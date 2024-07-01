@@ -30,6 +30,8 @@
 #define _WIN32_WINNT 0x0501
 #endif
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <locale.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -44,6 +46,7 @@
 #endif
 
 #include "postgres_fe.h"
+#include "flock.h"
 
 #ifdef WIN32_PG_DUMP
 #undef PGDLLIMPORT
@@ -61,10 +64,26 @@
 #undef WIN32
 #endif
 
+typedef struct ToolLogInfo {
+    time_t mTime;
+    time_t cTime;
+    char fileName[0];
+} ToolLogInfo;
+
+#ifndef palloc
+#define palloc(sz) malloc(sz)
+#endif
+#ifndef pfree
+#define pfree(ptr) free(ptr)
+#endif
+
+#define LOG_MAX_COUNT    50
+#define GS_LOCKFILE_SIZE 1024
 #define curLogFileMark "-current.log"
 // optimize,to suppose pirnt to file and screen
 static bool allow_log_store = false;
 void check_env_value_c(const char* input_env_value);
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -195,7 +214,173 @@ static void set_log_filename(char* log_new_name, const char* log_old_name)
     securec_check_c(rc, "\0", "\0");
 }
 
-static int create_log_file(const char* prefix_name, const char* log_path)
+static int gs_srvtool_lock(const char *prefix_name, const char *log_dir, FILE **fd)
+{
+    int ret;
+    struct stat statbuf;
+    int fildes = 0;
+    char lockfile[MAXPGPATH] = {'\0'};
+
+    ret = snprintf_s(lockfile, sizeof(lockfile), sizeof(lockfile) - 1, "%s/%s.%s", log_dir, prefix_name, "lock");
+    securec_check_ss_c(ret, "\0", "\0");
+
+    canonicalize_path(lockfile);
+
+    /* If lock file dose not exist, create it */
+    if (stat(lockfile, &statbuf) != 0) {
+        char content[GS_LOCKFILE_SIZE] = {0};
+        *fd = fopen(lockfile, PG_BINARY_W);
+        if (*fd == NULL) {
+            printf(_("%s: can't create lock file \"%s\" : %s\n"), prefix_name, lockfile, gs_strerror(errno));
+            exit(1);
+        } 
+        
+        fildes = fileno(*fd);
+        if (fchmod(fildes, S_IRUSR | S_IWUSR) == -1) {
+            printf(_("%s: can't chmod lock file \"%s\" : %s\n"), prefix_name, lockfile, gs_strerror(errno));
+            /* Close file and Nullify the pointer for retry */
+            fclose(*fd);
+            *fd = NULL;
+            exit(1);
+        }
+
+        if (fwrite(content, GS_LOCKFILE_SIZE, 1, *fd) != 1) {
+            fclose(*fd);
+            *fd = NULL;
+            printf(_("%s: can't write lock file \"%s\" : %s\n"), prefix_name, lockfile, gs_strerror(errno));
+            exit(1);
+        }
+        fclose(*fd);
+        *fd = NULL;
+    }
+
+    if ((*fd = fopen(lockfile, PG_BINARY_W)) == NULL) {
+        printf(_("%s: can't open lock file \"%s\" : %s\n"), prefix_name, lockfile, gs_strerror(errno));
+        exit(1);
+    }
+
+    ret = flock(fileno(*fd), LOCK_EX | LOCK_NB, 0, START_LOCATION, GS_LOCKFILE_SIZE);
+    return ret;
+}
+
+static inline int gs_srvtool_unlock(FILE *fd)
+{
+    int ret = -1;
+
+    if (fd != NULL) {
+        ret = flock(fileno(fd), LOCK_UN, 0, START_LOCATION, GS_LOCKFILE_SIZE);
+        fclose(fd);
+        fd = NULL;
+    }
+
+    return ret;
+}
+
+static inline int file_time_cmp(const void *v1, const void *v2)
+{
+    const ToolLogInfo *l1 = *(ToolLogInfo **)v1;
+    const ToolLogInfo *l2 = *(ToolLogInfo **)v2;
+
+    int result = l1->mTime - l2->mTime;
+    if (result == 0) {
+        return l1->cTime - l2->cTime;
+    }
+    return result;
+}
+
+static inline void free_file_list(ToolLogInfo **file_list, int count)
+{
+    for (int i = 0; i < count; i++) {
+        pfree(file_list[i]);
+    }
+    pfree(file_list);
+}
+
+static inline bool str_end_with(const char *str, const char *end)
+{
+    int slen = strlen(str);
+    int elen = strlen(end);
+    if (elen > slen) {
+        return false;
+    } else {
+        return (strcmp(str + slen - elen, end) == 0);
+    }
+}
+
+static void remove_oldest_log(const char *prefix_name, const char *log_path, int count)
+{
+    DIR *dir = NULL;
+    struct dirent *de = NULL;
+    errno_t rc = EOK;
+
+    int file_len = strlen(prefix_name) + strlen("-yyyy-mm-dd_hhmmss.log");
+    size_t info_size = sizeof(ToolLogInfo) + file_len + 1;
+    ToolLogInfo **file_list = (ToolLogInfo **)palloc(sizeof(ToolLogInfo *) * count);
+    if (file_list == NULL) {
+        printf(_("%s: palloc memory failed! %s\n"), prefix_name, gs_strerror(errno));
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        file_list[i] = (ToolLogInfo *)palloc(info_size);
+        if (file_list[i] == NULL) {
+            printf(_("%s: palloc memory failed! %s\n"), prefix_name, gs_strerror(errno));
+            free_file_list(file_list, i);
+            return;
+        }
+        rc = memset_s(file_list[i], info_size, 0, info_size);
+        securec_check_c(rc, "\0", "\0");
+    }
+
+    if ((dir = opendir(log_path)) == NULL) {
+        free_file_list(file_list, count);
+        printf(_("%s: opendir %s failed! %s\n"), prefix_name, log_path, gs_strerror(errno));
+        return;
+    }
+
+    int slot = 0;
+    struct stat fst;
+    char pathname[MAXPGPATH] = {'\0'};
+    while ((de = readdir(dir)) != NULL) {
+        if (strncmp(de->d_name, prefix_name, strlen(prefix_name)) == 0 &&
+            !str_end_with(de->d_name, curLogFileMark) &&
+            !str_end_with(de->d_name, ".lock")) {
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", log_path, de->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+            if (stat(pathname, &fst) < 0) {
+                printf(_("%s: could not stat file %s\n"), prefix_name, pathname, gs_strerror(errno));
+                continue;
+            }
+
+            file_list[slot]->mTime = fst.st_mtime;
+            file_list[slot]->cTime = fst.st_ctime;
+            rc = strncpy_s(file_list[slot]->fileName, file_len + 1, de->d_name, strlen(de->d_name));
+            securec_check_c(rc, "\0", "\0");
+            slot++;
+        }
+    }
+
+    qsort(file_list, slot, sizeof(ToolLogInfo *), file_time_cmp);
+    printf(_("%s: log file count %d, exceeds %d, remove the oldest ones\n"), prefix_name, count, LOG_MAX_COUNT);
+
+    int remove_cnt = 0;
+    while (remove_cnt < count - LOG_MAX_COUNT) {
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", log_path, file_list[remove_cnt]->fileName);
+        securec_check_ss_c(rc, "\0", "\0");
+        if (remove(pathname) < 0) {
+            printf(_("%s: remove log file %s failed!\n"), prefix_name, pathname, gs_strerror(errno));
+            continue;
+        }
+
+        remove_cnt++;
+        printf(_("%s: remove log file %s successfully, remain %d files\n"), prefix_name, pathname, count - remove_cnt);
+    }
+
+    free_file_list(file_list, count);
+    (void)closedir(dir);
+}
+
+static int create_log_file(const char* prefix_name, const char* log_path, int *count)
 {
 #define LOG_MAX_SIZE (16 * 1024 * 1024)
 #define LOG_MAX_TIMELEN 80
@@ -238,7 +423,8 @@ static int create_log_file(const char* prefix_name, const char* log_path)
 
     while (NULL != (de = readdir(dir))) {
         // exist current log file
-        if (NULL != strstr(de->d_name, prefix_name)) {
+        if (NULL != strstr(de->d_name, prefix_name) && !str_end_with(de->d_name, ".lock")) {
+            *count += 1;
             name_ptr = strstr(de->d_name, "-current.log");
             if (NULL != name_ptr) {
                 name_ptr += strlen("-current.log");
@@ -269,9 +455,8 @@ static int create_log_file(const char* prefix_name, const char* log_path)
                             (void)closedir(dir);
                             return -1;
                         }
+                        is_exist = false;
                     }
-                    (void)closedir(dir);
-                    return 0;
                 }
             }
         }
@@ -300,15 +485,16 @@ static int create_log_file(const char* prefix_name, const char* log_path)
         (void)dup2(fd, fileno(stderr));
         (void)fprintf(stderr, _("[%s]\n"), current_localtime);  // add current time to log
         close(fd);
+        *count += 1;
     }
     (void)closedir(dir);
     return 0;
 }
 
-static void redirect_output(const char* prefix_name, const char* log_dir)
+static void redirect_output(const char* prefix_name, const char* log_dir, int *count)
 {
 
-    if (0 != create_log_file(prefix_name, log_dir)) {
+    if (0 != create_log_file(prefix_name, log_dir, count)) {
         printf(_("Warning: create_log_file failed!\n"));
         return;
     }
@@ -343,7 +529,19 @@ void init_log(char* prefix_name)
     }
     allow_log_store = is_redirect;  // if false print to screen, if true print to file
     if (true == is_redirect) {
-        redirect_output(prefix_name, log_dir);
+        int file_count = 0;
+        FILE *fd = NULL;
+        if (gs_srvtool_lock(prefix_name, log_dir, &fd) == -1) {
+            printf(_("another %s command is running, init_log failed!\n"), prefix_name);
+            exit(1);
+        }
+
+        redirect_output(prefix_name, log_dir, &file_count);
+        if (file_count > LOG_MAX_COUNT) {
+            remove_oldest_log(prefix_name, log_dir, file_count);
+        }
+
+        gs_srvtool_unlock(fd);
     }
 }
 
