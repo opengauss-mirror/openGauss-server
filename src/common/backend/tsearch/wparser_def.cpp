@@ -22,6 +22,7 @@
 #include "tsearch/ts_type.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
+#include "miscadmin.h"
 
 /* Define me to enable tracing of parser behavior */
 /* Output token categories */
@@ -919,6 +920,8 @@ static int p_ishost(TParser* prs)
     int res = 0;
 
     tmpprs->wanthost = true;
+
+    check_stack_depth();
 
     if (TParserGet(tmpprs) && tmpprs->type == HOST) {
         prs->state->posbyte += tmpprs->lenbytetoken;
