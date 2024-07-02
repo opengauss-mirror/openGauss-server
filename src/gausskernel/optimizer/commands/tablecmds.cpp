@@ -1239,7 +1239,10 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         DefElem* def = makeDefElem("compression", (Node*)makeString(COMPRESSION_LOW));
         res = lappend(options, def);
     }
-
+    if (isCStore && assignedStorageType) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("There is a conflict caused by storage_type and orientation")));
+    }
     bool noSupportTable = segment || isCStore || isTsStore || relkind != RELKIND_RELATION ||
                           stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
                           stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
