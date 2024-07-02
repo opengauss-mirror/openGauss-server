@@ -2892,7 +2892,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
 
     if (!IsInitdb && (relkind == RELKIND_RELATION) && !IsSystemNamespace(namespaceId) &&
         !IsCStoreNamespace(namespaceId) && (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0) &&
-        (stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT) && !u_sess->attr.attr_storage.enable_recyclebin) {
+        (stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT)) {
         bool isSegmentType = (storage_type == SEGMENT_PAGE);
         if (!isSegmentType && (u_sess->attr.attr_storage.enable_segment || bucketinfo != NULL)) {
             storage_type = SEGMENT_PAGE;
@@ -2901,12 +2901,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             reloptions = transformRelOptions((Datum)0, stmt->options, NULL, validnsps, true, false);
         }
     } else if (storage_type == SEGMENT_PAGE) {
-        if (u_sess->attr.attr_storage.enable_recyclebin) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
-                errmsg("The table %s do not support segment-page storage", stmt->relation->relname),
-                errdetail("Segment-page storage doest not support recyclebin"),
-                errhint("set enable_recyclebin = off before using segmnet-page storage.")));
-        }
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
