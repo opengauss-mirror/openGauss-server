@@ -804,7 +804,107 @@ NOTICE:       last_name : heliu
 (1 row)
 
 drop procedure test_cursor_2;
+--
+create table t_cursor_0011_01(department_id int, department_name varchar(50));
+create table t_cursor_0011_02(employees_id int, department_id int, first_name varchar(50), last_name varchar(50), email varchar(50), phone_number int);
+insert into t_cursor_0011_01 values (1, 'sale'),(2, 'rd'),(3, 'pro');
+insert into t_cursor_0011_01 values (1, 'sale'),(2, 'rd'),(3, 'pro');;
+insert into t_cursor_0011_02 values (1, 1, 'zhang', 'san', '1@abc.com', 123),(2, 1, 'li', 'si', '2@abc.com', 124);
+insert into t_cursor_0011_02 values (1, 2, 'wang', 'wu', '3@abc.com', 321),(2, 2, 'he', 'liu', '4@abc.com', 421);
+create or replace procedure pro_cursor_0011_02
+as
+    company_name varchar(100);
+    department_name varchar(100);
+    employees_id_var int;
+    name_var varchar(100);
+    type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    my_cur2 ref_cur_type;
+    cursor c1 is select department_id, cursor(select department_name, cursor(select department_id ) from t_cursor_0011_02) from t_cursor_0011_01 d order by department_name;
+begin
+    open c1;
+    loop
+    fetch c1 into department_name, my_cur;
+    exit when c1%notfound;
+    raise notice 'department_name : % %',department_name, my_cur;
+    loop
+        fetch my_cur into name_var, my_cur2;
+        exit when my_cur%notfound;
+        raise notice ' department employees info : % %',name_var, my_cur2;
+        loop
+            fetch my_cur2 into employees_id_var;
+            exit when my_cur2%notfound;
+            raise notice ' employees_id_var : %',employees_id_var;
+        end loop;
+    end loop;
+    close my_cur;
+    end loop;
+end;
+/
+call pro_cursor_0011_02();
+NOTICE:  department_name : 3 <unnamed portal 98>
+NOTICE:   department employees info : pro <unnamed portal 102>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : pro <unnamed portal 103>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : pro <unnamed portal 104>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : pro <unnamed portal 105>
+NOTICE:   employees_id_var : 2
+NOTICE:  department_name : 3 <unnamed portal 101>
+NOTICE:   department employees info : pro <unnamed portal 106>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : pro <unnamed portal 107>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : pro <unnamed portal 108>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : pro <unnamed portal 109>
+NOTICE:   employees_id_var : 2
+NOTICE:  department_name : 2 <unnamed portal 97>
+NOTICE:   department employees info : rd <unnamed portal 110>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : rd <unnamed portal 111>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : rd <unnamed portal 112>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : rd <unnamed portal 113>
+NOTICE:   employees_id_var : 2
+NOTICE:  department_name : 2 <unnamed portal 100>
+NOTICE:   department employees info : rd <unnamed portal 114>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : rd <unnamed portal 115>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : rd <unnamed portal 116>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : rd <unnamed portal 117>
+NOTICE:   employees_id_var : 2
+NOTICE:  department_name : 1 <unnamed portal 96>
+NOTICE:   department employees info : sale <unnamed portal 118>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : sale <unnamed portal 119>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : sale <unnamed portal 120>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : sale <unnamed portal 121>
+NOTICE:   employees_id_var : 2
+NOTICE:  department_name : 1 <unnamed portal 99>
+NOTICE:   department employees info : sale <unnamed portal 122>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : sale <unnamed portal 123>
+NOTICE:   employees_id_var : 1
+NOTICE:   department employees info : sale <unnamed portal 124>
+NOTICE:   employees_id_var : 2
+NOTICE:   department employees info : sale <unnamed portal 125>
+NOTICE:   employees_id_var : 2
+ pro_cursor_0011_02 
+--------------------
+ 
+(1 row)
+
 -- clean
+drop procedure pro_cursor_0011_02;
+drop table t_cursor_0011_01;
+drop table t_cursor_0011_02;
 drop table res_count1;
 drop table employees;
 drop table departments;
