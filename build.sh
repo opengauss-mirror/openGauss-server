@@ -32,6 +32,7 @@ function print_help()
     -pm|--product_mode                this values of paramenter is opengauss or lite or finance, the default value is opengauss.
     -nls|--enable_nls                 enable Native Language Support
     --relocation                      generate gaussdb.map with relocation(GCC >=10.3).
+    --cmake                           use cmake to build openGauss, which is faster than traditional configure/autoconf
     "
 }
 
@@ -90,6 +91,10 @@ while [ $# -gt 0 ]; do
             extra_config_opt="$extra_config_opt --config_opt --enable-relocation "
             shift 1
             ;;
+        -C|--cmake)
+            build_by_cmake='--cmake'
+            shift 1
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -103,7 +108,7 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode} ${extra_config_opt}
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode} ${extra_config_opt} ${build_by_cmake}
 if [ $? -ne 0 ]; then
     echo "build_opengauss.sh failed, aborting."
     exit 1
