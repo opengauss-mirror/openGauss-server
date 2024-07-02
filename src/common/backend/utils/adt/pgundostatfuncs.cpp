@@ -810,7 +810,7 @@ static void PutTranslotInfoToTuple(int zoneId, uint32 offset, TransactionSlot *s
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, offset);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_4] = CStringGetTextDatum(textBuffer);
-        if (TransactionIdDidCommit((uint64)slot->XactId())) {
+        if (UHeapTransactionIdDidCommit((uint64)slot->XactId())) {
             values[ARR_5] = COMMITED_STATUS;
         } else if (TransactionIdIsInProgress((uint64)slot->XactId())) {
             values[ARR_5] = INPROCESS_STATUS;
@@ -978,7 +978,7 @@ static void ReadTranslotFromMemory(int startIdx, int endIdx,
                 UNDO_PTR_GET_OFFSET(slotPtr));
             securec_check_ss(rc, "\0", "\0");
             values[ARR_4] = CStringGetTextDatum(textBuffer);
-            if (TransactionIdDidCommit((uint64)slot->XactId())) {
+            if (UHeapTransactionIdDidCommit((uint64)slot->XactId())) {
                 values[ARR_5] = COMMITED_STATUS;
             } else if (TransactionIdIsInProgress((uint64)slot->XactId())) {
                 values[ARR_5] = INPROCESS_STATUS;
@@ -1222,7 +1222,7 @@ static uint64 UndoSpaceSize(UndoSpaceType type)
         } else {
             usp = ((UndoZone *)g_instance.undo_cxt.uZones[idx])->GetSlotSpace();
         }
-        used += (uint64)usp->Used();
+        used += (uint64)usp->Used(idx);
     }
     return used;
 }
@@ -1271,7 +1271,7 @@ static void ReadUndoSpaceFromShared(int id, TupleDesc *tupleDesc, Tuplestorestat
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, used);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_4] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, usp->Used());
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, usp->Used(idx));
         securec_check_ss(rc, "\0", "\0");
         values[ARR_5] = CStringGetTextDatum(textBuffer);
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, usp->LSN());

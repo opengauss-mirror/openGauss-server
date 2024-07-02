@@ -777,7 +777,7 @@ static bool VerifyUTuple(Relation rel, Page page, BlockNumber blkno, OffsetNumbe
     }
 
     if (isInvalidSlot) {
-        if (!TransactionIdDidCommit(tupXid)) {
+        if (!UHeapTransactionIdDidCommit(tupXid)) {
             ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
                 errmsg("tup xid not commit, tupxid = %lu.", tupXid)));
         }

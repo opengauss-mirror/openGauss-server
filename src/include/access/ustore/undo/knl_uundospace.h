@@ -63,7 +63,7 @@ public:
     {
         return lsn_;
     }
-    uint32 Used(void);
+    uint32 Used(int zoneId);
 
     /* Setter, used for redo. */
     inline void SetHead(UndoRecPtr head)

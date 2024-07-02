@@ -405,7 +405,10 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     for (int i = startIdx; i <= endIdx; i++) {
         UndoRecord *undorecord = (*urecvec)[i];
         uint8 undotype = undorecord->Utype();
-
+        if (undorecord->Blkno() != blkno) {
+            ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Blkno %u of undorecord is different from buffer %u.", undorecord->Blkno(), blkno)));
+        }
         /*
          * If the current UndoRecPtr on the slot is less than the
          * UndoRecPtr of the current undorecord, then it means this undorecord
