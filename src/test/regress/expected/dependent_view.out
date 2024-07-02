@@ -634,10 +634,30 @@ select * from circular_dependency_t; -- failed
 ERROR:  infinite recursion detected in rules for relation "circular_dependency_t"
 select * from circular_dependency_v; -- failed
 ERROR:  infinite recursion detected in rules for relation "circular_dependency_t"
+create table circular_dependency_t1 (id int, name text);
+create view circular_dependency_v1 as select * from circular_dependency_t1;
+create view circular_dependency_v2 as select * from circular_dependency_v1;
+create or replace view circular_dependency_v2 as select * from circular_dependency_v1 union all select * from circular_dependency_v2;
+alter table circular_dependency_t1 modify id int8;
+select * from circular_dependency_v2; -- failed
+ERROR:  infinite recursion detected in rules for relation: "circular_dependency_v2"
+ 
+create table circular_dependency_t2 (id int, name text);
+create view circular_dependency_v3 as select * from circular_dependency_t2;
+create view circular_dependency_v4 as select * from circular_dependency_v3;
+create or replace view circular_dependency_v3 as select * from circular_dependency_t2 union all select * from circular_dependency_v4;
+alter table circular_dependency_t2 modify id int8; -- failed
+ERROR:  infinite recursion detected in rules for relation: "circular_dependency_v3"
 --- clean
 drop schema dependent_view cascade;
-NOTICE:  drop cascades to 4 other objects
+--?.*
 DETAIL:  drop cascades to table base_table
 drop cascades to materialized view master_view1
 drop cascades to view circular_dependency_t
 drop cascades to view circular_dependency_v
+drop cascades to table circular_dependency_t1
+drop cascades to view circular_dependency_v1
+drop cascades to view circular_dependency_v2
+drop cascades to table circular_dependency_t2
+drop cascades to view circular_dependency_v4
+drop cascades to view circular_dependency_v3

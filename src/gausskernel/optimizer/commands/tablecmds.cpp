@@ -16898,6 +16898,12 @@ bool InvalidateDependView(Oid viewOid, char objType)
                 continue;
             }
             char relkind = get_rel_relkind(dep_view_oid);
+            if (relkind == objType && dep_view_oid == viewOid) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                        errmsg(
+                            "infinite recursion detected in rules for relation: \"%s\"", get_rel_name(viewOid))));
+            }
             if (relkind != RELKIND_VIEW && relkind != RELKIND_MATVIEW) {
                 continue;
             }
