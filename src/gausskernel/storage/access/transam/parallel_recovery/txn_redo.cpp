@@ -64,6 +64,7 @@ struct TxnRedoWorker {
     XLogRecPtr dispatched_txn_lsn; /* Max lsn dispatched to txn worker*/
     XLogRecPtr transed_txn_lsn; /* Max lsn transfer to txn worker list*/
     XLogRecPtr txn_trying_lsn; /* EndPtr of trying record on txn worker*/
+    uint32 pendingCount;
 };
 
 XLogRecPtr getTransedTxnLsn(TxnRedoWorker *worker)
@@ -76,6 +77,11 @@ XLogRecPtr getTryingTxnLsn(TxnRedoWorker *worker)
     return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->txn_trying_lsn);
 }
 
+uint32 getPendingCount(TxnRedoWorker *worker)
+{
+    return worker->pendingCount;
+}
+
 TxnRedoWorker *StartTxnRedoWorker()
 {
     TxnRedoWorker *worker = (TxnRedoWorker *)palloc(sizeof(TxnRedoWorker));
@@ -86,6 +92,7 @@ TxnRedoWorker *StartTxnRedoWorker()
     worker->procTail = NULL;
     worker->dispatched_txn_lsn = 0;
     worker->transed_txn_lsn = 0;
+    worker->pendingCount = 0;
     return worker;
 }
 
@@ -113,6 +120,7 @@ void AddTxnRedoItem(TxnRedoWorker *worker, RedoItem *item)
     }
     item->nextByWorker[0] = NULL;
     worker->pendingTail = item;
+    worker->pendingCount++;
 }
 
 void ApplyReadyTxnShareLogRecords(RedoItem *item)
@@ -303,6 +311,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
          */
         if (XLByteLE(record->EndRecPtr, curRead)) {
             item = ProcTxnItem(item);
+            worker->pendingCount--;
         } else {
             break;
         }

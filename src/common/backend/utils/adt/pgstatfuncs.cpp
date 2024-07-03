@@ -86,6 +86,10 @@
 #include "utils/json.h"
 #include "utils/jsonapi.h"
 #include "access/ondemand_extreme_rto/page_redo.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
+#include "access/parallel_recovery/dispatcher.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -13940,6 +13944,46 @@ Datum remote_double_write_stat(PG_FUNCTION_ARGS)
 
     SRF_RETURN_DONE(funcctx);
 #endif
+}
+
+Datum dispatch_stat_detail(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Tuplestorestate *tupstore = BuildTupleResult(fcinfo, &tupdesc);
+    const uint32 dispatch_stat_detail_cols = 5;
+    Datum values[dispatch_stat_detail_cols] = {0};
+    bool nulls[dispatch_stat_detail_cols] = {0};
+    parallel_recovery::DispatchStat *stat = NULL;
+    uint32 realNum = 0;
+
+    if (IsParallelRedo() && RecoveryInProgress()) {
+        parallel_recovery::get_dispatch_stat_detail(&stat, &realNum);
+    }
+
+    for (uint32 i=0; i<realNum; ++i) {
+        uint32 k = 0;
+        values[k] = CStringGetTextDatum(stat[i].worker_name);
+        nulls[k++] = false;
+        pfree(stat[i].worker_name);
+        values[k] = UInt64GetDatum(stat[i].pid);
+        nulls[k++] = false;
+        values[k] = UInt32GetDatum(stat[i].entry_num);
+        nulls[k++] = false;
+        values[k] = Float4GetDatum(stat[i].percent);
+        nulls[k++] = false;
+        values[k] = CStringGetTextDatum(stat[i].detail);
+        nulls[k++] = false;
+        pfree(stat[i].detail);
+
+        tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+
+    if (stat != NULL) {
+        pfree(stat);
+    }
+
+    tuplestore_donestoring(tupstore);
+    return (Datum)0;
 }
 
 Datum local_redo_time_count(PG_FUNCTION_ARGS)
