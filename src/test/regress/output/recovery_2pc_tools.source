@@ -511,6 +511,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  pagewriter_sleep                                 | integer | ms   | 0         | 3600000
  pagewriter_thread_num                            | integer |      | 1         | 16
  parallel_recovery_batch                          | integer |      | 1         | 100000
+ parallel_recovery_dispatch_algorithm             | integer |      | 1         | 2
  parallel_recovery_timeout                        | integer | ms   | 1         | 1000
  partition_iterator_elimination                   | bool    |      |           | 
  partition_lock_upgrade_timeout                   | integer |      | -1        | 3000
