@@ -189,6 +189,22 @@ Node* negate_clause(Node* node)
                 return (Node*)newexpr;
             }
         } break;
+        case T_NanTest: {
+            NanTest* expr = (NanTest*)node;
+
+            NanTest* newexpr = makeNode(NanTest);
+            newexpr->arg = expr->arg;
+            newexpr->nantesttype = (expr->nantesttype == IS_NAN ? IS_NOT_NAN : IS_NAN);
+            return (Node*)newexpr;
+        } break;
+        case T_InfiniteTest: {
+            InfiniteTest* expr = (InfiniteTest*)node;
+
+            InfiniteTest* newexpr = makeNode(InfiniteTest);
+            newexpr->arg = expr->arg;
+            newexpr->infinitetesttype = (expr->infinitetesttype == IS_INFINITE ? IS_NOT_INFINITE : IS_INFINITE);
+            return (Node*)newexpr;
+        } break;
         case T_BooleanTest: {
             BooleanTest* expr = (BooleanTest*)node;
             BooleanTest* newexpr = makeNode(BooleanTest);

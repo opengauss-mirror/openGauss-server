@@ -2941,6 +2941,32 @@ static NullTest* _readNullTest(void)
 }
 
 /*
+ * _readNanTest
+ */
+static NanTest* _readNanTest(void)
+{
+    READ_LOCALS(NanTest);
+
+    READ_NODE_FIELD(arg);
+    READ_ENUM_FIELD(nantesttype, NanTestType);
+
+    READ_DONE();
+}
+
+/*
+ * _readInfiniteTest
+ */
+static InfiniteTest* _readInfiniteTest(void)
+{
+    READ_LOCALS(InfiniteTest);
+
+    READ_NODE_FIELD(arg);
+    READ_ENUM_FIELD(infinitetesttype, InfiniteTestType);
+
+    READ_DONE();
+}
+
+/*
  * _readSetVariableExpr
  */
 static SetVariableExpr* _readSetVariableExpr(void)
@@ -6590,6 +6616,10 @@ Node* parseNodeString(void)
         return_value = _readXmlExpr();
     } else if (MATCH("NULLTEST", 8)) {
         return_value = _readNullTest();
+    } else if (MATCH("NANTEST", 7)) {
+        return_value = _readNanTest();
+    } else if (MATCH("INFINITETEST", 12)) {
+        return_value = _readInfiniteTest();
     } else if (MATCH("SETVARIABLEEXPR", 15)) {
         return_value = _readSetVariableExpr();
     } else if (MATCH("HASHFILTER", 10)) {

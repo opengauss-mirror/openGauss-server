@@ -637,6 +637,9 @@ extern Datum float84ge(PG_FUNCTION_ARGS);
 extern Datum width_bucket_float8(PG_FUNCTION_ARGS);
 Datum float8_multiply_text(PG_FUNCTION_ARGS);
 Datum text_multiply_float8(PG_FUNCTION_ARGS);
+extern Datum to_binary_float_text(PG_FUNCTION_ARGS);
+extern Datum to_binary_float_number(PG_FUNCTION_ARGS);
+extern Datum to_binary_float_text_number(PG_FUNCTION_ARGS);
 
 /* dbsize.c */
 extern Datum pg_tablespace_size_oid(PG_FUNCTION_ARGS);

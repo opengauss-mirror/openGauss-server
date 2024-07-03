@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92939;
+const uint32 GRAND_VERSION_NUM = 92940;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 NAN_INFINITE_TEST_EXPR = 92940;
 const uint32 STRAIGHT_JOIN_VERSION_NUMBER = 92939;
 const uint32 ROTATE_UNROTATE_VERSION_NUM = 92937;
 const uint32 PIPELINED_FUNCTION_VERSION_NUM = 92936;

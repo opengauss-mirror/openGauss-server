@@ -905,7 +905,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 /* PGXC_END */
 	DROP DUPLICATE DISCONNECT DUMPFILE
 
-	EACH ELASTIC ELSE ENABLE_P ENCLOSED ENCODING ENCRYPTED ENCRYPTED_VALUE ENCRYPTION ENCRYPTION_TYPE END_P ENDS ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVENT EVENTS EVERY EXCEPT EXCHANGE
+	EACH ELASTIC ELSE ENABLE_P ENCLOSED ENCODING ENCRYPTED ENCRYPTED_VALUE ENCRYPTION ENCRYPTION_TYPE END_P ENDS ENFORCED ENUM_P ERROR_P ERRORS ESCAPE EOL ESCAPING EVENT EVENTS EVERY EXCEPT EXCHANGE
 	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPIRED_P EXPLAIN
 	EXTENSION EXTERNAL EXTRACT ESCAPED
 
@@ -918,7 +918,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
-	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
+	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INFINITE_P INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
 	INTERSECT INTERVAL INTO INVISIBLE INVOKER IP IS ISNULL ISOLATION
@@ -933,7 +933,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
-	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
+	NAME_P NAMES NAN_P NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
@@ -26835,6 +26835,34 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->nulltesttype = IS_NOT_NULL;
 					$$ = (Node *)n;
 				}
+			| a_expr IS NAN_P
+			    {
+					NanTest *n = makeNode(NanTest);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->nantesttype = IS_NAN;
+					$$ = (Node *)n;
+				}
+			| a_expr IS NOT NAN_P
+			    {
+					NanTest *n = makeNode(NanTest);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->nantesttype = IS_NOT_NAN;
+					$$ = (Node *)n;
+				}
+			| a_expr IS INFINITE_P
+			    {
+					InfiniteTest *n = makeNode(InfiniteTest);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->infinitetesttype = IS_INFINITE;
+					$$ = (Node *)n;
+				}
+			| a_expr IS NOT INFINITE_P
+			    {
+					InfiniteTest *n = makeNode(InfiniteTest);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->infinitetesttype = IS_NOT_INFINITE;
+					$$ = (Node *)n;
+				}
 			| row OVERLAPS row
 				{
 					/* Create and populate a FuncCall node to support the OVERLAPS operator. */
@@ -27655,6 +27683,32 @@ func_application_special:	func_name '(' ')'
 					n->location = @1;
 					n->call_func = false;
 					$$ = (Node *)n;
+				}
+			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P opt_sort_clause ')'
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(ERROR,
+						       (errcode(ERRCODE_SYNTAX_ERROR),
+							   errmsg("The syntax or function is not supported. \"%s\"", $4)));
+					}
+					if (IsA($5, ColumnRef)) {
+						ereport(ERROR,
+							   (errcode(ERRCODE_SYNTAX_ERROR),
+							   errmsg("Default param can't be ColumnRef")));
+					}
+
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = $1;
+					n->args = lappend($3, $5);
+					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					n->agg_order = $9;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *) n;
 				}
 			| func_name '(' VARIADIC func_arg_expr opt_sort_clause ')'
 				{
@@ -29914,6 +29968,7 @@ unreserved_keyword:
 			| ENFORCED
 			| ENUM_P
 			| EOL
+			| ERROR_P
 			| ERRORS
 			| ESCAPE
 			| ESCAPED
@@ -29973,6 +30028,7 @@ unreserved_keyword:
 			| INDEX
 			| INDEXES
 			| INFILE
+			| INFINITE_P
 			| INHERIT
 			| INHERITS
 			| INITIAL_P
@@ -30039,6 +30095,7 @@ unreserved_keyword:
 			| MYSQL_ERRNO
 			| NAME_P
 			| NAMES
+			| NAN_P
 			| NEXT
 			| NO
 			| NOCOMPRESS

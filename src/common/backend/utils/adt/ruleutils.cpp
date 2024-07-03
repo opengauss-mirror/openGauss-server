@@ -9551,6 +9551,8 @@ static bool isSimpleNode(Node* node, Node* parentNode, int prettyFlags)
 
         case T_SubLink:
         case T_NullTest:
+        case T_NanTest:
+        case T_InfiniteTest:
         case T_BooleanTest:
         case T_HashFilter:
         case T_DistinctExpr:
@@ -10481,6 +10483,54 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                                 errmsg("unrecognized nulltesttype: %d", (int)ntest->nulltesttype)));
                 }
             }   
+            if (!PRETTY_PAREN(context))
+                appendStringInfoChar(buf, ')');
+        } break;
+
+        case T_NanTest: {
+            NanTest* ntest = (NanTest*)node;
+
+            if (!PRETTY_PAREN(context))
+                appendStringInfoChar(buf, '(');
+            get_rule_expr_paren((Node*)ntest->arg, context, true, node, no_alias);
+
+            switch (ntest->nantesttype)
+            {
+                case IS_NAN:
+                    appendStringInfoString(buf, " IS NAN");
+                    break;
+                case IS_NOT_NAN:
+                    appendStringInfoString(buf, " IS NOT NAN");
+                    break;
+                default:
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized nantesttype: %d", (int)ntest->nantesttype)));
+            }
+            if (!PRETTY_PAREN(context))
+                appendStringInfoChar(buf, ')');
+        } break;
+
+        case T_InfiniteTest: {
+            InfiniteTest* ntest = (InfiniteTest*)node;
+
+            if (!PRETTY_PAREN(context))
+                appendStringInfoChar(buf, '(');
+            get_rule_expr_paren((Node*)ntest->arg, context, true, node, no_alias);
+
+            switch (ntest->infinitetesttype)
+            {
+                case IS_INFINITE:
+                    appendStringInfoString(buf, " IS INFINITE");
+                    break;
+                case IS_NOT_INFINITE:
+                    appendStringInfoString(buf, " IS NOT INFINITE");
+                    break;
+                default:
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized infinitetesttype: %d", (int)ntest->infinitetesttype)));
+            }
             if (!PRETTY_PAREN(context))
                 appendStringInfoChar(buf, ')');
         } break;

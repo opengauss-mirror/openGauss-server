@@ -260,6 +260,8 @@ typedef enum NodeTag {
     T_MinMaxExpr,
     T_XmlExpr,
     T_NullTest,
+    T_NanTest,
+    T_InfiniteTest,
     T_BooleanTest,
     T_CoerceToDomain,
     T_CoerceToDomainValue,
@@ -322,6 +324,8 @@ typedef enum NodeTag {
     T_MinMaxExprState,
     T_XmlExprState,
     T_NullTestState,
+    T_NanTestState,
+    T_InfiniteTestState,
     T_HashFilterState,
     T_CoerceToDomainState,
     T_DomainConstraintState,
@@ -416,6 +420,7 @@ typedef enum NodeTag {
     T_String,
     T_BitString,
     T_Null,
+    T_Nan,
 
     /*
      * TAGS FOR LIST NODES (pg_list.h)

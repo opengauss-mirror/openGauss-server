@@ -20,6 +20,7 @@
 #include "nodes/relation.h"
 #include "optimizer/nodegroups.h"
 #include "parser/parse_oper.h"
+#include "catalog/pg_operator.h"
 
 /*
  * Note: the default selectivity estimates are not chosen entirely at random.
@@ -53,7 +54,7 @@
 #define DEFAULT_SPECIAL_EXPR_DISTINCT 10
 #define DEFAULT_SPECIAL_EXPR_BIASE (pow(u_sess->pgxc_cxt.NumDataNodes, (double)1 / 2) / u_sess->pgxc_cxt.NumDataNodes)
 
-/* default selectivity estimate for boolean and null test nodes */
+/* default selectivity estimate for boolean、null、nan、infinite test nodes */
 #define DEFAULT_UNK_SEL 0.005
 #define DEFAULT_NOT_UNK_SEL (1.0 - DEFAULT_UNK_SEL)
 
@@ -259,6 +260,10 @@ extern Selectivity booltestsel(
     PlannerInfo* root, BoolTestType booltesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo);
 extern Selectivity nulltestsel(
     PlannerInfo* root, NullTestType nulltesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo);
+extern Selectivity nantestsel(
+    PlannerInfo* root, NanTestType nantesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo);
+extern Selectivity infinitetestsel(
+    PlannerInfo* root, InfiniteTestType infinitetesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo);
 extern Selectivity scalararraysel(PlannerInfo* root, ScalarArrayOpExpr* clause, bool is_join_clause, int varRelid,
     JoinType jointype, SpecialJoinInfo* sjinfo);
 extern int estimate_array_length(Node* arrayexpr);

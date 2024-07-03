@@ -737,6 +737,14 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
         /* Use node specific selectivity calculation function */
         s1 = nulltestsel(
             root, ((NullTest*)clause)->nulltesttype, (Node*)((NullTest*)clause)->arg, varRelid, jointype, sjinfo);
+    } else if (IsA(clause, NanTest)) {
+        /* Use node specific selectivity calculation function */
+        s1 = nantestsel(
+            root, ((NanTest*)clause)->nantesttype, (Node*)((NanTest*)clause)->arg, varRelid, jointype, sjinfo);
+    } else if (IsA(clause, InfiniteTest)) {
+        /* Use node specific selectivity calculation function */
+        s1 = infinitetestsel(
+            root, ((InfiniteTest*)clause)->infinitetesttype, (Node*)((InfiniteTest*)clause)->arg, varRelid, jointype, sjinfo);
     } else if (IsA(clause, BooleanTest)) {
         /* Use node specific selectivity calculation function */
         s1 = booltestsel(

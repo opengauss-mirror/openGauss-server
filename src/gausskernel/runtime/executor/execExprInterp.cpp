@@ -151,6 +151,8 @@ static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod,
 static void ShutdownTupleDescRef(Datum arg);
 static void ExecEvalRowNullInt(ExprState *state, ExprEvalStep *op,
 				   ExprContext *econtext, bool checkisnull);
+static void ExecEvalNanInt(ExprState *state, ExprEvalStep *op, ExprContext *econtext, bool checkisnan);
+static void ExecEvalInfiniteInt(ExprState *state, ExprEvalStep *op, ExprContext *econtext, bool checkisnan);
 
 /* fast-path evaluation functions */
 static Datum ExecJustInnerVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
@@ -625,6 +627,10 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
         &&CASE_EEOP_AGG_COLLECT_PLAIN_TRANS_BYREF,
         &&CASE_EEOP_AGG_ORDERED_TRANS_DATUM,
         &&CASE_EEOP_AGG_ORDERED_TRANS_TUPLE,
+		&&CASE_EEOP_NANTEST_ISNAN,
+		&&CASE_EEOP_NANTEST_ISNOTNAN,
+		&&CASE_EEOP_INFINITETEST_ISINFINITE,
+		&&CASE_EEOP_INFINITETEST_ISNOTINFINITE,
 		&&CASE_EEOP_LAST
 	};
 
@@ -2180,6 +2186,34 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             EEO_NEXT();
         }
 
+		EEO_CASE(EEOP_NANTEST_ISNAN)
+		{
+			ExecEvalNan(state, op, econtext);
+ 
+			EEO_NEXT();
+		}
+
+		EEO_CASE(EEOP_NANTEST_ISNOTNAN)
+		{
+			ExecEvalNotNan(state, op, econtext);
+
+			EEO_NEXT();
+		}
+
+		EEO_CASE(EEOP_INFINITETEST_ISINFINITE)
+		{
+			ExecEvalInfinite(state, op, econtext);
+
+			EEO_NEXT();
+		}
+
+		EEO_CASE(EEOP_INFINITETEST_ISNOTINFINITE)
+		{
+			ExecEvalNotInfinite(state, op, econtext);
+
+			EEO_NEXT();
+		}
+
 		EEO_CASE(EEOP_LAST)
 		{
 			/* unreachable */
@@ -2675,6 +2709,26 @@ ExecEvalRowNotNull(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	ExecEvalRowNullInt(state, op, econtext, false);
 }
 
+void ExecEvalNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+	ExecEvalNanInt(state, op, econtext, true);
+}
+
+void ExecEvalNotNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+	ExecEvalNanInt(state, op, econtext, false);
+}
+
+void ExecEvalInfinite(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+	ExecEvalInfiniteInt(state, op, econtext, true);
+}
+
+void ExecEvalNotInfinite(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
+{
+	ExecEvalInfiniteInt(state, op, econtext, false);
+}
+
 static Datum CheckRowTypeIsNull(TupleDesc tupDesc, HeapTupleData tmptup, bool checkisnull)
 {
     int att;
@@ -2781,6 +2835,83 @@ ExecEvalRowNullInt(ExprState *state, ExprEvalStep *op,
 		*op->resvalue =  CheckRowTypeIsNullForAFormat(tupDesc, tmptup, checkisnull);
 	else
 		*op->resvalue =  CheckRowTypeIsNull(tupDesc, tmptup, checkisnull);
+}
+
+/* Common code for IS [NOT] NAN on value */
+static void ExecEvalNanInt(ExprState *state, ExprEvalStep *op, 
+						   ExprContext *econtext, bool checkisnan)
+{
+	Datum		value = *op->d.decspecexpr.value;
+	bool		isnull = *op->d.decspecexpr.isnull;
+	Expr		*expr = op->d.decspecexpr.expr;	
+	bool        resnan;
+	float8		val;
+	Oid 		inputtype;
+
+	/* 
+     * Evaluate value IS [NOT] NAN. 
+     * if number value is NAN and without NOT, return true, else false; if with NOT, the result is reversed;
+     * if charater string is 'NAN'、'INF'(ignore case) or others which can't cast to float8, throw errors;
+     * Especially for NULL, no matter IS_NAN or IS_NOT_NAN all return NULL.
+     */
+
+	*op->resnull = isnull;
+    if (isnull) return;
+
+	val = DatumGetFloat8(value);
+	resnan = isnan(val);
+	inputtype = deparseNodeForInputype(expr, T_NanTest, val);
+
+     /* Only float8, float4, numeric support NAN */
+    if (resnan && !(inputtype == FLOAT8OID || inputtype == FLOAT4OID || inputtype == NUMERICOID)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input for IS [NOT] NAN")));
+    }
+
+	/* 
+	 * resnan = true, checkisnan = true -> true;
+	 * resnan = true, checkisnan = false -> false;
+	 * resnan = false, checkisnan = true -> false;
+	 * resnan = false, checkisnan = false -> true;
+	 */
+	*op->resvalue = BoolGetDatum(resnan == checkisnan);
+}
+
+/* Common code for IS [NOT] INFINITE on value */
+static void ExecEvalInfiniteInt(ExprState *state, ExprEvalStep *op, 
+							    ExprContext *econtext, bool checkisinf)
+{
+	Datum		value = *op->d.decspecexpr.value;
+	bool		isnull = *op->d.decspecexpr.isnull;
+	Expr		*expr = op->d.decspecexpr.expr;		
+	bool        resinf;
+	float8		val;
+	Oid 		inputtype;
+
+    /* 
+     * Evaluate value IS [NOT] INFINITE. 
+     * if number value is INFINITE and without NOT, return true, else false; if with NOT, the result is reversed;
+     * if charater string is 'INF'、'NAN' (ignore case) or others which can't cast to float8, thrown errors;
+     * Especially for NULL, no matter IS_INFINITE or IS_NOT_INFINITE all return NULL.
+     */
+
+	*op->resnull = isnull;
+    if (isnull) return; 
+
+	val = DatumGetFloat8(value);
+	resinf = isinf(DatumGetFloat8(value));
+	inputtype = deparseNodeForInputype(expr, T_InfiniteTest, val);
+
+    /* Only float8, float4 support INF */
+    if (resinf && !(inputtype == FLOAT8OID || inputtype == FLOAT4OID)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input for IS [NOT] INFINITE")));
+    }
+
+	/* see "NAN" */
+	*op->resvalue = BoolGetDatum(resinf == checkisinf);
 }
 
 /*

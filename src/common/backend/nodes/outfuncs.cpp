@@ -3065,6 +3065,22 @@ static void _outNullTest(StringInfo str, NullTest* node)
     WRITE_BOOL_FIELD(argisrow);
 }
 
+static void _outNanTest(StringInfo str, NanTest* node)
+{
+    WRITE_NODE_TYPE("NANTEST");
+
+    WRITE_NODE_FIELD(arg);
+    WRITE_ENUM_FIELD(nantesttype, NanTestType);
+}
+
+static void _outInfiniteTest(StringInfo str, InfiniteTest* node)
+{
+    WRITE_NODE_TYPE("INFINITETEST");
+
+    WRITE_NODE_FIELD(arg);
+    WRITE_ENUM_FIELD(infinitetesttype, InfiniteTestType);
+}
+
 static void _outSetVariableExpr(StringInfo str, SetVariableExpr* node)
 {
     WRITE_NODE_TYPE("SetVariableExpr");
@@ -6678,6 +6694,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NullTest:
                 _outNullTest(str, (NullTest*)obj);
+                break;
+            case T_NanTest:
+                _outNanTest(str, (NanTest*)obj);
+                break;
+            case T_InfiniteTest:
+                _outInfiniteTest(str, (InfiniteTest*)obj);
                 break;
             case T_SetVariableExpr:
                 _outSetVariableExpr(str, (SetVariableExpr*)obj);

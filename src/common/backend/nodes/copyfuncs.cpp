@@ -3215,6 +3215,34 @@ static NullTest* _copyNullTest(const NullTest* from)
 }
 
 /*
+ * _copyNanTest
+ */
+static NanTest* _copyNanTest(const NanTest* from)
+{
+    NanTest* newnode = makeNode(NanTest);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(nantesttype);
+
+    return newnode;
+}
+
+/*
+ * _copyInfiniteTest
+ */
+static InfiniteTest* _copyInfiniteTest(const InfiniteTest* from)
+{
+    InfiniteTest* newnode = makeNode(InfiniteTest);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(infinitetesttype);
+
+    return newnode;
+}
+
+/*
  * _copySetVariableExpr
  */
 static SetVariableExpr* _copySetVariableExpr(const SetVariableExpr* from)
@@ -8256,6 +8284,12 @@ void* copyObject(const void* from)
             break;
         case T_NullTest:
             retval = _copyNullTest((NullTest*)from);
+            break;
+        case T_NanTest:
+            retval = _copyNanTest((NanTest*)from);
+            break;
+        case T_InfiniteTest:
+            retval = _copyInfiniteTest((InfiniteTest*)from);
             break;
         case T_SetVariableExpr:
             retval = _copySetVariableExpr((SetVariableExpr*)from);
