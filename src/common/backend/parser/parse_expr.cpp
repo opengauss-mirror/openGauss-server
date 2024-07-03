@@ -3831,9 +3831,8 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
 
     int nParamExec = 0;
     parse_state_temp = parse_state_parent;
-    while (parse_state_temp != NULL) {
-        nParamExec += list_length(parse_state_temp->cursor_expression_para_var);
-        parse_state_temp = parse_state_temp->parentParseState;
+    if (parse_state_temp != NULL) {
+        nParamExec = list_length(parse_state_temp->cursor_expression_para_var);
     }
     
     plan_tree->nParamExec = nParamExec;
