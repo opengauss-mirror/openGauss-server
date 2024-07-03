@@ -61,6 +61,8 @@
 ./share/postgresql/extension/hstore.control
 ./share/postgresql/extension/security_plugin.control
 ./share/postgresql/extension/security_plugin--1.0.sql
+./share/postgresql/extension/timescaledb.control
+./share/postgresql/extension/timescaledb--1.7.4.sql
 ./share/postgresql/extension/dolphin.control
 ./share/postgresql/extension/dolphin--4.0.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
@@ -776,6 +778,9 @@
 ./lib/postgresql/pg_plugin
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
+./lib/postgresql/timescaledb-1.7.4.so
+./lib/postgresql/timescaledb.so
+./lib/postgresql/timescaledb-tsl-1.7.4.so
 ./lib/postgresql/dolphin.so
 ./lib/postgresql/age.so
 ./lib/postgresql/datavec.so

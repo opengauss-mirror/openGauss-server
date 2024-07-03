@@ -175,7 +175,7 @@ cstore_buffers = 512MB         #min 16MB
 
 #max_files_per_process = 1000		# min 25
 					# (change requires restart)
-#shared_preload_libraries = ''         # (change requires restart)
+#shared_preload_libraries = ''         # (change requires restart. if timescaledb is used, add $libdir/timescaledb)
 # - Cost-Based Vacuum Delay -
 
 #vacuum_cost_delay = 0ms		# 0-100 milliseconds
