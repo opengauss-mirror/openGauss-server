@@ -173,6 +173,7 @@ typedef struct knl_session_attr_common {
     int pgstat_track_functions;
     int xmlbinary;
     int remoteConnType;
+    int nls_length_semantics;
 
     bool enable_bbox_dump;
     char* bbox_dump_path;

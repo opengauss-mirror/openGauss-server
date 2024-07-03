@@ -383,6 +383,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				ConstDatetime ConstInterval
 				Bit ConstBit BitWithLength BitWithoutLength OptCopyColTypename
 %type <str>		character
+%type <str>		character_national
 %type <str>		extract_arg
 %type <str>		opt_charset
 %type <boolean> opt_varying opt_timezone opt_no_inherit
@@ -486,6 +487,8 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <typnam> func_return 
 %type <keyword> as_is
 
+%type <boolean> opt_charbyte
+
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -513,7 +516,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUDIT_POLICY AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS BLOB_P BLOCKCHAIN BODY_P BOGUS
-	BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
+	BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTE_P BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CHARSET CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
@@ -8590,6 +8593,9 @@ GenericType:
 		;
 
 opt_type_modifiers: '(' expr_list ')'				{ $$ = $2; }
+                    | '(' Iconst BYTE_P ')'         { $$ = list_make1(makeIntConst($2, @2)); }
+                    | '(' Iconst CHAR_P ')'         { $$ = list_make1(makeIntConst($2, @2)); }
+                    | '(' Iconst CHARACTER ')'      { $$ = list_make1(makeIntConst($2, @2)); }
 					| /* EMPTY */					{ $$ = NIL; }
 		;
 
@@ -8807,38 +8813,42 @@ ConstCharacter:  CharacterWithLength
 				}
 		;
 
-CharacterWithLength:  character '(' Iconst ')' opt_charset
+CharacterWithLength:  character '(' Iconst opt_charbyte ')'
 				{
-					if (($5 != NULL) && (strcmp($5, "sql_text") != 0))
-					{
-						char *type;
-
-						type = (char *)feparser_malloc(strlen($1) + 1 + strlen($5) + 1);
-						strcpy(type, $1);
-						strcat(type, "_");
-						strcat(type, $5);
-						$1 = type;
-					}
-
 					$$ = SystemTypeName($1);
-					$$->typmods = list_make1(makeIntConst($3, @3));
-					$$->location = @1;
+					if ($4)
+					{
+					    $$->typmods = list_make2(makeIntConst($3, @3), makeIntConst(1, -1));
+					}
+					else
+					{
+					    $$->typmods = list_make1(makeIntConst($3, @3));
+					}
+                    $$->location = @1;
+				}
+				| character_national '(' Iconst ')'
+				{
+				    $$ = SystemTypeName($1);
+				    if (strcmp($1, "bpchar") == 0)
+                    {
+                        $$->typmods = list_make2(makeIntConst($3, @3), makeIntConst(1, -1));
+                    }
+                    else
+                    {
+                        $$->typmods = list_make1(makeIntConst($3, @3));
+                    }
+                    $$->location = @1;
 				}
 		;
 
-CharacterWithoutLength:	 character opt_charset
+opt_charbyte: CHAR_P	{ $$ = TRUE; }
+             | CHARACTER { $$ = TRUE; }
+             | BYTE_P    { $$ = FALSE; }
+             | /* EMPTY */	 { $$ = FALSE; } 
+         ;
+
+CharacterWithoutLength:	 character
 				{
-					if (($2 != NULL) && (strcmp($2, "sql_text") != 0))
-					{
-						char *type;
-
-						type = (char *)feparser_malloc(strlen($1) + 1 + strlen($2) + 1);
-						strcpy(type, $1);
-						strcat(type, "_");
-						strcat(type, $2);
-						$1 = type;
-					}
-
 					$$ = SystemTypeName($1);
 
 					/* char defaults to char(1), varchar to no limit */
@@ -8847,20 +8857,32 @@ CharacterWithoutLength:	 character opt_charset
 
 					$$->location = @1;
 				}
+				| character_national
+				{
+				    $$ = SystemTypeName($1);
+
+                    /* char defaults to char(1), varchar to no limit */
+                    if (strcmp($1, "bpchar") == 0)
+                    {
+                        $$->typmods = list_make1(makeIntConst(1, -1));
+                    }
+				}
 		;
 
 character:	CHARACTER opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
 			| CHAR_P opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
-			| NVARCHAR
-										{ $$ = "nvarchar2"; }
-			| NVARCHAR2
-										{ $$ = "nvarchar2"; }
 			| VARCHAR
 										{ $$ = "varchar"; }
 			| VARCHAR2
 										{ $$ = "varchar"; }
+		;
+
+character_national:	 NVARCHAR
+										{ $$ = "nvarchar2"; }
+			| NVARCHAR2
+										{ $$ = "nvarchar2"; }
 			| NATIONAL CHARACTER opt_varying
 										{ $$ = (char *)($3 ? "varchar": "bpchar"); }
 			| NATIONAL CHAR_P opt_varying
@@ -11671,6 +11693,7 @@ unreserved_keyword:
 			| BLOCKCHAIN
 			| BODY_P
 			| BY
+			| BYTE_P
 			| CACHE
 			| CALL
 			| CALLED

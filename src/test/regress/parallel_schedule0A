@@ -491,3 +491,7 @@ test: test_binary_suffix
 
 # test for rotate and unrotate function
 test: gb_ora_rotate_unrotate
+
+# test for string type char byte semantic
+test: bpchar_charbyte bpchar_cast bpchar_copy bpchar_index bpchar_regexmatch varchar_charbyte varchar_cast varchar_copy varchar_index varchar_regexmatch char_length_semantic
+test: gs_dump_char_semantic
