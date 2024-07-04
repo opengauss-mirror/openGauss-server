@@ -2403,6 +2403,8 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
          * Hence freeze xid should be CurrentTransactionId
          */
         FreezeXid = GetCurrentTransactionId();
+        OldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+        MultiXactFrzLimit = GetOldestMultiXactId();
     }
 
     /* return selected value to caller */
@@ -2567,6 +2569,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
          */
         freezeXid = GetCurrentTransactionId();
         freezeMulti = GetOldestMultiXactId();
+        oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
     }
 
     /* return selected value to caller */

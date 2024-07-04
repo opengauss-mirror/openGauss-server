@@ -2669,16 +2669,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             ereport(messageLevel, (errmsg("skipping \"%s\" --- foreign table does not support vacuum",
                     RelationGetRelationName(onerel))));
         }
-    } else if ((vacstmt->options & VACOPT_FULL) && RelationIsUstoreFormat(onerel)) {
-#else
-    if ((vacstmt->options & VACOPT_FULL) && RelationIsUstoreFormat(onerel)) {
-#endif
-        if(!OidIsValid(relationid)){
-            ereport(INFO, (errmsg("skipping \"%s\" --- Don't vacuum full ustore table,"
-                "this feature to be released in the future.",
-                RelationGetRelationName(onerel))));
-        }
     } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SIMPLE_HEAP)) {
+#else
+    if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SIMPLE_HEAP)) {
+#endif
         bool is_hdfs_rel = RelationIsPAXFormat(onerel);
         if (is_hdfs_rel) {
             ereport(LOG, (errmsg("vacuum full for DFS table: %s", onerel->rd_rel->relname.data)));

@@ -1333,7 +1333,7 @@ static void RawUHeapInsert(RewriteState state, UHeapTuple tup)
     } else {
         uheaptup = tup;
     }
-    len = MAXALIGN(uheaptup->disk_tuple_size); /* be conservative */
+    len = SHORTALIGN(uheaptup->disk_tuple_size); /* be conservative */
     /*
      * If we're gonna fail for oversize tuple, do it right away
      */

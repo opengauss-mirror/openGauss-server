@@ -598,7 +598,6 @@ select pg_sleep(4);
 
 insert into t_timecapsule_test_tmp select 8, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
 vacuum full PARTITION_TABLE_001;
-INFO:  skipping "partition_table_001" --- Don't vacuum full ustore table,this feature to be released in the future.
 drop table if exists PARTITION_TABLE_001 cascade;
 drop tablespace if exists example1;
 drop tablespace if exists example2;
