@@ -65,7 +65,19 @@ There were 0 unused item pointers.
 CPU 0.00s/0.00u sec elapsed 0.00 sec.
 --vacuum option all
 VACUUM (FULL, VERBOSE, FREEZE) range_list1 PARTITION (p_201901);
+--?INFO:  vacuuming "ustore_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet.
+CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--?INFO:  vacuuming "ustore_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet.
+CPU 0.00s/0.00u sec elapsed 0.00 sec.
 VACUUM (FULL, VERBOSE, FREEZE) range_list1 SUBPARTITION (p_201902_a);
+--?INFO:  vacuuming "ustore_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet.
+CPU 0.00s/0.00u sec elapsed 0.00 sec.
 --
 --2. test the actual work
 --
@@ -138,7 +150,7 @@ VACUUM FULL range_list_sales1 PARTITION (customer3);
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           122880
+            81920
 (1 row)
 
 --delete & insert
@@ -153,7 +165,7 @@ INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           163840
+           122880
 (1 row)
 
 --vacuum full subpartition
@@ -168,7 +180,7 @@ VACUUM FULL range_list_sales1 SUBPARTITION (customer3_channel1);
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           163840
+            81920
 (1 row)
 
 --check index is ok
