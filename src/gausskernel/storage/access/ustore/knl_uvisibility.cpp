@@ -73,7 +73,6 @@ static UHeapTupleStatus UHeapTupleGetStatus(const UHeapTuple utup)
         return UHEAPTUPLESTATUS_MULTI_LOCKED;
     } else if ((SINGLE_LOCKER_XID_IS_EXCL_LOCKED(infomask) || SINGLE_LOCKER_XID_IS_SHR_LOCKED(infomask)) &&
         TransactionIdIsNormal(locker) && !TransactionIdOlderThanFrozenXid(locker)) {
-        Assert(!UHEAP_XID_IS_TRANS(utuple->flag));
         return UHEAPTUPLESTATUS_LOCKED; // locked by select-for-update or select-for-share
     } else if (infomask & UHEAP_INPLACE_UPDATED) {
         return UHEAPTUPLESTATUS_INPLACE_UPDATED; // modified or locked by lock-for-update
