@@ -32373,6 +32373,15 @@ void ExecutePurge(PurgeStmt *stmt)
             break;
         }
         case PURGE_RECYCLEBIN: {
+            Oid userId = GetUserId();
+            /* 
+             * Superusers bypass all permission checking.
+             * Database Security: Support seperation of privilege.
+             */
+            if (!(superuser_arg(userId) || systemDBA_arg(userId))) {
+                ereport(ERROR,
+                    (errmsg("Only superuser can do purge recyclebin operation.")));
+            }
             RbCltPurgeRecyclebin();
             break;
         }
