@@ -23236,7 +23236,7 @@ static char* myFormatType(const char* typname, int32 typmod)
 
             tmp_typmod = typmod - VARHDRSZ;
             precision = (tmp_typmod >> 16) & 0xffff;
-            scale = tmp_typmod & 0xffff;
+            scale = (int16)(tmp_typmod & 0xffff);
             appendPQExpBuffer(buf, "(%d,%d)", precision, scale);
         }
     }

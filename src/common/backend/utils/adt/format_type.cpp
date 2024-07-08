@@ -373,6 +373,9 @@ char* printTypmod(const char* typname, int32 typmod, Oid typmodout)
     } else {
         /* Use the type-specific typmodout procedure */
         char* tmstr = NULL;
+        if (strcmp(typname, "numeric") == 0 && ((int16)(((uint32)(typmod - VARHDRSZ)) & 0XFFFF)) == PG_INT16_MIN) {
+            typname = "float";
+        }
 
         tmstr = DatumGetCString(OidFunctionCall1(typmodout, Int32GetDatum(typmod)));
         res = psnprintf(strlen(typname) + strlen(tmstr) + 1, "%s%s", typname, tmstr);

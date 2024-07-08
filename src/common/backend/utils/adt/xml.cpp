@@ -3392,7 +3392,7 @@ static const char* map_sql_type_to_xmlschema_type(Oid typeoid, int typmod)
                         "    <xsd:fractionDigits value=\"%d\"/>\n"
                         "  </xsd:restriction>\n",
                         ((unsigned int)(typmod - VARHDRSZ) >> 16) & 0xffff,
-                        (unsigned int)(typmod - VARHDRSZ) & 0xffff);
+                        (short)((typmod - VARHDRSZ) & 0xffff));
                 break;
 
             case INT2OID:

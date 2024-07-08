@@ -154,6 +154,8 @@ typedef struct NumericData* Numeric;
  * dscale values will fit in 14 bits.
  */
 #define NUMERIC_MAX_PRECISION 1000
+#define NUMERIC_MAX_SCALE 1000
+#define NUMERIC_MIN_SCALE -84
 
 /*
  * Internal limits on the scales chosen for calculation results

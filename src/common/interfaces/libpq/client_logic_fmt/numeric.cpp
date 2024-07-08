@@ -454,7 +454,7 @@ bool apply_typmod(NumericVar *var, int32 typmod, char *err_msg)
 
     typmod -= VARHDRSZ;
     precision = (typmod >> 16) & 0xffff;
-    scale = typmod & 0xffff;
+    scale = (int16)(typmod & 0xffff);
     maxdigits = precision - scale;
 
     /* Round to target scale (and set var->dscale) */

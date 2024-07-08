@@ -265,6 +265,8 @@ static int64 SequenceStrGetInt64(const char *str);
 static int GetLoadType(int load_type_f, int load_type_s);
 static Node *MakeSqlLoadNode(char *colname);
 static void checkDeleteRelationError();
+static TypeName *ParseFloatByExtentedPrecision(int ival, int location, core_yyscan_t yyscanner);
+static void CheckTypmodScale(List* arglist, int location, core_yyscan_t yyscanner);
 
 /* start with .. connect by related utilities */
 static bool IsConnectByRootIdent(Node* node);
@@ -25855,6 +25857,7 @@ Numeric:	INT_P
 				{
 					if ($2 != NULL)
 					{
+						CheckTypmodScale($2, @2, yyscanner);
 						$$ = SystemTypeName("numeric");
 						$$->typmods = $2;
 						$$->location = @1;
@@ -25907,24 +25910,28 @@ Numeric:	INT_P
 				}
 			| DECIMAL_P opt_type_modifiers
 				{
+					CheckTypmodScale($2, @2, yyscanner);
 					$$ = SystemTypeName("numeric");
 					$$->typmods = $2;
 					$$->location = @1;
 				}
 			| NUMBER_P opt_type_modifiers
 				{
+					CheckTypmodScale($2, @2, yyscanner);
 					$$ = SystemTypeName("numeric");
 					$$->typmods = $2;
 					$$->location = @1;
 				}
 			| DEC opt_type_modifiers
 				{
+					CheckTypmodScale($2, @2, yyscanner);
 					$$ = SystemTypeName("numeric");
 					$$->typmods = $2;
 					$$->location = @1;
 				}
 			| NUMERIC opt_type_modifiers
 				{
+					CheckTypmodScale($2, @2, yyscanner);
 					$$ = SystemTypeName("numeric");
 					$$->typmods = $2;
 					$$->location = @1;
@@ -25950,22 +25957,34 @@ opt_float:	'(' Iconst ')'
 								 errmsg("precision for type float must be at least 1 bit"),
 								 parser_errposition(@2)));
 					}
-					else if ($2 <= 24)
-						$$ = SystemTypeName("float4");
-					else if ($2 <= 53)
-						$$ = SystemTypeName("float8");
-					else {
-						const char* message = "precision for type float must be less than 54 bits";
-						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-						ereport(ERROR,
-								(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-								 errmsg("precision for type float must be less than 54 bits"),
-								 parser_errposition(@2)));
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && FLOAT_AS_NUMERIC
+					    && t_thrd.proc->workingVersionNum >= FLOAT_VERSION_NUMBER) {
+						$$ = ParseFloatByExtentedPrecision($2, @2, yyscanner);
+					} else {
+						if ($2 <= 24)
+							$$ = SystemTypeName("float4");
+						else if ($2 <= 53)
+							$$ = SystemTypeName("float8");
+						else {
+							const char* message = "precision for type float must be less than 54 bits";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(ERROR,
+									(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+									errmsg("precision for type float must be less than 54 bits"),
+									parser_errposition(@2)));
+						}
 					}
 				}
 			| /*EMPTY*/
 				{
-					$$ = SystemTypeName("float8");
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && FLOAT_AS_NUMERIC 
+						&& t_thrd.proc->workingVersionNum >= FLOAT_VERSION_NUMBER)
+					{
+						$$ = SystemTypeName("numeric");
+						$$->typmods = list_make2(makeIntConst(126, -1), makeIntConst(-32768, -1));
+					} else {
+						$$ = SystemTypeName("float8");
+					}		
 				}
 		;
 
@@ -32402,6 +32421,42 @@ static void parameter_check_execute_direct(const char* query)
 		ereport(errstate,
 			(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 				errmsg("must be system admin or monitor admin to use EXECUTE DIRECT")));
+	}
+}
+
+static TypeName *ParseFloatByExtentedPrecision(int ival, int location, core_yyscan_t yyscanner)
+{
+	TypeName *typnam = NULL;
+	
+	/* Float binary precision must be between 1 and 126 */
+	if (ival <= 126) {
+		typnam = SystemTypeName("numeric");
+		typnam->typmods = list_make2(makeIntConst(ival, location), makeIntConst(-32768, -1));
+	} else {
+		const char* message = "precision for type float must be less than 127 bits";
+		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+		ereport(ERROR,
+			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("precision for type float must be less than 127 bits"),
+				parser_errposition(location)));
+	}
+	return typnam;
+}
+
+static void CheckTypmodScale(List* arglist, int location, core_yyscan_t yyscanner)
+{
+	if (t_thrd.proc->workingVersionNum >= FLOAT_VERSION_NUMBER &&
+		u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && list_length(arglist) == 2) {
+		Node *arg = (Node*)lsecond(arglist);
+		A_Const *n = IsA(arg, A_Const) ? (A_Const *)arg : NULL;
+		if (n != NULL && (n->val.val.ival > NUMERIC_MAX_SCALE || n->val.val.ival < NUMERIC_MIN_SCALE)) {
+			const char* message = "NUMERIC scale must be between -84 and 1000";
+			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					errmsg("NUMERIC scale must be between -84 and 1000"),
+					parser_errposition(location)));
+		}
 	}
 }
 
