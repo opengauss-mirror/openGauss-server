@@ -2137,6 +2137,10 @@ static void reduce_orderby_recurse(Query* query, Node* jtnode, bool reduce)
     if (IsA(jtnode, RangeTblRef)) {
         int varno = ((RangeTblRef*)jtnode)->rtindex;
         RangeTblEntry* rte = rt_fetch(varno, query->rtable);
+        /* do not reduce sort of subquery when query contains limit etc*/
+        if (reduce && (query->limitOffset || query->limitCount || contain_rownum_walker((Node*)query, NULL))) {
+            return;
+        }
 
         /* Reduce orderby clause in subquery for join or from clause of more than one rte */
         reduce_orderby_final(rte, reduce);

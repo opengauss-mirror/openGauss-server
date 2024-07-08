@@ -78,6 +78,25 @@ ORDER BY user_id, order_date
 JOIN orders o USING (user_id, product)
 WHERE init.product = 'books';
 
+
+explain (costs off) SELECT avg(o.quantity) AS avg_quantity,
+sum(o.revenue) AS total_revenue
+FROM (
+SELECT DISTINCT ON (user_id)
+user_id, product
+FROM orders
+ORDER BY user_id, order_date
+) init
+JOIN orders o USING (user_id, product)
+WHERE init.product = 'books' offset 10;
+
+create table outer_(id int);
+create table inner_(id1 int, id2 int);
+set enable_hashjoin TO off;
+set enable_mergejoin to off;
+explain (costs off) select * from (select * from outer_ order by id desc) o left join inner_ i on o.id = i.id1 limit 1;
+explain (costs off) select * from (select * from outer_ order by id desc) o left join inner_ i on o.id = i.id1 where rownum < 10;
+
 drop table orders;
 --drop schema
 reset current_schema;

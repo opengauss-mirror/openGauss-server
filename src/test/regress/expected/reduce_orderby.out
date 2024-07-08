@@ -272,7 +272,66 @@ WHERE init.product = 'books';
  2.2500000000000000 |           152
 (1 row)
 
+explain (costs off) SELECT avg(o.quantity) AS avg_quantity,
+sum(o.revenue) AS total_revenue
+FROM (
+SELECT DISTINCT ON (user_id)
+user_id, product
+FROM orders
+ORDER BY user_id, order_date
+) init
+JOIN orders o USING (user_id, product)
+WHERE init.product = 'books' offset 10;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Limit
+   ->  Aggregate
+         ->  Nested Loop
+               Join Filter: (init.user_id = o.user_id)
+               ->  Subquery Scan on init
+                     Filter: (init.product = 'books'::text)
+                     ->  Unique
+                           ->  Sort
+                                 Sort Key: orders.user_id, orders.order_date
+                                 ->  Seq Scan on orders
+               ->  Seq Scan on orders o
+                     Filter: (product = 'books'::text)
+(12 rows)
+
+create table outer_(id int);
+create table inner_(id1 int, id2 int);
+set enable_hashjoin TO off;
+set enable_mergejoin to off;
+explain (costs off) select * from (select * from outer_ order by id desc) o left join inner_ i on o.id = i.id1 limit 1;
+                QUERY PLAN                
+------------------------------------------
+ Limit
+   ->  Nested Loop Left Join
+         Join Filter: (outer_.id = i.id1)
+         ->  Sort
+               Sort Key: outer_.id DESC
+               ->  Seq Scan on outer_
+         ->  Materialize
+               ->  Seq Scan on inner_ i
+(8 rows)
+
+explain (costs off) select * from (select * from outer_ order by id desc) o left join inner_ i on o.id = i.id1 where rownum < 10;
+                QUERY PLAN                
+------------------------------------------
+ Limit
+   ->  Nested Loop Left Join
+         Join Filter: (outer_.id = i.id1)
+         ->  Sort
+               Sort Key: outer_.id DESC
+               ->  Seq Scan on outer_
+         ->  Materialize
+               ->  Seq Scan on inner_ i
+(8 rows)
+
 drop table orders;
 --drop schema
 reset current_schema;
 drop schema reduce_orderby cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table reduce_orderby.outer_
+drop cascades to table reduce_orderby.inner_
