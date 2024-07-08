@@ -7379,13 +7379,8 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
     estate->tuple_store = NULL;
     estate->cursor_return_data = NULL;
     estate->cursor_return_numbers = 0;
-    if (rsi != NULL) {
-        estate->tuple_store_cxt = rsi->econtext->ecxt_per_query_memory;
-        estate->tuple_store_owner = t_thrd.utils_cxt.CurrentResourceOwner;
-    } else {
-        estate->tuple_store_cxt = NULL;
-        estate->tuple_store_owner = NULL;
-    }
+    estate->tuple_store_cxt = rsi != NULL ? rsi->econtext->ecxt_per_query_memory : NULL;
+    estate->tuple_store_owner = (rsi != NULL || estate->is_pipelined) ? t_thrd.utils_cxt.CurrentResourceOwner : NULL;
     estate->rsi = rsi;
 
     estate->found_varno = func->found_varno;

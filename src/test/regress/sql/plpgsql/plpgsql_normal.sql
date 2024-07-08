@@ -149,7 +149,27 @@ END;
 /
 select count(*) from stockpivot_pl();
 
+-- lower workmem
+set work_mem = '64kB';
+create or replace type type_0022 as (c1 integer, c2 tinyint);
+create or replace type tb_type_0022 as table of type_0022;
+create or replace function func_pipelined_022(count in number)
+    returns tb_type_0022 pipelined language plpgsql as
+$BODY$
+declare result type_0022;
+begin
+for i in 1 .. count loop
+result.c1 = 123;
+result.c2 = 32;
+pipe row(result);
+end loop;
+return;
+end;
+$BODY$;
+select count(*) from func_pipelined_022(10000);
+reset work_mem;
 
+-- nest function call for ereport
 create table test(id int);
 CREATE OR REPLACE FUNCTION insert_test() returns VOID LANGUAGE plpgsql AS
 $BODY$
