@@ -192,8 +192,10 @@ static int findprefix(struct cnfa* cnfa, struct colormap* cm, chr* string, size_
          */
         if (cm->cd[thiscolor].nschrs == 1 || thiscolor == 0) {
             c = cm->cd[thiscolor].firstchr;
-        } else {
+        } else if (cm->cmranges != NULL && thiscolor > 0 && thiscolor <= cm->numcmranges) {
             c = cm->cmranges[thiscolor - 1].cmin;
+        } else {
+            break;
         }
         if (GETCOLOR(cm, c) != thiscolor)
             break;

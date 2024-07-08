@@ -161,7 +161,7 @@ test: single_node_inet single_node_macaddr single_node_tstypes single_node_comme
 # ----------
 #test: single_node_geometry single_node_horology 
 #test: single_node_regex
-test: single_node_regex_temp 
+test: single_node_regex_temp test_regexp
 test: single_node_oidjoins single_node_type_sanity
 
 # ----------
