@@ -475,6 +475,7 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
         datum = index_getattr(itup, scankey->sk_attno, itupdesc, &isNull);
 
         if (likely((!(scankey->sk_flags & SK_ISNULL)) && !isNull)) {
+            int8 multiplier = (scankey->sk_flags & SK_BT_DESC) ? 1 : -1;
             /* btint4cmp */
             if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
                 result = (int32)datum == (int32)scankey->sk_argument
@@ -497,8 +498,7 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
                     FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument));
             }
 
-            if (!(scankey->sk_flags & SK_BT_DESC))
-                result = -result;
+            result *= multiplier;
         } else {
             if (scankey->sk_flags & SK_ISNULL) { /* key is NULL */
                 if (isNull)

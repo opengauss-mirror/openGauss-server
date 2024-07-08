@@ -77,9 +77,9 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
         else if (ScanDirectionIsBackward(direction))
             direction = ForwardScanDirection;
     }
-    scandesc = node->iss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+    scandesc = node->iss_ScanDesc;
 
     isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
 

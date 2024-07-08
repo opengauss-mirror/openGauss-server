@@ -1028,13 +1028,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         xid = GetCurrentTransactionIdIfAny();
     }
 
-    rechdr->xl_xid = xid;
     rechdr->xl_tot_len = total_len;
-    rechdr->xl_info = info;
-    rechdr->xl_rmid = rmid;
-    rechdr->xl_prev = InvalidXLogRecPtr;
-    rechdr->xl_crc = rdata_crc;
-    Assert(hashbucket_flag == false || no_hashbucket_flag == false);
     rechdr->xl_term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
                           g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
     if ((rechdr->xl_term & XLOG_CONTAIN_CSN) != 0) {
@@ -1047,7 +1041,13 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     if (t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
         rechdr->xl_term |= XLOG_CONTAIN_CSN;
     }
+    rechdr->xl_xid = xid;
+    rechdr->xl_prev = InvalidXLogRecPtr;
+    rechdr->xl_info = info;
+    rechdr->xl_rmid = rmid;
+    Assert(hashbucket_flag == false || no_hashbucket_flag == false);
     rechdr->xl_bucket_id = (uint2)(bucket_id + 1);
+    rechdr->xl_crc = rdata_crc;
 
     return t_thrd.xlog_cxt.ptr_hdr_rdt;
 }

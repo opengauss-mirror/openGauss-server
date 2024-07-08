@@ -120,8 +120,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     TupleTableSlot* slot = NULL;
     TupleTableSlot* tmpslot = NULL;
     ItemPointer tid;
-    bool isVersionScan = node->ss.isVersionScan;
     bool isUHeap = false;
+    bool isVersionScan;
 
     /*
      * extract necessary information from index scan node
@@ -135,9 +135,10 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
         else if (ScanDirectionIsBackward(direction))
             direction = ForwardScanDirection;
     }
-    scandesc = node->ioss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+    isVersionScan = node->ss.isVersionScan;
+    scandesc = node->ioss_ScanDesc;
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
     if (isUHeap) {
         tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
@@ -239,7 +240,6 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
          * Fill the scan tuple slot with data from the index.
          */
         StoreIndexTuple(slot, indexScan->xs_itup, indexScan->xs_itupdesc);
-
         /*
          * If the index was lossy, we have to recheck the index quals.
          * (Currently, this can never happen, but we should support the case

@@ -121,8 +121,8 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
      * Fetch data from node
      */
     qual = node->ps.qual;
-    proj_info = node->ps.ps_ProjInfo;
     econtext = node->ps.ps_ExprContext;
+    proj_info = node->ps.ps_ProjInfo;
 
     /*
      * If we have neither a qual to check nor a projection to do, just skip
