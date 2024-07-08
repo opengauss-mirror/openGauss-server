@@ -45,7 +45,6 @@ static void EndBarrier(PGXCNodeAllHandles* handles, const char* id, bool isSwitc
 static void CommitBarrier(PGXCNodeAllHandles* prepared_handles, const char* id);
 static void WriteBarrierLSNFile(XLogRecPtr barrierLSN, const char* barrier_id);
 static void replace_barrier_id_compatible(const char* id, char** log_id);
-static void RequestXLogStreamForBarrier();
 static void barrier_redo_pause(char* barrierId);
 static bool TryBarrierLockWithTimeout();
 static void CheckBarrierCommandStatus(PGXCNodeAllHandles* conn_handles, const char* id, const char* command, bool isCn,
@@ -551,8 +550,6 @@ bool is_barrier_pausable(const char* id)
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
-
-
 static void SaveAllNodeBarrierLsnInfo(const char* id, const PGXCNodeAllHandles* connHandles)
 {
     int conn;
@@ -1001,28 +998,6 @@ void replace_barrier_id_compatible(const char* id, char** log_id) {
     securec_check_ss(rc, "", "");
 
     *log_id = tmp_id;
-}
-
-static void RequestXLogStreamForBarrier()
-{
-    XLogRecPtr replayEndPtr = GetXLogReplayRecPtr(NULL);
-    if (t_thrd.xlog_cxt.is_cascade_standby && (CheckForSwitchoverTrigger() || CheckForFailoverTrigger())) {
-        HandleCascadeStandbyPromote(&replayEndPtr);
-        return;
-    }
-    if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0) {
-        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-        SpinLockAcquire(&walrcv->mutex);
-        walrcv->receivedUpto = 0;
-        SpinLockRelease(&walrcv->mutex);
-        if (t_thrd.xlog_cxt.readFile >= 0) {
-            (void)close(t_thrd.xlog_cxt.readFile);
-            t_thrd.xlog_cxt.readFile = -1;
-        }
-
-        RequestXLogStreaming(&replayEndPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
-                             u_sess->attr.attr_storage.PrimarySlotName);
-    }
 }
 
 static void barrier_redo_pause(char* barrierId)

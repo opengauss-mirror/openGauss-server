@@ -38,6 +38,10 @@
 #include "replication/walreceiver.h"
 #include "pgxc/barrier.h"
 #include "postmaster/barrier_preparse.h"
+#include "utils/builtins.h"
+#include "access/htup.h"
+#include "funcapi.h"
+#include "access/extreme_rto/dispatcher.h"
 
 typedef struct XLogPageReadPrivate {
     const char *datadir;
@@ -168,6 +172,44 @@ void SetBarrierPreParseLsn(XLogRecPtr startptr)
     SpinLockRelease(&walrcv->mutex);
 }
 
+bool check_preparse_result(XLogRecPtr *recptr)
+{
+    if (t_thrd.barrier_preparse_cxt.shutdown_requested) {
+        return false;
+    }
+    if (XLogRecPtrIsInvalid(g_instance.csn_barrier_cxt.lastValidRecord)) {
+        XLogRecPtr lastReplayRecPtr = InvalidXLogRecPtr;
+        (void)GetXLogReplayRecPtr(NULL, &lastReplayRecPtr);
+        if (XLogRecPtrIsInvalid(lastReplayRecPtr)) {
+            *recptr = lastReplayRecPtr;
+        }
+        return false;
+    }
+    return true;
+}
+
+void RequestXLogStreamForBarrier()
+{
+    XLogRecPtr replayEndPtr = GetXLogReplayRecPtr(NULL);
+    if (t_thrd.xlog_cxt.is_cascade_standby && (CheckForSwitchoverTrigger() || CheckForFailoverTrigger())) {
+        HandleCascadeStandbyPromote(&replayEndPtr);
+        return;
+    }
+    if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0) {
+        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+        SpinLockAcquire(&walrcv->mutex);
+        walrcv->receivedUpto = 0;
+        SpinLockRelease(&walrcv->mutex);
+        if (t_thrd.xlog_cxt.readFile >= 0) {
+            (void)close(t_thrd.xlog_cxt.readFile);
+            t_thrd.xlog_cxt.readFile = -1;
+        }
+
+        RequestXLogStreaming(&replayEndPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                             u_sess->attr.attr_storage.PrimarySlotName);
+    }
+}
+
 void BarrierPreParseMain(void)
 {
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
@@ -187,6 +229,11 @@ void BarrierPreParseMain(void)
 
     ereport(LOG, (errmsg("[BarrierPreParse] barrier preparse thread started")));
 
+    /* Init preparse information*/
+    g_instance.csn_barrier_cxt.preparseStartLocation = InvalidXLogRecPtr;
+    g_instance.csn_barrier_cxt.preparseEndLocation = InvalidXLogRecPtr;
+    g_instance.csn_barrier_cxt.lastValidRecord = InvalidXLogRecPtr;
+    
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -227,6 +274,7 @@ void BarrierPreParseMain(void)
     g_instance.proc_base->BarrierPreParseLatch = &t_thrd.proc->procLatch;
 
     startLSN = walrcv->lastReceivedBarrierLSN;
+    g_instance.csn_barrier_cxt.preparseStartLocation = startLSN;
     ereport(LOG, (errmsg("[BarrierPreParse] preparse thread start at %08X/%08X", (uint32)(startLSN >> shiftSize),
                          (uint32)startLSN)));
 
@@ -287,6 +335,7 @@ void BarrierPreParseMain(void)
                 break;
             }
             lastReadLSN = xlogreader->ReadRecPtr;
+            g_instance.csn_barrier_cxt.lastValidRecord = lastReadLSN;
             uint8 info = XLogRecGetInfo(xlogreader) & ~XLR_INFO_MASK;
             if (NEED_INSERT_INTO_HASH) {
                 xLogBarrierId = XLogRecGetData(xlogreader);
@@ -316,6 +365,11 @@ void BarrierPreParseMain(void)
         if (XLogRecPtrIsInvalid(xlogreader->ReadRecPtr) && errormsg) {
             ereport(LOG, (errmsg("[BarrierPreParse] preparse thread get an error info %s", errormsg)));
         }
+        g_instance.csn_barrier_cxt.preparseEndLocation = startLSN;
+
+        if (check_preparse_result(&startLSN)) {
+            RequestXLogStreamForBarrier();
+        }
         const long sleepTime = 1000;
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, sleepTime);
         if (((unsigned int)rc) & WL_POSTMASTER_DEATH) {
@@ -333,4 +387,41 @@ void WakeUpBarrierPreParseBackend()
             SetLatch(g_instance.proc_base->BarrierPreParseLatch);
         }
     }
+}
+
+Datum gs_get_preparse_location(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !(isOperatoradmin(GetUserId()))) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be superuser/sysadmin or operator admin to use gs_get_preparse_location()")));
+    }
+    XLogRecPtr preparseStartLocation = g_instance.csn_barrier_cxt.preparseStartLocation;
+    XLogRecPtr preparseEndLocation = g_instance.csn_barrier_cxt.preparseEndLocation;
+    XLogRecPtr lastValidRecord = g_instance.csn_barrier_cxt.lastValidRecord;
+
+    TupleDesc tupdesc;
+    Datum values[3];
+    bool nulls[3] = {0};
+    HeapTuple tuple;
+    Datum result;
+    char location[MAXFNAMELEN * 3] = {0};
+    errno_t rc = EOK;
+
+    const int COLUMN_NUM = 3;
+    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "preparse_start_location", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "preparse_end_location", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "last_valid_record", TEXTOID, -1, 0);
+
+    BlessTupleDesc(tupdesc);
+
+    values[0] = LsnGetTextDatum(preparseStartLocation);
+    values[1] = LsnGetTextDatum(preparseEndLocation);
+    values[2] = LsnGetTextDatum(lastValidRecord);
+    
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(tuple);
+    
+   PG_RETURN_DATUM(result);
 }

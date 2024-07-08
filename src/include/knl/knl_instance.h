@@ -788,6 +788,11 @@ typedef struct knl_g_csn_barrier_context {
     LWLock* barrier_hashtbl_lock;
     char stopBarrierId[MAX_BARRIER_ID_LENGTH];
     MemoryContext barrier_context;
+
+    bool startBarrierPreParse;
+    XLogRecPtr preparseStartLocation;
+    XLogRecPtr preparseEndLocation;
+    XLogRecPtr lastValidRecord;
 } knl_g_csn_barrier_context;
 
 typedef struct knl_g_comm_context {
