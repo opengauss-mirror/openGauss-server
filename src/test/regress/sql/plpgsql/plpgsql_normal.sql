@@ -149,5 +149,26 @@ END;
 /
 select count(*) from stockpivot_pl();
 
+
+create table test(id int);
+CREATE OR REPLACE FUNCTION insert_test() returns VOID LANGUAGE plpgsql AS
+$BODY$
+    DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+    insert into test select * from get_table_of_int(1);
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION get_tab_ptf_failed() returns t_tf_tab pipelined LANGUAGE plpgsql AS
+$BODY$
+declare result t_tf_row;
+begin
+    perform insert_test();
+    insert into test values(5);
+end;
+$BODY$;
+
+select get_tab_ptf_failed();
+
 reset search_path;
 drop schema plpgsql_pipelined cascade;

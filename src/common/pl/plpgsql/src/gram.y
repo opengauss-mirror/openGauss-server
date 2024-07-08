@@ -10825,7 +10825,7 @@ make_return_stmt(int location)
 	    const char* message = "pipe error";
 	    InsertErrorMessage(message, plpgsql_yylloc);
 	    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("RETURN statement in a pipelinedd function cannot contains an expression"), errdetail("%s", message),
+                                errmsg("RETURN statement in a pipelined function cannot contains an expression"), errdetail("%s", message),
                                 errcause("A RETURN statement in a pipelined function contains an expression, \
                                 which is not allowed. \
                                 Pipelined functions must return values to the caller by using the PIPE statement."),

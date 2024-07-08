@@ -1713,6 +1713,7 @@ typedef struct knl_u_plpgsql_context {
     bool has_invalid_pkg;
     bool has_invalid_func;
     bool has_error;
+    bool is_pipelined; /* for readonly ereport */
     bool is_exec_autonomous;
     bool in_package_function_compile;
     bool is_alter_compile_stmt;

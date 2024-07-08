@@ -1458,6 +1458,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         add_dummy_return(func);
     }
 
+    /* pipelined function: readonly */
+    if (func->is_pipelined && !func->is_autonomous) {
+        func->fn_readonly = true;
+    }
+    
     /*
      * Complete the function's info
      */

@@ -1275,6 +1275,9 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
     /*
      * Setup the execution state
      */
+     
+    u_sess->plsql_cxt.is_exec_autonomous = true;
+    u_sess->plsql_cxt.is_pipelined = func->is_pipelined;
     plpgsql_estate_setup(&estate, func, (ReturnSetInfo*)fcinfo->resultinfo);
     func->debug = NULL;
 
@@ -1584,6 +1587,9 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
     /*
      * Setup the execution state
      */
+     
+    u_sess->plsql_cxt.is_exec_autonomous = false;
+    u_sess->plsql_cxt.is_pipelined = func->is_pipelined;
     plpgsql_estate_setup(&estate, func, (ReturnSetInfo*)fcinfo->resultinfo);
     func->debug = NULL;
 
