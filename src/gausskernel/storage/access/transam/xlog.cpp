@@ -2647,6 +2647,7 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
     bool last_iteration = false;
     bool finishing_seg = false;
     bool use_existent = false;
+    bool segs_enough = true;
     int curridx = 0;
     int npages = 0;
     int startidx = 0;
@@ -2716,12 +2717,19 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             t_thrd.xlog_cxt.openLogFile = XLogFileInit(t_thrd.xlog_cxt.openLogSegNo, &use_existent, true);
             t_thrd.xlog_cxt.openLogOff = 0;
 
+            segs_enough = true;
+            if (g_instance.attr.attr_storage.wal_file_init_num > 0 && g_instance.wal_cxt.globalEndPosSegNo != InvalidXLogSegPtr &&
+                g_instance.wal_cxt.globalEndPosSegNo >= t_thrd.xlog_cxt.openLogSegNo) {
+                segs_enough = (g_instance.wal_cxt.globalEndPosSegNo - t_thrd.xlog_cxt.openLogSegNo)
+                    > (g_instance.attr.attr_storage.wal_file_init_num * 0.2);
+            }
+
             /*
              * Unlock WalAuxiliary thread to init new xlog segment if we are running out
-             * of xlog segments.
+             * of xlog segments, or available segments is less than wal_file_init_num * 0.2.
              */
-            if (!use_existent) {
-                g_instance.wal_cxt.globalEndPosSegNo = t_thrd.xlog_cxt.openLogSegNo;
+            if (!use_existent || !segs_enough) {
+                g_instance.wal_cxt.globalEndPosSegNo = Max(g_instance.wal_cxt.globalEndPosSegNo, t_thrd.xlog_cxt.openLogSegNo);
                 WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
             }
         }
@@ -4242,7 +4250,7 @@ bool PreInitXlogFileForStandby(XLogRecPtr requestLsn)
     return true;
 }
 
-void PreInitXlogFileForPrimary(int advance_xlog_file_num)
+void PreInitXlogFileForPrimary(int wal_file_init_num)
 {
     XLogSegNo startSegNo, nextSegNo, target;
     int lf;
@@ -4254,7 +4262,7 @@ void PreInitXlogFileForPrimary(int advance_xlog_file_num)
         return;
     }
     startSegNo = g_instance.wal_cxt.globalEndPosSegNo + 1;
-    target = startSegNo + advance_xlog_file_num - 1;
+    target = startSegNo + wal_file_init_num - 1;
     for (nextSegNo = startSegNo; nextSegNo <= target; nextSegNo++) {
         use_existent = true;
         lf = XLogFileInit(nextSegNo, &use_existent, true);
@@ -4494,6 +4502,10 @@ static bool InstallXLogFileSegment(XLogSegNo *segno, const char *tmppath, bool f
 
         /* durable_rename already emitted log message */
         return false;
+    }
+
+    if (*segno > g_instance.wal_cxt.globalEndPosSegNo) {
+        g_instance.wal_cxt.globalEndPosSegNo = *segno;
     }
 
     if (use_lock) {

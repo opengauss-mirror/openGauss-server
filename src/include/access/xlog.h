@@ -361,7 +361,6 @@ typedef struct XLogwrtResult {
     XLogRecPtr Flush; /* last byte + 1 flushed */
 } XLogwrtResult;
 
-extern void XLogMultiFileInit(int advance_xlog_file_num);
 typedef struct XLogwrtPaxos {
     XLogRecPtr  Write; /* last byte + 1 written out */
     XLogRecPtr  Consensus; /* last byte + 1 consensus in DCF */
@@ -708,8 +707,6 @@ extern XLogSegNo GetNewestXLOGSegNo(const char* workingPath);
 #define XLOG_CONTAIN_CSN 0x80000000
 #define XLOG_MASK_TERM 0x7FFFFFFF
 
-extern void XLogMultiFileInit(int advance_xlog_file_num);
-
 extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn);
 extern void XLogWaitFlush(XLogRecPtr recptr);
 extern void XLogWaitBufferInit(XLogRecPtr recptr);
@@ -719,7 +716,7 @@ extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
 extern int XLogFileInit(XLogSegNo segno, bool* use_existent, bool use_lock);
 extern int XLogFileOpen(XLogSegNo segno);
 extern bool PreInitXlogFileForStandby(XLogRecPtr requestLsn);
-extern void PreInitXlogFileForPrimary(int advance_xlog_file_num);
+extern void PreInitXlogFileForPrimary(int wal_file_init_num);
 
 extern void CheckXLogRemoved(XLogSegNo segno, TimeLineID tli);
 extern void XLogSetAsyncXactLSN(XLogRecPtr record);
