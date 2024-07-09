@@ -362,6 +362,7 @@ lreplace:
             ItemPointer tupleid = NULL;
             bool *temp_isnull = NULL;
             Datum *temp_values;
+            int temp_nvalid = m_local.m_reslot->tts_nvalid;
             relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
             result_rel_info = result_rel_info + m_c_local.m_estate->result_rel_index;
             if (relkind == RELKIND_RELATION || RELKIND_IS_SEQUENCE(relkind)) {
@@ -386,6 +387,7 @@ lreplace:
             }
             m_local.m_reslot->tts_isnull = temp_isnull;
             m_local.m_reslot->tts_values = temp_values;
+            m_local.m_reslot->tts_nvalid = temp_nvalid;
         }
 
         if (rel->rd_att->constr) {
