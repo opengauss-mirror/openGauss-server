@@ -190,5 +190,49 @@ $BODY$;
 
 select get_tab_ptf_failed();
 
+CREATE OR REPLACE PACKAGE pkg0016 AS
+TYPE array_type_0016_1 AS varray(10) OF char(10);
+FUNCTION func_pipelined_0016(count NUMBER) RETURN array_type_0016_1 pipelined;
+END pkg0016;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg0016 AS
+FUNCTION func_pipelined_0016(count NUMBER) RETURN array_type_0016_1 pipelined IS
+declare result array_type_0016_1;
+BEGIN
+FOR i IN 1..count LOOP
+result := '{1}';
+pipe row(result);
+pipe row(1);
+pipe row(date'2022-01-01');
+pipe row(123456.1);
+pipe row(-123456.1);
+END LOOP;
+RETURN;
+END;
+END pkg0016;
+/
+select pkg0016.func_pipelined_0016(2);
+
+CREATE OR REPLACE PACKAGE BODY pkg0016 AS
+FUNCTION func_pipelined_0016(count NUMBER) RETURN array_type_0016_1 pipelined IS
+declare result array_type_0016_1;
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+FOR i IN 1..count LOOP
+result := '{1}';
+pipe row(result);
+pipe row(1);
+pipe row(date'2022-01-01');
+pipe row(123456.1);
+pipe row(-123456.1);
+END LOOP;
+RETURN;
+END;
+END pkg0016;
+/
+
+select pkg0016.func_pipelined_0016(2);
+select * from pkg0016.func_pipelined_0016(2);
 reset search_path;
 drop schema plpgsql_pipelined cascade;
