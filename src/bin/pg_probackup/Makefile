@@ -25,6 +25,8 @@ OBJS += $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
 	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o \
 	$(top_builddir)/src/gausskernel/storage/gs_uwal/gs_uwal_adaptor.o
 
+OBJS += oss/appender.o oss/backup.o oss/restore.o oss/buffer.o oss/oss_operator.o oss/thread.o
+
 EXTRA_CLEAN = datapagemap.cpp datapagemap.h \
 	receivelog.cpp receivelog.h streamutil.cpp streamutil.h \
 	xlogreader.cpp instr_time.h
@@ -34,6 +36,9 @@ top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 EXTRA_CLEAN += logging.h
 
+AWS_SDK_INCLUDE_PATH = $(AWSSDK_INCLUDE_PATH)
+AWS_SDK_LIB_PATH = $(AWSSDK_LIB_PATH)
+
 LDFLAGS += -L$(LZ4_LIB_PATH) -L$(ZSTD_LIB_PATH)
 LIBS += -llz4
 ifeq ($(enable_lite_mode), no)
@@ -42,10 +47,16 @@ endif
 PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subdir) -I$(LZ4_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH)
 # add page_compression so .h
 LDFLAGS += -L../../lib/page_compression
-PG_CPPFLAGS = -I../../lib/page_compression -I../../src/common/port
+PG_CPPFLAGS = -I../../lib/page_compression -I../../src/common/port -I$(AWS_SDK_INCLUDE_PATH)
 LIBS += -lpagecompression -lzstd
 override CPPFLAGS := -DFRONTEND $(CPPFLAGS) $(PG_CPPFLAGS) -DHAVE_LIBZ
 PG_LIBS_INTERNAL = $(libpq_pgport) ${PTHREAD_CFLAGS}
+
+# add oss .h
+LDFLAGS += -I$(top_builddir)/$(subdir)/oss/include
+
+# add aws s3 so .h
+LDFLAGS += -L$(AWS_SDK_LIB_PATH) -laws-cpp-sdk-core -laws-cpp-sdk-s3 -I$(AWS_SDK_INCLUDE_PATH)
 
 all: submake-pagecompression $(PROGRAM)
 

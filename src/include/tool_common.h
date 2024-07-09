@@ -132,6 +132,15 @@ typedef struct DssOptions {
     char *socketpath;
 } DssOptions;
 
+/* OSS conntct parameters */
+typedef struct OssOptions {
+    char *access_id;
+    char *access_key;
+    char *endpoint;
+    char *region;
+    char *access_bucket;
+} OssOptions;
+
 typedef struct SSInstanceConfig {
     DssOptions dss;
 } SSInstanceConfig;

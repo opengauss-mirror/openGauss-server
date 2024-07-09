@@ -22,6 +22,7 @@
 #include "tool_common.h"
 #include "common/fe_memutils.h"
 #include "storage/file/fio_device.h"
+#include "oss/include/restore.h"
 
 static const char *statusName[] =
 {
@@ -42,6 +43,14 @@ static const char *devTypeName[] =
 {
     "FILE",
     "DSS",
+    "UNKNOWN",
+    "UNKNOWN"
+};
+
+static const char *ossStatusName[] =
+{
+    "LOCAL",
+    "S3",
     "UNKNOWN",
     "UNKNOWN"
 };
@@ -733,6 +742,9 @@ copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
     } else {
         writeControlFile(&ControlFile, to_fullpath, to_location);
     }
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        uploadConfigFile(to_fullpath, to_fullpath);
+    }
     pg_free(buffer);
 }
 
@@ -817,6 +829,11 @@ const char *dev2str(device_type_t type)
     return devTypeName[type];
 }
 
+const char *ossStatus2str(oss_status_t type)
+{
+    return ossStatusName[type];
+}
+
 device_type_t str2dev(const char *dev)
 {
     for (int i = 0; i < (int)DEV_TYPE_NUM; i++) {
@@ -824,6 +841,15 @@ device_type_t str2dev(const char *dev)
             return (device_type_t)i;
     }
     return DEV_TYPE_INVALID;
+}
+
+oss_status_t str2ossStatus(const char *status)
+{
+    for (int i = 0; i < (int)OSS_STATUS_NUM; i++) {
+        if (pg_strcasecmp(status, ossStatusName[i]) == 0)
+            return (oss_status_t)i;
+    }
+    return OSS_STATUS_INVALID;
 }
 
 bool

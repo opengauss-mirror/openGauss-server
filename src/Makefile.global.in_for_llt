@@ -661,6 +661,13 @@ LIBCURL_INCLUDE_PATH = $(LIBCURL_HOME)/include
 LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
 
 #############################################################################
+# awssdk component
+#############################################################################
+AWSSDK_HOME = $(top_builddir)/../$(BINARYPATH)/aws-sdk-cpp/comm
+AWSSDK_INCLUDE_PATH = $(AWSSDK_HOME)/include
+AWSSDK_LIB_PATH = $(AWSSDK_HOME)/lib
+
+#############################################################################
 
 #############################################################################
 # openssl component

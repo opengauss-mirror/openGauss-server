@@ -15,7 +15,8 @@
 #include "configuration.h"
 #include "json.h"
 #include "catalog/pg_control.h"
-
+#include "oss/include/oss_operator.h"
+#include "oss/include/restore.h"
 
 static void assign_log_level_console(ConfigOption *opt, const char *arg);
 static void assign_log_level_file(ConfigOption *opt, const char *arg);
@@ -42,6 +43,7 @@ static void show_configure_json(ConfigOption *opt);
 #define OPTION_COMPRESS_GROUP    "Compression parameters"
 #define OPTION_REMOTE_GROUP        "Remote access parameters"
 #define OPTION_DSS_GROUP          "DSS connect parameters"
+#define OPTION_OSS_GROUP          "OSS connect parameters"
 
 /*
  * Short name should be non-printable ASCII character.
@@ -243,6 +245,32 @@ ConfigOption instance_options[] =
         &instance_config.dss.instance_id, SOURCE_CMD, (OptionSource)0,
         OPTION_DSS_GROUP, 0, option_get_value
     },
+    /* OSS options */
+    {
+        's', 236, "access-id",
+        &instance_config.oss.access_id, SOURCE_CMD, (OptionSource)0,
+        OPTION_OSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 237, "access-key",
+        &instance_config.oss.access_key, SOURCE_CMD, (OptionSource)0,
+        OPTION_OSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 239, "endpoint",
+        &instance_config.oss.endpoint, SOURCE_CMD, (OptionSource)0,
+        OPTION_OSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 240, "region",
+        &instance_config.oss.region, SOURCE_CMD, (OptionSource)0,
+        OPTION_OSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 243, "access-bucket",
+        &instance_config.oss.access_bucket, SOURCE_CMD, (OptionSource)0,
+        OPTION_OSS_GROUP, 0, option_get_value
+    },
     { 0 }
 };
 
@@ -286,13 +314,22 @@ do_set_config(bool missing_ok)
     FILE       *fp;
     int            i;
     int nRet = 0;
+    char* bucket_name = NULL;
+    bool no_exist = false;
 
     join_path_components(path, backup_instance_path, BACKUP_CATALOG_CONF_FILE);
     nRet = snprintf_s(path_temp, sizeof(path_temp), sizeof(path_temp) - 1, "%s.tmp", path);
     securec_check_ss_c(nRet, "\0", "\0");
 
-    if (!missing_ok && !fileExists(path, FIO_LOCAL_HOST))
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        Oss::Oss* oss = getOssClient();
+        bucket_name = getBucketName();
+        no_exist = !oss->ObjectExists(bucket_name, path);
+    }
+    
+    if (!missing_ok && !fileExists(path, FIO_LOCAL_HOST) && no_exist) {
         elog(ERROR, "Configuration file \"%s\" doesn't exist", path);
+    }
 
     fp = fopen(path_temp, "wt");
     if (fp == NULL)
@@ -337,6 +374,13 @@ do_set_config(bool missing_ok)
         unlink(path_temp);
         elog(ERROR, "Cannot rename configuration file \"%s\" to \"%s\": %s",
              path_temp, path, strerror(errno_temp));
+    }
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        Oss::Oss* oss = getOssClient();
+        oss->RemoveObject(bucket_name, path);
+        oss->PutObject(bucket_name, path, path);
+        fio_unlink(path, FIO_BACKUP_HOST);
     }
 }
 
@@ -558,6 +602,32 @@ readInstanceConfigFile(const char *instance_name)
             'i', 235, "instance-id", &instance->dss.instance_id, SOURCE_CMD, (OptionSource)0,
             OPTION_DSS_GROUP, 0, option_get_value
         },
+        /* OSS options */
+        {
+            's', 236, "access-id",
+            &instance_config.oss.access_id, SOURCE_CMD, (OptionSource)0,
+            OPTION_OSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 237, "access-key",
+            &instance_config.oss.access_key, SOURCE_CMD, (OptionSource)0,
+            OPTION_OSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 239, "endpoint",
+            &instance_config.oss.endpoint, SOURCE_CMD, (OptionSource)0,
+            OPTION_OSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 240, "region",
+            &instance_config.oss.region, SOURCE_CMD, (OptionSource)0,
+            OPTION_OSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 243, "access-bucket",
+            &instance_config.oss.access_bucket, SOURCE_CMD, (OptionSource)0,
+            OPTION_OSS_GROUP, 0, option_get_value
+        },
         { 0 }
     };
 
@@ -577,6 +647,9 @@ readInstanceConfigFile(const char *instance_name)
     join_path_components(path, instance->backup_instance_path,
                          BACKUP_CATALOG_CONF_FILE);
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        restoreConfigFile(path);
+    }
     if (fio_access(path, F_OK, FIO_BACKUP_HOST) != 0)
     {
         elog(WARNING, "Control file \"%s\" doesn't exist", path);
@@ -608,6 +681,9 @@ readInstanceConfigFile(const char *instance_name)
         instance->xlog_seg_size = DEFAULT_XLOG_SEG_SIZE;
 #endif
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        remove(path);
+    }
     return instance;
 
 }

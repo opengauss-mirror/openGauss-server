@@ -31,6 +31,8 @@
 #include "zstd.h"
 #include "storage/file/fio_device.h"
 #include "storage/buf/bufmgr.h"
+#include "oss/include/appender.h"
+#include "oss/include/restore.h"
 
 typedef struct PreReadBuf
 {
@@ -471,8 +473,8 @@ get_checksum_errormsg(Page page, char **errormsg, BlockNumber absolute_blkno)
  *                                or header corruption,
  *                                only used for checkdb
  */
-static int32
-prepare_page(ConnectionArgs *conn_arg,
+static
+int32 prepare_page(ConnectionArgs *conn_arg,
              pgFile *file, XLogRecPtr prev_backup_start_lsn,
              BlockNumber blknum, FILE *in,
              BackupMode backup_mode,
@@ -666,7 +668,8 @@ compress_and_backup_page(pgFile *file, BlockNumber blknum,
                                                         FILE *in, FILE *out, pg_crc32 *crc,
                                                         int page_state, Page page,
                                                         CompressAlg calg, int clevel,
-                                                        const char *from_fullpath, const char *to_fullpath)
+                                                        const char *from_fullpath, const char *to_fullpath,
+                                                        FileAppender* appender, char** fileBuffer)
 {
     int         compressed_size = 0;
     size_t      write_buffer_size = 0;
@@ -699,13 +702,29 @@ compress_and_backup_page(pgFile *file, BlockNumber blknum,
     bph->compressed_size = compressed_size;
     write_buffer_size = compressed_size + sizeof(BackupPageHeader);
 
-    /* Update CRC */
-    COMP_FILE_CRC32(true, *crc, write_buffer, write_buffer_size);
-
     /* write data page */
-    if (fio_fwrite(out, write_buffer, write_buffer_size) != write_buffer_size)
-        elog(ERROR, "File: \"%s\", cannot write at block %u: %s",
-            to_fullpath, blknum, strerror(errno));
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        if (fileBuffer != NULL) {
+            rc = memcpy_s(*fileBuffer, write_buffer_size, write_buffer, write_buffer_size);
+            securec_check_c(rc, "\0", "\0");
+            *fileBuffer += write_buffer_size;
+        } else {
+            /* Update CRC */
+            COMP_FILE_CRC32(true, *crc, write_buffer, write_buffer_size);
+            file->crc = *crc;
+            /* write data page */
+            FileAppenderSegHeader content_header;
+            constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, write_buffer_size, 0, file);
+            writeHeader(&content_header, appender);
+            writePayload((char*)write_buffer, write_buffer_size, appender);
+        }
+    } else {
+        /* Update CRC */
+        COMP_FILE_CRC32(true, *crc, write_buffer, write_buffer_size);
+        if (fio_fwrite(out, write_buffer, write_buffer_size) != write_buffer_size)
+            elog(ERROR, "File: \"%s\", cannot write at block %u: %s",
+                to_fullpath, blknum, strerror(errno));
+    }
 
     file->write_size += write_buffer_size;
     file->uncompressed_size += BLCKSZ;
@@ -726,7 +745,8 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
                                 const char *from_fullpath, const char *to_fullpath,
                                 XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
                                 CompressAlg calg, int clevel, uint32 checksum_version,
-                                HeaderMap *hdr_map, bool is_merge)
+                                HeaderMap *hdr_map, bool is_merge,
+                                FileAppender* appender, char* fileBuffer)
 {
     int         rc;
     bool        use_pagemap;
@@ -771,6 +791,14 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
     file->uncompressed_size = 0;
     INIT_FILE_CRC32(true, file->crc);
 
+    if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
+        size_t pathLen = strlen(file->rel_path);
+        FileAppenderSegHeader start_header;
+        constructHeader(&start_header, FILE_APPEND_TYPE_FILE, pathLen, 0, file);
+        writeHeader(&start_header, appender);
+        writePayload((char*)file->rel_path, pathLen, appender);
+    }
+
     /*
     * Read each page, verify checksum and write it to backup.
     * If page map is empty or file is not present in previous backup
@@ -794,7 +822,8 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
                                         /* send pagemap if any */
                                         use_pagemap,
                                         /* variables for error reporting */
-                                        &err_blknum, &errmsg, &headers);
+                                        &err_blknum, &errmsg, &headers,
+                                        appender, fileBuffer ? &fileBuffer : NULL);
     }
     else
     {
@@ -802,7 +831,7 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
                                 /* send prev backup START_LSN */
                                 InvalidXLogRecPtr,
                                 calg, clevel, checksum_version, use_pagemap,
-                                &headers, backup_mode);
+                                &headers, backup_mode, appender, fileBuffer);
     }
 
     /* check for errors */
@@ -866,6 +895,12 @@ cleanup:
     /* dump page headers */
     write_page_headers(headers, file, hdr_map, is_merge);
 
+    if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
+        FileAppenderSegHeader end_header;
+        constructHeader(&end_header, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file);
+        writeHeader(&end_header, appender);
+    }
+
     pg_free(errmsg);
     pg_free(file->pagemap.bitmap);
     pg_free(headers);
@@ -881,14 +916,14 @@ void
 backup_non_data_file(pgFile *file, pgFile *prev_file,
                                             const char *from_fullpath, const char *to_fullpath,
                                             BackupMode backup_mode, time_t parent_backup_time,
-                                            bool missing_ok)
+                                            bool missing_ok, FileAppender* appender, char* fileBuffer)
 {
     fio_location from_location = is_dss_file(from_fullpath) ? FIO_DSS_HOST : FIO_DB_HOST;
     /* special treatment for global/pg_control */
     if (file->external_dir_num == 0 && strcmp(file->name, PG_XLOG_CONTROL_FILE) == 0)
     {
         copy_pgcontrol_file(from_fullpath, from_location,
-                                            to_fullpath, FIO_BACKUP_HOST, file);
+                                                to_fullpath, FIO_BACKUP_HOST, file);
         return;
     }
 
@@ -909,7 +944,23 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
         }
     }
 
-    backup_non_data_file_internal(from_fullpath, from_location, to_fullpath, file, true);
+    if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
+        // write file start header and from_fullpath
+        size_t pathLen = strlen(file->rel_path);
+        INIT_FILE_CRC32(true, file->crc);
+        FileAppenderSegHeader start_header;
+        constructHeader(&start_header, FILE_APPEND_TYPE_FILE, pathLen, 0, file);
+        writeHeader(&start_header, appender);
+        writePayload((char*)file->rel_path, pathLen, appender);
+    }
+    backup_non_data_file_internal(from_fullpath, from_location, to_fullpath, file, true,
+                                  appender, fileBuffer ? &fileBuffer : NULL);
+    if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
+        // write file end header
+        FileAppenderSegHeader end_header;
+        constructHeader(&end_header, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file);
+        writeHeader(&end_header, appender);
+    }
 }
 
 /*
@@ -925,7 +976,6 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
     size_t total_write_len = 0;
     char  *in_buf = (char *)pgut_malloc(STDIO_BUFSIZE);
     int    backup_seq = 0;
-
     /*
     * FULL -> INCR -> DEST
     *  2       1       0
@@ -1550,10 +1600,11 @@ restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
     return tmp_file->write_size;
 }
 
-bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFile *file, bool missing_ok, FILE *out)
+bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFile *file, bool missing_ok, FILE *out,
+                        FileAppender* appender, char** fileBuffer)
 {
     char *errmsg = NULL;
-    int rc = fio_send_file(from_fullpath, to_fullpath, out, file, &errmsg);
+    int rc = fio_send_file(from_fullpath, to_fullpath, out, file, &errmsg, appender, fileBuffer);
 
     /* handle errors */
     if (rc == FILE_MISSING)
@@ -1590,7 +1641,8 @@ bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFi
  */
 void
 backup_non_data_file_internal(const char *from_fullpath, fio_location from_location,
-                              const char *to_fullpath, pgFile *file, bool missing_ok)
+                              const char *to_fullpath, pgFile *file, bool missing_ok,
+                              FileAppender* appender, char** fileBuffer)
 {
     FILE       *in = NULL;
     FILE       *out = NULL;
@@ -1605,43 +1657,45 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     file->uncompressed_size = 0;
 
     /* open backup file for write  */
-    out = fopen(to_fullpath, PG_BINARY_W);
-    if (out == NULL)
-    {
-        if (file->external_dir_num)
+    if (current.media_type != MEDIA_TYPE_OSS) {
+        out = fopen(to_fullpath, PG_BINARY_W);
+        if (out == NULL)
         {
-            char    parent[MAXPGPATH];
-            errno_t rc = 0;
+            if (file->external_dir_num)
+            {
+                char    parent[MAXPGPATH];
+                errno_t rc = 0;
 
-            rc = strncpy_s(parent, MAXPGPATH, to_fullpath, MAXPGPATH - 1);
-            securec_check_c(rc, "", "");
-            get_parent_directory(parent);
+                rc = strncpy_s(parent, MAXPGPATH, to_fullpath, MAXPGPATH - 1);
+                securec_check_c(rc, "", "");
+                get_parent_directory(parent);
 
-            dir_create_dir(parent, DIR_PERMISSION);
-            out = fopen(to_fullpath, PG_BINARY_W);
-            if (out == NULL)
+                dir_create_dir(parent, DIR_PERMISSION);
+                out = fopen(to_fullpath, PG_BINARY_W);
+                if (out == NULL)
+                    elog(ERROR, "Cannot open destination file \"%s\": %s",
+                        to_fullpath, strerror(errno));
+            }
+            else
+            {
                 elog(ERROR, "Cannot open destination file \"%s\": %s",
                     to_fullpath, strerror(errno));
+            }
         }
-        else
-        {
-            elog(ERROR, "Cannot open destination file \"%s\": %s",
-                to_fullpath, strerror(errno));
-        }
-    }
 
-    /* update file permission */
-    if (!is_dss_type(file->type))
-    {
-        if (chmod(to_fullpath, file->mode) == -1)
-            elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
-                strerror(errno));
+        /* update file permission */
+        if (!is_dss_type(file->type))
+        {
+            if (chmod(to_fullpath, file->mode) == -1)
+                elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
+                    strerror(errno));
+        }
     }
 
     /* backup remote file  */
     if (fio_is_remote(FIO_DB_HOST))
     {
-        if (!backup_remote_file(from_fullpath, to_fullpath, file, missing_ok, out))
+        if (!backup_remote_file(from_fullpath, to_fullpath, file, missing_ok, out, appender, fileBuffer))
             goto cleanup;        
     }
     /* backup local file */
@@ -1670,7 +1724,9 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
 
         /* disable stdio buffering for local input/output files to avoid triple buffering */
         setvbuf(in, NULL, _IONBF, BUFSIZ);
-        setvbuf(out, NULL, _IONBF, BUFSIZ);
+        if (current.media_type != MEDIA_TYPE_OSS) {
+            setvbuf(out, NULL, _IONBF, BUFSIZ);
+        }
 
         /* allocate 64kB buffer */
         buf = (char *)pgut_malloc(CHUNK_SIZE);
@@ -1686,12 +1742,28 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
 
             if (read_len > 0)
             {
-                if (fwrite(buf, 1, read_len, out) != (size_t)read_len)
-                    elog(ERROR, "Cannot write to file \"%s\": %s", to_fullpath,
-                        strerror(errno));
+                if (current.media_type == MEDIA_TYPE_OSS) {
+                    if (fileBuffer != NULL) {
+                        int rc = memcpy_s(*fileBuffer, read_len, buf, read_len);
+                        securec_check_c(rc, "\0", "\0");
+                        *fileBuffer += read_len;
+                    } else {
+                        /* Update CRC */
+                        COMP_FILE_CRC32(true, file->crc, buf, read_len);
+                        /* write data page */
+                        FileAppenderSegHeader content_header;
+                        constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, read_len, 0, file);
+                        writeHeader(&content_header, appender);
+                        writePayload((char*)buf, read_len, appender);
+                    }
+                } else {
+                    if (fwrite(buf, 1, read_len, out) != (size_t)read_len)
+                        elog(ERROR, "Cannot write to file \"%s\": %s", to_fullpath,
+                            strerror(errno));
 
-                /* update CRC */
-                COMP_FILE_CRC32(true, file->crc, buf, read_len);
+                    /* update CRC */
+                    COMP_FILE_CRC32(true, file->crc, buf, read_len);
+                }
                 file->read_size += read_len;
             }
 
@@ -1712,7 +1784,7 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     if (in && fclose(in))
         elog(ERROR, "Cannot close the file \"%s\": %s", from_fullpath, strerror(errno));
 
-    if (out && fclose(out))
+    if (current.media_type != MEDIA_TYPE_OSS && out && fclose(out))
         elog(ERROR, "Cannot close the file \"%s\": %s", to_fullpath, strerror(errno));
 
     pg_free(buf);
@@ -2336,7 +2408,7 @@ int
 send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_fullpath,
                         pgFile *file, XLogRecPtr prev_backup_start_lsn, CompressAlg calg, int clevel,
                         uint32 checksum_version, bool use_pagemap, BackupPageHeader2 **headers,
-                        BackupMode backup_mode)
+                        BackupMode backup_mode, FileAppender* appender, char* fileBuffer)
 {
     FILE *in = NULL;
     FILE *out = NULL;
@@ -2427,7 +2499,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         else if (rc == PageIsOk)
         {
             /* lazily open backup file (useful for s3) */
-            if (!out)
+            if (current.media_type != MEDIA_TYPE_OSS && !out)
                 out = open_local_file_rw(to_fullpath, &out_buf, STDIO_BUFSIZE);
             
             BackupPageHeader2 *header = pgut_new(BackupPageHeader2);
@@ -2445,7 +2517,8 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
 
             compressed_size = compress_and_backup_page(file, blknum, in, out, &(file->crc),
             rc, curr_page, calg, clevel,
-            from_fullpath, to_fullpath);
+            from_fullpath, to_fullpath,
+            appender, fileBuffer ? &fileBuffer : NULL);
             cur_pos_out += compressed_size + sizeof(BackupPageHeader);
         }
 
@@ -2486,7 +2559,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         elog(ERROR, "Cannot close the source file \"%s\": %s", to_fullpath, strerror(errno));
 
     /* close local output file */
-    if (out && fclose(out))
+    if (current.media_type != MEDIA_TYPE_OSS && out && fclose(out))
         elog(ERROR, "Cannot close the backup file \"%s\": %s", to_fullpath, strerror(errno));
 
     pg_free(iter);
@@ -2521,11 +2594,17 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     if (file->n_headers <= 0)
         return NULL;
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        pthread_lock(&(hdr_map->mutex));
+        restoreConfigFile(hdr_map->path);
+        pthread_mutex_unlock(&(hdr_map->mutex));
+    }
+
     in = fopen(hdr_map->path, PG_BINARY_R);
 
     if (!in)
     {
-        elog(strict ? ERROR : WARNING, "Cannot open header file \"%s\": %s", hdr_map->path, strerror(errno));
+        elog(strict ? ERROR : WARNING, "Cannot open header file1 \"%s\": %s", hdr_map->path, strerror(errno));
         return NULL;
     }
     /* disable buffering for header file */
@@ -2601,6 +2680,10 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     {
         pg_free(headers);
         headers = NULL;
+    }
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        remove(hdr_map->path);
     }
 
     return headers;

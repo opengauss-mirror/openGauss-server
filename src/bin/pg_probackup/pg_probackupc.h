@@ -88,6 +88,9 @@ extern bool skip_block_validation;
 /* current settings */
 extern pgBackup current;
 
+/* Oss Client*/
+extern void* oss_client;
+
 /* argv of the process */
 extern char** commands_args;
 
@@ -100,6 +103,7 @@ extern int do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
                      bool no_validate, bool no_sync, bool backup_logs, bool backup_replslots);
 extern BackupMode parse_backup_mode(const char *value);
 extern const char *deparse_backup_mode(BackupMode mode);
+extern MediaType parse_media_type(const char *value);
 extern void process_block_change(ForkNumber forknum, const RelFileNode rnode,
                                  BlockNumber blkno);
 
@@ -166,6 +170,7 @@ extern int do_validate_all(void);
 extern int validate_one_page(Page page, BlockNumber absolute_blkno,
                              XLogRecPtr stop_lsn, PageState *page_st,
                              uint32 checksum_version);
+extern bool pre_check_backup(pgBackup *backup);
 
 /* return codes for validate_one_page */
 /* TODO: use enum */
@@ -315,15 +320,16 @@ extern void backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
                                  const char *from_fullpath, const char *to_fullpath,
                                  XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
                                  CompressAlg calg, int clevel, uint32 checksum_version,
-                                 HeaderMap *hdr_map, bool missing_ok);
+                                 HeaderMap *hdr_map, bool missing_ok,
+                                 FileAppender* appender = NULL, char* fileBuffer = NULL);
 extern void backup_non_data_file(pgFile *file, pgFile *prev_file,
                                  const char *from_fullpath, const char *to_fullpath,
                                  BackupMode backup_mode, time_t parent_backup_time,
-                                 bool missing_ok);
+                                 bool missing_ok, FileAppender* appender = NULL, char* fileBuffer = NULL);
 extern void backup_non_data_file_internal(const char *from_fullpath,
                                           fio_location from_location,
                                           const char *to_fullpath, pgFile *file,
-                                          bool missing_ok);
+                                          bool missing_ok, FileAppender* appender = NULL, char** fileBuffer = NULL);
 
 extern size_t restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
                                 const char *to_fullpath, bool use_bitmap, PageState *checksum_map,
@@ -404,7 +410,9 @@ extern void time2iso(char *buf, size_t len, time_t time);
 extern const char *status2str(BackupStatus status);
 extern BackupStatus str2status(const char *status);
 extern const char *dev2str(device_type_t type);
+extern const char *ossStatus2str(oss_status_t status);
 extern device_type_t str2dev(const char *dev);
+extern oss_status_t str2ossStatus(const char *status);
 extern const char *base36enc(long unsigned int value);
 extern char *base36enc_dup(long unsigned int value);
 extern long unsigned int base36dec(const char *text);
@@ -436,18 +444,19 @@ extern FILE* open_local_file_rw(const char *to_fullpath, char **out_buf, uint32 
 extern int send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_fullpath,
                       pgFile *file, XLogRecPtr prev_backup_start_lsn, CompressAlg calg, int clevel,
                       uint32 checksum_version, bool use_pagemap, BackupPageHeader2 **headers,
-                      BackupMode backup_mode);
+                      BackupMode backup_mode, FileAppender* appender = NULL, char* fileBuffer = NULL);
 
 /* FIO */
 extern void fio_delete(mode_t mode, const char *fullpath, fio_location location);
 extern int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *file,
                           XLogRecPtr horizonLsn, int calg, int clevel, uint32 checksum_version,
                           bool use_pagemap, BlockNumber *err_blknum, char **errormsg,
-                          BackupPageHeader2 **headers);
+                          BackupPageHeader2 **headers, FileAppender* appender = NULL, char** fileBuffer = NULL);
 /* return codes for fio_send_pages */
 extern int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* out, char **errormsg);
 extern int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
-                                                        pgFile *file, char **errormsg);
+                                                        pgFile *file, char **errormsg,
+                                                        FileAppender* appender = NULL, char** fileBuffer = NULL);
 
 extern void fio_list_dir(parray *files, const char *root, bool exclude, bool follow_symlink,
                          bool add_root, bool backup_logs, bool skip_hidden, int external_dir_num,
@@ -495,5 +504,26 @@ extern void replace_password(int argc, char** argv, const char* optionName);
 void *gs_palloc0(Size size);
 char *gs_pstrdup(const char *in);
 void *gs_repalloc(void *pointer, Size size);
+
+typedef struct
+{
+    const char *base_path;
+    const char *dss_path;
+    parray        *files;
+    bool        corrupted;
+    XLogRecPtr     stop_lsn;
+    uint32        checksum_version;
+    uint32        backup_version;
+    BackupMode    backup_mode;
+    const char    *external_prefix;
+    HeaderMap   *hdr_map;
+
+    /*
+     * Return value from the thread.
+     * 0 means there is no error, 1 - there is an error.
+     */
+    int            ret;
+} validate_files_arg;
+
 
 #endif /* PG_PROBACKUPC_H */

@@ -37,6 +37,7 @@ typedef struct ShowBackendRow
     char        start_lsn[20];
     char        stop_lsn[20];
     char        type[20];
+    char        oss_status[20];
     const char *status;
 } ShowBackendRow;
 
@@ -572,16 +573,16 @@ static void process_time(pgBackup *backup, ShowBackendRow *row)
 static void
 show_instance_plain(const char *instance_name, device_type_t instance_type,  parray *backup_list, bool show_name)
 {
-#define SHOW_FIELDS_COUNT 15
+#define SHOW_FIELDS_COUNT 16
     int            i;
     const char *names[SHOW_FIELDS_COUNT] =
                     { "Instance", "Version", "ID", "Recovery Time",
                       "Mode", "WAL Mode", "TLI", "Time", "Data", "WAL",
-                      "Zratio", "Start LSN", "Stop LSN", "Type", "Status" };
+                      "Zratio", "Start LSN", "Stop LSN", "Type", "S3 Status", "Status" };
     const char *field_formats[SHOW_FIELDS_COUNT] =
                     { " %-*s ", " %-*s ", " %-*s ", " %-*s ",
                       " %-*s ", " %-*s ", " %-*s ", " %*s ", " %*s ", " %*s ",
-                      " %*s ", " %-*s ", " %-*s ", " %-*s ", " %-*s "};
+                      " %*s ", " %-*s ", " %-*s ", " %-*s ", " %-*s ", " %-*s "};
     uint32        widths[SHOW_FIELDS_COUNT];
     uint32        widths_sum = 0;
     ShowBackendRow *rows = NULL;
@@ -713,6 +714,12 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
         widths[cur] = Max(widths[cur], (uint32)strlen(row->type));
         cur++;
 
+        /* S3 Status (LOCAL OR S3) */
+        rc = snprintf_s(row->oss_status, lengthof(row->oss_status), lengthof(row->oss_status) - 1, "%s", ossStatus2str(backup->oss_status));
+        securec_check_ss_c(rc, "\0", "\0");
+        widths[cur] = Max(widths[cur], (uint32)strlen(row->oss_status));
+        cur++;
+
         /* Status */
         row->status = status2str(backup->status);
         widths[cur] = Max(widths[cur], strlen(row->status));
@@ -803,6 +810,10 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
 
         appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],
                           row->type);
+        cur++;
+
+        appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],
+                          row->oss_status);
         cur++;
 
         appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],

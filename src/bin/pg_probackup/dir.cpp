@@ -26,6 +26,7 @@
 #include "common/fe_memutils.h"
 #include "PageCompression.h"
 #include "storage/file/fio_device.h"
+#include "oss/include/restore.h"
 
 /*
  * The contents of these directories are removed or recreated during server
@@ -1760,6 +1761,10 @@ dir_read_file_list(const char *root, const char *external_prefix,
     char     stdio_buf[STDIO_BUFSIZE];
     pg_crc32 content_crc = 0;
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        restoreConfigFile(file_txt);
+    }
+
     fp = fio_open_stream(file_txt, location);
     if (fp == NULL)
         elog(ERROR, "cannot open \"%s\": %s", file_txt, strerror(errno));
@@ -1877,6 +1882,10 @@ dir_read_file_list(const char *root, const char *external_prefix,
             file_txt, content_crc, expected_crc);
         parray_free(files);
         return NULL;
+    }
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        remove(file_txt);
     }
 
     return files;
@@ -2083,6 +2092,9 @@ write_database_map(pgBackup *backup, parray *database_map, parray *backup_files_
         file->uncompressed_size = file->read_size;
 
         parray_append(backup_files_list, file);
+    }
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        uploadConfigFile(database_map_path, database_map_path);
     }
 }
 

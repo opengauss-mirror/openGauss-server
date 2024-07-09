@@ -38,6 +38,13 @@ typedef enum en_device_type {
     DEV_TYPE_INVALID
 } device_type_t;
 
+typedef enum en_status_type {
+    OSS_STATUS_LOCAL = 0,
+    OSS_STATUS_OSS,
+    OSS_STATUS_NUM,
+    OSS_STATUS_INVALID
+} oss_status_t;
+
 extern bool g_enable_dss;
 extern uint64 XLogSegmentSize;
 

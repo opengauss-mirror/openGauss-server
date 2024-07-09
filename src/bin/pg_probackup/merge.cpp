@@ -121,6 +121,11 @@ do_merge(time_t backup_id)
     pgBackup   *dest_backup = NULL;
     pgBackup   *full_backup = NULL;
 
+    
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        elog(ERROR, "Not supported when specifying OSS options");
+    }
+
     if (backup_id == INVALID_BACKUP_ID)
         elog(ERROR, "required parameter is not specified: --backup-id");
 

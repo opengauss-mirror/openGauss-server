@@ -21,6 +21,7 @@
 #include "catalog/catalog.h"
 #include "storage/file/fio_device.h"
 #include "logger.h"
+#include "oss/include/restore.h"
 
 #define RESTORE_ARRAY_LEN 100
 
@@ -380,39 +381,45 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
             }
 
             /* validate datafiles only */
-            pgBackupValidate(tmp_backup, params);
-
-            /* After pgBackupValidate() only following backup
-             * states are possible: ERROR, RUNNING, CORRUPT and OK.
-             * Validate WAL only for OK, because there is no point
-             * in WAL validation for corrupted, errored or running backups.
-             */
-            if (tmp_backup->status != BACKUP_STATUS_OK)
-            {
-                corrupted_backup = tmp_backup;
-                break;
+            if (current.media_type == MEDIA_TYPE_OSS && !params->is_restore &&
+                tmp_backup->oss_status != OSS_STATUS_LOCAL) {
+                performRestoreOrValidate(tmp_backup, true);
+            } else if (current.media_type != MEDIA_TYPE_OSS || tmp_backup->oss_status == OSS_STATUS_LOCAL) {
+                pgBackupValidate(tmp_backup, params);
+                /* After pgBackupValidate() only following backup
+                * states are possible: ERROR, RUNNING, CORRUPT and OK.
+                * Validate WAL only for OK, because there is no point
+                * in WAL validation for corrupted, errored or running backups.
+                */
+                if (tmp_backup->status != BACKUP_STATUS_OK)
+                {
+                    corrupted_backup = tmp_backup;
+                    break;
+                }
+                /* We do not validate WAL files of intermediate backups
+                * It`s done to speed up restore
+                */
             }
-            /* We do not validate WAL files of intermediate backups
-             * It`s done to speed up restore
-             */
         }
 
         /* There is no point in wal validation of corrupted backups */
         // TODO: there should be a way for a user to request only(!) WAL validation
-        if (!corrupted_backup)
-        {
-            /*
-             * Validate corresponding WAL files.
-             * We pass base_full_backup timeline as last argument to this function,
-             * because it's needed to form the name of xlog file.
-             */
-            validate_wal(dest_backup, arclog_path, rt->target_time,
-                         rt->target_xid, rt->target_lsn,
-                         dest_backup->tli, instance_config.xlog_seg_size);
+        if(current.media_type != MEDIA_TYPE_OSS || tmp_backup->oss_status == OSS_STATUS_LOCAL) {
+            if (!corrupted_backup)
+            {
+                /*
+                * Validate corresponding WAL files.
+                * We pass base_full_backup timeline as last argument to this function,
+                * because it's needed to form the name of xlog file.
+                */
+                validate_wal(dest_backup, arclog_path, rt->target_time,
+                            rt->target_xid, rt->target_lsn,
+                            dest_backup->tli, instance_config.xlog_seg_size);
+            }
+            /* Orphanize every OK descendant of corrupted backup */
+            else
+                set_orphan_status(backups, corrupted_backup);
         }
-        /* Orphanize every OK descendant of corrupted backup */
-        else
-            set_orphan_status(backups, corrupted_backup);
     }
 
     /*
@@ -449,6 +456,7 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
      */
     if (params->is_restore)
     {
+
         restore_chain(dest_backup, parent_chain, params, instance_config.pgdata,
                       instance_config.dss.vgdata, no_sync);
 
@@ -1230,6 +1238,41 @@ static void threads_handle(pthread_t *threads,
     pthread_create(&progressThread, nullptr, ProgressReportRestore, nullptr);
 
     /* Restore files into target directory */
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        for (i = parray_num(parent_chain) - 1; i >= 0; i--) {
+            pgBackup   *backup = (pgBackup *) parray_get(parent_chain, i);
+            if (!lock_backup(backup, true)) {
+                elog(ERROR, "Cannot lock backup %s", base36enc(backup->start_time));
+            }
+            if (backup->oss_status == OSS_STATUS_LOCAL) {
+                continue;
+            }
+            if (backup->status != BACKUP_STATUS_OK &&
+                backup->status != BACKUP_STATUS_DONE) {
+                if (params->force)
+                    elog(WARNING, "Backup %s is not valid, restore is forced",
+                        base36enc(backup->start_time));
+                else
+                    elog(ERROR, "Backup %s cannot be restored because it is not valid",
+                        base36enc(backup->start_time));
+            }
+            /* confirm block size compatibility */
+            if (backup->block_size != BLCKSZ)
+                elog(ERROR,
+                    "BLCKSZ(%d) is not compatible(%d expected)",
+                    backup->block_size, BLCKSZ);
+            if (backup->wal_block_size != XLOG_BLCKSZ)
+                elog(ERROR,
+                    "XLOG_BLCKSZ(%d) is not compatible(%d expected)",
+                    backup->wal_block_size, XLOG_BLCKSZ);
+            performRestoreOrValidate(backup, false);
+            /* Backup is downloaded. Update backup status */
+            backup->end_time = time(NULL);
+            backup->oss_status = OSS_STATUS_LOCAL;
+            write_backup(backup, true);
+        }
+    }
+    
     for (i = 0; i < num_threads; i++)
     {
         restore_files_arg *arg = &(threads_args[i]);
@@ -1397,7 +1440,6 @@ restore_files(void *arg)
         PageState      *checksum_map = NULL; /* it should take ~1.5MB at most */
         datapagemap_t  *lsn_map = NULL;      /* it should take 16kB at most */
         pgFile    *dest_file = (pgFile *)parray_get(arguments->dest_files, i);
-
         /* Directories were created before */
         if (S_ISDIR(dest_file->mode)) {
             directoryFilesLocal++;
@@ -1503,8 +1545,6 @@ restore_files(void *arg)
         if (fio_chmod(to_fullpath, dest_file->mode, out_location) == -1)
             elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
                  strerror(errno));
-
-        
 
         // If destination file is 0 sized, then just close it and go for the next
         if (dest_file->write_size == 0)

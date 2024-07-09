@@ -701,6 +701,8 @@
 ./lib/libdcf.so
 ./lib/libzstd.so*
 ./lib/libcurl.so*
+./lib/libaws-cpp-sdk-core.so
+./lib/libaws-cpp-sdk-s3.so
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
 ./lib/postgresql/latin2_and_win1250.so

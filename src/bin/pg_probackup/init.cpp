@@ -9,6 +9,8 @@
  */
 
 #include "pg_probackup.h"
+#include "oss/include/oss_operator.h"
+#include "oss/include/restore.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
@@ -77,6 +79,14 @@ do_add_instance(InstanceConfig *instance)
 	if (access(arclog_path_dir, F_OK) != 0)
 		elog(ERROR, "Directory does not exist: '%s'", arclog_path_dir);
 
+	if (current.media_type == MEDIA_TYPE_OSS) {
+		Oss::Oss* oss = getOssClient();
+		char* bucket_name = getBucketName();
+		if (!oss->BucketExists(bucket_name)) {
+            elog(ERROR, "Bucket '%s' does not exist on OSS, please create it first.", bucket_name);
+        }
+	}
+
 	if (stat(instance->backup_instance_path, &st) == 0 && S_ISDIR(st.st_mode))
 		elog(ERROR, "Instance '%s' backup directory already exists: '%s'",
 			instance->name, instance->backup_instance_path);
@@ -123,6 +133,17 @@ do_add_instance(InstanceConfig *instance)
 	config_set_opt(instance_options, &instance_config.remote.ssh_options,
 				   SOURCE_DEFAULT);
 	config_set_opt(instance_options, &instance_config.remote.ssh_config,
+				   SOURCE_DEFAULT);
+
+	config_set_opt(instance_options, &instance_config.oss.access_id,
+				   SOURCE_DEFAULT);
+	config_set_opt(instance_options, &instance_config.oss.access_key,
+				   SOURCE_DEFAULT);
+	config_set_opt(instance_options, &instance_config.oss.endpoint,
+				   SOURCE_DEFAULT);
+	config_set_opt(instance_options, &instance_config.oss.region,
+				   SOURCE_DEFAULT);
+	config_set_opt(instance_options, &instance_config.oss.access_bucket,
 				   SOURCE_DEFAULT);
 
 	/* pgdata and vgname were set through command line */

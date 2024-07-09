@@ -873,6 +873,8 @@
 ./lib/krb5/plugins/kdb/db2.so
 ./lib/libverto.so*
 ./lib/libcurl.so*
+./lib/libaws-cpp-sdk-core.so
+./lib/libaws-cpp-sdk-s3.so
 ./lib/libcrypto.so*
 ./lib/libssl.so*
 ./lib/libgcc_s.so.1

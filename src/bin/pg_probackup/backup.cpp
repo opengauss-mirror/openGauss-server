@@ -29,6 +29,8 @@
 #include "common/fe_memutils.h"
 #include "storage/file/fio_device.h"
 #include "logger.h"
+#include "oss/include/backup.h"
+#include "oss/include/restore.h"
 
 
 /* list of dirs which will not to be backuped
@@ -65,6 +67,9 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* list of files contained in backup */
 static parray *backup_files_list = NULL;
+static parray *filesinfo = NULL;
+static SenderCxt *current_sender_cxt = NULL;
+static ReaderCxt *current_reader_cxt = NULL;
 
 /* We need critical section for datapagemap_add() in case of using threads */
 static pthread_mutex_t backup_pagemap_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -254,7 +259,6 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
     for (i = 0; i < num_threads; i++)
     {
         backup_files_arg *arg = &(threads_args[i]);
-
         elog(VERBOSE, "Start thread num: %i", i);
         pthread_create(&threads[i], NULL, backup_files, arg);
     }
@@ -521,6 +525,9 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
             file->name = file->rel_path;
         else
             file->name++;
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            uploadConfigFile(wal_full_path, wal_full_path);
+        }
     }
 
     /* Add xlog files into the list of backed up files */
@@ -564,7 +571,6 @@ static void sync_files(parray *database_map, const char *database_path, parray *
 
         set_min_recovery_point(pg_control, fullpath, current.stop_lsn);
     }
-    
     /* close and sync page header map */
     if (current.hdr_map.fp)
     {
@@ -572,6 +578,10 @@ static void sync_files(parray *database_map, const char *database_path, parray *
 
         if (fio_sync(current.hdr_map.path, FIO_BACKUP_HOST) != 0)
             elog(ERROR, "Cannot sync file \"%s\": %s", current.hdr_map.path, strerror(errno));
+
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            uploadConfigFile(current.hdr_map.path, current.hdr_map.path);
+        }
     }
 
     /* close ssh session in main thread */
@@ -829,8 +839,36 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     /*
      * Make directories before backup and setup threads at the same time
      */
-    run_backup_threads(external_prefix, database_path, dssdata_path, prev_backup_filelist, 
-                    external_dirs, nodeInfo, prev_backup_start_lsn);
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        no_sync = true; // no need to sync file to disk
+        current.oss_status = OSS_STATUS_OSS;
+        filesinfo = parray_new();
+        backup_files_arg arg;
+        arg.nodeInfo = nodeInfo;
+        arg.from_root = instance_config.pgdata;
+        arg.to_root = database_path;
+        arg.src_dss = instance_config.dss.vgdata;
+        arg.dst_dss = dssdata_path;
+        arg.external_prefix = external_prefix;
+        arg.external_dirs = external_dirs;
+        arg.files_list = backup_files_list;
+        arg.prev_filelist = prev_backup_filelist;
+        arg.prev_start_lsn = prev_backup_start_lsn;
+        arg.conn_arg.conn = NULL;
+        arg.conn_arg.cancel_conn = NULL;
+        arg.hdr_map = &(current.hdr_map);
+        arg.thread_num = -1;
+        current.filesinfo = filesinfo;
+        initBackupSenderContext(&current_sender_cxt);
+        current.sender_cxt = current_sender_cxt;
+        initBackupReaderContexts(&current_reader_cxt);
+        current.readerCxt = current_reader_cxt;
+        performBackup(&arg);
+        parray_free(filesinfo);
+    } else {
+        run_backup_threads(external_prefix, database_path, dssdata_path, prev_backup_filelist, 
+                external_dirs, nodeInfo, prev_backup_start_lsn);
+    }
 
     /* clean previous backup file list */
     if (prev_backup_filelist)
@@ -841,7 +879,6 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
 
     /* Notify end of backup */
     pg_stop_backup(&current, backup_conn, nodeInfo);
-    
     sync_files(database_map, database_path, external_dirs, dssdata_path, external_prefix, no_sync);
 
     /* be paranoid about instance been from the past */
@@ -1085,7 +1122,7 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
         pin_backup(&current, set_backup_params);
     }
 
-    if (!no_validate)
+    if (!no_validate && current.media_type != MEDIA_TYPE_OSS)
         pgBackupValidate(&current, NULL);
 
     /* do something after backup */

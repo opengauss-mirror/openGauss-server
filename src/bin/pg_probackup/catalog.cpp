@@ -20,6 +20,8 @@
 #include "file.h"
 #include "configuration.h"
 #include "common/fe_memutils.h"
+#include "oss/include/restore.h"
+#include "oss/include/oss_operator.h"
 
 static pgBackup* get_closest_backup(timelineInfo *tlinfo);
 static pgBackup* get_oldest_backup(timelineInfo *tlinfo);
@@ -456,6 +458,10 @@ catalog_get_backup_list(const char *instance_name, time_t requested_backup_id)
         elog(WARNING, "cannot open directory \"%s\": %s", backup_instance_path,
                 strerror(errno));
         goto err_proc;
+    }
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        restoreConfigDir();
     }
 
     /* scan the directory and list backups */
@@ -1724,6 +1730,12 @@ do_set_backup(const char *instance_name, time_t backup_id,
     if (set_backup_params->note)
         add_note(target_backup, set_backup_params->note);
 
+    if (set_backup_params->oss_status >=  OSS_STATUS_LOCAL && set_backup_params->oss_status < OSS_STATUS_NUM) {
+        target_backup->oss_status = set_backup_params->oss_status;
+        /* Update backup.control */
+        write_backup(target_backup, true);
+    }
+
     parray_walk(backup_list, pgBackupFree);
     parray_free(backup_list);
 }
@@ -1921,6 +1933,8 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
     fio_fprintf(out, "\n#Database Storage type\n");
     fio_fprintf(out, "storage-type = %s\n", dev2str(backup->storage_type));
 
+    fio_fprintf(out, "\n#S3 Storage status\n");
+    fio_fprintf(out, "s3-status = %s\n", ossStatus2str(backup->oss_status));
 }
 
 /*
@@ -1976,7 +1990,11 @@ write_backup(pgBackup *backup, bool strict)
 
     if (rename(path_temp, path) < 0)
         elog(ERROR, "Cannot rename file \"%s\" to \"%s\": %s",
-         path_temp, path, strerror(errno));
+        path_temp, path, strerror(errno));
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        uploadConfigFile(path, path);
+    }
 }
 
 void flush_and_close_file(pgBackup *backup, bool sync, FILE *out, char *control_path_temp)
@@ -2154,6 +2172,10 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
         elog(ERROR, "Cannot rename file \"%s\" to \"%s\": %s",
          control_path_temp, control_path, strerror(errno));
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        uploadConfigFile(control_path, control_path);
+    }    
+
     /* use extra variable to avoid reset of previous data_bytes value in case of error */
     backup->data_bytes = backup_size_on_disk;
     backup->uncompressed_bytes = uncompressed_size_on_disk;
@@ -2215,6 +2237,7 @@ readBackupControlFile(const char *path)
 	char    *recovery_name = NULL;
     int     parsed_options;
     char    *storage_type = NULL;
+    char    *oss_status = NULL;
     errno_t rc = 0;
 
     ConfigOption options[] =
@@ -2250,10 +2273,16 @@ readBackupControlFile(const char *path)
         {'s', 0, "recovery-name",		&recovery_name, SOURCE_FILE_STRICT},
         {'u', 0, "content-crc",			&backup->content_crc, SOURCE_FILE_STRICT},
         {'s', 0, "storage-type",        &storage_type, SOURCE_FILE_STRICT},
+        {'s', 0, "s3-status",           &oss_status, SOURCE_FILE_STRICT},
         {0}
     };
 
     pgBackupInit(backup);
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        restoreConfigFile(path);
+    }
+
     if (fio_access(path, F_OK, FIO_BACKUP_HOST) != 0)
     {
         elog(WARNING, "Control file \"%s\" doesn't exist", path);
@@ -2351,6 +2380,14 @@ readBackupControlFile(const char *path)
     if (storage_type)
         backup->storage_type = str2dev(storage_type);
 
+    if (oss_status) {
+        backup->oss_status = str2ossStatus(oss_status);
+    }
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        remove(path);
+    }
+
     return backup;
 }
 
@@ -2373,6 +2410,27 @@ parse_backup_mode(const char *value)
     /* Backup mode is invalid, so leave with an error */
     elog(ERROR, "invalid backup-mode \"%s\"", value);
     return BACKUP_MODE_INVALID;
+}
+
+MediaType
+parse_media_type(const char *value)
+{
+    const char *v = value;
+    size_t  len;
+
+    /* Skip all spaces detected */
+    while (IsSpace(*v))
+        v++;
+    len = strlen(v);
+
+    if (len > 0 && pg_strncasecmp("s3", v, len) == 0)
+        return MEDIA_TYPE_OSS;
+    else if (len > 0 && pg_strncasecmp("disk", v, len) == 0)
+        return MEDIA_TYPE_DISK;
+
+    /* media type is invalid, so leave with an error */
+    elog(ERROR, "invalid media_type \"%s\"", value);
+    return MEDIA_TYPE_UNKNOWN;
 }
 
 const char *
@@ -2503,6 +2561,9 @@ pgBackupInit(pgBackup *backup)
     backup->files = NULL;
     backup->note = NULL;
     backup->content_crc = 0;
+    backup->dssdata_bytes = 0;
+    backup->oss_status = OSS_STATUS_INVALID;
+    backup->media_type = MEDIA_TYPE_UNKNOWN;
 }
 
 /* free pgBackup object */
@@ -2696,7 +2757,7 @@ scan_parent_chain(pgBackup *current_backup, pgBackup **result_backup)
     while (target_backup->parent_backup_link)
     {
         if (target_backup->status != BACKUP_STATUS_OK &&
-          target_backup->status != BACKUP_STATUS_DONE)
+            target_backup->status != BACKUP_STATUS_DONE)
         /* oldest invalid backup in parent chain */
         invalid_backup = target_backup;
 
@@ -2707,7 +2768,7 @@ scan_parent_chain(pgBackup *current_backup, pgBackup **result_backup)
     /* Previous loop will skip FULL backup because his parent_backup_link is NULL */
     if (target_backup->backup_mode == BACKUP_MODE_FULL &&
         (target_backup->status != BACKUP_STATUS_OK &&
-        target_backup->status != BACKUP_STATUS_DONE))
+         target_backup->status != BACKUP_STATUS_DONE))
     {
         invalid_backup = target_backup;
     }

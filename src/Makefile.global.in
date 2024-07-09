@@ -300,6 +300,7 @@ ifeq ($(with_3rd), NONE)
   MOCKCPP_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
   NUMA_HOME = $(top_builddir)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(top_builddir)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
+  AWSSDK_HOME = $(top_builddir)/$(BINARYPATH)/aws-sdk-cpp/$(LIB_SUPPORT_LLT)
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nng/comm
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
@@ -349,6 +350,7 @@ endif
   MOCKCPP_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
   NUMA_HOME = $(with_3rd)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(with_3rd)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
+  AWSSDK_HOME = $(with_3rd)/$(BINARYPATH)/aws-sdk-cpp/$(LIB_SUPPORT_LLT)
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nng/comm
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
@@ -648,6 +650,12 @@ LIBCURL_INCLUDE_PATH = $(LIBCURL_HOME)/include
 LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
 
 #############################################################################
+# awssdk component
+#############################################################################
+AWSSDK_INCLUDE_PATH = $(AWSSDK_HOME)/include
+AWSSDK_LIB_PATH = $(AWSSDK_HOME)/lib
+
+#############################################################################
 # masstree component
 #############################################################################
 MASSTREE_INCLUDE_PATH = $(MASSTREE_HOME)/include
@@ -728,7 +736,7 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(AWSSDK_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH)
 
 # GDS links to libevent
 ifeq ($(enable_multiple_nodes), yes)
@@ -894,6 +902,7 @@ endif
 LDFLAGS += -L$(GSTRACE_LIB_PATH)
 LDFLAGS += -L$(NUMA_LIB_PATH)
 LDFLAGS += -L$(LIBCURL_LIB_PATH)
+LDFLAGS += -L$(AWSSDK_LIB_PATH)
 ifeq ($(enable_mot), yes)
   LDFLAGS += -L$(MASSTREE_LIB_PATH)
 endif
@@ -947,6 +956,12 @@ GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
 #############################################################################
 LIBCURL_INCLUDE_PATH = $(LIBCURL_HOME)/include
 LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
+
+#############################################################################
+# awssdk component
+#############################################################################
+AWSSDK_INCLUDE_PATH = $(AWSSDK_HOME)/include
+AWSSDK_LIB_PATH = $(AWSSDK_HOME)/lib
 
 #############################################################################
 # Perl
