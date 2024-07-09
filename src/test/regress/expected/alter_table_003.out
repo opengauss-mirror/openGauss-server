@@ -9396,5 +9396,24 @@ select * from t0;
 (0 rows)
 
 drop table if exists t0;
+create table test_0509 (id int ,name varchar(10));
+create table test_0509_2(id int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_0509_2_pkey" for table "test_0509_2"
+\parallel on 2
+begin
+alter table test_0509 ADD COLUMN t2_id integer DEFAULT 1 NOT NULL CONSTRAINT fk_t2_id REFERENCES test_0509_2(id);
+perform pg_sleep(1);
+raise info 'xact1';
+end;
+/
+begin
+perform pg_sleep(0.5);
+PERFORM * from test_0509_2;
+raise info 'xact2';
+end;
+/
+\parallel off
+INFO:  xact2
+INFO:  xact1
 \c postgres
 drop database test_first_after_B;
