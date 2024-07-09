@@ -147,7 +147,7 @@ function test_1() {
 			(ROW(2.0, 'b', 2), ARRAY[ROW(2, 'b', 2)::tst_comp_basic_t]),
 			(ROW(3.0, 'c', 3), ARRAY[ROW(3, 'c', 3)::tst_comp_basic_t]),
 			(ROW(4.0, 'd', 4), ARRAY[ROW(4, 'd', 3)::tst_comp_basic_t]),
-			(ROW(5.0, 'e', NULL), ARRAY[NULL, ROW(5, NULL, 5)::tst_comp_basic_t]);
+			(ROW(5.0, 'e', 5), ARRAY[NULL, ROW(5, NULL, 5)::tst_comp_basic_t]);
 
 		-- test_tbl_composite_with_enums
 		INSERT INTO tst_comp_enum (a, b) VALUES
@@ -179,7 +179,7 @@ function test_1() {
 			(ROW(2.0, '{b, c, a}', 2), ARRAY[ROW(2, '{b, c, a}', 1)::tst_comp_enum_array_t]),
 			(ROW(3.0, '{c, a, b}', 1), ARRAY[ROW(3, '{c, a, b}', 1)::tst_comp_enum_array_t]),
 			(ROW(4.0, '{c, b, d}', 4), ARRAY[ROW(4, '{c, b, d}', 4)::tst_comp_enum_array_t]),
-			(ROW(5.0, '{c, NULL, b}', NULL), ARRAY[ROW(5, '{c, e, b}', 1)::tst_comp_enum_array_t]);
+			(ROW(5.0, '{c, NULL, b}', 5), ARRAY[ROW(5, '{c, e, b}', 1)::tst_comp_enum_array_t]);
 
 		-- test_tbl_mixed_composites
 		INSERT INTO tst_comp_mix_array (a, b) VALUES
@@ -260,7 +260,7 @@ e|{d,NULL}
 (2,b,2)|{\"(2,b,2)\"}
 (3,c,3)|{\"(3,c,3)\"}
 (4,d,4)|{\"(4,d,3)\"}
-(5,e,)|{NULL,\"(5,,5)\"}
+(5,e,5)|{NULL,\"(5,,5)\"}
 1|(1,a,1)
 2|(2,b,2)
 3|(3,c,3)
@@ -280,7 +280,7 @@ e|{d,NULL}
 (2,\"{b,c,a}\",2)|{\"(2,\\\""{b,c,a}\\\"",1)\"}
 (3,\"{c,a,b}\",1)|{\"(3,\\\""{c,a,b}\\\"",1)\"}
 (4,\"{c,b,d}\",4)|{\"(4,\\\""{c,b,d}\\\"",4)\"}
-(5,\"{c,NULL,b}\",)|{\"(5,\\\""{c,e,b}\\\"",1)\"}
+(5,\"{c,NULL,b}\",5)|{\"(5,\\\""{c,e,b}\\\"",1)\"}
 (\"(1,a,1)\",\"{\"\"(1,a,1)\"\",\"\"(2,b,2)\"\"}\",a,\"{a,b,NULL,c}\")|{\"(\\\"(1,a,1)\\\",\\\"{\\\"\\\"(1,a,1)\\\"\\\",\\\"\\\"(2,b,2)\\\"\\\",NULL}\\\",a,\\\"{a,b,c}\\\")\"}
 1|[1,11)
 2|[2,21)
@@ -379,7 +379,7 @@ e|{e,d}
 (2,b,2)|{\"(2,b,2)\"}
 (3,c,3)|{\"(3,c,3)\"}
 (4,d,4)|{NULL,\"(9,x,)\"}
-(5,e,)|{NULL,\"(9,x,)\"}
+(5,e,5)|{NULL,\"(9,x,)\"}
 1|(1,,)
 2|(2,b,2)
 3|(3,c,3)
@@ -399,7 +399,7 @@ e|{e,d}
 (2,\"{b,c,a}\",2)|{\"(2,\\\""{b,c,a}\\\"",1)\"}
 (3,\"{c,a,b}\",1)|{\"(3,\\\""{c,a,b}\\\"",1)\"}
 (4,\"{c,b,d}\",4)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
-(5,\"{c,NULL,b}\",)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
+(5,\"{c,NULL,b}\",5)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
 (\"(1,a,1)\",\"{\"\"(1,a,1)\"\",\"\"(2,b,2)\"\"}\",a,\"{a,b,NULL,c}\")|{\"(\\\"(1,a,1)\\\",\\\"{\\\"\\\"(1,a,1)\\\"\\\",\\\"\\\"(2,b,2)\\\"\\\",NULL}\\\",a,\\\"{a,b,c}\\\")\",NULL}
 1|[100,1001)
 2|[2,21)
@@ -460,9 +460,9 @@ e|{e,d}
 		DELETE FROM tst_comp_enum_what WHERE (b[1]).b = '{c, a, b}';
 		DELETE FROM tst_comp_mix_array WHERE ((a).a).a = 1;
 		DELETE FROM tst_range WHERE a = 1;
-		DELETE FROM tst_range WHERE '[10,20]' && b;
+		DELETE FROM tst_range WHERE range_overlaps('[10,20]', b);
 		DELETE FROM tst_range_array WHERE a = 1;
-		DELETE FROM tst_range_array WHERE tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'Mon Aug 05 00:00:00 2014 CEST'::timestamptz) && b;
+		DELETE FROM tst_range_array WHERE range_overlaps(tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'Mon Aug 05 00:00:00 2014 CEST'::timestamptz), b);
 		DELETE FROM tst_hstore WHERE a = 1;"
 	
 	wait_for_catchup $case_db $pub_node1_port "tap_sub_slot"
@@ -485,7 +485,7 @@ e|{e,d}
 5|(,x,-1)
 (2,b,2)|{\"(2,b,2)\"}
 (4,d,4)|{NULL,\"(9,x,)\"}
-(5,e,)|{NULL,\"(9,x,)\"}
+(5,e,5)|{NULL,\"(9,x,)\"}
 3|(3,c,3)
 4|(4,d,44)
 5|(4,d,44)
@@ -496,7 +496,7 @@ e|{e,d}
 5|(4,\"{c,b,d}\",4)
 (2,\"{b,c,a}\",2)|{\"(2,\\\""{b,c,a}\\\"",1)\"}
 (4,\"{c,b,d}\",4)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
-(5,\"{c,NULL,b}\",)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
+(5,\"{c,NULL,b}\",5)|{\"(5,\\\""{a,b,c}\\\"",5)\"}
 2|[\"2014-08-02 00:00:00+02\",\"2014-08-04 00:00:00+02\")|{\"[2,4)\",\"[20,31)\"}
 3|[\"2014-08-01 00:00:00+02\",\"2014-08-04 00:00:00+02\")|{\"[3,5)\"}
 2|\"updated\"=>\"value\"

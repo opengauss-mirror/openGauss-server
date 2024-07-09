@@ -29,18 +29,26 @@ gsctl_wait_time=3600
 data_dir=$g_data_path
 
 function exec_sql(){
-	result=$(gsql -d $1 -p $2 -Atq -c "$3")
+	execStr=$3
+	if [[ $3 == "CREATE DATABASE"* ]] || [[ $3 == "DROP DATABASE"* ]]; then
+		execStr="set dolphin.b_compatibility_mode = off;"$3
+	fi
+	result=$(gsql -d $1 -p $2 -Atq -c "$execStr")
 	if [ "$result" != "" ]; then
 		echo "$result"
 	fi
 }
 
 function exec_sql_with_user() {
+	execStr=$3
+	if [[ $3 == "CREATE DATABASE"* ]] || [[ $3 == "DROP DATABASE"* ]]; then
+		execStr="set dolphin.b_compatibility_mode = off;"$3
+	fi
 	local sql_user=$username
 	if [ -n "$test_username" ]; then
 		sql_user=$test_username
 	fi
-	result=$(gsql -U $sql_user -W $passwd -d $1 -p $2 -Atq -c "$3")
+	result=$(gsql -U $sql_user -W $passwd -d $1 -p $2 -Atq -c "$execStr")
 	if [ "$result" != "" ]; then
 		echo "$result"
 	fi
