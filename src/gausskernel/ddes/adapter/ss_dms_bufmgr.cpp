@@ -198,7 +198,10 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 }
 
 void SegPageCheckDiskLSNForRelease(BufferDesc *buf_desc)
-{
+{   
+    if (SS_DISASTER_STANDBY_CLUSTER) {
+        return;
+    }
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     RelFileNode rnode = buf_desc->tag.rnode;
     XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
