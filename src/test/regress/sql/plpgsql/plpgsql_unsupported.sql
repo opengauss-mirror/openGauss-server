@@ -57,6 +57,7 @@ CREATE OR REPLACE FUNCTION func_test(n NUMBER) RETURN _int4 PIPELINED IS
 BEGIN
     return 1;
 END;
+/
 
 -- do not call return: success
 CREATE OR REPLACE FUNCTION func_test(n NUMBER) RETURN _int4 PIPELINED IS
@@ -162,6 +163,29 @@ BEGIN
 END;
 /
 alter function alter_func_pipelined(number) pipelined;
+
+
+create or replace type tb_type_0013 as table of varchar2(2000);
+drop table if exists t_pipelined_0013;
+create table t_pipelined_0013(c1 int);
+create or replace function func_pipelined_0013(count in number)
+returns tb_type_0013 pipelined language plpgsql as
+$BODY$
+declare
+begin
+for i in 1 .. count loop
+insert into t_pipelined_0013 values(i);
+-- pipe row( 'insert into test values( ' || i || ') success');
+perform pg_sleep(1);
+update t_pipelined_0013 set c1 = 10 where c1 = i;
+end loop;
+-- pipe row( 'All done!' );
+return;
+end;
+$BODY$;
+
+-- cannot perform a DML operation inside a query
+select func_pipelined_0013(3);
 
 reset search_path;
 drop schema plpgsql_pipelined_unsupported cascade;

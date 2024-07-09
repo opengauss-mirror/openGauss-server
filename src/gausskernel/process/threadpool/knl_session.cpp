@@ -876,6 +876,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->createPlsqlType = CREATE_PLSQL_TYPE_END;
     plsql_cxt->functionStyleType = FUNCTION_STYLE_TYPE_NONE;
     plsql_cxt->is_pkg_compile = false;
+    plsql_cxt->is_pipelined = false;
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
     plsql_cxt->currCompilingObjStatus = true;

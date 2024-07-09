@@ -94,6 +94,18 @@ static bool _SPI_checktuples(void);
 extern void ClearVacuumStmt(VacuumStmt *stmt);
 static void CopySPI_Plan(SPIPlanPtr newplan, SPIPlanPtr plan, MemoryContext plancxt);
 
+static void pipelined_readonly_ereport()
+{
+    if (u_sess->plsql_cxt.is_pipelined && !u_sess->plsql_cxt.is_exec_autonomous) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot perform a DML operation inside a query"),
+                        errcause("DML operation like insert, update, delete or select-for-update cannot "
+                                 "be performed inside a query."),
+                        erraction("Ensure that the offending DML operation is not performed or use an "
+                                  "autonomous transaction to perform the DML operation within the query.")));
+    }
+}
+
 /* =================== interface functions =================== */
 int SPI_connect(CommandDest dest, void (*spiCallbackfn)(void *), void *clientData)
 {
@@ -310,6 +322,7 @@ void SPI_stp_transaction_check(bool read_only, bool savepoint)
 #endif
 
     if (read_only) {
+        pipelined_readonly_ereport();
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
             errmsg("commit/rollback/savepoint is not allowed in a non-volatile function")));
             /* translator: %s is a SQL statement name */
@@ -1794,6 +1807,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
             Node *pstmt = (Node *)lfirst(lc);
 
             if (!CommandIsReadOnly(pstmt)) {
+                pipelined_readonly_ereport();
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     /* translator: %s is a SQL statement name */
                     errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(pstmt)),
@@ -2799,6 +2813,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
             }
 
             if (read_only && !CommandIsReadOnly(stmt)) {
+                pipelined_readonly_ereport();
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     /* translator: %s is a SQL statement name */
                     errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(stmt))));
