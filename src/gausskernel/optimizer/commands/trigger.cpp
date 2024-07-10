@@ -178,9 +178,9 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
     int ret = 0;
 
     if (OidIsValid(relOid))
-        rel = heap_open(relOid, AccessExclusiveLock);
+        rel = heap_open(relOid, ShareRowExclusiveLock);
     else
-        rel = HeapOpenrvExtended(stmt->relation, AccessExclusiveLock, false, true);
+        rel = HeapOpenrvExtended(stmt->relation, ShareRowExclusiveLock, false, true);
 
     /*
      * Triggers must be on tables or views, and there are additional

@@ -3511,5 +3511,25 @@ alter table t0 change column c6 c int first, modify c text after x, change colum
 select * from t0;
 drop table if exists t0;
 
+
+create table test_0509 (id int ,name varchar(10));
+create table test_0509_2(id int primary key);
+
+\parallel on 2
+begin
+alter table test_0509 ADD COLUMN t2_id integer DEFAULT 1 NOT NULL CONSTRAINT fk_t2_id REFERENCES test_0509_2(id);
+perform pg_sleep(1);
+raise info 'xact1';
+end;
+/
+
+begin
+perform pg_sleep(0.5);
+PERFORM * from test_0509_2;
+raise info 'xact2';
+end;
+/
+\parallel off
+
 \c postgres
 drop database test_first_after_B;
