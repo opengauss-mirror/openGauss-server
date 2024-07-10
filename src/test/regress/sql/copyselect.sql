@@ -47,6 +47,11 @@ copy (select * from test1) from stdin;
 --
 copy (select * from test1) (t,id) to stdout;
 --
+-- Test when_expr
+--
+copy (select * from test1) to stdout with (when_expr); -- error
+copy (select * from test1) to stdout with (when_expr''); -- error
+--
 -- Test JOIN
 --
 copy (select * from test1 join test2 using (id) order by 1) to stdout;
