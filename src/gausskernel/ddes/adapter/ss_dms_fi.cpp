@@ -58,6 +58,14 @@ void dms_fi_set_tls_trigger_custom(int val)
     }
 }
 
+unsigned char dms_fi_entry_custom_valid(unsigned int point)
+{
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.dms_fi_entry_custom_valid(point);
+    }
+    return GS_ERROR;
+}
+
 void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args)
 {
     dms_fi_set_tls_trigger_custom(TRUE);
@@ -67,5 +75,6 @@ int dms_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int co
 int dms_fi_set_entry_value(unsigned int type, unsigned int value) {return GS_ERROR;}
 int dms_fi_get_tls_trigger_custom() {return GS_ERROR;}
 void dms_fi_set_tls_trigger_custom(int val) {}
+unsigned char dms_fi_entry_custom_valid(unsigned int point) {return GS_ERROR;}
 void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args) {};
 #endif
