@@ -24,6 +24,7 @@
  */
 #include "utils/snapshot.h"
 #include "utils/postinit.h"
+#include "utils/knl_globalsysdbcache.h"
 #include "storage/procarray.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment_internal.h"
@@ -624,7 +625,7 @@ void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
             Assert(ssmsg.tablespaceid != InvalidOid);
         }
         ssmsg.type = BCAST_SI;
-        if (msg->id >= SHAREDINVALFUNC_ID) {
+        if (msg->id >= SHAREDINVALDB_ID) {
             errno_t rc =
                 memcpy_s(&(ssmsg.msg), sizeof(SharedInvalidationMessage), msg, sizeof(SharedInvalidationMessage));
             securec_check_c(rc, "", "");
@@ -743,6 +744,11 @@ int SSProcessSharedInvalMsg(char *data, uint32 len)
     }
 
     SSBroadcastSI* ssmsg = (SSBroadcastSI *)data;
+    if (ssmsg->msg.id == SHAREDINVALDB_ID) {
+        NotifyGscDropDB(ssmsg->msg.db.dbId, ssmsg->msg.db.need_clear);
+        return DMS_SUCCESS;
+    }
+
     /* process msg one by one */
     if (EnableGlobalSysCache()) {
         SSStandbyGlobalInvalidSharedInvalidMessages(&(ssmsg->msg), ssmsg->tablespaceid);

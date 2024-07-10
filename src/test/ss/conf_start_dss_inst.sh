@@ -1,5 +1,5 @@
 #!/bin/bash
-INST_OFFSET=`expr $UID % 64`
+INST_OFFSET=`expr $UID % 63`
 SIMULATE_SIZE=50000 # Unit: MB
 LOG_SIZE=30000 # Unit: MB
 declare inst_count=''

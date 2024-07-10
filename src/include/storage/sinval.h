@@ -120,6 +120,15 @@ typedef struct {
     Oid objId; /* function ID or package ID */
 } SharedInvalFuncMsg;
 
+//Only used for drop db in shared storage cluster only
+#define SHAREDINVALDB_ID (-8)
+
+typedef struct {
+    int8 id;  /* type field --- must be first */
+    Oid dbId; /* database ID, or 0 for shared catalogs */
+    bool need_clear; /* whether need clear gsc */
+} SharedInvalDbMsg;
+
 typedef union SharedInvalidationMessage {
     int8 id; /* type field --- must be first */
     SharedInvalCatcacheMsg cc;
@@ -130,6 +139,7 @@ typedef union SharedInvalidationMessage {
     SharedInvalHbktSmgrMsg hbksm;
     SharedInvalRelmapMsg rm;
     SharedInvalFuncMsg fm;
+    SharedInvalDbMsg db;
 } SharedInvalidationMessage;
 
 typedef struct _SharedInvalidationMessageEx {
@@ -163,4 +173,5 @@ extern void LocalExecuteThreadAndSessionInvalidationMessage(SharedInvalidationMe
 extern void LocalExecuteThreadInvalidationMessage(SharedInvalidationMessage* msg);
 extern void LocalExecuteSessionInvalidationMessage(SharedInvalidationMessage* msg);
 extern void GlobalExecuteSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n);
+extern void SSSendDropDbMsg(Oid dbid, bool need_clear);
 #endif /* SINVAL_H */

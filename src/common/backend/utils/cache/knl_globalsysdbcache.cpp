@@ -47,6 +47,7 @@
 #include "knl/knl_session.h"
 #include "utils/syscache.h"
 #include "storage/proc.h"
+#include "storage/sinval.h"
 #include "funcapi.h"
 #include "commands/dbcommands.h"
 
@@ -1414,5 +1415,10 @@ void NotifyGscDropDB(Oid db_id, bool need_clear)
     if (!EnableGlobalSysCache()) {
         return;
     }
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE && !RecoveryInProgress()) {
+        SSSendDropDbMsg(db_id, need_clear);
+    }
+
     g_instance.global_sysdbcache.DropDB(db_id, need_clear);
 }

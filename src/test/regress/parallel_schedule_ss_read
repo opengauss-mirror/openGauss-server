@@ -6,5 +6,6 @@ test: segment_subpartition_truncate
 #test: segment_subpartition_gpi
 #test: segment_subpartition_analyze_vacuum
 #test: segment_subpartition_select
+test: gsc_sync_drop_db
 #ss_standby_support_write should be put as the last case
 test: ss_standby_support_write
