@@ -398,7 +398,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
         urec->Load(true);
         state = undo::CheckUndoRecordValid(urec->Urp(), true, NULL);
         if (state == UNDO_RECORD_NORMAL) {
-            VerifyUndoRecordValid(urec, true);
+            UndoRecordVerify(urec);
         }
     }
     PG_CATCH();
@@ -665,30 +665,6 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
     CheckLastRecordSize(undoSize, xlundometa);
     return UNDO_RET_SUCC;
 }
-
-void VerifyUndoRecordValid(UndoRecord *urec, bool needCheckXidInvalid)
-{
-    if (u_sess->attr.attr_storage.ustore_verify_level < (int) USTORE_VERIFY_DEFAULT) {
-        return;
-    }
-
-    bool undoRecordNotValid = TransactionIdFollowsOrEquals(urec->Xid(),
-        t_thrd.xact_cxt.ShmemVariableCache->nextXid) || urec->Utype() == UNDO_UNKNOWN;
-    if (needCheckXidInvalid) {
-        undoRecordNotValid = undoRecordNotValid && TransactionIdIsValid(urec->Xid());
-    }
-    if (undoRecordNotValid) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT(
-                "undorec xid invalid %lu,nextXid xid %lu:"
-                "global recycle xid %lu, globalFrozenXid %lu, utype %d, urp_ %lu, uinfo %d "),
-                urec->Xid(), t_thrd.xact_cxt.ShmemVariableCache->nextXid,
-                pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
-                pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
-                urec->Utype(), urec->Urp(), urec->Uinfo())));
-    }
-}
-
 void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
 {
     if (urecvec == NULL) {

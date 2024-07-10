@@ -282,12 +282,7 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
         END_CRIT_SECTION();
     }
 
-    UPageVerifyParams verifyParams;
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, BufferGetBlockNumber(buffer), InvalidOffsetNumber,
-            NULL, NULL, InvalidXLogRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel);
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
@@ -602,12 +597,7 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     }
 
     END_CRIT_SECTION();
-    UPageVerifyParams verifyParams;
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relationData.relation, page, blkno, InvalidOffsetNumber,
-        NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relationData.relation);
 
     UnlockReleaseBuffer(buffer);
 

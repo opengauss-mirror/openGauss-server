@@ -40,13 +40,10 @@
 #define USTORE_VERIFY_MOD_REDO 0x00080000
 #define USTORE_VERIFY_MOD_MASK (USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE | USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_MOD_REDO)
 
-#define DML_VERIFY      1
-#define ANALYZE_VERIFY  2
-
-/* Ustore verification submodule list for a specific module. */
-#define USTORE_VERIFY_UNDO_SUB_UNDOZONE 0x0001
-#define USTORE_VERIFY_UNDO_SUB_TRANSLOT 0x0002
-#define USTORE_VERIFY_UNDO_SUB_TRANSLOT_BUFFER 0x0004
+/* Ustore urq verfication module list. */
+#define USTORE_VERIFY_URQ_SUB_HEADER 0x00020001
+#define USTORE_VERIFY_URQ_SUB_ITEM 0x00020002
+#define USTORE_VERIFY_URQ_SUB_METADATA 0x00020004
 #define USTORE_VERIFY_SUB_MOD_MASK 0x0000ffff
 
 /* Ustore verification level of each modules. */
@@ -55,61 +52,45 @@ typedef enum VerifyLevel {
     USTORE_VERIFY_DEFAULT = 1,
     USTORE_VERIFY_FAST = 2,
     USTORE_VERIFY_COMPLETE = 3,
-    USTORE_VERIFY_WHITEBOX = 4
 } VerifyLevel;
 
-/* Base verify info struct for each type. */
-typedef struct baseVerifyInfo {
-    int process;
-    VerifyLevel vLevel;
-    Relation rel;
-} baseVerifyInfo;
+#define CHECK_VERIFY_LEVEL(level)\
+{ \
+    if (u_sess->attr.attr_storage.ustore_verify_level < level) { \
+        return; \
+    } \
+}
 
-/* Input params struct for upage verification. */
-typedef struct UPageVerifyParams {
-    baseVerifyInfo bvInfo;
-    Page page;
-    BlockNumber blk;
-    OffsetNumber offnum;
-    TupleDesc tupDesc;
-} UPageVerifyParams;
+#define BYPASS_VERIFY(module, rel) \
+do { \
+    if ((u_sess->attr.attr_storage.ustore_verify_module & module) == 0) { \
+        return; \
+    } \
+    if (rel != NULL && !RelationIsUstoreFormat(rel) && !RelationIsUstoreIndex(rel)) { \
+        return; \
+    } \
+} while(0)
 
-/* Input params struct for upage redo verification. */
-typedef struct URedoVerifyParams {
-    UPageVerifyParams pageVerifyParams;
-    XLogRecPtr latestRedo;
-} URedoVerifyParams;
+#define UNDO_BYPASS_VERIFY \
+do { \
+    if ((u_sess->attr.attr_storage.ustore_verify_module & USTORE_VERIFY_MOD_UNDO) == 0) { \
+        return; \
+    } \
+} while(0)
 
-/* Input params struct for ubtree page verification. */
-typedef struct UBtreePageVerifyParams {
-    baseVerifyInfo bvInfo;
-    Page page;
-    GPIScanDesc gpiScan;
-} UBtreePageVerifyParams;
+extern inline int ustore_verify_errlevel(void)
+{
+    return u_sess->attr.attr_storage.ustore_verify ? WARNING : ERROR;
+}
 
-/* Sub-module for undo verification */
-typedef enum VerifySubModule {
-    UNDO_VERIFY_UNDOZONE = 0,
-    UNDO_VERIFY_TRANS_SLOT,
-    UNDO_VERIFY_TRANS_SLOT_BUFFER,
-    /* Add other types before the last element if needed*/
-    UNDO_VERIFY_SUB_MODULE_BUTT
-} VerifySubModule;
+#define BEGIN_SAVE_VERIFY(tmp) \
+{   \
+    temp = u_sess->attr.attr_storage.ustore_verify; \
+    u_sess->attr.attr_storage.ustore_verify = true; \
+}
 
-/* Input params struct for undo verification. */
-typedef struct UndoVerifyParams {
-    baseVerifyInfo bvInfo;
-    VerifySubModule subModule;
-    union {
-        Page page;
-        undo::UndoZone *undoZone;
-        undo::TransactionSlot *slot;
-    } paramVal;
-} UndoVerifyParams;
-
-extern bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevl, char *paramSt, 
-    Relation rel, Page page, BlockNumber blk, OffsetNumber offnum, TupleDesc tupDesc = NULL, 
-    GPIScanDesc gpiScan = NULL, XLogRecPtr lastestRedo = InvalidXLogRecPtr,
-    undo::UndoZone *uZone = NULL, undo::TransactionSlot *slot = NULL, int process = 0);
-extern bool ExecuteUstoreVerify(uint32 module, char* verifyParam);
+#define END_SAVE_VERIFY(tmp) \
+{   \
+    u_sess->attr.attr_storage.ustore_verify = tmp; \
+}
 #endif

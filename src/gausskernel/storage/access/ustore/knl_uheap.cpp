@@ -557,7 +557,6 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
     uint16 lower;
     int retryTimes = 0;
     int options = 0;
-    UPageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_INSERT_FAILED, WhiteboxDefaultErrorEmit);
     if (utuple == NULL) {
@@ -720,13 +719,12 @@ reacquire_buffer:
     END_CRIT_SECTION();
     /* Clean up */
     Assert(UHEAP_XID_IS_TRANS(tuple->disk_tuple->flag));
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, rel, page, blkno, ItemPointerGetOffsetNumber(&(tuple->ctid)),
-        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, false, 
+            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), 
+            ItemPointerGetOffsetNumber(&(tuple->ctid)));
+        UndoRecordVerify(undorec);
     }
-
-    VerifyUndoRecordValid(undorec);
     UHeapFinalizeDML<UHEAP_INSERT>(rel, buffer, NULL, utuple, tuple, NULL, false, false);
 
     return InvalidOid;
@@ -2022,7 +2020,6 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
     bool multixidIsMyself = false;
     TransactionId minXidInTDSlots = InvalidTransactionId;
     int retryTimes = 0;
-    UPageVerifyParams verifyParams;
 
     Assert(ItemPointerIsValid(tid));
 
@@ -2316,14 +2313,15 @@ check_tup_satisfies_update:
     }
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(utuple.disk_tuple->flag));
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, blkno, offnum,
-        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), offnum);
+
+        UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
+        UndoRecordVerify(undorec);
     }
 
-    UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
-    VerifyUndoRecordValid(undorec);
+    
     UHeapFinalizeDML<UHEAP_DELETE>(relation, buffer, NULL, &utuple, NULL, &(utuple.ctid), hasTupLock, false);
 
     return TM_Ok;
@@ -2460,7 +2458,6 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     TransactionId minXidInTDSlots = InvalidTransactionId;
     bool oldBufLockReleased = false;
     int retryTimes = 0;
-    UPageVerifyParams verifyParams;
 
     Assert(newtup->tupTableType == UHEAP_TUPLE);
     Assert(ItemPointerIsValid(otid));
@@ -3315,27 +3312,24 @@ check_tup_satisfies_update:
     /* be tidy */
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(uheaptup->disk_tuple->flag));
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        relation, page, block, ItemPointerGetOffsetNumber(&oldtup.ctid),
-        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
 
-    if(!useInplaceUpdate) {
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, relation, BufferGetPage(newbuf), BufferGetBlockNumber(newbuf),
-            ItemPointerGetOffsetNumber(&(uheaptup->ctid)),
-            NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);    
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&oldtup.ctid));
+
+        if (!useInplaceUpdate) {
+            Page newPage = BufferGetPage(newbuf);
+            UpageVerify((UHeapPageHeader)newPage, InvalidXLogRecPtr, NULL, relation, false, 
+            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
         }
     }
 
     URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
     UndoRecord *oldundorec = (*urecvec)[0];
-    VerifyUndoRecordValid(oldundorec);
+    UndoRecordVerify(oldundorec);
     if (!useInplaceUpdate) {
         UndoRecord *newundorec = (*urecvec)[1];
-        VerifyUndoRecordValid(newundorec);
+        UndoRecordVerify(newundorec);
     }
 
     UHeapFinalizeDML<UHEAP_UPDATE>(relation, buffer, &newbuf, newtup, uheaptup, &(oldtup.ctid),
@@ -3394,7 +3388,6 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
     /* needwal can also be passed in by options */
     bool needwal = RelationNeedsWAL(relation);
     bool skipUndo = false;
-    UPageVerifyParams verifyParams;
 
     saveFreeSpace = RelationGetTargetPageFreeSpace(relation, UHEAP_DEFAULT_FILLFACTOR);
 
@@ -3439,6 +3432,7 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
         UHeapFreeOffsetRanges *ufreeOffsetRanges = NULL;
         bool setTupleXid = false;
         ShortTransactionId tupleXid = 0;
+        OffsetNumber verifyOffnum[MaxOffsetNumber] = {InvalidOffsetNumber};
 
         CHECK_FOR_INTERRUPTS();
 
@@ -3557,6 +3551,7 @@ reacquire_buffer:
                  */
                 Assert(offnum == ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
 
+                verifyOffnum[nthispage] = offnum;
                 nthispage++;
             }
 
@@ -3655,11 +3650,15 @@ reacquire_buffer:
         }
 
         END_CRIT_SECTION();
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, relation, page, BufferGetBlockNumber(buffer),
-            InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr, NULL, NULL, 0))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+
+        if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
+            UpageVerifyHeader((UHeapPageHeader)page, InvalidXLogRecPtr, relation);
+            for (int k = 0; k < nthispage; k++) {
+                UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+                    (USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),  verifyOffnum[k]);
+            }
         }
+
         pfree(ufreeOffsetRanges);
         UnlockReleaseBuffer(buffer);
         if (!skipUndo) {
@@ -4199,12 +4198,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
     }
 
 cleanup:
-    UPageVerifyParams verifyParams;
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, BufferGetBlockNumber(buf),
-        InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
 
     if (frozenSlots != NULL)
         pfree(frozenSlots);
@@ -5615,7 +5609,6 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     Page page = NULL;
     int zoneId;
     uint16 tdCount = 0;
-    UPageVerifyParams verifyParams;
 
     buffer = ReadBuffer(relation, blkno);
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -5758,11 +5751,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
 
     END_CRIT_SECTION();
 
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, blkno,
-        InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
-        (void) ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
 
     UnlockReleaseBuffer(buffer);
 

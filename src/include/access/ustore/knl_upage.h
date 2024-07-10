@@ -49,8 +49,7 @@
 
 #define UPageGetRowPtrOffset(_page) (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData((UHeapPageHeaderData *)_page))
 
-#define UPageGetRowPtr(_upage, _offsetNumber) \
-    FastVerifyUPageRowPtr(UPageGenerateRowPtr(_upage, _offsetNumber), (UHeapPageHeaderData *)_upage, _offsetNumber)
+#define UPageGetRowPtr(_upage, _offsetNumber) (UPageGenerateRowPtr(_upage, _offsetNumber))
 
 #define UPageGenerateRowPtr(_upage, _offsetNumber)                                                                \
     ((RowPtr *)(((char *)_upage) + SizeOfUHeapPageHeaderData + SizeOfUHeapTDData((UHeapPageHeaderData *)_upage) + \
@@ -316,8 +315,6 @@ Size PageGetUHeapFreeSpace(Page page);
 Size PageGetExactUHeapFreeSpace(Page page);
 extern UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tuples, int ntuples,
     Size saveFreeSpace);
-extern bool VerifyUPageValid(UPageVerifyParams *verifyParams);
-extern bool VerifyRedoUPageValid(URedoVerifyParams *verifyParams);
 extern bool VerifyPageHeader(Page page);
 extern void FastVerifyUTuple(UHeapDiskTuple diskTup, Buffer buffer);
 void UHeapRecordPotentialFreeSpace(Buffer buffer, int delta);
@@ -344,6 +341,18 @@ inline OffsetNumber UHeapPageGetMaxOffsetNumber(char *upage)
     return maxoff;
 }
 
-extern RowPtr *FastVerifyUPageRowPtr(RowPtr *rp, UHeapPageHeader uphdr, OffsetNumber offsetNumber);
+#define USTORE_VERIFY_UPAGE_HEADER 0x01
+#define USTORE_VERIFY_UPAGE_TUPLE  0x02
+#define USTORE_VERIFY_UPAGE_ROW    0x04
+#define USTORE_VERIFY_UPAGE_ROWS   0x08
+#define USTORE_VERIFY_UPAGE_MASK   0xff
+
+#define USTORE_VERIFY_UPAGE_DEFAULT (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROWS)
+
+void UpageVerify(UHeapPageHeader header, XLogRecPtr lastRedo, TupleDesc tupDesc, Relation rel, 
+    bool isRedo = false, uint8 mask = USTORE_VERIFY_UPAGE_DEFAULT, 
+    OffsetNumber num = InvalidOffsetNumber  /* for single TUPLE and ROW */);
+
+void UpageVerifyHeader(UHeapPageHeader header, XLogRecPtr lastRedo, Relation rel, bool isRedo = false);
 
 #endif

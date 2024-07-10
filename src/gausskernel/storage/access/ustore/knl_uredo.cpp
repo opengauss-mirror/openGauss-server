@@ -172,7 +172,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
 
         undo::RedoUndoMeta(record, &undometa, xlundohdr->urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
             t_thrd.ustore_cxt.urecvec->LastRecordSize());
-        VerifyUndoRecordValid(undorec);
+        UndoRecordVerify(undorec);
         UHeapResetPreparedUndo();
     }
 
@@ -267,7 +267,6 @@ void UHeapXlogInsert(XLogReaderState *record)
     TupleBuffer tbuf;
     bool allReplay = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
     bool onlyReplayUndo = allReplay ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_INSERT_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -279,11 +278,10 @@ void UHeapXlogInsert(XLogReaderState *record)
         action = GetInsertRedoAction(record, &buffer, skipSize);
         if (action == BLK_NEEDS_REDO) {
             PerformInsertRedoAction(record, buffer.buf, urecptr, tbuf);
-            if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-                NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL,
-                NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-                ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-            }
+            
+            Page page = BufferGetPage(buffer.buf);
+            UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+                NULL, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -403,7 +401,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
         }
         undo::RedoUndoMeta(record, &undometa, xlundohdr->urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
             t_thrd.ustore_cxt.urecvec->LastRecordSize());
-        VerifyUndoRecordValid(undorec);
+        UndoRecordVerify(undorec);
         UHeapResetPreparedUndo();
     }
 
@@ -454,7 +452,6 @@ static void UHeapXlogDelete(XLogReaderState *record)
     TupleBuffer tbuf;
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
-    URedoVerifyParams verifyParams;
 
     bool allReplay = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
     bool onlyReplayUndo = allReplay ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
@@ -476,11 +473,10 @@ static void UHeapXlogDelete(XLogReaderState *record)
         action = XLogReadBufferForRedo(record, 0, &buffer);
         if (action == BLK_NEEDS_REDO) {
             PerformDeleteRedoAction(record, &utup, &buffer, urecptr);
-            if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-                NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber,
-                NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-                ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-            }
+            
+            Page page = BufferGetPage(buffer.buf);
+            UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+                NULL, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -501,7 +497,6 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
     BlockNumber blkno;
     int nFrozen = xlrec->nFrozen;
     int slotNo = 0;
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_FREEZE_TD_SLOT_FAILED, WhiteboxDefaultErrorEmit);
     (void) XLogRecGetBlockTag(record, 0, &rnode, NULL, &blkno);
@@ -540,10 +535,9 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
 
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -561,7 +555,6 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
     XLogRedoAction action;
     int slotNo = 0;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_INVALID_TD_SLOT_FAILED, WhiteboxDefaultErrorEmit);
     action = XLogReadBufferForRedo(record, 0, &buffer);
@@ -588,10 +581,8 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
 
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -713,7 +704,6 @@ static void UHeapXlogClean(XLogReaderState *record)
     BlockNumber blkno = InvalidBlockNumber;
     XLogRedoAction action;
     XLogRecPtr lsn = record->EndRecPtr;
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_CLEAN_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -738,11 +728,10 @@ static void UHeapXlogClean(XLogReaderState *record)
 
     if (action == BLK_NEEDS_REDO) {
         PerformCleanRedoAction(record, &buffer, &freespace);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL, NULL,
-            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        Page page = BufferGetPage(buffer.buf);
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1006,10 +995,10 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
 
         URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
         UndoRecord *undorec = (*urecvec)[0];
-        VerifyUndoRecordValid(undorec);
-        if (!inplaceUpdate) {
-            UndoRecord *newundorec = (*urecvec)[1];
-            VerifyUndoRecordValid(newundorec);
+        if (inplaceUpdate) {
+            UndoRecordVerify(undorec);
+        } else {
+            UndoRecordVerify(newundorec);
         }
         UHeapResetPreparedUndo();
     }
@@ -1290,7 +1279,6 @@ static void UHeapXlogUpdate(XLogReaderState *record)
     uint16 *tdCount = NULL;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
     bool inplaceUpdate = !(xlrec->flags & XLZ_NON_INPLACE_UPDATE);
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_UPDATE_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -1325,11 +1313,10 @@ static void UHeapXlogUpdate(XLogReaderState *record)
         if (newaction == BLK_NEEDS_REDO) {
             newlen = GetUHeapDiskTupleFromUpdateNewRedoData(record, &tuples, &affixLens, tbuf, sameBlock);
             freespace = PerformUpdateNewRedoAction(record, &buffers, &tuples, newlen, xlnewundohdr, urecptr, sameBlock);
-            if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-                (char *) &verifyParams, NULL, BufferGetPage(buffers.newbuffer.buf), newblk,
-                InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-                ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-            }
+            
+            Page page = BufferGetPage(buffers.newbuffer.buf);
+            UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+                NULL, true);
         }
 
         if (BufferIsValid(buffers.newbuffer.buf) && buffers.newbuffer.buf != buffers.oldbuffer.buf) {
@@ -1638,7 +1625,6 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
     uint16 *tdCount = NULL;
     bool allReplay = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
     bool onlyReplayUndo = allReplay ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
-    URedoVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_MULTI_INSERT_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -1654,11 +1640,10 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
     /* Apply the wal for data */
     if (action == BLK_NEEDS_REDO) {
         PerformMultiInsertRedoAction(record, xlrec, &buffer, urecptr, ufreeOffsetRanges);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL, NULL,
-            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        Page page = BufferGetPage(buffer.buf);
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     pfree(ufreeOffsetRanges);
@@ -1675,7 +1660,6 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
     RedoBufferInfo buffer = { 0 };
     XLogRecPtr lsn = record->EndRecPtr;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     if (XLogReadBufferForRedo(record, HEAP_BASESHIFT_ORIG_BLOCK_NUM, &buffer) == BLK_NEEDS_REDO) {
         char *maindata = XLogRecGetData(record);
@@ -1686,10 +1670,9 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
 
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1706,7 +1689,6 @@ static void UHeapXlogExtendTDSlot(XLogReaderState *record)
     errno_t ret = EOK;
     XlUHeapExtendTdSlots *xlrec = NULL;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     xlrec = (XlUHeapExtendTdSlots *)XLogRecGetData(record);
     action = XLogReadBufferForRedo(record, 0, &buffer);
@@ -1758,10 +1740,9 @@ static void UHeapXlogExtendTDSlot(XLogReaderState *record)
 
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1784,7 +1765,6 @@ static void UHeapXlogFreeze(XLogReaderState *record)
     UHeapTupleData utuple;
     RelFileNode rnode;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     (void)XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, &blkno);
     /*
@@ -1837,10 +1817,9 @@ static void UHeapXlogFreeze(XLogReaderState *record)
 
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
     if (BufferIsValid(buffer.buf)) {
         UnlockReleaseBuffer(buffer.buf);
@@ -1976,7 +1955,6 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
     Buffer buf = redoBuffInfo.buf;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     XLogRecGetBlockTag(record, 0, NULL, NULL, &blkno);
     if (action == BLK_NEEDS_REDO) {
@@ -2004,11 +1982,9 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
 
         PageSetLSN(page, record->EndRecPtr);
         MarkBufferDirty(buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, page, blkno, InvalidOffsetNumber,
-            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buf))
@@ -2022,7 +1998,6 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
     XlUHeapUndoResetSlot *xlrec = (XlUHeapUndoResetSlot *)XLogRecGetData(record);
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     (void) XLogRecGetBlockTag(record, 0, NULL, NULL, &blkno);
     Buffer buf = redoBuffInfo.buf;
@@ -2031,11 +2006,10 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
 
         PageSetLSN(BufferGetPage(buf), lsn);
         MarkBufferDirty(buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, InvalidOffsetNumber,
-            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+        
+        Page page = BufferGetPage(buf);
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buf))
@@ -2051,7 +2025,6 @@ static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
     Buffer buf = redoBuffInfo.buf;
     BlockNumber blkno = InvalidBlockNumber;
-    URedoVerifyParams verifyParams;
 
     (void) XLogRecGetBlockTag(record, 0, NULL, NULL, &blkno);
 
@@ -2098,11 +2071,10 @@ static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
 
         PageSetLSN(BufferGetPage(buf), lsn);
         MarkBufferDirty(buf);
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, InvalidOffsetNumber,
-            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
-        }
+
+        Page page = BufferGetPage(buf);
+        UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
+            NULL, true);
     }
 
     if (BufferIsValid(buf))

@@ -27,6 +27,7 @@
 #include "catalog/pg_index.h"
 #include "lib/stringinfo.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/bufpage.h"
 #include "datatype/timestamp.h"
 
 /*
@@ -504,6 +505,9 @@ typedef struct {
     double avgTravelQueueItems;
 } NewPageState;
 
+typedef RpSort ItemIdSort;
+typedef RpSortData ItemIdSortData;
+
 #define TXNINFOSIZE (sizeof(ShortTransactionId) * 2)
 
 /*
@@ -636,7 +640,6 @@ extern void UBTreeVerifyIndex(Relation rel, TupleDesc *tupDesc, Tuplestorestate 
 extern int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTuple prevHikey);
 extern uint32 UBTreeVerifyRecycleQueue(Relation rel, TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols);
 extern Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber, bool needHead, int access);
-extern bool UBTreePageVerify(UBtreePageVerifyParams *verifyParams);
 
 typedef enum IndexTraceLevel {
     TRACE_NO = 0,
@@ -662,8 +665,8 @@ extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumb
 extern void UBTreeRecycleQueueInitPage(Relation rel, Page page, BlockNumber blkno, BlockNumber prevBlkno,
     BlockNumber nextBlkno);
 extern void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNext);
-extern void UBTreeRecycleQueuePageChangeEndpointLeftPage(Buffer buf, bool isHead);
-extern void UBTreeRecycleQueuePageChangeEndpointRightPage(Buffer buf, bool isHead);
+extern void UBTreeRecycleQueuePageChangeEndpointLeftPage(Relation rel, Buffer buf, bool isHead);
+extern void UBTreeRecycleQueuePageChangeEndpointRightPage(Relation rel, Buffer buf, bool isHead);
 extern void UBTreeXlogRecycleQueueModifyPage(Buffer buf, xl_ubtree2_recycle_queue_modify *xlrec);
 extern uint32 UBTreeRecycleQueuePageDump(Relation rel, Buffer buf, bool recordEachItem,
     TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols);
@@ -671,4 +674,12 @@ extern void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNu
     Tuplestorestate *tupstore, uint32 cols);
 extern void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
     void *state);
+
+// verify urq
+void UBTRecycleQueueVerifyPageOffline(Relation rel, Page page, BlockNumber blkno);
+
+// verify ubtree
+void UBTreeVerifyPage(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
+void UBTreeVerifyAll(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
+
 #endif /* UBTREE_H */

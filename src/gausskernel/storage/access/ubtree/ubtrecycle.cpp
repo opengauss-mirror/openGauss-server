@@ -46,6 +46,10 @@ static bool QueuePageIsEmpty(Buffer buf);
 static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber);
 static void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid);
 static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset);
+static void UBTRecycleQueueExecVerify(int mode, UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno, UBTRecycleMeta metaData, OffsetNumber offnum = InvalidOffsetNumber, bool fromInsert = false);
+static void UBTRecycleQueueVerifyHeader(UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno);
+static void UBTRecycleQueueVerifyItem(UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
+static void UBTRecycleMetaDataVerify(UBTRecycleMeta metaData, Relation rel, BlockNumber metaBlkno);
 
 const BlockNumber FirstBlockNumber = 0;
 const BlockNumber FirstNormalBlockNumber = 2;      /* 0 and 1 are pages which include meta data */
@@ -143,6 +147,7 @@ void UBTreeRecycleQueueInitPage(Relation rel, Page page, BlockNumber blkno, Bloc
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, blkno);
     header->prevBlkno = prevBlkno;
     header->nextBlkno = nextBlkno;
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, blkno, NULL);
 }
 
 /* record the chain changes in prev or next page */
@@ -154,6 +159,7 @@ void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNex
     } else {
         header->prevBlkno = newBlkno;
     }
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, NULL, BufferGetBlockNumber(buf), NULL);
 }
 
 static void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Buffer rightBuf)
@@ -221,6 +227,8 @@ static void InitRecycleQueueInitialPage(Relation rel, Buffer buf)
     }
 
     END_CRIT_SECTION();
+    UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, blkno);
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, blkno, NULL);
 }
 
 Buffer ReadRecycleQueueBuffer(Relation rel, BlockNumber blkno)
@@ -519,6 +527,7 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
 
     if (metaChanged) {
         MarkBufferDirtyHint(metaBuf, false);
+        UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_METADATA, NULL, rel, BufferGetBlockNumber(metaBuf), metaData);
     }
     UnlockReleaseBuffer(metaBuf);
 
@@ -526,7 +535,7 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
     return indexBuf;
 }
 
-void UBTreeRecycleQueuePageChangeEndpointLeftPage(Buffer buf, bool isHead)
+void UBTreeRecycleQueuePageChangeEndpointLeftPage(Relation rel, Buffer buf, bool isHead)
 {
     uint32 endpointFlag = (isHead ? URQ_HEAD_PAGE : URQ_TAIL_PAGE);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), BufferGetBlockNumber(buf));
@@ -539,9 +548,12 @@ void UBTreeRecycleQueuePageChangeEndpointLeftPage(Buffer buf, bool isHead)
         tailItem->next = OtherBlockOffset;
     }
     header->flags &= ~endpointFlag;
+    if (rel == NULL) {
+        UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, BufferGetBlockNumber(buf), NULL);
+    }
 }
 
-void UBTreeRecycleQueuePageChangeEndpointRightPage(Buffer buf, bool isHead)
+void UBTreeRecycleQueuePageChangeEndpointRightPage(Relation rel, Buffer buf, bool isHead)
 {
     uint32 endpointFlag = (isHead ? URQ_HEAD_PAGE : URQ_TAIL_PAGE);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), BufferGetBlockNumber(buf));
@@ -557,6 +569,9 @@ void UBTreeRecycleQueuePageChangeEndpointRightPage(Buffer buf, bool isHead)
         Assert(header->head == InvalidOffset);
     }
     header->flags |= endpointFlag;
+    if (rel == NULL) {
+        UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, BufferGetBlockNumber(buf), NULL);
+    }
 }
 
 static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf, bool isHead)
@@ -569,8 +584,8 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
     /* Do the update.  No ereport(ERROR) until changes are logged */
     START_CRIT_SECTION();
 
-    UBTreeRecycleQueuePageChangeEndpointLeftPage(buf, isHead);
-    UBTreeRecycleQueuePageChangeEndpointRightPage(nextBuf, isHead);
+    UBTreeRecycleQueuePageChangeEndpointLeftPage(rel, buf, isHead);
+    UBTreeRecycleQueuePageChangeEndpointRightPage(rel, nextBuf, isHead);
 
     MarkBufferDirty(buf);
     MarkBufferDirty(nextBuf);
@@ -594,6 +609,11 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
     }
 
     END_CRIT_SECTION();
+    
+    UBTRecycleQueueHeader nextHeader = GetRecycleQueueHeader(BufferGetPage(nextBuf), BufferGetBlockNumber(nextBuf));
+    UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), BufferGetBlockNumber(buf));
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, nextHeader, rel, BufferGetBlockNumber(nextBuf), NULL);
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, BufferGetBlockNumber(buf), NULL);
 }
 
 static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access)
@@ -712,7 +732,15 @@ static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf)
     }
 
     END_CRIT_SECTION();
-
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, leftHeader, rel, leftBlkno, NULL);
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, header, rel, blkno, NULL);
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER, rightHeader, rel, rightBlkno, NULL);
+    if (header->prevBlkno == header->nextBlkno) {
+        ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
+            "RecycleQueueLinkNewPage invalid: prev and next page is the same, "
+            "blkno %u next_blkno %u prev next blkno %u index \"%s\" oid %u.", leftBlkno,
+            BufferGetBlockNumber(newBuf), header->prevBlkno, RelationGetRelationName(rel), rel->rd_id)));
+    }
     UnlockReleaseBuffer(rightBuf);
 }
 
@@ -761,7 +789,7 @@ static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycle
     return newBuf;
 }
 
-static void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHead)
+static void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHead, Relation rel)
 {
     UBTRecycleMeta metaData = (UBTRecycleMeta)PageGetContents(BufferGetPage(metaBuf));
     int32 *addr = (isHead ? (int32 *)&(metaData->headBlkno) : (int32 *)&(metaData->tailBlkno));
@@ -769,6 +797,7 @@ static void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHe
         /* update succeed, mark buffer dirty */
         if (ConditionalLockBuffer(metaBuf)) {
             MarkBufferDirty(metaBuf);
+            UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_METADATA, NULL, rel, BufferGetBlockNumber(metaBuf), metaData);
             LockBuffer(metaBuf, BUFFER_LOCK_UNLOCK);
         }
     }
@@ -793,7 +822,7 @@ Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber
     /* try to fix the information in the meta if necessary */
     BlockNumber trueBlkno = BufferGetBlockNumber(buf);
     if (trueBlkno != givenBlkno) {
-        TryFixMetaData(metaBuf, givenBlkno, trueBlkno, needHead);
+        TryFixMetaData(metaBuf, givenBlkno, trueBlkno, needHead, rel);
     }
     ReleaseBuffer(metaBuf);
 
@@ -906,7 +935,7 @@ static void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, Bl
     }
 
     END_CRIT_SECTION();
-
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER & USTORE_VERIFY_URQ_SUB_ITEM, header, rel, BufferGetBlockNumber(buf), NULL, offset, true);
     UnlockReleaseBuffer(buf);
 }
 
@@ -946,6 +975,7 @@ void UBTreeXlogRecycleQueueModifyPage(Buffer buf, xl_ubtree2_recycle_queue_modif
         item->next = header->freeListHead;
         header->freeListHead = xlrec->offset;
     }
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER & USTORE_VERIFY_URQ_SUB_ITEM, header, NULL, blkno, NULL, xlrec->offset, xlrec->isInsert);
 }
 
 static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset)
@@ -990,6 +1020,7 @@ static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset)
     }
 
     END_CRIT_SECTION();
+    UBTRecycleQueueExecVerify(USTORE_VERIFY_URQ_SUB_HEADER & USTORE_VERIFY_URQ_SUB_ITEM, header, rel, BufferGetBlockNumber(buf), NULL, offset, false);
 
     if (!(IsNormalOffset(header->head))) {
         /* deleting the only item on this page */
@@ -1156,3 +1187,166 @@ uint32 UBTreeRecycleQueuePageDump(Relation rel, Buffer buf, bool recordEachItem,
     return errVerified;
 }
 
+static void UBTRecycleQueueExecVerify(int mode, UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno, 
+    UBTRecycleMeta metaData, OffsetNumber offnum, bool fromInsert)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+
+    int module = mode & USTORE_VERIFY_SUB_MOD_MASK;
+    if (module & USTORE_VERIFY_URQ_SUB_HEADER) {
+        UBTRecycleQueueVerifyHeader(header, rel, blkno);
+    }
+    if (module & USTORE_VERIFY_URQ_SUB_ITEM) {
+        UBTRecycleQueueVerifyItem(header, rel, blkno, offnum, fromInsert);
+    }
+    if (module & USTORE_VERIFY_URQ_SUB_METADATA) {
+        UBTRecycleMetaDataVerify(metaData, rel, blkno);
+    }
+}
+
+void UBTRecycleQueueVerifyPageOffline(Relation rel, Page page, BlockNumber blkno)
+{
+    UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, blkno);
+    UBTRecycleMeta metaData = NULL;
+    int mode = USTORE_VERIFY_URQ_SUB_HEADER & USTORE_VERIFY_URQ_SUB_ITEM;
+    if (IsMetaPage(blkno)) {
+        metaData = (UBTRecycleMeta)PageGetContents(page);
+        mode &= USTORE_VERIFY_URQ_SUB_METADATA;
+    }
+    UBTRecycleQueueExecVerify(mode, header, rel, blkno, metaData, InvalidOffset, false);
+}
+
+static void UBTRecycleQueueVerifyHeader(UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+    uint32 urqBlocks = MaxBlockNumber;
+    Oid relOid = InvalidOid;
+    bool headerError = false;
+    
+    if (rel != NULL) {
+        RelationOpenSmgr(rel);
+        urqBlocks = Max(minRecycleQueueBlockNumber, smgrnblocks(rel->rd_smgr, FSM_FORKNUM));
+        relOid = rel->rd_id;
+    }
+
+    headerError = (header->flags > (URQ_HEAD_PAGE | URQ_TAIL_PAGE)) || (IsNormalOffset(header->head) && !IsNormalOffset(header->tail)) ||
+        (!IsNormalOffset(header->head) && IsNormalOffset(header->tail)) || (header->freeItems > BlockGetMaxItems(blkno)) ||
+        (header->prevBlkno == header->nextBlkno) || (header->prevBlkno == blkno || header->nextBlkno == blkno) ||
+        (header->prevBlkno >= urqBlocks || header->nextBlkno >= urqBlocks);
+    
+    if (headerError) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify URQ] urq header is invalid : oid=%u, blkno=%u, flags=%u, head=%d, tail=%d,"
+            " free_items=%d, free_list_head=%d, prev_blkno=%u, next_blkno=%u", relOid, blkno, header->flags,
+            header->head, header->tail, header->freeItems, header->freeListHead, header->prevBlkno, header->nextBlkno)));
+    }
+}
+
+void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Oid oid, BlockNumber blkno)
+{
+    TransactionId maxXid = ReadNewTransactionId();
+    TransactionId prevXid = 0;
+    uint16 itemCount = 0;
+    uint16 itemMaxNum = BlockGetMaxItems(blkno);
+    uint16 currOffset = header->head;
+    uint16 prevOffset = InvalidOffset;
+    
+    UBTRecycleQueueItem item = NULL;
+ 
+    while (IsNormalOffset(currOffset) && itemCount <= itemMaxNum) {
+        if (currOffset == itemMaxNum) {
+            break;
+        }
+        item = &header->items[currOffset];
+        if (item->prev != prevOffset || item->next == currOffset) {
+            break;
+        }
+        if (item->xid > maxXid || item->xid < prevXid) {
+            break;
+        }
+        itemCount++;
+        prevXid = item->xid;
+        prevOffset = currOffset;
+        currOffset = item->next;
+    }
+
+    uint16 freelistOffset = header->freeListHead;
+    while (freelistOffset != InvalidOffset && itemCount <= itemMaxNum) {
+        if (freelistOffset == itemMaxNum) {
+            break;
+        }
+        item = &header->items[freelistOffset];
+        if (item->blkno == InvalidBlockNumber && item->xid == InvalidTransactionId &&
+            item->prev == InvalidOffset) {
+            itemCount++;
+            freelistOffset = item->next;
+        }
+    }
+ 
+    if (itemCount + header->freeItems != itemMaxNum) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify URQ] urq items are invalid : oid %u, blkno %u, (items info : curr_item_offset = %u, "
+            "prev_offset = %u, item_count = %u, free_list_offset = %u, free_items = %u, next_xid = %ld)",
+            oid, blkno, currOffset, prevOffset, itemCount, freelistOffset, header->freeItems, maxXid)));
+    }
+}
+
+static void UBTRecycleQueueVerifyItem(UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno, OffsetNumber offnum, bool fromInsert)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+
+    Oid relOid = (rel ? rel->rd_id : InvalidOid);
+    bool itemError = false;
+    UBTRecycleQueueItem item = NULL;
+ 
+    if (offnum != InvalidOffset) {
+        item = &header->items[offnum];
+        if (fromInsert) {
+            itemError = (item->blkno == InvalidBlockNumber) || (item->next == offnum);
+        } else {
+            itemError = (header->freeListHead != offnum) || (item->xid != InvalidTransactionId) ||
+                (item->blkno != InvalidBlockNumber) || (item->prev != InvalidOffset);
+        }
+        if (itemError) {
+            ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                 "[Verify URQ] urq item is invalid: oid=%u, blkno=%u, offset=%u, "
+                "(item info : xid=%ld blkno=%u prev=%u next=%u)", relOid, blkno, offnum,
+                item->xid, item->blkno, item->prev, item->next)));
+        }
+    }
+ 
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_COMPLETE)
+
+    UBTRecycleQueueVerifyAllItems(header, relOid, blkno);
+}
+ 
+static void UBTRecycleMetaDataVerify(UBTRecycleMeta metaData, Relation rel, BlockNumber metaBlkno)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+    
+    BlockNumber indexBlocks = (rel == NULL ? metaData->nblocksUpper : RelationGetNumberOfBlocks(rel));
+    uint32 urqBlocks = MaxBlockNumber;
+    Oid oid = InvalidOid;
+    bool metaError = false;
+
+    if (rel != NULL) {
+        RelationOpenSmgr(rel);
+        urqBlocks = Max(minRecycleQueueBlockNumber, smgrnblocks(rel->rd_smgr, FSM_FORKNUM));
+        oid = rel->rd_id;
+    }
+
+    metaError = ((metaData->headBlkno == 1 - metaBlkno) || (metaData->tailBlkno == 1 - metaBlkno)) ||
+        (metaData->headBlkno >= urqBlocks || metaData->tailBlkno >= urqBlocks) || (metaData->nblocksUpper > indexBlocks);
+ 
+    if (metaError) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify URQ] urq meta is invalid : oid=%u, meta_blkno=%u, (meta info : headBlkno = %u, tailBlkno = %u, "
+            "nblocksUpper = %u, nblocksLower = %u; urq_blocks = %u, index_blocks = %u)",
+            oid, metaBlkno, metaData->headBlkno, metaData->tailBlkno, metaData->nblocksUpper,
+            metaData->nblocksLower, urqBlocks, indexBlocks)));
+    }
+}

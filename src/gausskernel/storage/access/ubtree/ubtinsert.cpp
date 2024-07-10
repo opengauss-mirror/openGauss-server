@@ -166,7 +166,6 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     UBTPageOpaqueInternal opaque;
     OffsetNumber offnum, maxoff;
     IndexPruneState prstate;
-    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreePagePruneOpt", WhiteboxDefaultErrorEmit);
 
@@ -280,11 +279,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     }
 
     END_CRIT_SECTION();
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-        NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-    }
+    UBTreeVerifyAll(rel, page, BufferGetBlockNumber(buf), InvalidOffsetNumber, false);
     return has_pruned;
 }
 
@@ -707,7 +702,6 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
     Buffer nbuf = InvalidBuffer;
     bool found = false;
     Relation tarRel = heapRel;
-    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreeCheckUnique", WhiteboxDefaultErrorEmit);
 
@@ -719,10 +713,6 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
     page = BufferGetPage(buf);
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-    }
 
     /*
      * Scan over all equal tuples, looking for live conflicts.
@@ -906,11 +896,6 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("fell off the end of index \"%s\" at blkno %u",
                                    RelationGetRelationName(rel), nblkno)));
-                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-                    NULL, gpiScan, InvalidXLogRecPtr))) {
-                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-                }
             }
             maxoff = PageGetMaxOffsetNumber(page);
             offset = P_FIRSTDATAKEY(opaque);
@@ -987,7 +972,6 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
     UBTPageOpaqueInternal lpageop;
     bool movedright = false;
     bool pruned = false;
-    UBtreePageVerifyParams verifyParams;
 
     lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -1027,11 +1011,6 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
             for (;;) {
                 rbuf = _bt_relandgetbuf(rel, rbuf, rblkno, BT_WRITE);
                 page = BufferGetPage(rbuf);
-                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-                    NULL, NULL, InvalidXLogRecPtr))) {
-                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-                }
                 lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
                 /*
                  * If this page was incompletely split, finish the split now.
@@ -1221,7 +1200,6 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         BTMetaPageData *metad = NULL;
         OffsetNumber itup_off;
         BlockNumber itup_blkno;
-        UBtreePageVerifyParams verifyParams;
 
         itup_off = newitemoff;
         itup_blkno = BufferGetBlockNumber(buf);
@@ -1340,11 +1318,7 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         }
 
         END_CRIT_SECTION();
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-            NULL, NULL, InvalidXLogRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-        }
+        UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), itup_off, true);
         /* release buffers */
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
@@ -1394,6 +1368,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     bool isleaf = false;
     errno_t rc;
     IndexTuple firstright, lefthighkey;
+    Buffer actualInsertBuf = InvalidBuffer;
+    OffsetNumber actualInsertOff = InvalidOffsetNumber;
 
     WHITEBOX_TEST_STUB("UBTreeSplit", WhiteboxDefaultErrorEmit);
 
@@ -1650,6 +1626,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
 
         /* does new item belong before this one? */
         if (i == newitemoff) {
+            Assert(actualInsertBuf == InvalidBuffer);
+            Assert(actualInsertOff == InvalidOffsetNumber);
             if (newitemonleft) {
                 newitemleftoff = leftoff;
                 if (!UBTreePageAddTuple(leftpage, newitemsz, newitem, leftoff, true)) {
@@ -1659,6 +1637,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                         errmsg("failed to add new item to the left sibling while splitting block %u of index \"%s\"",
                                origpagenumber, RelationGetRelationName(rel))));
                 }
+                actualInsertBuf = buf;
+                actualInsertOff = leftoff;
                 leftoff = OffsetNumberNext(leftoff);
                 /* update active hint */
                 lopaque->activeTupleCount++;
@@ -1670,6 +1650,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                         errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
                                origpagenumber, RelationGetRelationName(rel))));
                 }
+                actualInsertBuf = rbuf;
+                actualInsertOff = rightoff;
                 rightoff = OffsetNumberNext(rightoff);
                 /* update active hint */
                 ropaque->activeTupleCount++;
@@ -1718,6 +1700,10 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                     errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
                            origpagenumber, RelationGetRelationName(rel))));
         }
+        Assert(actualInsertBuf == InvalidBuffer);
+        Assert(actualInsertOff == InvalidOffsetNumber);
+        actualInsertBuf = rbuf;
+        actualInsertOff = rightoff;
         rightoff = OffsetNumberNext(rightoff);
         /* update active hint */
         ropaque->activeTupleCount++;
@@ -1888,6 +1874,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     }
 
     END_CRIT_SECTION();
+    Page page = BufferGetPage(actualInsertBuf);
+    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
 
     /* discard this page from the Recycle Queue */
     UBTreeRecordUsedPage(rel, addr);
@@ -2007,15 +1995,10 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
     Page page;
     UBTPageOpaqueInternal opaque;
     TransactionId xmin, xmax;
-    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreeFindDeleteLoc", WhiteboxDefaultErrorEmit);
 
     page = BufferGetPage(*bufP);
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-    }
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
 
@@ -2097,11 +2080,6 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                 nblkno = opaque->btpo_next;
                 *bufP = _bt_relandgetbuf(rel, *bufP, nblkno, BT_WRITE);
                 page = BufferGetPage(*bufP);
-                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-                    NULL, NULL, InvalidXLogRecPtr))) {
-                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-                }
                 opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
                 if (!P_IGNORE(opaque))
                     break;
@@ -2243,7 +2221,6 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bo
     IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
     UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
     TransactionId xid = GetCurrentTransactionId();
-    UBtreePageVerifyParams verifyParams;
 
     /* Do the update.  No ereport(ERROR) until changes are logged */
     START_CRIT_SECTION();
@@ -2282,10 +2259,7 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bo
     }
 
     END_CRIT_SECTION();
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-    }
+    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), offset, false);
     bool needRecordEmpty = (opaque->activeTupleCount == 0);
     if (needRecordEmpty) {
         /*
@@ -2602,6 +2576,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     }
 
     END_CRIT_SECTION();
+    UBTreeVerifyAll(rel, rootpage, rootblknum, InvalidOffsetNumber, false);
 
     /* done with metapage */
     _bt_relbuf(rel, metabuf);

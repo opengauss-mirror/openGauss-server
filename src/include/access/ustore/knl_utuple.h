@@ -241,6 +241,12 @@ typedef enum LockOper {
         ShortTransactionIdToNormal((tup)->t_multi_base, (tup)->disk_tuple->xid) : \
         ShortTransactionIdToNormal((tup)->t_xid_base, (tup)->disk_tuple->xid))
 
+#define UHeapDiskTupleGetRawXid(disktup, page)                                                   \
+    (UHeapTupleHasMultiLockers((disktup)->flag) ?                                                 \
+        ShortTransactionIdToNormal(((UHeapPageHeaderData *)(page))->pd_multi_base, (disktup)->xid) :\
+        ShortTransactionIdToNormal(((UHeapPageHeaderData *)(page))->pd_xid_base, (disktup)->xid))
+
+
 #define UHeapTupleCopyBaseFromPage(tup, page)                                 \
     do {                                                                      \
         (tup)->t_xid_base = ((UHeapPageHeaderData *)(page))->pd_xid_base;     \
