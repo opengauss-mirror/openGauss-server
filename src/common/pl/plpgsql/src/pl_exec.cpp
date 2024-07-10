@@ -2110,12 +2110,14 @@ void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *estate)
     TupleTableSlot *slot = MakeSingleTupleTableSlot(estate->rettupdesc);
     int index = 0;
     while (tuplestore_gettupleslot(tuple_store, true, false, slot)) {
+        Datum datum;
         if (estate->pipelined_resistuple) {
             isNulls[index] = false;
-            values[index] = datumCopy(ExecFetchSlotTupleDatum(slot), elemByVal, elemLen);
+            datum = ExecFetchSlotTupleDatum(slot);
         } else {
-            values[index] = heap_slot_getattr(slot, 1, &isNulls[index]);
+            datum = heap_slot_getattr(slot, 1, &isNulls[index]);
         }
+        values[index] = datumCopy(datum, elemByVal, elemLen);
         index++;
     }
 
