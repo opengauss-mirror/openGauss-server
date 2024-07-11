@@ -1311,7 +1311,7 @@ static void AppendSubPartitionDetail(StringInfo buf, tableInfo tableinfo, Subpar
         "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' AND p.partstrategy = '%c' "
-        "ORDER BY p.boundaries[1]::%s ASC",
+        "ORDER BY p.boundaries[1]::%s ASC NULLS LAST",
         subpartinfo->subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION, subpartinfo->subparttype,
         get_typename(subpartinfo->subpartkeytype));
 
@@ -1391,9 +1391,9 @@ static void AppendRangeIntervalPartitionInfo(StringInfo buf, Oid tableoid, table
         tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_RANGE);
     for (int i = 1; i <= partkeynum; i++) {
         if (i == partkeynum) {
-            appendStringInfo(query, "p.boundaries[%d]::%s ASC", i, get_typename(iPartboundary[i - 1]));
+            appendStringInfo(query, "p.boundaries[%d]::%s ASC NULLS LAST", i, get_typename(iPartboundary[i - 1]));
         } else {
-            appendStringInfo(query, "p.boundaries[%d]::%s, ", i, get_typename(iPartboundary[i - 1]));
+            appendStringInfo(query, "p.boundaries[%d]::%s NULLS LAST, ", i, get_typename(iPartboundary[i - 1]));
         }
     }
 
@@ -1470,7 +1470,7 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
             "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
             "ON p.reltablespace = t.oid "
             "WHERE p.parentid = %u AND p.parttype = '%c' "
-            "AND p.partstrategy = '%c' ORDER BY p.boundaries[1]::%s ASC",
+            "AND p.partstrategy = '%c' ORDER BY p.boundaries[1]::%s ASC NULLS LAST",
             tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST, get_typename(*iPartboundary));
     } else {
         appendStringInfo(query,
@@ -1478,7 +1478,7 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
             "p.bound_def AS partbound, "
             "p.oid AS partoid, "
             "t.spcname AS reltblspc FROM ( "
-            "SELECT oid, relname, reltablespace, pg_catalog.string_agg(bound,',' ORDER BY bound_id) AS bound_def FROM( "
+            "SELECT oid, relname, reltablespace, pg_catalog.string_agg(bound,',' ORDER BY bound_id NULLS LAST) AS bound_def FROM( "
             "SELECT oid, relname, reltablespace, bound_id, '('||"
             "pg_catalog.array_to_string(pg_catalog.array_agg(key_value ORDER BY key_id), ',', 'NULL')||')' AS bound "
             "FROM ( SELECT oid, relname, reltablespace, bound_id, key_id, ");
@@ -1511,7 +1511,7 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
             "UNION ALL SELECT oid, relname, reltablespace, 'DEFAULT' AS bound_def FROM pg_catalog.pg_partition "
             "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c' AND boundaries[1] IS NULL) p "
             "LEFT JOIN pg_catalog.pg_tablespace t ON p.reltablespace = t.oid "
-            "ORDER BY p.bound_def ASC",
+            "ORDER BY p.bound_def ASC NULLS LAST",
             tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST,
             tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST);
     }
@@ -1579,7 +1579,7 @@ static void AppendHashPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
         "WHERE p.parentid = %u AND p.parttype = '%c' "
         "AND p.partstrategy = '%c' ORDER BY ",
         tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_HASH);
-    appendStringInfo(query, "p.boundaries[1]::%s ASC", get_typename(*iPartboundary));
+    appendStringInfo(query, "p.boundaries[1]::%s ASC NULLS LAST", get_typename(*iPartboundary));
 
     (void)SPI_execute(query->data, true, INT_MAX);
     int proc = SPI_processed;
