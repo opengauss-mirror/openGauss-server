@@ -671,6 +671,23 @@ select * from t12;-- ok
  (3,4)
 (2 rows)
 
+-- test6 expression dependency
+create table expr_dependency_t1(id int);
+create view expr_dependency_v1 as select id + 1 from expr_dependency_t1;
+alter table expr_dependency_t1 modify id int8;
+select * from expr_dependency_v1;
+ ?column? 
+----------
+(0 rows)
+
+create table expr_dependency_t2(name varchar(10));
+create view expr_dependency_v2 as select name || 'aa' from expr_dependency_t2;
+alter table expr_dependency_t2 modify name int;
+select * from expr_dependency_v2; 
+ ?column? 
+----------
+(0 rows)
+
 --- clean
 drop schema dependent_view cascade;
 --?.*
@@ -687,3 +704,7 @@ drop cascades to view circular_dependency_v3
 drop cascades to table t11
 drop cascades to view v11
 drop cascades to table t12
+drop cascades to table expr_dependency_t1
+drop cascades to view expr_dependency_v1
+drop cascades to table expr_dependency_t2
+drop cascades to view expr_dependency_v2
