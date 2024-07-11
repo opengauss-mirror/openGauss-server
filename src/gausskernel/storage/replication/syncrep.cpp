@@ -1360,16 +1360,17 @@ int SyncRepWakeQueue(bool all, int mode)
     /* Delete the finished segment from the list, and only notifies leader proc */
     if (pTail != pHead) {
         PGPROC* leaderProc = (PGPROC *) (((char *) pHead->next) - offsetof(PGPROC, syncRepLinks));
-        pHead->next->prev = NULL;
-        pHead->next = pTail->next;
-        pTail->next->prev = pHead;
-        pTail->next = NULL;
 
 #ifndef ENABLE_MULTIPLE_NODES
         if (g_instance.attr.attr_storage.enable_save_confirmed_lsn && XLogRecPtrIsValid(*confirmedLSN)) {
             SetXactLastCommitToSyncedStandby(*confirmedLSN);
         }
 #endif
+
+        pHead->next->prev = NULL;
+        pHead->next = pTail->next;
+        pTail->next->prev = pHead;
+        pTail->next = NULL;
 
         /*
          * SyncRepWaitForLSN() reads syncRepState without holding the lock, so
