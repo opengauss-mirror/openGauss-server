@@ -269,3 +269,11 @@ void ProcessCatchupInterrupt(void)
     }
 }
 
+void SSSendDropDbMsg(Oid dbid, bool need_clear)
+{
+    SharedInvalidationMessage msg;
+    msg.db.id = SHAREDINVALDB_ID;
+    msg.db.dbId = dbid;
+    msg.db.need_clear = need_clear;
+    SSSendSharedInvalidMessages(&msg, 1);
+}

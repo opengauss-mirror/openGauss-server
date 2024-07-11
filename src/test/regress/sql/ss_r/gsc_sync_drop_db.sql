@@ -1,0 +1,2 @@
+\c postgres
+select database_name from gs_gsc_dbstat_info() where database_name like '%testdb1%';
