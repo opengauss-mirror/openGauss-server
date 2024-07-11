@@ -53,7 +53,7 @@ select rownum, name, address, age from rownum_table where address = 'xian' or ro
 
 --test order by
 --create test table
-create table test_table
+create table test_table_on_rownum
 (
     id       integer       primary key ,
     name     varchar2(20)  ,
@@ -62,16 +62,16 @@ create table test_table
     tele     varchar2(20)   default '101'
 );
 --insert data
-insert into test_table values(1,'charlie', 40, 'shanghai');
-insert into test_table values(2,'lincon', 10, 'xianyang');
-insert into test_table values(3,'charlie', 40, 'chengdu');
-insert into test_table values(4,'lincon', 10, 'xian', '');
-insert into test_table values(5,'charlie', 40, 'chengdu');
-insert into test_table values(6,'lincon', 10, 'xian', '12345657');
+insert into test_table_on_rownum values(1,'charlie', 40, 'shanghai');
+insert into test_table_on_rownum values(2,'lincon', 10, 'xianyang');
+insert into test_table_on_rownum values(3,'charlie', 40, 'chengdu');
+insert into test_table_on_rownum values(4,'lincon', 10, 'xian', '');
+insert into test_table_on_rownum values(5,'charlie', 40, 'chengdu');
+insert into test_table_on_rownum values(6,'lincon', 10, 'xian', '12345657');
 --test order by
-select * from (select * from test_table order by id) as result where rownum < 4;
-select * from (select * from test_table order by id desc) as result where rownum < 2;
-select * from (select * from test_table order by id asc) as result where rownum <= 5;
+select * from (select * from test_table_on_rownum order by id) as result where rownum < 4;
+select * from (select * from test_table_on_rownum order by id desc) as result where rownum < 2;
+select * from (select * from test_table_on_rownum order by id asc) as result where rownum <= 5;
 
 --test union and intersect
 --create test table
@@ -144,7 +144,7 @@ select rownum, * from (select * from except_table where rownum <= 3 minus select
 
 --drop the test table
 drop table rownum_table;
-drop table test_table;
+drop table test_table_on_rownum;
 drop table distributors;
 drop table actors;
 drop table except_table;

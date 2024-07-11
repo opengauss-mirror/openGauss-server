@@ -138,7 +138,7 @@ test: single_node_numerology
 # ----------
 # The second group of parallel tests
 # ----------
-test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz 
+test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz
 #test: single_node_interval 
 test: single_node_abstime single_node_reltime 
 #test: single_node_tinterval 
@@ -184,7 +184,7 @@ test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate 
+test: single_node_create_aggregate
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum
@@ -1009,7 +1009,7 @@ test: toomanyparams
 
 test: test_astore_multixact
 
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
 # test: row_compression/pg_tablespace_size
 test: row_compression/twophase
 test: row_compression/row_compress_feature pldebugger_shutdown
@@ -1080,7 +1080,7 @@ test: test_object_alter
 test: event_trigger object_address
 test: event_trigger_dump_restore
 # partition expression key
-test: partition_expr_key
+test: partition_expr_key null_in_partition
 test: alter_foreign_schema
 
 # test for slow_sql

@@ -82,21 +82,21 @@ select cast('s' as int);
 --------------- limit #,#-------------------
 -- limit case in postgresql
 \c regression
-create table test(a int);
-insert into test values (1),(2),(3),(4),(5);
-select * from test order by 1 limit 2,3;
-select * from test order by 1 limit 2,6;
-select * from test order by 1 limit 6,2;
-drop table test;
+create table test_limit_table(a int);
+insert into test_limit_table values (1),(2),(3),(4),(5);
+select * from test_limit_table order by 1 limit 2,3;
+select * from test_limit_table order by 1 limit 2,6;
+select * from test_limit_table order by 1 limit 6,2;
+drop table test_limit_table;
 
 -- limit case in B db
 \c B_db
-create table test(a int);
-insert into test values (1),(2),(3),(4),(5);
-select * from test order by 1 limit 2,3;
-select * from test order by 1 limit 2,6;
-select * from test order by 1 limit 6,2;
-drop table test;
+create table test_limit_table(a int);
+insert into test_limit_table values (1),(2),(3),(4),(5);
+select * from test_limit_table order by 1 limit 2,3;
+select * from test_limit_table order by 1 limit 2,6;
+select * from test_limit_table order by 1 limit 6,2;
+drop table test_limit_table;
 
 --------------timestampdiff-----------------
 -- timestamp with time zone

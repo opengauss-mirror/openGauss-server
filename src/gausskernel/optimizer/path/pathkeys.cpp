@@ -563,6 +563,17 @@ List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection
             reverse_sort = index->reverse_sort[i];
             nulls_first = index->nulls_first[i];
         }
+        
+        /* 
+         * in B format, null value in insert into the minimal partition
+         * desc default: nulls first -> nulls last
+         * asc  default: nulls last  -> nulls
+         */
+        if (index->ispartitionedindex && !index->isGlobal && CheckPluginNullsPolicy()) {
+            if ((!reverse_sort && !nulls_first) || (reverse_sort && nulls_first)) {
+                nulls_first = !nulls_first;
+            }
+        }
 
         /* OK, try to make a canonical pathkey for this sort key */
         cpathkey = make_pathkey_from_sortinfo(root,
