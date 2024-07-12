@@ -98,6 +98,7 @@ typedef struct st_ss_dms_func {
     int (*dms_fi_get_tls_trigger_custom)(void);
     void (*dms_fi_set_tls_trigger_custom)(int val);
     void (*fault_injection_call)(unsigned int point, ...);
+    unsigned char (*dms_fi_entry_custom_valid)(unsigned int point);
 } ss_dms_func_t;
 
 int ss_dms_func_init();

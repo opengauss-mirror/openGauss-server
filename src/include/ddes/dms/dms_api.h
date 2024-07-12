@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           156
+#define DMS_LOCAL_VERSION           159
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -788,7 +788,7 @@ typedef struct st_dms_broadcast_info {
     unsigned char check_session_kill; 
 } dms_broadcast_info_t;
 
-typedef enum st_dms_stat_cmd {
+typedef enum en_dms_stat_cmd {
     DMS_STAT_ASK_MASTER,
     DMS_STAT_ASK_OWNER,
     DMS_STAT_ASK_CR_PAGE,
@@ -987,7 +987,8 @@ typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
 typedef int (*dms_az_switchover_demote_approve)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase2)(void *db_handle);
-typedef int (*dms_az_switchover_promote_core)(void *db_handle);
+typedef int (*dms_az_switchover_promote_phase1)(void *db_handle);
+typedef int (*dms_az_switchover_promote_phase2)(void *db_handle);
 typedef void (*dms_dyn_log)(void *db_handle, long long dyn_log_time);
 
 typedef int (*dms_invld_alock_ownership)(void *db_handle, char *resid, unsigned char req_mode, unsigned char is_try);
@@ -1176,7 +1177,8 @@ typedef struct st_dms_callback {
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
     dms_az_switchover_demote_approve az_switchover_demote_approve;
     dms_az_switchover_demote_phase2 az_switchover_demote_phase2;
-    dms_az_switchover_promote_core az_switchover_promote;
+    dms_az_switchover_promote_phase1 az_switchover_promote_phase1;
+    dms_az_switchover_promote_phase2 az_switchover_promote_phase2;
     dms_az_failover_promote_phase1 az_failover_promote_phase1;
     dms_az_failover_promote_resetlog az_failover_promote_resetlog;
     dms_az_failover_promote_phase2 az_failover_promote_phase2;
@@ -1303,6 +1305,10 @@ typedef enum en_reform_callback_stat {
     REFORM_MES_TASK_STAT_CONFIRM_CVT_SS_READ_LOCK,
     REFORM_CALLBACK_STAT_REBUILD_ALOCK_LOCAL,
     REFORM_CALLBACK_STAT_REBUILD_DRC_ALOCK_REMOTE,
+    REFORM_CALLBACK_STAT_OPEN_DATAFILE,
+    REFORM_CALLBACK_STAT_GET_DATAFILE_SIZE,
+    REFORM_CALLBACK_STAT_OPEN_CTRLFILE,
+    REFORM_CALLBACK_STAT_GET_CTRLFILE_SIZE,
     REFORM_CALLBACK_STAT_COUNT
 } reform_callback_stat_e;
 
@@ -1315,6 +1321,18 @@ typedef enum e_dms_fi_type {
     DMS_FI_TYPE_CUSTOM_FAULT,
     DMS_FI_TYPE_END,
 } dms_fi_type_e;
+
+typedef enum en_db_call_dms_trigger_fi_point_name {
+    // call in db, trigger in dms, point range[10800, DB_FI_ENTRY_END]
+    DB_FI_CHANGE_STATUS_AFTER_TRANSFER_PAGE = 10800,
+    DB_FI_ENTRY_END = FI_ENTRY_END
+} db_call_dms_trigger_fi_point_name;
+
+typedef enum en_dms_call_db_trigger_fi_point_name {
+    // call in dms, trigger in db, point range[800, DMS_FI_ENTRY_END]
+    DMS_FI_TRIGGER_IN_DB_ENTRY_BEGIN = 800,
+    DMS_FI_ENTRY_END
+} dms_call_db_trigger_fi_point_name;
 
 struct dms_fi_entry {
     int pointId;
@@ -1343,6 +1361,7 @@ typedef struct thread_set {
 
 typedef struct st_driver_ping_info {
     unsigned long long rw_bitmap;
+    dms_role_t dms_role;
     unsigned long long major_version;
     unsigned long long minor_version;
 } driver_ping_info_t;

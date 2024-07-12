@@ -34,35 +34,36 @@ extern "C" {
 #endif
 
 typedef enum en_db_fi_point_name {
-    DB_FI_CHANGE_BUFFERTAG_BLOCKNUM = DB_FI_ENTRY_BEGIN,
-    DB_FI_ENTRY_END = FI_ENTRY_END
+    // if CALL and TRIGGER both in kernel point range [10001, 10799]
+    DB_FI_CHANGE_BUFFERTAG_BLOCKNUM = DB_FI_ENTRY_BEGIN + 1,
 } db_fi_point_name;
 
 int dms_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count);
 int dms_fi_set_entry_value(unsigned int type, unsigned int value);
 int dms_fi_get_tls_trigger_custom(void);
 void dms_fi_set_tls_trigger_custom(int val);
+unsigned char dms_fi_entry_custom_valid(unsigned int point);
 void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args);
 
 #ifdef USE_ASSERT_CHECKING
-#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(action)                                             \
-    do {                                                                                          \
-        if (dms_fi_get_tls_trigger_custom() == TRUE) {                                            \
-            dms_fi_set_tls_trigger_custom(FALSE);                                                 \
+#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)                                       \
+    do {                                                                                           \
+        if (dms_fi_entry_custom_valid(point) && dms_fi_get_tls_trigger_custom() == TRUE) {         \
+            dms_fi_set_tls_trigger_custom(FALSE);                                                  \
             ereport(DEBUG1, (errmsg("[KERNEL_FI] fi custom action happens at %s", __FUNCTION__))); \
-            action;                                                                               \
-        }                                                                                         \
+            action;                                                                                \
+        }                                                                                          \
     } while (0)
 
-#define SS_FAULT_INJECTION_CALL(point, ...)                                                       \
-    do {                                                                                          \
-        if (g_ss_dms_func.inited) {                                                               \
-            g_ss_dms_func.fault_injection_call(point, ##__VA_ARGS__);                             \
-        }                                                                                         \
+#define SS_FAULT_INJECTION_CALL(point, ...)                                                        \
+    do {                                                                                           \
+        if (g_ss_dms_func.inited) {                                                                \
+            g_ss_dms_func.fault_injection_call(point, ##__VA_ARGS__);                              \
+        }                                                                                          \
     } while (0)
 
 #else
-#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(action)
+#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)
 #define SS_FAULT_INJECTION_CALL(point, ...)
 #endif
 
