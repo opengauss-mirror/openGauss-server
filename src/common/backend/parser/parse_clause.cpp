@@ -624,7 +624,7 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
         SelectStmt *subQueryStmt;
         ColumnRef *cref;
         ResTarget *resT;
-        List *exprlist, *filterlist;
+        List *filterlist;
         subQueryStmt = (SelectStmt *)r->subquery;
         prev = NULL;
         if (1 == list_length(subQueryStmt->targetList)) {

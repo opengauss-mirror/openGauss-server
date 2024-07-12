@@ -3071,6 +3071,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
    int* var_dno = NULL;
    bool has_refcursor = false;
    bool has_out_param = false;
+   bool is_pipelined = false;
 
    FuncExpr *fexpr = NULL;
    bool savedIsSTP = u_sess->SPI_cxt.is_stp;
@@ -3120,6 +3121,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
 
            Datum datum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isNull);
            proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
+           is_pipelined = PROC_IS_PIPELINED(CharGetDatum(datum));
            if (proIsProcedure) {
                (reinterpret_cast<FuncExprState*>(funcexpr))->prokind = 'p';
            } else {
@@ -3135,6 +3137,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
            ReleaseSysCache(tp);
        } else {
            proIsProcedure = PROC_IS_PRO(prokind);
+           is_pipelined = PROC_IS_PIPELINED(prokind);
            u_sess->SPI_cxt.is_stp = savedIsSTP;
        }
    }
@@ -3467,7 +3470,7 @@ no_function_result:
        MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
        tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
        rsinfo.setResult = tupstore;
-       if (!returnsSet) {
+       if (!returnsSet && !is_pipelined) {
            int natts = expectedDesc->natts;
            Datum* nulldatums = NULL;
            bool* nullflags = NULL;
