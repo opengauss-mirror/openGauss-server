@@ -3190,6 +3190,9 @@ static void _outJoinExpr(StringInfo str, JoinExpr* node)
     WRITE_NODE_FIELD(quals);
     WRITE_NODE_FIELD(alias);
     WRITE_INT_FIELD(rtindex);
+    if (t_thrd.proc->workingVersionNum >= STRAIGHT_JOIN_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_straight_join);
+    }
 }
 
 static void _outFromExpr(StringInfo str, FromExpr* node)
@@ -3829,6 +3832,9 @@ static void _outSpecialJoinInfo(StringInfo str, SpecialJoinInfo* node)
     WRITE_BOOL_FIELD(lhs_strict);
     WRITE_BOOL_FIELD(delay_upper_joins);
     WRITE_NODE_FIELD(join_quals);
+    if (t_thrd.proc->workingVersionNum >= STRAIGHT_JOIN_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_straight_join);
+    }
 }
 
 static void

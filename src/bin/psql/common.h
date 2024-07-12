@@ -108,4 +108,7 @@ extern void expand_tilde(char** filename);
 extern bool do_parallel_execution(int count, char** stmts);
 extern char* GetEnvStr(const char* env);
 
+extern bool CheckDBCompatibility(PGconn* connection, char *dbCompatibility);
+extern bool CheckSpecificExtension(PGconn* connection, char *extension);
+
 #endif /* COMMON_H */

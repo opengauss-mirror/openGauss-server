@@ -1382,6 +1382,7 @@ typedef struct JoinExpr {
     Node* quals;       /* qualifiers on join, if any */
     Alias* alias;      /* user-written alias clause, if any */
     int rtindex;       /* RT index assigned for join, or 0 */
+    bool is_straight_join; /* set true if straight_join */
 } JoinExpr;
 
 /* ----------

@@ -3388,6 +3388,7 @@ static JoinExpr* _copyJoinExpr(const JoinExpr* from)
     COPY_NODE_FIELD(quals);
     COPY_NODE_FIELD(alias);
     COPY_SCALAR_FIELD(rtindex);
+    COPY_SCALAR_FIELD(is_straight_join);
 
     return newnode;
 }
@@ -3657,6 +3658,7 @@ static SpecialJoinInfo* _copySpecialJoinInfo(const SpecialJoinInfo* from)
     COPY_SCALAR_FIELD(lhs_strict);
     COPY_SCALAR_FIELD(delay_upper_joins);
     COPY_NODE_FIELD(join_quals);
+    COPY_SCALAR_FIELD(is_straight_join);
 
     return newnode;
 }

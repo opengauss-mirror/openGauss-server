@@ -2703,3 +2703,33 @@ char* GetEnvStr(const char* env)
     }
     return NULL;
 }
+
+bool CheckDBCompatibility(PGconn *connection, char *dbCompatibility)
+{
+    bool isCompatibility = false;
+    PGresult *res = PQexec(connection, "select setting from pg_catalog.pg_settings where name = 'sql_compatibility'");
+    
+    isCompatibility = (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && 
+        PQntuples(res) == 1 && strcmp(PQgetvalue(res, 0, 0), dbCompatibility) == 0);
+    
+    PQclear(res);
+    return isCompatibility;
+}
+
+bool CheckSpecificExtension(PGconn *connection, char *extension)
+{
+    bool isHasExtension = false;
+    char sql[100] = {0};
+    int rc = 0;
+
+    rc = sprintf_s(sql, sizeof(sql), "SELECT extname from pg_catalog.pg_extension where extname = '%s'", extension);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    PGresult *res = PQexec(connection, sql);
+    
+    isHasExtension = (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && 
+        PQntuples(res) == 1);
+    
+    PQclear(res);
+    return isHasExtension;
+}
