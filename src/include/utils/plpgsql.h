@@ -474,6 +474,7 @@ typedef struct { /* openGauss data type */
     Oid tableofOid;
     TypeDependExtend* dependExtend;
     PLpgSQL_expr* cursorExpr;
+    int cursorDno;
 } PLpgSQL_type;
 
 typedef struct {
@@ -598,6 +599,7 @@ typedef struct { /* Record variable (non-fixed structure) */
     PLpgSQL_package* pkg = NULL;
     PLpgSQL_expr* default_val = NULL;
     PLpgSQL_expr* expr = NULL;
+    int cursorDno;
 } PLpgSQL_rec;
 
 typedef struct { /* Field in record */
@@ -2122,6 +2124,7 @@ extern bool CheckElementParsetreeTag(Node* parsetree);
 extern Datum transVaratt1BTo4B(Datum value);
 extern PLpgSQL_datum* deepCopyPlpgsqlDatum(PLpgSQL_datum* datum);
 extern PLpgSQL_var* copyPlpgsqlVar(PLpgSQL_var* src);
+extern PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr);
 extern void assign_text_var(PLpgSQL_var* var, const char* str);
 extern MemoryContext GetAvailableHoldContext(List* PortalContextList);
 

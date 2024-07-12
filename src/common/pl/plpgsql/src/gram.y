@@ -9783,6 +9783,7 @@ read_datatype(int tok)
                     {
                         PLpgSQL_type *newp = plpgsql_build_datatype(UNKNOWNOID, -1, InvalidOid);
                         newp->cursorExpr = var->cursor_explicit_expr;
+                        newp->cursorDno = var->dno;
                         return newp;
                     }
                 } else if (ns && ns->itemtype == PLPGSQL_NSTYPE_ROW)

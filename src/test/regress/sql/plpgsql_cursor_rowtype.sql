@@ -211,6 +211,59 @@ call pck3_1.ppp1();
 call pck3_1.ppp1();
 call pck3_1.ppp1();
 
+CREATE TABLE STORAGE_LARGE_TABLE_STORAGE_TABLE_000 (c_id int,
+c_d_id int NOT NULL,
+c_w_id int NOT NULL,
+c_first varchar(16) NOT NULL,
+c_middle char(2),
+c_last varchar(16) NOT NULL,
+c_street_1 varchar(20) NOT NULL,
+c_street_2 varchar(20),
+c_city varchar(20) NOT NULL,
+c_state char(2) NOT NULL,
+c_zip char(9) NOT NULL,
+c_phone char(16) NOT NULL,
+c_since timestamp,
+c_credit char(2) NOT NULL,
+c_credit_lim numeric(12,2),
+c_discount numeric(4,4),
+c_balance numeric(12,2),
+c_ytd_payment numeric(12,2) NOT NULL,
+c_payment_cnt int NOT NULL,
+c_delivery_cnt int NOT NULL,
+c_data varchar(500) NOT NULL);
+
+CREATE TABLE STORAGE_LARGE_CURSOR_TABLE_216 AS SELECT * FROM STORAGE_LARGE_TABLE_STORAGE_TABLE_000 WHERE C_ID=0;
+
+declare
+temp integer := 0;
+id_temp integer;
+name_temp text;
+begin
+for temp in 0..99 loop
+INSERT INTO STORAGE_LARGE_CURSOR_TABLE_216 VALUES (temp,temp,temp,'iscmvlstpn','OE','BARBARBAR','bkilipzfcxcle','pmbwodmpvhvpafbj','dyfaoptppzjcgjrvyqa','uq',480211111,9400872216162535,null,'GC',50000.0,0.4361328,-10.0,10.0,1,0,'QVLDETANRBRBURBMZQUJSHOQNGGSMNTECCIPRIIRDHIRWIYNPFZCSYKXXYSCDSF');
+end loop;
+end;
+/
+
+Declare
+Type MyRefCur IS Ref Cursor RETURN STORAGE_LARGE_CURSOR_TABLE_216%ROWTYPE;
+c1 MyRefCur;
+temp c1%RowType;
+Begin
+Open c1 For Select * from STORAGE_LARGE_CURSOR_TABLE_216 ORDER BY C_ID;
+LOOP
+FETCH C1 INTO temp;
+EXIT WHEN C1%NOTFOUND;
+raise info 'str1 is %', temp.C_id;
+END LOOP;
+Close c1;
+End;
+/
+
+drop table STORAGE_LARGE_TABLE_STORAGE_TABLE_000;
+drop table STORAGE_LARGE_CURSOR_TABLE_216;
+
 --test: drop column
 create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
 insert into int_4_2(a, d, b) values(3, 6,'johan');
