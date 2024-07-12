@@ -2588,4 +2588,9 @@ typedef struct IndexHintRelationData{
     IndexHintType index_type;
 }IndexHintRelationData;
 
+typedef struct AlterTriggerStmt {
+    NodeTag type;
+    char *trigname; /* TRIGGER's name */
+    char tgenabled; /* trigger's firing configuration WRT session_replication_role */
+} AlterTriggerStmt;
 #endif /* PARSENODES_COMMONH */

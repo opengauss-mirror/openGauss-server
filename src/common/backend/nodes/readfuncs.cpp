@@ -1723,6 +1723,15 @@ static AlterTableStmt* _readAlterTableStmt(void)
     READ_DONE();
 }
 
+static AlterTriggerStmt* _readAlterTriggerStmt(void)
+{
+    READ_LOCALS(AlterTriggerStmt);
+    READ_STRING_FIELD(trigname);
+    READ_CHAR_FIELD(tgenabled);
+
+    READ_DONE();
+}
+
 static PLDebug_variable* _readPLDebug_variable(void)
 {
     READ_LOCALS(PLDebug_variable);

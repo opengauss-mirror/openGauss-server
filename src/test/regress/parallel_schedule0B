@@ -459,3 +459,4 @@ test: udf_crem create_c_function
 test: create_function
 test: pg_compatibility
 
+test: alter_trigger

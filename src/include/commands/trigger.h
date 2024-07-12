@@ -204,4 +204,6 @@ extern HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
     int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot, TM_Result* result = NULL,
     TM_FailureData* tmfd = NULL);
 
+extern ObjectAddress AlterTrigger(AlterTriggerStmt *stmt);
+
 #endif /* TRIGGER_H */

@@ -6350,6 +6350,23 @@ void ResetTrigShipFlag()
     }
 
 }
+
+ObjectAddress AlterTrigger(AlterTriggerStmt* stmt)
+{
+    ObjectAddress address;
+    Oid trigoid;
+    Oid reloid;
+    trigoid = get_trigger_oid_b(stmt->trigname, &reloid, false);
+    if (OidIsValid(trigoid) && OidIsValid(reloid)) {
+        Relation rel;
+        rel = relation_open(reloid, AccessExclusiveLock);
+        EnableDisableTrigger(rel, stmt->trigname, stmt->tgenabled, false);
+        relation_close(rel, NoLock);
+        ObjectAddressSet(address, TriggerRelationId, trigoid);
+    }
+    return address;
+}
+
 /* build a function name for b format trigger */
 static char* rebuild_funcname_for_b_trigger(char* trigname, char* relname)
 {

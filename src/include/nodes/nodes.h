@@ -575,6 +575,7 @@ typedef enum NodeTag {
     T_AddTableIntoCBIState,
 
     T_CreateAmStmt,
+    T_AlterTriggerStmt,
     T_CreatePublicationStmt,
     T_AlterPublicationStmt,
     T_CreateSubscriptionStmt,
