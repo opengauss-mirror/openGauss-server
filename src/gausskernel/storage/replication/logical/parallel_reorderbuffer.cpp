@@ -1506,6 +1506,13 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
         appendStringInfoChar(out, 'B');
         pq_sendint64(out, change->csn);
         pq_sendint64(out, txn->first_lsn);
+
+        if (pdata->pOptions.include_xids) {
+            appendStringInfoChar(out, 'X');
+            pq_sendint64(out, txn->xid);
+            beginLen += 1 + sizeof(uint64);
+        }
+
         if (pdata->pOptions.include_timestamp) {
             appendStringInfoChar(out, 'T');
             const char *timeStamp = timestamptz_to_str(txn->commit_time);
@@ -1532,6 +1539,11 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
         const uint32 upperPart = 32;
         appendStringInfo(out, "BEGIN CSN: %lu first_lsn: %X/%X", change->csn, (uint32)(txn->first_lsn >> upperPart),
             (uint32)(txn->first_lsn));
+
+        if (pdata->pOptions.include_xids) {
+            appendStringInfo(out, " xid: %lu", txn->xid);
+        }
+
         if (pdata->pOptions.include_timestamp) {
             const char *timeStamp = timestamptz_to_str(txn->commit_time);
             appendStringInfo(out, " commit_time: %s", timeStamp);

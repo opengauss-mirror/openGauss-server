@@ -390,6 +390,16 @@ static void BeginToText(const char* stream, uint32 *curPos, PQExpBuffer res)
     *curPos += sizeof(LSNlower);
     appendPQExpBuffer(res, "first_lsn: %X/%X", LSNupper, LSNlower);
 
+    if (stream[*curPos] == 'X') {
+        *curPos += 1;
+        uint32 xidupper = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(xidupper);
+        uint32 xidlower = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(xidlower);
+        uint64 xid = ((uint64)(xidupper) << upperPart) + xidlower;
+        appendPQExpBuffer(res, " xid: %lu", xid);
+    }
+
     if (stream[*curPos] == 'T') {
         *curPos += 1;
         uint32 timeLen = ntohl(*(uint32 *)(&stream[*curPos]));
