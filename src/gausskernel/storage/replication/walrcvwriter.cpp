@@ -1414,7 +1414,7 @@ static int WalRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrc
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    uint64_t elapsed = tv.tv_sev - uwalrcv->truncateTimeStamp;
+    uint64_t elapsed = tv.tv_sec - uwalrcv->truncateTimeStamp;
 
     if (needQuery || (startPtr / XLogSegSize == truncatePtr / XLogSegSize)
         || elapsed < g_instance.attr.attr_storage.uwal_truncate_interval) {
