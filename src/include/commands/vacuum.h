@@ -15,6 +15,7 @@
 #define VACUUM_H
 #include "access/htup.h"
 #include "access/genam.h"
+#include "access/tidstore.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
@@ -24,6 +25,13 @@
 #include "storage/lock/lock.h"
 #include "utils/pg_rusage.h"
 #include "utils/relcache.h"
+
+/*
+ * Threshold that controls whether we bypass index vacuuming and heap
+ * vacuuming as an optimization
+ */
+#define BYPASS_THRESHOLD_PAGES  0.02    /* i.e. 2% of rel_pages */
+#define BYPASS_THRESHOLD_MEMORY_USAGE (32L * 1024L * 1024L) /* 32MB */
 
 typedef enum DELETE_STATS_OPTION {
     DELETE_STATS_NONE = 0x00u,
@@ -272,15 +280,11 @@ typedef struct {
 
 typedef bool (*EqualFunc)(const void*, const void*);
 
-typedef struct VacItemPointerData {
-    ItemPointerData itemPointerData;
-    int2 bktId;
-} VacItemPointerData;
-
-typedef VacItemPointerData* VacItemPointer;
-
-#define VacItemPtrDataGetItemPtr(vacItemPtrData) (&((vacItemPtrData).itemPointerData))
-#define VacItemPtrGetItemPtr(vacItemPtr) (&((vacItemPtr)->itemPointerData))
+typedef struct VacDeadItemsInfo {
+    TidStore* dead_items;
+    size_t    max_bytes;   /* the maximum bytes TidStore can use */
+    int64     num_items;   /* current dead items num */
+} VacDeadItemsInfo;
 
 typedef struct LVRelStats {
     /* hasindex = true means two-pass strategy; false means one-pass */
@@ -291,19 +295,19 @@ typedef struct LVRelStats {
     BlockNumber scanned_pages; /* number of pages we examined */
     BlockNumber tupcount_pages; /* pages whose tuples we counted */
     BlockNumber new_visible_pages; /* number of pages marked all visible */
+    BlockNumber lpdead_item_pages; /* number of pages contain dead items */
     double old_live_tuples;        /* previous value of pg_class.reltuples */
     double scanned_tuples;     /* counts only tuples on scanned pages */
     double old_rel_tuples;     /* previous value of pg_class.reltuples */
     double new_rel_tuples;     /* new estimated total # of tuples */
-    double          new_dead_tuples;        /* new estimated total # of dead tuples */
+    double new_dead_tuples;    /* new estimated total # of dead tuples */
     BlockNumber pages_removed;
     double tuples_deleted;
+    double tuples_bypassed;     /* bypassed dead items when do_index_vacuuming is false*/
     BlockNumber nonempty_pages; /* actually, last nonempty page + 1 */
-    /* List of TIDs of tuples we intend to delete */
-    /* NB: this list is ordered by TID address */
-    int num_dead_tuples;     /* current # of entries */
-    int max_dead_tuples;     /* # slots allocated in array */
-    VacItemPointer dead_tuples; /* array of ItemPointerData */
+    /* TIDs of tuples we intend to delete */
+    /* NB: this list is ordered by (bktId, TID) */
+    VacDeadItemsInfo dead_items_info;
     int curr_heap_start;
     int num_index_scans;
     TransactionId latestRemovedXid;
@@ -315,6 +319,19 @@ typedef struct LVRelStats {
     int2 currVacuumBktId;     /* current lazy vacuum bucket id */
     oidvector* bucketlist;
     bool hasKeepInvisbleTuples;
+    /*
+     * index vacuum will be bypassed when the following factors satisfied:
+     * 1. lazy vacuum in non-aggresive mode.
+     * 2. don't support dead tuples belong to different relations or buckets.
+     * 3. no index scan has been done.
+     * 4. scanned_pages and memory usage of dead tuples are too small.
+     *
+     * index cleanup should be fast if index vacuum do nothing,
+     * so do_index_vacuum is false means only lazy_vacuum_index() will be bypassed.
+     *
+     * Because there's no aggresive mode for ustore vacuum, bypass index vaccum won't take effective.
+     */
+    bool do_index_vacuuming;
 } LVRelStats;
 
 typedef struct VacRelPrintStats {
@@ -324,6 +341,7 @@ typedef struct VacRelPrintStats {
     BlockNumber nblocks;
     double nkeep;
     double nunused;
+    double tupsBypassed;
     BlockNumber emptyPages;
     PGRUsage ruVac;
 } VACRelPrintStats;
@@ -415,6 +433,7 @@ extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 free
     TransactionId* freezeLimit, TransactionId* freezeTableLimit, MultiXactId* multiXactFrzLimit);
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
+extern bool bypass_lazy_vacuum_index(const LVRelStats *vacrelstats, const bool aggresive, const int nindexes);
 
 /* in commands/vacuumlazy.c */
 extern void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy);
@@ -481,13 +500,16 @@ extern void analyze_concurrency_process(Oid relid, int16 attnum, MemoryContext o
 extern int GetOneTupleSize(VacuumStmt* stmt, Relation rel);
 
 extern void lazy_vacuum_index(Relation indrel,
-                                  IndexBulkDeleteResult **stats,
-                                  const LVRelStats *vacrelstats,
-                                  BufferAccessStrategy vacStrategy);
+                              IndexBulkDeleteResult **stats,
+                              const LVRelStats *vacrelstats,
+                              BufferAccessStrategy vacStrategy);
 extern IndexBulkDeleteResult* lazy_cleanup_index(
     Relation indrel, IndexBulkDeleteResult* stats, LVRelStats* vacrelstats, BufferAccessStrategy vac_strategy);
-extern void lazy_record_dead_tuple(LVRelStats *vacrelstats,
-                                           ItemPointer itemptr);
+extern void dead_items_alloc(LVRelStats *vacrelstats);
+extern void dead_items_add(LVRelStats* vacrelstats, BlockNumber blkno,
+                           OffsetNumber* offsets, int num_offsets);
+extern void dead_items_cleanup(LVRelStats* vacrelstats);
+extern void dead_items_reset(LVRelStats* vacrelstats);
 extern void vacuum_log_cleanup_info(Relation rel, LVRelStats *vacrelstats);
 extern void CBIOpenLocalCrossbucketIndex(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel);
 extern int GetVacuumLogLevel(void);
