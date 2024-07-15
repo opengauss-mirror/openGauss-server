@@ -125,6 +125,7 @@ typedef struct UwalrcvWriterState {
     bool needQuery;
     bool needXlogCatchup = true;
     bool fullSync = false;
+    uint64_t truncateTimeStamp;
 
     char uwalReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } UwalrcvWriterState;

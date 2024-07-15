@@ -178,6 +178,7 @@ const char *g_reserve_param[] = {
     "uwal_rpc_compression_switch",
     "uwal_rpc_flowcontrol_switch",
     "uwal_rpc_flowcontrol_value",
+    "uwal_truncate_interval",
     "uwal_async_append_switch"
 };
 
