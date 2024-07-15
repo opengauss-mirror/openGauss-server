@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS pg_catalog.pg_proc_ext
 )WITH(oids=false) TABLESPACE pg_default;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3488;
-CREATE INDEX pg_proc_ext_proc_oid_index ON pg_catalog.pg_proc_ext USING BTREE(proc_oid OID_OPS);
+CREATE UNIQUE INDEX pg_proc_ext_proc_oid_index ON pg_catalog.pg_proc_ext USING BTREE(proc_oid OID_OPS);
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 GRANT SELECT ON pg_catalog.pg_event_trigger TO PUBLIC;
