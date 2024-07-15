@@ -30,6 +30,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pgxc_group.h"
+#include "catalog/pg_proc_ext.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
@@ -3270,7 +3271,7 @@ static FunctionScan* create_functionscan_plan(PlannerInfo* root, Path* best_path
             ng_convert_to_exec_nodes(&best_path->distribution, best_path->locator_type, RELATION_ACCESS_READ);
     }
 #else
-    scan_plan->scan.plan.exec_type = EXEC_ON_ALL_NODES;
+    scan_plan->scan.plan.exec_type = EXEC_ON_DATANODES;
     scan_plan->scan.plan.exec_nodes =
         ng_convert_to_exec_nodes(&best_path->distribution, best_path->locator_type, RELATION_ACCESS_READ);
 #endif
@@ -6209,6 +6210,40 @@ static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanre
     node->funccoltypes = funccoltypes;
     node->funccoltypmods = funccoltypmods;
     node->funccolcollations = funccolcollations;
+
+    if (IS_STREAM_PLAN && u_sess->opt_cxt.query_dop > 1) {
+        FunctionPartitionStrategy strategy;
+        List* partkey = NIL;
+        strategy = GetParallelStrategyAndKey(((FuncExpr*)funcexpr)->funcid, &partkey);
+
+        PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr);
+        if (cursorPstmt != NULL) {
+            Plan* cursorPlan = cursorPstmt->planTree;
+            Stream* stream = (Stream*)cursorPlan;
+
+            /* set plan->dop according to cursorplan */
+            inherit_plan_locator_info(plan, cursorPlan->lefttree);
+            stream->smpDesc.consumerDop = plan->dop;
+
+            /* if FUNC_PARTITION_HASH is specified, set distributed_keys and distriType */
+            if (strategy == FUNC_PARTITION_HASH && partkey != NIL) {
+                ListCell* lc1 = NULL;
+                foreach (lc1, cursorPlan->targetlist) {
+                    TargetEntry* entry = (TargetEntry*)lfirst(lc1);
+                    ListCell* lc2 = NULL;
+                    foreach (lc2, partkey) {
+                        if (strcmp(entry->resname, (char*)lfirst(lc2)) == 0) {
+                            stream->distribute_keys = lappend(stream->distribute_keys, entry->expr);
+                            break;
+                        }
+                    }
+                }
+                plan->distributed_keys = stream->distribute_keys;
+                stream->smpDesc.distriType = list_length(plan->distributed_keys) > 0 ?
+                                                LOCAL_DISTRIBUTE : stream->smpDesc.distriType;
+            }
+        }
+    }
 
     return node;
 }

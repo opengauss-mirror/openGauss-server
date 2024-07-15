@@ -867,6 +867,7 @@ typedef struct RelOptInfo {
     unsigned int num_data_nodes = 0; //number of distributing data nodes
 
     List* partial_pathlist;   /* partial Paths */
+    int cursorDop;
 } RelOptInfo;
 
 /*

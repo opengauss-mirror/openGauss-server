@@ -882,6 +882,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->isCreatePkgFunction = false;
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
+    plsql_cxt->parallel_cursor_arg_name = NULL;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)

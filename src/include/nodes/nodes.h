@@ -661,6 +661,7 @@ typedef enum NodeTag {
     T_SqlLoadColExpr,
     T_AutoIncrement,
     T_RenameCell,
+    T_FunctionPartitionInfo,
     /*
      * TAGS FOR REPLICATION GRAMMAR PARSE NODES (replnodes.h)
      */

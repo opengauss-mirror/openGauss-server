@@ -22,6 +22,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
 #include "catalog/gs_collation.h"
+#include "catalog/pg_proc_ext.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
 #include "db4ai/predict_by.h"
@@ -1866,10 +1867,15 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
     ListCell* args = NULL;
     Node* result = NULL;
 
-    /* Transform the list of arguments ... */
+    /* Transform the list of arguments, skip CursorExpr which transformed later */
     targs = NIL;
     foreach (args, fn->args) {
-        targs = lappend(targs, transformExprRecurse(pstate, (Node*)lfirst(args)));
+        Node* arg = (Node*)lfirst(args);
+        if (!IsA(arg, CursorExpression)) {
+            targs = lappend(targs, transformExprRecurse(pstate, arg));
+        } else {
+            targs = lappend(targs, arg);
+        }
     }
 
     if (fn->agg_within_group) {
@@ -1883,6 +1889,26 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
 
     /* ... and hand off to ParseFuncOrColumn */
     result = ParseFuncOrColumn(pstate, fn->funcname, targs, last_srf, fn, fn->location, fn->call_func);
+
+    if (IsA(result, FuncExpr)) {
+        /* if function is not SRF or pipelined, close smp for all CursorExpressions */
+        int2 seq = (!((FuncExpr*)result)->funcretset &&
+                    !PROC_IS_PIPELINED(get_func_prokind(((FuncExpr*)result)->funcid))) ?
+                -1 : GetParallelCursorSeq(((FuncExpr*)result)->funcid);
+        int2 i = 0;
+        AutoDopControl dopControl;
+        foreach (args, ((FuncExpr*)result)->args) {
+            Node* arg = (Node*)lfirst(args);
+            if (IsA(arg, CursorExpression)) {
+                if (i != seq) {
+                    dopControl.CloseSmp();
+                }
+                lfirst(args) = transformCursorExpression(pstate, (CursorExpression*)arg);
+                dopControl.ResetSmp();
+            }
+            i++;
+        }
+    }
 
     if (IsStartWithFunction((FuncExpr*)result) && !pstate->p_hasStartWith && !pstate->p_split_where_for_swcb) {
         ereport(ERROR,
@@ -3871,6 +3897,7 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
     ListCell* raw_parsetree_cell = NULL;
     List* stmt_list = NIL;
     ParseState* parse_state_temp = NULL;
+    int level = ++u_sess->parser_cxt.cursor_expr_level;
 
     ParseState* parse_state_parent = pstate;
 
@@ -3893,6 +3920,15 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
     Query* query = castNode(Query, linitial(stmt_list));
 
     plan_tree = pg_plan_query(query, 0, NULL);
+
+    if (IsA(plan_tree->planTree, Stream)) {
+        ((Stream*)plan_tree->planTree)->cursor_expr_level = level;
+
+        /* reset cursor_expr_level */
+        if (level == 1) {
+            u_sess->parser_cxt.cursor_expr_level = 0;
+        }
+    }
 
     int nParamExec = 0;
     parse_state_temp = parse_state_parent;
@@ -4093,3 +4129,18 @@ static Node *transformStartWithWhereClauseColumnRef(ParseState *pstate, ColumnRe
     return NULL;
 }
 
+PlannedStmt* getCursorStreamFromFuncArg(FuncExpr* funcexpr)
+{
+    ListCell* lc = NULL;
+    foreach (lc, funcexpr->args) {
+        Node* arg = (Node*)lfirst(lc);
+        if (IsA(arg, CursorExpression)) {
+            CursorExpression* cursorExpr = (CursorExpression*)arg;
+            PlannedStmt* cursorPlan = (PlannedStmt*)cursorExpr->plan;
+            if (IsA(cursorPlan->planTree, Stream)) {
+                return cursorPlan;
+            }
+        }
+    }
+    return NULL;
+}

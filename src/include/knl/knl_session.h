@@ -462,6 +462,7 @@ typedef struct knl_u_parser_context {
     bool has_set_uservar;
     bool has_equal_uservar;
     bool is_straight_join;
+    int cursor_expr_level;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -1734,6 +1735,7 @@ typedef struct knl_u_plpgsql_context {
     HTAB* plpgsql_lock_objects;
 
     bool need_init;
+    char* parallel_cursor_arg_name;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package

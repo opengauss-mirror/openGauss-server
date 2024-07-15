@@ -72,6 +72,8 @@ typedef struct {
     uint64 queryId; /* u_sess->debug_query_id */
     unsigned int planNodeId;
     unsigned int smpIdentifier;
+    int cursorExprLevel;
+    unsigned int cursorParentNodeId;
 } StreamKey;
 
 typedef union {

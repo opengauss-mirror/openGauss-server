@@ -296,7 +296,7 @@ void ExtractProduerInfo()
     u_sess->proc_cxt.MyProcPort->user_name = u_sess->stream_cxt.producer_obj->getUserName();
 
     /* runtimethreadinstr */
-    if (u_sess->instr_cxt.global_instr) {
+    if (u_sess->instr_cxt.global_instr && u_sess->stream_cxt.producer_obj->getCursorExprLevel() == 0) {
         Assert(u_sess->instr_cxt.thread_instr == NULL);
         int segmentId = u_sess->stream_cxt.producer_obj->getPlan()->planTree->plan_node_id;
         u_sess->instr_cxt.thread_instr = u_sess->instr_cxt.global_instr->allocThreadInstrumentation(segmentId);
@@ -779,8 +779,9 @@ void StreamExit()
 
     closeAllVfds();
 
-    AtProcExit_Buffers(0, 0);
+    /* ShutdownPostgres would release buffer under AbortOutOfAnyTransaction */
     ShutdownPostgres(0, 0);
+    AtProcExit_Buffers(0, 0);
     if(!EnableLocalSysCache()) {
         AtProcExit_Files(0, 0);
     }

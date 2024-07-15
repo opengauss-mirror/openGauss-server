@@ -41,6 +41,7 @@
 #include "pgxc/pgxcnode.h"
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
+#include "parser/parse_expr.h"
 #include "utils/memutils.h"
 #include "commands/dbcommands.h"
 #include "miscadmin.h"
@@ -619,7 +620,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
 
     key.queryId = pstmt->queryId;
     key.planNodeId = plan->plan_node_id;
-
+    key.cursorExprLevel = streamNode->cursor_expr_level;
+    key.cursorParentNodeId = streamNode->cursor_owner_node_id;
     /*
      * MPPDB with-recursive support
      */
@@ -769,7 +771,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
             /* Set smp identifier. */
             key.smpIdentifier = i;
             producer = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamProducer(
-                key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, producerConnNum, transType);
+                key, ctl->cursorPstmt != NULL ? ctl->cursorPstmt : pstmt, streamNode,
+                u_sess->stream_cxt.stream_runtime_mem_cxt, producerConnNum, transType);
             producer->setSharedContext(sharedContext);
             producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
                 u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
@@ -967,6 +970,17 @@ static void InitStreamFlow(StreamFlowCtl* ctl)
                 ctl->plan = oldPlan->righttree;
                 InitStreamFlow(ctl);
             } break;
+            case T_FunctionScan: {
+                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)oldPlan)->funcexpr);
+                if (cursorPstmt != NULL) {
+                    Stream* cursorPlan = (Stream*)(cursorPstmt->planTree);
+                    ctl->plan = (Plan*)cursorPlan;
+                    ctl->cursorPstmt = cursorPstmt;
+
+                    InitStreamFlow(ctl);
+                    break;
+                }
+            } break;
             default:
                 if (oldPlan->lefttree) {
                     ctl->plan = oldPlan->lefttree;
@@ -1085,6 +1099,7 @@ void BuildStreamFlow(PlannedStmt* plan)
         ctl.subConsumerList = &topConsumerList;
         ctl.threadNum = &threadNum;
         ctl.dummyThread = ThreadIsDummy(plan->planTree);
+        ctl.cursorPstmt = NULL;
         /* Init check info. */
         SetCheckInfo(&ctl.checkInfo, plan->planTree);
 
@@ -1176,6 +1191,8 @@ void SetupStreamRuntime(StreamState* node)
 
     key.queryId = node->ss.ps.state->es_plannedstmt->queryId;
     key.planNodeId = streamNode->scan.plan.plan_node_id;
+    key.cursorExprLevel = streamNode->cursor_expr_level;
+    key.cursorParentNodeId = streamNode->cursor_owner_node_id;
 
     Assert(u_sess->stream_cxt.global_obj != NULL);
     pair = u_sess->stream_cxt.global_obj->popStreamPair(key);
@@ -1214,6 +1231,8 @@ static void StartupStreamThread(StreamState* node)
 
     key.queryId = node->ss.ps.state->es_plannedstmt->queryId;
     key.planNodeId = node->ss.ps.plan->plan_node_id;
+    key.cursorExprLevel = ((Stream*)node->ss.ps.plan)->cursor_expr_level;
+    key.cursorParentNodeId = ((Stream*)node->ss.ps.plan)->cursor_owner_node_id;
     Assert(u_sess->stream_cxt.global_obj != NULL);
     pair = u_sess->stream_cxt.global_obj->popStreamPair(key);
     Assert(pair->producerList != NULL);

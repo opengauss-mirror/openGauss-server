@@ -49,6 +49,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_synonym.h"
@@ -594,7 +595,8 @@ void examine_parameter_list(List* parameters, Oid languageOid, const char* query
  */
 static bool compute_common_attribute(DefElem* defel, DefElem** volatility_item, DefElem** strict_item,
     DefElem** security_item, DefElem** leakproof_item, List** set_items, DefElem** cost_item, DefElem** rows_item,
-    DefElem** fencedItem, DefElem** shippable_item, DefElem** package_item, DefElem** pipelined_item)
+    DefElem** fencedItem, DefElem** shippable_item, DefElem** package_item, DefElem** pipelined_item,
+    DefElem** parallel_enable_item)
 {
     if (strcmp(defel->defname, "volatility") == 0) {
         if (*volatility_item)
@@ -648,6 +650,11 @@ static bool compute_common_attribute(DefElem* defel, DefElem** volatility_item, 
             goto duplicate_error;
 
         *pipelined_item = defel;
+    } else if (strcmp(defel->defname, "parallel_enable") == 0) {
+        if (*parallel_enable_item)
+            goto duplicate_error;
+
+        *parallel_enable_item = defel;
     } else
         return false;
 
@@ -717,7 +724,8 @@ static bool compute_b_attribute(DefElem* defel)
  */
 static List* compute_attributes_sql_style(const List* options, List** as, char** language, bool* windowfunc_p,
     char* volatility_p, bool* strict_p, bool* security_definer, bool* leakproof_p, ArrayType** proconfig,
-    float4* procost, float4* prorows, bool* fenced, bool* shippable, bool* package, bool* is_pipelined)
+    float4* procost, float4* prorows, bool* fenced, bool* shippable, bool* package, bool* is_pipelined,
+    FunctionPartitionInfo** partInfo)
 {
     ListCell* option = NULL;
     DefElem* as_item = NULL;
@@ -734,6 +742,7 @@ static List* compute_attributes_sql_style(const List* options, List** as, char**
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
     DefElem* pipelined_item = NULL;
+    DefElem* parallel_enable_item = NULL;
     List* bCompatibilities = NIL;
     foreach (option, options) {
         DefElem* defel = (DefElem*)lfirst(option);
@@ -761,7 +770,8 @@ static List* compute_attributes_sql_style(const List* options, List** as, char**
                        &fencedItem,
                        &shippable_item,
                        &package_item,
-                       &pipelined_item)) {
+                       &pipelined_item,
+                       &parallel_enable_item)) {
             /* recognized common option */
             continue;
         } else if (compute_b_attribute(defel)) {
@@ -842,6 +852,18 @@ static List* compute_attributes_sql_style(const List* options, List** as, char**
 
     if (package_item != NULL) {
         *package = intVal(package_item->arg);
+    }
+
+    if (parallel_enable_item != NULL) {
+        if (volatility_item == NULL) {
+            *volatility_p = PROVOLATILE_IMMUTABLE;
+            ereport(NOTICE, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("immutable would be set if parallel_enable specified")));
+        } else if (*volatility_p != PROVOLATILE_IMMUTABLE) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("only immutable can be set if parallel_enable specified")));
+        }
+        *partInfo = (FunctionPartitionInfo*)parallel_enable_item->arg;
     }
     list_free(set_items);
     return bCompatibilities;
@@ -1053,6 +1075,7 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     bool fenced = IS_SINGLE_NODE ? false : true;
     bool shippable = false;
     bool package = false;
+    FunctionPartitionInfo* partInfo = NULL;
     bool proIsProcedure = stmt->isProcedure;
     if (!OidIsValid(pkg_oid)) {
         u_sess->plsql_cxt.debug_query_string = pstrdup(queryString);
@@ -1156,7 +1179,7 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     List *functionOptions = compute_attributes_sql_style((const List *)stmt->options, &as_clause, &language,
                                                          &isWindowFunc, &volatility, &isStrict, &security, &isLeakProof,
                                                          &proconfig, &procost, &prorows, &fenced, &shippable, &package,
-                                                         &isPipelined);
+                                                         &isPipelined, &partInfo);
 
     pipelined_function_sanity_check(stmt, isPipelined);
 
@@ -1320,6 +1343,28 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         CheckWindowFuncValid(languageOid, prosrc_str);
     }
 
+    if (partInfo != NULL) {
+        int numargs;
+        Datum* argnames = NULL;
+        int i = 0;
+        deconstruct_array(parameterNames, TEXTOID, -1, false, 'i', &argnames, NULL, &numargs);
+        for (i = 0; i < numargs; i++) {
+            char* pname = TextDatumGetCString(argnames[i]);
+
+            if (strcmp(partInfo->partitionCursor, pname) == 0) {
+                partInfo->partitionCursorIndex = i;
+                break;
+            }
+        }
+
+        if (i == numargs || parameterTypes->values[i] != REFCURSOROID) {
+            ereport(ERROR, (errmsg("partition expr must be cursor-type parameter")));
+        }
+
+        u_sess->plsql_cxt.parallel_cursor_arg_name = MemoryContextStrdup(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), partInfo->partitionCursor);
+    }
+
     /*
      * And now that we have all the parameters, and know we're permitted to do
      * so, go ahead and create the function.
@@ -1354,7 +1399,8 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         param_type_depend_ext,
         ret_type_depend_ext,
         stmt,
-        isPipelined);
+        isPipelined,
+        partInfo);
 
     CreateFunctionComment(address.objectId, functionOptions);
     pfree_ext(param_type_depend_ext);
@@ -1718,6 +1764,9 @@ void RemoveFunctionById(Oid funcOid)
 
         heap_close(relation, RowExclusiveLock);
     }
+
+    /* delete pg_proc_ext tuple */
+    DeletePgProcExt(funcOid);
 
     /* Recode time of delete function. */
     if (funcOid != InvalidOid) {
@@ -2605,7 +2654,8 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
                 &fencedItem,
                 &shippable_item,
                 &package_item,
-                &pipelined_item)) {
+                &pipelined_item,
+                NULL)) {
             continue;
         } else if (compute_b_attribute(defel)) {
             /* recognized b compatibility options */
@@ -2717,6 +2767,11 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
     CatalogUpdateIndexes(rel, tup);
 
     CreateFunctionComment(funcOid, alterOptions, true);
+
+    /* if non-immutable is specified, clear parallel_enable info */
+    if (procForm->provolatile != PROVOLATILE_IMMUTABLE) {
+        DeletePgProcExt(funcOid);
+    }
 
     /* Recode time of alter funciton. */
     if (OidIsValid(funcOid)) {

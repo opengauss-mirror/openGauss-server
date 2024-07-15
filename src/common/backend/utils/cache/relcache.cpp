@@ -94,6 +94,7 @@
 #include "catalog/pg_partition.h"
 #include "catalog/pg_pltemplate.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
@@ -349,6 +350,7 @@ static const FormData_pg_attribute Desc_pg_replication_origin[Natts_pg_replicati
 };
 static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
 static const FormData_pg_attribute Desc_gs_sql_patch_origin[Natts_gs_sql_patch] = {Schema_gs_sql_patch};
+static const FormData_pg_attribute Desc_pg_proc_ext[Natts_pg_proc_ext] = {Schema_pg_proc_ext};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -749,6 +751,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_pg_app_workloadgroup_mapping,
         Desc_pg_app_workloadgroup_mapping,
+        false,
+        true},
+    {ProcedureExtensionRelationId,
+        "pg_proc_ext",
+        ProcedureExtensionRelationId_Rowtype_Id,
+        false,
+        false,
+        Natts_pg_proc_ext,
+        Desc_pg_proc_ext,
         false,
         true},
     {EnumRelationId, "pg_enum", EnumRelation_Rowtype_Id, false, true, Natts_pg_enum, Desc_pg_enum, false, true},

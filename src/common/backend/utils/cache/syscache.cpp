@@ -70,6 +70,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
@@ -645,12 +646,12 @@ const cachedesc cacheinfo[] = {
         1,
         {Anum_streaming_cont_query_matrelid, 0, 0, 0},
         STREAMING_CONT_QUERY_MATRELID_INDEX_ID_NBUCKETS},
+#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQOID */
         StreamingContQueryOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         STREAMING_CONT_QUERY_OID_INDEX_ID_NBUCKETS},
-#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQRELID */
         StreamingContQueryRelidIndexId,
         1,
@@ -663,6 +664,12 @@ const cachedesc cacheinfo[] = {
         STREAMING_CONT_QUERY_SCHEMA_CHANGE_INDEX_ID_NBUCKETS},
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
+    {ProcedureExtensionRelationId,     /* PROCEDUREEXTENSIONOID */
+        ProcExtProcOidIndexId,
+        1,
+        {Anum_pg_proc_ext_proc_oid, 0, 0},
+        8
+    },
     {EventTriggerRelationId,            /* EVENTTRIGGERNAME */
         EventTriggerNameIndexId,
         1,

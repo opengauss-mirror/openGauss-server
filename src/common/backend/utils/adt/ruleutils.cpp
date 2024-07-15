@@ -52,6 +52,7 @@
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_package.h"
+#include "catalog/pg_proc_ext.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
 #include "commands/tablespace.h"
@@ -66,6 +67,7 @@
 #endif
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/parsenodes_common.h"
 #include "optimizer/clauses.h"
 #include "optimizer/tlist.h"
 #include "parser/keywords.h"
@@ -254,6 +256,7 @@ static text* pg_get_expr_worker(text* expr, Oid relid, const char* relname, int 
 static int print_function_arguments(StringInfo buf, HeapTuple proctup, bool print_table_args, bool print_defaults);
 static void print_function_ora_arguments(StringInfo buf, HeapTuple proctup);
 static void print_function_rettype(StringInfo buf, HeapTuple proctup);
+static void print_parallel_enable(StringInfo buf, HeapTuple procTup, int2 parallelCursorSeq, Oid funcid);
 static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps);
 #ifdef PGXC
 static void set_deparse_plan(deparse_namespace* dpns, Plan* plan);
@@ -4795,6 +4798,11 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     else if (!proIsProcedure)
         appendStringInfoString(&buf, " NOT SHIPPABLE");
 
+    int2 parallelCursorSeq = GetParallelCursorSeq(funcid);
+    if (parallelCursorSeq != -1) {
+        print_parallel_enable(&buf, proctup, parallelCursorSeq, funcid);
+    }
+
     Datum propackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isnull);
     if (!isnull && DatumGetBool(propackage))
         appendStringInfoString(&buf, " PACKAGE");
@@ -5133,6 +5141,39 @@ static int print_function_arguments(StringInfo buf, HeapTuple proctup, bool prin
     }
     pfree_ext(is_client_logic);
     return argsprinted;
+}
+
+static void print_parallel_enable(StringInfo buf, HeapTuple procTup, int2 parallelCursorSeq, Oid funcid)
+{
+    bool isNull = false;
+    /* Get argument names, if available */
+    Datum proargnames = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proargnames, &isNull);
+    Datum* elems = NULL;
+    int nelems;
+
+    Assert(!isNull);
+    deconstruct_array(DatumGetArrayTypeP(proargnames), TEXTOID, -1, false, 'i', &elems, NULL, &nelems);
+
+    appendStringInfo(buf, " PARALLEL_ENABLE (PARTITION %s BY ", TextDatumGetCString(elems[parallelCursorSeq]));
+
+    FunctionPartitionStrategy strategy;
+    List* partkey = NIL;
+    strategy = GetParallelStrategyAndKey(funcid, &partkey);
+
+    if (strategy == FUNC_PARTITION_ANY) {
+        appendStringInfoString(buf, "ANY)");
+    } else if (strategy == FUNC_PARTITION_HASH) {
+        appendStringInfoString(buf, "HASH(");
+        ListCell* lc = NULL;
+        foreach (lc, partkey) {
+            char* keyName = (char*)lfirst(lc);
+            if (lnext(lc) != NULL) {
+                appendStringInfo(buf, "%s,", keyName);
+            } else {
+                appendStringInfo(buf, "%s))", keyName);
+            }
+        }
+    }
 }
 
 /*

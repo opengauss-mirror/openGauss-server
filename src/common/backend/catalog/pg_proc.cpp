@@ -28,6 +28,7 @@
 #include "catalog/gs_package.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_synonym.h"
@@ -1064,7 +1065,8 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
     bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate,
-    TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt, bool isPipelined)
+    TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt, bool isPipelined,
+    FunctionPartitionInfo* partInfo)
 {
     Oid retval;
     int parameterCount;
@@ -1838,6 +1840,9 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
 
     /* Post creation hook for new function */
     InvokeObjectAccessHook(OAT_POST_CREATE, ProcedureRelationId, retval, 0, NULL);
+
+    /* Record PARALLEL_ENABLE PARTITION BY INFO */
+    InsertPgProcExt(retval, partInfo);
 
     /* Recode the procedure create time. */
     if (OidIsValid(retval)) {

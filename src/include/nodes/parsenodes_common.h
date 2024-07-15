@@ -328,6 +328,19 @@ typedef struct SortBy {
     int location;             /* operator location, or -1 if none/unknown */
 } SortBy;
 
+typedef enum FunctionPartitionStrategy {
+    FUNC_PARTITION_ANY = 0,
+    FUNC_PARTITION_HASH
+} FunctionPartitionStrategy;
+
+typedef struct FunctionPartitionInfo {
+    NodeTag type;
+    FunctionPartitionStrategy strategy;
+    char* partitionCursor;
+    int partitionCursorIndex;
+    List* partitionCols;
+} FunctionPartitionInfo;
+
 /*
  * WindowDef - raw representation of WINDOW and OVER clauses
  *

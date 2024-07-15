@@ -363,8 +363,11 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
 
     /* Save the finished struct in the query's simple_rel_array */
     root->simple_rel_array[relid] = rel;
-    if (rel->rtekind == RTE_RELATION)
+    if (rel->rtekind == RTE_RELATION) {
         set_local_rel_size(root, rel);
+    } else if (rel->rtekind == RTE_FUNCTION) {
+        rel->cursorDop = rte->cursorDop;
+    }
 
     /*
      * This is a convenient spot at which to note whether rels participating

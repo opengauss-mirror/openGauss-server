@@ -359,6 +359,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	struct CondInfo*	condinfo;
 	RotateClause         *rotateinfo;
 	UnrotateClause       *unrotateinfo;
+	FunctionPartitionInfo *funcPartInfo;
 }
 
 %type <node>	stmt schema_stmt
@@ -583,9 +584,10 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <lockstrength> for_locking_strength
 %type <node>	for_locking_item
 %type <list>	for_locking_clause opt_for_locking_clause for_locking_items
-%type <list>	locked_rels_list
+%type <list>	locked_rels_list colid_list
 %type <boolean>	opt_all
 
+%type <funcPartInfo> parallel_partition_opt
 %type <node>	join_outer join_qual
 %type <jtype>	join_type
 
@@ -939,7 +941,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
 
-	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
+	PACKAGE PACKAGES PARALLEL_ENABLE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 	PIPELINED
 /* PGXC_BEGIN */
 	POOL PRECEDING PRECISION
@@ -17012,6 +17014,14 @@ common_func_opt_item:
 				{
 					$$ = makeDefElem("shippable", (Node*)makeInteger(FALSE));
 				}
+			| PARALLEL_ENABLE parallel_partition_opt
+				{
+					if (!DB_IS_CMPT(A_FORMAT)) {
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										errmsg("PARALLEL_ENABLE is only supported in A compatibility database.")));
+					}
+					$$ = makeDefElem("parallel_enable", (Node*)$2);
+				}
 			| EXTERNAL SECURITY DEFINER
 				{
 					$$ = makeDefElem("security", (Node *)makeInteger(TRUE));
@@ -17074,6 +17084,55 @@ common_func_opt_item:
 					BCompatibilityOptionSupportCheck($1);
 					$$ = makeDefElem("comment", (Node *)makeString($2));
 			    }
+		;
+
+parallel_partition_opt:
+			'(' PARTITION param_name BY ANY ')'
+				{
+					$$ = makeNode(FunctionPartitionInfo);
+					$$->strategy = FUNC_PARTITION_ANY;
+					$$->partitionCursor = $3;
+
+				}
+			| '(' PARTITION param_name BY IDENT '(' colid_list ')' ')'
+				{
+					if (strcmp($5, "hash") != 0) {
+						const char* message = "Un-support feature";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("unrecognized option \"%s\"", $3)));	
+					}
+					$$ = makeNode(FunctionPartitionInfo);
+					$$->strategy = FUNC_PARTITION_HASH;
+					$$->partitionCursor = $3;
+					$$->partitionCols = $7;
+				}
+			| '(' PARTITION param_name BY RANGE '(' colid_list ')' ')'
+				{
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("PARALLEL_ENABLE PARTITION BY RANGE is not yet supported.")));
+				}
+			| '(' PARTITION param_name BY VALUE_P '(' ColId ')' ')'
+				{
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("PARALLEL_ENABLE PARTITION BY VALUE is not yet supported.")));
+				}
+			| /* EMPTY */
+				{
+					$$ = NULL;
+				}
+
+colid_list:
+			ColId
+				{
+					$$ = list_make1($1);
+				}
+			| colid_list ',' ColId
+				{
+					$$ = lappend($1, $3);
+				}
 		;
 
 createfunc_opt_item:
@@ -30144,6 +30203,7 @@ unreserved_keyword:
 			| OWNER
 			| PACKAGE
 			| PACKAGES
+			| PARALLEL_ENABLE
 			| PARSER
 			| PARTIAL %prec PARTIAL_EMPTY_PREC
 			| PARTITION
