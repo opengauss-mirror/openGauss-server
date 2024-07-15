@@ -1136,7 +1136,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
      * support normal row table unless it is partitioned.
      * The partition table can be parallelized when partItrs > u_sess->opt_cxt.query_dop.
      */
-    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (!rel->is_ustore) &&
+    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) &&
                         (rel->locator_type != LOCATOR_TYPE_REPLICATED) && (rte->tablesample == NULL);
     if (!isrp) {
 #endif

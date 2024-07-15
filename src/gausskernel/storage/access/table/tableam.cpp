@@ -925,6 +925,10 @@ void UHeapamScanMarkpos(TableScanDesc sscan)
     return UHeapMarkPos(sscan);
 }
 
+void UHeapamScanInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
+{
+    return UeapInitParallelSeqscan(sscan, dop, dir);
+}
 
 void UHeapamScanEndscan(TableScanDesc sscan)
 {
@@ -1216,7 +1220,7 @@ static const TableAmRoutine g_ustoream_methods = {
     scan_restrpos : UHeapamScanRestrpos,
     scan_markpos : UHeapamScanMarkpos,
 
-    scan_init_parallel_seqscan : HeapamScanInitParallelSeqscan,
+    scan_init_parallel_seqscan : UHeapamScanInitParallelSeqscan,
     scan_getnexttuple : UHeapamScanGetnexttuple,
     scan_GetNextBatch : UHeapamGetNextBatchMode,
     scan_getpage : UHeapamScanGetpage,

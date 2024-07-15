@@ -89,36 +89,46 @@ FORCE_INLINE
 bool NextUpage(UHeapScanDesc scan, ScanDirection dir, BlockNumber& page)
 {
     bool finished = false;
-    /*
-     * advance to next/prior page and detect end of scan
-     */
-    if (BackwardScanDirection == dir) {
-        finished = (page == scan->rs_base.rs_startblock);
-        if (page == 0) {
-            page = scan->rs_base.rs_nblocks;
-        }
-        page--;
-    } else {
+    if (scan->dop > 1) {
+        Assert(scan->rs_parallel == NULL);
+        Assert(dir == ForwardScanDirection);
         page++;
-        if (page >= scan->rs_base.rs_nblocks) {
-            page = 0;
+        if ((page - scan->rs_base.rs_startblock) % PARALLEL_SCAN_GAP == 0) {
+            page += (scan->dop - 1) * PARALLEL_SCAN_GAP;
         }
-        finished = (page == scan->rs_base.rs_startblock);
-
+        finished = (page >= scan->rs_base.rs_nblocks);
+    } else {
         /*
-         * Report our new scan position for synchronization purposes. We
-         * don't do that when moving backwards, however. That would just
-         * mess up any other forward-moving scanners.
-         *
-         * Note: we do this before checking for end of scan so that the
-         * final state of the position hint is back at the start of the
-         * rel.  That's not strictly necessary, but otherwise when you run
-         * the same query multiple times the starting position would shift
-         * a little bit backwards on every invocation, which is confusing.
-         * We don't guarantee any specific ordering in general, though.
-         */
-        if (scan->rs_allow_sync) {
-            ss_report_location(scan->rs_base.rs_rd, page);
+        * advance to next/prior page and detect end of scan
+        */
+        if (BackwardScanDirection == dir) {
+            finished = (page == scan->rs_base.rs_startblock);
+            if (page == 0) {
+                page = scan->rs_base.rs_nblocks;
+            }
+            page--;
+        } else {
+            page++;
+            if (page >= scan->rs_base.rs_nblocks) {
+                page = 0;
+            }
+            finished = (page == scan->rs_base.rs_startblock);
+
+            /*
+            * Report our new scan position for synchronization purposes. We
+            * don't do that when moving backwards, however. That would just
+            * mess up any other forward-moving scanners.
+            *
+            * Note: we do this before checking for end of scan so that the
+            * final state of the position hint is back at the start of the
+            * rel.  That's not strictly necessary, but otherwise when you run
+            * the same query multiple times the starting position would shift
+            * a little bit backwards on every invocation, which is confusing.
+            * We don't guarantee any specific ordering in general, though.
+            */
+            if (scan->rs_allow_sync) {
+                ss_report_location(scan->rs_base.rs_rd, page);
+            }
         }
     }
 
@@ -684,6 +694,7 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys, Pa
     uscan->rs_base.rs_ntuples = 0;
     uscan->rs_cutup = NULL;
     uscan->rs_parallel = parallel_scan;
+    uscan->dop = 1;
     if (uscan->rs_parallel != NULL) {
         /* For parallel scan, believe whatever ParallelHeapScanDesc says. */
         uscan->rs_base.rs_syncscan = uscan->rs_parallel->phs_syncscan;
@@ -780,6 +791,7 @@ static void UHeapinitscan(TableScanDesc sscan, ScanKey key, bool isRescan)
     scan->rs_base.rs_inited = false;
     scan->rs_base.rs_cbuf = InvalidBuffer;
     scan->rs_base.rs_cblock = InvalidBlockNumber;
+    scan->dop = 1;
 
     if (scan->rs_base.rs_rd->rd_tam_ops == TableAmUstore) {
         scan->rs_base.lastVar = -1;
@@ -1192,6 +1204,34 @@ void UHeapRestRpos(TableScanDesc sscan)
             UHeapScanGetTuple(scan, NoMovementScanDirection);
         }
     }
+}
+
+void UeapInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
+{
+    HeapScanDesc scan = (HeapScanDesc) sscan;
+
+    if (!scan || scan->rs_base.rs_nblocks == 0) {
+        return;
+    }
+
+    if (dop <= 1) {
+        return;
+    }
+
+    scan->dop = dop;
+
+    uint32 paral_blocks = u_sess->stream_cxt.smp_id * PARALLEL_SCAN_GAP;
+
+    /* If not enough pages to divide into every worker. */
+    if (scan->rs_base.rs_nblocks <= paral_blocks) {
+        scan->rs_base.rs_startblock = 0;
+        scan->rs_base.rs_nblocks = 0;
+        return;
+    }
+    if(dir == BackwardScanDirection){
+        ereport(ERROR, (errmsg("Backward Scan Direction is not support for ustore parallel seq scan.")));
+    }
+    scan->rs_base.rs_startblock = paral_blocks;
 }
 
 UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir, bool* has_cur_xact_write)
