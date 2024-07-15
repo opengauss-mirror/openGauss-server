@@ -239,6 +239,7 @@ typedef struct knl_instance_attr_storage {
     bool uwal_rpc_compression_switch;
     bool uwal_rpc_flowcontrol_switch;
     int uwal_rpc_flowcontrol_value;
+    int uwal_truncate_interval;
     bool uwal_async_append_switch;
 } knl_instance_attr_storage;
 

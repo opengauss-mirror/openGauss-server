@@ -1021,14 +1021,15 @@ int walRcvWriteUwal(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInf
     nbytes = (int)Min((int64)MaxReadUwalBytes, Min(uwalFreeOffset, readLen));
     if (startPtr / XLogSegSize != t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset / XLogSegSize) {
         if (startPtr / XLogSegSize < writePtr / XLogSegSize) {
-            startPtr = (startPtr / XLogSegSize + 1) * XLogSegSize;
+            uint64_t segNum = (writePtr / XLogSegSize) - (startPtr / XLogSegSize);
+            startPtr = (writePtr / XLogSegSize) * XLogSegSize;
             SpinLockAcquire(&uwalrcv->mutex);
             uwalrcv->startPtr = startPtr;
             uwalrcv->flushPtr = startPtr;
             uwalrcv->writeNoWait = false;
             SpinLockRelease(&uwalrcv->mutex);
             END_CRIT_SECTION();
-            return XLogSegSize;
+            return segNum * XLogSegSize;
         }
         END_CRIT_SECTION();
         return 0;
@@ -1170,6 +1171,9 @@ int uwalRcvStateInit(UwalrcvWriterState *uwalrcv, UwalInfo info)
     uwalrcv->needQuery = false;
     uwalrcv->needXlogCatchup = true;
     SpinLockRelease(&uwalrcv->mutex);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uwalrcv->truncateTimeStamp = tv.tv_sec;
 
     SpinLockAcquire(&uwalrcv->writeMutex);
     uwalrcv->writePtr = info.info.writeOffset;
@@ -1386,7 +1390,7 @@ static int WalRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrc
     }
 
     int loop = 0;
-    while (needQuery && loop++ < 20) {
+    while (needQuery && loop++ < 2) {
         ret = GsUwalQuery(&info->id, &(info->info));
         if (ret != 0) {
             ereport(WARNING, (errmsg("GsUwalQuery return failed")));
@@ -1408,7 +1412,12 @@ static int WalRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrc
         pg_usleep(100000);
     }
 
-    if (needQuery || (startPtr / XLogSegSize == truncatePtr / XLogSegSize)) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t elapsed = tv.tv_sev - uwalrcv->truncateTimeStamp;
+
+    if (needQuery || (startPtr / XLogSegSize == truncatePtr / XLogSegSize)
+        || elapsed < g_instance.attr.attr_storage.uwal_truncate_interval) {
         return 0;
     }
 
@@ -1421,6 +1430,8 @@ static int WalRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrc
     }
     START_CRIT_SECTION();
     ret = GsUwalTruncate(&(info->id), startPtr);
+    gettimeofday(&tv, NULL);
+    uwalrcv->truncateTimeStamp = tv.tv_sec;
     if (0 != ret) {
         ereport(LOG, (errmsg("WalRcvUwalTruncate failed retCode: %d", ret)));
         END_CRIT_SECTION();
