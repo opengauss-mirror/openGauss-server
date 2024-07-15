@@ -1998,7 +1998,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     // we need to lock low mode on partiton table
     if (vacstmt->options & VACOPT_FULL) {
         lmode = ExclusiveLock;
-        lmodePartTable = ShareUpdateExclusiveLock;
+        lmodePartTable = ExclusiveLock;
     } else {
         lmode = ShareUpdateExclusiveLock;
         lmodePartTable = ShareUpdateExclusiveLock;
