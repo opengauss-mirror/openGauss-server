@@ -100,6 +100,49 @@ create or replace package pck6 is
 va pck9.r1;
 end pck6;
 /
+-- test parallel_enable
+CREATE TYPE my_outrec_typ AS (
+    employee_id numeric(6,0),
+    department_id numeric,
+    first_name character varying(30),
+    last_name character varying(30),
+    email character varying(30),
+    phone_number character varying(30)
+);
+create or replace package my_pkg as
+    FUNCTION pkg_f_1 (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any);
+    FUNCTION pkg_f_2 (p1 SYS_REFCURSOR, p2 SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p1 by hash(a,b));
+end my_pkg;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+NOTICE:  immutable would be set if parallel_enable specified
+create or replace package body my_pkg as
+    FUNCTION pkg_f_1 (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END pkg_f_1;
+    FUNCTION pkg_f_2 (p1 SYS_REFCURSOR, p2 SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p1 by hash(a,b)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p1 INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p1%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END pkg_f_2;
+end my_pkg;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+NOTICE:  immutable would be set if parallel_enable specified
+NOTICE:  immutable would be set if parallel_enable specified
+NOTICE:  immutable would be set if parallel_enable specified
 \! @abs_bindir@/gs_dump dump_package_db -p @portstring@ -f @abs_bindir@/dump_package.tar -F t >/dev/null 2>&1; echo $?
 0
 \! @abs_bindir@/gs_restore -d restore_package_db -p @portstring@ @abs_bindir@/dump_package.tar >/dev/null 2>&1; echo $?
@@ -112,6 +155,32 @@ call rowtype_pckg.rowtype_func();
   2 | b
 (2 rows)
 
+\sf my_pkg.pkg_f_1
+CREATE OR REPLACE FUNCTION public.my_pkg.pkg_f_1(p SYS_REFCURSOR)
+ RETURN SETOF my_outrec_typ IMMUTABLE NOT FENCED NOT SHIPPABLE PARALLEL_ENABLE (PARTITION p BY ANY) PACKAGE
+AS  DECLARE out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END ;
+/
+\sf my_pkg.pkg_f_2
+CREATE OR REPLACE FUNCTION public.my_pkg.pkg_f_2(p1 SYS_REFCURSOR, p2 SYS_REFCURSOR)
+ RETURN SETOF my_outrec_typ IMMUTABLE NOT FENCED NOT SHIPPABLE PARALLEL_ENABLE (PARTITION p1 BY HASH(a,b)) PACKAGE
+AS  DECLARE out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p1 INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p1%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END ;
+/
 \c regression
 drop database if exists restore_subpartition_db;
 NOTICE:  database "restore_subpartition_db" does not exist, skipping

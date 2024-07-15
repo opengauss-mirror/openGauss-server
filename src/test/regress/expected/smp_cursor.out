@@ -1,0 +1,523 @@
+create schema smp_cursor;
+set search_path=smp_cursor;
+create table t1(a int, b int, c int, d bigint);
+insert into t1 values(generate_series(1, 100), generate_series(1, 10), generate_series(1, 2), generate_series(1, 50));
+analyze t1;
+set query_dop=1002;
+explain (costs off) select * from t1;
+               QUERY PLAN               
+----------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/2)
+   ->  Seq Scan on t1
+(2 rows)
+
+set enable_auto_explain = on;
+set auto_explain_level = notice;
+-- test cursor smp
+begin;
+declare xc no scroll cursor for select * from t1;
+fetch xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration:.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+end;
+-- test plan hint
+begin;
+declare xc no scroll cursor for select /*+ set(query_dop 1) */ * from t1;
+fetch xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select /*+ set(query_dop 1) */ * from t1;
+Name: datanode1
+--?Seq Scan on smp_cursor.t1.*
+  Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+end;
+set query_dop = 1;
+begin;
+declare xc no scroll cursor for select /*+ set(query_dop 1002) */ * from t1;
+fetch xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select /*+ set(query_dop 1002) */ * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration:.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+end;
+-- scroll cursor can not smp
+set query_dop = 1002;
+begin;
+declare xc cursor for select /*+ set(query_dop 1002) */ * from t1;
+fetch xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc cursor for select /*+ set(query_dop 1002) */ * from t1;
+Name: datanode1
+--?Seq Scan on smp_cursor.t1.*
+  Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a | b | c | d 
+---+---+---+---
+ 1 | 1 | 1 | 1
+(1 row)
+
+end;
+-- cursor declared with plpgsql can not smp
+declare
+    cursor xc no scroll is select * from t1;
+    tmp t1%ROWTYPE;
+begin
+    open xc;
+    fetch xc into tmp;
+    close xc;
+end;
+/
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select * from t1
+Name: datanode1
+--?Seq Scan on smp_cursor.t1.*
+  Output: a, b, c, d
+
+
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at FETCH
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at FETCH
+-- test resource conflict checking
+begin;
+declare xc no scroll cursor for select * from t1;
+drop table t1;
+ERROR:  cannot DROP TABLE "t1" because it is being used by active queries in this session
+end;
+-- test cursor with hold
+begin;
+declare xc no scroll cursor with hold for select * from t1;
+fetch xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor with hold for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration:.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+end;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor with hold for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration:.*
+
+fetch absolute 10 xc;
+ a  | b  | c | d  
+----+----+---+----
+--?.*
+(1 row)
+
+close xc;
+-- test cursor backward error
+begin;
+declare xc no scroll cursor for select * from t1;
+fetch absolute 10 xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a  | b  | c | d  
+----+----+---+----
+--?.*
+(1 row)
+
+fetch absolute 9 xc;
+ERROR:  cursor with stream plan do not support scan backward.
+end;
+-- test cursor other operate
+begin;
+declare xc no scroll cursor for select * from t1;
+fetch first xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+fetch forward xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+fetch absolute 5 xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a | b | c | d 
+---+---+---+---
+--?.*
+(1 row)
+
+fetch relative 5 xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+ a  | b  | c | d  
+----+----+---+----
+--?.*
+(1 row)
+
+fetch all xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+  a  | b  | c | d  
+-----+----+---+----
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(90 rows)
+
+move xc;
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?duration.*
+
+end;
+drop schema smp_cursor cascade;
+NOTICE:  drop cascades to table t1

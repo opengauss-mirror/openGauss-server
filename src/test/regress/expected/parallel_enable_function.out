@@ -1,0 +1,670 @@
+create schema parallel_enable_function;
+set search_path=parallel_enable_function;
+create table employees (employee_id number(6), department_id NUMBER, first_name varchar2(30), last_name varchar2(30), email varchar2(30), phone_number varchar2(30));
+BEGIN  
+   FOR i IN 1..100 LOOP  
+      INSERT INTO employees VALUES (i, 60, 'abc', 'def', '123', '123');  
+   END LOOP;  
+   COMMIT;
+END;  
+/
+CREATE TYPE my_outrec_typ AS (
+    employee_id numeric(6,0),
+    department_id numeric,
+    first_name character varying(30),
+    last_name character varying(30),
+    email character varying(30),
+    phone_number character varying(30)
+);
+-- create srf function with parallel_enable
+CREATE OR REPLACE FUNCTION hash_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END hash_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+CREATE OR REPLACE FUNCTION any_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END any_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+-- create function with multi-partkey
+CREATE OR REPLACE FUNCTION multi_partkey_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id, department_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END multi_partkey_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+-- create pipelined function
+create type table_my_outrec_typ is table of my_outrec_typ;
+CREATE OR REPLACE FUNCTION pipelined_table_f (p SYS_REFCURSOR) RETURN table_my_outrec_typ pipelined parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+      FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+      EXIT WHEN p%NOTFOUND;
+	  pipe row(out_rec);
+    END LOOP;
+END pipelined_table_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+CREATE OR REPLACE FUNCTION pipelined_array_f (p SYS_REFCURSOR) RETURN _employees PIPELINED parallel_enable (partition p by any) 
+   IS
+    in_rec my_outrec_typ;
+   BEGIN
+LOOP
+    FETCH p INTO in_rec;
+    EXIT WHEN p%NOTFOUND;
+    PIPE ROW (in_rec);
+    END LOOP;
+END pipelined_array_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+-- without partition by
+CREATE OR REPLACE FUNCTION no_partition_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END no_partition_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+-- call function
+set query_dop = 1002;
+explain (costs off) select * from hash_srf(cursor (select * from employees)) limit 10;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on hash_srf
+(4 rows)
+
+select * from hash_srf(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+explain (costs off) select * from any_srf(cursor (select * from employees)) limit 10;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on any_srf
+(4 rows)
+
+select * from any_srf(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+explain (costs off) select * from pipelined_table_f(cursor (select * from employees)) limit 10;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on pipelined_table_f
+(4 rows)
+
+select * from pipelined_table_f(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+explain (costs off) select * from multi_partkey_srf(cursor (select * from employees)) limit 10;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on multi_partkey_srf
+(4 rows)
+
+select * from multi_partkey_srf(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+explain (costs off) select * from pipelined_array_f(cursor (select * from employees)) limit 10;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on pipelined_array_f
+(4 rows)
+
+select * from pipelined_array_f(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+explain (costs off) select * from no_partition_srf(cursor (select * from employees)) limit 10;
+               QUERY PLAN                
+-----------------------------------------
+ Limit
+   ->  Function Scan on no_partition_srf
+(2 rows)
+
+select * from no_partition_srf(cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+           1 |            60 | abc        | def       | 123   | 123
+           2 |            60 | abc        | def       | 123   | 123
+           3 |            60 | abc        | def       | 123   | 123
+           4 |            60 | abc        | def       | 123   | 123
+           5 |            60 | abc        | def       | 123   | 123
+           6 |            60 | abc        | def       | 123   | 123
+           7 |            60 | abc        | def       | 123   | 123
+           8 |            60 | abc        | def       | 123   | 123
+           9 |            60 | abc        | def       | 123   | 123
+          10 |            60 | abc        | def       | 123   | 123
+(10 rows)
+
+-- test count(*)
+explain (costs off) select count(*) from hash_srf(cursor (select * from employees));
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Function Scan on hash_srf
+(4 rows)
+
+select count(*) from hash_srf(cursor (select * from employees));
+ count 
+-------
+   100
+(1 row)
+
+-- test multi cursor args
+CREATE OR REPLACE FUNCTION multi_cursor_srf (p1 SYS_REFCURSOR, p2 SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p1 by hash(employee_id)) IS
+    out_rec_1 my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+    out_rec_2 my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p1 INTO out_rec_1.employee_id, out_rec_1.department_id, out_rec_1.first_name, out_rec_1.last_name, out_rec_1.email, out_rec_1.phone_number;  -- input row
+        EXIT WHEN p1%NOTFOUND;
+        FETCH p2 INTO out_rec_2.employee_id, out_rec_2.department_id, out_rec_2.first_name, out_rec_2.last_name, out_rec_2.email, out_rec_2.phone_number;  -- input row
+        EXIT WHEN p2%NOTFOUND;
+        return next out_rec_1;
+    END LOOP;
+    RETURN;
+END multi_cursor_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+explain (costs off) select * from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees)) limit 10;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on multi_cursor_srf
+(4 rows)
+
+select * from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees)) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(10 rows)
+
+explain (costs off) select count(*) from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees));
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Function Scan on multi_cursor_srf
+(4 rows)
+
+select count(*) from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees));
+ count 
+-------
+   100
+(1 row)
+
+-- nested function call
+explain (costs off) select * from hash_srf(cursor (select * from hash_srf(cursor (select * from employees)))) limit 10;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Function Scan on hash_srf
+(4 rows)
+
+select * from hash_srf(cursor (select * from hash_srf(cursor (select * from employees)))) limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+-- functionscan join
+explain (costs off) select * from hash_srf(cursor (select * from employees)) a, hash_srf(cursor (select * from employees)) b limit 10;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Nested Loop
+                     ->  Streaming(type: BROADCAST dop: 2/2)
+                           ->  Function Scan on hash_srf a
+                     ->  Function Scan on hash_srf b
+(7 rows)
+
+select * from hash_srf(cursor (select * from employees)) a, hash_srf(cursor (select * from employees)) b limit 10;
+ employee_id | department_id | first_name | last_name | email | phone_number | employee_id | department_id | first_name | last_name | email | phone_number 
+-------------+---------------+------------+-----------+-------+--------------+-------------+---------------+------------+-----------+-------+--------------
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+--?*
+(10 rows)
+
+-- targetlist
+explain (costs off) select hash_srf(cursor (select * from employees)) limit 10;
+  QUERY PLAN  
+--------------
+ Limit
+   ->  Result
+(2 rows)
+
+select hash_srf(cursor (select * from employees)) limit 10;
+        hash_srf         
+-------------------------
+ (1,60,abc,def,123,123)
+ (2,60,abc,def,123,123)
+ (3,60,abc,def,123,123)
+ (4,60,abc,def,123,123)
+ (5,60,abc,def,123,123)
+ (6,60,abc,def,123,123)
+ (7,60,abc,def,123,123)
+ (8,60,abc,def,123,123)
+ (9,60,abc,def,123,123)
+ (10,60,abc,def,123,123)
+(10 rows)
+
+-- subquery cannot smp
+explain (costs off) select 1, (select count(*) from hash_srf(cursor (select * from employees)));
+               QUERY PLAN                
+-----------------------------------------
+ Result
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Function Scan on hash_srf
+(4 rows)
+
+select 1, (select count(*) from hash_srf(cursor (select * from employees)));
+ ?column? | count 
+----------+-------
+        1 |   100
+(1 row)
+
+-- test create or replace
+CREATE OR REPLACE FUNCTION any_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END any_srf;
+/
+select parallel_cursor_seq, parallel_cursor_strategy, parallel_cursor_partkey from pg_proc_ext where proc_oid = 'any_srf'::regproc;
+ parallel_cursor_seq | parallel_cursor_strategy | parallel_cursor_partkey 
+---------------------+--------------------------+-------------------------
+(0 rows)
+
+CREATE OR REPLACE FUNCTION any_srf (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END any_srf;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+select parallel_cursor_seq, parallel_cursor_strategy, parallel_cursor_partkey from pg_proc_ext where proc_oid = 'any_srf'::regproc;
+ parallel_cursor_seq | parallel_cursor_strategy | parallel_cursor_partkey 
+---------------------+--------------------------+-------------------------
+                   0 |                        0 | {}
+(1 row)
+
+-- set provolatile. stable/volatile with parallel_enable would throw error
+CREATE OR REPLACE FUNCTION stable_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ stable parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END stable_f;
+/
+ERROR:  only immutable can be set if parallel_enable specified
+CREATE OR REPLACE FUNCTION volatile_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ volatile parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+        LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END volatile_f;
+/
+ERROR:  only immutable can be set if parallel_enable specified
+CREATE OR REPLACE FUNCTION immutable_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ immutable parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END immutable_f;
+/
+-- Alter Function set volatile/stable would clear parallel_cursor info
+alter function immutable_f(p SYS_REFCURSOR) volatile;
+select parallel_cursor_seq, parallel_cursor_strategy, parallel_cursor_partkey from pg_proc_ext where proc_oid = 'immutable_f'::regproc;
+ parallel_cursor_seq | parallel_cursor_strategy | parallel_cursor_partkey 
+---------------------+--------------------------+-------------------------
+(0 rows)
+
+alter function immutable_f(p SYS_REFCURSOR) stable;
+alter function immutable_f(p SYS_REFCURSOR) immutable;
+-- throw error when the operation of parallel cursor is not FETCH CURSOR
+CREATE OR REPLACE FUNCTION invalid_opr_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH absolute 5 from p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END invalid_opr_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+ERROR:  only support FETCH CURSOR for parallel cursor "p"
+CONTEXT:  compilation of PL/pgSQL function "invalid_opr_f" near line 4
+CREATE OR REPLACE FUNCTION invalid_opr_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH backward from p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END invalid_opr_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+ERROR:  only support FETCH CURSOR for parallel cursor "p"
+CONTEXT:  compilation of PL/pgSQL function "invalid_opr_f" near line 4
+CREATE OR REPLACE FUNCTION invalid_opr_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH prior from p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END invalid_opr_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+ERROR:  only support FETCH CURSOR for parallel cursor "p"
+CONTEXT:  compilation of PL/pgSQL function "invalid_opr_f" near line 4
+-- test specified non refcursor type
+CREATE OR REPLACE FUNCTION invalid_type_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition a by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END invalid_type_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+ERROR:  partition expr must be cursor-type parameter
+CREATE OR REPLACE FUNCTION invalid_type_f (p SYS_REFCURSOR, a int) RETURN setof my_outrec_typ parallel_enable (partition a by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH from p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END invalid_type_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+ERROR:  partition expr must be cursor-type parameter
+-- create non-SRF/pipelined function
+CREATE OR REPLACE FUNCTION return_int_f (p SYS_REFCURSOR) RETURN int parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+    res int := 0;
+BEGIN
+    LOOP
+        FETCH from p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        res := res + 1;
+    END LOOP;
+    RETURN res;
+END return_int_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+explain (costs off) select * from return_int_f(cursor (select * from employees));
+          QUERY PLAN           
+-------------------------------
+ Function Scan on return_int_f
+(1 row)
+
+select * from return_int_f(cursor (select * from employees));
+ return_int_f 
+--------------
+          100
+(1 row)
+
+-- declare cursor
+begin;
+declare xc no scroll cursor for select * from employees;
+explain select * from hash_srf('xc');
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Function Scan on hash_srf  (cost=0.25..10.25 rows=1000 width=358)
+(1 row)
+
+end;
+-- test bulk collect
+CREATE OR REPLACE FUNCTION bulk_collect_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by hash(employee_id)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+    emp_tab table_my_outrec_typ;
+BEGIN
+    LOOP
+        FETCH p bulk collect INTO emp_tab limit 5;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        out_rec := emp_tab(emp_tab.first);
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END bulk_collect_f;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+explain (costs off) select count(*) from bulk_collect_f(cursor (select * from employees));
+                    QUERY PLAN                     
+---------------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Function Scan on bulk_collect_f
+(4 rows)
+
+select count(*) from bulk_collect_f(cursor (select * from employees));
+ count 
+-------
+    20
+(1 row)
+
+-- create package
+create or replace package my_pkg as
+    FUNCTION pkg_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any);
+end my_pkg;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+create or replace package body my_pkg as
+    FUNCTION pkg_f (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END pkg_f;
+end my_pkg;
+/
+NOTICE:  immutable would be set if parallel_enable specified
+NOTICE:  immutable would be set if parallel_enable specified
+explain (costs off) select count(*) from my_pkg.pkg_f(cursor (select * from employees));
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Function Scan on pkg_f
+(4 rows)
+
+select count(*) from my_pkg.pkg_f(cursor (select * from employees));
+ count 
+-------
+   100
+(1 row)
+
+drop schema parallel_enable_function cascade;
+NOTICE:  drop cascades to 15 other objects
+DETAIL:  drop cascades to table employees
+drop cascades to type my_outrec_typ
+drop cascades to function hash_srf(refcursor)
+drop cascades to function multi_partkey_srf(refcursor)
+drop cascades to type table_my_outrec_typ
+drop cascades to function pipelined_table_f(refcursor)
+drop cascades to function pipelined_array_f(refcursor)
+drop cascades to function no_partition_srf(refcursor)
+drop cascades to function multi_cursor_srf(refcursor,refcursor)
+drop cascades to function any_srf(refcursor)
+drop cascades to function immutable_f(refcursor)
+drop cascades to function return_int_f(refcursor)
+drop cascades to function bulk_collect_f(refcursor)
+--?drop cascades to package.*
+drop cascades to function parallel_enable_function.pkg_f(refcursor)
