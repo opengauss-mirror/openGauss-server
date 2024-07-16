@@ -7193,7 +7193,7 @@ static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSour
     }
 
     if (dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_entries fail")));
+        ereport(ERROR, (errmsg("set parameter ss_fi_cpu_latency_entries fail")));
         return false;
     }
     return true;
