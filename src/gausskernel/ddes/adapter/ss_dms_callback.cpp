@@ -486,9 +486,6 @@ static void CBSwitchoverResult(void *db_handle, int result)
     } else {
         /* abort and restore state */
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-        if (SS_DISASTER_STANDBY_CLUSTER) {
-            g_instance.dms_cxt.SSReformInfo.in_reform = false;
-        }
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Switchover failed,"
                           "errno: %d.", result)));
     }
