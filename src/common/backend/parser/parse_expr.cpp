@@ -548,6 +548,22 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
             break;
         }
 
+        case T_NanTest: {
+            NanTest* n = (NanTest*)expr;
+
+            n->arg = (Expr*)transformExprRecurse(pstate, (Node*)n->arg);
+            result = expr;
+            break;
+        }
+
+        case T_InfiniteTest: {
+            InfiniteTest* n = (InfiniteTest*)expr;
+
+            n->arg = (Expr*)transformExprRecurse(pstate, (Node*)n->arg);
+            result = expr;
+            break;
+        }
+
         case T_BooleanTest:
             result = transformBooleanTest(pstate, (BooleanTest*)expr);
             break;

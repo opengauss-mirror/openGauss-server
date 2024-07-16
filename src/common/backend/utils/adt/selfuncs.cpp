@@ -1780,6 +1780,141 @@ Selectivity nulltestsel(
 }
 
 /*
+ *		nantestsel		- Selectivity of NanTest Node.
+ */
+Selectivity nantestsel(
+    PlannerInfo* root, NanTestType nantesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo)
+{
+    VariableStatData vardata;
+    vardata.statsTuple = NULL;
+    vardata.freefunc = NULL;
+    vardata.rel = NULL;
+    vardata.var = NULL;
+    double selec;
+
+    examine_variable(root, arg, varRelid, &vardata);
+
+    if (HeapTupleIsValid(vardata.statsTuple)) {
+        Form_pg_statistic stats;
+        double freq_nan;
+
+        stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
+        freq_nan = var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(get_float8_nan()), false, true);
+
+        switch (nantesttype) {
+            case IS_NAN:
+
+                /* Use freq_nan directly. */
+                selec = freq_nan;
+                break;
+            case IS_NOT_NAN:
+
+                selec = 1.0 - stats->stanullfrac - freq_nan;
+                break;
+            default:
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized nantesttype: %d", (int)nantesttype))));
+
+                return (Selectivity)0; /* keep compiler quiet */
+        }
+    } else {
+        /*
+         * No ANALYZE stats available, so make a guess
+         */
+        switch (nantesttype) {
+            case IS_NAN:
+                selec = DEFAULT_UNK_SEL;
+                break;
+            case IS_NOT_NAN:
+                selec = DEFAULT_NOT_UNK_SEL;
+                break;
+            default:
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized nantesttype: %d", (int)nantesttype))));
+                return (Selectivity)0; /* keep compiler quiet */
+        }
+    }
+
+    ReleaseVariableStats(vardata);
+
+    /* result should be in range, but make sure... */
+    CLAMP_PROBABILITY(selec);
+
+    return (Selectivity)selec;
+}
+
+/*
+ *		infinitetestsel		- Selectivity of InfiniteTest Node.
+ */
+Selectivity infinitetestsel(
+    PlannerInfo* root, InfiniteTestType infinitetesttype, Node* arg, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo)
+{
+    VariableStatData vardata;
+    vardata.statsTuple = NULL;
+    vardata.freefunc = NULL;
+    vardata.rel = NULL;
+    vardata.var = NULL;
+    double selec;
+
+    examine_variable(root, arg, varRelid, &vardata);
+
+    if (HeapTupleIsValid(vardata.statsTuple)) {
+        Form_pg_statistic stats;
+        double freq_inf;
+
+        stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
+        freq_inf = var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(get_float8_infinity()), false, true);
+
+        switch (infinitetesttype) {
+            case IS_INFINITE:
+
+                selec = freq_inf;
+                break;
+            case IS_NOT_INFINITE:
+
+                selec = 1.0 - stats->stanullfrac - freq_inf;
+                break;
+            default:
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized infinitetesttype: %d", (int)infinitetesttype))));
+
+                return (Selectivity)0; /* keep compiler quiet */
+        }
+    } else {
+        /*
+         * No ANALYZE stats available, so make a guess
+         */
+        switch (infinitetesttype) {
+            case IS_INFINITE:
+                selec = DEFAULT_UNK_SEL;
+                break;
+            case IS_NOT_INFINITE:
+                selec = DEFAULT_NOT_UNK_SEL;
+                break;
+            default:
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized infinitetesttype: %d", (int)infinitetesttype))));
+                return (Selectivity)0; /* keep compiler quiet */
+        }
+    }
+
+    ReleaseVariableStats(vardata);
+
+    /* result should be in range, but make sure... */
+    CLAMP_PROBABILITY(selec);
+
+    return (Selectivity)selec;
+}
+
+/*
  * strip_array_coercion - strip binary-compatible relabeling from an array expr
  *
  * For array values, the parser normally generates ArrayCoerceExpr conversions,

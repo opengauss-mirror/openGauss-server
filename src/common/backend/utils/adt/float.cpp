@@ -62,6 +62,7 @@ static const uint32 nan[2] = {0xffffffff, 0x7fffffff};
 
 static int float4_cmp_internal(float4 a, float4 b);
 double float8in_internal(char* str, char** s, bool* hasError);
+static double to_binary_float_internal(char* origin_num, bool *err);
 
 #ifndef HAVE_CBRT
 /*
@@ -2923,4 +2924,204 @@ Datum float8_to_interval(PG_FUNCTION_ARGS)
     return DirectFunctionCall2(numeric_to_interval,
                                 DirectFunctionCall1(float8_numeric, val),
                                 Int32GetDatum(typmod));
+}
+
+/*
+ * to_binary_float: convert 'origin_num' to a single precision floating-point number。
+ *
+ * - err: if true, indicate convert failed; if false, indicate convert succeed.
+ */
+static double to_binary_float_internal(char* origin_num, bool *err)
+{
+    char* num = origin_num;
+    double val;
+    char* endptr;
+
+    *err = false;
+
+    if (*num == '\0') {
+        *err = true;
+        return 0;
+    }
+
+    /* skip leading whitespace */
+    while (*num != '\0' && isspace((unsigned char)*num))
+        num++;
+
+    errno = 0;
+    val = strtod(num, &endptr);
+
+    /* change -0 to 0 */
+    if (*num == '-' && val == 0.0) {
+        val += 0.0;
+    }
+
+    // to_binary_float accept 'Nan', '[+-]Inf'
+    if (endptr == num || errno != 0) {
+        int save_errno = errno;
+
+        if (pg_strcasecmp(num, "NaN") == 0) {
+            val = get_float4_nan();
+            endptr = num + 3;
+        } else if (pg_strncasecmp(num, "Infinity", 8) == 0) {
+            val = get_float4_infinity();
+            endptr = num + 8;
+        } else if (pg_strncasecmp(num, "-Infinity", 9) == 0) {
+            val = -get_float4_infinity();
+            endptr = num + 9;
+        } else if (pg_strncasecmp(num, "Inf", 3) == 0) {
+            val = get_float4_infinity();
+            endptr = num + 3;
+        } else if (pg_strncasecmp(num, "-Inf", 4) == 0) {
+            val = -get_float4_infinity();
+            endptr = num + 4;
+        }  else if (save_errno == ERANGE) {
+            // convert to infinite
+            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL)
+                val = (val == 0.0 ? 0 : (val >= HUGE_VAL ? get_float4_infinity() : -get_float4_infinity()));
+        }
+    }
+#ifdef HAVE_BUGGY_SOLARIS_STRTOD
+    else {
+        /*
+         * Many versions of Solaris have a bug wherein strtod sets endptr to
+         * point one byte beyond the end of the string when given "inf" or
+         * "infinity".
+         */
+        if (endptr != num && endptr[-1] == '\0')
+            endptr--;
+    }
+#endif /* HAVE_BUGGY_SOLARIS_STRTOD */
+
+    /* skip trailing whitespace */
+    while (*endptr != '\0' && isspace((unsigned char)*endptr))
+        endptr++;
+
+    if (*endptr != '\0') {
+        *err = true;
+        return 0;
+    }
+
+    if (isinf((float4)val) && !isinf(val)) {
+        val = val < 0 ? -get_float4_infinity() : get_float4_infinity();
+    }
+    if (((float4)val) == 0.0 && val != 0) {
+        val = 0;
+    }
+
+    return val;
+}
+
+/*
+ * to_binary_float_text()  -  convert to a single precision floating-point number.
+ */
+Datum to_binary_float_text(PG_FUNCTION_ARGS)
+{
+    bool str1_null = PG_ARGISNULL(0);
+    bool str2_null = PG_ARGISNULL(1);
+    bool with_default = PG_GETARG_BOOL(2);
+
+    char *num1, *num2;
+    double result, r1, r2;
+    bool err1, err2;
+
+    err1 = true;
+    if (!str1_null) {
+        num1 = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+        r1 = to_binary_float_internal(num1, &err1);
+        pfree_ext(num1);
+    }
+
+    err2 = true;
+    if (with_default && !str2_null) {
+        num2 = TextDatumGetCString(PG_GETARG_TEXT_P(1));
+        r2 = to_binary_float_internal(num2, &err2);
+        pfree_ext(num2);
+    }
+
+    /*
+     * IF str1 is NULL, return NULL, expect with default and str2 convert error.
+     */
+    if (str1_null && with_default && !str2_null && err2) 
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+            errmsg("invalid input syntax for type real")));
+
+    if (str1_null)
+        PG_RETURN_NULL();
+
+    if (!err1) {
+        result = r1;
+    } else if (with_default) {
+        if (str2_null)
+            PG_RETURN_NULL();
+
+        if (err2)
+            ereport(ERROR, 
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input syntax for type real")));
+        else 
+            result = r2;
+    } else {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+            errmsg("invalid input syntax for type real")));
+    }
+
+    PG_RETURN_FLOAT4((float4)result);
+}
+
+/*
+ * to_binary_float_number()
+ */
+Datum to_binary_float_number(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+
+    float8 val = PG_GETARG_FLOAT8(0);
+
+    if (val > FLT_MAX) {
+        val = get_float4_infinity();
+    } else if (val < FLT_MIN) {
+        val = -get_float4_infinity();
+    }
+
+    PG_RETURN_FLOAT4((float4)val);
+}
+
+Datum to_binary_float_text_number(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+
+    bool with_default = PG_GETARG_BOOL(2);
+
+    char *num;
+    double result;
+    bool err;
+
+    err = false;
+    num = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+    result = to_binary_float_internal(num, &err);
+    pfree_ext(num);
+
+    // if str1 convert err, and with default, convert str2
+    if (with_default && err && !PG_ARGISNULL(1)) {
+        err = false;
+        result = PG_GETARG_FLOAT8(1);
+        if (result > FLT_MAX) {
+            result = get_float4_infinity();
+        } else if (result < FLT_MIN) {
+            result = -get_float4_infinity();
+        }
+    } 
+
+    if (err) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+            errmsg("invalid input syntax for type real")));
+    }
+
+    PG_RETURN_FLOAT4((float4)result);
 }

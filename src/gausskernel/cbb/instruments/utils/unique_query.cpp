@@ -645,6 +645,20 @@ void UniqueSql::JumbleExpr(pgssJumbleState* jstate, Node* node)
 
             break;
         }
+        case T_NanTest: {
+            NanTest* nt = (NanTest*)node;
+            APP_JUMB(nt->nantesttype);
+            UniqueSql::JumbleExpr(jstate, (Node*)nt->arg);
+
+            break;
+        }
+        case T_InfiniteTest: {
+            InfiniteTest* it = (InfiniteTest*)node;
+            APP_JUMB(it->infinitetesttype);
+            UniqueSql::JumbleExpr(jstate, (Node*)it->arg);
+
+            break;
+        }
         case T_BooleanTest: {
             BooleanTest* bt = (BooleanTest*)node;
             APP_JUMB(bt->booltesttype);

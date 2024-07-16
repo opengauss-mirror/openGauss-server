@@ -2057,6 +2057,66 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				ExprEvalPushStep(state, &scratch);
 				break;
 			}
+		case T_NanTest:
+			{
+				NanTest *ntest = (NanTest *) node;
+
+				if (ntest ->nantesttype == IS_NAN) 
+				{
+					scratch.opcode = EEOP_NANTEST_ISNAN;
+				}
+				else if (ntest->nantesttype == IS_NOT_NAN)
+				{
+					scratch.opcode = EEOP_NANTEST_ISNOTNAN;
+				}
+				else
+				{
+					elog(ERROR, "unrecognized nantesttype: %d",
+							(int) ntest->nantesttype);
+				}
+
+				scratch.d.decspecexpr.value = (Datum *) palloc(sizeof(Datum));
+				scratch.d.decspecexpr.isnull = (bool *) palloc(sizeof(bool));
+				/* first evaluate argument into result variable */
+				ExecInitExprRec(ntest->arg, state, 
+							    scratch.d.decspecexpr.value, scratch.d.decspecexpr.isnull, 
+								node);
+				scratch.d.decspecexpr.expr = node;
+
+				/* then push the test of that argument */
+				ExprEvalPushStep(state, &scratch);
+				break;
+			}
+		case T_InfiniteTest:
+			{
+				InfiniteTest *itest = (InfiniteTest *) node;
+
+				if (itest->infinitetesttype == IS_INFINITE)
+				{
+					scratch.opcode = EEOP_INFINITETEST_ISINFINITE;
+				}
+				else if (itest->infinitetesttype == IS_NOT_INFINITE)
+				{
+					scratch.opcode = EEOP_INFINITETEST_ISNOTINFINITE;
+				}
+				else 
+				{
+					elog(ERROR, "unrecognized infinitetesttype: %d",
+							(int) itest->infinitetesttype);
+				}
+
+				scratch.d.decspecexpr.value = (Datum *) palloc(sizeof(Datum));
+				scratch.d.decspecexpr.isnull = (bool *) palloc(sizeof(bool));
+				/* first evaluate argument into result variable */
+				ExecInitExprRec(itest->arg, state,
+								scratch.d.decspecexpr.value, scratch.d.decspecexpr.isnull, 
+								node);
+				scratch.d.decspecexpr.expr = node;
+								
+				/* then push the test of that argument */
+				ExprEvalPushStep(state, &scratch);
+				break;
+			}
 		default:
 			elog(ERROR, "unrecognized node type: %d, line=%d, func:%s",
 				 (int) nodeTag(node), __LINE__, __func__);	

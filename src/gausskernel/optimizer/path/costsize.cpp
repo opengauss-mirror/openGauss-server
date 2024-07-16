@@ -4969,6 +4969,19 @@ static bool cost_qual_eval_walker(Node* node, cost_qual_eval_context* context)
          * phexpr.
          */
         return false;
+    } else if (IsA(node, NanTest) || IsA(node, InfiniteTest)) {
+        /* 
+         * Add NanTest | InfiniteTest 0.1 cup_operator_cost, to make the these two 
+         * condition executeed executeed after '='、'IN (x, x)' condition, and before
+         * 'IN (x, x, x, ...)' condigtion.
+         * 
+         * Firstly, we don't care about order when input type is float8, and others 
+         * type cast to float8 must call castfunc, which usually take 1 cpu_operator_cost. 
+         * 'In (...)' condition cost = array length * 0.5(see ScalarArrayOpExpr). 
+         * So we can calc (2 * 0.5) ~ (3 * 0.5) - 1 = 0 ~ 0.5, and We take 0.1 to make 
+         * the impact minimize.
+         */
+        context->total.per_tuple += u_sess->attr.attr_sql.cpu_operator_cost * 0.1;
     }
 
     /* recurse into children */

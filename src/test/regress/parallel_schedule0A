@@ -456,6 +456,9 @@ test: create_function_3 vacuum
 test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists test_create_sequence_if_not_exists
 #test: constraints
 
+# test for new expr IS [NOT] NAN|INFINITE and new function TO_BINARY_FLOAT
+test: func_to_binary_float expr_nantest_infinitetest
+
 #test: errors subplan_base
 test: subplan_new
 #test: select

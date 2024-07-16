@@ -255,6 +255,14 @@ typedef enum ExprEvalOp
     EEOP_AGG_ORDERED_TRANS_DATUM,
     EEOP_AGG_ORDERED_TRANS_TUPLE,
 
+	/* perform NAN tests for scalar values */
+	EEOP_NANTEST_ISNAN,
+	EEOP_NANTEST_ISNOTNAN,
+
+	/* perform INFINITE tests for scalar values */
+	EEOP_INFINITETEST_ISINFINITE,
+	EEOP_INFINITETEST_ISNOTINFINITE,
+
 	/* non-existent operation, used e.g. to check array lengths */
 	EEOP_LAST
 } ExprEvalOp;
@@ -373,6 +381,14 @@ typedef struct ExprEvalStep
 			/* cached tupdesc pointer - filled at runtime */
 			TupleDesc	argdesc;
 		}			nulltest_row;
+
+		/* for EEOP_NANTEST_IS[NOT]NAN | IS[NOT]INFINITE */
+		struct
+		{
+			Datum 	*value;
+			bool	*isnull;
+			Expr   	*expr;
+		}			decspecexpr;
 
 		/* for EEOP_PARAM_EXEC/EXTERN */
 		struct
@@ -731,6 +747,10 @@ extern void ExecEvalRowNull(ExprState *state, ExprEvalStep *op,
 				ExprContext *econtext);
 extern void ExecEvalRowNotNull(ExprState *state, ExprEvalStep *op,
 				   ExprContext *econtext);
+extern void ExecEvalNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
+extern void ExecEvalNotNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
+extern void ExecEvalInfinite(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
+extern void ExecEvalNotInfinite(ExprState *state, ExprEvalStep *op, ExprContext *econtext);
 extern void ExecEvalArrayExpr(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalArrayCoerce(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalRow(ExprState *state, ExprEvalStep *op);

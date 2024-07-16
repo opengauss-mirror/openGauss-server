@@ -320,6 +320,7 @@ extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);
 extern ExprState *ExecPrepareCheck(List *qual, EState *estate);
 extern List *ExecPrepareExprList(List *nodes, EState *estate);
 extern bool ExecCheck(ExprState *state, ExprContext *context);
+extern Oid deparseNodeForInputype(Expr *expr, NodeTag nodeTag, float8 val);
 
 /**
  * new expr

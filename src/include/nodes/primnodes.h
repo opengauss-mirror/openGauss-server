@@ -1106,6 +1106,36 @@ typedef struct NullTest {
     bool argisrow;             /* T to perform field-by-field null checks */
 } NullTest;
 
+/* ----------------
+ * NanTest
+ *
+ * NanTest represents the operation of testing a value for Nan.
+ * The appropriate test is performed and returned as a boolean Datum.
+ * ----------------
+ */
+typedef enum NanTestType { IS_NAN, IS_NOT_NAN } NanTestType;
+
+typedef struct NanTest {
+    Expr xpr;
+    Expr* arg;                 /* input expression */
+    NanTestType nantesttype;   /* IS NAN, IS NOT NAN */
+} NanTest;
+
+/* ----------------
+ * InfiniteTest
+ *
+ * InfiniteTest represents the operation of testing a value for Infinite.
+ * The appropriate test is performed and returned as a boolean Datum.
+ * ----------------
+ */
+typedef enum InfiniteTestType { IS_INFINITE, IS_NOT_INFINITE } InfiniteTestType;
+
+typedef struct InfiniteTest {
+    Expr xpr;
+    Expr* arg;                 /* input expression */
+    InfiniteTestType infinitetesttype;   /* IS INFINITE, IS NOT INFINITE */
+} InfiniteTest;
+
 /*
  * BooleanTest
  *
