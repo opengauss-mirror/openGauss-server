@@ -1956,6 +1956,20 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{
+            "enable_heap_multi_insert_for_insert_select",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable enable heap_multi_insert for query like 'insert into xxx select yyy', as fast as the copy command"),
+            NULL
+            },
+            &u_sess->attr.attr_storage.enable_heap_multi_insert_for_insert_select,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"enable_default_ustore_table",
             PGC_USERSET,
             NODE_SINGLENODE,

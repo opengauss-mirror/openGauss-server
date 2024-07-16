@@ -3544,13 +3544,23 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 #endif
 
     if (operation == CMD_INSERT) {
-        if (node->ps.type == T_ModifyTableState || node->mt_upsert->us_action != UPSERT_NONE || node->isReplace ||
-            (result_rel_info->ri_TrigDesc != NULL && (result_rel_info->ri_TrigDesc->trig_insert_before_row ||
-                                                       result_rel_info->ri_TrigDesc->trig_insert_instead_row)))
+        if (node->ps.type == T_ModifyTableState ||
+                node->mt_upsert->us_action != UPSERT_NONE ||
+                node->isReplace ||
+                (result_rel_info->ri_TrigDesc != NULL && (result_rel_info->ri_TrigDesc->trig_insert_before_row ||
+                                                           result_rel_info->ri_TrigDesc->trig_insert_instead_row)) ||
+                !ENABLE_HEAP_MULTI_INSERT_FOR_INSERT_SELECT ||
+                (result_rel_info->ri_RelationDesc->rd_att->constr != NULL &&
+                     result_rel_info->ri_RelationDesc->rd_att->constr->cons_autoinc != NULL) ||
+                RelationIsPartition(result_rel_info->ri_RelationDesc)) {
             ExecInsert = ExecInsertT<false>;
-        else {
-            use_heap_multi_insert = true;
-            ExecInsert = ExecInsertT<true>;
+        } else {
+            if (RelationIsAstoreFormat(result_rel_info->ri_RelationDesc)) {
+                use_heap_multi_insert = true;
+                ExecInsert = ExecInsertT<true>;
+            } else {
+                ExecInsert = ExecInsertT<false>;
+            }
         }
 
         if (use_heap_multi_insert) {

@@ -1885,10 +1885,15 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         pstate->p_relnamespace = NIL;
         sub_varnamespace = pstate->p_varnamespace;
         pstate->p_varnamespace = NIL;
+        if (stmt->returningList || stmt->upsertClause)
+            qry->is_dist_insertselect = false;
+        else
+            qry->is_dist_insertselect = stmt->is_dist_insertselect;
     } else {
         sub_rtable = NIL; /* not used, but keep compiler quiet */
         sub_relnamespace = NIL;
         sub_varnamespace = NIL;
+        qry->is_dist_insertselect = false;
     }
 
     /*
@@ -1911,6 +1916,19 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION), errmsg("Not allowed to insert into relation pg_auth_history.")));
     }
+
+    if (qry->is_dist_insertselect) {
+        Oid relid = RelationGetRelid(targetrel);
+        HeapTuple classtup = SearchSysCache1(RELOID, relid);
+        Form_pg_class class_struct = (Form_pg_class)GETSTRUCT(classtup);
+        if (class_struct->parttype == PARTTYPE_PARTITIONED_RELATION ||
+            class_struct->parttype == PARTTYPE_SUBPARTITIONED_RELATION ||
+            class_struct->parttype == PARTTYPE_VALUE_PARTITIONED_RELATION ) {
+            qry->is_dist_insertselect = false;
+        }
+        ReleaseSysCache(classtup);
+    }
+
 
     if (targetrel != NULL &&
         ((unsigned int)RelationGetInternalMask(targetrel) & INTERNAL_MASK_DINSERT)) {

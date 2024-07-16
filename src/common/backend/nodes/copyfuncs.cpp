@@ -4968,6 +4968,7 @@ static Query* _copyQuery(const Query* from)
     COPY_STRING_FIELD(unique_sql_text);
 #endif
     COPY_SCALAR_FIELD(can_push);
+    COPY_SCALAR_FIELD(is_dist_insertselect);
     COPY_SCALAR_FIELD(unique_check);
     COPY_NODE_FIELD(resultRelations);
     COPY_NODE_FIELD(withCheckOptions);
@@ -5038,6 +5039,7 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     }
     COPY_SCALAR_FIELD(isRewritten);   
     COPY_SCALAR_FIELD(hasIgnore);
+    COPY_SCALAR_FIELD(is_dist_insertselect);
     return newnode;
 }
 

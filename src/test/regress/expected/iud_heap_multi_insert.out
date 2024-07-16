@@ -1,0 +1,20 @@
+NOTICE:  table "prep202407_hmi" does not exist, skipping
+DROP TABLE
+NOTICE:  table "dest202407_hmi" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+ enable_heap_multi_insert_for_insert_select 
+--------------------------------------------
+ on
+(1 row)
+
+INSERT 0 10000
+INSERT 0 10000
+ count 
+-------
+ 10000
+(1 row)
+
+DROP TABLE
+DROP TABLE
