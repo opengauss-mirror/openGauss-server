@@ -112,6 +112,8 @@ static bool is_utf16_surrogate_second(pg_wchar c);
 static pg_wchar surrogate_pair_to_codepoint(pg_wchar first, pg_wchar second);
 static void addunicode(pg_wchar c, yyscan_t yyscanner);
 static void set_is_delimiter_name(char* text, core_yyscan_t yyscanner );
+static int process_decimal_float(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval);
+static int process_decimal_double(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval);
 
 #define yyerror(msg)  scanner_yyerror(msg, yyscanner)
 
@@ -375,9 +377,13 @@ operator		{op_chars}+
 integer			{digit}+
 decimal			(({digit}*\.{digit}+)|({digit}+\.{digit}*))
 decimalfail		{digit}+\.\.
+decimalf        ({integer}|{decimal})[fF]
+decimald        ({integer}|{decimal})[dD]
 real			({integer}|{decimal})[Ee][-+]?{digit}+
 realfail1		({integer}|{decimal})[Ee]
 realfail2		({integer}|{decimal})[Ee][-+]
+realf           ({real})[fF]
+reald           ({real})[dD]
 snapvers		({digit}+(\.{digit}+)*)
 
 param			\${integer}
@@ -1045,6 +1051,62 @@ other			.
 					yyextra->is_hint_str = false;
 					return process_integer_literal(yytext, yylval);
 				}
+{decimalf}		{
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+						u_sess->attr.attr_sql.float_suffix_acceptance) {
+						SET_YYLLOC();
+						yyextra->is_hint_str = false;
+						return process_decimal_float(yytext, yyleng, yyscanner, yylval);
+					} else {
+						yyless(yyleng-1);
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return FCONST;
+					}
+				}
+{realf}			{
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+						u_sess->attr.attr_sql.float_suffix_acceptance) {
+						SET_YYLLOC();
+						yyextra->is_hint_str = false;
+						return process_decimal_float(yytext, yyleng, yyscanner, yylval);
+					} else {
+						yyless(yyleng-1);
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return FCONST;
+					}
+				}
+{decimald}		{
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+						u_sess->attr.attr_sql.float_suffix_acceptance) {
+						SET_YYLLOC();
+						yyextra->is_hint_str = false;
+						return process_decimal_double(yytext, yyleng, yyscanner, yylval);
+					} else {
+						yyless(yyleng-1);
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return FCONST;
+					}
+				}
+{reald}			{
+					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+						u_sess->attr.attr_sql.float_suffix_acceptance) {
+						SET_YYLLOC();
+						yyextra->is_hint_str = false;
+						return process_decimal_double(yytext, yyleng, yyscanner, yylval);
+					} else {
+						yyless(yyleng-1);
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return FCONST;
+					}
+				}
 {real}			{
 					SET_YYLLOC();
 					yylval->str = pstrdup(yytext);
@@ -1531,6 +1593,24 @@ process_integer_literal(const char *token, YYSTYPE *lval)
 	}
 	lval->ival = val;
 	return ICONST;
+}
+
+static int 
+process_decimal_float(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval)
+{
+	startlit();
+	addlit(token, len-1, yyscanner);
+	lval->str = litbufdup(yyscanner);
+	return FCONST_F;
+}
+
+static int 
+process_decimal_double(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval)
+{
+	startlit();
+	addlit(token, len-1, yyscanner);
+	lval->str = litbufdup(yyscanner);
+	return FCONST_D;
 }
 
 static unsigned int

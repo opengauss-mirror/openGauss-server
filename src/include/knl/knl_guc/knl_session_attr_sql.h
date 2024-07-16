@@ -130,6 +130,7 @@ typedef struct knl_session_attr_sql {
     bool lo_compat_privileges;
     bool quote_all_identifiers;
     bool enforce_a_behavior;
+    bool float_suffix_acceptance;
     bool enable_slot_log;
     bool convert_string_to_digit;
     bool agg_redistribute_enhancement;
