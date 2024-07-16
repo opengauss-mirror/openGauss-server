@@ -282,18 +282,29 @@ PLpgSQL_package* PackageInstantiation(Oid packageOid)
         ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for package %u, while compile package", packageOid)));
     }
-    packagebodydatum = SysCacheGetAttr(PROCOID, pkgTuple, Anum_gs_package_pkgbodydeclsrc, &isnull);
+    packagebodydatum = SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgbodydeclsrc, &isnull);
     if (isnull) {
         isSpec = true;
     } else {
         isSpec = false;
     }
+
+    (void)SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgbodyinitsrc, &isnull);
     ReleaseSysCache(pkgTuple);
 
     SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
+    if (!isnull) {
+        pkg = GetCompileListPkg(packageOid);
+    }
+    if (pkg != NULL) {
+        u_sess->plsql_cxt.need_init = false;
+    } else {
+        u_sess->plsql_cxt.need_init = true;
+    }
     pkg = plpgsql_package_validator(packageOid, isSpec);
+    u_sess->plsql_cxt.need_init = true;
 
     SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
@@ -642,7 +653,9 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     SetCurrCompilePgObjStatus(true);
     list_free_ext(u_sess->plsql_cxt.func_compiled_list);
     u_sess->plsql_cxt.real_func_num = 0;
+    u_sess->plsql_cxt.need_init = false;
     plpgsql_package_validator(oldPkgOid, false, true);
+    u_sess->plsql_cxt.need_init = true;
     plpgsql_clear_created_pkg(oldPkgOid);
     return oldPkgOid;
 }

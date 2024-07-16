@@ -880,6 +880,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
     plsql_cxt->currCompilingObjStatus = true;
+    plsql_cxt->need_init = true;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)

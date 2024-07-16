@@ -1736,9 +1736,6 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
         if (enable_plpgsql_gsdependency_guc()) {
             pkgValid = GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC);
         } 
-        if (pkgValid) {
-            // check_record_nest_tableof_index_type(NULL, typeNames);
-        }
         return typOid;
     }
 

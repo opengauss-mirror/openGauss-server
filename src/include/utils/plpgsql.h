@@ -1978,6 +1978,7 @@ extern char* plpgsql_get_curline_query();
 extern void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc);
 extern void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type);
 extern void CheckSaveExceptionsDML(int errstate);
+extern PLpgSQL_package* GetCompileListPkg(Oid pkgOid);
 
 extern void plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata);
 /* ----------
