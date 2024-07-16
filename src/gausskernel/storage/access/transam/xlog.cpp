@@ -3497,6 +3497,12 @@ void XLogWaitFlush(XLogRecPtr recptr)
         return;
     }
 
+    /* SS standby cluster sometime is not in recovery, we also dont need wait here */
+    if (SS_DISASTER_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
+        ereport(DEBUG1, (errmsg("[SS_DISASTER_CLUSTER] SS standby cluster needless wait xlog flush")));
+        return;
+    }
+
     volatile XLogRecPtr flushTo = gs_compare_and_swap_u64(&g_instance.wal_cxt.flushResult, 0, 0);
 
     while (XLByteLT(flushTo, recptr)) {
@@ -13066,8 +13072,8 @@ bool CreateRestartPoint(int flags)
      * Check that we're still in recovery mode. It's ok if we exit recovery
      * mode after this check, the restart point is valid anyway.
      */
-    if (!recoveryInProgress) {
-        ereport(DEBUG2, (errmsg("skipping restartpoint, recovery has already ended")));
+    if (!recoveryInProgress && !SS_DISASTER_STANDBY_CLUSTER) {
+        ereport(LOG, (errmsg("skipping restartpoint, recovery has already ended")));
         LWLockRelease(CheckpointLock);
         gstrace_exit(GS_TRC_ID_CreateRestartPoint);
         return false;
