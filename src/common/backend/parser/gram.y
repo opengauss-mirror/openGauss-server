@@ -868,7 +868,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET FCONST_F FCONST_D
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
@@ -885,7 +885,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND ARCHIVE ARRAY AS ASC
         ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
-	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS
+	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS
 	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
@@ -12304,6 +12304,8 @@ TriggerFuncArg:
 					$$ = makeString(pstrdup(buf));
 				}
 			| FCONST								{ $$ = makeString($1); }
+			| FCONST_F								{ $$ = makeString($1); }
+			| FCONST_D								{ $$ = makeString($1); }
 			| Sconst								{ $$ = makeString($1); }
 			| ColLabel								{ $$ = makeString($1); }
 		;
@@ -27070,6 +27072,16 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->model_args_location = @6;
 					$$ = (Node*) n;				
 				}
+			| FCONST_F
+				{
+					Node *num = makeFloatConst($1, @1);
+					$$ = makeTypeCast(num, SystemTypeName("float4"), @1);	
+				}
+			| FCONST_D
+				{
+					Node *num = makeFloatConst($1, @1);
+					$$ = makeTypeCast(num, SystemTypeName("float8"), @1);	
+				}
 		;
 
 /*
@@ -30291,6 +30303,8 @@ col_name_keyword:
 			  BETWEEN
 			| BIGINT
 			| BINARY_DOUBLE
+			| BINARY_DOUBLE_INF
+			| BINARY_DOUBLE_NAN
 			| BINARY_INTEGER
 			| BIT
 			| BOOLEAN_P
@@ -30362,6 +30376,8 @@ col_name_keyword_nonambiguous:
 			  BETWEEN
 			| BIGINT
 			| BINARY_DOUBLE
+			| BINARY_DOUBLE_INF
+			| BINARY_DOUBLE_NAN
 			| BINARY_INTEGER
 			| BIT
 			| BOOLEAN_P

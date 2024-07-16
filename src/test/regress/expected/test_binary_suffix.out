@@ -1,0 +1,917 @@
+-- create new schema
+drop schema if exists test_binary;
+NOTICE:  schema "test_binary" does not exist, skipping
+create schema test_binary;
+set search_path=test_binary;
+set float_suffix_acceptance to on;
+SELECT 3.14f;
+ float4 
+--------
+   3.14
+(1 row)
+
+SELECT 10.0d;
+ float8 
+--------
+     10
+(1 row)
+
+SELECT -2.5f;
+ ?column? 
+----------
+     -2.5
+(1 row)
+
+SELECT -10.0d;
+ ?column? 
+----------
+      -10
+(1 row)
+
+SELECT 1f;
+ float4 
+--------
+      1
+(1 row)
+
+SELECT 2d;
+ float8 
+--------
+      2
+(1 row)
+
+SELECT -3F;
+ ?column? 
+----------
+       -3
+(1 row)
+
+SELECT -4D;
+ ?column? 
+----------
+       -4
+(1 row)
+
+SELECT 123e3d;
+ float8 
+--------
+ 123000
+(1 row)
+
+SELECT 5.5df;
+  f  
+-----
+ 5.5
+(1 row)
+
+SELECT 3.6D;
+ float8 
+--------
+    3.6
+(1 row)
+
+SELECT 8.6fabc;
+ abc 
+-----
+ 8.6
+(1 row)
+
+CREATE TABLE test_table (
+    id INT,
+    float_value FLOAT,
+    double_value BINARY_DOUBLE
+);
+INSERT INTO test_table (id, float_value, double_value) VALUES (1, 3.14f, 2.7182d);
+SELECT float_value * 2d, double_value + 1.5f FROM test_table;
+     ?column?     | ?column? 
+------------------+----------
+ 6.28000020980835 |   4.2182
+(1 row)
+
+DROP TABLE test_table;
+SELECT round(3.14159f, 2);
+ round 
+-------
+  3.14
+(1 row)
+
+SELECT trunc(3.14159f, 2);
+ trunc 
+-------
+  3.14
+(1 row)
+
+SELECT sqrt(4.0f);
+ sqrt 
+------
+    2
+(1 row)
+
+SELECT power(2.0f, 3.0f);
+ power 
+-------
+     8
+(1 row)
+
+SELECT sin(0.5f);
+       sin        
+------------------
+ .479425538604203
+(1 row)
+
+SELECT cos(0.5f);
+       cos        
+------------------
+ .877582561890373
+(1 row)
+
+SELECT log(10.0f);
+ log 
+-----
+   1
+(1 row)
+
+SELECT exp(2.0f);
+       exp        
+------------------
+ 7.38905609893065
+(1 row)
+
+CREATE FUNCTION test_function(input_val float) RETURNS float AS $$
+BEGIN
+  RETURN input_val * 2.0f;
+END;
+$$ LANGUAGE plpgsql;
+SELECT test_function(10.5f);
+ test_function 
+---------------
+            21
+(1 row)
+
+drop function test_function;
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+    input_value FLOAT;
+BEGIN
+    input_value := TG_ARGV[0]::FLOAT;
+    INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3, input_value);
+    RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func(2.5f);
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func(2.5d);
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+drop function tri_insert_func;
+drop table test_trigger_src_tbl;
+drop table test_trigger_des_tbl;
+SELECT 1.5f = 1.5; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1.5f <> 2.0; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1.5f > 1.0; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1.5f < 2.0; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (1.5f > 1.0) AND (2.5f < 3.0); -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (1.5f > 1.0) OR (2.5f > 3.0); -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1.5f + 2.5; -- 返回 4.0
+ ?column? 
+----------
+        4
+(1 row)
+
+SELECT 3.5f - 1.5; -- 返回 2.0
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT 2.0f * 3.0; -- 返回 6.0
+ ?column? 
+----------
+        6
+(1 row)
+
+SELECT 4.0f / 2.0; -- 返回 2.0
+ ?column? 
+----------
+        2
+(1 row)
+
+set float_suffix_acceptance to off;
+SELECT 3.14f;
+  f   
+------
+ 3.14
+(1 row)
+
+SELECT 10.0d;
+  d   
+------
+ 10.0
+(1 row)
+
+SELECT -2.5f;
+  f   
+------
+ -2.5
+(1 row)
+
+SELECT -10.0d;
+   d   
+-------
+ -10.0
+(1 row)
+
+SELECT 1f;
+ f 
+---
+ 1
+(1 row)
+
+SELECT 2d;
+ d 
+---
+ 2
+(1 row)
+
+SELECT -3F;
+ f  
+----
+ -3
+(1 row)
+
+SELECT -4D;
+ d  
+----
+ -4
+(1 row)
+
+SELECT 123e3d;
+   d    
+--------
+ 123000
+(1 row)
+
+SELECT 5.5df;
+ df  
+-----
+ 5.5
+(1 row)
+
+SELECT 3.6D;
+  d  
+-----
+ 3.6
+(1 row)
+
+SELECT 8.6fabc;
+ fabc 
+------
+  8.6
+(1 row)
+
+INSERT INTO test_table (id, float_value, double_value) VALUES (1, 3.14f, 2.7182d);
+ERROR:  syntax error at or near "f"
+LINE 1: ...le (id, float_value, double_value) VALUES (1, 3.14f, 2.7182d...
+                                                             ^
+SELECT float_value * 2d, double_value + 1.5f FROM test_table;
+ERROR:  relation "test_table" does not exist on datanode1
+LINE 1: SELECT float_value * 2d, double_value + 1.5f FROM test_table...
+                                                          ^
+DROP TABLE test_table;
+ERROR:  table "test_table" does not exist
+SELECT round(3.14159f, 2);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT round(3.14159f, 2);
+                            ^
+SELECT trunc(3.14159f, 2);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT trunc(3.14159f, 2);
+                            ^
+SELECT sqrt(4.0f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT sqrt(4.0f);
+                       ^
+SELECT power(2.0f, 3.0f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT power(2.0f, 3.0f);
+                        ^
+SELECT sin(0.5f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT sin(0.5f);
+                      ^
+SELECT cos(0.5f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT cos(0.5f);
+                      ^
+SELECT log(10.0f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT log(10.0f);
+                       ^
+SELECT exp(2.0f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT exp(2.0f);
+                      ^
+CREATE FUNCTION test_function(input_val float) RETURNS float AS $$
+BEGIN
+  RETURN input_val * 2.0f;
+END;
+$$ LANGUAGE plpgsql;
+SELECT test_function(10.5f);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT test_function(10.5f);
+                                 ^
+DROP FUNCTION test_function;
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+    input_value FLOAT;
+BEGIN
+    input_value := TG_ARGV[0]::FLOAT;
+    INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3, input_value);
+    RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func(2.5f);
+ERROR:  syntax error at or near "f"
+LINE 4:            EXECUTE PROCEDURE tri_insert_func(2.5f);
+                                                        ^
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+ERROR:  trigger "insert_trigger" for table "test_trigger_src_tbl" does not exist
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func(2.5d);
+ERROR:  syntax error at or near "d"
+LINE 4:            EXECUTE PROCEDURE tri_insert_func(2.5d);
+                                                        ^
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+ERROR:  trigger "insert_trigger" for table "test_trigger_src_tbl" does not exist
+drop function tri_insert_func;
+drop table test_trigger_src_tbl;
+drop table test_trigger_des_tbl;
+SELECT 1.5f = 1.5;
+ERROR:  syntax error at or near "="
+LINE 1: SELECT 1.5f = 1.5;
+                    ^
+SELECT 1.5f <> 2.0;
+ERROR:  syntax error at or near "<>"
+LINE 1: SELECT 1.5f <> 2.0;
+                    ^
+SELECT 1.5f > 1.0;
+ERROR:  syntax error at or near ">"
+LINE 1: SELECT 1.5f > 1.0;
+                    ^
+SELECT 1.5f < 2.0;
+ERROR:  syntax error at or near "<"
+LINE 1: SELECT 1.5f < 2.0;
+                    ^
+SELECT (1.5f > 1.0) AND (2.5f < 3.0);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT (1.5f > 1.0) AND (2.5f < 3.0);
+                   ^
+SELECT (1.5f > 1.0) OR (2.5f > 3.0);
+ERROR:  syntax error at or near "f"
+LINE 1: SELECT (1.5f > 1.0) OR (2.5f > 3.0);
+                   ^
+SELECT 1.5f + 2.5;
+ERROR:  syntax error at or near "+"
+LINE 1: SELECT 1.5f + 2.5;
+                    ^
+SELECT 3.5f - 1.5;
+ERROR:  syntax error at or near "-"
+LINE 1: SELECT 3.5f - 1.5;
+                    ^
+SELECT 2.0f * 3.0;
+ERROR:  syntax error at or near "*"
+LINE 1: SELECT 2.0f * 3.0;
+                    ^
+SELECT 4.0f / 2.0;
+ERROR:  syntax error at or near "/"
+LINE 1: SELECT 4.0f / 2.0;
+                    ^
+set float_suffix_acceptance to on;
+SELECT BINARY_DOUBLE_INFINITY;
+ binary_double_infinity 
+------------------------
+               Infinity
+(1 row)
+
+SELECT BINARY_DOUBLE_NAN;
+ binary_double_nan 
+-------------------
+               NaN
+(1 row)
+
+CREATE TABLE test_table (
+    id INT,
+    float_value binary_double
+);
+INSERT INTO test_table (id, float_value)
+VALUES (1, BINARY_DOUBLE_NAN);
+SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_NAN;
+ id | float_value 
+----+-------------
+  1 |         NaN
+(1 row)
+
+INSERT INTO test_table (id, float_value)
+VALUES (2, BINARY_DOUBLE_INFINITY);
+SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_INFINITY;
+ id | float_value 
+----+-------------
+  2 |    Infinity
+(1 row)
+
+SELECT float_value + 1 FROM test_table WHERE id = 1;
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT float_value * 2 FROM test_table WHERE id = 2;
+ ?column? 
+----------
+ Infinity
+(1 row)
+
+SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_NAN OR float_value = BINARY_DOUBLE_INFINITY;
+ id | float_value 
+----+-------------
+  1 |         NaN
+  2 |    Infinity
+(2 rows)
+
+DROP TABLE test_table;
+SELECT ABS(binary_double_infinity);
+   abs    
+----------
+ Infinity
+(1 row)
+
+SELECT CEIL(binary_double_infinity);
+   ceil   
+----------
+ Infinity
+(1 row)
+
+SELECT SQRT(binary_double_infinity);
+   sqrt   
+----------
+ Infinity
+(1 row)
+
+SELECT FLOOR(binary_double_infinity);
+  floor   
+----------
+ Infinity
+(1 row)
+
+SELECT SQRT(binary_double_infinity);
+   sqrt   
+----------
+ Infinity
+(1 row)
+
+SELECT EXP(binary_double_infinity);
+   exp    
+----------
+ Infinity
+(1 row)
+
+SELECT LOG(binary_double_infinity);
+   log    
+----------
+ Infinity
+(1 row)
+
+SELECT POWER(binary_double_infinity, 2);
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT SIN(binary_double_infinity);
+ERROR:  input is out of range
+CONTEXT:  referenced column: sin
+SELECT ABS(binary_double_nan);
+ abs 
+-----
+ NaN
+(1 row)
+
+SELECT CEIL(binary_double_nan);
+ ceil 
+------
+  NaN
+(1 row)
+
+SELECT SQRT(binary_double_nan);
+ sqrt 
+------
+  NaN
+(1 row)
+
+SELECT FLOOR(binary_double_nan);
+ floor 
+-------
+   NaN
+(1 row)
+
+SELECT SQRT(binary_double_nan);
+ sqrt 
+------
+  NaN
+(1 row)
+
+SELECT EXP(binary_double_nan);
+ exp 
+-----
+ NaN
+(1 row)
+
+SELECT LOG(binary_double_nan);
+ log 
+-----
+ NaN
+(1 row)
+
+SELECT POWER(binary_double_nan, 2);
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT SIN(binary_double_nan);
+ sin 
+-----
+ NaN
+(1 row)
+
+-- 创建自定义函数
+CREATE FUNCTION test_function(value FLOAT)
+  RETURNS FLOAT
+  LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF value = binary_double_infinity THEN
+    RETURN 1.0;
+  ELSE
+    RETURN 0.0;
+  END IF;
+END;
+$$;
+SELECT test_function(binary_double_nan);
+ test_function 
+---------------
+             0
+(1 row)
+
+DROP FUNCTION test_function;
+--表达式
+SELECT binary_double_infinity = binary_double_infinity; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT binary_double_nan = binary_double_nan; -- 返回 false
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT binary_double_nan = binary_double_infinity; -- 返回 false
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT binary_double_infinity <> 0.0; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT binary_double_nan <> binary_double_nan; -- 返回 true
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT binary_double_infinity > 0.0; -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT binary_double_nan < binary_double_infinity; -- 返回 false
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT (binary_double_infinity > 0.0) AND (binary_double_nan < binary_double_infinity); -- 返回 false
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT (binary_double_infinity > 0.0) OR (binary_double_nan < binary_double_infinity); -- 返回 true
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT binary_double_infinity + 1.0; -- 返回正无穷大
+ ?column? 
+----------
+ Infinity
+(1 row)
+
+SELECT binary_double_nan + 1.0; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT binary_double_infinity - binary_double_infinity; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT binary_double_nan - 1.0; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT binary_double_infinity * binary_double_infinity; -- 返回正无穷大
+ ?column? 
+----------
+ Infinity
+(1 row)
+
+SELECT binary_double_nan * 1.0; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT binary_double_infinity / binary_double_infinity; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT binary_double_nan / 1.0; -- 返回 NaN
+ ?column? 
+----------
+      NaN
+(1 row)
+
+CREATE TABLE T1(binary_double_nan INT);
+INSERT INTO T1 VALUES(1),(2),(3);
+SELECT binary_double_nan;
+ binary_double_nan 
+-------------------
+               NaN
+(1 row)
+
+SELECT binary_double_nan FROM T1;
+ binary_double_nan 
+-------------------
+               NaN
+               NaN
+               NaN
+(3 rows)
+
+SELECT T1.binary_double_nan FROM T1;
+ binary_double_nan 
+-------------------
+                 1
+                 2
+                 3
+(3 rows)
+
+DROP TABLE T1;
+--CHECK约束
+create table t1(
+    num binary_double
+    CONSTRAINT check_num CHECK (num > 100)
+);
+insert into t1 values (binary_double_infinity);--插入成功
+insert into t1 values (-binary_double_infinity);--插入失败
+ERROR:  new row for relation "t1" violates check constraint "check_num"
+DETAIL:  N/A
+insert into t1 values (binary_double_nan);--插入成功
+drop table t1;
+--隐式转换
+create table t1 (id int);
+insert into t1 values(binary_double_infinity);--插入失败
+ERROR:  integer out of range
+CONTEXT:  referenced column: id
+insert into t1 values(-binary_double_infinity);--插入失败
+ERROR:  integer out of range
+CONTEXT:  referenced column: id
+insert into t1 values(binary_double_nan);--插入失败
+ERROR:  integer out of range
+CONTEXT:  referenced column: id
+drop table t1;
+--聚集函数
+create table t1(id binary_double);
+insert into t1 values(99);
+insert into t1 values(100);
+insert into t1 values(binary_double_infinity);
+insert into t1 values(binary_double_nan);
+select avg(id) from t1;
+ avg 
+-----
+ NaN
+(1 row)
+
+select sum(id) from t1;
+ sum 
+-----
+ NaN
+(1 row)
+
+select max(id) from t1;
+ max 
+-----
+ NaN
+(1 row)
+
+select min(id) from t1;
+ min 
+-----
+  99
+(1 row)
+
+drop table t1;
+--关键字测试
+create table binary_double_infinity(col1 float4);
+drop table binary_double_infinity;
+create table t1(binary_double_nan float4);
+insert into t1 values(3.14),(10),(15);
+select binary_double_nan from t1;
+ binary_double_nan 
+-------------------
+               NaN
+               NaN
+               NaN
+(3 rows)
+
+select t1.binary_double_nan from t1;
+ binary_double_nan 
+-------------------
+              3.14
+                10
+                15
+(3 rows)
+
+drop table t1;
+create table t1(binary_double_infinity float4 DEFAULT binary_double_infinity, id int);
+insert into t1 (id) values(10);
+insert into t1 values (100,9);
+select * from t1;
+ binary_double_infinity | id 
+------------------------+----
+               Infinity | 10
+                    100 |  9
+(2 rows)
+
+select * from t1 where binary_double_infinity = 100;
+ binary_double_infinity | id 
+------------------------+----
+(0 rows)
+
+select * from t1 where binary_double_infinity = binary_double_infinity;
+ binary_double_infinity | id 
+------------------------+----
+               Infinity | 10
+                    100 |  9
+(2 rows)
+
+select id from t1 group by id having binary_double_infinity > 100;
+ id 
+----
+  9
+ 10
+(2 rows)
+
+drop table t1;
+select 3.14binary_double_nan;
+ERROR:  syntax error at or near "binary_double_nan"
+LINE 1: select 3.14binary_double_nan;
+                   ^
+select 3.14binary_double_infinity;
+ERROR:  syntax error at or near "binary_double_infinity"
+LINE 1: select 3.14binary_double_infinity;
+                   ^
+create user binary_double_infinity with password'gauss@123';
+drop user binary_double_infinity;
+create schema binary_double_infinity;
+drop schema binary_double_infinity;
+CREATE FUNCTION binary_double_infinity(a INTEGER, b INTEGER)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$$
+BEGIN
+  RETURN a + b;
+END;
+$$;
+ERROR:  syntax error at or near "("
+LINE 1: CREATE FUNCTION binary_double_infinity(a INTEGER, b INTEGER)
+                                              ^
+drop function binary_double_infinity;
+ERROR:  syntax error at or near ";"
+LINE 1: drop function binary_double_infinity;
+                                            ^
+create type binary_double_infinity AS (
+    id INT,
+    name VARCHAR(50),
+    age INT
+);
+drop type binary_double_infinity;
+ERROR:  syntax error at or near "binary_double_infinity"
+LINE 1: drop type binary_double_infinity;
+                  ^
+set disable_keyword_options = 'binary_double_nan';
+select 3.14binary_double_nan;
+ binary_double_nan 
+-------------------
+              3.14
+(1 row)
+
+select 3.14binary_double_infinity;
+ERROR:  syntax error at or near "binary_double_infinity"
+LINE 1: select 3.14binary_double_infinity;
+                   ^
+create user binary_double_nan with password'gauss@123';
+drop user binary_double_nan;
+create schema binary_double_nan;
+drop schema binary_double_nan;
+CREATE FUNCTION binary_double_nan(a INTEGER, b INTEGER)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$$
+BEGIN
+  RETURN a + b;
+END;
+$$;
+drop function binary_double_nan;
+create type binary_double_nan AS (
+    id INT,
+    name VARCHAR(50),
+    age INT
+);
+drop type binary_double_nan;
+set disable_keyword_options = '';
+drop schema if exists test_binary cascade;
+NOTICE:  drop cascades to type "binary_double_infinity"
