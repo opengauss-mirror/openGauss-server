@@ -1131,6 +1131,7 @@ typedef enum JoinType {
     /*
      * We might need additional join types someday.
      */
+    JOIN_STRAIGHT
 } JoinType;
 
 /*

@@ -332,6 +332,7 @@ typedef struct RangeTblEntry {
     Alias* eref;  /* expanded reference names */
     Alias* pname; /* partition name, if any */
     List* plist;
+    char* relnamespace;
     bool lateral;               /* subquery or function is marked LATERAL? */
     bool inh;                   /* inheritance requested? */
     bool inFromCl;              /* present in FROM clause? */

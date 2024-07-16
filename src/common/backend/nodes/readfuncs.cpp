@@ -3118,6 +3118,9 @@ static JoinExpr* _readJoinExpr(void)
     READ_NODE_FIELD(quals);
     READ_NODE_FIELD(alias);
     READ_INT_FIELD(rtindex);
+    IF_EXIST(is_straight_join) {
+        READ_BOOL_FIELD(is_straight_join);
+    }
 
     READ_DONE();
 }
@@ -3262,6 +3265,7 @@ static RangeTblEntry* _readRangeTblEntry(void)
                                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                                     errmsg("NULL relnamespace for RTE %u found", local_node->relid)));
                         }
+                        local_node->relnamespace = relnamespace;
                     }
                     /*
                      * Same reason as above, get synOid for distribution plan.

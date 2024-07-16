@@ -951,7 +951,7 @@ void reportDependentObjects(
      * In restrict mode, we check targetObjects, remove object entries related to views from targetObjects,
      * and ensure that no errors are reported due to deleting table fields that have view references.
      */
-    if (behavior == DROP_RESTRICT && origObject != NULL && origObject->objectSubId != 0) {
+    if (behavior == DROP_RESTRICT && origObject != NULL && (origObject->objectSubId != 0 || u_sess->attr.attr_sql.dolphin)) {
         ObjectAddresses* newTargetObjects = new_object_addresses();
         const ObjectAddress* originalObj = NULL;
         const int typeOidOffset = 2;
@@ -974,7 +974,7 @@ void reportDependentObjects(
                        (originalObj->objectId + typeOidOffset) == obj->objectId)) {
                 // delete pg_type entry
                 add_exact_object_address_extra(obj, extra, newTargetObjects);
-            } else if (objClass != OCLASS_REWRITE) { // delete constraint and so on
+            } else if (objClass != OCLASS_REWRITE || (u_sess->attr.attr_sql.dolphin && extra->dependee.objectId == origObject->objectId)) { // delete constraint and so on
                 add_exact_object_address_extra(obj, extra, newTargetObjects);
             }
         }

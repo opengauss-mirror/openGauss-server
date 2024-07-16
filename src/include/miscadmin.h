@@ -147,6 +147,7 @@ extern const uint32 PRIOR_EXPR_VERSION_NUM;
 extern const uint32 CURSOR_EXPRESSION_VERSION_NUMBER;
 extern const uint32 ROTATE_UNROTATE_VERSION_NUM;
 extern const uint32 FLOAT_VERSION_NUMBER;
+extern const uint32 STRAIGHT_JOIN_VERSION_NUMBER;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

@@ -730,6 +730,7 @@ static bool _equalJoinExpr(const JoinExpr* a, const JoinExpr* b)
     COMPARE_NODE_FIELD(quals);
     COMPARE_NODE_FIELD(alias);
     COMPARE_SCALAR_FIELD(rtindex);
+    COMPARE_SCALAR_FIELD(is_straight_join);
 
     return true;
 }
@@ -838,6 +839,7 @@ static bool _equalSpecialJoinInfo(const SpecialJoinInfo* a, const SpecialJoinInf
     COMPARE_SCALAR_FIELD(lhs_strict);
     COMPARE_SCALAR_FIELD(delay_upper_joins);
     COMPARE_NODE_FIELD(join_quals);
+    COMPARE_SCALAR_FIELD(is_straight_join);
 
     return true;
 }

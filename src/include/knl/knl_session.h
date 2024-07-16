@@ -458,6 +458,7 @@ typedef struct knl_u_parser_context {
     bool in_userset;
     bool has_set_uservar;
     bool has_equal_uservar;
+    bool is_straight_join;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
