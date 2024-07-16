@@ -2855,8 +2855,15 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
          * Show information about partition table.
          * 1. Get the partition key postition and partition strategy from pg_partition.
          */
+        const char *intervalStr = NULL;
+        if (CheckDBCompatibility(pset.db, "B") && CheckSpecificExtension(pset.db, "dolphin")) {
+            intervalStr = "`interval`";
+        } else {
+            intervalStr = "interval";
+        }
         printfPQExpBuffer(&buf,
-            "select partkey,partstrategy,interval[1] from pg_partition where parentid = %s and parttype = 'r'", oid);
+            "select partkey,partstrategy, %s[1] from pg_partition where parentid = %s and parttype = 'r'", 
+            intervalStr, oid);
         PGresult *tmp_result = NULL;
 
         result = PSQLexec(buf.data, false);

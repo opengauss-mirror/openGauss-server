@@ -3215,6 +3215,34 @@ static NullTest* _copyNullTest(const NullTest* from)
 }
 
 /*
+ * _copyNanTest
+ */
+static NanTest* _copyNanTest(const NanTest* from)
+{
+    NanTest* newnode = makeNode(NanTest);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(nantesttype);
+
+    return newnode;
+}
+
+/*
+ * _copyInfiniteTest
+ */
+static InfiniteTest* _copyInfiniteTest(const InfiniteTest* from)
+{
+    InfiniteTest* newnode = makeNode(InfiniteTest);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(infinitetesttype);
+
+    return newnode;
+}
+
+/*
  * _copySetVariableExpr
  */
 static SetVariableExpr* _copySetVariableExpr(const SetVariableExpr* from)
@@ -3388,6 +3416,7 @@ static JoinExpr* _copyJoinExpr(const JoinExpr* from)
     COPY_NODE_FIELD(quals);
     COPY_NODE_FIELD(alias);
     COPY_SCALAR_FIELD(rtindex);
+    COPY_SCALAR_FIELD(is_straight_join);
 
     return newnode;
 }
@@ -3657,6 +3686,7 @@ static SpecialJoinInfo* _copySpecialJoinInfo(const SpecialJoinInfo* from)
     COPY_SCALAR_FIELD(lhs_strict);
     COPY_SCALAR_FIELD(delay_upper_joins);
     COPY_NODE_FIELD(join_quals);
+    COPY_SCALAR_FIELD(is_straight_join);
 
     return newnode;
 }
@@ -8256,6 +8286,12 @@ void* copyObject(const void* from)
             break;
         case T_NullTest:
             retval = _copyNullTest((NullTest*)from);
+            break;
+        case T_NanTest:
+            retval = _copyNanTest((NanTest*)from);
+            break;
+        case T_InfiniteTest:
+            retval = _copyInfiniteTest((InfiniteTest*)from);
             break;
         case T_SetVariableExpr:
             retval = _copySetVariableExpr((SetVariableExpr*)from);

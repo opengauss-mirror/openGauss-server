@@ -243,7 +243,6 @@ bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer b
         if (utuple != NULL && TransactionIdIsNormal(fxid) && IsMVCCSnapshot(snapshot) &&
             SINGLE_LOCKER_XID_IS_EXCL_LOCKED(utuple->disk_tuple->flag)) {
             Assert(UHEAP_XID_IS_EXCL_LOCKED(utuple->disk_tuple->flag));
-            Assert(!UHEAP_XID_IS_TRANS(utuple->disk_tuple->flag));
             lockerXid = UHeapTupleGetRawXid(utuple);
             tupleIsExclusivelyLocked = true;
         }
@@ -1262,7 +1261,6 @@ TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer
     UHeapTupleStatus tupleStatus = UHeapTupleGetStatus(utuple);
     /* tuple is no longer locked by a single locker */
     if (tupleStatus != UHEAPTUPLESTATUS_LOCKED && SINGLE_LOCKER_XID_IS_EXCL_LOCKED(tupleData->flag)) {
-        Assert(!UHEAP_XID_IS_TRANS(utuple->disk_tuple->flag));
         UHeapTupleHeaderClearSingleLocker(tupleData);
     }
 

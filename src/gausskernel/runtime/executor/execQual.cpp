@@ -135,6 +135,8 @@ static Datum ExecEvalMinMax(MinMaxExprState* minmaxExpr, ExprContext* econtext, 
 static Datum ExecEvalXml(XmlExprState* xmlExpr, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalNullIf(FuncExprState* nullIfExpr, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalNullTest(NullTestState* nstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+static Datum ExecEvalNanTest(NanTestState* nstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+static Datum ExecEvalInfiniteTest(InfiniteTestState* nstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalHashFilter(HashFilterState* hstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalBooleanTest(GenericExprState* bstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalCoerceToDomain(
@@ -1258,6 +1260,14 @@ static void find_uservar_in_expr(ExprState *root, char *return_name, bool *if_us
         } break;
         case T_NullTestState: {
             NullTestState* parent = (NullTestState*)root;
+            find_uservar_in_expr(parent->arg,return_name, if_use);
+        } break;
+        case T_NanTestState: {
+            NanTestState* parent = (NanTestState*)root;
+            find_uservar_in_expr(parent->arg,return_name, if_use);
+        } break;
+        case T_InfiniteTestState: {
+            InfiniteTestState* parent = (InfiniteTestState*)root;
             find_uservar_in_expr(parent->arg,return_name, if_use);
         } break;
         case T_SubPlanState: 
@@ -5108,6 +5118,192 @@ static Datum ExecEvalNullTest(NullTestState* nstate, ExprContext* econtext, bool
    }
 }
 
+static bool check_val_for_nan_or_infinite(NodeTag nodeTag, float8 val)
+{
+    /*
+     * Charater 'inf'、'Infinity' is unsupported in expression IS [NOT] NAN.
+     * Charater 'NaN' is unsupported is expression IS [NOT] INFINITE.
+     */
+    if ((nodeTag == T_NanTest && isinf(val)) || (nodeTag == T_InfiniteTest && isnan(val))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+            errmsg("invalid input for IS [NOT] %s", nodeTag == T_NanTest ? "NAN" : "INFINITE")));
+        return false; // Sustain return statement to uphold logical integrity
+    }
+
+    return true;
+}
+
+static Oid deparse_funcexpr_for_input_type(FuncExpr* funcexpr, NodeTag type, float8 val)
+{
+    Oid inputtype = InvalidOid;
+    ExprState* exprstate = (ExprState*) lfirst(list_head(funcexpr->args));
+    if (IsA(exprstate, Param)) {
+        Param* param = (Param*) exprstate;
+        inputtype = param->paramtype;
+    } else if (IsA(exprstate, Var)) {
+        if (check_val_for_nan_or_infinite(type, val)) {
+            Var* var = (Var*) exprstate;
+            inputtype = var->vartype;
+        }
+    } else
+        inputtype = exprstate->resultType;
+    
+    return inputtype;
+}
+
+Oid deparseNodeForInputype(Expr *expr, NodeTag type, float8 val)
+{
+    Expr *argexpr;
+    Oid inputtype = InvalidOid;
+
+    if (type == T_NanTest) {
+        argexpr = ((NanTest *) expr)->arg;
+    } else if (type = T_InfiniteTest) {
+        argexpr = ((InfiniteTest *) expr)->arg;
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", (int)type)));
+    }
+
+    if (IsA(argexpr, Var)) {
+        Var* var = (Var*) argexpr;
+        inputtype = var->vartype;
+
+    } else if (IsA(argexpr, FuncExpr)) {
+        inputtype = deparse_funcexpr_for_input_type((FuncExpr *) argexpr, type, val);
+
+    } else if (IsA(argexpr, Const)) {
+        check_val_for_nan_or_infinite(type, val);
+
+    } else if (IsA(argexpr, OpExpr)) {
+        OpExpr* opexpr = (OpExpr *) argexpr;
+        inputtype = opexpr->opresulttype;
+
+    } else if (IsA(argexpr, Param)) {
+        Param* param = (Param*) argexpr;
+        inputtype = param->paramtype;
+
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", (int)type)));
+    }
+
+    return inputtype;
+}
+
+/* ----------------------------------------------------------------
+*		ExecEvalNanTest
+*
+*		Evaluate a NanTest node.
+* ----------------------------------------------------------------
+*/
+static Datum ExecEvalNanTest(NanTestState* nstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    NanTest* ntest = (NanTest*)nstate->xprstate.expr;
+    Datum result;
+    bool resultnan;
+    Oid inputtype;
+    float8 val;
+
+    result = ExecEvalExpr(nstate->arg, econtext, isNull, isDone);
+
+    if (isDone && *isDone == ExprEndResult)
+        return result; /* nothing to check */
+
+    /* 
+     * Evaluate value IS [NOT] NAN. 
+     * if number value is NAN and without NOT, return true, else false; if with NOT, the result is reversed;
+     * if charater string is 'NAN'、'INF'(ignore case) or others which can't cast to float8, throw errors;
+     * Especially for NULL, no matter IS_NAN or IS_NOT_NAN all return NULL.
+     */
+
+    if (*isNull) {
+        return (Datum)0; 
+    }
+
+    val = DatumGetFloat8(result);
+    resultnan = isnan(val);
+    inputtype = deparseNodeForInputype((Expr *)ntest, T_NanTest, val);
+
+     /* Only float8, float4, numeric support NAN */
+    if (resultnan && !(inputtype == FLOAT8OID || inputtype == FLOAT4OID || inputtype == NUMERICOID)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input for IS [NOT] NAN")));
+    }
+
+    switch (ntest->nantesttype) {
+        case IS_NAN:
+            return BoolGetDatum(resultnan);
+        case IS_NOT_NAN:
+            return BoolGetDatum(!resultnan);
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("unrecognized nantesttype: %d", (int)ntest->nantesttype)));
+            return (Datum)0; /* keep compiler quiet */
+    }
+}
+
+/* ----------------------------------------------------------------
+*		ExecEvalInfiniteTest
+*
+*		Evaluate a InfiniteTest node.
+* ----------------------------------------------------------------
+*/
+static Datum ExecEvalInfiniteTest(InfiniteTestState* nstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    InfiniteTest* itest = (InfiniteTest*)nstate->xprstate.expr;
+    Datum result;
+    bool resultinf;
+    Oid inputtype;
+    float8 val;
+
+    result = ExecEvalExpr(nstate->arg, econtext, isNull, isDone);
+
+    if (isDone && *isDone == ExprEndResult)
+        return result; /* nothing to check */
+
+    /* 
+     * Evaluate value IS [NOT] INFINITE. 
+     * if number value is INFINITE and without NOT, return true, else false; if with NOT, the result is reversed;
+     * if charater string is 'INF'、'NAN' (ignore case) or others which can't cast to float8, thrown errors;
+     * Especially for NULL, no matter IS_INFINITE or IS_NOT_INFINITE all return NULL.
+     */
+
+    if (*isNull) {
+        return (Datum)0; 
+    }
+
+    val = DatumGetFloat8(result);
+    resultinf = isinf(val);
+    inputtype = deparseNodeForInputype((Expr *)itest, T_InfiniteTest, val);
+
+    /* Only float8, float4 support INF */
+    if (resultinf && !(inputtype == FLOAT8OID || inputtype == FLOAT4OID)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input for IS [NOT] INFINITE")));
+    }
+
+    switch (itest->infinitetesttype) {
+        case IS_INFINITE:
+            return BoolGetDatum(resultinf);
+        case IS_NOT_INFINITE:
+            return BoolGetDatum(!resultinf);
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("unrecognized infinitetesttype: %d", (int)itest->infinitetesttype)));
+            return (Datum)0; /* keep compiler quiet */
+    }
+}
+
 /* ----------------------------------------------------------------
 *		ExecEvalHashFilter
 *
@@ -6395,6 +6591,24 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
            nstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalNullTest;
            nstate->arg = ExecInitExprByRecursion(ntest->arg, parent);
            nstate->argdesc = NULL;
+           state = (ExprState*)nstate;
+       } break;
+        case T_NanTest: {
+            NanTest* ntest = (NanTest*)node;
+            NanTestState* nstate = makeNode(NanTestState);
+            nstate->xprstate.is_flt_frame = false;
+
+            nstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalNanTest;
+            nstate->arg = ExecInitExprByRecursion(ntest->arg, parent);
+            state = (ExprState*)nstate;
+       } break;
+        case T_InfiniteTest: {
+           InfiniteTest* itest = (InfiniteTest*)node;
+           InfiniteTestState* nstate = makeNode(InfiniteTestState);
+           nstate->xprstate.is_flt_frame = false;
+
+           nstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalInfiniteTest;
+           nstate->arg = ExecInitExprByRecursion(itest->arg, parent);
            state = (ExprState*)nstate;
        } break;
        case T_HashFilter: {

@@ -15735,7 +15735,11 @@ static int exec_stmt_savepoint(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
              * Revert to outer eval_econtext.  (The inner one was
              * automatically cleaned up during subxact exit.)
              */
-            estate->eval_econtext = u_sess->plsql_cxt.simple_econtext_stack->stack_econtext;
+            if (u_sess->plsql_cxt.simple_econtext_stack == NULL) {
+                estate->eval_econtext = NULL;
+            } else {
+                estate->eval_econtext = u_sess->plsql_cxt.simple_econtext_stack->stack_econtext;
+            }
             break;
         default:
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

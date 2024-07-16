@@ -60,6 +60,8 @@ Oid exprType(const Node* expr)
         case T_CurrentOfExpr:
         case T_HashFilter:
         case T_NullTest:
+        case T_NanTest:
+        case T_InfiniteTest:
         case T_ScalarArrayOpExpr:
         case T_RowCompareExpr:
             type = BOOLOID;
@@ -959,6 +961,8 @@ Oid exprCollation(const Node* expr)
             }
             break;
         case T_NullTest:
+        case T_NanTest:
+        case T_InfiniteTest:
         case T_HashFilter:
             coll = InvalidOid; /* result is always boolean */
             break;
@@ -1193,6 +1197,8 @@ void exprSetCollation(Node* expr, Oid collation)
                 : (collation == InvalidOid));
             break;
         case T_NullTest:
+        case T_NanTest:
+        case T_InfiniteTest:
         case T_HashFilter:
             Assert(!OidIsValid(collation)); /* result is always boolean */
             break;
@@ -1452,6 +1458,14 @@ int exprLocation(const Node* expr)
         case T_NullTest:
             /* just use argument's location */
             loc = exprLocation((Node*)((const NullTest*)expr)->arg);
+            break;
+        case T_NanTest:
+            /* just use argument's location */
+            loc = exprLocation((Node*)((const NanTest*)expr)->arg);
+            break;
+        case T_InfiniteTest:
+            /* just use argument's location */
+            loc = exprLocation((Node*)((const InfiniteTest*)expr)->arg);
             break;
         case T_HashFilter:
             /* just use argument's location */
@@ -1937,6 +1951,10 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_NullTest:
             return p2walker(((NullTest*)node)->arg, context);
+        case T_NanTest:
+            return p2walker(((NanTest*)node)->arg, context);
+        case T_InfiniteTest:
+            return p2walker(((InfiniteTest*)node)->arg, context);
         case T_HashFilter:
             return p2walker(((HashFilter*)node)->arg, context);
         case T_BooleanTest:
@@ -2635,6 +2653,22 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->arg, ntest->arg, Expr*);
             return (Node*)newnode;
         } break;
+        case T_NanTest: {
+            NanTest* ntest = (NanTest*)node;
+            NanTest* newnode = NULL;
+
+            FLATCOPY(newnode, ntest, NanTest, isCopy);
+            MUTATE(newnode->arg, ntest->arg, Expr*);
+            return (Node*)newnode;
+        } break;
+        case T_InfiniteTest: {
+            InfiniteTest* ntest = (InfiniteTest*)node;
+            InfiniteTest* newnode = NULL;
+
+            FLATCOPY(newnode, ntest, InfiniteTest, isCopy);
+            MUTATE(newnode->arg, ntest->arg, Expr*);
+            return (Node*)newnode;
+        } break;
         case T_HashFilter: {
             HashFilter* htest = (HashFilter*)node;
             HashFilter* newnode = NULL;
@@ -3127,6 +3161,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_NullTest:
             return p2walker(((NullTest*)node)->arg, context);
+        case T_NanTest:
+            return p2walker(((NanTest*)node)->arg, context);
+        case T_InfiniteTest:
+            return p2walker(((InfiniteTest*)node)->arg, context);
         case T_BooleanTest:
             return p2walker(((BooleanTest*)node)->arg, context);
         case T_HashFilter:

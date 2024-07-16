@@ -1267,6 +1267,24 @@ typedef struct NullTestState {
 } NullTestState;
 
 /* ----------------
+ *		NanTestState node
+ * ----------------
+ */
+typedef struct NanTestState {
+    ExprState xprstate;
+    ExprState* arg; /* input expression */
+} NanTestState;
+
+/* ----------------
+ *		InfiniteTestState node
+ * ----------------
+ */
+typedef struct InfiniteTestState {
+    ExprState xprstate;
+    ExprState* arg; /* input expression */
+} InfiniteTestState;
+
+/* ----------------
  *		HashFilterState node
  * ----------------
  */

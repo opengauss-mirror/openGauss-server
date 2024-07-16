@@ -56,6 +56,12 @@
 #include "utils/varbit.h"
 #include "tcop/tcopprot.h"
 
+typedef Node* (*DriverTransFunction)(ParseState* pstate, ColumnRef *cref, char *colname);
+typedef struct {
+    char *keyword;
+    DriverTransFunction function;
+} ColnameTransition;
+
 extern Node* build_column_default(Relation rel, int attrno, bool isInsertCmd = false, bool needOnUpdate = false);
 extern Node* makeAConst(Value* v, int location);
 extern Value* makeStringValue(char* str);
@@ -104,6 +110,15 @@ static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
 static void SubCheckOutParam(List* exprtargs, Oid funcid);
 static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey);
 static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cursor_expression);
+static Node* transformStringCast(ParseState* pstate, char *str, int location, TypeName *typname);
+static Node* transformBinaryDoubleInf(ParseState* pstate, ColumnRef *cref, char *colname);
+static Node* transformBinaryDoubleNan(ParseState* pstate, ColumnRef *cref, char *colname);
+
+ColnameTransition predicateTable[] = {
+        { "binary_double_infinity", transformBinaryDoubleInf },
+        { "binary_double_nan", transformBinaryDoubleNan }
+};
+#define PREDICATE_COUNT (int)(sizeof(predicateTable) / sizeof(predicateTable[0]))
 
 #define OrientedIsCOLorPAX(rte) ((rte)->orientation == REL_COL_ORIENTED || (rte)->orientation == REL_PAX_ORIENTED)
 #define INDEX_KEY_MAX_PREFIX_LENGTH (int)2676
@@ -533,6 +548,22 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
             break;
         }
 
+        case T_NanTest: {
+            NanTest* n = (NanTest*)expr;
+
+            n->arg = (Expr*)transformExprRecurse(pstate, (Node*)n->arg);
+            result = expr;
+            break;
+        }
+
+        case T_InfiniteTest: {
+            InfiniteTest* n = (InfiniteTest*)expr;
+
+            n->arg = (Expr*)transformExprRecurse(pstate, (Node*)n->arg);
+            result = expr;
+            break;
+        }
+
         case T_BooleanTest:
             result = transformBooleanTest(pstate, (BooleanTest*)expr);
             break;
@@ -865,6 +896,15 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
 
             AssertEreport(IsA(field1, String), MOD_OPT, "");
             colname = strVal(field1);
+
+            for (int i = 0; i < PREDICATE_COUNT; i++) {
+                if(strcmp(colname, predicateTable[i].keyword) == 0){
+                    node = predicateTable[i].function(pstate, cref, colname);
+                }
+            }
+            if (node != NULL) {
+                break;
+            }
 
             if (pstate->p_hasStartWith || pstate->p_split_where_for_swcb) {
                 Node *expr = NULL;
@@ -3852,6 +3892,29 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
         parse_state_temp = parse_state_temp->parentParseState;
     }
     return (Node*)newm;
+}
+
+static Node* transformStringCast(ParseState* pstate, char *str, int location, TypeName *typname)
+{
+    A_Const *n = makeNode(A_Const);
+    n->val.type = T_String;
+    n->val.val.str = str;
+    n->location = location;
+
+    TypeCast *tc = makeNode(TypeCast);
+    tc->arg = (Node *)n;
+    tc->typname = typname;
+    tc->location = location;
+
+    return transformTypeCast(pstate, tc);
+}
+
+static Node* transformBinaryDoubleInf(ParseState* pstate, ColumnRef *cref, char *colname) {
+    return transformStringCast(pstate, "infinity", cref->location, SystemTypeName("float8"));
+}
+
+static Node* transformBinaryDoubleNan(ParseState* pstate, ColumnRef *cref, char *colname) {
+    return transformStringCast(pstate, "nan", cref->location, SystemTypeName("float8"));
 }
 
 

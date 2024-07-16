@@ -8856,6 +8856,11 @@ static void PostmasterStateMachine(void)
      */
     if (g_instance.demotion > NoDemote && pmState == PM_NO_CHILDREN) {
         ereport(LOG, (errmsg("all server processes terminated; reinitializing")));
+
+        if (SS_DISASTER_STANDBY_CLUSTER && g_instance.dms_cxt.SSClusterState == NODESTATE_PROMOTE_APPROVE) {
+            pmState = PM_RUN;
+            return;
+        }
         /* cause gpc scheduler use lwlock, so before reset shared memory(still has lwlock),
           get gpc_reset_lock and reset gpc */
         if (ENABLE_GPC) {

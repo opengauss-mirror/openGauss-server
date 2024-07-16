@@ -619,6 +619,22 @@ static bool _equalNullTest(const NullTest* a, const NullTest* b)
     return true;
 }
 
+static bool _equalNanTest(const NanTest* a, const NanTest* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(nantesttype);
+
+    return true;
+}
+
+static bool _equalInfiniteTest(const InfiniteTest* a, const InfiniteTest* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(infinitetesttype);
+
+    return true;
+}
+
 static bool _equalSetVariableExpr(const SetVariableExpr *a, const SetVariableExpr *b)
 {
     COMPARE_STRING_FIELD(name);
@@ -730,6 +746,7 @@ static bool _equalJoinExpr(const JoinExpr* a, const JoinExpr* b)
     COMPARE_NODE_FIELD(quals);
     COMPARE_NODE_FIELD(alias);
     COMPARE_SCALAR_FIELD(rtindex);
+    COMPARE_SCALAR_FIELD(is_straight_join);
 
     return true;
 }
@@ -838,6 +855,7 @@ static bool _equalSpecialJoinInfo(const SpecialJoinInfo* a, const SpecialJoinInf
     COMPARE_SCALAR_FIELD(lhs_strict);
     COMPARE_SCALAR_FIELD(delay_upper_joins);
     COMPARE_NODE_FIELD(join_quals);
+    COMPARE_SCALAR_FIELD(is_straight_join);
 
     return true;
 }
@@ -3806,6 +3824,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_NullTest:
             retval = _equalNullTest((NullTest*)a, (NullTest*)b);
+            break;
+        case T_NanTest:
+            retval = _equalNanTest((NanTest*)a, (NanTest*)b);
+            break;
+        case T_InfiniteTest:
+            retval = _equalInfiniteTest((InfiniteTest*)a, (InfiniteTest*)b);
             break;
         case T_SetVariableExpr:
             retval = _equalSetVariableExpr((SetVariableExpr*)a, (SetVariableExpr*)b);

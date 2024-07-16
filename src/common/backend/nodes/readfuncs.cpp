@@ -2945,6 +2945,32 @@ static NullTest* _readNullTest(void)
 }
 
 /*
+ * _readNanTest
+ */
+static NanTest* _readNanTest(void)
+{
+    READ_LOCALS(NanTest);
+
+    READ_NODE_FIELD(arg);
+    READ_ENUM_FIELD(nantesttype, NanTestType);
+
+    READ_DONE();
+}
+
+/*
+ * _readInfiniteTest
+ */
+static InfiniteTest* _readInfiniteTest(void)
+{
+    READ_LOCALS(InfiniteTest);
+
+    READ_NODE_FIELD(arg);
+    READ_ENUM_FIELD(infinitetesttype, InfiniteTestType);
+
+    READ_DONE();
+}
+
+/*
  * _readSetVariableExpr
  */
 static SetVariableExpr* _readSetVariableExpr(void)
@@ -3122,6 +3148,9 @@ static JoinExpr* _readJoinExpr(void)
     READ_NODE_FIELD(quals);
     READ_NODE_FIELD(alias);
     READ_INT_FIELD(rtindex);
+    IF_EXIST(is_straight_join) {
+        READ_BOOL_FIELD(is_straight_join);
+    }
 
     READ_DONE();
 }
@@ -3266,6 +3295,7 @@ static RangeTblEntry* _readRangeTblEntry(void)
                                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                                     errmsg("NULL relnamespace for RTE %u found", local_node->relid)));
                         }
+                        local_node->relnamespace = relnamespace;
                     }
                     /*
                      * Same reason as above, get synOid for distribution plan.
@@ -6590,6 +6620,10 @@ Node* parseNodeString(void)
         return_value = _readXmlExpr();
     } else if (MATCH("NULLTEST", 8)) {
         return_value = _readNullTest();
+    } else if (MATCH("NANTEST", 7)) {
+        return_value = _readNanTest();
+    } else if (MATCH("INFINITETEST", 12)) {
+        return_value = _readInfiniteTest();
     } else if (MATCH("SETVARIABLEEXPR", 15)) {
         return_value = _readSetVariableExpr();
     } else if (MATCH("HASHFILTER", 10)) {

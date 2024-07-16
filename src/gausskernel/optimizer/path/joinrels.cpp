@@ -303,10 +303,11 @@ static void make_rels_by_clauseless_joins(PlannerInfo* root, RelOptInfo* old_rel
  * match the SpecialJoinInfo node.
  */
 static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2, Relids joinrelids,
-    SpecialJoinInfo** sjinfo_p, bool* reversed_p)
+    SpecialJoinInfo** sjinfo_p, bool* reversed_p, bool* straight_join_p)
 {
     SpecialJoinInfo* match_sjinfo = NULL;
     bool reversed = false;
+    bool straight_join = false;
     bool unique_exchange = false;
     bool must_be_leftjoin = false;
     bool lateral_fwd = false;
@@ -319,6 +320,7 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
      */
     *sjinfo_p = NULL;
     *reversed_p = false;
+    *straight_join_p = false;
 
     /*
      * If we have any special joins, the proposed join might be illegal; and
@@ -328,6 +330,9 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
     foreach (l, root->join_info_list) {
         SpecialJoinInfo* sjinfo = (SpecialJoinInfo*)lfirst(l);
 
+        if (sjinfo->is_straight_join) {
+            straight_join = true;
+        }
         /*
          * This special join is not relevant unless its RHS overlaps the
          * proposed join.  (Check this first as a fast path for dismissing
@@ -531,6 +536,7 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
     /* Otherwise, it's a valid join */
     *sjinfo_p = match_sjinfo;
     *reversed_p = reversed;
+    *straight_join_p = straight_join;
     return true;
 }
 
@@ -551,6 +557,7 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
     Relids joinrelids;
     SpecialJoinInfo* sjinfo = NULL;
     bool reversed = false;
+    bool straight_join = false;
     SpecialJoinInfo sjinfo_data;
     RelOptInfo* joinrel = NULL;
     List* restrictlist = NIL;
@@ -562,7 +569,7 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
     joinrelids = bms_union(rel1->relids, rel2->relids);
 
     /* Check validity and determine join type. */
-    if (!join_is_legal(root, rel1, rel2, joinrelids, &sjinfo, &reversed)) {
+    if (!join_is_legal(root, rel1, rel2, joinrelids, &sjinfo, &reversed, &straight_join)) {
         /* invalid join path */
         bms_free_ext(joinrelids);
         return NULL;
@@ -591,6 +598,7 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
         sjinfo->jointype = JOIN_INNER;
         /* we don't bother trying to make the remaining fields valid */
         sjinfo->lhs_strict = false;
+        sjinfo->is_straight_join = straight_join;
         sjinfo->delay_upper_joins = false;
         sjinfo->join_quals = NIL;
     }
@@ -650,6 +658,9 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
                 break;
             }
             add_paths_to_joinrel(root, joinrel, rel1, rel2, JOIN_INNER, sjinfo, restrictlist);
+            if (u_sess->attr.attr_sql.dolphin && sjinfo->is_straight_join) {
+                break;
+            }
             add_paths_to_joinrel(root, joinrel, rel2, rel1, JOIN_INNER, sjinfo, restrictlist);
             break;
         case JOIN_LEFT:
@@ -956,10 +967,11 @@ static bool has_legal_joinclause(PlannerInfo* root, RelOptInfo* rel)
             Relids joinrelids;
             SpecialJoinInfo* sjinfo = NULL;
             bool reversed = false;
+            bool straight_join = false;
 
             /* join_is_legal needs relids of the union */
             joinrelids = bms_union(rel->relids, rel2->relids);
-            if (join_is_legal(root, rel, rel2, joinrelids, &sjinfo, &reversed)) {
+            if (join_is_legal(root, rel, rel2, joinrelids, &sjinfo, &reversed, &straight_join)) {
                 /* Yes, this will work */
                 bms_free_ext(joinrelids);
                 return true;

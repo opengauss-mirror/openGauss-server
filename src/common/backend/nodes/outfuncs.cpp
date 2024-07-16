@@ -3065,6 +3065,22 @@ static void _outNullTest(StringInfo str, NullTest* node)
     WRITE_BOOL_FIELD(argisrow);
 }
 
+static void _outNanTest(StringInfo str, NanTest* node)
+{
+    WRITE_NODE_TYPE("NANTEST");
+
+    WRITE_NODE_FIELD(arg);
+    WRITE_ENUM_FIELD(nantesttype, NanTestType);
+}
+
+static void _outInfiniteTest(StringInfo str, InfiniteTest* node)
+{
+    WRITE_NODE_TYPE("INFINITETEST");
+
+    WRITE_NODE_FIELD(arg);
+    WRITE_ENUM_FIELD(infinitetesttype, InfiniteTestType);
+}
+
 static void _outSetVariableExpr(StringInfo str, SetVariableExpr* node)
 {
     WRITE_NODE_TYPE("SetVariableExpr");
@@ -3190,6 +3206,9 @@ static void _outJoinExpr(StringInfo str, JoinExpr* node)
     WRITE_NODE_FIELD(quals);
     WRITE_NODE_FIELD(alias);
     WRITE_INT_FIELD(rtindex);
+    if (t_thrd.proc->workingVersionNum >= STRAIGHT_JOIN_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_straight_join);
+    }
 }
 
 static void _outFromExpr(StringInfo str, FromExpr* node)
@@ -3829,6 +3848,9 @@ static void _outSpecialJoinInfo(StringInfo str, SpecialJoinInfo* node)
     WRITE_BOOL_FIELD(lhs_strict);
     WRITE_BOOL_FIELD(delay_upper_joins);
     WRITE_NODE_FIELD(join_quals);
+    if (t_thrd.proc->workingVersionNum >= STRAIGHT_JOIN_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_straight_join);
+    }
 }
 
 static void
@@ -6678,6 +6700,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NullTest:
                 _outNullTest(str, (NullTest*)obj);
+                break;
+            case T_NanTest:
+                _outNanTest(str, (NanTest*)obj);
+                break;
+            case T_InfiniteTest:
+                _outInfiniteTest(str, (InfiniteTest*)obj);
                 break;
             case T_SetVariableExpr:
                 _outSetVariableExpr(str, (SetVariableExpr*)obj);

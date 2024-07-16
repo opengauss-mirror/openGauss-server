@@ -455,7 +455,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRe
                     "xlogLsn:%lu, pageLsn:%lu",
                     blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
                     blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
-                    xlogLsn, pageLsn)));
+                    xlogLsn, *pageLsn)));
         }
 
         if (XLByteLE(xlogLsn, *pageLsn)) {
@@ -468,7 +468,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRe
                 "xlogLsn:%lu, pageLsn:%lu",
                 blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
                 blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
-                xlogLsn, pageLsn)));
+                xlogLsn, *pageLsn)));
 #endif
             // do not release content_lock
             return true;

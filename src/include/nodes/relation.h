@@ -1948,6 +1948,7 @@ typedef struct SpecialJoinInfo {
     bool delay_upper_joins; /* can't commute with upper RHS */
     List* join_quals;       /* join quals, in implicit-AND list format */
     bool varratio_cached;   /* decide chach selec or not. */
+    bool is_straight_join;  /* set true if is straight_join*/
 } SpecialJoinInfo;
 
 /*

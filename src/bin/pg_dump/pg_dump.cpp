@@ -9121,6 +9121,7 @@ EventInfo* getEvents(Archive *fout, int *numEvents)
     int i_nspname;
     char* database_name = PQdb(GetConnection(fout));
     bool is_bcompatibility = findDBCompatibility(fout, PQdb(GetConnection(fout)));
+    const char *intervalStr = NULL;
 
     if (GetVersionNum(fout) < EVENT_VERSION) {
         return NULL;
@@ -9129,12 +9130,18 @@ EventInfo* getEvents(Archive *fout, int *numEvents)
     selectSourceSchema(fout, "pg_catalog");
     query = createPQExpBuffer();
     if (is_bcompatibility) {
+        if (hasSpecificExtension(fout, "dolphin")) {
+            intervalStr = "`interval`";
+        } else {
+            intervalStr = "interval";
+        }
         appendPQExpBuffer(
             query,
             "SELECT pg_job.oid,  job_id, log_user, job_name, pg_job.nspname, pg_namespace.oid, dbname, start_date, "
-            "end_date, interval, enable "
+            "end_date, %s, enable "
             "FROM pg_job LEFT join pg_namespace on pg_namespace.nspname = pg_job.nspname where dbname=\'%s\'",
-            database_name);
+            intervalStr, database_name);
+
         res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
         
         ntups = PQntuples(res);
@@ -18511,12 +18518,19 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int cnt;
 
     bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, false);
+    const char *intervalStr = NULL;
     /* get partitioned table info */
+    if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin")) {
+        intervalStr = "`interval`";
+    } else {
+        intervalStr = "interval";
+    }
     appendPQExpBuffer(defq,
-        "SELECT partstrategy, interval[1], "
+        "SELECT partstrategy, %s[1], "
         "pg_catalog.array_length(partkey, 1) AS partkeynum, partkey, "
         "pg_catalog.array_length(intervaltablespace, 1) AS inttblspcnum, intervaltablespace "
         "FROM pg_partition WHERE parentid = '%u' AND parttype = '%c'",
+        intervalStr,
         tbinfo->dobj.catId.oid,
         PART_OBJ_TYPE_PARTED_TABLE);
     res = ExecuteSqlQueryForSingleRow(fout, defq->data);

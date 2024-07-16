@@ -4067,6 +4067,19 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"uwal_truncate_interval", 
+            PGC_POSTMASTER, 
+            NODE_SINGLENODE, 
+            UWAL, 
+            gettext_noop("Interval(s) for moving xlog files"), 
+            NULL},
+            &g_instance.attr.attr_storage.uwal_truncate_interval,
+            60,
+            0,
+            7200,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -7180,7 +7193,7 @@ static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSour
     }
 
     if (dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_entries fail")));
+        ereport(ERROR, (errmsg("set parameter ss_fi_cpu_latency_entries fail")));
         return false;
     }
     return true;
