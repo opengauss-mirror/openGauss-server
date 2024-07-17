@@ -70,6 +70,7 @@ typedef struct StreamFlowCtl {
     int* threadNum;                /* The number of stream thread. */
     bool dummyThread;              /* If it's a dummy stream node? */
     StreamFlowCheckInfo checkInfo; /* Check if consumer match producer between stream node. */
+    PlannedStmt* cursorPstmt;
 } StreamFlowCtl;
 
 typedef union {

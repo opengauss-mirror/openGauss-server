@@ -3713,6 +3713,7 @@ Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel, Relids requir
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL;    /* for now, assume unordered result */
     pathnode->exec_type = SetBasePathExectype(root, rel);
+    pathnode->dop = rel->cursorDop;
 
 #ifdef STREAMPLAN
     pathnode->distribute_keys = rel->distribute_keys;

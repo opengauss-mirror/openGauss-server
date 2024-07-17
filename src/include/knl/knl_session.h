@@ -112,6 +112,9 @@ typedef struct knl_u_stream_context {
 
     class StreamProducer* producer_obj;
 
+    /* List of StreamNodeGroup belong to current session that are active in the backend */
+    List *cursorNodeGroupList;
+
     MemoryContext stream_runtime_mem_cxt;
 
     /* Shared memory context for in-memory data exchange. */
@@ -459,6 +462,7 @@ typedef struct knl_u_parser_context {
     bool has_set_uservar;
     bool has_equal_uservar;
     bool is_straight_join;
+    int cursor_expr_level;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -1731,6 +1735,7 @@ typedef struct knl_u_plpgsql_context {
     HTAB* plpgsql_lock_objects;
 
     bool need_init;
+    char* parallel_cursor_arg_name;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -3215,6 +3220,11 @@ inline void stp_reset_xact_state_and_err_msg(bool savedisAllowCommitRollback, bo
     if (needResetErrMsg) {
         stp_reset_commit_rolback_err_msg();
     }
+}
+
+inline bool has_backend_cursor_stream()
+{
+    return list_length(u_sess->stream_cxt.cursorNodeGroupList) > 0;
 }
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_H_ */

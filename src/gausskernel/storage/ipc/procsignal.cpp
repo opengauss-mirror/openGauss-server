@@ -286,8 +286,8 @@ void procsignal_sigusr1_handler(SIGNAL_ARGS)
         WLMCheckSigRecvData();
     if (CheckProcSignal(PROCSIG_SPACE_LIMIT))
         WLMCheckSpaceLimit();
-#if (!defined ENABLE_MULTIPLE_NODES) && (!defined USE_SPQ)
-    if (CheckProcSignal(PROCSIG_STREAM_STOP_CHECK))
+#ifndef ENABLE_MULTIPLE_NODES
+    if (CheckProcSignal(PROCSIG_STREAM_STOP_CHECK) && !IS_SPQ_RUNNING)
         StreamMarkStop();
 #endif
 #endif

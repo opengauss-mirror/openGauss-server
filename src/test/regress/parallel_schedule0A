@@ -33,7 +33,7 @@ test: extract_pushdown_or_clause
 test: workload_manager
 
 test: spm_adaptive_gplan
-test: smp
+test: smp smp_cursor parallel_enable_function
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix

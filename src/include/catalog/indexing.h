@@ -690,6 +690,9 @@ DECLARE_UNIQUE_INDEX(pg_event_trigger_evtname_index, 3486, on pg_event_trigger u
 DECLARE_UNIQUE_INDEX(pg_event_trigger_oid_index, 3487, on pg_event_trigger using btree(oid oid_ops));
 #define EventTriggerOidIndexId  3487
 
+DECLARE_UNIQUE_INDEX(pg_proc_ext_proc_oid_index, 3488, on pg_proc_ext using btree(proc_oid oid_ops));
+#define ProcExtProcOidIndexId  3488
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 

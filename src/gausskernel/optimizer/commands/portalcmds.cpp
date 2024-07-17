@@ -142,6 +142,10 @@ void PerformCursorOpen(PlannedStmt* stmt, ParamListInfo params, const char* quer
      */
     PortalStart(portal, params, 0, GetActiveSnapshot());
 
+    if (u_sess->stream_cxt.global_obj != NULL) {
+        portal->streamInfo.ResetEnvForCursor();
+    }
+
     if (u_sess->pgxc_cxt.gc_fdw_snapshot) {
         PopActiveSnapshot();
     }
@@ -286,6 +290,11 @@ void PortalCleanup(Portal portal)
             saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
             PG_TRY();
             {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (IS_STREAM_PORTAL) {
+                    portal->streamInfo.AttachToSession();
+                }
+#endif
                 t_thrd.utils_cxt.CurrentResourceOwner = portal->resowner;
                 ExecutorFinish(queryDesc);
                 ExecutorEnd(queryDesc);
@@ -294,14 +303,12 @@ void PortalCleanup(Portal portal)
                  * estate is under the queryDesc, and stream threads use it.
                  * we should wait all stream threads exit to cleanup queryDesc.
                  */
-                if (!StreamThreadAmI()) {
-                    portal->streamInfo.AttachToSession();
+                if (IS_STREAM_PORTAL) {
                     StreamNodeGroup::ReleaseStreamGroup(true);
                     portal->streamInfo.Reset();
                 }
 #else
-                if (t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !StreamThreadAmI()) {
-                    portal->streamInfo.AttachToSession();
+                if (t_thrd.spq_ctx.spq_role == ROLE_UTILITY && IS_STREAM_PORTAL) {
                     StreamNodeGroup::ReleaseStreamGroup(true);
                     portal->streamInfo.Reset();
                 }
@@ -421,11 +428,21 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
 
         PushActiveSnapshot(queryDesc->snapshot);
 
-        /*
-         * Rewind the executor: we need to store the entire result set in the
-         * tuplestore, so that subsequent backward FETCHs can be processed.
-         */
-        ExecutorRewind(queryDesc);
+        if (IsA(queryDesc->planstate, StreamState)) {
+            /*
+             * Record current position when transaction commit for cursor with stream plan,
+             * so that subsequent absolute FETCHs can be processed properly.
+             */
+            portal->commitPortalPos = portal->portalPos;
+            portal->portalPos = 0;
+        } else {
+            /*
+            * Rewind the executor: we need to store the entire result set in the
+            * tuplestore, so that subsequent backward FETCHs can be processed.
+            */
+            portal->commitPortalPos = 0;
+            ExecutorRewind(queryDesc);
+        }
 
         /*
          * Change the destination to output to the tuplestore.	Note we tell
@@ -455,6 +472,15 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
         portal->queryDesc = NULL; /* prevent double shutdown */
         ExecutorFinish(queryDesc);
         ExecutorEnd(queryDesc);
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (IS_STREAM_PORTAL) {
+            portal->streamInfo.AttachToSession();
+            StreamNodeGroup::ReleaseStreamGroup(true, STREAM_COMPLETE);
+            portal->streamInfo.Reset();
+        }
+#endif
+
         FreeQueryDesc(queryDesc);
 
         /*

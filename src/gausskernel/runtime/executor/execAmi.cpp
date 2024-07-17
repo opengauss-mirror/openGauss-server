@@ -366,6 +366,13 @@ void ExecReScan(PlanState* node)
         ReScanExprContext(node->ps_ExprContext);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* if the cursor has executed by stream, it cannot rescan anymore. */
+    if (IsA(node, StreamState)) {
+        ereport(ERROR, (errmsg("cursor with stream plan do not support scan backward.")));
+    }
+#endif
+
     /* If need stub execution, stop rescan here */
     if (!planstate_need_stub(node)) {
         if (IS_PGXC_DATANODE && EXEC_IN_RECURSIVE_MODE(node->plan) && IsA(node, StreamState)) {

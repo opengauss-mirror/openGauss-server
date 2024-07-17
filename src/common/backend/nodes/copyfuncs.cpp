@@ -2281,6 +2281,10 @@ static Stream* _copyStream(const Stream* from)
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif
+    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(cursor_expr_level);
+        COPY_SCALAR_FIELD(cursor_owner_node_id);
+    }
     return newnode;
 }
 

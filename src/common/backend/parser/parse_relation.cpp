@@ -1764,6 +1764,17 @@ RangeTblEntry* addRangeTableEntryForFunction(
     rte->funccolcollations = NIL;
     rte->alias = alias;
 
+    /*
+     * create_functionscan_path need cursorDop to determine
+     * wheather functionscan smp or not.
+     */
+    if (IsA(funcexpr, FuncExpr)) {
+        PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr);
+        if (cursorPstmt != NULL) {
+            rte->cursorDop = cursorPstmt->planTree->lefttree->dop;
+        }
+    }
+
     eref = makeAlias(alias ? alias->aliasname : funcname, NIL);
     rte->eref = eref;
 

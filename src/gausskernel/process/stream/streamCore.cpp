@@ -751,7 +751,9 @@ StreamPair* StreamNodeGroup::popStreamPair(StreamKey key)
 
     foreach (cell, m_streamPairList) {
         pair = (StreamPair*)lfirst(cell);
-        if (pair->key.queryId == key.queryId && pair->key.planNodeId == key.planNodeId)
+        if (pair->key.queryId == key.queryId && pair->key.planNodeId == key.planNodeId &&
+            pair->key.cursorExprLevel == key.cursorExprLevel &&
+            pair->key.cursorParentNodeId == key.cursorParentNodeId)
             return pair;
     }
 
@@ -961,6 +963,8 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 #endif
         u_sess->stream_cxt.global_obj->deInit(status);
         delete u_sess->stream_cxt.global_obj;
+        u_sess->stream_cxt.cursorNodeGroupList = list_delete(u_sess->stream_cxt.cursorNodeGroupList,
+            u_sess->stream_cxt.global_obj);
         u_sess->stream_cxt.global_obj = NULL;
     }
 

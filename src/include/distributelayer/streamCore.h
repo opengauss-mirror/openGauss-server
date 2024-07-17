@@ -58,6 +58,8 @@
 
 #define TupleVectorMaxSize 100
 
+#define IS_STREAM_PORTAL (!StreamThreadAmI() && portal->streamInfo.streamGroup != NULL)
+
 struct StreamState;
 class StreamObj;
 class StreamNodeGroup;
@@ -70,6 +72,8 @@ typedef struct {
     uint64 queryId; /* u_sess->debug_query_id */
     unsigned int planNodeId;
     unsigned int smpIdentifier;
+    int cursorExprLevel;
+    unsigned int cursorParentNodeId;
 } StreamKey;
 
 typedef union {

@@ -27,6 +27,7 @@
 #include "parser/parse_clause.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_expr.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/poolmgr.h"
 #include "pgxc/pruningslice.h"
@@ -1852,6 +1853,13 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     max_push_sql_num, gather_count, subplans, subroots, initplans, subplan_ids, false, is_under_ctescan,
                     is_data_node_exec, is_read_only, node_group_info_context);
                     *parent_node_id = save_parent_id;
+                }
+            } break;
+            case T_FunctionScan: {
+                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)result_plan)->funcexpr);
+                if (cursorPstmt != NULL) {
+                    Stream* stream = (Stream*)cursorPstmt->planTree;
+                    stream->cursor_owner_node_id = result_plan->plan_node_id;
                 }
             } break;
             default:

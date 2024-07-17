@@ -105,11 +105,53 @@ va pck9.r1;
 end pck6;
 /
 
+-- test parallel_enable
+CREATE TYPE my_outrec_typ AS (
+    employee_id numeric(6,0),
+    department_id numeric,
+    first_name character varying(30),
+    last_name character varying(30),
+    email character varying(30),
+    phone_number character varying(30)
+);
+create or replace package my_pkg as
+    FUNCTION pkg_f_1 (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any);
+    FUNCTION pkg_f_2 (p1 SYS_REFCURSOR, p2 SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p1 by hash(a,b));
+end my_pkg;
+/
+
+create or replace package body my_pkg as
+    FUNCTION pkg_f_1 (p SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p by any) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END pkg_f_1;
+    FUNCTION pkg_f_2 (p1 SYS_REFCURSOR, p2 SYS_REFCURSOR) RETURN setof my_outrec_typ parallel_enable (partition p1 by hash(a,b)) IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+BEGIN
+    LOOP
+        FETCH p1 INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+        EXIT WHEN p1%NOTFOUND;
+        return next out_rec;
+    END LOOP;
+    RETURN;
+END pkg_f_2;
+end my_pkg;
+/
+
 \! @abs_bindir@/gs_dump dump_package_db -p @portstring@ -f @abs_bindir@/dump_package.tar -F t >/dev/null 2>&1; echo $?
 \! @abs_bindir@/gs_restore -d restore_package_db -p @portstring@ @abs_bindir@/dump_package.tar >/dev/null 2>&1; echo $?
 
 \c restore_package_db
 call rowtype_pckg.rowtype_func();
+
+\sf my_pkg.pkg_f_1
+\sf my_pkg.pkg_f_2
 
 \c regression
 drop database if exists restore_subpartition_db;

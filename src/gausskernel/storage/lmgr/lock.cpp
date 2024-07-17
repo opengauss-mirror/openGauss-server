@@ -591,6 +591,16 @@ bool IsOtherProcRedistribution(PGPROC *otherProc)
  */
 inline bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
 {
+    if (has_backend_cursor_stream()) {
+        ListCell *lc;
+        foreach(lc, u_sess->stream_cxt.cursorNodeGroupList) {
+            StreamNodeGroup* streamNodeGroup = (StreamNodeGroup*)lfirst(lc);
+            Assert(streamNodeGroup != u_sess->stream_cxt.global_obj);
+            if (streamNodeGroup->inNodeGroup(proc1->pid, proc2->pid)) {
+                return true;
+            }
+        }
+    }
     return u_sess->stream_cxt.global_obj == NULL ? false
             : u_sess->stream_cxt.global_obj->inNodeGroup(proc1->pid, proc2->pid);
 }
@@ -619,8 +629,8 @@ void CancelConflictLockWaiter(PROCLOCK *proclock, LOCK *lock, LockMethod lockMet
         bool conflictLocks =
             ((lockMethodTable->conflictTab[lockmode] & LOCKBIT_ON((unsigned int)proc->waitLockMode)) != 0);
         PGPROC *leader2 = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
-        bool isSameTrans = ((StreamTopConsumerAmI() || StreamThreadAmI()) && IsInSameTransaction(proc, t_thrd.proc)) ||
-            (leader1 == leader2);
+        bool isSameTrans = ((StreamTopConsumerAmI() || StreamThreadAmI() || has_backend_cursor_stream()) &&
+                            IsInSameTransaction(proc, t_thrd.proc)) || (leader1 == leader2);
         /* send term to waitqueue proc while conflict and not in a stream or lock group */
         if (conflictLocks && !isSameTrans && !IsPrepareXact(proc) &&
             proc->pid != 0 && gs_signal_send(proc->pid, SIGTERM) < 0) {
@@ -646,7 +656,7 @@ void CancelConflictLockHolder(PROCLOCK *proclock, LOCK *lock, LockMethod lockMet
             bool conflictLocks = ((lockMethodTable->conflictTab[lockmode] & otherProcLock->holdMask) != 0);
             PGPROC *leader2 = (otherProcLock->tag.myProc->lockGroupLeader == NULL) ?
                 otherProcLock->tag.myProc : otherProcLock->tag.myProc->lockGroupLeader;
-            bool isSameTrans = ((StreamTopConsumerAmI() || StreamThreadAmI()) &&
+            bool isSameTrans = ((StreamTopConsumerAmI() || StreamThreadAmI() || has_backend_cursor_stream()) &&
                 IsInSameTransaction(otherProcLock->tag.myProc, t_thrd.proc)) || (leader1 == leader2);
             /* send term to holder proc while conflict and not in a stream or lock group */
             if (conflictLocks && !isSameTrans && !IsPrepareXact(otherProcLock->tag.myProc) &&
@@ -1322,7 +1332,7 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
          * thread is in one transaction, but these threads use differnt procs.
          * We need treat these procs as one proc
          */
-        if (StreamTopConsumerAmI() || StreamThreadAmI() || inLockGroup) {
+        if (StreamTopConsumerAmI() || StreamThreadAmI() || has_backend_cursor_stream() || inLockGroup) {
             SHM_QUEUE *otherProcLocks = &(lock->procLocks);
             PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(otherProcLocks, otherProcLocks,
                                                                offsetof(PROCLOCK, lockLink));

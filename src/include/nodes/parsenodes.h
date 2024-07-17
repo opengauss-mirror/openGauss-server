@@ -382,6 +382,7 @@ typedef struct RangeTblEntry {
                                  * Select * from table_name subpartition (subpartition_name);
                                  * or delete from table_name partition (partition_name, ...)
                                  */
+    int cursorDop;              /* for functionscan with cursor param */
 } RangeTblEntry;
 
 /*

@@ -13394,6 +13394,9 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     bool addDelimiter = false;
     bool isNullSelfloop = false;
     const char *funcKind;
+    char* parallelCursorName = NULL;
+    char* parallelCursorStrategy = NULL;
+    char* parallelCursorPartKey = NULL;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
     /* Skip if not to be dumped */
@@ -13426,9 +13429,9 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
      */
     appendPQExpBuffer(query,
         "SELECT proretset, prosrc, probin, "
-        "pg_catalog.pg_get_function_arguments(oid) AS funcargs, "
-        "pg_catalog.pg_get_function_identity_arguments(oid) AS funciargs, "
-        "pg_catalog.pg_get_function_result(oid) AS funcresult, "
+        "pg_catalog.pg_get_function_arguments(p.oid) AS funcargs, "
+        "pg_catalog.pg_get_function_identity_arguments(p.oid) AS funciargs, "
+        "pg_catalog.pg_get_function_result(p.oid) AS funcresult, "
         "proiswindow, provolatile, proisstrict, prosecdef, "
         "proleakproof, proconfig, procost, prorows, propackageid, proowner,"
         "%s, "
@@ -13437,9 +13440,11 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "%s, "
         "(SELECT lanname FROM pg_catalog.pg_language WHERE oid = prolang) AS lanname, "
         "%s, "
-        "(SELECT 1 FROM pg_depend WHERE objid = oid AND objid = refobjid AND refclassid = 1255 LIMIT 1) AS selfloop "
-        "FROM pg_catalog.pg_proc "
-        "WHERE oid = '%u'::pg_catalog.oid",
+        "(SELECT 1 FROM pg_depend WHERE objid = p.oid AND objid = refobjid AND refclassid = 1255 LIMIT 1) AS selfloop, "
+        "proargnames[o.parallel_cursor_seq + 1] AS parallelCursorName, o.parallel_cursor_strategy AS parallelCursorStrategy, "
+        "pg_catalog.array_to_string(o.parallel_cursor_partkey, ', ') AS parallelCursorPartKey "
+        "FROM pg_catalog.pg_proc p left join pg_catalog.pg_proc_ext o on p.oid = o.proc_oid "
+        "WHERE p.oid = '%u'::pg_catalog.oid",
         isHasFencedmode ? "fencedmode" : "NULL AS fencedmode",
         isHasProshippable ? "proshippable" : "NULL AS proshippable",
         isHasPropackage ? "propackage" : "NULL AS propackage",
@@ -13470,6 +13475,9 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     proshippable = PQgetvalue(res, 0, PQfnumber(res, "proshippable"));
     propackage = PQgetvalue(res, 0, PQfnumber(res, "propackage"));
     propackageid = PQgetvalue(res, 0, PQfnumber(res, "propackageid"));
+    parallelCursorName = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorName"));
+    parallelCursorStrategy = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorStrategy"));
+    parallelCursorPartKey = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorPartKey"));
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
         /* get definer user name */
@@ -13688,6 +13696,15 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             appendPQExpBuffer(q, " SHIPPABLE");
         } else {
             appendPQExpBuffer(q, " NOT SHIPPABLE");
+        }
+    }
+
+    if (((int)strlen(parallelCursorName)) != 0) {
+        appendPQExpBuffer(q, " PARALLEL_ENABLE (PARTITION %s BY ", parallelCursorName);
+        if (parallelCursorStrategy[0] == '0') {
+            appendPQExpBuffer(q, "ANY)");
+        } else if (parallelCursorStrategy[0] == '1') {
+            appendPQExpBuffer(q, "HASH(%s))", parallelCursorPartKey);
         }
     }
 

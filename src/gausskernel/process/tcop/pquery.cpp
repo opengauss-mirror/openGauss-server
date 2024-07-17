@@ -793,6 +793,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                 portal->atStart = true;
                 portal->atEnd = false; /* allow fetches */
                 portal->portalPos = 0;
+                portal->commitPortalPos = 0;
                 portal->posOverflow = false;
 
                 PopActiveSnapshot();
@@ -819,6 +820,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                 portal->atStart = true;
                 portal->atEnd = false; /* allow fetches */
                 portal->portalPos = 0;
+                portal->commitPortalPos = 0;
                 portal->posOverflow = false;
                 break;
 
@@ -846,6 +848,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                 portal->atStart = true;
                 portal->atEnd = false; /* allow fetches */
                 portal->portalPos = 0;
+                portal->commitPortalPos = 0;
                 portal->posOverflow = false;
                 break;
 
@@ -904,15 +907,6 @@ void PortalSetResultFormat(Portal portal, int nFormats, int16* formats)
 {
     int natts;
     int i;
-
-#ifndef ENABLE_MULTIPLE_NODES
-#ifndef USE_SPQ
-    if (StreamTopConsumerAmI()) {
-        portal->streamInfo.RecordSessionInfo();
-        u_sess->stream_cxt.global_obj->m_portal = portal;
-    }
-#endif
-#endif
 
     /* Do nothing if portal won't return tuples */
     if (portal->tupDesc == NULL)
@@ -2191,10 +2185,10 @@ static long DoPortalRunFetch(Portal portal, FetchDirection fdirection, long coun
 
                     if (portal->atEnd)
                         pos++; /* need one extra fetch if off end */
-                    if (count <= pos)
-                        (void)PortalRunSelect(portal, false, pos - count + 1, None_Receiver);
-                    else if (count > pos + 1)
-                        (void)PortalRunSelect(portal, true, count - pos - 1, None_Receiver);
+                    if (count - portal->commitPortalPos <= pos)
+                        (void)PortalRunSelect(portal, false, pos - count + 1 + portal->commitPortalPos, None_Receiver);
+                    else if (count - portal->commitPortalPos > pos + 1)
+                        (void)PortalRunSelect(portal, true, count - pos - 1 - portal->commitPortalPos, None_Receiver);
                 }
                 return PortalRunSelect(portal, true, 1L, dest);
             } else if (count < 0) {

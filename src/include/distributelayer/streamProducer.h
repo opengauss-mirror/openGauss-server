@@ -198,6 +198,8 @@ public:
     /* Get the wlm params. */
     WLMGeneralParam getWlmParams();
 
+    int getCursorExprLevel();
+
     uint32 getExplainThreadid();
 
     unsigned char getExplainTrack();

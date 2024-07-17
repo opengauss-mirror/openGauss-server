@@ -1562,6 +1562,11 @@ WLMGeneralParam StreamProducer::getWlmParams()
     return m_wlmParams;
 }
 
+int StreamProducer::getCursorExprLevel()
+{
+    return m_key.cursorExprLevel;
+}
+
 uint32 StreamProducer::getExplainThreadid()
 {
     return m_explain_thread_id;

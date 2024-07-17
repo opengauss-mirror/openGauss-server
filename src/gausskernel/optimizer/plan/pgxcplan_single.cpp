@@ -72,7 +72,7 @@
  * If Stream is supported, a copy of the 'query' is returned as a backup in case generating a plan
  * with Stream fails.
  */
-static Query* check_shippable(bool *stream_unsupport, Query* query, shipping_context* context)
+static Query* check_shippable(bool *stream_unsupport, Query* query, shipping_context* context, int cursorOptions)
 {
     if (u_sess->attr.attr_sql.rewrite_rule & PARTIAL_PUSH) {
         *stream_unsupport = !context->query_shippable;
@@ -86,9 +86,10 @@ static Query* check_shippable(bool *stream_unsupport, Query* query, shipping_con
         u_sess->opt_cxt.is_dngather_support = false;
     }
 
-    /* single node do not support parallel query in cursor */
+    /* single node support parallel query in cursor only when it is no-scroll cursor */
     if (query->utilityStmt && IsA(query->utilityStmt, DeclareCursorStmt)) {
-        *stream_unsupport = true;
+        cursorOptions = cursorOptions | ((DeclareCursorStmt*)query->utilityStmt)->options;
+        *stream_unsupport = !(cursorOptions & CURSOR_OPT_NO_SCROLL) ? true : *stream_unsupport;
     }
 
     if (*stream_unsupport || !IS_STREAM) {
@@ -128,7 +129,7 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         (void)stream_walker((Node*)query, (void*)(&context));
         disable_unshipped_log(query, &context);
 
-        re_query = check_shippable(&stream_unsupport, query, &context);
+        re_query = check_shippable(&stream_unsupport, query, &context, cursorOptions);
     } else {
         if (unlikely(u_sess->attr.attr_sql.enable_unshipping_log)) {
             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,

@@ -2522,7 +2522,8 @@ bool pgxc_is_func_shippable(Oid funcid, shipping_context* context)
             return true;
         }
 #endif
-        if (proshippable) {
+        /* centralized scenarios do not use proshippable to determine */
+        if (IS_PGXC_COORDINATOR && proshippable) {
             return true;
         }
     } else if (PROVOLATILE_VOLATILE == provolatile && context != NULL && !context->disallow_volatile_func_shippable) {
@@ -2553,7 +2554,8 @@ bool pgxc_is_func_shippable(Oid funcid, shipping_context* context)
                 break;
         }
 
-        if (proshippable) {
+        /* centralized scenarios does not use proshippable to determine */
+        if (IS_PGXC_COORDINATOR && proshippable) {
             return true;
         }
     }

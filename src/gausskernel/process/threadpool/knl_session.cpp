@@ -326,6 +326,7 @@ static void knl_u_stream_init(knl_u_stream_context* stream_cxt)
     stream_cxt->stop_query_id = 0;
     stream_cxt->stream_runtime_mem_cxt = NULL;
     stream_cxt->data_exchange_mem_cxt = NULL;
+    stream_cxt->cursorNodeGroupList = NIL;
 }
 
 static void knl_u_sig_init(knl_u_sig_context* sig_cxt)
@@ -881,6 +882,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->isCreatePkgFunction = false;
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
+    plsql_cxt->parallel_cursor_arg_name = NULL;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
