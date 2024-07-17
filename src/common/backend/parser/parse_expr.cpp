@@ -247,6 +247,31 @@ static Const* BuildColumnBaseValue(Form_pg_attribute attTup)
     return nullptr;
 }
 
+static bool IsConstDefaultValue(FuncExpr* expr)
+{
+    if (expr->funcformat != COERCE_IMPLICIT_CAST) {
+        return false;
+    }
+
+    ListCell* cell = NULL;
+    List* args = expr->args;
+    bool isFirstArg = true;
+
+    foreach (cell, args) {
+        Node* arg = (Node*)lfirst(cell);
+        if (isFirstArg) {
+            isFirstArg = false;
+            if (!IsA(arg, Const) &&
+                !(IsA(arg, FuncExpr) && ((FuncExpr*)arg)->funcformat == COERCE_IMPLICIT_CAST)) {
+                return false;
+            }
+        } else if (!IsA(arg, Const)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void AddDefaultExprNode(ParseState* pstate)
 {
     RightRefState* refState = pstate->rightRefState;
@@ -280,7 +305,7 @@ static void AddDefaultExprNode(ParseState* pstate)
                 refState->constValues[i] = nullptr;
             } else if (IsA(node, Const)) {
                 refState->constValues[i] = (Const*)node;
-            } else if (IsA(node, FuncExpr)) {
+            } else if (IsA(node, FuncExpr) && IsConstDefaultValue((FuncExpr*)node)) {
                 FuncExpr* expr = (FuncExpr*)node;
                 List* args = expr->args;
                 Expr* simple = simplify_function(expr->funcid, expr->funcresulttype, exprTypmod((const Node*)expr), 

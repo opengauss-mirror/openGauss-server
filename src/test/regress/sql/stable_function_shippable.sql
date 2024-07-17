@@ -329,3 +329,80 @@ explain (costs off, verbose on) select * from test where date_trunc('year', b) >
 
 --clean up
 drop table test;
+
+create table concat_ws_t(a text);
+-- test concat
+explain(costs off) select * from concat_ws_t where a like concat('%', '1', '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bool, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::"char", '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::name, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int1, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int2, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int4, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int8, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int16, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::text, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::oid, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::clob, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '{"a":1}'::json, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xml, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::varchar, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::varbit, '%')::text;
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::cstring, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '{"a":1}'::jsonb, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::nvarchar2, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xid, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xid32, '%');
+
+-- some can't do simply func
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::money, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::raw, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bytea, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '2022-11-11'::date, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '2022-11-11 11:11:11'::timestamp, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '11:11:11'::time, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::numeric, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bpchar, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::float4, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::float8, '%');
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::blob, '%')::text;
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bit(8), '%')::text;
+
+-- -- test concat_ws
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1', '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bool, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::"char", '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::name, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int1, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int2, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int4, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int8, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int16, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::text, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::oid, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::clob, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '{"a":1}'::json, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xml, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::varchar, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::varbit, '3')::text;
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::cstring, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '{"a":1}'::jsonb, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::nvarchar2, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xid, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xid32, '3');
+
+-- some can't do simply func
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::money, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::raw, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bytea, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '2022-11-11'::date, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '2022-11-11 11:11:11'::timestamp, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '11:11:11'::time, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::numeric, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bpchar, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::float4, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::float8, '3');
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::blob, '3')::text;
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bit(8), '3')::text;
+
+drop table concat_ws_t;

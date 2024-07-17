@@ -778,3 +778,471 @@ explain (costs off, verbose on) select * from test where date_trunc('year', b) >
 
 --clean up
 drop table test;
+create table concat_ws_t(a text);
+-- test concat
+explain(costs off) select * from concat_ws_t where a like concat('%', '1', '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bool, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%t%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::"char", '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::name, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int1, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int2, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int4, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int8, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::int16, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::text, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::oid, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::clob, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '{"a":1}'::json, '%');
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%{"a":1}%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xml, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::varchar, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::varbit, '%')::text;
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::cstring, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '{"a":1}'::jsonb, '%');
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%{"a": 1}%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::nvarchar2, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xid, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::xid32, '%');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '%1%'::text)
+(2 rows)
+
+-- some can't do simply func
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::money, '%');
+                    QUERY PLAN                     
+---------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '$1.00'::money, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::raw, '%');
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '01'::raw, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bytea, '%');
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '\x31'::bytea, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '2022-11-11'::date, '%');
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '2022-11-11 00:00:00'::timestamp(0) without time zone, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '2022-11-11 11:11:11'::timestamp, '%');
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '2022-11-11 11:11:11'::timestamp without time zone, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '11:11:11'::time, '%');
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '11:11:11'::time without time zone, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::numeric, '%');
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', 1::numeric, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bpchar, '%');
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '1'::bpchar, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::float4, '%');
+                 QUERY PLAN                 
+--------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', 1::real, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::float8, '%');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', 1::double precision, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::blob, '%')::text;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', '01'::blob, '%'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat('%', '1'::bit(8), '%')::text;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat('%', B'10000000'::bit(8), '%'))
+(2 rows)
+
+-- -- test concat_ws
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1', '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bool, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ 't23'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::"char", '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::name, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int1, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int2, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int4, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int8, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::int16, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::text, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::oid, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::clob, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '{"a":1}'::json, '3');
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '{"a":1}23'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xml, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::varchar, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::varbit, '3')::text;
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::cstring, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '{"a":1}'::jsonb, '3');
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '{"a": 1}23'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::nvarchar2, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xid, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::xid32, '3');
+          QUERY PLAN          
+------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ '123'::text)
+(2 rows)
+
+-- some can't do simply func
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::money, '3');
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '$1.00'::money, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::raw, '3');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '01'::raw, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bytea, '3');
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '\x31'::bytea, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '2022-11-11'::date, '3');
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '2022-11-11 00:00:00'::timestamp(0) without time zone, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '2022-11-11 11:11:11'::timestamp, '3');
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '2022-11-11 11:11:11'::timestamp without time zone, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '11:11:11'::time, '3');
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '11:11:11'::time without time zone, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::numeric, '3');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, 1::numeric, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bpchar, '3');
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '1'::bpchar, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::float4, '3');
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, 1::real, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::float8, '3');
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, 1::double precision, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::blob, '3')::text;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, '01'::blob, '3'))
+(2 rows)
+
+explain(costs off) select * from concat_ws_t where a like concat_ws('2', '1'::bit(8), '3')::text;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Seq Scan on concat_ws_t
+   Filter: (a ~~ concat_ws('2'::text, B'10000000'::bit(8), '3'))
+(2 rows)
+
+drop table concat_ws_t;

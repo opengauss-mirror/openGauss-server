@@ -183,7 +183,7 @@ select (c6 is not null) as c6_is_not_null,
        (c12 is not null) as c12_is_not_null
 from time_default_t where n = 1 or n = 3;
 
-select (c6 is not null) c6_is_not_null,
+select (c6 is null) as c6_is_null,
        (c8 is null) as c8_is_null,
        (c10 is null) as c10_is_null,
        (c12 is null) as c12_is_null
