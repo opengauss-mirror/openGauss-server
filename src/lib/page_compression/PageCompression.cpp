@@ -131,7 +131,7 @@ int PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer, si
             }
         }
         if (chunkNum == 0) {
-            return 0;
+            break;
         }
 
         /* compressed chunk */
