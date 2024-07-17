@@ -60,6 +60,13 @@ ERROR:  syntax error at or near "("
 LINE 1: copy (select * from test1) (t,id) to stdout;
                                    ^
 --
+-- Test when_expr
+--
+copy (select * from test1) to stdout with (when_expr); -- error
+ERROR:  option "when_expr" not recognized
+copy (select * from test1) to stdout with (when_expr''); -- error
+ERROR:  option "when_expr" not recognized
+--
 -- Test JOIN
 --
 copy (select * from test1 join test2 using (id) order by 1) to stdout;

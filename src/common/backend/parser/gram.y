@@ -6165,6 +6165,9 @@ copy_generic_opt_list:
 copy_generic_opt_elem:
 			ColLabel copy_generic_opt_arg
 				{
+					/* Character "when_expr" may be injected as "COPY ... WHEN ... "*/
+					if (pg_strcasecmp($1, "when_expr") == 0)
+						ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", $1)));
 					$$ = makeDefElem($1, $2);
 				}
 		;
