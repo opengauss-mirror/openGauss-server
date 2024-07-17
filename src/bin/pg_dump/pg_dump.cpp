@@ -13441,8 +13441,8 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "(SELECT lanname FROM pg_catalog.pg_language WHERE oid = prolang) AS lanname, "
         "%s, "
         "(SELECT 1 FROM pg_depend WHERE objid = p.oid AND objid = refobjid AND refclassid = 1255 LIMIT 1) AS selfloop, "
-        "proargnames[o.parallel_cursor_seq + 1] AS parallelCursorName, o.parallel_cursor_strategy AS parallelCursorStrategy, "
-        "pg_catalog.array_to_string(o.parallel_cursor_partkey, ', ') AS parallelCursorPartKey "
+        "proargnames[o.parallel_cursor_seq + 1] AS parallelcursorname, o.parallel_cursor_strategy AS parallelcursorstrategy, "
+        "pg_catalog.array_to_string(o.parallel_cursor_partkey, ', ') AS parallelcursorpartkey "
         "FROM pg_catalog.pg_proc p left join pg_catalog.pg_proc_ext o on p.oid = o.proc_oid "
         "WHERE p.oid = '%u'::pg_catalog.oid",
         isHasFencedmode ? "fencedmode" : "NULL AS fencedmode",
@@ -13475,9 +13475,9 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     proshippable = PQgetvalue(res, 0, PQfnumber(res, "proshippable"));
     propackage = PQgetvalue(res, 0, PQfnumber(res, "propackage"));
     propackageid = PQgetvalue(res, 0, PQfnumber(res, "propackageid"));
-    parallelCursorName = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorName"));
-    parallelCursorStrategy = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorStrategy"));
-    parallelCursorPartKey = PQgetvalue(res, 0, PQfnumber(res, "parallelCursorPartKey"));
+    parallelCursorName = PQgetvalue(res, 0, PQfnumber(res, "parallelcursorname"));
+    parallelCursorStrategy = PQgetvalue(res, 0, PQfnumber(res, "parallelcursorstrategy"));
+    parallelCursorPartKey = PQgetvalue(res, 0, PQfnumber(res, "parallelcursorpartkey"));
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
         /* get definer user name */
