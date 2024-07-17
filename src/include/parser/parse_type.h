@@ -27,6 +27,7 @@ extern Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, 
                             bool print_notice = true, TypeDependExtend* dependExtend = NULL);
 extern Oid LookupPctTypeInPackage(RangeVar* rel, Oid pkgOid, const char* field);
 extern Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid = InvalidOid, Oid namespaceId = InvalidOid);
+extern Oid LookupTypeInFunc(const char* typeName);
 extern Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p, TypeDependExtend* dependExtend = NULL);
 extern Oid typenameTypeId(ParseState* pstate, const TypeName* typname);
 extern void typenameTypeIdAndMod(ParseState* pstate, const TypeName* typname, Oid* typeid_p, int32* typmod_p,

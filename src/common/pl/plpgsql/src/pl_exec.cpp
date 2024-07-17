@@ -3133,6 +3133,7 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
         case PLPGSQL_DTYPE_ASSIGNLIST:
         case PLPGSQL_DTYPE_COMPOSITE:
         case PLPGSQL_DTYPE_RECORD_TYPE:
+        case PLPGSQL_DTYPE_SUBTYPE:
             /*
              * These datum records are read-only at runtime, so no need to
              * copy them (well, ARRAYELEM contains some cached type data, but

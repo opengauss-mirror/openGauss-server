@@ -2473,7 +2473,7 @@ Oid getBaseTypeAndTypmod(Oid typid, int32* typmod)
             ReleaseSysCache(tup);
             break;
         }
-        Assert(*typmod == -1);
+        Assert(typTup->typinput==F_SUBTYPE_IN || *typmod == -1);
         typid = typTup->typbasetype;
         *typmod = typTup->typtypmod;
         ReleaseSysCache(tup);

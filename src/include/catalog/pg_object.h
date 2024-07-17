@@ -105,6 +105,7 @@ typedef FormData_pg_object* Form_pg_object;
 #define OBJECT_TYPE_PKGSPEC 'S'
 #define OBJECT_TYPE_PKGBODY 'B'
 #define OBJECT_TYPE_MATVIEW 'm'
+#define OBJECT_TYPE_SYNONYM 'y'
 
 extern bool GetPgObjectValid(Oid oid, PgObjectType objectType);
 extern bool SetPgObjectValid(Oid oid, PgObjectType objectType, bool valid);
