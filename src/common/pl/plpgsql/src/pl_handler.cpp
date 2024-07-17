@@ -1319,8 +1319,10 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
             retval = plpgsql_exec_autonm_function(func, &fake_fcinfo, codeblock->source_text);
         } else {
             Oid old_value = saveCallFromPkgOid(func->pkg_oid);
+            u_sess->plsql_cxt.need_init = true;
             retval = plpgsql_exec_function(func, &fake_fcinfo, false);
             restoreCallFromPkgOid(old_value);
+            u_sess->plsql_cxt.need_init = true;
         }
     }
     PG_CATCH();
@@ -1870,7 +1872,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCo
     List* temp_tableof_index = NULL;
     bool save_is_package_instantiation = u_sess->plsql_cxt.is_package_instantiation;
     bool needExecDoStmt = true;
-        if (enable_plpgsql_undefined()) {
+    if (enable_plpgsql_undefined()) {
         needExecDoStmt = GetCurrCompilePgObjStatus();
     }
     ResourceOwnerData* oldowner = NULL;
@@ -1884,7 +1886,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCo
     PG_TRY();
     {
         u_sess->plsql_cxt.is_package_instantiation = true;
-        if (needExecDoStmt) {
+        if (needExecDoStmt && u_sess->plsql_cxt.need_init) {
             init_do_stmt(pkg, isCreate, cell, oldCompileStatus, curr_compile, temp_tableof_index, oldcxt);
         }
         if (isCreate && enable_plpgsql_gsdependency_guc() && !IsInitdb) {

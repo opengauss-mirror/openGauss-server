@@ -1704,7 +1704,6 @@ typedef struct knl_u_plpgsql_context {
 
     // gs depend
     bool compile_has_warning_info;
-    bool expr_can_have_out_func;
     bool currCompilingObjStatus;
     bool need_create_depend;
     bool during_compile;
@@ -1730,6 +1729,8 @@ typedef struct knl_u_plpgsql_context {
     int compile_check_node_level;
     int real_func_num;
     HTAB* plpgsql_lock_objects;
+
+    bool need_init;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package

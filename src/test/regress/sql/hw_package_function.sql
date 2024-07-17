@@ -751,6 +751,66 @@ end trigger_test;
 /
 
 DROP PACKAGE trigger_test;
+
+-- create packages whose package body both have an initialization anonymous block, and the initialization functions are nestedly called.
+CREATE OR REPLACE PACKAGE nested_pkg1 is
+function nested_pkg1_fun1(i int) return int;
+function nested_pkg1_fun2(i int) return int;
+id1 int:= 1;
+end nested_pkg1;
+/
+
+CREATE OR REPLACE PACKAGE nested_pkg2 is
+function nested_pkg2_fun1(i number) return number;
+function nested_pkg2_fun2(i numeric) return numeric;
+id2 int:= 2;
+end nested_pkg2;
+/
+
+CREATE OR REPLACE PACKAGE BODY nested_pkg1 is
+function nested_pkg1_fun1(i int) return int is
+res int;
+begin
+res := nested_pkg2.id2;
+return res;
+end;
+function nested_pkg1_fun2(i int) return int is
+res int;
+begin
+res := i;
+return res;
+end;
+begin
+id1 := nested_pkg2.nested_pkg2_fun2(5);
+end nested_pkg1;
+/
+
+CREATE OR REPLACE PACKAGE BODY nested_pkg2 is
+function nested_pkg2_fun1(i number) return number is
+res int;
+begin
+res := nested_pkg1.id1;
+return res;
+end;
+function nested_pkg2_fun2(i numeric) return numeric is
+res int;
+begin
+res := i;
+return res;
+end;
+begin
+id2 := nested_pkg1.nested_pkg1_fun2(10);
+end nested_pkg2;
+/
+
+select nested_pkg2.nested_pkg2_fun1(1);
+select nested_pkg1.nested_pkg1_fun1(1);
+select nested_pkg2.nested_pkg2_fun2(1);
+select nested_pkg1.nested_pkg1_fun2(1);
+
+drop package nested_pkg1;
+drop package nested_pkg2;
+
 \c regression
 drop database db;
 drop user pkg_user1;

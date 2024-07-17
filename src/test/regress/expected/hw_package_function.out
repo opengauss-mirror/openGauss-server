@@ -911,6 +911,85 @@ end trigger_test;
 /
 DROP PACKAGE trigger_test;
 NOTICE:  drop cascades to function pkg_user2.tri_insert_func()
+-- create packages whose package body both have an initialization anonymous block, and the initialization functions are nestedly called.
+CREATE OR REPLACE PACKAGE nested_pkg1 is
+function nested_pkg1_fun1(i int) return int;
+function nested_pkg1_fun2(i int) return int;
+id1 int:= 1;
+end nested_pkg1;
+/
+CREATE OR REPLACE PACKAGE nested_pkg2 is
+function nested_pkg2_fun1(i number) return number;
+function nested_pkg2_fun2(i numeric) return numeric;
+id2 int:= 2;
+end nested_pkg2;
+/
+CREATE OR REPLACE PACKAGE BODY nested_pkg1 is
+function nested_pkg1_fun1(i int) return int is
+res int;
+begin
+res := nested_pkg2.id2;
+return res;
+end;
+function nested_pkg1_fun2(i int) return int is
+res int;
+begin
+res := i;
+return res;
+end;
+begin
+id1 := nested_pkg2.nested_pkg2_fun2(5);
+end nested_pkg1;
+/
+CREATE OR REPLACE PACKAGE BODY nested_pkg2 is
+function nested_pkg2_fun1(i number) return number is
+res int;
+begin
+res := nested_pkg1.id1;
+return res;
+end;
+function nested_pkg2_fun2(i numeric) return numeric is
+res int;
+begin
+res := i;
+return res;
+end;
+begin
+id2 := nested_pkg1.nested_pkg1_fun2(10);
+end nested_pkg2;
+/
+select nested_pkg2.nested_pkg2_fun1(1);
+ nested_pkg2_fun1 
+------------------
+                5
+(1 row)
+
+select nested_pkg1.nested_pkg1_fun1(1);
+ nested_pkg1_fun1 
+------------------
+               10
+(1 row)
+
+select nested_pkg2.nested_pkg2_fun2(1);
+ nested_pkg2_fun2 
+------------------
+                1
+(1 row)
+
+select nested_pkg1.nested_pkg1_fun2(1);
+ nested_pkg1_fun2 
+------------------
+                1
+(1 row)
+
+drop package nested_pkg1;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function pkg_user2.nested_pkg1_fun1(integer)
+drop cascades to function pkg_user2.nested_pkg1_fun2(integer)
+drop package nested_pkg2;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function pkg_user2.nested_pkg2_fun1(numeric)
+drop cascades to function pkg_user2.nested_pkg2_fun2(numeric)
 \c regression
 drop database db;
 drop user pkg_user1;
