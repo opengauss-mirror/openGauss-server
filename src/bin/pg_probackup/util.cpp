@@ -532,18 +532,20 @@ get_redo(const char *pgdata_path, RedoParams *redo)
 
 }
 
-void
-parse_vgname_args(const char* args)
+void parse_vgname_args(const char* args)
 {
     char *vgname = xstrdup(args);
     if (strstr(vgname, "/") != NULL)
         elog(ERROR, "invalid token \"/\" in vgname");
 
+    /* Check vgname args */
     char *comma = strstr(vgname, ",");
     if (comma == NULL) {
-        instance_config.dss.vgdata = vgname;
-        instance_config.dss.vglog = const_cast<char*>("");
-        return;
+        elog(ERROR, "invalid vgname args, there is at least one \",\" in vgname\n"
+             "insufficient vgname args, check the number of args, example: --vgname=\"+data,+log\"");
+    }
+    if (*(comma + 1) == '\0' ){
+        elog(ERROR,  "insufficient vgname args, check the number of args, example: --vgname=\"+data,+log\"");
     }
 
     instance_config.dss.vgdata = xstrdup(vgname);
@@ -556,8 +558,7 @@ parse_vgname_args(const char* args)
         elog(ERROR, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
 }
 
-bool
-is_ss_xlog(const char *ss_dir)
+bool is_ss_xlog(const char *ss_dir)
 {
     char ss_xlog[MAXPGPATH] = {0};
     char ss_notify[MAXPGPATH] = {0};
