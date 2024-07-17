@@ -4197,7 +4197,7 @@ static Oid pre_evaluate_func[] = {CURRENTSCHEMAFUNCOID,
     CURRENTDATABASEFUNCOID,
     PGCLIENTENCODINGFUNCOID};
 
-static bool is_safe_simplify_func(Oid funcid)
+static bool is_safe_simplify_func(Oid funcid, List *args)
 {
     if (funcid == InvalidOid) {
         return false;
@@ -4207,6 +4207,56 @@ static bool is_safe_simplify_func(Oid funcid)
             return true;
         }
     }
+
+    /* handle some special func */
+    if (funcid == CONCATFUNCOID || funcid == CONCATWSFUNCOID) {
+        ListCell* arg = NULL;
+        foreach (arg, args) {
+            Oid typ = exprType((Node*)lfirst(arg));
+            /*
+             * binary: not ok, bytea_output will affect the result. raw, etc...
+             * binary: BINARY, VARBINARY, BLOB, TINYBLOB, MEDIUMBLOB, LONGBLOB, bit. althought the concat_internal treat
+             *          them specially, but the concat result is blob, so the result still affect by bytea_output.
+             * time: not ok, DateStyle will affect the result. time, timestamp, date, etc...
+             * num: ok, integer, float, numeric
+             * bool: ok
+             * string: ok, char/varchar/text/xml/json/set/enum/xml/unknown, etc...
+             */
+            switch (typ) {
+                case BOOLOID:
+                case CHAROID:
+                case NAMEOID:
+                case INT1OID:
+                case INT2OID:
+                case INT4OID:
+                case INT8OID:
+                case INT16OID:
+                case TEXTOID:
+                case OIDOID:
+                case CLOBOID:
+                case JSONOID:
+                case XMLOID:
+                case UNKNOWNOID:
+                case VARCHAROID:
+                case VARBITOID:
+                case CSTRINGOID:
+                case JSONBOID:
+                case NVARCHAR2OID:
+                case XIDOID:
+                case SHORTXIDOID:
+                    break;
+                default:
+                    if (type_is_set(typ) || type_is_enum(typ)) {
+                        break;
+                    }
+                    /* other case, return false directly */
+                    return false;
+            }
+        }
+        /* all args outfunc are immutable, return true */
+        return true;
+    }
+    
     return false;
 }
 
@@ -4295,7 +4345,7 @@ static Expr* evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
         /* okay */;
     else if (context->estimate && funcform->provolatile == PROVOLATILE_STABLE)
         /* okay */;
-    else if (is_safe_simplify_func(funcid))
+    else if (is_safe_simplify_func(funcid, args))
         /* okay */;
     else
         return NULL;
