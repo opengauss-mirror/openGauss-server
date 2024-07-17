@@ -697,6 +697,8 @@ endif
 	cp '$(ZSTD_LIB_PATH)'/libzstd.so* '$(DESTDIR)$(libdir)/'
 	cp '$(LIBODBC_LIB_PATH)'/libodbc* '$(DESTDIR)$(libdir)/'
 	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
+	cp -d '$(AWSSDK_LIB_PATH)'/libaws-cpp-sdk-core.so* '$(DESTDIR)$(libdir)/'
+	cp -d '$(AWSSDK_LIB_PATH)'/libaws-cpp-sdk-s3.so* '$(DESTDIR)$(libdir)/'
 endif
 
 	rm -rf '$(DESTDIR)$(libdir)/../temp'
