@@ -568,8 +568,8 @@ static inline HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
 
 static inline void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
 {
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == slot->tts_tam_ops);
-    slot->tts_tam_ops->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
+    AssertValidTuple(tuple);
+    g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
 }
 
 
@@ -608,8 +608,7 @@ static inline Datum tableam_tops_getsysattr(Tuple tuple, int attnum, TupleDesc t
     Buffer buf = InvalidBuffer)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_getsysattr(tuple, attnum, tuple_desc, isnull, buf);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_getsysattr(tuple, attnum, tuple_desc, isnull, buf);
 }
 
 static inline MinimalTuple tableam_tops_form_minimal_tuple(TupleDesc tuple_descriptor, Datum *values,
@@ -634,24 +633,21 @@ static inline Tuple tableam_tops_form_cmprs_tuple(TupleDesc tuple_descriptor, Fo
 static inline void tableam_tops_deform_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_deform_tuple(tuple, tuple_desc, values, isnull);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple(tuple, tuple_desc, values, isnull);
 }
 
 static inline void tableam_tops_deform_tuple2(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
                                               Buffer buffer)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_deform_tuple2(tuple, tuple_desc, values, isnull, buffer);
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_tuple2(tuple, tuple_desc, values, isnull, buffer);
 }
 
 static inline void tableam_tops_deform_cmprs_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *values, bool *isnull,
     char *cmprs_info)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_deform_cmprs_tuple(tuple, tuple_desc, values, isnull,
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_deform_cmprs_tuple(tuple, tuple_desc, values, isnull,
         cmprs_info);
 }
 
@@ -671,8 +667,7 @@ static inline Tuple tableam_tops_modify_tuple(Tuple tuple, TupleDesc tuple_desc,
     const bool *repl_isnull, const bool *do_replace)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_modify_tuple(tuple, tuple_desc, repl_values,
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_modify_tuple(tuple, tuple_desc, repl_values,
         repl_isnull, do_replace);
 }
 
@@ -680,8 +675,7 @@ static inline Tuple tableam_tops_opfusion_modify_tuple(Tuple tuple, TupleDesc tu
     Datum* repl_values, bool* repl_isnull, UpdateFusion* opf)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_opfusion_modify_tuple(tuple, tuple_desc,
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_opfusion_modify_tuple(tuple, tuple_desc,
         repl_values, repl_isnull, opf);
 }
 
@@ -706,8 +700,7 @@ static inline Datum tableam_tops_tuple_getattr(Tuple tuple, int att_num, TupleDe
 static inline Datum tableam_tops_tuple_fast_getattr(Tuple tuple, int att_num, TupleDesc tuple_desc, bool *is_null)
 {
     AssertValidTuple(tuple);
-    Assert(g_tableam_routines[GetTabelAmIndexTuple(tuple)] == tuple_desc->td_tam_ops);
-    return tuple_desc->td_tam_ops->tops_tuple_fast_getattr(tuple, att_num,
+    return g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tops_tuple_fast_getattr(tuple, att_num,
         tuple_desc, is_null);
 }
 
