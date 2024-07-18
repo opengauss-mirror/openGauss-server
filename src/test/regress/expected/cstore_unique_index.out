@@ -94,7 +94,7 @@ create unique index on part_t1 (b, c);
 ERROR:  Global partition index does not support column store.
 -- Fail. Unique index on cstore_table can only be local index.
 create unique index on part_t1 using cbtree (a, c);
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 create unique index on part_t1 using cbtree (a, c) local;
 \d part_t1
     Table "public.part_t1"

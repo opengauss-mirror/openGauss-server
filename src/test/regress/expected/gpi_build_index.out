@@ -39,10 +39,10 @@ create index rp_index_global15 on hw_global_index_rp ((c1-c2),c1,c2) global;
 ERROR:  Global partition index does not support EXPRESSION index
 --succeed
 create index rp_index_global16 on hw_global_index_rp using hash (c1) global;
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 --fail ERROR: access method "HASH" does not support global indexes
 create index rp_index_global17 on hw_global_index_rp using gin ((c1-c2),c1,c2) global;
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 --fail ERROR: data type INTEGER has no default operator class for access method "GIN" ???
 create unique index CONCURRENTLY rp_index_global18 on hw_global_index_rp (c1) global;
 ERROR:  cannot create concurrent partitioned indexes 

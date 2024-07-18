@@ -243,10 +243,10 @@ UPDATE test_part_bitmapand_ginst_btree SET sample = to_tsquery('english', txtsam
 CREATE UNIQUE INDEX ON test_part_bitmapand_ginst_btree (a) local;
 -- failed
 CREATE INDEX qq ON test_part_bitmapand_ginst_btree USING gist (keyword tsquery_ops);
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 CREATE INDEX qq ON test_part_bitmapand_ginst_btree USING gist (keyword tsquery_ops) local;
 CREATE INDEX ON test_part_bitmapand_ginst_btree USING gist (keyword tsquery_ops);
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
                              QUERY PLAN                             
 --------------------------------------------------------------------

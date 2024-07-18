@@ -41,7 +41,7 @@ CREATE INDEX idx8_gpi_table1 ON gpi_table1 ((c1+10), c2) GLOBAL;
 ERROR:  Global partition index does not support EXPRESSION index
 --error
 CREATE INDEX idx9_gpi_table1 ON gpi_table1 USING hash (c1, c2) GLOBAL;
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 --error
 CREATE INDEX idx10_gpi_table1 ON gpi_table1 (c1);
 --ok
