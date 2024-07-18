@@ -275,7 +275,7 @@ function check_version() {
   if [[ ! -f "${GAUSSHOME}/version.cfg" ]]; then
     die "Cannot find current version.cfg!" ${err_upgrade_pre}
   else
-    old_version=$(tail -n 1 "$GAUSSHOME"/version.cfg)
+    old_version=$(sed -n 3p "$GAUSSHOME"/version.cfg)
     old_cfg=$(sed -n 2p "$GAUSSHOME"/version.cfg | sed 's/\.//g')
   fi
   if [[ -f "$GAUSS_UPGRADE_BIN_PATH"/version.cfg ]]; then
@@ -286,7 +286,7 @@ function check_version() {
     die "Cannot find new version.cfg!" ${err_upgrade_pre}
   fi
 
-  new_version=$(tail -n 1 "$new_version_cfg_path")
+  new_version=$(sed -n 3p "$new_version_cfg_path")
   new_cfg=$(sed -n 2p "$new_version_cfg_path" | sed 's/\.//g')
 
   if [[ X"$old_version" == X || X"$old_cfg" == X || X"$new_version" == X || X"$new_cfg" == X ]]; then
@@ -503,7 +503,7 @@ function cp_pkg() {
     die "chmod files or dirs failed" ${err_upgrade_bin}
   fi
   #check pkg's version.cfg is equal to version_flag
-  temppkg_version=$(tail -n 1 "$new_bin_path"/version.cfg)
+  temppkg_version=$(sed -n 3p "$new_bin_path"/version.cfg)
   if [[ "$new_version" != "$temppkg_version" ]]; then
     die "pkg's version.cfg is not correct!" ${err_upgrade_bin}
   fi

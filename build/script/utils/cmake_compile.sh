@@ -64,6 +64,15 @@ function get_kernel_commitid()
 }
 
 #######################################################################
+##insert the version mode to version.cfg
+#######################################################################
+function get_version_mode()
+{
+    echo "$version_mode" >> ${SCRIPT_DIR}/version.cfg
+    echo "End insert version mode into version cfg" >> "$LOG_FILE" 2>&1
+}
+
+#######################################################################
 ## generate the version file.
 #######################################################################
 function make_license_control()
@@ -157,6 +166,9 @@ function install_gaussdb()
 
     #insert the commitid to version.cfg as the upgrade app path specification
     get_kernel_commitid
+
+    #insert the version mode to version.cfg
+    get_version_mode
 }
 
 #######################################################################
