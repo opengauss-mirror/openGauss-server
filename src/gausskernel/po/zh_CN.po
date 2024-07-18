@@ -14751,8 +14751,8 @@ msgstr "跨桶索引不支持列存储"
 
 #: ../common/backend/parser/parse_utilcmd.cpp:4287
 #, c-format
-msgid "Global partition index only support btree."
-msgstr "全局分区索引只支持btree."
+msgid "Global partition index only support btree and ubtree."
+msgstr "全局分区索引只支持btree和ubtree."
 
 #: ../common/backend/parser/parse_utilcmd.cpp:4297
 #, c-format

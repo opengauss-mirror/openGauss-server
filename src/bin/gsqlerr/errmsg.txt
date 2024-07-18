@@ -25349,7 +25349,7 @@ CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-05160: "Global partition index only support btree."
+GAUSS-05160: "Global partition index only support btree and ubtree."
 SQLSTATE: 0A000
 CAUSE: "invalid"
 ACTION: "invalid"

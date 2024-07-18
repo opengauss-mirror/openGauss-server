@@ -161,7 +161,7 @@ NOTICE:  index "hash_t4_id2" does not exist, skipping
 drop index if exists hash_t4_id2_new;
 NOTICE:  index "hash_t4_id2_new" does not exist, skipping
 create index hash_t4_id1 on hash_table_4 using hash(id) global;
-ERROR:  Global partition index only support btree.
+ERROR:  Global partition index only support btree and ubtree.
 create index hash_t4_id2 on hash_table_4 using hash(id) local
 (
     partition index_t4_p1,

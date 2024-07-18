@@ -4296,7 +4296,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
         if (pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE) != 0 &&
             pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE) != 0) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-                    errmsg("Global partition index only support btree.")));
+                    errmsg("Global partition index only support btree and ubtree.")));
         }
         if (isColStore) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
