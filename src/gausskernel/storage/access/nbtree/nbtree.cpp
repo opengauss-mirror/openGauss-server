@@ -42,8 +42,6 @@ typedef struct {
     IndexBulkDeleteCallback callback;
     void *callback_state;
     BTCycleId cycleid;
-    BlockNumber lastBlockVacuumed; /* highest blkno actually vacuumed */
-    BlockNumber lastBlockLocked;   /* highest blkno we've cleanup-locked */
     BlockNumber totFreePages;      /* true total # of free pages */
     MemoryContext pagedelcontext;
 } BTVacState;
@@ -730,8 +728,6 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
     vstate.callback = callback;
     vstate.callback_state = callback_state;
     vstate.cycleid = cycleid;
-    vstate.lastBlockVacuumed = BTREE_METAPAGE; /* Initialise at first block */
-    vstate.lastBlockLocked = BTREE_METAPAGE;
     vstate.totFreePages = 0;
 
     /* Create a temporary memory context to run _bt_pagedel in */
@@ -782,33 +778,6 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
         for (; blkno < num_pages; blkno++) {
             btvacuumpage(&vstate, blkno, blkno);
         }
-    }
-
-    /*
-     * If the WAL is replayed in hot standby, the replay process needs to get
-     * cleanup locks on all index leaf pages, just as we've been doing here.
-     * However, we won't issue any WAL records about pages that have no items
-     * to be deleted.  For pages between pages we've vacuumed, the replay code
-     * will take locks under the direction of the lastBlockVacuumed fields in
-     * the XLOG_BTREE_VACUUM WAL records.  To cover pages after the last one
-     * we vacuum, we need to issue a dummy XLOG_BTREE_VACUUM WAL record
-     * against the last leaf page in the index, if that one wasn't vacuumed.
-     */
-    if (XLogStandbyInfoActive() && vstate.lastBlockVacuumed < vstate.lastBlockLocked) {
-        Buffer buf;
-
-        /*
-         * The page should be valid, but we can't use _bt_getbuf() because we
-         * want to use a nondefault buffer access strategy.  Since we aren't
-         * going to delete any items, getting cleanup lock again is probably
-         * overkill, but for consistency do that anyway.
-         */
-        buf = ReadBufferExtended(rel, MAIN_FORKNUM, vstate.lastBlockLocked, RBM_NORMAL, info->strategy);
-        _bt_checkbuffer_valid(rel, buf);
-        LockBufferForCleanup(buf);
-        _bt_checkpage(rel, buf);
-        _bt_delitems_vacuum(rel, buf, NULL, 0, vstate.lastBlockVacuumed);
-        _bt_relbuf(rel, buf);
     }
 
     MemoryContextDelete(vstate.pagedelcontext);
@@ -904,14 +873,6 @@ restart:
         LockBufferForCleanup(buf);
 
         /*
-         * Remember highest leaf page number we've taken cleanup lock on; see
-         * notes in btvacuumscan
-         */
-        if (blkno > vstate->lastBlockLocked) {
-            vstate->lastBlockLocked = blkno;
-        }
-
-        /*
          * Check whether we need to recurse back to earlier pages.	What we
          * are concerned about is a page split that happened since we started
          * the vacuum scan.  If the split moved some tuples to a lower page
@@ -986,15 +947,7 @@ restart:
              * doesn't seem worth the amount of bookkeeping it'd take to avoid
              * that.
              */
-            _bt_delitems_vacuum(rel, buf, deletable, ndeletable, vstate->lastBlockVacuumed);
-
-            /*
-             * Remember highest leaf page number we've issued a
-             * XLOG_BTREE_VACUUM WAL record for.
-             */
-            if (blkno > vstate->lastBlockVacuumed) {
-                vstate->lastBlockVacuumed = blkno;
-            }
+            _bt_delitems_vacuum(rel, buf, deletable, ndeletable, 0);
 
             stats->tuples_removed += ndeletable;
             /* must recompute maxoff */
