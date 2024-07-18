@@ -1,4 +1,4 @@
-﻿/* -------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -2957,6 +2957,13 @@ int PostmasterMain(int argc, char* argv[])
     g_instance.comm_cxt.pLogCtl = (LogControlData*)MemoryContextAlloc(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT), sizeof(LogControlData));
     g_instance.pid_cxt.SysLoggerPID = SysLogger_Start();
+
+    /* Database Security: Support database audit */
+    /*  start auditor process */
+    /* start the audit collector as needed. */
+    if (u_sess->attr.attr_security.Audit_enabled && !dummyStandbyMode) {
+        pgaudit_start_all();
+    }
 
     if (IS_PGXC_DATANODE && !dummyStandbyMode && !isRestoreMode) {
         StreamObj::startUp();
@@ -7256,16 +7263,8 @@ static void reaper(SIGNAL_ARGS)
                 && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
-            /* Database Security: Support database audit */
-            /*  start auditor process */
-            /* start the audit collector as needed. */
-            if (u_sess->attr.attr_security.Audit_enabled && !dummyStandbyMode) {
-                pgaudit_start_all();
-            }
-
             if (t_thrd.postmaster_cxt.audit_primary_start && !t_thrd.postmaster_cxt.audit_primary_failover &&
                 !t_thrd.postmaster_cxt.audit_standby_switchover) {
-                pg_usleep(100000L);
                 pgaudit_system_start_ok(g_instance.attr.attr_network.PostPortNumber);
                 t_thrd.postmaster_cxt.audit_primary_start = false;
             }
