@@ -2932,6 +2932,7 @@ typedef struct knl_u_hook_context {
     void *groupingplannerHook;
     void *replaceNullOrNotHook;
     void *nullsMinimalPolicyHook;
+    void *getIgnoreKeywordTokenHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
