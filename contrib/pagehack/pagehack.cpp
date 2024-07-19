@@ -3963,7 +3963,7 @@ static int parse_pg_control_file(char* filename)
     FILE* fd = NULL;
     ControlFileData ControlFile;
     size_t readBytes = 0;
-    char* wal_level_str[] = {"minimal", "archive", "hot_standby"};
+    char* wal_level_str[] = {"minimal", "archive", "hot_standby", "logical"};
     char* db_state_str[] = {"starting up",
         "shut down",
         "shut down in recovery",
