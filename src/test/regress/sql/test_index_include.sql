@@ -1,0 +1,13 @@
+create schema test_index_include;
+set current_schema to test_index_include;
+
+create database dbb dbcompatibility 'b';
+\c dbb
+create table t1 (id int not null, name text) with (fillfactor=20, orientation=row, storage_type=ustore) nocompress tablespace pg_default;
+insert into t1 values(generate_series(1,9), 'col' || generate_series(1,9));
+create index i1 on t1 using ubtree(id) include(id) with(indexsplit=insertpt) tablespace pg_default where id > 10;
+
+\c regression
+drop database if exists dbb;
+reset current_schema;
+drop schema test_index_include cascade;

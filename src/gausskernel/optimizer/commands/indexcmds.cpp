@@ -648,6 +648,48 @@ static bool parseVisibleStateFromOptions(List* options)
     return visible;
 }
 
+static bool equalIncludeIndex(IndexElem* index1, IndexElem* index2)
+{
+    SortByNulls no = index1->nulls_ordering;
+    // ignore nulls_ordering
+    index1->nulls_ordering = index2->nulls_ordering;
+
+    bool res = equal(index1, index2);
+    index1->nulls_ordering = no;
+    return res;
+}
+
+static bool listMemberIncludeIndex(List* list, IndexElem* index)
+{
+    ListCell* cell = NULL;
+
+    foreach (cell, list) {
+        if (equalIncludeIndex((IndexElem *)lfirst(cell), index)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static List* listIntersectionIncludeIndex(List *list1, List *list2)
+{
+    List *result = NIL;
+    ListCell *cell = NULL;
+
+    if (list1 == NIL || list2 == NIL) {
+        return NIL;
+    }
+
+    foreach (cell, list1) {
+        if (listMemberIncludeIndex(list2, (IndexElem *)lfirst(cell))) {
+            result = lappend(result, lfirst(cell));
+        }
+    }
+
+    return result;
+}
+
 /*
  * DefineIndex
  *		Creates a new index.
@@ -937,7 +979,8 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
                 errmsg("create a index with include columns is only supported in ubtree")));
     }
 
-    if (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL) {
+    if ((u_sess->attr.attr_sql.dolphin && listIntersectionIncludeIndex(stmt->indexParams, stmt->indexIncludingParams) != NIL) ||
+        (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("included columns must not intersect with key columns")));
