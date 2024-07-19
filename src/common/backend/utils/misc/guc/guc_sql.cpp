@@ -3682,7 +3682,8 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
         for (start = 0; start < OPT_MAX; start++) {
             const char* item = (const char*)lfirst(cell);
 
-            if (strcmp(item, behavior_compat_options[start].name) == 0)
+            if (strcmp(item, behavior_compat_options[start].name) == 0 
+                && (result & behavior_compat_options[start].flag) == 0)
                 result += behavior_compat_options[start].flag;
         }
     }
