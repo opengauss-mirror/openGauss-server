@@ -2630,7 +2630,7 @@ void GetReplslotPath(char *path)
 {
     if (ENABLE_DSS) {
         errno_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replslot",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         securec_check_ss(rc, "\0", "\0");
     } else {
         errno_t rc = strcpy_s(path, MAXPGPATH, "pg_replslot");

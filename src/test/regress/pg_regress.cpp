@@ -1947,9 +1947,8 @@ static void initdb_node_info(bool standby)
 
         (void)snprintf(ss_extra_args,
             sizeof(ss_extra_args),
-            SYSTEMQUOTE "--vgname=\"+data,+log%i\" --enable-dss --dms_url=\"%s\" -I %d "
+            SYSTEMQUOTE "--vgname=\"+data,+log\" --enable-dss --dms_url=\"%s\" -I %d "
                 "--socketpath=\"UDS:%s/dss_home%d/.dss_unix_d_socket\"" SYSTEMQUOTE,
-            i,
             ss_standby_read ? "0:127.0.0.1:1611,1:127.0.0.1:1711" : "0:127.0.0.1:1611",
             i,
             temp_install,

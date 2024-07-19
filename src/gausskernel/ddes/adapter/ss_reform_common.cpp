@@ -182,7 +182,7 @@ XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private
 void SSGetRecoveryXlogPath()
 {
     errno_t rc = EOK;
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
 
     rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
         dssdir, g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id);
@@ -230,10 +230,10 @@ void SSDisasterGetXlogPathList()
     }
     struct dirent *entry;
     
-    DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+    DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name);
     if (dssdir == NULL) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] Error opening dssdir %s", 
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)));                                                  
+                        g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name)));                                                  
     }
 
     uint8_t len = strlen("pg_xlog");
@@ -244,7 +244,7 @@ void SSDisasterGetXlogPathList()
                 rc = memmove_s(entry->d_name, MAX_PATH, entry->d_name + len, strlen(entry->d_name) - len + 1);
                 securec_check_c(rc, "\0", "\0");
                 rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index++], MAXPGPATH, MAXPGPATH - 1,
-                    "%s/%s%d", g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, "pg_xlog", atoi(entry->d_name));
+                    "%s/%s%d", g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name, "pg_xlog", atoi(entry->d_name));
                 securec_check_ss(rc, "", "");
             }
         } else {
@@ -524,7 +524,7 @@ void SSGrantDSSWritePermission(void)
         pg_usleep(REFORM_WAIT_LONG);
         ereport(WARNING, (errmodule(MOD_DMS),
             errmsg("[SS reform] Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name,
                 g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
                 errhint("Check vgname and socketpath and restart later.")));
     }

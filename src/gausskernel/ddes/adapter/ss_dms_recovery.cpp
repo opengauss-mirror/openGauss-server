@@ -245,7 +245,7 @@ void ss_failover_dw_init_internal()
      * step 3: rebuild dw file and init self dw
      */
 
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
     int old_primary_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
     int self_id = g_instance.attr.attr_storage.dms_attr.instance_id;
     if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {

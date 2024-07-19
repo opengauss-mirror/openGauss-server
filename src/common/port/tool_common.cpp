@@ -470,7 +470,7 @@ void freefile(char** lines)
 
 /*
 * read ss config, return enable_dss 
-* we will get ss_enable_dss, ss_dss_conn_path and ss_dss_vg_name.
+* we will get ss_enable_dss, ss_dss_conn_path and ss_dss_data_vg_name.
 */
 bool ss_read_config(const char* pg_data)
 {
@@ -511,7 +511,7 @@ bool ss_read_config(const char* pg_data)
     ss_instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
     ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
     (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_data_vg_name", ss_instance_config.dss.vgname);
     (void)find_guc_optval((const char**)optlines, "ss_instance_id", inst_id);
     ss_instance_config.dss.instance_id = atoi(inst_id);
 
