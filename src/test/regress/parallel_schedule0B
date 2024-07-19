@@ -457,6 +457,6 @@ test: udf_crem create_c_function
 # procedure, Function Test
 #test: create_procedure
 test: create_function
-test: pg_compatibility
+test: pg_compatibility test_index_include
 
 test: alter_trigger
