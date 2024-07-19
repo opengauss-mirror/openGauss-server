@@ -413,5 +413,6 @@ extern void reportDependentObjects(
 extern void AcquireDeletionLock(const ObjectAddress* object, int flags);
 extern void add_object_address_ext(Oid classId, Oid objectId, int32 subId, char deptype, ObjectAddresses* addrs);
 extern void add_object_address_ext1(const ObjectAddress *obj, ObjectAddresses* addrs);
+extern long DeleteSubprogramDenpendOnProcedure(Oid classId, Oid objectId, bool is_delete = true);
 
 #endif   /* DEPENDENCY_H */

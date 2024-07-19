@@ -145,6 +145,7 @@ typedef struct PsqlScanStateData
 	BeginState	begin_state;		/* mark the type of a sql string start with BEGIN or DECLARE */
 	bool		declare_encountered;	/* mark if we have encountered a DECLARE. When we matched a ';' which is not in parentheses,
 						   if we have met a DECLARE, it must be treated as a normal sql, not a xp */
+	bool 		trigger_encountered; 	/*mark if we have encountered a TRIGGER.*/
 	int		butt_num;		/* identifier(not include identifier declared in enum GramIdentify) encountered number after DECLARE. 
 						   For sql like "Declare foo CURSOR XXX, butt_num is 1.
 						   Using this we can judge if the sql is a DECLARE CURSOR stmt */
@@ -1641,6 +1642,7 @@ psql_scan_reset(PsqlScanState state)
 	state->begin_state = BEGIN_UNDEFINED;
 	state->butt_num = 0;
 	state->declare_encountered = false;
+	state->trigger_encountered = false;
 	state->is_b_format = false;
 	state->is_end_state = false;
 	if (state->delimiter_name) {
@@ -2365,7 +2367,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->count_to_read = -1;
 			break;
 		case IDEN_PROCEDURE:
-			if (state->declare_encountered && state->begin_state == BEGIN_UNDEFINED) {
+			if (state->trigger_encountered && state->declare_encountered && state->begin_state == BEGIN_UNDEFINED) {
 				/*
 				 * declare_encountered is true means we have met a 'declare' already, sql may like
 				 * 'create trigger declare on declare execute procedure xx', 'declare' should be treat as an identifier
@@ -2448,6 +2450,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 		case IDEN_TRIGGER:
 			state->gram_state[IDEN_DECLARE] = true;
 			state->gram_state[IDEN_BEGIN] = true;
+			state->trigger_encountered = true;
 			state->count_to_read = -1;
 			break;
 		case IDEN_DECLARE:

@@ -1091,6 +1091,63 @@ static void reset_implicit_cursor_attr(PLpgSQL_execstate *estate)
 }
 #endif
 
+bool copy_parent_func_exec_param(PLpgSQL_function* func, PLpgSQL_execstate *estate, int pos) {
+    Assert (func->parent_func);
+
+    for (int i = pos; i < estate->ndatums; i++) {
+        if(func->datums[i] != NULL && func->datums[i]->inherit) {
+            PLpgSQL_execstate* prt_est = func->parent_func->cur_estate;
+            for (int j = 0; prt_est && j < prt_est->ndatums; j++) {
+
+                char* cur_name = getPlpgsqlVarName(func->datums[i]);
+                cur_name = (cur_name && cur_name[0] != '$') ? cur_name : getPlpgsqlVarName(func->datums[i], false);
+
+                char* prt_name = getPlpgsqlVarName(prt_est->datums[j]);
+                prt_name = (prt_name && prt_name[0] != '$') ? prt_name : getPlpgsqlVarName(prt_est->datums[j], false);
+
+                if (cur_name && prt_name && strcmp(cur_name, prt_name) == 0) {
+                    estate->datums[i] = prt_est->datums[j];
+                    estate->datums[i]->inherit = true;
+
+                    MemoryContext cxt = func->parent_func->fn_cxt;
+                    if (func->parent_func->parent_func) {
+                        cxt = func->parent_func->parent_func->fn_cxt;
+                    }
+
+                    if (func->datums[i]->dtype == PLPGSQL_DTYPE_VAR || func->datums[i]->dtype == PLPGSQL_DTYPE_VARRAY) {
+                        ((PLpgSQL_var*)prt_est->datums[j])->datum_cxt = cxt;
+
+                    } else if (func->datums[i]->dtype == PLPGSQL_DTYPE_ROW || func->datums[i]->dtype == PLPGSQL_DTYPE_RECORD) {
+                        ((PLpgSQL_row*)prt_est->datums[j])->datum_cxt = cxt;
+
+                    } else if (func->datums[i]->dtype == PLPGSQL_DTYPE_REC){
+                        ((PLpgSQL_rec*)prt_est->datums[j])->datum_cxt = cxt;
+                    }
+
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+PLpgSQL_datum* GetOriginSubprogramDatum(PLpgSQL_execstate *estate, int dno, Oid func_oid) {
+    PLpgSQL_datum* datum = NULL;
+    /* Nested up to two levels at most. */
+    if (estate->func->fn_oid == func_oid) {
+        datum = estate->datums[dno];
+    } else if (estate->func->parent_func && estate->func->parent_func->fn_oid == func_oid){
+        datum = estate->func->parent_func->cur_estate->datums[dno];
+    } else if (estate->func->parent_func && estate->func->parent_func->parent_func && 
+               estate->func->parent_func->parent_func->fn_oid == func_oid) {
+         datum = estate->func->parent_func->parent_func->cur_estate->datums[dno];    
+    } else {
+        datum = estate->datums[dno];   
+    }
+    return datum;
+}
+
 static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyParse)
 {
     MemoryContext current_context = CurrentMemoryContext;
@@ -1745,18 +1802,25 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
      */
 
     for (i = 0; i < estate.ndatums; i++) {
-        if (!func->datums[i]->ispkg) {
-            estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
-        } else {
-            estate.datums[i] = func->datums[i];
-        }
-
-        if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+        if(func->datums[i] != NULL) {
+            if (func->datums[i]->ispkg) {
+                estate.datums[i] = func->datums[i];  
+            } else if (func->datums[i]->inherit && func->parent_func) {
+                // 如果是嵌套两层，可能嵌套第二层会修改继承嵌套第一层的issub，导致没有复制到数据
+                if(!copy_parent_func_exec_param(func, &estate, i)) {
+                    estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+                }  
+            } else {
+                estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+            }
+            
+            if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
             if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
                 check_if_recfield_exist(estate, i, func);
 	    }
+            }
         }
     }
 
@@ -6074,6 +6138,16 @@ static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bo
             MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
             assign_text_var(curvar, portal->name);
             temp = MemoryContextSwitchTo(temp);
+        } else if (curvar->inherit) {
+            MemoryContext temp = NULL;
+            MemoryContext cxt = estate->func->fn_cxt;
+            cxt =  estate->func->parent_func ? estate->func->parent_func->fn_cxt : cxt;
+            if (estate->func->parent_func && estate->func->parent_func->parent_func) {
+                cxt = estate->func->parent_func->parent_func->fn_cxt;
+            }
+            temp = MemoryContextSwitchTo(cxt);
+            assign_text_var(curvar, portal->name);
+            MemoryContextSwitchTo(temp);
         } else {
             assign_text_var(curvar, portal->name);
         }
@@ -7930,11 +8004,13 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
             rec = (PLpgSQL_rec*)(estate->datums[stmt->rec->dno]);
         } else if (stmt->row != NULL) {
             row = stmt->row;
-            if (row->ispkg) {
+            if (row->ispkg && row->pkg->pkg_oid) {
                 row = (PLpgSQL_row*)(row->pkg->datums[stmt->row->dno]);
+            } else if (row->inherit) {
+                row = (PLpgSQL_row*)GetOriginSubprogramDatum(estate, stmt->row->dno, stmt->row->func_oid);
             } else {
-                row = (PLpgSQL_row*)(estate->datums[stmt->row->dno]);
-            }
+				row = (PLpgSQL_row*)(estate->datums[stmt->row->dno]);
+			}
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
@@ -8832,6 +8908,10 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
      * ----------
      */
     curvar = (PLpgSQL_var*)(estate->datums[stmt->curvar]);
+    /*
+	if (curvar->pkg_oid != InvalidOid) {
+       curvar->pkg = PackageInstantiation(curvar->pkg_oid);
+    }*/
 #ifndef ENABLE_MULTIPLE_NODES
     /* in centralized mode, package cursor used in autonomous session is not supported */
     if (curvar->ispkg && u_sess->is_autonomous_session) {
@@ -8848,6 +8928,16 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
             MemoryContext temp;
             PLpgSQL_package* pkg = curvar->pkg;
             temp = MemoryContextSwitchTo(pkg->pkg_cxt);
+            curname = TextDatumGetCString(curvar->value);
+            MemoryContextSwitchTo(temp);
+        } else if (curvar->inherit) {
+            MemoryContext temp = NULL;
+            MemoryContext cxt = estate->func->fn_cxt;
+            cxt =  estate->func->parent_func ? estate->func->parent_func->fn_cxt : cxt;
+            if (estate->func->parent_func && estate->func->parent_func->parent_func) {
+                cxt = estate->func->parent_func->parent_func->fn_cxt;
+            }
+            temp = MemoryContextSwitchTo(cxt);
             curname = TextDatumGetCString(curvar->value);
             MemoryContextSwitchTo(temp);
         } else {
@@ -8912,6 +9002,16 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
                 MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
                 assign_text_var(curvar, portal->name);
                 temp = MemoryContextSwitchTo(temp);
+            } else if (curvar->inherit) {
+                MemoryContext temp = NULL;
+                MemoryContext cxt = estate->func->fn_cxt;
+                cxt =  estate->func->parent_func ? estate->func->parent_func->fn_cxt : cxt;
+                if (estate->func->parent_func && estate->func->parent_func->parent_func) {
+                    cxt = estate->func->parent_func->parent_func->fn_cxt;
+                }
+                temp = MemoryContextSwitchTo(cxt);
+                assign_text_var(curvar, portal->name);
+                MemoryContextSwitchTo(temp);
             } else {
                 assign_text_var(curvar, portal->name);
             }
@@ -9020,6 +9120,16 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     if (curname == NULL) {
         if (curvar->pkg != NULL) {
             MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
+            assign_text_var(curvar, portal->name);
+            MemoryContextSwitchTo(temp);
+        } else if (curvar->inherit) {
+            MemoryContext temp = NULL;
+            MemoryContext cxt = estate->func->fn_cxt;
+            cxt =  estate->func->parent_func ? estate->func->parent_func->fn_cxt : cxt;
+            if (estate->func->parent_func && estate->func->parent_func->parent_func) {
+                cxt = estate->func->parent_func->parent_func->fn_cxt;
+            }
+            temp = MemoryContextSwitchTo(cxt);
             assign_text_var(curvar, portal->name);
             MemoryContextSwitchTo(temp);
         } else {
@@ -9151,6 +9261,8 @@ static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt)
             row = stmt->row;
             if (row->ispkg) {
                 row = (PLpgSQL_row*)(row->pkg->datums[stmt->row->dno]);
+            } else if (row->inherit) {
+                row = (PLpgSQL_row*)GetOriginSubprogramDatum(estate, stmt->row->dno, row->func_oid);
             } else {
                 row = (PLpgSQL_row*)(estate->datums[stmt->row->dno]);
             }
@@ -9713,7 +9825,11 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
                     MemoryContext temp = MemoryContextSwitchTo(var->pkg->pkg_cxt);
                     newvalue = datumCopy(newvalue, false, var->datatype->typlen);
                     MemoryContextSwitchTo(temp);
-                } else {
+                } else if (var->inherit) {
+                    MemoryContext temp = MemoryContextSwitchTo(var->datum_cxt);
+                    newvalue = datumCopy(newvalue, false, var->datatype->typlen);
+                    MemoryContextSwitchTo(temp);
+                }else {
                     newvalue = datumCopy(newvalue, false, var->datatype->typlen);
                 }
             }
@@ -10970,7 +11086,7 @@ static PLpgSQL_temp_assignvar* build_temp_assignvar_from_datum(PLpgSQL_datum* ta
 {
     PLpgSQL_var* var = (PLpgSQL_var*)target;
     PLpgSQL_temp_assignvar* result = NULL;
-    if (var->datatype->typinput.fn_oid == F_ARRAY_IN) {
+    if (var->datatype && var->datatype->typinput.fn_oid == F_ARRAY_IN) {
         result = (PLpgSQL_temp_assignvar*)palloc0(sizeof(PLpgSQL_temp_assignvar));
         result->isarrayelem = true;
         result->isnull = var->isnull;
@@ -10984,7 +11100,7 @@ static PLpgSQL_temp_assignvar* build_temp_assignvar_from_datum(PLpgSQL_datum* ta
         result->nsubscripts = nsubscripts;
         return result;
     }
-    if (var->datatype->typinput.fn_oid == F_DOMAIN_IN) {
+    if (var->datatype && var->datatype->typinput.fn_oid == F_DOMAIN_IN) {
         HeapTuple type_tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(var->datatype->typoid));
         if (HeapTupleIsValid(type_tuple)) {
             Form_pg_type type_form = (Form_pg_type)GETSTRUCT(type_tuple);
@@ -11131,8 +11247,10 @@ static PLpgSQL_datum* get_indirect_target(PLpgSQL_execstate* estate, PLpgSQL_dat
     PLpgSQL_row* row = (PLpgSQL_row*)assigntarget;
     for (int i = 0; i < row->nfields; i++) {
         if (row->fieldnames[i] && strcmp(row->fieldnames[i], filed) == 0) {
-            if (row->ispkg) {
+            if (row->ispkg && row->pkg->pkg_oid) {
                 return row->pkg->datums[row->varnos[i]];
+            } else if (row->inherit) {
+                return GetOriginSubprogramDatum(estate, row->varnos[i], row->func_oid);
             } else {
                 return estate->datums[row->varnos[i]];
             }
@@ -11417,6 +11535,9 @@ static PLpgSQL_var* makeNewNestedPlpgsqlVar(PLpgSQL_var* src)
     dest->is_cursor_open = src->is_cursor_open;
     dest->tableOfIndexType = src->tableOfIndexType; 
     dest->tableOfIndex = NULL;
+    dest->inherit = src->inherit;
+    dest->pkg_oid = src->pkg_oid;
+    dest->datum_cxt = src->datum_cxt;
     dest->nest_table = makeNewNestedPlpgsqlVar(src->nest_table);
     dest->nest_layers = src->nest_layers;
     return dest;
@@ -13430,9 +13551,11 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                         continue; /* skip dropped column in row struct */
                     }
 #ifndef ENABLE_MULTIPLE_NODES
-                    if (row->ispkg) {
+                    if (row->ispkg && row->pkg->pkg_oid) {
                         PLpgSQL_package* pkg = row->pkg;
                         var = (PLpgSQL_var*)(pkg->datums[row->varnos[fnum]]);
+                    } else if (row->inherit) {
+                        var = (PLpgSQL_var*)GetOriginSubprogramDatum(estate, row->varnos[fnum], row->func_oid);
                     } else {
                         var = (PLpgSQL_var*)(estate->datums[row->varnos[fnum]]);
                     }
@@ -13582,7 +13705,7 @@ HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, Tuple
                     errmodule(MOD_PLSQL),
                     errmsg("dropped rowtype entry for non-dropped column when make tuple")));
         }
-        if (row->ispkg) {
+        if (row->ispkg && OidIsValid(row->pkg->pkg_oid)) {
             PLpgSQL_package* pkg = row->pkg;
             if (pkg == NULL) {
                 ereport(ERROR,
@@ -13594,6 +13717,9 @@ HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, Tuple
                     erraction("check package error and redefine package")));  
             }
             exec_eval_datum(estate, pkg->datums[row->varnos[i]], &fieldtypeid, &fieldtypmod, &dvalues[i], &nulls[i]);
+        } else if (row->inherit) {
+            PLpgSQL_datum* datum = GetOriginSubprogramDatum(estate, row->varnos[i], row->func_oid);
+            exec_eval_datum(estate, datum, &fieldtypeid, &fieldtypmod, &dvalues[i], &nulls[i]);
         } else {
             exec_eval_datum(estate, estate->datums[row->varnos[i]], &fieldtypeid, &fieldtypmod, &dvalues[i], &nulls[i]);
         }

@@ -460,6 +460,8 @@ typedef struct knl_u_parser_context {
     bool isPerform;
     void* stmt;
 
+    bool has_subprogram;
+
     bool has_hintwarning;
     bool in_userset;
     bool has_set_uservar;
@@ -1526,6 +1528,7 @@ typedef struct PLpgSQL_compile_context {
     struct PLpgSQL_datum** plpgsql_Datums;
     struct PLpgSQL_function* plpgsql_curr_compile;
     struct PLpgSQL_condition* plpgsql_conditions;
+    int plpgsql_subprogram_nDatums;
 
     bool* datum_need_free; /* need free datum when free function/package memory? */
     bool plpgsql_DumpExecTree;
@@ -1579,7 +1582,6 @@ typedef struct PLpgSQL_compile_context {
     const char* cur_line_end;
     int cur_line_num;
     List* goto_labels;
-
     bool plpgsql_check_syntax;
 
     struct PLpgSQL_package* plpgsql_curr_compile_package;
@@ -1662,6 +1664,7 @@ typedef struct knl_u_plpgsql_context {
     /* dbe.output buffer limit */
     uint32 dbe_output_buffer_limit;
     Oid running_pkg_oid;
+    Oid running_func_oid;
     bool is_delete_function;
     bool is_package_instantiation;
     char* client_info;
@@ -1722,6 +1725,11 @@ typedef struct knl_u_plpgsql_context {
     bool isCreateTypeBody;
     char typfunckind;
     List* CursorRecordTypeList;  /*Save the type recorded during the cursor definition*/
+
+    Oid cur_func_oid;
+    bool isCreateFuncSubprogramBody;
+    int block_level;
+    Oid createFunctionOid;
 
     // gs depend
     bool compile_has_warning_info;

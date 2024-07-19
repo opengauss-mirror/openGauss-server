@@ -127,7 +127,7 @@ static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
 
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    bool isAgg, bool isWindowFunc);
+    bool isAgg, bool isWindowFunc, Oid profuncid = InvalidOid);
 static bool user_define_func_check(Oid languageId, const char* probin, char** absolutePath, CFunType* function_type);
 static const char* get_file_name(const char* filePath, CFunType function_type);
 
@@ -572,7 +572,7 @@ static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
 static bool checkPackageFunctionConflicts(const char* procedureName,
     Datum allParameterTypes, oidvector* parameterTypes, Datum parameterModes,
     Oid procNamespace, bool package, Oid propackageid, Oid languageId, bool isOraStyle,
-    bool replace, Oid protypeid = InvalidOid)
+    bool replace, Oid protypeid = InvalidOid, Oid profuncid = InvalidOid)
 {
     int inpara_count;
     int allpara_count = 0;
@@ -648,6 +648,9 @@ static bool checkPackageFunctionConflicts(const char* procedureName,
                 typid = ObjectIdGetDatum(packageid_datum);
             if (protypeid != typid)
                 continue;
+            Oid funcoid = GetProprocoidByOid(HeapTupleGetOid(proctup));
+            if (profuncid != funcoid)
+                continue;
             /* only check package function */
             if (ispackage != package && protypeid == InvalidOid) {
                 ReleaseSysCacheList(catlist);
@@ -708,7 +711,8 @@ static bool checkPackageFunctionConflicts(const char* procedureName,
 
             result = result1 || result2;
 #ifndef ENABLE_MULTIPLE_NODES
-            if (result && IsPlpgsqlLanguageOid(languageId) && !OidIsValid(propackageid) && !isOraStyle) {
+            if (result && IsPlpgsqlLanguageOid(languageId) && !OidIsValid(propackageid) &&
+                !isOraStyle && !OidIsValid(profuncid)) {
                 if (DatumGetPointer(pro_arg_modes) == NULL) {
                     result &= (DatumGetPointer(parameterModes) == NULL);
                 } else if (DatumGetPointer(parameterModes) == NULL) {
@@ -755,7 +759,7 @@ static bool checkPackageFunctionConflicts(const char* procedureName,
  */
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    bool isAgg, bool isWindowFunc)
+    bool isAgg, bool isWindowFunc, Oid func_oid)
 {
     Datum proargnames;
     bool isnull = false;
@@ -766,7 +770,7 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
                 errmsg("function \"%s\" already exists with same argument types", procedureName)));
     }
 
-    if (!pg_proc_ownercheck(HeapTupleGetOid(oldtup), proowner)) {
+    if (!pg_proc_ownercheck(HeapTupleGetOid(oldtup), proowner) && !OidIsValid(func_oid)) {
         aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, procedureName);
     }
 
@@ -1074,7 +1078,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
     bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate,
     TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt, bool isPipelined,
-    FunctionPartitionInfo* partInfo, Oid protypeid, char typefunckind, bool isfinal)
+    FunctionPartitionInfo* partInfo, Oid protypeid, char typefunckind, bool isfinal, Oid profuncid)
 {
     Oid retval;
     int parameterCount;
@@ -1111,13 +1115,15 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     char* final_file_name = NULL;
     List* name = NULL;
     List* dependenciesRefObjOids = NULL;
+    bool inAnonymousSubprogram = false;
+    bool isSubprogram = false;
     /* sanity checks */
     Assert(PointerIsValid(prosrc));
     u_sess->plsql_cxt.compile_has_warning_info = false;
     /* 
      * Check function name to ensure that it doesn't conflict with existing synonym.
      */
-    if (!IsInitdb && GetSynonymOid(procedureName, procNamespace, true) != InvalidOid) {
+    if (!IsInitdb && !OidIsValid(profuncid) && GetSynonymOid(procedureName, procNamespace, true) != InvalidOid) {
         ereport(ERROR,
                 (errmsg("function name is already used by an existing synonym in schema \"%s\"",
                     get_namespace_name(procNamespace))));
@@ -1460,6 +1466,8 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     } else if (OidIsValid(protypeid)) {
         /* we treat object type methods as package function. But we don't record it in pg_proc */
         package = true;
+    } else if (OidIsValid(profuncid)) {
+        values[Anum_pg_proc_package - 1] = true;
     } else {
         values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
     }
@@ -1534,7 +1542,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* Check for pre-existing definition */
 #ifndef ENABLE_MULTIPLE_NODES
         Oid oldTupleOid = GetOldTupleOid(procedureName, parameterTypes, procNamespace,
-            propackageid, values, parameterModes, protypeid);
+            propackageid, values, parameterModes, protypeid, profuncid);
         oldtup = SearchSysCache1(PROCOID, ObjectIdGetDatum(oldTupleOid));
 #else
         oldtup = SearchSysCache3(PROCNAMEARGSNSP,
@@ -1543,6 +1551,52 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             ObjectIdGetDatum(procNamespace));
 #endif
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (enable_out_param_override() && !u_sess->attr.attr_common.IsInplaceUpgrade && !IsInitdb && !proIsProcedure &&
+        IsPlpgsqlLanguageOid(languageObjectId)) {
+        bool findOutParamFunc = false;
+        CatCList *catlist = NULL;
+        if (t_thrd.proc->workingVersionNum < 92470) {
+            catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(procedureName));
+        } else {
+            catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
+        }
+        for (int i = 0; i < catlist->n_members; ++i) {
+            HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+            Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+            bool isNull = false;
+            Datum packageOidDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            Oid packageOid = InvalidOid;
+            if (!isNull) {
+                packageOid = DatumGetObjectId(packageOidDatum);
+            }
+
+            Oid procOid = GetProprocoidByOid(HeapTupleGetOid(proctup));
+            if (packageOid == propackageid && OidIsValid(procOid) && procOid == profuncid
+                    && procform->pronamespace == procNamespace) {
+                isNull = false;
+                (void)SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proallargtypes, &isNull);
+                if (!isNull) {
+                    findOutParamFunc = true;
+                    break;
+                }
+            }
+        }
+
+        ReleaseSysCacheList(catlist);
+        if (existOutParam) {
+            if (!HeapTupleIsValid(oldtup) && findOutParamFunc) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                         (errmsg("\"%s\" functions with plpgsql language and out params are not supported Overloaded.",
+                                 procedureName),
+                          errdetail("N/A."),
+                          errcause("functions with plpgsql language and out params are not supported Overloaded."),
+                          erraction("Drop function before create function."))));
+            }
+        }
+    }
+#endif
     if (HeapTupleIsValid(oldtup)) {
         /* There is one; okay to replace it? */
         bool isNull = false;
@@ -1557,11 +1611,12 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             replace,
             isOraStyle,
             isAgg,
-            isWindowFunc);
+            isWindowFunc,
+            profuncid);
 
         Datum ispackage = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_package, &isNull);
         /* skip this restrict for obejct type method */
-        if (!isNull && DatumGetBool(ispackage) != package && protypeid == InvalidOid) {
+        if (!OidIsValid(profuncid) && !isNull && DatumGetBool(ispackage) != package && protypeid == InvalidOid) {
             ReleaseSysCache(oldtup);
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1610,7 +1665,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* checking for package function */
         bool conflicts =
             checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, parameterModes,
-                procNamespace, package, propackageid, languageObjectId, isOraStyle, replace, protypeid);
+                procNamespace, package, propackageid, languageObjectId, isOraStyle, replace, protypeid, profuncid);
         if (conflicts) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1659,6 +1714,9 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* drop the types build on procedure */
         DeleteTypesDenpendOnPackage(ProcedureRelationId, retval);
 
+        /* drop the subprogram build on procedure */
+        DeleteSubprogramDenpendOnProcedure(ProcedureRelationId, retval);
+
         /* the 'shared dependencies' also change when update. */
         deleteSharedDependencyRecordsFor(ProcedureRelationId, retval, 0);
         (void) deleteDependencyRecordsFor(ClientLogicProcId, retval, true);
@@ -1680,6 +1738,15 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         CacheInvalidateFunction(retval, InvalidOid);
     }
 
+    /*
+     * Anonymous block subroutines should be removed after the execution of the anonymous block concludes,
+     * without adding dependencies.
+     */
+    inAnonymousSubprogram = u_sess->plsql_cxt.curr_compile_context &&
+                                  u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile &&
+                                  u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list &&
+                                  u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->in_anonymous;
+
     myself.classId = ProcedureRelationId;
     myself.objectId = retval;
     myself.objectSubId = 0;
@@ -1695,72 +1762,77 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         referenced.objectSubId = 0;
         recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
-        /* dependency on implementation language */
-        referenced.classId = LanguageRelationId;
-        referenced.objectId = languageObjectId;
-        referenced.objectSubId = 0;
-        recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-
-        GsDependParamBody gsDependParamBody;
-        gsplsql_init_gs_depend_param_body(&gsDependParamBody);
-        if (enable_plpgsql_gsdependency()) {
-            gsDependParamBody.dependNamespaceOid = procNamespace;
-            if (NULL != u_sess->plsql_cxt.curr_compile_context &&
-                NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
-                Assert(propackageid ==
-                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid);
-                gsDependParamBody.dependPkgOid = propackageid;
-                gsDependParamBody.dependPkgName = pkgname;
-            }
-            gsDependParamBody.refPosType = GSDEPEND_REFOBJ_POS_IN_PROCHEAD;
-            gsDependParamBody.type = GSDEPEND_OBJECT_TYPE_TYPE;
-            gsDependParamBody.dependName = funcHeadObjDesc.name;
-        }
-
-        /* Do not record dependency while return type is current object type */
-        if (protypeid != returnType && typefunckind != TABLE_VARRAY_CONSTRUCTOR_PROC) {
-            /* dependency on return type */
-            referenced.classId = TypeRelationId;
-            referenced.objectId = returnType;
+        if (!inAnonymousSubprogram) {
+            /* dependency on implementation language */
+            referenced.classId = LanguageRelationId;
+            referenced.objectId = languageObjectId;
             referenced.objectSubId = 0;
-            if (enable_plpgsql_gsdependency() && NULL != retTypDependExt) {
-                gsDependParamBody.dependExtend = retTypDependExt;
-                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
-                if (gsDependParamBody.hasDependency) {
-                    hasDependency = true;
-                }
-                if (gsDependParamBody.dependExtend->dependUndefined) {
-                    hasUndefined = true;
-                }
-            } else {
-                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-            }
-        }
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
-        /* dependency on parameter types */
-        for (i = 0; i < allParamCount; i++) {
-            /* Do not record dependency while parameter type is current object type */
-            if (typefunckind == TABLE_VARRAY_CONSTRUCTOR_PROC || protypeid == allParams[i]) {
-                continue;
+            GsDependParamBody gsDependParamBody;
+            gsplsql_init_gs_depend_param_body(&gsDependParamBody);
+            if (enable_plpgsql_gsdependency()) {
+                gsDependParamBody.dependNamespaceOid = procNamespace;
+                if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+                    NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+                    Assert(propackageid ==
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid);
+                    gsDependParamBody.dependPkgOid = propackageid;
+                    gsDependParamBody.dependPkgName = pkgname;
+                }
+                gsDependParamBody.refPosType = GSDEPEND_REFOBJ_POS_IN_PROCHEAD;
+                gsDependParamBody.type = GSDEPEND_OBJECT_TYPE_TYPE;
+                gsDependParamBody.dependName = funcHeadObjDesc.name;
             }
-            referenced.classId = TypeRelationId;
-            referenced.objectId = allParams[i];
-            referenced.objectSubId = 0;
-            /*
-             * in plsql_dependency GUC, we don't build the dependency between procedure and type
-             * when the type is dropped or rebuild we don't want the procedure to be dropped.
-             */
-            if (enable_plpgsql_gsdependency() && NULL != paramTypDependExt) {
-                gsDependParamBody.dependExtend = paramTypDependExt + i;
-                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
-                if (gsDependParamBody.hasDependency) {
-                    hasDependency = true;
+
+            /* Do not record dependency while return type is current object type */
+            if (protypeid != returnType && typefunckind != TABLE_VARRAY_CONSTRUCTOR_PROC) {
+                /* dependency on return type */
+                referenced.classId = TypeRelationId;
+                referenced.objectId = returnType;
+                referenced.objectSubId = 0;
+                if (enable_plpgsql_gsdependency() && retTypDependExt != NULL) {
+                    gsDependParamBody.dependExtend = retTypDependExt;
+                    recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
+                    if (gsDependParamBody.hasDependency) {
+                        hasDependency = true;
+                    }
+                    if (gsDependParamBody.dependExtend->dependUndefined) {
+                        hasUndefined = true;
+                    }
+                } else {
+                    recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
                 }
-                if (gsDependParamBody.dependExtend->dependUndefined) {
-                    hasUndefined = true;
+            }
+
+            /* dependency on parameter types */
+            for (i = 0; i < allParamCount; i++) {
+                /* Do not record dependency while parameter type is current object type */
+                if (typefunckind == TABLE_VARRAY_CONSTRUCTOR_PROC) {
+                    continue;
                 }
-            } else {
-                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+                if (protypeid == allParams[i]) {
+                    continue;
+                }
+                referenced.classId = TypeRelationId;
+                referenced.objectId = allParams[i];
+                referenced.objectSubId = 0;
+                /*
+                * in plsql_dependency GUC, we don't build the dependency between procedure and type
+                * when the type is dropped or rebuild we don't want the procedure to be dropped.
+                */
+                if (enable_plpgsql_gsdependency() && NULL != paramTypDependExt) {
+                    gsDependParamBody.dependExtend = paramTypDependExt + i;
+                    recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
+                    if (gsDependParamBody.hasDependency) {
+                        hasDependency = true;
+                    }
+                    if (gsDependParamBody.dependExtend->dependUndefined) {
+                        hasUndefined = true;
+                    }
+                } else {
+                    recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+                }
             }
         }
 
@@ -1775,6 +1847,13 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         if (protypeid != InvalidOid) {
             referenced.classId = TypeRelationId;
             referenced.objectId = protypeid;
+            referenced.objectSubId = 0;
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+        }
+        /* dependency on functions */
+        if (profuncid != InvalidOid) {
+            referenced.classId = ProcedureRelationId;
+            referenced.objectId = profuncid;
             referenced.objectSubId = 0;
             recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
         }
@@ -1835,7 +1914,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     InvokeObjectAccessHook(OAT_POST_CREATE, ProcedureRelationId, retval, 0, NULL);
 
     /* Record PARALLEL_ENABLE PARTITION BY INFO */
-    InsertPgProcExt(retval, partInfo);
+    InsertPgProcExt(retval, partInfo, profuncid);
 
     /* Recode the procedure create time. */
     if (OidIsValid(retval)) {
@@ -1858,6 +1937,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
 
     heap_close(rel, RowExclusiveLock);
     CacheInvalidateFunction(retval, InvalidOid);
+
     if (u_sess->SPI_cxt._connected == -1 && !u_sess->plsql_cxt.isCreatePkg &&
         !u_sess->plsql_cxt.isCreatePkgFunction) {
             plpgsql_hashtable_clear_invalid_obj();
@@ -1893,6 +1973,25 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     CommandCounterIncrement();
     /* Verify function body */
     if (OidIsValid(languageValidator)) {
+        // Record the OID of the anonymous block's subroutine for easy subsequent removal.
+        if (OidIsValid(profuncid)) {
+            if (u_sess->plsql_cxt.curr_compile_context &&
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile) {
+                if (profuncid == OID_MAX) {
+                    Oid* oid = (Oid*)palloc(sizeof(Oid));
+                    *oid = ObjectIdGetDatum(retval);
+                    List *oid_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->sub_func_oid_list;
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->sub_func_oid_list = lappend(oid_list, oid);
+                } else if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func != NULL &&
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->fn_oid == OID_MAX) {
+                    Oid* oid = (Oid*)palloc(sizeof(Oid));
+                    *oid = ObjectIdGetDatum(retval);
+                    List *oid_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->sub_func_oid_list;
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->sub_func_oid_list = lappend(oid_list, oid);
+                }
+            }
+        }
+        u_sess->plsql_cxt.createFunctionOid = retval;
         ArrayType* set_items = NULL;
         int save_nestlevel;
         /* Set per-function configuration parameters */
@@ -1937,9 +2036,10 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     if (enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.has_error) {
             SetPgObjectValid(retval, OBJECT_TYPE_PROC, false);
     } 
-    if (propackageid == InvalidOid) {
+    if (propackageid == InvalidOid && !OidIsValid(profuncid)) {
         plpgsql_clear_created_func(ObjectIdGetDatum(retval));
     }
+    u_sess->plsql_cxt.createFunctionOid = InvalidOid;
     pfree_ext(final_file_name);
     pfree_ext(pkgname);
     list_free_ext(name);

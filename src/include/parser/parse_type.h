@@ -66,6 +66,7 @@ extern bool IsTypeTableInInstallationGroup(const Type type_tup);
 extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p,
     TypeDependExtend* depend_extend = NULL);
 extern char* CastPackageTypeName(const char* typName, Oid  pkgOid, bool isPackage, bool isPublic = true);
+extern Oid LookupTypeInFunc(const char* typeName);
 extern bool IsBinaryType(Oid typid);
 typedef bool (*isBinaryType)(Oid typid);
 #define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)

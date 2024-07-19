@@ -1341,9 +1341,17 @@ static void RecordDependencyOfPkg(PLpgSQL_package* pkg, Oid pkgOid, Oid currComp
             pkg, &curr_compile->plpgsql_curr_compile_package->invalItems, InvalidOid, pkgOid);
         (void)MemoryContextSwitchTo(temp);
     } else {
-        MemoryContext temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile->fn_cxt);
-        record_pkg_function_dependency(pkg, &curr_compile->plpgsql_curr_compile->invalItems, InvalidOid, pkgOid);
+        PLpgSQL_function* curr_func = curr_compile->plpgsql_curr_compile;
+        MemoryContext temp = MemoryContextSwitchTo(curr_func->fn_cxt);
+        record_pkg_function_dependency(pkg, &curr_func->invalItems, InvalidOid, pkgOid);
         (void)MemoryContextSwitchTo(temp);
+        /* Transfer dependency to the parent function */
+        while (curr_func->parent_func) {
+            MemoryContext temp_parent = MemoryContextSwitchTo(curr_func->parent_func->fn_cxt);
+            record_pkg_function_dependency(pkg, &curr_func->parent_func->invalItems, InvalidOid, pkgOid);
+            (void)MemoryContextSwitchTo(temp_parent);
+            curr_func = curr_func->parent_func;
+        }
     }
 }
 

@@ -17825,7 +17825,7 @@ pkg_body_subprogram: {
                 }
                 $$ = result_list;
             }
-            ;
+			;
 CreatePackageBodyStmt:
 			CREATE opt_or_replace PACKAGE BODY_P pkg_name as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
 			u_sess->plsql_cxt.isCreatePkg = true;
@@ -18343,7 +18343,12 @@ subprogram_body: 	{
 				rc = CompileWhich();
 				int	tok = YYEMPTY;
 				int	pre_tok = 0;
+				int in_procedure = 0;
+				int max_proc_level = 0;
+				bool in_begin = false;
 				base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+				int as_count = 0;
+				int procedure_count = 0;
 
 				yyextra->core_yy_extra.in_slash_proc_body = true;
 				/* the token BEGIN_P have been parsed */
@@ -18377,10 +18382,18 @@ subprogram_body: 	{
 						parser_yyerror("subprogram body is not ended correctly");
 						break;
 					}
-
-					if (tok == BEGIN_P)
+					if (!in_begin && (pre_tok == ';' || pre_tok == DECLARE || pre_tok == 0 || pre_tok == COMMENTSTRING) && (tok == PROCEDURE || tok == FUNCTION)) {
+						in_procedure++;
+						max_proc_level = max_proc_level > in_procedure ? max_proc_level : in_procedure;
+						procedure_count++;
+					}
+					if (tok == BEGIN_P) {
 						blocklevel++;
-
+						in_begin = true;
+					}
+					if (tok == AS || tok == IS) {
+						as_count++;
+					}
 					/*
 					 * End of procedure rules:
 					 *	;END [;]
@@ -18391,14 +18404,14 @@ subprogram_body: 	{
 						tok = YYLEX;
 
 						/* adapt A db's label */
-						if (!(tok == ';'  || (tok == 0 || tok == END_OF_PROC))
+						if (!(tok == ';' || (tok == 0 || tok == END_OF_PROC))
 							&& tok != IF_P
 							&& tok != CASE
 							&& tok != LOOP
 							&& tok != WHILE_P
 							&& tok != REPEAT)
 						{
-							if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';')
+							if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && as_count == 0 && procedure_count ==0)
 							{
 								proc_e = yylloc;
 								break;
@@ -18426,7 +18439,15 @@ subprogram_body: 	{
 									yyextra->lookahead_num = 1;
 								}
 							}
-							break;
+							if(in_procedure == 0)
+								break;
+							else {
+								blocklevel--;
+								in_procedure--;
+								if ((procedure_count - as_count - 1) == in_procedure) {
+									break;
+								}
+							}
 						}
 
 						/* Cope with nested BEGIN/END pairs.
@@ -18438,14 +18459,22 @@ subprogram_body: 	{
 						{
 							blocklevel--;
 						}
+						in_begin = false;
 					}
 
 					pre_tok = tok;
 					tok = YYLEX;
+
 				}
 
 				if (proc_e == 0) {
 					ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("subprogram body is not ended correctly")));
+				}
+				// record whether there is a subprogram
+				if (max_proc_level > 0) {
+					u_sess->parser_cxt.has_subprogram = true;
+				} else {
+					u_sess->parser_cxt.has_subprogram = false;
 				}
 
 				proc_body_len = proc_e - proc_b + 1 ;
@@ -34802,6 +34831,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner)
 		return ident;
 	}
 }
+
 /*
  * Must undefine this stuff before including scan.c, since it has different
  * definitions for these macros.

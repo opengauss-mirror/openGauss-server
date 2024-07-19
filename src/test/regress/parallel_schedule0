@@ -1,4 +1,3 @@
-
 # ----------
 # src/test/regress/parallel_schedule
 #
@@ -1081,6 +1080,9 @@ test: var_eq_const_selectivity
 test: pg_controldata
 
 test: describe_index_with_tablespace
+
+#subprogram
+test: nested_subprogram
 
 # syntax compatibility
 test: sytcomp_del_upt4orderby

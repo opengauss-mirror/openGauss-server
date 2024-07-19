@@ -51,6 +51,7 @@
 #include "utils/typcache.h"
 #include "knl/knl_session.h"
 #include "utils/varbit.h"
+#include "catalog/indexing.h"
 
 #include <limits.h>
 
@@ -239,7 +240,7 @@ static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_Identi
 bool plpgsql_is_token_keyword(int tok);
 static void check_bulk_into_type(PLpgSQL_row* row);
 static void check_table_index(PLpgSQL_datum* datum, char* funcName);
-static PLpgSQL_type* build_type_from_record_var(int dno, int location);
+static PLpgSQL_type* build_type_from_record_var(int dno, int location, bool for_proc = false);
 static PLpgSQL_type * build_array_type_from_elemtype(PLpgSQL_type *elem_type);
 static PLpgSQL_var* plpgsql_build_nested_variable(PLpgSQL_var *nest_table, bool isconst, char* name, int lineno);
 static void read_multiset(StringInfoData* ds, char* tableName1, Oid typeOid1);
@@ -249,6 +250,7 @@ static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr);
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype);
 static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace);
 static void  plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend = NULL);
+static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, char arraytype, int32 atttypmod, TypeDependExtend* dependExtend = NULL);
 static void plpgsql_build_package_refcursor_type(const char* typname);
 static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
 static Oid plpgsql_build_function_package_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
@@ -287,6 +289,8 @@ static void yylex_object_type_selfparam(char** fieldnames,
                 PLwdatum *objtypwdatum,
                 bool overload = false);
 static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
+static void HandleSubprogram();
+static void HandleBlockLevel();
 %}
 
 %expect 0
@@ -721,9 +725,18 @@ opt_semi		:
                 | ';'
                 ;
 
-pl_block		: decl_sect K_BEGIN declare_sect_b proc_sect exception_sect K_END opt_label
+pl_block		: decl_sect K_BEGIN 
+					{ 
+						if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+							HandleBlockLevel();
+							HandleSubprogram();
+							//u_sess->plsql_cxt.curr_compile_context->in_begin = true;
+						}
+					} 
+					declare_sect_b proc_sect exception_sect K_END opt_label
                     {
                         PLpgSQL_stmt_block *newp;
+                        //u_sess->plsql_cxt.curr_compile_context->in_begin = false;
 
                         newp = (PLpgSQL_stmt_block *)palloc0(sizeof(PLpgSQL_stmt_block));
 
@@ -734,24 +747,24 @@ pl_block		: decl_sect K_BEGIN declare_sect_b proc_sect exception_sect K_END opt_
                         newp->isAutonomous = $1.isAutonomous;
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
-                        newp->body		= $4;
-                        if ($3 != NULL) {
-                            if ($5 != NULL) {
+                        newp->body		= $5;
+                        if ($4 != NULL) {
+                            if ($6 != NULL) {
                                 const char* message = "declare handler and exception cannot be used at the same time";
                                 InsertErrorMessage(message, plpgsql_yylloc);
                                 ereport(errstate,
                                         (errcode(ERRCODE_UNDEFINED_OBJECT),
                                         errmsg("declare handler and exception cannot be used at the same time")));
                             } else {
-                                newp->exceptions	= $3;
+                                newp->exceptions	= $4;
                                 newp->isDeclareHandlerStmt  = true;
                             }
                         } else {
-                            newp->exceptions	= $5;
+                            newp->exceptions	= $6;
                             newp->isDeclareHandlerStmt  = false;
                         }
 
-                        check_labels($1.label, $7, @7);
+                        check_labels($1.label, $8, @8);
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -1496,6 +1509,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
                             gsplsql_build_gs_type_in_body_dependency($9);
+                        } else {
+                             plpgsql_build_func_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->atttypmod, $9->dependExtend);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1676,6 +1691,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
                             gsplsql_build_gs_type_in_body_dependency($6);
+                        } else {
+                            plpgsql_build_func_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->atttypmod, $6->dependExtend);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1861,6 +1878,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             }
                         } else if (enable_plpgsql_gsdependency()) {
                             gsplsql_build_gs_type_in_body_dependency($6);
+                        } else {
+                            if ($10->typoid == VARCHAROID) {
+                                plpgsql_build_func_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_VARCHAR, $6->atttypmod, $6->dependExtend);
+                            } else {
+                                plpgsql_build_func_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_INTEGER, $6->atttypmod, $6->dependExtend);
+                            }
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1950,6 +1973,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             for (i = 0; i < rec_var->attrnum; i++) {
                                 gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
                             }
+                        } else {
+                            if ($10->typoid == VARCHAROID) {
+                                plpgsql_build_func_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF_VARCHAR, $10->atttypmod, $10->dependExtend);
+                            } else {
+                                plpgsql_build_func_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF_INTEGER, $10->atttypmod, $10->dependExtend);
+                            }
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -2025,6 +2054,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             foreach(cell, $6) {
                                 gsplsql_build_gs_type_in_body_dependency(((PLpgSQL_rec_attr*)lfirst(cell))->type);
                             }
+                        } else {
+                            PLpgSQL_type* rec_comptype = build_type_from_record_var(newp->dno, @6, true);
+                            newp->typoid = rec_comptype->typoid;
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -2089,6 +2121,16 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                     }
                 |	K_PRAGMA any_identifier ';'
                     {
+                        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func != NULL &&
+                            OidIsValid(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_oid)) {
+                                ereport(ERROR,
+                                    (errmodule(MOD_PLSQL),
+                                        errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("Subprogram autonomous transaction is not supported."),
+                                        errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                        erraction("Modify SQL statement according to the manual.")));
+                        }
                         if (pg_strcasecmp($2, "autonomous_transaction") == 0) {
                             u_sess->plsql_cxt.pragma_autonomous = true;
                             if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile !=NULL) {
@@ -2102,6 +2144,16 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                     }
                 |   K_PRAGMA any_identifier '(' any_identifier ',' error_code ')' ';'
                     {
+                        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func != NULL &&
+                            OidIsValid(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_oid)) {
+                                ereport(ERROR,
+                                    (errmodule(MOD_PLSQL),
+                                        errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("Subprogram autonomous transaction is not supported."),
+                                        errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                        erraction("Modify SQL statement according to the manual.")));
+                        }
                         if (pg_strcasecmp($2, "exception_init") == 0) {
                             if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                                 plpgsql_set_variable($4, $6);
@@ -10265,9 +10317,6 @@ get_proc_str(int tok)
     int     blocklevel = 0;
     int     pre_tok = 0;
     DefElem *def;
-    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) {
-        yyerror("not allowed create procedure in function or procedure.");
-    }
     tok = yylex();
     def = makeDefElem(NULL, NULL); /* make an empty DefElem */
     def->location = yylloc;
@@ -10276,6 +10325,8 @@ get_proc_str(int tok)
     char * spec_proc_str = NULL;
     int loc = yylloc;
     int curloc = yylloc;
+    bool in_begin = false;
+    int in_procedure = 0;
     MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     initStringInfo(&ds);
     MemoryContextSwitchTo(oldCxt);
@@ -10299,6 +10350,10 @@ get_proc_str(int tok)
             }
         }
 
+        if (!in_begin && (tok == K_PROCEDURE || tok == K_FUNCTION)) {
+			in_procedure++;
+		}
+
         if (tok == ';' && !is_defining_proc) 
         {
             break;
@@ -10307,12 +10362,14 @@ get_proc_str(int tok)
         if (tok == K_BEGIN) 
         {
             blocklevel++;
+            in_begin = true;
         }
 
         /* if have is or as,it means in body*/
         if ((tok == K_IS || tok == K_AS) && !is_defining_proc)
         {
-            if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling) {
+            if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL && 
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling) {
                 yyerror("not allow define function or procedure in package specification");
                 break;
             }
@@ -10328,15 +10385,21 @@ get_proc_str(int tok)
             }
             if (blocklevel == 1 && (pre_tok == ';' || pre_tok == K_BEGIN) && (tok == ';' || tok == 0))
             {
-                curloc = yylloc;
-                plpgsql_append_source_text(&ds, loc, curloc);
-                break;
+                if(in_procedure < 1){
+                    curloc = yylloc;
+                    plpgsql_append_source_text(&ds, loc, curloc);          
+                    break;
+                } else {
+                    in_procedure--;
+                    blocklevel--;
+                }
             }
             if (blocklevel > 1 && (pre_tok == ';' || pre_tok == K_BEGIN) && (tok == ';' || tok == 0))
             {
                 blocklevel--;
             }
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && tok == T_WORD)
+            in_begin = false;
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && tok == T_WORD && in_procedure == 0)
             {
                 curloc = yylloc;
                 plpgsql_append_source_text(&ds, loc, curloc);
@@ -13235,6 +13298,15 @@ static RangeVar* createRangeVarForCompositeType(char* schamaName, char* typname)
 
 static void buildDependencyForCompositeType(Oid newtypeoid)
 {
+    char* funcname = "inline_code_block";
+    bool ignore = u_sess->plsql_cxt.curr_compile_context != NULL &&
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                    (strcmp(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_signature, funcname) == 0 ||
+                    (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func != NULL &&
+                    strcmp(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->fn_signature, funcname) == 0));
+    if (ignore) {
+        return;
+    }
     ObjectAddress myself, referenced;
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
         myself.classId = ProcedureRelationId;
@@ -13384,11 +13456,13 @@ static void check_record_type(PLpgSQL_rec_type * var_type, int location, bool ch
 /*
  * Build a composite type by execute SQL, when record type is nested.
  */
-static PLpgSQL_type* build_type_from_record_var(int dno, int location)
+static PLpgSQL_type* build_type_from_record_var(int dno, int location, bool for_proc)
 {
     PLpgSQL_type *newp = NULL;
     PLpgSQL_rec_type * var_type = (PLpgSQL_rec_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
-    check_record_type(var_type, location);
+    if (!for_proc) {
+        check_record_type(var_type, location);
+    }
 
     /* concatenate name string with function name for composite type, which to avoid conflict. */
     char*  functypname = NULL;
@@ -13446,6 +13520,7 @@ static PLpgSQL_type* build_type_from_record_var(int dno, int location)
             DefineCompositeType(r, codeflist);
             newtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typname),
                 ObjectIdGetDatum(getCurrentNamespace()));
+            record_inline_subprogram_type(newtypeoid);
             pfree_ext(r);
             list_free_deep(codeflist);
 
@@ -13697,6 +13772,137 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     pfree_ext(casttypename);
 }
 
+static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, char arraytype, int32 atttypmod, TypeDependExtend* dependExtend)
+{
+    if(u_sess->attr.attr_sql.sql_compatibility !=  A_FORMAT 
+        || u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile == NULL) {
+        return;
+    }
+    Oid typoid = InvalidOid;
+    char typtyp;
+    Oid pkgNamespaceOid = getCurrentNamespace();
+    Oid fn_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
+    Oid parentFuncOid = InvalidOid;
+    if (OidIsValid(fn_oid) && !u_sess->plsql_cxt.isCreateFunction)  {
+        Relation desc;
+        ScanKeyData skey[1];
+        SysScanDesc sysscan;
+        HeapTuple tuple;
+
+        ScanKeyInit(&skey[0], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(fn_oid));
+        desc = heap_open(ProcedureRelationId, AccessShareLock);
+        sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 1, skey);
+
+        /* get all functions under packageoid */
+        while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
+                parentFuncOid = fn_oid;
+                break;
+            }
+
+        systable_endscan(sysscan);
+        heap_close(desc, NoLock);
+    }
+ 
+   /* 用户创建了子程序，然后在新的 session 中调用外层函数时，此时不会在内核中解析函数体，
+    * u_sess->parser_cxt.has_subprogram 始终为 false，导致外层程序自定义类型未创建，
+    * 在子程序中调用不到外层程序自定义的类型而报错，此处先查找依赖于外层程序的子程序，找到
+    * 代表该程序含有子程序，则创建type;
+    * 直接调用不会走到 ProcedureCreate_extend 中调用 DeleteSubprogramDenpendOnProcedure
+    */ 
+    long counter  = 0;
+    counter = DeleteSubprogramDenpendOnProcedure(ProcedureRelationId, fn_oid, false);
+    // 只在含有子程序的 procedure/function 创建.
+    if (u_sess->parser_cxt.has_subprogram || OidIsValid(parentFuncOid) || counter > 0) {
+        char* casttypename = CastPackageTypeName(typname,
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, false, true);
+        if (strlen(casttypename) >= NAMEDATALEN ) {
+            ereport(errstate,
+                (errcode(ERRCODE_NAME_TOO_LONG),
+                    errmsg("type name too long"),
+                    errdetail("record name %s with function name %s should be less the %d letters.",
+                        typname,
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_signature,
+                        NAMEDATALEN)));
+            u_sess->plsql_cxt.have_error = true;
+            pfree_ext(casttypename);
+        }
+
+        Oid oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename),
+            ObjectIdGetDatum(pkgNamespaceOid));
+        if (OidIsValid(oldtypeoid)) {
+            if(IsPackageDependType(oldtypeoid, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid)) {
+                return;
+            }
+        }
+        if (arraytype == TYPCATEGORY_TABLEOF ||
+            arraytype == TYPCATEGORY_TABLEOF_VARCHAR ||
+            arraytype == TYPCATEGORY_TABLEOF_INTEGER) {
+            typtyp = TYPTYPE_TABLEOF;
+        } else {
+            typtyp = TYPTYPE_BASE;
+        }
+        Oid ownerId = GetUserId();		
+		
+        ObjectAddress address = TypeCreate(InvalidOid, /* force the type's OID to this */
+            casttypename,               /* Array type name */
+            pkgNamespaceOid,               /* Same namespace as parent */
+            InvalidOid,                 /* Not composite, no relationOid */
+            0,                          /* relkind, also N/A here */
+            ownerId,                    /* owner's ID */
+            -1,                         /* Internal size (varlena) */
+            typtyp,               /* Not composite - typelem is */
+            arraytype,          /* type-category (array or table of) */
+            false,                      /* array types are never preferred */
+            DEFAULT_TYPDELIM,           /* default array delimiter */
+            F_ARRAY_IN,                 /* array input proc */
+            F_ARRAY_OUT,                /* array output proc */
+            F_ARRAY_RECV,               /* array recv (bin) proc */
+            F_ARRAY_SEND,               /* array send (bin) proc */
+            InvalidOid,                 /* typmodin procedure - none */
+            InvalidOid,                 /* typmodout procedure - none */
+            F_ARRAY_TYPANALYZE,         /* array analyze procedure */
+            elemtypoid,               /* array element type - the rowtype */
+            false,                       /* yes, this is an array type */
+            InvalidOid,                 /* this has no array type */
+            InvalidOid,                 /* domain base type - irrelevant */
+            NULL,                       /* default value - none */
+            NULL,                       /* default binary representation */
+            false,                      /* passed by reference */
+            'd',                        /* alignment - must be the largest! */
+            'x',                        /* fully TOASTable */
+            atttypmod,                  /* typmod */
+            0,                          /* array dimensions for typBaseType */
+            false,                      /* Type NOT NULL */
+            get_typcollation(elemtypoid),
+            dependExtend);
+
+        typoid = address.objectId;
+        CommandCounterIncrement();
+   
+
+        bool anonymous_subprogram = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile &&
+                                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->in_anonymous;
+        /*
+         * Types defined within an anonymous block do not have dependencies and are deleted once the execution of 
+         * the anonymous block is complete.
+         */
+        if(!anonymous_subprogram) {
+            ObjectAddress myself, referenced;
+            myself.classId = ProcedureRelationId;
+            myself.objectId = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
+            myself.objectSubId = 0;
+            referenced.classId = TypeRelationId;
+            referenced.objectId = typoid;
+            referenced.objectSubId = 0;
+            recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
+            CommandCounterIncrement();
+        }  
+        pfree_ext(casttypename);
+
+        record_inline_subprogram_type(typoid);
+    }
+    return;
+}
 
 static void plpgsql_build_package_refcursor_type(const char* typname)
 {
@@ -14108,6 +14314,15 @@ check_labels(const char *start_label, const char *end_label, int end_location)
 {
     if (end_label)
     {
+        if (u_sess->plsql_cxt.curr_compile_context && u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile) {
+            if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list) {
+                char* func_name = get_func_name(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid);
+                if (func_name && pg_strcasecmp(end_label, func_name) == 0) {
+                    return;
+                }
+            }
+        }
+
         if (!start_label) {
             const char* message = "end label specified for unlabelled block";
             InsertErrorMessage(message, plpgsql_yylloc);
@@ -14898,14 +15113,14 @@ static void raw_parse_package_function_callback(void *arg)
 
 static void raw_parse_package_function(char* proc_str, int location, int leaderlen)
 {
+    sql_error_callback_arg cbarg;
+    ErrorContextCallback  syntax_errcontext;
+    List* raw_parsetree_list = NULL;
+    u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+    u_sess->plsql_cxt.rawParsePackageFunction = true;
+
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL)
     {
-        sql_error_callback_arg cbarg;
-        ErrorContextCallback  syntax_errcontext;
-        List* raw_parsetree_list = NULL;
-        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
-        u_sess->plsql_cxt.rawParsePackageFunction = true;
-
         cbarg.location = location;
         cbarg.leaderlen = leaderlen;
 
@@ -14913,40 +15128,52 @@ static void raw_parse_package_function(char* proc_str, int location, int leaderl
         syntax_errcontext.arg = &cbarg;
         syntax_errcontext.previous = t_thrd.log_cxt.error_context_stack;
         t_thrd.log_cxt.error_context_stack = &syntax_errcontext;
-        raw_parsetree_list = raw_parser(proc_str);
+    }
+    raw_parsetree_list = raw_parser(proc_str);
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
         /* Restore former ereport callback */
         t_thrd.log_cxt.error_context_stack = syntax_errcontext.previous;
+    }
 
-        CreateFunctionStmt* stmt;
-        u_sess->plsql_cxt.rawParsePackageFunction = false;
-        int rc = 0;
-        if (raw_parsetree_list == NULL) {
-            return;
-        }
-        stmt = (CreateFunctionStmt *)linitial(raw_parsetree_list);
-        stmt->queryStr = proc_str;
-        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling) {
+    CreateFunctionStmt* stmt;
+    u_sess->plsql_cxt.rawParsePackageFunction = false;
+    int rc = 0;
+    if (raw_parsetree_list == NULL) {
+        return;
+    }
+    stmt = (CreateFunctionStmt *)linitial(raw_parsetree_list);
+    stmt->queryStr = proc_str;
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL)
+        stmt->isPrivate = false;
+    else {
+        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL && 
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling) {
             stmt->isPrivate = false;
         } else {
             stmt->isPrivate = true;
         }
-        if (u_sess->parser_cxt.isFunctionDeclare) {
-            stmt->isFunctionDeclare = true;
-        } else {
-            stmt->isFunctionDeclare = false;
-        }
+    }
+    if (u_sess->parser_cxt.isFunctionDeclare) {
+        stmt->isFunctionDeclare = true;
+    } else {
+        stmt->isFunctionDeclare = false;
+    }
 
-        rc = CompileWhich();
-        if (rc == PLPGSQL_COMPILE_PACKAGE) {
-            stmt->startLineNumber = u_sess->plsql_cxt.procedure_start_line;
-            stmt->firstLineNumber = u_sess->plsql_cxt.procedure_first_line;
-        }
-        /* check function name */
-        CheckDuplicateFunctionName(stmt->funcname);
+    rc = CompileWhich();
+    if (rc == PLPGSQL_COMPILE_PACKAGE) {
+        stmt->startLineNumber = u_sess->plsql_cxt.procedure_start_line;
+        stmt->firstLineNumber = u_sess->plsql_cxt.procedure_first_line;
+    }
+    /* check function name */
+    CheckDuplicateFunctionName(stmt->funcname);
+        
+    if(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL){
         List *proc_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->proc_list;
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->proc_list = lappend(proc_list,stmt);
-    } else {
-        yyerror("kerword PROCEDURE only use in package compile");
+
+    } else if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        List *proc_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list;
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list = lappend(proc_list,stmt);
     }
 }
 
@@ -15407,4 +15634,25 @@ yylex_object_type_selfparam(char ** fieldnames,
         varnos[nfields] = -1;
     }
     pfree_ext(ds.data);
+}
+
+static void HandleSubprogram(){
+    if(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL 
+       && u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list != NULL){
+        if(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+            Oid parentFuncOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
+            MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_cxt);
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_subprogram_nDatums = u_sess->plsql_cxt.curr_compile_context->plpgsql_nDatums;
+            ProcessSubprograms(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list, parentFuncOid);
+            (void)MemoryContextSwitchTo(oldCxt);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                           errmsg("'subprogram:' is only supported in database which dbcompatibility='A'.")));
+        }
+    }
+}
+
+static void HandleBlockLevel() {
+    if(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL)
+        u_sess->plsql_cxt.block_level++;
 }

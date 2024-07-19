@@ -52,7 +52,7 @@ extern void InsertIntoPendingLibraryDelete(const char* filename, bool atCommit);
 extern void libraryDoPendingDeletes(bool isCommit);
 extern void ResetPendingLibraryDelete();
 extern ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString,
-    Oid pkg_oid = InvalidOid, Oid type_oid = InvalidOid);
+    Oid pkg_oid = InvalidOid, Oid type_oid = InvalidOid, Oid func_oid = InvalidOid);
 extern ObjectAddress CreateFunction_extend(CreateFunctionStmt* stmt, const char* queryString,
     void* getHeaderInfoCtx, void** pHeapTuple, bool isPackageFunc = false, Oid type_oid = InvalidOid);
 extern ObjectAddress RenameFunction(List* name, List* argtypes, const char* newname);

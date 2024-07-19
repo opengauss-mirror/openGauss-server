@@ -1014,6 +1014,12 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
                 var->pkg = pkg;
                 var->pkg_name = GetPackageListName(NameStr(pkg_struct->pkgname), namespaceOid);
             }
+            if (var->pkg_oid == InvalidOid) {
+                var->pkg_oid = pkg->pkg_oid;
+            }
+            if (var->datum_cxt == NULL) {
+                var->datum_cxt = CurrentMemoryContext;
+            }
         } else if (pkg->datums[i]->dtype == PLPGSQL_DTYPE_ROW) {
             PLpgSQL_row* row = (PLpgSQL_row*)pkg->datums[i];
             if (row->pkg == NULL) {
@@ -1025,7 +1031,7 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
             if (row->pkg == NULL) {
                 row->pkg = pkg;
                 row->pkg_name = GetPackageListName(NameStr(pkg_struct->pkgname), namespaceOid);
-            }
+            }  
         } else if (pkg->datums[i]->dtype == PLPGSQL_DTYPE_REC) {
             PLpgSQL_rec* rec = (PLpgSQL_rec*)pkg->datums[i];
             if (rec->pkg == NULL) {
@@ -1037,6 +1043,9 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
             if (rec->pkg == NULL) {
                 rec->pkg = pkg;
                 rec->pkg_name = GetPackageListName(NameStr(pkg_struct->pkgname), namespaceOid);
+            }
+            if (rec->pkg_oid == InvalidOid) {
+                rec->pkg_oid = pkg->pkg_oid;
             }
         }
     }
@@ -1559,6 +1568,7 @@ void InsertError(Oid objId)
         (void)CompileStatusSwtichTo(save_compile_status);
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
         u_sess->plsql_cxt.isCreateFunction = false;
+        u_sess->plsql_cxt.createFunctionOid = InvalidOid;
         PG_RE_THROW();
     }
     PG_END_TRY();

@@ -47,6 +47,7 @@ CATALOG(pg_proc_ext,3483) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(3484) BKI_SCHEMA_MACR
 #ifdef CATALOG_VARLEN
     text  parallel_cursor_partkey[1];  /* specify what keys to partition for parallel cursor */
 #endif
+    Oid   pro_proc_oid;
 } FormData_pg_proc_ext;
 
 /* ----------------
@@ -60,16 +61,18 @@ typedef FormData_pg_proc_ext *Form_pg_proc_ext;
  *     compiler constants for pg_proc_ext
  * ----------------
  */
-#define Natts_pg_proc_ext                          4
+#define Natts_pg_proc_ext                          5
 #define Anum_pg_proc_ext_proc_oid                  1
 #define Anum_pg_proc_ext_parallel_cursor_seq       2
 #define Anum_pg_proc_ext_parallel_cursor_strategy  3
 #define Anum_pg_proc_ext_parallel_cursor_partkey   4
+#define Anum_pg_proc_ext_procoid                   5
 
-extern void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo);
+extern void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo, Oid proprocoid = InvalidOid);
 extern int2 GetParallelCursorSeq(Oid oid);
 extern FunctionPartitionStrategy GetParallelStrategyAndKey(Oid oid, List** partkey);
 extern void DeletePgProcExt(Oid oid);
+extern Oid GetProprocoidByOid(Oid oid);
 
 #endif   /* PG_PROC_EXT_H */
 
