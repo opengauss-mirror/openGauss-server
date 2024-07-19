@@ -237,7 +237,7 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 
     if (ENABLE_DSS) {
         errno_t rc = snprintf_s(datadir, MAXPGPATH, MAXPGPATH - 1, "%s/",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         securec_check_ss(rc, "\0", "\0");
     } else {
         datadir[0] = '\0';
@@ -595,9 +595,9 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
         char *tmppath = NULL;
         char *newpath = parsepath;
         uint32 pathsize = (uint32)strlen(parsepath);
-        uint32 homesize = (uint32)strlen(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+        uint32 homesize = (uint32)strlen(g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         if ((pathsize <= homesize + 1) ||
-            (strncmp(path, g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, homesize) != 0)) {
+            (strncmp(path, g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, homesize) != 0)) {
             pfree(parsepath);
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relation file path %s.", path)));
         }
@@ -717,7 +717,7 @@ char* GetDatabasePath(Oid dbNode, Oid spcNode)
 
     if (ENABLE_DSS) {
         rc = snprintf_s(datadir, MAXPGPATH, MAXPGPATH - 1, "%s/",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         securec_check_ss(rc, "\0", "\0");
     } else {
         datadir[0] = '\0';

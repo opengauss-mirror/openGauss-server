@@ -491,7 +491,7 @@ void RelationMapFinishBootstrap(void)
     if (ENABLE_DSS) {
         char map_file_name[MAXPGPATH];
         int rc = snprintf_s(map_file_name, sizeof(map_file_name), sizeof(map_file_name) - 1, "%s/global/%s",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, RELMAPPER_FILENAME);
+            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, RELMAPPER_FILENAME);
         securec_check_ss_c(rc, "\0", "\0");
 
         struct stat st;

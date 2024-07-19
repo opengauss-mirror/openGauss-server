@@ -1473,7 +1473,7 @@ void _PG_init(void)
 
 #ifdef GlobalCache
     long long au_size;
-    const char *vg_name = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name + 1;
+    const char *vg_name = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name + 1;
     int ret = dss_compare_size(vg_name, &au_size);
     if (ret != 0 || au_size != DSS_DEFAULT_AU_SIZE) {
         pthread_mutex_unlock(&g_ndp_instance.mutex);

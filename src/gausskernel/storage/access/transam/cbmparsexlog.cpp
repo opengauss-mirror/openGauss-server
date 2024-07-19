@@ -935,7 +935,7 @@ static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr
     targetPageOff = targetPagePtr % XLogSegSize;
 
     if (ENABLE_DSS)
-        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
 
     /*
      * See if we need to switch to a new segment because the requested record

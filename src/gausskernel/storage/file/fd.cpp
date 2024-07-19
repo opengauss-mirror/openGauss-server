@@ -878,7 +878,7 @@ int SSErgodicOpenXlogFile(XLogSegNo segno, int fileFlags, int fileMode)
 {
     char xlog_file_name[MAXPGPATH];
     char xlog_file_full_path[MAXPGPATH];
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
     DIR* dir;
     int fd;
     struct dirent *entry;

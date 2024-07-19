@@ -56,11 +56,7 @@ init_dss_conf()
     mkdir -p ${dss_home}/log
 
     echo "data:${simu_path}/dss_data.dmp" > ${dss_home}/cfg/dss_vg_conf.ini
-    for i in `seq 0 $last_id`
-    do
-        echo "log${i}:${simu_path}/dss_log${i}.dmp" >> ${dss_home}/cfg/dss_vg_conf.ini
-    done
-
+    echo "log:${simu_path}/dss_log.dmp" >> ${dss_home}/cfg/dss_vg_conf.ini
     echo "INST_ID = ${inst_id}" > ${dss_home}/cfg/dss_inst.ini
     echo "_LOG_LEVEL = 255" >> ${dss_home}/cfg/dss_inst.ini
     echo "_LOG_BACKUP_FILE_COUNT = 128" >> ${dss_home}/cfg/dss_inst.ini
@@ -84,22 +80,16 @@ create_vg()
     truncate -s `expr ${SIMULATE_SIZE} / 1000`G ${simu_path}/dss_data.dmp
     chmod 777 ${simu_path}/dss_data.dmp
 
-    for i in `seq 0 $last_id`
-    do
-        echo " =========== truncate `expr ${LOG_SIZE} / 1000`G =========== "
-#        dd if=/dev/zero bs=1048576 count=${LOG_SIZE} of=${simu_path}/dss_log${i}.dmp
-        truncate -s `expr ${SIMULATE_SIZE} / 1000`G ${simu_path}/dss_log${i}.dmp
-        chmod 777 ${simu_path}/dss_log${i}.dmp
-    done
+    echo " =========== truncate `expr ${LOG_SIZE} / 1000`G =========== "
+#   dd if=/dev/zero bs=1048576 count=${LOG_SIZE} of=${simu_path}/dss_log.dmp
+    truncate -s `expr ${SIMULATE_SIZE} / 1000`G ${simu_path}/dss_log.dmp
+    chmod 777 ${simu_path}/dss_log.dmp
 
     echo "> creating volume group ${simu_path}/dss_data.dmp"
     ${GAUSSHOME}/bin/dsscmd cv -g data -v ${simu_path}/dss_data.dmp -s 2048 -D ${dss_home}
 
-    for i in `seq 0 $last_id`
-    do
-        echo "> creating volume group ${simu_path}/dss_log${i}.dmp"
-        ${GAUSSHOME}/bin/dsscmd cv -g log${i} -v ${simu_path}/dss_log${i}.dmp -s 2048 -D ${dss_home}
-    done
+    echo "> creating volume group ${simu_path}/dss_log.dmp"
+    ${GAUSSHOME}/bin/dsscmd cv -g log -v ${simu_path}/dss_log.dmp -s 2048 -D ${dss_home}
 }
 
 start_dss()

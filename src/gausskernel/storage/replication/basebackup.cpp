@@ -192,7 +192,7 @@ static void send_xlog_location()
     int rc = 0;
     
     if (ENABLE_DSS) {
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
         rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog%d", dssdir,
              g_instance.attr.attr_storage.dms_attr.instance_id);
     } else {
@@ -862,7 +862,7 @@ void SendBaseBackup(BaseBackupCmd *cmd)
     if (ENABLE_DSS) {
         int rc = 0;
         char fullpath[MAXPGPATH] = {0};
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
 
         rc = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", dssdir);
         securec_check_ss(rc, "", "");
@@ -1918,7 +1918,7 @@ static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, 
 {
     ListCell *lc = NULL;
     int64 asize = 0;
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
 
     if (ENABLE_DSS) {
         /* Add a node for all directory in dss*/

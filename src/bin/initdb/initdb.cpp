@@ -1575,9 +1575,15 @@ static void setup_config(void)
     }
 
     if (strlen(vgdata) != 0) {
-        nRet = sprintf_s(repltok, sizeof(repltok), "ss_dss_vg_name = '%s'", vgdata);
+        nRet = sprintf_s(repltok, sizeof(repltok), "ss_dss_data_vg_name = '%s'", vgdata);
         securec_check_ss_c(nRet, "\0", "\0");
-        conflines = replace_token(conflines, "#ss_dss_vg_name = ''", repltok);
+        conflines = replace_token(conflines, "#ss_dss_data_vg_name = ''", repltok);
+    }
+
+    if (strlen(vglog) != 0) {
+        nRet = sprintf_s(repltok, sizeof(repltok), "ss_dss_xlog_vg_name = '%s'", vglog);
+        securec_check_ss_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#ss_dss_xlog_vg_name = ''", repltok);
     }
 
     if (socketpath != NULL) {

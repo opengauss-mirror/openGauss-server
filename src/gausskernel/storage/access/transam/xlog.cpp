@@ -14618,7 +14618,7 @@ static void CollectTableSpace(DIR *tblspcdir, List **tablespaces, StringInfo tbl
     const char *dataDir = NULL;
     int datadirpathlen = -1;
 
-    dataDir = is_dss_file(TBLSPCDIR) ? g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name : t_thrd.proc_cxt.DataDir;
+    dataDir = is_dss_file(TBLSPCDIR) ? g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name : t_thrd.proc_cxt.DataDir;
     datadirpathlen = strlen(dataDir);
     /* Collect information about all tablespaces */
     while ((de = ReadDir(tblspcdir, "pg_tblspc")) != NULL) {

@@ -2124,7 +2124,7 @@ void initDssPath(char *dssdir)
     rc = snprintf_s(g_instance.datadir_cxt.multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact", dssdir);
     securec_check_ss(rc, "", "");
 
-    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
+    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name,
         g_instance.attr.attr_storage.dms_attr.instance_id);
     securec_check_ss(rc, "", "");
 
@@ -2150,14 +2150,14 @@ void initDSSConf(void)
 
     // check whether dss connect is successful.
     struct stat st;
-    if (stat(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if (stat(g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, &st) != 0 || !S_ISDIR(st.st_mode)) {
         ereport(FATAL, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
             errmsg("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\"",
-            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name,
             g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
             errhint("Check vgname and socketpath and restart later.")));
     } else {
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
 
         // do not overwrite
         if (strncmp(g_instance.datadir_cxt.baseDir, dssdir, strlen(dssdir)) != 0) {

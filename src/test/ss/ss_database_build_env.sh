@@ -82,9 +82,9 @@ init_gaussdb()
 {
     inst_id=$1
     dss_home=$2
-    echo "${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname=\"+data,+log${inst_id}\" --enable-dss --dms_url=\"${nodedate_cfg}\" -I ${inst_id} --socketpath=\"UDS:${dss_home}/.dss_unix_d_socket\""
+    echo "${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname=\"+data,+log\" --enable-dss --dms_url=\"${nodedate_cfg}\" -I ${inst_id} --socketpath=\"UDS:${dss_home}/.dss_unix_d_socket\""
 
-    ${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname="+data,+log${inst_id}" --enable-dss --dms_url="${nodedate_cfg}" -I ${inst_id} --socketpath="UDS:${dss_home}/.dss_unix_d_socket"
+    ${GAUSSHOME}/bin/gs_initdb -D ${SS_DATA}/dn${inst_id} --nodename=single_node -w ${SUPER_PASSWORD} --vgname="+data,+log" --enable-dss --dms_url="${nodedate_cfg}" -I ${inst_id} --socketpath="UDS:${dss_home}/.dss_unix_d_socket"
 }
 
 set_gausdb_port()

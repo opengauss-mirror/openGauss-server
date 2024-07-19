@@ -644,7 +644,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  sql_note                                         | bool    |      |           | 
  sql_use_spacelimit                               | integer | kB   | -1        | 2147483647
  ss_dss_conn_path                                 | string  |      |           | 
- ss_dss_vg_name                                   | string  |      |           | 
+ ss_dss_data_vg_name                              | string  |      |           | 
+ ss_dss_xlog_vg_name                              | string  |      |           | 
  ss_enable_aio                                    | bool    |      |           | 
  ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 

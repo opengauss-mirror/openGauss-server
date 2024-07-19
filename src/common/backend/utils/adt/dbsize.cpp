@@ -174,7 +174,7 @@ static int64 calculate_database_size(Oid dbOid)
 
     /* Get the vgname in DSS mode */
     if (ENABLE_DSS)
-        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
 
     /* Shared storage in pg_global is not counted */
 
@@ -633,14 +633,14 @@ static int64 calculate_tablespace_size(Oid tblspcOid)
     if (tblspcOid == DEFAULTTABLESPACE_OID) {
         if (ENABLE_DSS) {
             rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/base",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+                g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         } else {
             rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "base");
         }
     } else if (tblspcOid == GLOBALTABLESPACE_OID) {
         if (ENABLE_DSS) {
             rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/global",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+                g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         } else {
             rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "global");
         }
@@ -650,7 +650,7 @@ static int64 calculate_tablespace_size(Oid tblspcOid)
         if (ENABLE_DSS) {
             rc = snprintf_s(
                 tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc/%u/%s",
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name,
                 tblspcOid, TABLESPACE_VERSION_DIRECTORY);
         } else {
             rc = snprintf_s(tblspcPath,
