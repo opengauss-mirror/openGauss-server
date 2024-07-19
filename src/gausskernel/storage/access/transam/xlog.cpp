@@ -14110,8 +14110,8 @@ XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfi
     if (!superuser() && !has_rolreplication(GetUserId()) &&
         !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                        errmsg("must be system admin or replication role "
-                               "or operator admin in operation mode to run a backup")));
+                        (errmsg("must be system admin or replication role to run a backup."
+                                "If in operation mode, you can also be operator admin to run a backup."))));
     }
 
     /*
@@ -14534,8 +14534,8 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
     if (!superuser() && !has_rolreplication(GetUserId()) &&
         !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                        (errmsg("must be system admin or replication role "
-                                "or operator admin in operation mode to run a backup"))));
+                        (errmsg("must be system admin or replication role to run a backup."
+                                "If in operation mode, you can also be operator admin to run a backup."))));
     }
 
     /*
