@@ -1019,7 +1019,7 @@ void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
 {
     bool get_lock = false;
-    int wait_tickets = 1000;
+    int wait_tickets = (SS_PRIMARY_MODE) ? 500 : 5000;
     int cur_tickets = 0;
 
     do {
@@ -1036,8 +1036,8 @@ bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
     } while (true);
 
     if (!get_lock) {
-        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:1s",
-            lock, mode))));
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:%dms",
+            lock, mode, wait_tickets))));
     }
     return get_lock;
 }
