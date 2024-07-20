@@ -493,31 +493,32 @@ static void CBSwitchoverResult(void *db_handle, int result)
 
 static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
 {
+    char* type_string = NULL;
+    type_string = SSGetLogHeaderTypeStr();
+
     for (int ntries = 0;; ntries++) {
         SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
         if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
             g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
-                    "confirm ntries=%d.",
-                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, list_stable,
-                    ntries)));
+                errmsg("%s Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
+                    "confirm ntries=%d.", type_string, SS_MY_INST_ID, primary_id, list_stable, ntries)));
             return DMS_SUCCESS;
         } else {
             if (dms_reform_failed()) {
                 ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d, list_stable:%llu, "
+                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
                         "control file indicates primary is %d, list_stable%llu; dms reform failed.",
-                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id, list_stable,
+                        type_string, (int)primary_id, list_stable,
                         g_instance.dms_cxt.SSReformerControl.primaryInstId,
                         g_instance.dms_cxt.SSReformerControl.list_stable)));
                 return DMS_ERROR;
             }
             if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                 ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d, list_stable:%llu, "
+                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
                         " control file indicates primary is %d, list_stable%llu; wait timeout.",
-                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id, list_stable,
+                        type_string, (int)primary_id, list_stable,
                         g_instance.dms_cxt.SSReformerControl.primaryInstId,
                         g_instance.dms_cxt.SSReformerControl.list_stable)));
                 return DMS_ERROR;
@@ -552,8 +553,8 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
         LWLockRelease(ControlFileLock);
         Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == (int)primary_id);
 
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary, list_stable:%llu.",
-            SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id, list_stable)));
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] set current instance:%d as primary, list_stable:%llu.",
+            primary_id, list_stable)));
         ret = DMS_SUCCESS;
     } else { /* we are on standby */
         LWLockRelease(ControlFileLock);
@@ -1999,6 +2000,15 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSReformInfo.reform_end_time = GetCurrentTimestamp();
     g_instance.dms_cxt.SSReformInfo.reform_success = true;
 
+    /* 
+     * Only two kind of condition:
+     * 1.Primary or standby restart in single node mode, other nodes in cluster is set PM_WAIT_REFORM.
+     * 2.In failover, standby no promoting as priamey is set PM_WAIT_BACKENDS.
+     */
+    if (pmState == PM_WAIT_REFORM ||
+        (SS_PERFORMING_FAILOVER && SS_STANDBY_MODE && pmState == PM_WAIT_BACKENDS)) {
+        pmState = PM_RUN;
+    }
     ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[SS reform] Reform success, instance:%d is running.",
@@ -2011,15 +2021,6 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = false;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
     
-    /* 
-     * Only two kand of condition:
-     * 1.Primary or standby restart in single node mode, other nodes in cluster is set PM_WAIT_REFORM.
-     * 2.In failover, standby no promoting as priamey is set PM_WAIT_BACKENDS.
-     */
-    if (pmState == PM_WAIT_REFORM ||
-        (SS_PERFORMING_FAILOVER && SS_STANDBY_MODE && pmState == PM_WAIT_BACKENDS)) {
-        pmState = PM_RUN;
-    }
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "
                     "rec=%d, dmsStatus=%d.", pmState, g_instance.dms_cxt.SSClusterState,
                     g_instance.demotion, t_thrd.walsender_cxt.WalSndCtl->demotion,

@@ -89547,12 +89547,12 @@ msgstr "[SS reform] EndOfLog:%lu."
 
 #: storage/access/transam/xlog.cpp:11006
 #, c-format
-msgid "[SS switchover/SS failover/SS normal reform] start full checkpoint."
+msgid "[SS reform][SS failover][SS switchover] start full checkpoint."
 msgstr "[SS切换/SS故障切换/SS正常reform]启动完整检查点。"
 
 #: storage/access/transam/xlog.cpp:11015
 #, c-format
-msgid "[SS switchover/SS failover/SS normal reform] finished full checkpointand update control file"
+msgid "[SS reform][SS failover][SS switchover] finished full checkpointand update control file"
 msgstr "[SS切换/SS故障切换/SS正常reform]完成完整检查点和更新控制文件"
 
 #: storage/access/transam/xlog.cpp:11047
