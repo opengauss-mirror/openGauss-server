@@ -9324,11 +9324,11 @@ void StartupXLOG(void)
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_CLUSTER_ONDEMAND_NOT_NORAML && SS_PRIMARY_MODE) {
             if (SS_STANDBY_PROMOTING) {
-                ereport(FATAL, (errmsg("[On-demand] Do not allow switchover if ondemand recovery is not finish")));
+                ereport(FATAL, (errmsg("[SS reform][On-demand] Do not allow switchover if ondemand recovery is not finish")));
             }
             Assert(g_instance.dms_cxt.SSReformerControl.recoveryInstId != INVALID_INSTANCEID);
             src_id = g_instance.dms_cxt.SSReformerControl.recoveryInstId;
-            ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
+            ereport(LOG, (errmsg("[SS reform][On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
         } else if (SS_DORADO_CLUSTER) {
@@ -10013,7 +10013,7 @@ void StartupXLOG(void)
 
     if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
         /* do not need replay anything in SS standby mode */
-        ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
+        ereport(LOG, (errmsg("[SS reform] Skip redo replay in standby mode")));
         t_thrd.xlog_cxt.InRecovery = false;
     }
 
@@ -10023,9 +10023,9 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
             StartupOndemandRecovery();
-            ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
+            ereport(LOG, (errmsg("[SS reform][On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
-            ereport(LOG, (errmsg("[On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
+            ereport(LOG, (errmsg("[SS reform][On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
                 "crash, replayed in extreme rto recovery mode")));
         }
     }
@@ -10041,7 +10041,7 @@ void StartupXLOG(void)
         SetOndemandExtremeRtoMode();
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
         g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_NORMAL;
-        ereport(LOG, (errmsg("[On-demand] realtime build start finish, set status to BUILD_NORMAL")));
+        ereport(LOG, (errmsg("[SS reform][On-demand] realtime build start finish, set status to BUILD_NORMAL")));
     }
 
     /* refresh recovery parallelism */
@@ -11049,7 +11049,7 @@ void StartupXLOG(void)
         }
         if (!SS_IN_ONDEMAND_RECOVERY) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover/SS normal reform] start full checkpoint.")));
+                errmsg("[SS reform][SS failover][SS switchover] start full checkpoint.")));
             RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
@@ -11058,7 +11058,7 @@ void StartupXLOG(void)
             LWLockRelease(ControlFileLock);
             SSRecheckBufferPool();
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover/SS normal reform] finished full checkpoint"
+                errmsg("[SS reform][SS failover][SS switchover] finished full checkpoint"
                     "and update control file")));
         }
     }
@@ -11097,7 +11097,7 @@ void StartupXLOG(void)
 
     if (SS_IN_ONDEMAND_RECOVERY) {
         /* We wait at here */
-        ereport(LOG, (errmsg("[On-demand] ondemand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
+        ereport(LOG, (errmsg("[SS reform][On-demand] ondemand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
                              ", recentLocalXmin: " XID_FMT ", recentGlobalXmin: %lu, PendingPreparedXacts: %d"
                              ", NextCommitSeqNo: %lu, cutoff_csn_min: %lu.",
                              NextXidAfterReovery, t_thrd.xact_cxt.ShmemVariableCache->startupMaxXid,
@@ -11118,7 +11118,7 @@ void StartupXLOG(void)
         LWLockRelease(ControlFileLock);
         SSRecheckBufferPool();
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[On-demand] finished full checkpoint and update control file")));
+            errmsg("[SS reform][On-demand] finished full checkpoint and update control file")));
 
         NotifyGscRecoveryFinished();
         if (ENABLE_INCRE_CKPT) {

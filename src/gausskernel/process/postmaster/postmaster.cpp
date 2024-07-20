@@ -3967,7 +3967,8 @@ static int ServerLoop(void)
                 g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
                 g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
                 Assert(g_instance.pid_cxt.StartupPID != 0);
-                ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start, set status to READY_TO_BUILD.", SS_MY_INST_ID)));
+                ereport(LOG, (errmsg("[SS][On-demand] Node:%d ondemand realtime build start, "
+                        "set status to READY_TO_BUILD.", SS_MY_INST_ID)));
             }
         }
 
@@ -15425,7 +15426,7 @@ void SSOndemandProcExitIfStayWaitBackends()
     }
     if (pmState == PM_WAIT_BACKENDS) {
         ereport(WARNING, (errmodule(MOD_DMS), 
-            errmsg("[On-demand] Proc exit because pmState stay PM_WAIT_BACKENDS for %d times, "
+            errmsg("[SS reform][On-demand] Proc exit because pmState stay PM_WAIT_BACKENDS for %d times, "
                 "when reform failed and in ondemand recovery, to avoid pmState being stuck in PM_WAIT_BACKENDS.", 
                 WAIT_PMSTATE_UPDATE_TRIES)));
         _exit(0);
