@@ -62,7 +62,7 @@ init_dss_conf()
     echo "_LOG_BACKUP_FILE_COUNT = 128" >> ${dss_home}/cfg/dss_inst.ini
     echo "_LOG_MAX_FILE_SIZE = 100M" >> ${dss_home}/cfg/dss_inst.ini
     echo "LSNR_PATH = ${dss_home}" >> ${dss_home}/cfg/dss_inst.ini
-    echo "DISK_LOCK_FILE_PATH = ${lock_path}" >> ${dss_home}/cfg/dss_inst.ini
+    echo "_DISK_LOCK_FILE_PATH = ${lock_path}" >> ${dss_home}/cfg/dss_inst.ini
     echo "DSS_NODES_LIST = ${mes_cfg}" >> ${dss_home}/cfg/dss_inst.ini
 }
 
