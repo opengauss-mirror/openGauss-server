@@ -2005,14 +2005,14 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
     Oid oldIndexRelationId = PartIdGetParentId(oldIndexPartId, false);
     Oid newIndexRelationId = PartIdGetParentId(newIndexPartId, false);
     
-    Relation oldIndexRelation = index_open(oldIndexRelationId, ShareUpdateExclusiveLock);
-    Relation newIndexRelation = index_open(newIndexRelationId, ShareUpdateExclusiveLock);
+    Relation oldIndexRelation = index_open(oldIndexRelationId, AccessExclusiveLock);
+    Relation newIndexRelation = index_open(newIndexRelationId, AccessExclusiveLock);
 
     /*
      * Take a necessary lock on the old and new index part before swaping them.
      */
-    oldIndexPartition = partitionOpen(oldIndexRelation, oldIndexPartId, ShareUpdateExclusiveLock);
-    newIndexPartition = partitionOpen(newIndexRelation, newIndexPartId, ShareUpdateExclusiveLock);
+    oldIndexPartition = partitionOpen(oldIndexRelation, oldIndexPartId, AccessExclusiveLock);
+    newIndexPartition = partitionOpen(newIndexRelation, newIndexPartId, AccessExclusiveLock);
 
     /* Now swap names of those index parts */
     pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
