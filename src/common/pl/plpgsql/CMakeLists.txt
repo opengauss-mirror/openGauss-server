@@ -14,6 +14,12 @@ execute_process(
 )
 
 execute_process(
+    COMMAND sed -i "s/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g" ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_gram.cpp
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE PL_GRAM
+)
+
+execute_process(
     COMMAND perl generate-plerrcodes.pl ${PROJECT_SRC_DIR}/common/backend/utils/errcodes.txt
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src
     OUTPUT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/plerrcodes.h 
