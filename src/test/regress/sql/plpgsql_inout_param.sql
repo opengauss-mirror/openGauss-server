@@ -1543,4 +1543,5 @@ drop function test_inout_func();
 drop type test_inout_type;
 
 -- clean
+drop table inttest;
 drop schema if exists plpgsql_inout cascade;

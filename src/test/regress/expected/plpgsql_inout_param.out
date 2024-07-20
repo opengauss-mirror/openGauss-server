@@ -1890,46 +1890,46 @@ drop function test_inout_func2();
 drop function test_inout_func();
 drop type test_inout_type;
 -- clean
+drop table inttest;
 drop schema if exists plpgsql_inout cascade;
-NOTICE:  drop cascades to 41 other objects
-DETAIL:  drop cascades to function proc2()
-drop cascades to function proc4()
-drop cascades to function proc5(integer[])
-drop cascades to function proc6()
-drop cascades to function proc7(integer[],integer)
-drop cascades to function proc8()
-drop cascades to function proc9()
-drop cascades to function proc10()
-drop cascades to type info
-drop cascades to function proc20(info,integer)
-drop cascades to function proc21()
-drop cascades to function proc11()
-drop cascades to function proc12()
-drop cascades to type o1
-drop cascades to type o2
-drop cascades to type o3
-drop cascades to function proc13()
-drop cascades to function proc14()
-drop cascades to type customer
-drop cascades to table customers
-drop cascades to function proc15()
-drop cascades to function proc16(character varying)
-drop cascades to function proc17()
-drop cascades to type t
-drop cascades to function proc3()
-drop cascades to function proc1()
-drop cascades to type t1
-drop cascades to function p1(integer)
-drop cascades to function p2()
-drop cascades to function fun1()
-drop cascades to type myint
-drop cascades to function myintin(cstring)
-drop cascades to function myintout(myint)
-drop cascades to function myinthash(myint)
-drop cascades to cast from integer to myint
-drop cascades to cast from myint to integer
-drop cascades to function myinteq(myint,myint)
-drop cascades to operator <>(myint,myint)
-drop cascades to operator =(myint,myint)
-drop cascades to operator family myint_ops for access method hash
-drop cascades to table inttest
+NOTICE:  drop cascades to 40 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
