@@ -698,6 +698,9 @@ set_min_recovery_point(pgFile *file, const char *fullpath,
 
     /* Update pg_control checksum in backup_list */
     file->crc = ControlFile.crc;
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        uploadConfigFile(fullpath, fullpath);
+    }
 
     pg_free(buffer);
 }

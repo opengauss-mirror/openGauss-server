@@ -296,9 +296,15 @@ void restoreConfigDir()
     Oss::Oss* oss = getOssClient();
     char* bucket_name = getBucketName();
     char* prefix_name = backup_instance_path + 1;
+    char dir_path[MAXPGPATH];
+    char arclog_path[MAXPGPATH];
+    int nRet = 0;
+    fio_mkdir(backup_instance_path, DIR_PERMISSION, location);
+    nRet = snprintf_s(arclog_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s", backup_path, "wal", instance_name);
+    securec_check_ss_c(nRet, "\0", "\0");
+    fio_mkdir(arclog_path, DIR_PERMISSION, location);
     parray *obj_list = parray_new();
     oss->ListObjectsWithPrefix(bucket_name, prefix_name, obj_list);
-    char    dir_path[MAXPGPATH];
     for (size_t i = 0; i < parray_num(obj_list); i++) {
         char* object = (char*)parray_get(obj_list, i);
         char* filename = last_dir_separator(object);
@@ -316,14 +322,14 @@ void restoreConfigDir()
     parray_free(obj_list);
 }
 
-void restoreConfigFile(const char* path)
+void restoreConfigFile(const char* path, bool errorOk)
 {
     Oss::Oss* oss = getOssClient();
     const char* object_name = NULL;
     const char* bucket_name = NULL;
     bucket_name = getBucketName();
     object_name = path;
-    oss->GetObject(bucket_name, object_name, (char*)path);
+    oss->GetObject(bucket_name, object_name, (char*)path, errorOk);
 }
 
 void uploadConfigFile(const char* path, const char* object_name)

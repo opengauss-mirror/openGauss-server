@@ -2268,6 +2268,9 @@ check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
     {
         rc = snprintf_s(backup_label, MAXPGPATH, MAXPGPATH - 1, "%s/backup_label", pgdata);
         securec_check_ss_c(rc, "\0", "\0");
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            restoreConfigFile(backup_label, true);
+        }
         if (fio_access(backup_label, F_OK, FIO_DB_HOST) == 0)
         {
             elog(WARNING, "Destination directory contains \"backup_control\" file. "

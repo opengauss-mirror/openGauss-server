@@ -23,25 +23,6 @@
 #define OSS_MAX_FILE_PATH 1024
 #define OSS_MAX_ETAG_LEN 256
 
-/* Data Structure Definition*/
-
-typedef struct OssFile {
-    char filePath[OSS_MAX_FILE_PATH];
-    /* for write */
-    char uploadID[OSS_MAX_UPLOAD_ID_LEN];
-    char** eTagList;
-    int partNum;
-    /* for read */
-    size_t fileSize;
-    bool oss_eof;
-    bool oss_error;
-    void* bufDate;
-    int byteCout;
-    int actualLen;
-    size_t offset;
-    char etag[OSS_MAX_ETAG_LEN];
-} OssFile;
-
 /* API Function */
 
 namespace Oss {
@@ -53,7 +34,7 @@ class Oss {
 public:
     Oss(const char* endpoint, const char* access_key, const char* secret_key, const char* region = NULL, bool secure = false);
     ~Oss();
-    void GetObject(const char* bucket_name, const char* object_name, const char* file_name);
+    void GetObject(const char* bucket_name, const char* object_name, const char* file_name, bool errorOk = false);
     void GetObject(const char* from_bucket, const char* object_key, void* file);
     void PutObject(const char* bucket_name, const char* file_path, const char* file_name);
     void RemoveObject(const char* bucket_name, const char* objcet_key);

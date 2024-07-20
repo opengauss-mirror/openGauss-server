@@ -1859,6 +1859,10 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
             file->uncompressed_size = file->size;
             parray_append(backup_files_list, file);
         }
+
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            uploadConfigFile(backup_label, backup_label);
+        }
     }
 
     if (sscanf_s(PQgetvalue(res, 0, 0), XID_FMT, recovery_xid) != 1)
@@ -1904,6 +1908,10 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
             }
 
             parray_append(backup_files_list, file);
+        }
+
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            uploadConfigFile(tablespace_map, tablespace_map);
         }
     }
 

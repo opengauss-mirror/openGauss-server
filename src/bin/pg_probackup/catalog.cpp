@@ -460,10 +460,6 @@ catalog_get_backup_list(const char *instance_name, time_t requested_backup_id)
         goto err_proc;
     }
 
-    if (current.media_type == MEDIA_TYPE_OSS) {
-        restoreConfigDir();
-    }
-
     /* scan the directory and list backups */
     backups = parray_new();
     for (; (data_ent = fio_readdir(data_dir)) != NULL; errno = 0)
