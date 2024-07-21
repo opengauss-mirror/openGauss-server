@@ -80,6 +80,7 @@ void OndemandXlogFileIdCacheInit(void)
 void *OndemandXLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
 {
     Size dataSize = (itemsize + sizeof(RedoMemSlot)) * itemnum;
+    ParseBufferDesc *descstate = NULL;
 
     Assert(t_thrd.storage_cxt.ondemandXLogMem != NULL);
     Assert(dataSize <= OndemandRecoveryShmemSize());
@@ -91,6 +92,9 @@ void *OndemandXLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
     for (int i = memctl->totalblknum; i > 0; --i) {
         memctl->memslot[i - 1].buf_id = i; /*  start from 1 , 0 is invalidbuffer */
         memctl->memslot[i - 1].freeNext = i - 1;
+        // init parsebufferdesc because ondemandXLogMem may not memset 0
+        descstate = (ParseBufferDesc *)(t_thrd.storage_cxt.ondemandXLogMem + itemsize * (i - 1));
+        descstate->state = 0;
     }
     // only used firstreleaseslot of globalmemctl
     memctl->firstfreeslot = InvalidBuffer;
@@ -196,10 +200,6 @@ void OndemandXLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, 
 void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager)
 {
     g_parseManager = NULL;
-    // do not free parsebuffers, but memset it to 0, which is managed in shared memory
-    if (parsemanager->memctl.isInit) {
-        memset(t_thrd.storage_cxt.ondemandXLogMem, 0, OndemandRecoveryShmemSize());
-    }
     parsemanager->parsebuffers = NULL;
     parsemanager->memctl.isInit = false;
 }
