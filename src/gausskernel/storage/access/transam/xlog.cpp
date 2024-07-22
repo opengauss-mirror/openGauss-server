@@ -4006,10 +4006,6 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
 {
     char path[MAXPGPATH];
     char tmppath[MAXPGPATH];
-    char *zbuffer = NULL;
-    char* ss_zero_buffer_raw = NULL;
-    char* ss_zero_buffer = NULL;
-    char zbuffer_raw[XLOG_BLCKSZ + ALIGNOF_BUFFER];
     XLogSegNo installed_segno;
     int max_advance;
     int fd;
@@ -4074,11 +4070,9 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
      * Note: ensure the buffer is reasonably well-aligned; this may save a few
      * cycles transferring data to the kernel.
      */
-    zbuffer = (char *)BUFFERALIGN(zbuffer_raw);
-    rc = memset_s(zbuffer, XLOG_BLCKSZ, 0, XLOG_BLCKSZ);
-    securec_check(rc, "\0", "\0");
-
     if (is_dss_fd(fd)) {
+        char *ss_zero_buffer = NULL;
+        char *ss_zero_buffer_raw = NULL;
         /* extend file and fill space at once to avoid performance issue */
         pgstat_report_waitevent(WAIT_EVENT_WAL_INIT_WRITE);
         errno = 0;
@@ -4122,6 +4116,11 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
             pfree(ss_zero_buffer_raw);
         }
     } else {
+        char zbuffer_raw[XLOG_BLCKSZ + ALIGNOF_BUFFER];
+        char *zbuffer = (char *)BUFFERALIGN(zbuffer_raw);
+        rc = memset_s(zbuffer, XLOG_BLCKSZ, 0, XLOG_BLCKSZ);
+        securec_check(rc, "\0", "\0");
+
         for (nbytes = 0; (uint32)nbytes < XLogSegSize; nbytes += XLOG_BLCKSZ) {
             errno = 0;
             pgstat_report_waitevent(WAIT_EVENT_WAL_INIT_WRITE);
@@ -5152,11 +5151,16 @@ static void ExecuteRecoveryCommand(char *command, char *commandName, bool failOn
  * a lot of segment creations by foreground processes, which is not so good.
  */
 static void PreallocXlogFiles(XLogRecPtr endptr)
-{   
-    /* In ss repplication dorado cluster, standby cluster doesn't need to preallocate xlog files */
-    if (SS_DORADO_STANDBY_CLUSTER) {
+{
+    /*
+     * These condition do not need preallocate xlog files:
+     * 1. In ss repplication dorado cluster, standby cluster sync primary xlog
+     * 2. In ondemand recovery, we do not preallocate xlog files for better rto
+     */
+    if (SS_DORADO_STANDBY_CLUSTER || SS_IN_ONDEMAND_RECOVERY) {
         return;
     }
+
     XLogSegNo _logSegNo;
     int lf;
     bool use_existent = false;
@@ -10718,7 +10722,7 @@ void StartupXLOG(void)
     uint32 redoReadOff = t_thrd.xlog_cxt.readOff;
     
     /* only primary mode can call getwritepermissionsharedstorage when dorado hyperreplication. */
-    if(IS_SHARED_STORAGE_MODE) {
+    if (IS_SHARED_STORAGE_MODE) {
         GetWritePermissionSharedStorage();
         CheckShareStorageCtlInfo(EndOfLog);   
     }

@@ -2034,7 +2034,7 @@ void SegWorkerProcLsnForwarder(RedoItem *lsnForwarder)
     } while (refCount != 1);
 
     // prune done, redo all seg block record
-    SegWorkerRedoAllSegBlockRecord();
+    SegWorkerRedoIfRealtimeBuildFailover();
 
     SetCompletedReadEndPtr(g_redoWorker, lsnForwarder->record.ReadRecPtr, lsnForwarder->record.EndRecPtr);
     (void)pg_atomic_sub_fetch_u32(&lsnForwarder->record.refcount, 1);
@@ -3323,11 +3323,6 @@ static void HashMapManagerProcLsnForwarder(RedoItem *lsnForwarder)
 {
     SetCompletedReadEndPtr(g_redoWorker, lsnForwarder->record.ReadRecPtr, lsnForwarder->record.EndRecPtr);
     (void)pg_atomic_sub_fetch_u32(&lsnForwarder->record.refcount, 1);
-    uint32 refCount;
-    do {
-        refCount = pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount);
-        RedoInterruptCallBack();
-    } while (refCount != 0);
 }
 
 void HashMapManagerMain()

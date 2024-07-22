@@ -2124,8 +2124,8 @@ void initDssPath(char *dssdir)
     rc = snprintf_s(g_instance.datadir_cxt.multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact", dssdir);
     securec_check_ss(rc, "", "");
 
-    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name,
-        g_instance.attr.attr_storage.dms_attr.instance_id);
+    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
+        g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name, g_instance.attr.attr_storage.dms_attr.instance_id);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", dssdir);
