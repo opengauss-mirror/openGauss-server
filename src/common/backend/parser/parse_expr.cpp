@@ -3186,7 +3186,7 @@ static Node* transformSequenceFuncCall(ParseState* pstate, Node* field1, Node* f
     if (field1 != NULL) {
         StringInfoData buf;
         initStringInfo(&buf);
-        appendStringInfo(&buf, "%s.%s", strVal(field1), strVal(field2));
+        appendStringInfo(&buf, "\"%s\".\"%s\"", strVal(field1), strVal(field2));
         arg = makeString(buf.data);
     } else {
         arg = (Value*)field2;
