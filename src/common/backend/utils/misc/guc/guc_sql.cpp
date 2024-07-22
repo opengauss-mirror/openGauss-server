@@ -3693,6 +3693,19 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     u_sess->utils_cxt.behavior_compat_flags = result;
 }
 
+typedef int16 (*getIgnoreKeywordTokenHook)(const char *item);
+
+static int get_ignore_keyword_token(const char *item)
+{
+    int token = -1;
+    if (u_sess->hook_cxt.getIgnoreKeywordTokenHook != NULL) {
+        token = ((getIgnoreKeywordTokenHook)u_sess->hook_cxt.getIgnoreKeywordTokenHook)(item);
+    } else {
+        token = semtc_get_ignore_keyword_token(item);
+    }
+    return token;
+}
+
 static bool check_disable_keyword_options(char **newval, void **extra, GucSource source)
 {
     char *rawstring = NULL;
@@ -3714,13 +3727,9 @@ static bool check_disable_keyword_options(char **newval, void **extra, GucSource
     foreach(cell, elemlist)
     {
         const char *item = (const char *)lfirst(cell);
-        int token = semtc_get_ignore_keyword_token(item);
+        int token = get_ignore_keyword_token(item);
         if (token < 0) {
-            GUC_check_errdetail("invalid disable keyword \"%s\"", item);
-            MemoryContextSwitchTo(old_context);
-            pfree(rawstring);
-            list_free(elemlist);
-            return false;
+            ereport(WARNING, (errmsg("invalid disable keyword \"%s\", will be skipped.", item)));
         }
     }
     MemoryContextSwitchTo(old_context);
@@ -3747,7 +3756,7 @@ static void assign_disable_keyword_options(const char *newval, void *extra)
     {
         const char *item = (const char *)lfirst(cell);
 
-        int token = semtc_get_ignore_keyword_token(item);
+        int token = get_ignore_keyword_token(item);
         if (token >= 0) {
             result = lappend_int(result, token);
         }
