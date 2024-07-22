@@ -12,8 +12,7 @@ select 1 interval; --ok
 (1 row)
 
 set disable_keyword_options = 'intervalxx';
-ERROR:  invalid value for parameter "disable_keyword_options": "intervalxx"
-DETAIL:  invalid disable keyword "intervalxx"
+WARNING:  invalid disable keyword "intervalxx", will be skipped.
 set disable_keyword_options = 'interval,interval';
 select 1 interval; --ok
  interval 
