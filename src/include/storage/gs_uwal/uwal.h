@@ -365,6 +365,7 @@ typedef int (*UwalRegisterCertVerifyFunc)(int32_t (*certVerify)(void* certStoreC
 typedef enum {
     NET_PROTOCOL_TCP = 0,
     NET_PROTOCOL_RDMA  = 1,
+    NET_PROTOCOL_UB  = 2,
     NET_PROTOCOL_BUTT
 } NetProtocol;
 
