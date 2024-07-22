@@ -511,6 +511,7 @@ typedef struct {
     uint2 opt;
     bool is_conflict_type; /* whether wal log type is conflict with standby read if redo */
     XLogPhyBlock pblk;
+    bool hasCSN;
 } XLogBlockHead;
 
 #define XLogBlockHeadEncodeSize (sizeof(XLogBlockHead))

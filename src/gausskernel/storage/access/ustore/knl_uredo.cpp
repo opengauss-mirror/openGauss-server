@@ -102,9 +102,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
     UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
     Oid invalidPartitionOid = 0;
 
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         blkprev = (UndoRecPtr *) ((char *)currLogPtr);
@@ -184,10 +184,10 @@ static XLogRedoAction GetInsertRedoAction(XLogReaderState *record, RedoBufferInf
     XLogRedoAction action;
 
     if (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) {
-        bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+        bool hasCSN = XLogRecHasCSN(record);
         XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
         XlUndoHeader *xlundohdr =
-            (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
+            (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
         TransactionId *xidBase = (TransactionId *)((char *)xlundohdr + SizeOfXLUndoHeader + skipSize);
         uint16 *tdCount = (uint16 *)((char *)xidBase + sizeof(TransactionId));
 
@@ -309,9 +309,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
     bool defaultHasSubXact = false;
     uint32 readSize = 0;
 
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
         hasSubXact = (bool *) ((char *)currLogPtr);
@@ -363,9 +363,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
      * explicitly stored tuple.
      */
     Size datalen = recordlen - SizeOfXLUndoHeader - SizeOfUHeapDelete - undoMetaSize - SizeOfUHeapHeader -
-        readSize - (hasCSN ? sizeof(CommitSeqNo) : 0);
+        readSize - SizeOfXLOGCSN(hasCSN);
     char *data = (char *)xlrec + SizeOfUHeapDelete + SizeOfXLUndoHeader + undoMetaSize + readSize +
-        (hasCSN ? sizeof(CommitSeqNo) : 0);
+        SizeOfXLOGCSN(hasCSN);
 
     utup->disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
     utup->disk_tuple_size = datalen;
@@ -828,9 +828,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
     bool inplaceUpdate = true;
     char *xlogXorDelta = NULL;
 
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN));
     UndoRecPtr urecptr = xlundohdr->urecptr;
     char *curxlogptr = ((char *)xlundohdr) + SizeOfXLUndoHeader;
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
@@ -925,7 +925,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
 
         char *data = (char *)curxlogptr;
         Size datalen = recordlen - SizeOfUHeapHeader - SizeOfXLUndoHeader - SizeOfUHeapUpdate -
-            undoMetaSize - SizeOfXLUndoHeader - initPageXtraInfo - readSize - (hasCSN ? sizeof(CommitSeqNo) : 0);
+            undoMetaSize - SizeOfXLUndoHeader - initPageXtraInfo - readSize - SizeOfXLOGCSN(hasCSN);
 
         oldtup->disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
         oldtup->disk_tuple_size = datalen;
@@ -1434,8 +1434,8 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
         curxlogptr += sizeof(uint16);
     }
 
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
-    curxlogptr = curxlogptr + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    bool hasCSN = XLogRecHasCSN(record);
+    curxlogptr = curxlogptr + SizeOfXLOGCSN(hasCSN);
     (*xlrec) = (XlUHeapMultiInsert *)curxlogptr;
     curxlogptr = (char *)*xlrec + SizeOfUHeapMultiInsert;
 
@@ -2132,7 +2132,7 @@ static TransactionId UHeapXlogGetCurrentXidInsert(XLogReaderState *record, bool 
 {
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert +
-        (hasCSN ? sizeof(CommitSeqNo) : 0));
+        SizeOfXLOGCSN(hasCSN));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
 
     if (!hasCurrentXid) {
@@ -2158,7 +2158,7 @@ static TransactionId UHeapXlogGetCurrentXidDelete(XLogReaderState *record, bool 
 {
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete +
-            (hasCSN ? sizeof(CommitSeqNo) : 0));
+            SizeOfXLOGCSN(hasCSN));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
     if (!hasCurrentXid) {
         return XLogRecGetXid(record);
@@ -2186,7 +2186,7 @@ static TransactionId UHeapXlogGetCurrentXidUpdate(XLogReaderState *record, bool 
 {
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate +
-        (hasCSN ? sizeof(CommitSeqNo) : 0));
+        SizeOfXLOGCSN(hasCSN));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
 
     if (!hasCurrentXid) {
