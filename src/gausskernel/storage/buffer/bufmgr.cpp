@@ -6248,6 +6248,8 @@ void LockBuffer(Buffer buffer, int mode)
 {
     volatile BufferDesc *buf = NULL;
     bool need_update_lockid = false;
+    bool dms_standby_retry_read = false;
+    int  origin_mode = mode;
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
@@ -6275,7 +6277,7 @@ retry:
      * need to transfer newest page version by DMS.
      */
     if (ENABLE_DMS && mode != BUFFER_LOCK_UNLOCK) {
-        LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
+        LWLockMode lock_mode = (origin_mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
         Buffer tmp_buffer;
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         ReadBufferMode read_mode = RBM_NORMAL;
@@ -6312,10 +6314,44 @@ retry:
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
             }
 
+            /*
+             * If two standby sessions request to read a page at the same time, and the primary session  
+             * requests to write to the page, it is easy to enter a deadlock state.
+             *
+             * Because the two sessions on the standby node will hold the content lock at the shared level,
+             * at the same time, even if one of them fails, release the lock and sleep, the other will hold
+             * it during this time, and the MES thread from the host will never get the exclusive lock on 
+             * this page. 
+             * 
+             * However, the session on the primary side holds the exclusive lock, which prevents the MES 
+             * for standby from taking the shared lock, which eventually leads to a deadlock.
+             *
+             * Therefore, after the standby session failed to get the page from dms for the first time, 
+             * the local content lock is changed to exclusive, in this way, the standby session will not 
+             * hold the content shared lock all the time, give the MES from the primary a chance to get it,
+             * and the timeout time of the primary and standby servers is modified to open the unlocking
+             * time window.
+	     */
+            if (!dms_standby_retry_read && SS_STANDBY_MODE) {
+	        dms_standby_retry_read = true;
+		mode = BUFFER_LOCK_EXCLUSIVE;
+	    }
             pg_usleep(5000L);
             goto retry;
-        }
+        } else if (dms_standby_retry_read) {
+            /*
+             * We're on standby, and we have got the page, but we're holding an exclusive lock,
+             * which isn't good, so release the lock and start over.
+             *
+             * A good idea would be to add the ability to lock downgrade for LWLock.
+             */
+	    mode = origin_mode;
+	    dms_standby_retry_read = false;
+	    LWLockRelease(buf->content_lock);
+	    goto retry;
+	}
     }
+
 }
 
 /*
