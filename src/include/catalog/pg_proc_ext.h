@@ -37,9 +37,9 @@
  * ----------------
  */
 #define ProcedureExtensionRelationId 3483
-#define ProcedureExtensionRelationId_Rowtype_Id 11663
+#define ProcedureExtensionRelationId_Rowtype_Id 3484
 
-CATALOG(pg_proc_ext,3483) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
+CATALOG(pg_proc_ext,3483) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(3484) BKI_SCHEMA_MACRO
 {
     Oid   proc_oid;                    /* procedure oid */
     int2  parallel_cursor_seq;         /* specify which cursor arg to be parallel for function */
