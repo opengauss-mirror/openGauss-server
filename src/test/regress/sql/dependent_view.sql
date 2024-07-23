@@ -235,5 +235,16 @@ create view circular_dependency_v4 as select * from circular_dependency_v3;
 create or replace view circular_dependency_v3 as select * from circular_dependency_t2 union all select * from circular_dependency_v4;
 alter table circular_dependency_t2 modify id int8; -- failed
 
+-- test5 table depends on a view
+create table t11 (a int, b int);
+create view v11 as select * from t11;
+create table t12 (v v11);
+insert into t11 values (1,2), (3,4);
+insert into t12 select v11 from v11;
+alter table t11 modify b numeric;
+select * from t12;-- ok
+select * from v11;-- expect error
+select * from t12;-- ok
+
 --- clean
 drop schema dependent_view cascade;
