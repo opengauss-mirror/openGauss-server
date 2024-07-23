@@ -39,7 +39,7 @@ extern void closeRestoreFile(FileAppenderSegDescriptor* desc);
 
 extern void restoreConfigDir();
 
-extern void restoreConfigFile(const char* path);
+extern void restoreConfigFile(const char* path, bool errorOk = false);
 
 extern void uploadConfigFile(const char* local_path, const char* object_name);
 

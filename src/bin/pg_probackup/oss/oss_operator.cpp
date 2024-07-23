@@ -99,7 +99,7 @@ void Oss::GetObject(const char* from_bucket, const char* object_key, void* fileP
     }
 }
 
-void Oss::GetObject(const char* bucket_name, const char* object_name, const char* file_name) {
+void Oss::GetObject(const char* bucket_name, const char* object_name, const char* file_name, bool errorOk) {
     auto s3_client = reinterpret_cast<Aws::S3::S3Client *>(s3_client_);
     Aws::S3::Model::GetObjectRequest request;
     request.SetBucket(bucket_name);
@@ -107,7 +107,9 @@ void Oss::GetObject(const char* bucket_name, const char* object_name, const char
     auto outcome = s3_client->GetObject(request);
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
-        elog(ERROR, "GetObject: %s, %s", err.GetExceptionName().c_str(), err.GetMessage().c_str());
+        int elevel = errorOk ? WARNING : ERROR;
+        elog(elevel, "GetObject: %s, %s", err.GetExceptionName().c_str(), err.GetMessage().c_str());
+        return;
     }
     char* separator_pos = last_dir_separator(file_name);
     char* dir_path = strndup(file_name, separator_pos - file_name);

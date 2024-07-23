@@ -1407,6 +1407,10 @@ read_tablespace_map(parray *files, const char *backup_dir)
     join_path_components(map_path, db_path, PG_TABLESPACE_MAP_FILE);
 
     /* Exit if database/tablespace_map doesn't exist */
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        restoreConfigFile(map_path, true);
+    }
+
     if (!fileExists(map_path, FIO_BACKUP_HOST))
     {
         elog(LOG, "there is no file tablespace_map");

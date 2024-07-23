@@ -419,6 +419,10 @@ static void parse_instance_name()
         {
             struct stat st;
 
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                restoreConfigDir();
+            }
+
             if (fio_stat(backup_instance_path, &st, true, FIO_BACKUP_HOST) != 0)
             {
                 elog(WARNING, "Failed to access directory \"%s\": %s",
@@ -458,7 +462,7 @@ static void parse_instance_name()
             }
             config_read_opt(path, instance_options, ERROR, true, false);
             if (current.media_type == MEDIA_TYPE_OSS) {
-                remove(path);
+                uploadConfigFile(path, path);
             }
         }
         setMyLocation();
