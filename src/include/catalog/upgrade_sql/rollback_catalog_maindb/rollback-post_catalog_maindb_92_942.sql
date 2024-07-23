@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_get_preparse_location() cascade;

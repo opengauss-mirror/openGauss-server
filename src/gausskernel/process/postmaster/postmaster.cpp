@@ -4425,6 +4425,10 @@ static int ServerLoop(void)
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
             (g_instance.pid_cxt.CPMonitorPID == 0) && (pmState == PM_RUN) && !dummyStandbyMode)
             g_instance.pid_cxt.CPMonitorPID = initialize_util_thread(WLM_CPMONITOR);
+        
+        if (ENABLE_PREPARSE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
+             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
+        }
 
 #ifndef ENABLE_LITE_MODE
         /* If we have lost the twophase cleaner, try to start a new one */
@@ -13642,10 +13646,10 @@ static void SetAuxType()
         case EXRTO_RECYCLER:
             t_thrd.bootstrap_cxt.MyAuxProcType = ExrtoRecyclerProcess;
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
             break;
@@ -13945,11 +13949,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             extreme_rto::exrto_recycle_main();
             proc_exit(1);
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             BarrierPreParseMain();
             proc_exit(1);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
             proc_exit(1);
@@ -14213,8 +14217,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
         case EXRTO_RECYCLER:
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
@@ -14775,10 +14779,9 @@ static ThreadMetaData GaussdbThreadGate[] = {
 #endif
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
-
+    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
-    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
       "timeseries compaction" },
     { GaussDbThreadMain<TS_COMPACTION_CONSUMER>, TS_COMPACTION_CONSUMER, "TScompconsumer",
@@ -15038,36 +15041,13 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     }
 
     /*
-     * Make sure that all xlog has been redo before locking.
-     * Sleep 0.5s is an auxiliary way to check whether all xlog has been redone.
+     * lock and start the preparse thread
      */
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
         uint32 conn_mode = pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
-        while (checkTimes--) {
-            if (knl_g_get_redo_finish_status()) {
-                redoDone = true;
-                break;
-            }
-            ereport(LOG, (errmsg("%d redo_done", redoDone)));
-            sleep(0.01);
-        }
-        ereport(LOG, (errmsg("%d redo_done", redoDone)));
-        if (!redoDone) {
-            if (!conn_mode) {
-                pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, true);
-                // clean redo done
-                pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, false);
-            }
-            ereport(ERROR, (errcode_for_file_access(),
-                errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
-        }
-
-        XLogRecPtr replay1 = GetXLogReplayRecPtrInPending();
-        sleep(0.5);
-        XLogRecPtr replay2 = GetXLogReplayRecPtrInPending();
-        if (replay1 != replay2) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not add lock when DN is not redo all xlog.")));
-        }
+        if (!WalRcvInProgress() && g_instance.pid_cxt.BarrierPreParsePID == 0) {
+            g_instance.csn_barrier_cxt.startBarrierPreParse = true;
+        } 
     } else {
         pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, false);
     }
@@ -15078,6 +15058,12 @@ Datum disable_conn(PG_FUNCTION_ARGS)
         if (arg1 == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("Invalid null pointer attribute for disable_conn()")));
+        }
+        if (!WalRcvInProgress()) {
+            RequestXLogStreamForBarrier();
+        }
+        if (g_instance.pid_cxt.BarrierPreParsePID == 0) {
+            g_instance.csn_barrier_cxt.startBarrierPreParse = false;   
         }
         host = TextDatumGetCString(arg1);
         ValidateInputString(host);

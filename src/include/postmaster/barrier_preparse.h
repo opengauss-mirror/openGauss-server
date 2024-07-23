@@ -45,8 +45,10 @@
         ereport(WARNING, (errmsg("trying to delete a barrierID that does not exist")));                         \
 } while (0)
 
+#define ENABLE_PREPARSE (g_instance.csn_barrier_cxt.startBarrierPreParse == true)
 extern void BarrierPreParseMain(void);
 extern void WakeUpBarrierPreParseBackend(void);
 extern void SetBarrierPreParseLsn(XLogRecPtr startptr);
+extern void RequestXLogStreamForBarrier();
 
 #endif /* BARRIER_PREPARSE_H */
