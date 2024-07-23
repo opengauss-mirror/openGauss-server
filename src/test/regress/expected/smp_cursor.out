@@ -519,5 +519,31 @@ NOTICE:
 --?duration.*
 
 end;
+-- cursor expr in targetlist do not smp
+set enable_auto_explain = off;
+explain (costs off) select a, cursor(select * from t1) from t1 limit 10;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Seq Scan on t1
+(4 rows)
+
+select a, cursor(select * from t1) from t1 limit 10;
+ a  |     ?column?     
+----+------------------
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(10 rows)
+
 drop schema smp_cursor cascade;
 NOTICE:  drop cascades to table t1

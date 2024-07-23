@@ -156,6 +156,9 @@ select * from hash_srf(cursor (select * from employees)) a, hash_srf(cursor (sel
 explain (costs off) select hash_srf(cursor (select * from employees)) limit 10;
 select hash_srf(cursor (select * from employees)) limit 10;
 
+explain (costs off) select hash_srf(cursor (select * from employees)) from employees limit 10;
+select hash_srf(cursor (select * from employees)) from employees limit 10;
+
 -- subquery cannot smp
 explain (costs off) select 1, (select count(*) from hash_srf(cursor (select * from employees)));
 select 1, (select count(*) from hash_srf(cursor (select * from employees)));

@@ -79,4 +79,9 @@ fetch all xc;
 move xc;
 end;
 
+-- cursor expr in targetlist do not smp
+set enable_auto_explain = off;
+explain (costs off) select a, cursor(select * from t1) from t1 limit 10;
+select a, cursor(select * from t1) from t1 limit 10;
+
 drop schema smp_cursor cascade;
