@@ -392,4 +392,34 @@ drop index idx_nv_num_a;
 drop index idx_uq_a;
 drop table web_returns_p_a;
 
+-- test unusable local index
+create table ALTER_TABLE_MERGE_TABLE_057
+(
+c_smallint smallint,
+c_varchar varchar(100)
+) partition by range (c_varchar)
+(
+partition ALTER_TABLE_MERGE_TABLE_057_1 values less than ('a222') ,
+partition ALTER_TABLE_MERGE_TABLE_057_2 values less than ('a444') ,
+partition ALTER_TABLE_MERGE_TABLE_057_3 values less than ('a777') ,
+partition ALTER_TABLE_MERGE_TABLE_057_4 values less than ('a999')
+);
+
+create unique index INDEX_ALTER_TABLE_MERGE_TABLE_057_1 ON ALTER_TABLE_MERGE_TABLE_057 USING btree (c_smallint, c_varchar) local;
+alter table ALTER_TABLE_MERGE_TABLE_057 modify partition ALTER_TABLE_MERGE_TABLE_057_3 unusable local indexes;
+
+set behavior_compat_options = 'update_unusable_unique_index_on_iud';
+insert into ALTER_TABLE_MERGE_TABLE_057 values (1, 'a555');
+insert into ALTER_TABLE_MERGE_TABLE_057 values (1, 'a555'); --error
+
+insert into ALTER_TABLE_MERGE_TABLE_057 values (2, 'a111');
+insert into ALTER_TABLE_MERGE_TABLE_057 values (2, 'a111'); --error
+
+reset behavior_compat_options;
+insert into ALTER_TABLE_MERGE_TABLE_057 values (1, 'a555');
+
+insert into ALTER_TABLE_MERGE_TABLE_057 values (3, 'a333');
+insert into ALTER_TABLE_MERGE_TABLE_057 values (3, 'a333'); --error
+
+drop table ALTER_TABLE_MERGE_TABLE_057;
 -- End. Clean u

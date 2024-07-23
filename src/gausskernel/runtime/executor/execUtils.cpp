@@ -2014,8 +2014,6 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     unusedRelationDescs = resultRelInfo->ri_UnusableIndexRelationDescs;
     unusedindexInfoArray = resultRelInfo->ri_UnusableIndexRelationInfo;
 
-    totalIndices = numIndices + numUnusedIndices;
-    
     heapRelation = resultRelInfo->ri_RelationDesc;
     containGPI = resultRelInfo->ri_ContainGPI;
 
@@ -2039,12 +2037,14 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             return NIL;
         }
         /* If the global partition index is included, the index insertion process needs to continue */
-        if (!p->pd_part->indisusable && !containGPI) {
+        if (!p->pd_part->indisusable && !containGPI && !UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD) {
             numIndices = 0;
         }
     } else {
         actualheap = heapRelation;
     }
+
+    totalIndices = numIndices + numUnusedIndices;
 
     if (bucketId != InvalidBktId) {
         searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, actualheap, bucketId, actualheap);
@@ -2115,8 +2115,9 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 actualindex,
                 indexpartition,
                 RowExclusiveLock);
-            // skip unusable index
-            if (!indexpartition->pd_part->indisusable) {
+            // skip unusable index except UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD is set and index is unique
+            if (!indexpartition->pd_part->indisusable && !(UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD &&
+                IndexIsUnique(indexRelation->rd_index))) {
                 continue;
             }
         } else {
