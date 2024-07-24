@@ -82,3 +82,4 @@ PG_RMGR(RM_COMPRESSION_REL_ID, "CompressionRelation", CfsShrinkRedo, CfsShrinkDe
     CfsShrinkTypeName)
 PG_RMGR(RM_LOGICALDDLMSG_ID, "LogicalDDLMessage", logicalddlmsg_redo, logicalddlmsg_desc, NULL, NULL, NULL, NULL, NULL, \
     logicalddlmsg_type_name)
+PG_RMGR(RM_GENERIC_ID, "Generic", generic_redo, generic_desc, NULL, NULL, NULL, NULL, NULL, NULL)

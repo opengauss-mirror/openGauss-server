@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/clog.h"
+#include "access/generic_xlog.h"
 #include "access/gin.h"
 #include "access/gist_private.h"
 #include "access/hash.h"

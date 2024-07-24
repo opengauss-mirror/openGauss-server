@@ -76,7 +76,7 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92942;
+const uint32 GRAND_VERSION_NUM = 92943;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
@@ -96,6 +96,7 @@ const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
 const uint32 UPSERT_ALIAS_VERSION_NUM = 92920;
 const uint32 SUPPORT_GS_DEPENDENCY_VERSION_NUM = 92916;
 const uint32 SPQ_VERSION_NUM = 92915;
+const uint32 GENERICXLOG_VERSION_NUM = 92943;
 const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION = 92913;
 const uint32 PAGE_DIST_VERSION_NUM = 92912;
 const uint32 NODE_REFORM_INFO_VERSION_NUM = 92911;

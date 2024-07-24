@@ -4,6 +4,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/barrierdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/barrierdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/clogdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/clogdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/dbasedesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dbasedesc.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/genericdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/genericdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/gindesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/gindesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/gistdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/gistdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/hashdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/hashdesc.cpp

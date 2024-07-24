@@ -159,4 +159,21 @@ static inline uint32 pg_rotate_right32(uint32 word, int n)
     return (word >> n) | (word << (sizeof(word) * BITS_PER_BYTE - n));
 }
 
+/* calculate ceil(log base 2) of num */
+static inline uint64 sh_log2(uint64 num)
+{
+    int i;
+    uint64 limit;
+
+    for (i = 0, limit = 1; limit < num; i++, limit <<= 1)
+        ;
+    return i;
+}
+
+/* calculate first power of 2 >= num */
+static inline uint64 sh_pow2(uint64 num)
+{
+    return ((uint64)1) << sh_log2(num);
+}
+
 #endif							/* PG_BITUTILS_H */
