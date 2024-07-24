@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           159
+#define DMS_LOCAL_VERSION           160
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -1226,7 +1226,7 @@ typedef struct st_dms_profile {
     unsigned int resource_catalog_centralized : 1; // 1: centralized, 0: distributed
     unsigned int time_stat_enabled : 1;
     unsigned int reserved : 29;
-    unsigned int elapsed_switch;
+    unsigned char elapsed_switch;
     unsigned char rdma_rpc_use_busypoll;    // busy poll need to occupy the cpu core
     unsigned char rdma_rpc_is_bind_core;
     unsigned char rdma_rpc_bind_core_start;
