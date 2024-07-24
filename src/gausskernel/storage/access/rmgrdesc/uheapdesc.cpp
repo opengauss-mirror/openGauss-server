@@ -115,7 +115,7 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
             Size blkDataLen = 0;
             XlUHeapInsert *xlrec = (XlUHeapInsert *)rec;
             XlUHeapHeader *uheapHeader = (XlUHeapHeader *) XLogRecGetBlockData(record, 0, &blkDataLen);
-            hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+            hasCSN = XLogRecHasCSN(record);
             bool isInit = (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) != 0;
             if (isInit) {
                 appendStringInfo(buf, "XLOG_UHEAP_INSERT insert(init): ");
@@ -128,7 +128,7 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
             appendStringInfo(buf, "TupInfo: ");
             appendStringInfo(buf, "tupoffset %u, flag %u. ", (uint16)xlrec->offnum, (uint8)xlrec->flags);
             XlUndoHeader *xlundohdr =
-                (XlUndoHeader *)((char *)rec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
+                (XlUndoHeader *)((char *)rec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
             currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid, &toastLen);
             appendStringInfo(buf, "UndoInfo: ");
             appendStringInfo(buf,
@@ -173,9 +173,9 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                 curxlogptr += sizeof(uint16);
             }
 
-            hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+            hasCSN = XLogRecHasCSN(record);
             XlUHeapMultiInsert *xlrec =
-                (XlUHeapMultiInsert *)((char *)curxlogptr + (hasCSN ? sizeof(CommitSeqNo) : 0));
+                (XlUHeapMultiInsert *)((char *)curxlogptr + SizeOfXLOGCSN(hasCSN));
             curxlogptr = (char *)xlrec + SizeOfUHeapMultiInsert;
             int nranges = *(int *)curxlogptr;
 
@@ -206,14 +206,14 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
         }
         case XLOG_UHEAP_DELETE: {
             XlUHeapDelete *xlrec = (XlUHeapDelete *)rec;
-            hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+            hasCSN = XLogRecHasCSN(record);
             appendStringInfo(buf, "XLOG_UHEAP_DELETE: ");
             appendStringInfo(buf, "TupInfo: ");
             appendStringInfo(buf, "oldxid %lu, tupoffset %u, td_id %u, flag %u. ", xlrec->oldxid,
                 (uint16)xlrec->offnum, (uint8)xlrec->td_id, (uint8)xlrec->flag);
 
             XlUndoHeader *xlundohdr =
-                (XlUndoHeader *)((char *)rec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
+                (XlUndoHeader *)((char *)rec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
             currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid,
                 &toastLen);
             appendStringInfo(buf, "UndoInfo: ");
@@ -235,7 +235,7 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
             errno_t rc;
             char *recdata = XLogRecGetBlockData(record, 0, &datalen);
             char *recdataEnd = recdata + datalen;
-            hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+            hasCSN = XLogRecHasCSN(record);
 
             XlUndoHeader *xlundohdr = NULL;
             XlUHeapUpdate *xlrec = (XlUHeapUpdate *)rec;
@@ -245,7 +245,7 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                 "oldxid %lu, old tupoffset %u, new tupoffset %u, old_tuple_td_id %u, old_tuple_flag %u. ",
                 xlrec->oldxid, (uint16)xlrec->old_offnum, (uint16)xlrec->new_offnum,
                 (uint8)xlrec->old_tuple_td_id, (uint16)xlrec->old_tuple_flag);
-            xlundohdr = (XlUndoHeader *)((char *)rec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
+            xlundohdr = (XlUndoHeader *)((char *)rec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN));
             currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid, &toastLen);
             appendStringInfo(buf, "UndoInfo(oldpage): ");
             appendStringInfo(buf,

@@ -1368,7 +1368,7 @@ static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
     bool is_init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
     /* caution, remaining data in record is not aligned */
-    char *data_old = (char *)xlrec + heapUpdateSize + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    char *data_old = (char *)xlrec + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
     if (is_init) {
         datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
     } else {
@@ -1432,7 +1432,7 @@ static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
     bool is_init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
     /* caution, remaining data in record is not aligned */
-    char *data_old = (char *)xlrec + heapUpdateSize + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    char *data_old = (char *)xlrec + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
     if (is_init) {
         datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
     } else {
@@ -1566,8 +1566,8 @@ static void DecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     Size datalenNew = 0;
     char *dataNew = XLogRecGetBlockData(r, 0, &datalenNew);
 
-    Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - (hasCSN ? sizeof(CommitSeqNo) : 0);
-    char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - SizeOfXLOGCSN(hasCSN);
+    char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN);
     uint32 toastLen = 0;
     bool hasToast = false;
     char *toastPtr = UpdateOldTupleCalc(isInplaceUpdate, r, &dataOld, &tuplelenOld, &toastLen);
@@ -1634,8 +1634,8 @@ static void AreaDecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
         curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfUHeapUpdate);
     }
     bool isInplaceUpdate = (xlrec->flags & XLZ_NON_INPLACE_UPDATE) == 0;
-    Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - (hasCSN ? sizeof(CommitSeqNo) : 0);
-    char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - SizeOfXLOGCSN(hasCSN);
+    char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN);
     uint32 toastLen = 0;
     char *toastPtr = UpdateOldTupleCalc(isInplaceUpdate, r, &dataOld, &tuplelenOld, &toastLen);
     bool hasToast = false;
@@ -1737,8 +1737,8 @@ static void DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
         Assert(XLogRecGetDataLen(r) > (heapDeleteSize + SizeOfHeapHeader));
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, datalen);
 
-        DecodeXLogTuple((char *)xlrec + heapDeleteSize + (hasCSN ? sizeof(CommitSeqNo) : 0),
-            datalen - (hasCSN ? sizeof(CommitSeqNo) : 0), change->data.tp.oldtuple, true);
+        DecodeXLogTuple((char *)xlrec + heapDeleteSize + SizeOfXLOGCSN(hasCSN),
+            datalen - SizeOfXLOGCSN(hasCSN), change->data.tp.oldtuple, true);
     }
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
@@ -1785,8 +1785,8 @@ static void AreaDecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
         Assert(XLogRecGetDataLen(r) > (heapDeleteSize + SizeOfHeapHeader));
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, datalen);
 
-        DecodeXLogTuple((char *)xlrec + heapDeleteSize + (hasCSN ? sizeof(CommitSeqNo) : 0),
-            datalen - (hasCSN ? sizeof(CommitSeqNo) : 0), change->data.tp.oldtuple, true);
+        DecodeXLogTuple((char *)xlrec + heapDeleteSize + SizeOfXLOGCSN(hasCSN),
+            datalen - SizeOfXLOGCSN(hasCSN), change->data.tp.oldtuple, true);
     }
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
@@ -1819,9 +1819,9 @@ static void DecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
         return;
     }
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
     bool hasToast = (xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0;
-    Size datalen = XLogRecGetDataLen(r) - SizeOfUHeapDelete - SizeOfXLUndoHeader - (hasCSN ? sizeof(CommitSeqNo) : 0);
+    Size datalen = XLogRecGetDataLen(r) - SizeOfUHeapDelete - SizeOfXLUndoHeader - SizeOfXLOGCSN(hasCSN);
     Size addLen = 0;
     uint32 toastLen = 0;
     UpdateUndoBody(&addLen, (char *)xlundohdr + SizeOfXLUndoHeader, xlundohdr->flag, &toastLen);
@@ -1829,13 +1829,13 @@ static void DecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     if (toastLen > 0) {
         toastData = (char *)palloc0(toastLen);
         errno_t rc = memcpy_s(toastData, toastLen,
-            (char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) + SizeOfXLUndoHeader + addLen,
+            (char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) + SizeOfXLUndoHeader + addLen,
             toastLen);
         securec_check(rc, "\0", "\0");
     }
     addLen += toastLen;
 
-    Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) +
+    Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) +
         SizeOfXLUndoHeader + addLen);
     addLen += metaLen;
     if (toastLen == 0 && (datalen == 0 || !AllocSizeIsValid(datalen))) {
@@ -1850,7 +1850,7 @@ static void DecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     securec_check(rc, "\0", "\0");
 
     char *dataold =
-        (char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) + SizeOfXLUndoHeader + addLen;
+        (char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) + SizeOfXLUndoHeader + addLen;
     if (!hasToast) {
         change->data.utp.oldtuple = ReorderBufferGetUTupleBuf(ctx->reorder, datalen -addLen);
         DecodeXLogTuple(dataold, datalen - addLen, (ReorderBufferTupleBuf *)change->data.utp.oldtuple, false);
@@ -1884,9 +1884,9 @@ static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
         return;
     }
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
     bool hasToast = (xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0;
-    Size datalen = XLogRecGetDataLen(r) - SizeOfUHeapDelete - SizeOfXLUndoHeader - (hasCSN ? sizeof(CommitSeqNo) : 0);
+    Size datalen = XLogRecGetDataLen(r) - SizeOfUHeapDelete - SizeOfXLUndoHeader - SizeOfXLOGCSN(hasCSN);
     Size addLen = 0;
     uint32 toastLen = 0;
     UpdateUndoBody(&addLen, (char *)xlundohdr + SizeOfXLUndoHeader, xlundohdr->flag, &toastLen);
@@ -1894,13 +1894,13 @@ static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     if (toastLen > 0) {
         toastData = (char *)palloc0(toastLen);
         errno_t rc = memcpy_s(toastData, toastLen,
-            (char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) + SizeOfXLUndoHeader + addLen,
+            (char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) + SizeOfXLUndoHeader + addLen,
             toastLen);
         securec_check(rc, "\0", "\0");
     }
     addLen += toastLen;
 
-    Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) +
+    Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) +
         SizeOfXLUndoHeader + addLen);
     addLen += metaLen;
 
@@ -1911,7 +1911,7 @@ static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     securec_check(rc, "\0", "\0");
 
     char *dataold =
-        (char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0) + SizeOfXLUndoHeader + addLen;
+        (char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN) + SizeOfXLUndoHeader + addLen;
 
     change->data.utp.oldtuple = ReorderBufferGetUTupleBuf(ctx->reorder, datalen);
     if (!hasToast) {

@@ -432,6 +432,7 @@ void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecPa
 
     XLogRecSetBlockDataStateContent(record, blockid, blockdatarec);
     recordblockstate->blockparse.blockhead.is_conflict_type = is_conflict_type;
+    recordblockstate->blockparse.blockhead.hasCSN = XLogRecHasCSN(record);
 }
 
 void XLogRecSetAuxiBlkNumState(XLogBlockDataParse *blockdatarec, BlockNumber auxilaryblkn1, BlockNumber auxilaryblkn2)
@@ -505,6 +506,16 @@ void GetXlUndoHeaderExtraData(char **currLogPtr, XlUndoHeaderExtra *xlundohdrext
     } else {
         xlundohdrextra->partitionOid = 0;
     }
+    if ((flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
+        *currLogPtr += sizeof(TransactionId);
+        xlundohdrextra->size += sizeof(TransactionId);
+    }
+    if ((flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0) {
+        uint32 toastLen = *(uint32 *)(*currLogPtr);
+        *currLogPtr += sizeof(uint32) + toastLen;
+        xlundohdrextra->size += sizeof(uint32) + toastLen;
+    }
+
 }
 
 /* Set uheap undo insert block state for xlog record */
@@ -512,7 +523,8 @@ RelFileNode XLogRecSetUHeapUndoInsertBlockState(XLogReaderState *record,
     XlUHeapInsert *xlrec, insertUndoParse *parseBlock, DecodedBkpBlock *decodebkp)
 {
     RelFileNode rnode;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    bool hasCSN = XLogRecHasCSN(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     GetXlUndoHeaderExtraData(&currLogPtr, &parseBlock->xlundohdrextra, xlundohdr->flag);
@@ -539,7 +551,8 @@ RelFileNode XLogRecSetUHeapUndoDeleteBlockState(XLogReaderState *record,
     RelFileNode rnode;
     Size recordlen = XLogRecGetDataLen(record);
     deleteUndoParse *parseBlock = &blockundo->deleteUndoParse;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    bool hasCSN = XLogRecHasCSN(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     GetXlUndoHeaderExtraData(&currLogPtr, &parseBlock->xlundohdrextra, xlundohdr->flag);
@@ -550,7 +563,7 @@ RelFileNode XLogRecSetUHeapUndoDeleteBlockState(XLogReaderState *record,
     blockundo->maindata = (char *)currLogPtr;
     blockundo->recordlen = recordlen - SizeOfUHeapDelete -
         SizeOfXLUndoHeader - parseBlock->xlundohdrextra.size -
-        undoMetaSize - SizeOfUHeapHeader;
+        undoMetaSize - SizeOfUHeapHeader - SizeOfXLOGCSN(hasCSN);
 
     parseBlock->recxid = XLogRecGetXid(record);
     parseBlock->offnum = xlrec->offnum;
@@ -574,7 +587,8 @@ RelFileNode XLogRecSetUHeapUndoUpdateBlockState(XLogReaderState *record,
     RelFileNode rnode;
     Size recordlen = XLogRecGetDataLen(record);
     updateUndoParse *parseBlock = &blockundo->updateUndoParse;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    bool hasCSN = XLogRecHasCSN(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN));
     XlUndoHeader *xlnewundohdr;
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
@@ -606,7 +620,7 @@ RelFileNode XLogRecSetUHeapUndoUpdateBlockState(XLogReaderState *record,
         blockundo->recordlen = recordlen - SizeOfUHeapUpdate -
             SizeOfXLUndoHeader - parseBlock->xlundohdrextra.size -
             SizeOfXLUndoHeader - parseBlock->xlnewundohdrextra.size -
-            undoMetaSize - initPageXtraInfo - SizeOfUHeapHeader;
+            undoMetaSize - initPageXtraInfo - SizeOfUHeapHeader - SizeOfXLOGCSN(hasCSN);
     } else {
         int *undoXorDeltaSizePtr = (int *)currLogPtr;
         parseBlock->undoXorDeltaSize = *undoXorDeltaSizePtr;
@@ -650,6 +664,9 @@ RelFileNode XLogRecSetUHeapUndoMultiInsertBlockState(XLogReaderState *record,
         /* has xidBase and tdCount */
         currLogPtr += sizeof(TransactionId) + sizeof(uint16);
     }
+
+    bool hasCSN = XLogRecHasCSN(record);
+    currLogPtr = currLogPtr + SizeOfXLOGCSN(hasCSN);
 
     blockundo->maindata = (char *)currLogPtr;
     xlrec = (XlUHeapMultiInsert *)((char *)currLogPtr);

@@ -1458,7 +1458,7 @@ static void skipUndoRecBody(char **currLogPtr, XlUndoHeader *xlundohdr)
 
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0) {
         uint32 toastLen = *(uint32 *)(*currLogPtr);
-        *currLogPtr += sizeof(toastLen) + toastLen;
+        *currLogPtr += sizeof(uint32) + toastLen;
     }
 }
 
@@ -1468,9 +1468,9 @@ static void TrackUheapInsert(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1500,9 +1500,9 @@ static void TrackUheapDelete(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1533,9 +1533,9 @@ static void TrackUheapUpdate(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1582,7 +1582,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
     int nranges;
     UndoRecPtr *urpvec = NULL;
     bool isinit = (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) != 0;
-    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    bool hasCSN = XLogRecHasCSN(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)XLogRecGetData(record);
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 

@@ -499,11 +499,17 @@ static char *ReachXlUndoHeaderEnd(XlUndoHeader *xlundohdr)
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PARTITION_OID) != 0) {
         currLogPtr += sizeof(Oid);
     }
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
+        currLogPtr += sizeof(TransactionId);
+    }
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST)) {
+        currLogPtr += sizeof(uint32) + *(uint32 *)((char *)currLogPtr);
+    }
     return currLogPtr;
 }
 
 void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isinit, bool istoast, void *blkdata,
-    Size datalen, TransactionId recxid, Size *freespace)
+    Size datalen, TransactionId recxid, Size *freespace, bool isHasCSN)
 {
     char *data = (char *)blkdata;
     Page page = buffer->pageinfo.page;
@@ -520,7 +526,7 @@ void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool 
     UHeapDiskTuple utup = GetUHeapDiskTupleFromRedoData(data, &newlen, tbuf);
 
     undo::XlogUndoMeta undometa;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(isHasCSN));
     char *currLogPtr = ReachXlUndoHeaderEnd(xlundohdr);
     XlogUndoMeta *xlundometa = (XlogUndoMeta *)((char *)currLogPtr);
     UndoRecPtr urecptr = xlundohdr->urecptr;
@@ -562,7 +568,7 @@ void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool 
     PageSetLSN(page, buffer->lsn);
 }
 
-void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size recordlen, TransactionId recxid)
+void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size recordlen, TransactionId recxid, bool isHasCSN)
 {
     Page page = buffer->pageinfo.page;
     TupleBuffer tbuf;
@@ -576,7 +582,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
     UHeapTupleData utup;
     undo::XlogUndoMeta undometa;
     RowPtr *rp;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + SizeOfXLOGCSN(isHasCSN));
     char *currLogPtr = ReachXlUndoHeaderEnd(xlundohdr);
     Size shiftSize = currLogPtr - (char *)xlrec;
     XlogUndoMeta *xlundometa = (XlogUndoMeta *)((char *)currLogPtr);
@@ -629,13 +635,13 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
 
 void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata,
     bool inplaceUpdate, bool blockInplaceUpdate, UHeapTupleData *oldtup, bool sameBlock,
-    BlockNumber blk, TransactionId recordxid)
+    BlockNumber blk, TransactionId recordxid, bool isHasCSN)
 {
     XLogRecPtr lsn = buffers->oldbuffer.lsn;
     Page oldpage = buffers->oldbuffer.pageinfo.page;
     Pointer recData = (Pointer)recorddata;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)recData;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(isHasCSN));
     UndoRecPtr urecptr = xlundohdr->urecptr;
     Buffer oldbuf = buffers->oldbuffer.buf;
     RowPtr *rp = NULL;
@@ -679,7 +685,7 @@ void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata
 Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata,
     bool inplaceUpdate, bool blockInplaceUpdate, void *blkdata, UHeapTupleData *oldtup,
     Size recordlen, Size data_len, bool isinit, bool istoast, bool sameBlock,
-    TransactionId recordxid, UpdateRedoAffixLens *affixLens)
+    TransactionId recordxid, UpdateRedoAffixLens *affixLens, bool isHasCSN)
 {
     XLogRecPtr lsn = buffers->newbuffer.lsn;
     TupleBuffer tbuf;
@@ -691,7 +697,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
 
     Pointer recData = (Pointer)recorddata;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)recData;
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + SizeOfXLOGCSN(isHasCSN));
     char *curxlogptr = ReachXlUndoHeaderEnd(xlundohdr);
     UndoRecPtr urecptr = xlundohdr->urecptr;
     errno_t rc = EOK;
@@ -1024,7 +1030,7 @@ static UHeapDiskTuple GetUHeapDiskTupleFromMultiInsertRedoData(char **data, int 
 }
 
 void UHeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isinit, bool istoast,
-    void *blkdata, Size datalen, TransactionId recxid, Size *freespace)
+    void *blkdata, Size datalen, TransactionId recxid, Size *freespace, bool isHasCSN)
 {
     char *data = (char *)blkdata;
     Page page = buffer->pageinfo.page;
@@ -1068,6 +1074,7 @@ void UHeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, 
         uheappage->pd_multi_base = 0;
     }
 
+    curxlogptr = curxlogptr + SizeOfXLOGCSN(isHasCSN);
     xlrec = (XlUHeapMultiInsert *)((char *)curxlogptr);
     curxlogptr = (char *)xlrec + SizeOfUHeapMultiInsert;
     UndoRecPtr *urpvec = NULL;
@@ -1309,6 +1316,7 @@ static void UHeapXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
 {
     bool isinit = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_PAGE) != 0;
     bool istoast = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_TOAST_PAGE) != 0;
+    bool hasCSN = blockhead->hasCSN;
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     XLogBlockDataParse *datadecode = blockdatarec;
     XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
@@ -1320,7 +1328,7 @@ static void UHeapXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
         Assert(blkdata != NULL);
         UHeapXlogInsertOperatorPage(bufferinfo, maindata, isinit, istoast, (void *)blkdata, blkdatalen, recordxid,
-            NULL);
+            NULL, hasCSN);
         MakeRedoBufferDirty(bufferinfo);
     }
 }
@@ -1330,12 +1338,13 @@ static void UHeapXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     XLogBlockDataParse *datadecode = blockdatarec;
     XLogRedoAction action;
+    bool hasCSN = blockhead->hasCSN;
 
     action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
         char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
         Size recordlen = datadecode->main_data_len;
-        UHeapXlogDeleteOperatorPage(bufferinfo, (void *)maindata, recordlen, recordxid);
+        UHeapXlogDeleteOperatorPage(bufferinfo, (void *)maindata, recordlen, recordxid, hasCSN);
         MakeRedoBufferDirty(bufferinfo);
     }
 }
@@ -1356,6 +1365,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
     UpdateRedoAffixLens affixLens = {0, 0};
     UHeapTupleData oldtup;
     Size freespace = 0;
+    bool hasCSN = blockhead->hasCSN;
     action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
         if (XLogBlockDataGetBlockId(datadecode) == UHEAP_UPDATE_NEW_BLOCK_NUM) {
@@ -1370,7 +1380,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
                 buffers.oldbuffer.lsn = buffers.newbuffer.lsn;
 
                 UHeapXlogUpdateOperatorOldpage(&buffers, (void *)maindata, inplaceUpdate,
-                    blockInplaceUpdate, &oldtup, sameBlock, oldblk, recordxid);
+                    blockInplaceUpdate, &oldtup, sameBlock, oldblk, recordxid, hasCSN);
             }
 
             blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
@@ -1379,7 +1389,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
             Size dataLen = datadecode->blockdata.data_len;
             freespace = UHeapXlogUpdateOperatorNewpage(&buffers, (void *)maindata, inplaceUpdate,
                 blockInplaceUpdate, (void *)blkdata,  &oldtup, recordlen, dataLen, isinit,
-                istoast, sameBlock, recordxid, &affixLens);
+                istoast, sameBlock, recordxid, &affixLens, hasCSN);
             /* may should free space */
             if (!inplaceUpdate && freespace < BLCKSZ / FREESPACE_FRACTION) {
                 RelFileNode rnode;
@@ -1400,7 +1410,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
             }
 
             UHeapXlogUpdateOperatorOldpage(&buffers, (void *)maindata, inplaceUpdate,
-                blockInplaceUpdate, &oldtup, sameBlock, newblk, recordxid);
+                blockInplaceUpdate, &oldtup, sameBlock, newblk, recordxid, hasCSN);
         }
 
         MakeRedoBufferDirty(bufferinfo);
@@ -1415,6 +1425,7 @@ static void UHeapXlogMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockDataPar
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     XLogBlockDataParse *datadecode = blockdatarec;
     XLogRedoAction action;
+    bool hasCSN = blockhead->hasCSN;
 
     action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
@@ -1425,7 +1436,7 @@ static void UHeapXlogMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockDataPar
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
         Assert(blkdata != NULL);
         UHeapXlogMultiInsertOperatorPage(bufferinfo, maindata, isinit, istoast, (void *)blkdata, blkdatalen, recordxid,
-            NULL);
+            NULL, hasCSN);
         MakeRedoBufferDirty(bufferinfo);
     }
 }

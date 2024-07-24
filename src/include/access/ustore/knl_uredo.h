@@ -89,6 +89,7 @@ typedef struct XlUndoHeader {
 } XlUndoHeader;
 
 #define SizeOfXLUndoHeader (offsetof(XlUndoHeader, flag) + sizeof(uint8)) // 13 Bytes
+#define SizeOfXLOGCSN(flag) (flag ? sizeof(CommitSeqNo) : 0)
 
 struct XlUndoHeaderExtra {
     UndoRecPtr blkprev;
