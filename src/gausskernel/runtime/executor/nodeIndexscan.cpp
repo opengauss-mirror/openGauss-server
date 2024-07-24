@@ -606,13 +606,13 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
                 }
 
                 /* Initialize scan descriptor for partitioned table */
-                index_state->iss_ScanDesc = scan_handler_idx_beginscan(current_relation,
-                    index_state->iss_RelationDesc,
+                index_state->iss_ScanDesc = scan_handler_idx_beginscan(index_state->ss.ss_currentPartition,
+                    index_state->iss_CurrentIndexPartition,
                     scanSnap,
                     index_state->iss_NumScanKeys,
                     index_state->iss_NumOrderByKeys,
                     (ScanState*)index_state);
-                    }
+            }
         }
     } else {
         /*
