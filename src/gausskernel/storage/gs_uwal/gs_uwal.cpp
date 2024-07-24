@@ -364,11 +364,14 @@ static bool GsUwalParseConfig(cJSON *uwalConfJSON)
     } else if (!strcasecmp(protocolJSON->valuestring, "rdma")) {
         rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "rdma");
         securec_check(rc, "\0", "\0");
+    } else if (!strcasecmp(protocolJSON->valuestring, "ub")) {
+        rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "ub");
+        securec_check(rc, "\0", "\0");
     } else if (!strcasecmp(protocolJSON->valuestring, "tcp")) {
         rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "tcp");
         securec_check(rc, "\0", "\0");
     } else {
-        ereport(WARNING, (errmsg("uwal_protocol only support tcp and rdma, will use the default protocol tcp")));
+        ereport(WARNING, (errmsg("uwal_protocol only support tcp, rdma and ub, will use the default protocol tcp")));
         rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "tcp");
         securec_check(rc, "\0", "\0");
     }
@@ -404,8 +407,9 @@ static bool GsUwalParseConfig(cJSON *uwalConfJSON)
                         rc = strcpy_s(g_uwalConfig.repliNodes[nodeId], UWAL_PROTOCOL_LEN, "tcp");
                         securec_check(rc, "\0", "\0");
                     } else if (strcasecmp(subProtocolJSON->valuestring, "rdma") &&
+                               strcasecmp(subProtocolJSON->valuestring, "ub") &&
                                strcasecmp(subProtocolJSON->valuestring, "tcp")) {
-                        ereport(WARNING, (errmsg("protocol only support tcp and rdma, use the default protocol tcp")));
+                        ereport(WARNING, (errmsg("protocol only support tcp, rdma and ub, use the default protocol tcp")));
                         rc = strcpy_s(g_uwalConfig.repliNodes[nodeId], UWAL_PROTOCOL_LEN, "tcp");
                         securec_check(rc, "\0", "\0");
                     } else {
@@ -613,6 +617,8 @@ void GetLocalStateInfo(OUT NodeStateInfo *nodeStateInfo)
     netInfo.protocol = NET_PROTOCOL_TCP;
     if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
         netInfo.protocol = NET_PROTOCOL_RDMA;
+    } else if (!strcasecmp(g_uwalConfig.protocol, "ub")) {
+        netInfo.protocol = NET_PROTOCOL_UB;
     }
 
     NetList netList;
@@ -802,8 +808,12 @@ int GsUwalWalSenderNotify(bool exceptSelf)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remoteuwalhost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_uwalConfig.protocol, "rdma") && !strcasecmp(g_uwalConfig.repliNodes[standbyStateInfo.nodeId], "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma") &&
+            !strcasecmp(g_uwalConfig.repliNodes[standbyStateInfo.nodeId], "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
+        } else if (!strcasecmp(g_uwalConfig.protocol, "ub") &&
+                   !strcasecmp(g_uwalConfig.repliNodes[standbyStateInfo.nodeId], "ub")) {
+            netInfo.protocol = NET_PROTOCOL_UB;
         }
 
         NetList netList;
@@ -879,8 +889,12 @@ int GsUwalWalReceiverNotify(bool isConnectedToPrimary)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remotehost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_uwalConfig.protocol, "rdma") && !strcasecmp(g_uwalConfig.repliNodes[primaryStateInfo.nodeId], "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma") &&
+            !strcasecmp(g_uwalConfig.repliNodes[primaryStateInfo.nodeId], "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
+        } else if (!strcasecmp(g_uwalConfig.protocol, "ub") &&
+                   !strcasecmp(g_uwalConfig.repliNodes[primaryStateInfo.nodeId], "ub")) {
+            netInfo.protocol = NET_PROTOCOL_UB;
         }
 
         NetList netList;
