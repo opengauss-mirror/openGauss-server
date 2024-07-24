@@ -2358,6 +2358,11 @@ typedef struct knl_u_statement_context {
     bool enable_wait_events_bitmap; /* change to true in init stage of stmt handle */
     int64 current_row_count; /* Record the number of rows affected by current query */
     int64 last_row_count; /* Record the number of rows affected by last query */
+
+    void *root_query_plan; /* Record the root query plan before report */
+    bool query_plan_threshold_active; /* active if need start query_plan threshold timer */
+    bool is_exceed_query_plan_threshold; /* if true when slow sql take effect */
+    TimestampTz record_query_plan_fin_time; /* finish time when execute time exceed log_min_duration_statement */
 } knl_u_statement_context;
 
 struct Qid_key {

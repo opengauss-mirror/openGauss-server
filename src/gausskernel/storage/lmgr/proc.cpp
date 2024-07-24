@@ -73,6 +73,7 @@
 #include "instruments/percentile.h"
 #include "instruments/snapshot.h"
 #include "instruments/instr_statement.h"
+#include "instruments/instr_handle_mgr.h"
 #include "utils/builtins.h"
 #include "instruments/ash.h"
 #include "pgaudit.h"
@@ -96,6 +97,7 @@ static void CheckIdleInTransactionSessionTimeout(void);
 static bool CheckStandbyTimeout(void);
 static void FiniNuma(int code, Datum arg);
 static inline void ReleaseChildSlot(void);
+static void CheckQueryPlanThreshold();
 
 /*
  * Report shared-memory space needed by InitProcGlobal.
@@ -2628,6 +2630,59 @@ bool enable_lockwait_sig_alarm(int delayms)
     return true;
 }
 
+bool enable_query_plan_sig_alarm(int delayms)
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || u_sess->statement_cxt.stmt_stat_cxt == NULL) {
+        return true;
+    }
+
+    if (u_sess->statement_cxt.query_plan_threshold_active) {
+        return true;
+    }
+
+    TimestampTz start_time = CURRENT_STMT_METRIC_HANDLE->start_time;
+    u_sess->statement_cxt.record_query_plan_fin_time = TimestampTzPlusMilliseconds(start_time, delayms);
+    
+    /* if query plan timeout > session timeout or statement timeout, 
+     * don't set timer to ensure that sess or statement timeout take effect 
+     */
+    if (t_thrd.storage_cxt.statement_timeout_active && 
+        (u_sess->statement_cxt.record_query_plan_fin_time >= t_thrd.storage_cxt.statement_fin_time)) {
+        return true;  
+    }
+
+    if (u_sess->storage_cxt.session_timeout_active && 
+        (u_sess->statement_cxt.record_query_plan_fin_time >= u_sess->storage_cxt.session_fin_time)) {
+        return true;
+    }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->storage_cxt.idle_in_transaction_session_timeout_active &&
+        (u_sess->statement_cxt.record_query_plan_fin_time >= 
+         u_sess->storage_cxt.idle_in_transaction_session_fin_time)) {
+        return true;
+    }
+#endif
+    u_sess->statement_cxt.query_plan_threshold_active = true;
+    
+    long secs;
+    int usecs;
+    /* start to set signal timer, if now >= query plan timeout, start 1us timer */
+    TimestampDifference(GetCurrentTimestamp(), u_sess->statement_cxt.record_query_plan_fin_time, &secs, &usecs);
+    if (secs == 0 && usecs == 0) {
+        usecs = 1;
+    }
+
+    struct itimerval timeval;
+    errno_t rc = memset_s(&timeval, sizeof(struct itimerval), 0, sizeof(struct itimerval));
+    securec_check(rc, "\0", "\0");
+    timeval.it_value.tv_sec = secs;
+    timeval.it_value.tv_usec = usecs;
+    if (gs_signal_settimer(&timeval))
+        return false;
+    return true;
+}
+
 /* Enable the session timeout timer. */
 bool enable_session_sig_alarm(int delayms)
 {
@@ -2799,13 +2854,15 @@ bool disable_sig_alarm(bool is_statement_timeout)
      * We will re-enable the interrupt if necessary in CheckStatementTimeout.
      */
     if (t_thrd.storage_cxt.statement_timeout_active || t_thrd.storage_cxt.deadlock_timeout_active ||
-        t_thrd.storage_cxt.lockwait_timeout_active || t_thrd.wlm_cxt.wlmalarm_timeout_active) {
+        t_thrd.storage_cxt.lockwait_timeout_active || t_thrd.wlm_cxt.wlmalarm_timeout_active || 
+        u_sess->statement_cxt.query_plan_threshold_active) {
         if (gs_signal_canceltimer()) {
             t_thrd.storage_cxt.statement_timeout_active = false;
             t_thrd.storage_cxt.cancel_from_timeout = false;
             t_thrd.storage_cxt.deadlock_timeout_active = false;
             t_thrd.storage_cxt.lockwait_timeout_active = false;
             t_thrd.wlm_cxt.wlmalarm_timeout_active = false;
+            u_sess->statement_cxt.query_plan_threshold_active = false;
             return false;
         }
     }
@@ -2814,6 +2871,7 @@ bool disable_sig_alarm(bool is_statement_timeout)
     t_thrd.storage_cxt.deadlock_timeout_active = false;
     t_thrd.storage_cxt.lockwait_timeout_active = false;
     t_thrd.wlm_cxt.wlmalarm_timeout_active = false;
+    u_sess->statement_cxt.query_plan_threshold_active = false;
 
     /* Cancel or reschedule statement timeout */
     if (is_statement_timeout) {
@@ -3043,6 +3101,10 @@ void handle_sig_alarm(SIGNAL_ARGS)
         if (t_thrd.proc != NULL) {
             PGSemaphoreUnlock(&t_thrd.proc->sem);
         }
+    }
+
+    if (u_sess->statement_cxt.query_plan_threshold_active) {
+        CheckQueryPlanThreshold();
     }
 
     errno = save_errno;
@@ -3325,4 +3387,18 @@ void BecomeLockGroupMember(PGPROC *leader)
     t_thrd.proc->lockGroupLeader = leader;
     dlist_push_tail(&leader->lockGroupMembers, &t_thrd.proc->lockGroupLink);
     LWLockRelease(leaderLwlock);
+}
+
+void CheckQueryPlanThreshold()
+{
+    if (u_sess->attr.attr_storage.log_min_duration_statement == 0 ||
+        !u_sess->statement_cxt.query_plan_threshold_active) {
+            return;
+    }
+
+    TimestampTz now = GetCurrentTimestamp();
+    if (now > u_sess->statement_cxt.record_query_plan_fin_time) {
+        u_sess->statement_cxt.is_exceed_query_plan_threshold = true;
+        u_sess->statement_cxt.query_plan_threshold_active = false;
+    }
 }

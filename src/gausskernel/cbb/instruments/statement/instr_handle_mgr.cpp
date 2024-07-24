@@ -233,7 +233,7 @@ static void print_stmt_basic_debug_log(int log_level)
         errmsg("\t soft parse: %lu", CURRENT_STMT_METRIC_HANDLE->parse.soft_parse)));
     ereport(log_level, (errmodule(MOD_INSTR),
         errmsg("\t hard parse: %lu", CURRENT_STMT_METRIC_HANDLE->parse.hard_parse)));
-    if (CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L1 || CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L2) {
+    if (CURRENT_STMT_METRIC_HANDLE->level >= STMT_TRACK_L0 || CURRENT_STMT_METRIC_HANDLE->level <= STMT_TRACK_L2) {
         ereport(log_level, (errmodule(MOD_INSTR),
             errmsg("\t query plan size: %lu", CURRENT_STMT_METRIC_HANDLE->plan_size)));
         ereport(log_level, (errmodule(MOD_INSTR),
@@ -320,7 +320,7 @@ static void print_stmt_net_debug_log(int log_level)
 static void print_stmt_summary_lock_debug_log(int log_level)
 {
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("6, ----Lock Summary Info Area----")));
-    if (CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L1 || CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L2) {
+    if (CURRENT_STMT_METRIC_HANDLE->level >= STMT_TRACK_L0 && CURRENT_STMT_METRIC_HANDLE->level <= STMT_TRACK_L2) {
         ereport(log_level, (errmodule(MOD_INSTR),
             errmsg("\t lock cnt: %ld", CURRENT_STMT_METRIC_HANDLE->lock_summary.lock_cnt)));
         ereport(log_level, (errmodule(MOD_INSTR),

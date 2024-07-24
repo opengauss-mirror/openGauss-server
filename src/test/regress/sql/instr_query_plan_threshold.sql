@@ -7,7 +7,7 @@ insert into query_plan_table select generate_series(1,10000),generate_series(1,1
 select reset_unique_sql('GLOBAL', 'ALL', 0);
 
 -- full sql
-set track_stmt_stat_level = 'L1,OFF';
+set track_stmt_stat_level = 'L0,OFF';
 set log_min_duration_statement = '0ms';
 set statement_timeout = '0ms';
 delete statement_history;
@@ -28,7 +28,7 @@ select pg_sleep(1);
 select count(*) from statement_history where query like '%from query_plan_table%' and query_plan is not null;
 
 -- slow sql
-set track_stmt_stat_level = 'OFF,L1';
+set track_stmt_stat_level = 'OFF,L0';
 set log_min_duration_statement = '0ms';
 delete statement_history;
 select reset_unique_sql('GLOBAL', 'ALL', 0);
@@ -57,6 +57,17 @@ select t1.num, pg_sleep(1) from query_plan_table t1 where t1.num = 1;
 select count(t1.num) from query_plan_table t1, query_plan_table t2, query_plan_table t3, query_plan_table t4;
 select pg_sleep(1);
 -- expect 2 row
+select count(*) from statement_history where query like '%from query_plan_table%' and query_plan is not null;
+
+set log_min_duration_statement = '2s';
+set statement_timeout = '1s';
+delete statement_history;
+select reset_unique_sql('GLOBAL', 'ALL', 0);
+select t1.id from query_plan_table t1 where t1.id = 1;
+select t1.num from query_plan_table t1 where t1.num = 1;
+select t1.num, pg_sleep(1) from query_plan_table t1 where t1.num = 1;
+select pg_sleep(1);
+-- expect 0 row
 select count(*) from statement_history where query like '%from query_plan_table%' and query_plan is not null;
 
 set track_stmt_stat_level = 'OFF,L0';

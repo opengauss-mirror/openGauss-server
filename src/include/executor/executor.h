@@ -263,6 +263,7 @@ extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** p
 
 extern long ExecGetPlanMemCost(Plan* node);
 extern bool executorEarlyStop();
+extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
 
 /* ----------------------------------------------------------------
  *		ExecProcNode
@@ -275,6 +276,10 @@ extern bool executorEarlyStop();
 
 static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
+    if (u_sess->statement_cxt.is_exceed_query_plan_threshold) {
+        instr_stmt_report_query_plan((QueryDesc *)u_sess->statement_cxt.root_query_plan);
+        u_sess->statement_cxt.root_query_plan = NULL;
+    }
     TupleTableSlot* result;
     Assert(node->ExecProcNode);
 
