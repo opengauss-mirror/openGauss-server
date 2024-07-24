@@ -1081,6 +1081,31 @@ static void CheckPgAttribute(Oid obj_oid, char* attName, Form_pg_attribute new_a
     heap_close(rel, RowExclusiveLock);
 }
 
+static bool findDependentTable(Relation rel, Oid type_id)
+{
+    bool found = false;
+    if (!OidIsValid(type_id)) {
+        return found;
+    }
+    const int keyNum = 2;
+    ScanKeyData key_dep[keyNum];
+    SysScanDesc scan_dep = NULL;
+    HeapTuple tup_dep = NULL;
+    ScanKeyInit(&key_dep[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(TypeRelationId));
+    ScanKeyInit(&key_dep[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(type_id));
+    scan_dep = systable_beginscan(rel, DependReferenceIndexId, true, NULL, keyNum, key_dep);
+    while (HeapTupleIsValid((tup_dep = systable_getnext(scan_dep)))) {
+        Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup_dep);
+        if (depform->classid == RelationRelationId) {
+            found = true;
+            break;
+        }
+    }
+    systable_endscan(scan_dep);
+    return found;
+}
+
 enum ValidateDependResult {
     ValidateDependInvalid,
     ValidateDependValid,
@@ -1091,7 +1116,9 @@ enum ValidateDependResult {
 static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list)
 {
     bool isValid = true;
+    bool existTable = false;
     Oid rw_objid = InvalidOid;
+    Oid type_id = InvalidOid;
     // 1. filter the valid view
     if (GetPgObjectValid(view_oid, objType)) {
         return ValidateDependValid;
@@ -1103,7 +1130,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     }
     *list = lappend_oid(*list, view_oid);
 
-    // 2. find pg_rewrite entry which this view depends on internally
+    // 2. find pg_rewrite/pg_type entry which depend on this view internally
     const int keyNum = 2;
     ScanKeyData key[keyNum];
     SysScanDesc scan = NULL;
@@ -1117,7 +1144,8 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
         if (depform->classid == RewriteRelationId && depform->deptype == DEPENDENCY_INTERNAL) {
             rw_objid = depform->objid;
-            break;
+        } else if (depform->classid == TypeRelationId && depform->deptype == DEPENDENCY_INTERNAL) {
+            type_id = depform->objid;
         }
     }
     systable_endscan(scan);
@@ -1125,7 +1153,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     if (!OidIsValid(rw_objid)) {
         elog(ERROR, "cannot find the internal dependent pg_rewrite entry.");
     }
-    // 3. find all columns of parent views and tables which this view depends on directly,
+    // 3.1 find all columns of parent views and tables which this view depends on directly,
     //    and check their validity recursively.
     List *query_str = NIL;
     ScanKeyData key_dep[keyNum];
@@ -1202,6 +1230,12 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     }
     pfree_ext(newtuple);
     systable_endscan(scan_dep);
+    // 3.2 find views or tables which depend on this view directly,
+    //     and report error if tables exist.
+    existTable = findDependentTable(rel_dep, type_id);
+    if (existTable) {
+        elog(ERROR, "The view is invalid. There is a table dependent on the view so it cannot be recompiled.");
+    }
     heap_close(rel_dep, RowExclusiveLock);
     // 4. mark the current view valid
     if (!circularDependency) {
