@@ -161,8 +161,7 @@ void SSInitReformerControlPages(void)
     struct stat st;
     if (stat(XLOG_CONTROL_FILE, &st) == 0 && S_ISREG(st.st_mode)) {
         SSReadControlFile(REFORM_CTRL_PAGE);
-        if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
-            g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
+        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
             (void)printf("[SS] ERROR: files from last install must be cleared.\n");
             ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
