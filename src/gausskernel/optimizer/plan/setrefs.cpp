@@ -120,7 +120,7 @@ static bool fix_scan_expr_walker(Node* node, fix_scan_expr_context* context);
 static void set_join_references(PlannerInfo* root, Join* join, int rtoffset);
 static void set_upper_references(PlannerInfo* root, Plan* plan, int rtoffset);
 static void set_dummy_tlist_references(Plan* plan, int rtoffset);
-static indexed_tlist* build_tlist_index(List* tlist);
+static indexed_tlist* build_tlist_index(List* tlist, bool returnConstForConst = false);
 static Var* search_indexed_tlist_for_var(Var* var, indexed_tlist* itlist, Index newvarno, int rtoffset);
 static Var* search_indexed_tlist_for_non_var(Node* node, indexed_tlist* itlist, Index newvarno);
 static Var* search_indexed_tlist_for_sortgroupref(
@@ -1228,7 +1228,7 @@ static void set_tlist_qual_extensible_exprs_of_extensibleplan(PlannerInfo* root,
 {
     if (cscan->extensible_plan_tlist != NIL || cscan->scan.scanrelid == 0) {
         /* Adjust tlist, qual, extensible_exprs to reference extensible scan tuple */
-        indexed_tlist* itlist = build_tlist_index(cscan->extensible_plan_tlist);
+        indexed_tlist* itlist = build_tlist_index(cscan->extensible_plan_tlist, true);
 
         cscan->scan.plan.targetlist =
             (List*)fix_upper_expr(root, (Node*)cscan->scan.plan.targetlist, itlist, INDEX_VAR, rtoffset);
@@ -1771,7 +1771,7 @@ static void set_dummy_tlist_references(Plan* plan, int rtoffset)
  * to search_indexed_tlist_for_var() or search_indexed_tlist_for_non_var().
  * When done, the indexed_tlist may be freed with a single pfree_ext().
  */
-static indexed_tlist* build_tlist_index(List* tlist)
+static indexed_tlist* build_tlist_index(List* tlist, bool returnConstForConst)
 {
     indexed_tlist* itlist = NULL;
     tlist_vinfo* vinfo = NULL;
@@ -1799,6 +1799,8 @@ static indexed_tlist* build_tlist_index(List* tlist)
             vinfo++;
         } else if (tle->expr && IsA(tle->expr, PlaceHolderVar))
             itlist->has_ph_vars = true;
+        else if (tle->expr && IsA(tle->expr, Const) && returnConstForConst)
+            itlist->return_const = true;
         else
             itlist->has_non_vars = true;
     }
