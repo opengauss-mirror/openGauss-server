@@ -162,11 +162,15 @@ for i in 1 .. count loop
 result.c1 = 123;
 result.c2 = 32;
 pipe row(result);
+pipe row(null);
 end loop;
 return;
 end;
 $BODY$;
 select count(*) from func_pipelined_022(10000);
+select func_pipelined_022(10);
+select * from func_pipelined_022(0);
+select func_pipelined_022(0);
 reset work_mem;
 
 -- nest function call for ereport

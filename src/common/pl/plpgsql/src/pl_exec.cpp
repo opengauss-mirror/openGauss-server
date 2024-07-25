@@ -2095,9 +2095,8 @@ void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *estate)
     }
 
     Tuplestorestate *tuple_store = estate->tuple_store;
-    int size = tuplestore_get_memtupcount(tuple_store);
-    Datum *values = (Datum *)palloc(sizeof(Datum) * size);
-    bool *isNulls = (bool *)palloc(sizeof(bool) * size);
+    List* null_list = NIL;
+    List* datum_list = NIL;
 
     int32 elemTypeMod;
     Oid elemTypeId  = searchsubtypebytypeId(estate->fn_rettype, &elemTypeMod);
@@ -2111,14 +2110,16 @@ void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *estate)
     int index = 0;
     while (tuplestore_gettupleslot(tuple_store, true, false, slot)) {
         Datum datum;
+        bool is_null = false;
         if (estate->pipelined_resistuple) {
-            isNulls[index] = false;
             datum = ExecFetchSlotTupleDatum(slot);
         } else {
-            datum = heap_slot_getattr(slot, 1, &isNulls[index]);
+            datum = heap_slot_getattr(slot, 1, &is_null);
         }
-        values[index] = datumCopy(datum, elemByVal, elemLen);
+        null_list = lappend_int(null_list, (int)is_null);
+        datum_list = lappend(datum_list, (void*)datumCopy(datum, elemByVal, elemLen));
         index++;
+        ExecClearTuple(slot);
     }
 
     tuplestore_end(tuple_store);
@@ -2128,8 +2129,20 @@ void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *estate)
         int dims[1];
         int lbs[1];
 
-        dims[0] = size;
+        dims[0] = index;
         lbs[0] = 1;
+        Datum *values = (Datum *)palloc(sizeof(Datum) * index);
+        bool *isNulls = (bool *)palloc(sizeof(bool) * index);
+        ListCell* null_cell = NULL;
+        ListCell* datum_cell = NULL;
+        int loop_index = 0;
+        forboth(null_cell, null_list, datum_cell, datum_list) {
+            isNulls[loop_index] = (bool)lfirst_int(null_cell);
+            values[loop_index] = (Datum)lfirst(datum_cell);
+            loop_index++;
+        }
+        list_free(null_list);
+        list_free(datum_list);
         estate->retval =
              PointerGetDatum(construct_md_array(values, isNulls, 1, dims, lbs, elemTypeId, elemLen, elemByVal, elemAlign));
     } else {

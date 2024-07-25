@@ -6420,7 +6420,6 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
 bool ConditionalLockBuffer(Buffer buffer)
 {
     volatile BufferDesc *buf = NULL;
-    int dms_retry_times = 0;
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {

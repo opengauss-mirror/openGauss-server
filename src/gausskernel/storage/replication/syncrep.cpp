@@ -85,8 +85,6 @@ static SyncStandbyNumState check_sync_standbys_num(const SyncRepStandbyData* syn
 static bool judge_sync_standbys_num(const SyncRepStandbyData* sync_standbys, int num_standbys, SyncStandbyNumState* state);
 
 
-static void SyncRepQueueInsert(int mode);
-static bool SyncRepCancelWait(void);
 static void SyncRepWaitCompletionQueue();
 static void SyncRepNotifyComplete();
 
@@ -497,59 +495,6 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
     return waitStopRes;
 }
 
-/*
- * Insert t_thrd.proc into the specified SyncRepQueue, maintaining sorted invariant.
- *
- * Usually we will go at tail of queue, though it's possible that we arrive
- * here out of order, so start at tail and work back to insertion point.
- */
-static void SyncRepQueueInsert(int mode)
-{
-    PGPROC *proc = NULL;
-
-    Assert(mode >= 0 && mode < NUM_SYNC_REP_WAIT_MODE);
-    proc = (PGPROC *)SHMQueuePrev(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]),
-                                  &(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]),
-                                  offsetof(PGPROC, syncRepLinks));
-
-    while (proc != NULL) {
-        /*
-         * Stop at the queue element that we should after to ensure the queue
-         * is ordered by LSN. The same lsn is allowed in sync queue.
-         */
-        if (XLByteLE(proc->waitLSN, t_thrd.proc->waitLSN))
-            break;
-
-        proc = (PGPROC *)SHMQueuePrev(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]), &(proc->syncRepLinks),
-                                      offsetof(PGPROC, syncRepLinks));
-    }
-
-    if (proc != NULL)
-        SHMQueueInsertAfter(&(proc->syncRepLinks), &(t_thrd.proc->syncRepLinks));
-    else
-        SHMQueueInsertAfter(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]), &(t_thrd.proc->syncRepLinks));
-}
-
-/*
- * Acquire SyncRepLock and cancel any wait currently not in completion queue.
- */
-static bool SyncRepCancelWait(void)
-{
-    bool success = false;
-
-    LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
-    if (!t_thrd.proc->syncRepInCompleteQueue) {
-        if (!SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks))) {
-            SHMQueueDelete(&(t_thrd.proc->syncRepLinks));
-        }
-        t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
-        success = true;
-    }
-    LWLockRelease(SyncRepLock);
-
-    return success;
-}
-
 void SyncRepCleanupAtProcExit(void)
 {
     if (t_thrd.proc->syncRepLinks.prev || t_thrd.proc->syncRepLinks.next ||
@@ -629,10 +574,6 @@ void SyncRepReleaseWaiters(void)
     XLogRecPtr writePtr;
     XLogRecPtr flushPtr;
     XLogRecPtr replayPtr;
-    int numreceive = 0;
-    int numwrite = 0;
-    int numflush = 0;
-    int numapply = 0;
     bool got_recptr = false;
     bool am_sync = false;
 
