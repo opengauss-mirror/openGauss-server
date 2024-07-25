@@ -433,16 +433,53 @@ ERROR:  syntax error at or near "/"
 LINE 1: SELECT 4.0f / 2.0;
                     ^
 set float_suffix_acceptance to on;
+SELECT CONCAT('The value is ', TO_CHAR(BINARY_DOUBLE_INFINITY)) AS result;
+        result         
+-----------------------
+ The value is Infinity
+(1 row)
+
+SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_INFINITY)) AS result;
+         result         
+------------------------
+ The value is -Infinity
+(1 row)
+
+SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_NAN)) AS result;
+      result      
+------------------
+ The value is NaN
+(1 row)
+
+set enable_binary_special_o_format to on;
+SELECT CONCAT('The value is ', TO_CHAR(BINARY_DOUBLE_INFINITY)) AS result;
+      result      
+------------------
+ The value is Inf
+(1 row)
+
+SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_INFINITY)) AS result;
+      result       
+-------------------
+ The value is -Inf
+(1 row)
+
+SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_NAN)) AS result;
+      result      
+------------------
+ The value is Nan
+(1 row)
+
 SELECT BINARY_DOUBLE_INFINITY;
  binary_double_infinity 
 ------------------------
-               Infinity
+                    Inf
 (1 row)
 
 SELECT BINARY_DOUBLE_NAN;
  binary_double_nan 
 -------------------
-               NaN
+               Nan
 (1 row)
 
 CREATE TABLE test_table (
@@ -454,7 +491,7 @@ VALUES (1, BINARY_DOUBLE_NAN);
 SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_NAN;
  id | float_value 
 ----+-------------
-  1 |         NaN
+  1 |         Nan
 (1 row)
 
 INSERT INTO test_table (id, float_value)
@@ -462,75 +499,75 @@ VALUES (2, BINARY_DOUBLE_INFINITY);
 SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_INFINITY;
  id | float_value 
 ----+-------------
-  2 |    Infinity
+  2 |         Inf
 (1 row)
 
 SELECT float_value + 1 FROM test_table WHERE id = 1;
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT float_value * 2 FROM test_table WHERE id = 2;
  ?column? 
 ----------
- Infinity
+      Inf
 (1 row)
 
 SELECT * FROM test_table WHERE float_value = BINARY_DOUBLE_NAN OR float_value = BINARY_DOUBLE_INFINITY;
  id | float_value 
 ----+-------------
-  1 |         NaN
-  2 |    Infinity
+  1 |         Nan
+  2 |         Inf
 (2 rows)
 
 DROP TABLE test_table;
 SELECT ABS(binary_double_infinity);
-   abs    
-----------
- Infinity
+ abs 
+-----
+ Inf
 (1 row)
 
 SELECT CEIL(binary_double_infinity);
-   ceil   
-----------
- Infinity
+ ceil 
+------
+  Inf
 (1 row)
 
 SELECT SQRT(binary_double_infinity);
-   sqrt   
-----------
- Infinity
+ sqrt 
+------
+  Inf
 (1 row)
 
 SELECT FLOOR(binary_double_infinity);
-  floor   
-----------
- Infinity
+ floor 
+-------
+   Inf
 (1 row)
 
 SELECT SQRT(binary_double_infinity);
-   sqrt   
-----------
- Infinity
+ sqrt 
+------
+  Inf
 (1 row)
 
 SELECT EXP(binary_double_infinity);
-   exp    
-----------
- Infinity
+ exp 
+-----
+ Inf
 (1 row)
 
 SELECT LOG(binary_double_infinity);
-   log    
-----------
- Infinity
+ log 
+-----
+ Inf
 (1 row)
 
 SELECT POWER(binary_double_infinity, 2);
-  power   
-----------
- Infinity
+ power 
+-------
+   Inf
 (1 row)
 
 SELECT SIN(binary_double_infinity);
@@ -539,55 +576,55 @@ CONTEXT:  referenced column: sin
 SELECT ABS(binary_double_nan);
  abs 
 -----
- NaN
+ Nan
 (1 row)
 
 SELECT CEIL(binary_double_nan);
  ceil 
 ------
-  NaN
+  Nan
 (1 row)
 
 SELECT SQRT(binary_double_nan);
  sqrt 
 ------
-  NaN
+  Nan
 (1 row)
 
 SELECT FLOOR(binary_double_nan);
  floor 
 -------
-   NaN
+   Nan
 (1 row)
 
 SELECT SQRT(binary_double_nan);
  sqrt 
 ------
-  NaN
+  Nan
 (1 row)
 
 SELECT EXP(binary_double_nan);
  exp 
 -----
- NaN
+ Nan
 (1 row)
 
 SELECT LOG(binary_double_nan);
  log 
 -----
- NaN
+ Nan
 (1 row)
 
 SELECT POWER(binary_double_nan, 2);
  power 
 -------
-   NaN
+   Nan
 (1 row)
 
 SELECT SIN(binary_double_nan);
  sin 
 -----
- NaN
+ Nan
 (1 row)
 
 -- 创建自定义函数
@@ -668,49 +705,49 @@ SELECT (binary_double_infinity > 0.0) OR (binary_double_nan < binary_double_infi
 SELECT binary_double_infinity + 1.0; -- 返回正无穷大
  ?column? 
 ----------
- Infinity
+      Inf
 (1 row)
 
 SELECT binary_double_nan + 1.0; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT binary_double_infinity - binary_double_infinity; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT binary_double_nan - 1.0; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT binary_double_infinity * binary_double_infinity; -- 返回正无穷大
  ?column? 
 ----------
- Infinity
+      Inf
 (1 row)
 
 SELECT binary_double_nan * 1.0; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT binary_double_infinity / binary_double_infinity; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 SELECT binary_double_nan / 1.0; -- 返回 NaN
  ?column? 
 ----------
-      NaN
+      Nan
 (1 row)
 
 CREATE TABLE T1(binary_double_nan INT);
@@ -718,15 +755,15 @@ INSERT INTO T1 VALUES(1),(2),(3);
 SELECT binary_double_nan;
  binary_double_nan 
 -------------------
-               NaN
+               Nan
 (1 row)
 
 SELECT binary_double_nan FROM T1;
  binary_double_nan 
 -------------------
-               NaN
-               NaN
-               NaN
+               Nan
+               Nan
+               Nan
 (3 rows)
 
 SELECT T1.binary_double_nan FROM T1;
@@ -770,19 +807,19 @@ insert into t1 values(binary_double_nan);
 select avg(id) from t1;
  avg 
 -----
- NaN
+ Nan
 (1 row)
 
 select sum(id) from t1;
  sum 
 -----
- NaN
+ Nan
 (1 row)
 
 select max(id) from t1;
  max 
 -----
- NaN
+ Nan
 (1 row)
 
 select min(id) from t1;
@@ -800,9 +837,9 @@ insert into t1 values(3.14),(10),(15);
 select binary_double_nan from t1;
  binary_double_nan 
 -------------------
-               NaN
-               NaN
-               NaN
+               Nan
+               Nan
+               Nan
 (3 rows)
 
 select t1.binary_double_nan from t1;
@@ -820,7 +857,7 @@ insert into t1 values (100,9);
 select * from t1;
  binary_double_infinity | id 
 ------------------------+----
-               Infinity | 10
+                    Inf | 10
                     100 |  9
 (2 rows)
 
@@ -832,7 +869,7 @@ select * from t1 where binary_double_infinity = 100;
 select * from t1 where binary_double_infinity = binary_double_infinity;
  binary_double_infinity | id 
 ------------------------+----
-               Infinity | 10
+                    Inf | 10
                     100 |  9
 (2 rows)
 
