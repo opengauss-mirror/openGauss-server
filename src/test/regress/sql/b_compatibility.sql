@@ -1769,5 +1769,36 @@ reset role;
 drop user use_a_1144877 cascade;
 drop user use_b_1144877 cascade;
 
+create user use_a_1144480 identified by 'A@123456';
+create user use_b_1144480 identified by 'A@123456';
+
+--超户建表和视图
+create table sql_security_1144480(id int,cal int);
+insert into sql_security_1144480 values(1,1);
+insert into sql_security_1144480 values(2,2);
+insert into sql_security_1144480 values(3,3);
+
+create schema s_1144480;
+create table s_1144480.sql_security_1144480(id int,cal int);
+insert into s_1144480.sql_security_1144480 values(2,1);
+insert into s_1144480.sql_security_1144480 values(3,2);
+insert into s_1144480.sql_security_1144480 values(4,3);
+
+grant all on schema public to use_a_1144480;
+create definer=use_a_1144480 sql security invoker view v_1144480 as select * from s_1144480.sql_security_1144480;
+create definer=use_a_1144480 sql security definer view v_1144480_1 as select * from sql_security_1144480;
+
+--普通用户a 调用 ：v_1144480 报错没有模式的权限；v_1144480_1 成功
+grant all on table s_1144480.sql_security_1144480 to use_a_1144480;
+grant all on table sql_security_1144480 to use_a_1144480;
+set role use_a_1144480 password 'A@123456';
+select * from v_1144480 order by 1,2;
+select * from v_1144480_1 order by 1,2;
+
+reset role;
+drop schema s_1144480 cascade;
+drop user use_b_1144480 cascade;
+drop user use_a_1144480 cascade;
+
 \c regression
 drop database db_a1144877;
