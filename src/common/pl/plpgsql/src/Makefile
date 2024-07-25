@@ -71,8 +71,10 @@ ifdef BISON
 	$(BISON) -d $(BISONFLAGS) -o $@ $<
 	$(PERL) $(top_builddir)/src/mtlocal.pl $(srcdir)/pl_gram.cpp
 	$(PERL) $(top_builddir)/src/mtlocal.pl $(srcdir)/pl_gram.hpp
+	sed -i 's/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g' $(srcdir)/pl_gram.cpp
 else
 	@$(missing) bison $< $@
+	sed -i 's/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g' $(srcdir)/pl_gram.cpp
 endif
 
 # generate plerrcodes.h from src/backend/utils/errcodes.txt
