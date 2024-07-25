@@ -607,6 +607,7 @@ int SocketBackend(StringInfo inBuf)
         case 'I': /* Push, Pop schema name */
         case 'L': /* Link gc_fdw */
         case 'J': /* Trace ID */
+        case 'V': /* client conn driver support trace info*/
             break;
 
         case 'X': /* terminate */
@@ -619,6 +620,7 @@ int SocketBackend(StringInfo inBuf)
         case 'C': /* close */
         case 'D': /* describe */
         case 'E': /* execute */
+        case 'K': /* client conn driver net_time */
         case 'H': /* flush */
         case 'P': /* parse */
             u_sess->postgres_cxt.doing_extended_query_message = true;
@@ -6621,9 +6623,14 @@ void ProcessInterrupts(void)
             pgstat_report_activity(STATE_IDLE, NULL);
             ereport(FATAL,
                 (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating snapshot process due to administrator command")));
-        } else
+        } else {
+            /* handle when remote conn lost like session timeout */
+            if (!u_sess->statement_cxt.previous_stmt_flushed) {
+                handle_commit_previous_metirc_context();
+            }
             ereport(FATAL,
                 (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating connection due to administrator command")));
+        }   
     }
     if (t_thrd.int_cxt.ClientConnectionLost && !u_sess->stream_cxt.in_waiting_quit) {
         t_thrd.int_cxt.QueryCancelPending = false;   /* lost connection trumps QueryCancel */
@@ -7738,6 +7745,56 @@ void LoadSqlPlugin()
 }
 #endif
 
+/* handle and commit previous stmt metric context in jdbc trace mode. */
+void handle_commit_previous_metirc_context() {
+    /* handle local time info to metricContext*/
+    update_sql_state();
+    /* commit metricContext to statementFlush */
+    commit_metirc_context();
+}
+
+/* handle when connection closed*/
+void deal_fronted_lost()
+ {
+    /* unified auditing logout */
+    audit_processlogout_unified();
+
+    /*
+    * isSingleMode means we are doing initdb. Some temp tables
+    * will be created to store intermediate result, so should do cleaning
+    * when finished.
+    * xc_maintenance_mode is for cluster resize, temp table created
+    * during it should be clean too.
+    * Drop temp schema if IS_SINGLE_NODE.
+    */
+    RemoveTempNamespace();
+
+    InitThreadLocalWhenSessionExit();
+
+    if (IS_THREAD_POOL_WORKER) {
+        (void)gs_signal_block_sigusr2();
+        t_thrd.threadpool_cxt.worker->CleanUpSession(false);
+        (void)gs_signal_unblock_sigusr2();
+        return;
+    } else {
+        /*
+        * Reset whereToSendOutput to prevent ereport from attempting
+        * to send any more messages to client.
+        */
+        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+            t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+
+        /*
+        * NOTE: if you are tempted to add more code here, DON'T!
+        * Whatever you had in mind to do should be set up as an
+        * on_proc_exit or on_shmem_exit callback, instead. Otherwise
+        * it will fail to be called during other backend-shutdown
+        * scenarios.
+        */
+        proc_exit(0);
+    }
+ }
+
 /* ----------------------------------------------------------------
  * PostgresMain
  *	   openGauss main loop -- all backends, interactive or otherwise start here
@@ -8605,6 +8662,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     bool template0_locked = false;
     OgRecordOperator _local_tmp_opt(false, SRT13_BEFORE_QUERY);
     OgRecordOperator _local_tmp_opt1(false, SRT14_AFTER_QUERY);
+
+    bool query_started = false;
     /*
      * Non-error queries loop here.
      */
@@ -8732,6 +8791,18 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             pgstat_report_unique_sql_id(true);
 
             u_sess->trace_cxt.trace_id[0] = '\0';
+
+            /* update our elapsed time statistics. */
+            if (og_time_record_is_started()) {
+                _local_tmp_opt.exit();
+            }
+            timeInfoRecordEnd(u_sess->statement_cxt.nettime_trace_is_working);
+
+            if (u_sess->statement_cxt.nettime_trace_is_working) {
+                send_dbtime_to_driver(u_sess->statement_cxt.total_db_time);
+                u_sess->statement_cxt.total_db_time = 0;
+            } 
+
             /*
              * If connection to client is lost, we do not need to send message to client.
              */
@@ -8762,11 +8833,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 UnsetGlobalSnapshotData();
             }
 #endif
-            /* update our elapsed time statistics. */
-            if (og_time_record_is_started()) {
-                _local_tmp_opt.exit();
-            }
-            timeInfoRecordEnd();
 
             /* reset unique_sql_id & stat
              *
@@ -8776,9 +8842,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
              * lost the unique sql entry.
              */
             ReportQueryStatus();
-            statement_commit_metirc_context();
-            ResetCurrentUniqueSQL();
-
+            statement_commit_metirc_context(u_sess->statement_cxt.nettime_trace_is_working);
+            if (u_sess->statement_cxt.nettime_trace_is_working) {
+                u_sess->statement_cxt.previous_stmt_flushed = false;
+            } else {
+                ResetCurrentUniqueSQL();
+            }
+            query_started = false;
             send_ready_for_query = false;
         } else {
             /* update our elapsed time statistics. */
@@ -8886,6 +8956,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #ifdef USE_SPQ
         t_thrd.spq_ctx.spq_role = ROLE_UTILITY; 
 #endif
+        if (!query_started) {
+            query_started = true;
+            u_sess->statement_cxt.nettime_trace_is_working = nettime_trace_is_working();        
+        }
+        
         /* update our elapsed time statistics. */
         timeInfoRecordStart();
         _local_tmp_opt1.enter();
@@ -9166,6 +9241,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 
                 pgstatCountSQL4SessionLevel();
+
+                if (!u_sess->statement_cxt.previous_stmt_flushed) {
+                    handle_commit_previous_metirc_context();
+                    u_sess->statement_cxt.previous_stmt_flushed = true;
+                }
                 statement_init_metric_context();
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
@@ -9928,50 +10008,44 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 }
             } break;
 
+            case 'K': /* client conn info net_time*/
+            {
+                int64 net_trans_time = pq_getmsgint64(&input_message);
+                u_sess->stat_cxt.localTimeInfoArray[NET_TRANS_TIME] = net_trans_time;
+                handle_commit_previous_metirc_context();
+                u_sess->statement_cxt.previous_stmt_flushed = true;
+                ResetCurrentUniqueSQL();
+
+            } break;
+
                 /*
-                 * 'X' means that the frontend is closing down the socket. EOF
-                 * means unexpected loss of frontend connection. Either way,
-                 * perform normal shutdown.
+                 * 'V' means remote client driver support trace, for low version server,
+                 * client does not send this message.
+                 */
+            case 'V':
+                u_sess->statement_cxt.remote_support_trace = true;
+                query_started = false;
+                break;
+
+                /*
+                 * 'X' means that the frontend is closing down the socket.
+                 * means unexpected loss of frontend connection. perform
+                 * normal shutdown.
                  */
             case 'X':
-            case EOF:
-                /* unified auditing logout */
-                audit_processlogout_unified();
-
-                /*
-                 * isSingleMode means we are doing initdb. Some temp tables
-                 * will be created to store intermediate result, so should do cleaning
-                 * when finished.
-                 * xc_maintenance_mode is for cluster resize, temp table created
-                 * during it should be clean too.
-                 * Drop temp schema if IS_SINGLE_NODE.
+                deal_fronted_lost();
+                break;
+                
+                /* EOF means unexpected loss of frontend connection. Either way,
+                 * perform normal shutdown.
                  */
-                RemoveTempNamespace();
-
-                InitThreadLocalWhenSessionExit();
-
-                if (IS_THREAD_POOL_WORKER) {
-                    (void)gs_signal_block_sigusr2();
-                    t_thrd.threadpool_cxt.worker->CleanUpSession(false);
-                    (void)gs_signal_unblock_sigusr2();
-                    break;
-                } else {
-                    /*
-                     * Reset whereToSendOutput to prevent ereport from attempting
-                     * to send any more messages to client.
-                     */
-                    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-                        t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-
-                    /*
-                     * NOTE: if you are tempted to add more code here, DON'T!
-                     * Whatever you had in mind to do should be set up as an
-                     * on_proc_exit or on_shmem_exit callback, instead. Otherwise
-                     * it will fail to be called during other backend-shutdown
-                     * scenarios.
-                     */
-                    proc_exit(0);
+            case EOF:
+                if (!u_sess->statement_cxt.previous_stmt_flushed) {
+                    handle_commit_previous_metirc_context();
                 }
+                deal_fronted_lost();
+                break;
+
                 /* fall through */
             case 'd': /* copy data */
             case 'c': /* copy done */

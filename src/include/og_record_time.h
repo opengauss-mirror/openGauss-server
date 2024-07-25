@@ -61,11 +61,13 @@ typedef enum TimeInfoType {
     SRT13_BEFORE_QUERY,
     SRT14_AFTER_QUERY,
     RTT_UNKNOWN,
+    NET_TRANS_TIME,
     TOTAL_TIME_INFO_TYPES
 } TimeInfoType;
 
 // some procedure use old postion, so we define this.
 const TimeInfoType TOTAL_TIME_INFO_TYPES_P1 = SRT1_Q;
+const TimeInfoType TOTAL_TIME_INFO_TYPES_P2 = NET_TRANS_TIME;
 
 typedef enum NetInfoType {
     NET_SEND_TIMES,
@@ -177,6 +179,7 @@ const char* og_record_time_type_str(const RecordType& record_type);
  * @return const char* desc
  */
 const char* og_record_time_type_str(int pos);
+
 
 #ifdef _cplusplus
 }

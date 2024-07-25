@@ -39,7 +39,8 @@
 
 void statement_init_metric_context();
 void statement_init_metric_context_if_needs();
-void statement_commit_metirc_context();
+void statement_commit_metirc_context(bool commit_delay = false);
+void commit_metirc_context();
 void release_statement_context(PgBackendStatus* beentry, const char* func, int line);
 void* bind_statement_context();
 

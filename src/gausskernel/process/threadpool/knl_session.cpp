@@ -1172,6 +1172,11 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
     statement_cxt->query_plan_threshold_active = false;
     statement_cxt->is_exceed_query_plan_threshold = false;
     statement_cxt->record_query_plan_fin_time = 0;
+
+    statement_cxt->remote_support_trace = false;
+    statement_cxt->previous_stmt_flushed = true;
+    statement_cxt->nettime_trace_is_working = false;
+    statement_cxt->total_db_time = 0;
 }
 
 void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)

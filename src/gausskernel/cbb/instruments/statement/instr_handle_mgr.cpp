@@ -113,7 +113,7 @@ void statement_init_metric_context()
     }
     init_full_sql_wait_events();
 
-    /* commit for previous allocated handle */
+    /* commit for previous allocated handle like PBE/PBE...S*/
     if (u_sess->statement_cxt.curStatementMetrics != NULL) {
         statement_commit_metirc_context();
     }
@@ -390,17 +390,9 @@ static void print_stmt_debug_log()
     print_stmt_wait_event_log(log_level);
 }
 
-/* put current handle to suspend list */
-void statement_commit_metirc_context()
-{
+
+void commit_metirc_context() {
     CHECK_STMT_HANDLE();
-
-    instr_stmt_report_stat_at_handle_commit();
-
-    instr_stmt_diff_wait_events();
-    u_sess->statement_cxt.enable_wait_events_bitmap = false;
-    print_stmt_debug_log();
-
     (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
 
     /*
@@ -418,7 +410,7 @@ void statement_commit_metirc_context()
         CURRENT_STMT_METRIC_HANDLE->slow_query_threshold &&
         CURRENT_STMT_METRIC_HANDLE->slow_query_threshold >= 0 &&
         (!u_sess->attr.attr_common.track_stmt_parameter ||
-         (u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->timeModel[0] > 0))))) {
+        (u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->timeModel[0] > 0))))) {
         /* need to persist, put to suspend list */
         CURRENT_STMT_METRIC_HANDLE->next = u_sess->statement_cxt.suspendStatementList;
         u_sess->statement_cxt.suspendStatementList = CURRENT_STMT_METRIC_HANDLE;
@@ -435,7 +427,23 @@ void statement_commit_metirc_context()
 
     ereport(DEBUG1, (errmodule(MOD_INSTR),
         errmsg("[Statement] commit - free list length: %d, suspend list length: %d",
-               u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
+            u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
+}
+
+/* put current handle to suspend list */
+void statement_commit_metirc_context(bool commit_delay)
+{
+    CHECK_STMT_HANDLE();
+
+    instr_stmt_report_stat_at_handle_commit();
+
+    instr_stmt_diff_wait_events();
+    u_sess->statement_cxt.enable_wait_events_bitmap = false;
+    print_stmt_debug_log();
+    
+    if (!commit_delay) {
+        commit_metirc_context();
+    }
 }
 
 void release_statement_context(PgBackendStatus* beentry, const char* func, int line)

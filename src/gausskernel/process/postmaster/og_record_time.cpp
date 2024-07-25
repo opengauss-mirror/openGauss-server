@@ -50,6 +50,7 @@ const char* TimeInfoTypeName[] = {
         "SRT13_BEFORE_QUERY",
         "SRT14_AFTER_QUERY",
         "RTT_UNKNOWN",
+        "NET_TRANS_TIME",
         "NET_SEND_TIMES",
         "NET_SEND_N_CALLS",
         "NET_SEND_SIZE",
@@ -541,6 +542,7 @@ void OgRecordStat::report_start(const OgTimeDataVo& data_record)
 
 void OgRecordStat::report_end(const OgTimeDataVo& record)
 {
+
     // assert not records_stack.is_empty()
     OgTimeDataVo& time_vo = records_stack.top();
     if (record != time_vo) {

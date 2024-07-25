@@ -554,10 +554,13 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     set_stmt_advise(statementInfo, values, nulls, &i);
     /* time info addition */
     values[i++] = Int64GetDatum(statementInfo->timeModel[NET_SEND_TIME]);
-    for (int num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+    for (int num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES_P2; num++) {
         values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
     }
     values[i++] = Int64GetDatum(statementInfo->parent_query_id);
+    for (int num = TOTAL_TIME_INFO_TYPES_P2; num < TOTAL_TIME_INFO_TYPES; num++) {
+        values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
+    }
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }

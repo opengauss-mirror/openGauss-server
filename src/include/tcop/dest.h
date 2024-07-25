@@ -169,6 +169,7 @@ extern DestReceiver* CreateDestReceiver(CommandDest dest);
 extern DestReceiver* CreateReceiverForMerge(CommandDest dest);
 extern void EndCommand(const char* commandTag, CommandDest dest);
 extern void EndCommand_noblock(const char* commandTag, CommandDest dest);
+extern void send_dbtime_to_driver(int64 db_time);
 
 /* Additional functions that go with destination management, more or less. */
 
