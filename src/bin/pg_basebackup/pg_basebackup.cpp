@@ -1649,6 +1649,7 @@ int main(int argc, char **argv)
 {
     progname = get_progname(argv[0]);
     if (!strcmp(progname, "gs_basebackup")) {
+        init_audit(progname, argc, argv);
         return GsBaseBackup(argc, argv);
     } else if (!strcmp(progname, "gs_tar")) {
         return GsTar(argc, argv);
@@ -2277,7 +2278,7 @@ static int GsBaseBackup(int argc, char** argv)
     free_basebackup();
 
     pg_log(stderr, _("%s: base backup successfully\n"), progname);
-
+    audit_success();
     return 0;
 }
 
