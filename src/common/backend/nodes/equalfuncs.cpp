@@ -1270,6 +1270,7 @@ static bool _equalCursorExpression(const CursorExpression* a, const CursorExpres
     COMPARE_STRING_FIELD(raw_query_str);
     COMPARE_NODE_FIELD(param);
     COMPARE_SCALAR_FIELD(location);
+    COMPARE_SCALAR_FIELD(is_simple_select_target);
     return true;
 }
 

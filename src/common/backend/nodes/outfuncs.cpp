@@ -4160,6 +4160,7 @@ static void _outCursorExpression(StringInfo str, CursorExpression* node)
     WRITE_STRING_FIELD(raw_query_str);
     WRITE_NODE_FIELD(param);
     WRITE_INT_FIELD(location);
+    WRITE_BOOL_FIELD(is_simple_select_target);
 }
 
 

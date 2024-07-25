@@ -5162,7 +5162,7 @@ Oid deparseNodeForInputype(Expr *expr, NodeTag type, float8 val)
 
     if (type == T_NanTest) {
         argexpr = ((NanTest *) expr)->arg;
-    } else if (type = T_InfiniteTest) {
+    } else if (type == T_InfiniteTest) {
         argexpr = ((InfiniteTest *) expr)->arg;
     } else {
         ereport(ERROR,
@@ -5888,6 +5888,15 @@ static Datum ExecEvalCursorExpression(CursorExpressionState* state, ExprContext*
         *isDone = ExprSingleResult;
     }
     *isNull = false;
+
+    /*
+     * we will never access the protal later when the cursor expression is in a simple target query, such as query: select a, cursor("select xxx") from xx,
+     * so in this case we no need to create the protal and just need to return a dummy portal name
+     */
+    if (cursor_expression->is_simple_select_target == true) {
+        portal_name = pstrdup("<unnamed portal>");
+        return CStringGetTextDatum(portal_name);
+    }
 
     portal = CreateNewPortal(false);
     oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));

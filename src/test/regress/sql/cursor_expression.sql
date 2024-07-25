@@ -522,7 +522,13 @@ end;
 /
 call pro_cursor_0011_02();
 
+-- test insert as select cursor
+create table test_insert(c1 varchar, c2 varchar);
+insert into test_insert SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d;
+select * from test_insert;
+
 -- clean
+drop table test_insert;
 drop procedure pro_cursor_0011_02;
 drop table t_cursor_0011_01;
 drop table t_cursor_0011_02;

@@ -200,9 +200,9 @@ NOTICE:            last_name_name2 : t
 (1 row)
 
 select * from v1;
- department_name |      ?column?       
------------------+---------------------
- sale            | <unnamed portal 27>
+ department_name |     ?column?     
+-----------------+------------------
+ sale            | <unnamed portal>
 (1 row)
 
 drop schema cursor_expression_dump cascade;

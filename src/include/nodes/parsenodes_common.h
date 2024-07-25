@@ -654,6 +654,7 @@ typedef struct CursorExpression {
     char * raw_query_str;  /* cursor expression raw query string*/
     List* param;      /* cursor expression param. used to passed outer var to expression query*/
     int location;     /* token location, or -1 if unknown */
+    bool is_simple_select_target;  /* plpgsql will set it as true and simple query will set it as false */
 } CursorExpression;
 
 /* ----------------------
