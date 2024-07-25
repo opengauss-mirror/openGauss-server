@@ -98,7 +98,7 @@ SELECT TO_BINARY_FLOAT(1.79769313486231E+100);
 SELECT TO_BINARY_FLOAT(2.22507485850720E-100);
  to_binary_float 
 -----------------
-       -Infinity
+               0
 (1 row)
 
 SELECT TO_BINARY_FLOAT(1.79769313486231E+310); -- error: overflow
@@ -175,7 +175,7 @@ SELECT TO_BINARY_FLOAT(c1 DEFAULT NULL ON CONVERSION ERROR) FROM tbf ORDER By c1
                8
 (8 rows)
 
-SELECT TO_BINARY_FLOAT(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tbf ORDER By c1;  -- error， column can't be default param
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tbf ORDER By c1;  -- errorя╝М column can't be default param
 ERROR:  Default param can't be ColumnRef
 SELECT TO_BINARY_FLOAT(c2 DEFAULT 3.14 ON CONVERSION ERROR) FROM tbf ORDER By c1;
  to_binary_float 
@@ -434,6 +434,18 @@ SELECT TO_BINARY_FLOAT('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR);
 SELECT TO_BINARY_FLOAT('today' DEFAULT 'roll' ON CONVERSION ERROR);  -- error
 ERROR:  invalid input syntax for type real
 CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(3.402E+100);
+ to_binary_float 
+-----------------
+        Infinity
+(1 row)
+
+SELECT TO_BINARY_FLOAT('test' DEFAULT 3.04E+100 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+        Infinity
+(1 row)
+
 -- test overflow and null
 SELECT TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 3.14 ON CONVERSION ERROR);
  to_binary_float 
@@ -444,7 +456,7 @@ SELECT TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 3.14 ON CONVERSION ERROR);
 SELECT TO_BINARY_FLOAT(2.22507485850720E-100 DEFAULT 3.14 ON CONVERSION ERROR);
  to_binary_float 
 -----------------
-       -Infinity
+               0
 (1 row)
 
 SELECT TO_BINARY_FLOAT('1.79769313486231E+100' DEFAULT 3.14 ON CONVERSION ERROR);
@@ -531,6 +543,72 @@ SELECT TO_BINARY_FLOAT(NULL DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR)
                 
 (1 row)
 
+-- test zero
+SELECT TO_BINARY_FLOAT(0);
+ to_binary_float 
+-----------------
+               0
+(1 row)
+
+SELECT TO_BINARY_FLOAT('test' DEFAULT 0 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+               0
+(1 row)
+
+SELECT TO_BINARY_FLOAT(0 DEFAULT 0 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+               0
+(1 row)
+
+SELECT TO_BINARY_FLOAT(0 DEFAULT 123 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+               0
+(1 row)
+
+-- test negetive
+CREATE TABLE t_ne (c1 float4);
+INSERT INTO t_ne VALUES (3.402E+38);
+INSERT INTO t_ne VALUES (-3.402E+38);
+SELECT c1, TO_BINARY_FLOAT(c1) FROM t_ne;
+     c1     | to_binary_float 
+------------+-----------------
+  3.402e+38 |       3.402e+38
+ -3.402e+38 |      -3.402e+38
+(2 rows)
+
+SELECT TO_BINARY_FLOAT(-3.402E+38);
+ to_binary_float 
+-----------------
+      -3.402e+38
+(1 row)
+
+SELECT TO_BINARY_FLOAT('test' DEFAULT 3.402E+38 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+       3.402e+38
+(1 row)
+
+SELECT TO_BINARY_FLOAT('test' DEFAULT -3.402E+38 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+      -3.402e+38
+(1 row)
+
+SELECT TO_BINARY_FLOAT(-3.402E+100);
+ to_binary_float 
+-----------------
+       -Infinity
+(1 row)
+
+SELECT TO_BINARY_FLOAT('test' DEFAULT -3.04E+100 ON CONVERSION ERROR);
+ to_binary_float 
+-----------------
+       -Infinity
+(1 row)
+
 -- pbe
 CREATE TABLE tbf2 (c1 int, func_info text, res float4);
 PREPARE default_param_text2(int, text, text) AS INSERT INTO tbf2 VALUES ($1, CONCAT('TO_BINARY_FLOAT(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_BINARY_FLOAT($2 DEFAULT $3 ON CONVERSION ERROR));
@@ -606,4 +684,5 @@ SELECT * FROM tbf2 ORDER BY c1;
 
 DROP TABLE tbf;
 DROP TABLE tbf2;
+DROP TABLE t_ne;
 drop schema if exists func_tbf cascade;
