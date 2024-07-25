@@ -650,6 +650,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_aio                                    | bool    |      |           | 
  ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 
+ ss_enable_dynamic_trace                          | bool    |      |           | 
+ ss_enable_reform_trace                           | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 
  ss_enable_ondemand_realtime_build                | bool    |      |           | 

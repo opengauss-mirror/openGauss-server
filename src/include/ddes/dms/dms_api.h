@@ -34,15 +34,19 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           160
+#define DMS_LOCAL_VERSION           162
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
 #ifdef OPENGAUSS
 #define DMS_PAGEID_SIZE         24  // openGauss bufferTag size
 #else
-#define DMS_PAGEID_SIZE         16
+#define DMS_PAGEID_SIZE         8
 #endif
+#define DMS_ALOCK_NAME_SIZE     128
+#define DMS_ALOCKID_SIZE        sizeof(alockid_t)
+#define DMS_DRID_SIZE           sizeof(dms_drid_t)
+#define DMS_RESID_SIZE          DMS_ALOCKID_SIZE
 
 #define DMS_XID_SIZE            12
 #define DMS_INSTANCES_SIZE      4
@@ -153,33 +157,26 @@ typedef struct st_dms_drid {
         struct {
             unsigned long long key1;
             unsigned long long key2;
-            unsigned int key3;
+            unsigned long long key3;
         };
         struct {
-            unsigned short  type;  // lock type
-            union {
-                unsigned short  uid;   // user id, for table lock resource
-                unsigned short  len;
-            };
-            union {
-                struct {
-                    unsigned int    oid;   // lock id
-                    unsigned int    index; // index id
-                    unsigned int    parent_part;  // parent partition id
-                    unsigned int    part;  // partition id
-                };
-                struct {
-                    unsigned long long oid_64;
-                    unsigned long long unused;
-                };
-                struct {
-                    unsigned char resid[DMS_DRID_CTX_SIZE];
-                };
-            };
+            unsigned short      type;
+            unsigned short      uid;
+            unsigned int        index;
+            unsigned long long  oid;
+            unsigned int        parent;
+            unsigned int        part;
         };
     };
 } dms_drid_t;
 #pragma pack()
+
+typedef struct st_alockid {
+    char                name[DMS_ALOCK_NAME_SIZE];
+    unsigned char       len;
+    unsigned char       type;
+    unsigned char       unused[2];
+} alockid_t;
 
 typedef enum en_drc_res_type {
     DRC_RES_INVALID_TYPE,
@@ -190,6 +187,7 @@ typedef enum en_drc_res_type {
     DRC_RES_LOCAL_TXN_TYPE,
     DRC_RES_LOCK_ITEM_TYPE,
     DRC_RES_GLOBAL_XA_TYPE,
+    DRC_RES_ALOCK_TYPE,
     DRC_RES_TYPE_MAX_COUNT,
 } drc_res_type_e;
 
@@ -262,9 +260,6 @@ typedef struct st_dms_cr_assist_t {
     dms_cr_phase_t phase;                   /* OUT parameter */
     dms_cr_status_t status;                 /* OUT parameter */
 } dms_cr_assist_t;
-
-#define DMS_RESID_SIZE  132
-#define DMS_DRID_SIZE   sizeof(dms_drid_t)
 
 typedef struct st_dms_drlock {
     dms_drid_t      drid;
@@ -620,6 +615,8 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DCS_REQ_XA_IN_USE,
     DMS_EVT_DCS_REQ_END_XA,
     DMS_EVT_REQ_CKPT,
+    DMS_EVT_PROC_GENERIC_REQ,
+    DMS_EVT_PROC_REFORM_REQ,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -1000,6 +997,7 @@ typedef int (*dms_az_failover_promote_resetlog)(void *db_handle);
 typedef int (*dms_az_failover_promote_phase2)(void *db_handle);
 typedef int (*dms_check_shutdown_consistency)(void *db_handle, instance_list_t *old_remove);
 typedef int (*dms_check_db_readwrite)(void *db_handle);
+typedef unsigned int (*dms_check_is_maintain)();
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1187,6 +1185,7 @@ typedef struct st_dms_callback {
     dms_get_alock_wait_info get_alock_wait_info;
     dms_check_shutdown_consistency check_shutdown_consistency;
     dms_check_db_readwrite check_db_readwrite;
+    dms_check_is_maintain check_is_maintain;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1251,6 +1250,8 @@ typedef struct st_dms_profile {
     unsigned char enable_mes_task_threadpool;
     unsigned int mes_task_worker_max_cnt;
     unsigned int max_alive_time_for_abnormal_status;
+    unsigned char enable_dyn_trace;
+    unsigned char enable_reform_trace;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -1347,8 +1348,6 @@ typedef struct st_dms_tlock_info {
     unsigned char unused[3];
 } dms_tlock_info_t;
 
-typedef dms_tlock_info_t dms_alock_info_t;
-
 typedef struct thread_info {
     char thread_name[DMS_MAX_NAME_LEN];
     void *thread_info;
@@ -1358,6 +1357,12 @@ typedef struct thread_set {
     thread_info_t threads[MAX_DMS_THREAD_NUM];
     int thread_count;
 } thread_set_t;
+
+typedef struct st_dms_alock_info {
+    alockid_t alockid;
+    unsigned char lock_mode;
+    unsigned char unused[3];
+} dms_alock_info_t;
 
 typedef struct st_driver_ping_info {
     unsigned long long rw_bitmap;

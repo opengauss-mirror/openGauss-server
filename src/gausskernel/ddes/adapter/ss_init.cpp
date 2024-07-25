@@ -395,6 +395,8 @@ static void set_dms_fi()
 static void setDMSProfile(dms_profile_t* profile)
 {
     knl_instance_attr_dms* dms_attr = &g_instance.attr.attr_storage.dms_attr;
+    profile->enable_dyn_trace = dms_attr->enable_dyn_trace;
+    profile->enable_reform_trace = dms_attr->enable_reform_trace;
     profile->resource_catalog_centralized = (unsigned int)dms_attr->enable_catalog_centralized;
     profile->inst_id = (uint32)dms_attr->instance_id;
     profile->page_size = BLCKSZ;
