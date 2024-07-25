@@ -131,6 +131,12 @@ extern void appendStringInfoString(StringInfo str, const char* s);
 extern void appendStringInfoChar(StringInfo str, char ch);
 
 /* ------------------------
+ * popStringInfoChar
+ * Pop a single byte to str..
+ */
+extern void popStringInfoChar(StringInfo str);
+
+/* ------------------------
  * appendStringInfoCharMacro
  * As above, but a macro for even more speed where it matters.
  * Caution: str argument will be evaluated multiple times.
