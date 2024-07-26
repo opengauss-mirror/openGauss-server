@@ -633,15 +633,15 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
             }
         }
 
-         ParallelIndexScanDescData *paralleDesc = NULL;
-                if (u_sess->stream_cxt.global_obj && node->ss.ps.plan->dop > 1) {
-                    if (WorkerThreadAmI()) {
-                        u_sess->stream_cxt.global_obj->BuildStreamDesc(estate->es_plannedstmt->queryId, index_state->ss.ps.plan);
-                    }
-                    paralleDesc = (ParallelIndexScanDescData*)u_sess->stream_cxt.global_obj->GetParalleDesc(estate->es_plannedstmt->queryId, index_state->ss.ps.plan->plan_node_id);
-                    if (WorkerThreadAmI())
-                        scan_handler_idx_parallelscan_initialize(current_relation, index_state->iss_RelationDesc, paralleDesc);
-                }
+        ParallelIndexScanDescData *paralleDesc = NULL;
+        if (u_sess->stream_cxt.global_obj && node->ss.ps.plan->dop > 1) {
+            if (WorkerThreadAmI()) {
+                u_sess->stream_cxt.global_obj->BuildStreamDesc(estate->es_plannedstmt->queryId, index_state->ss.ps.plan);
+            }
+            paralleDesc = (ParallelIndexScanDescData*)u_sess->stream_cxt.global_obj->GetParalleDesc(estate->es_plannedstmt->queryId, index_state->ss.ps.plan->plan_node_id);
+            if (WorkerThreadAmI())
+                scan_handler_idx_parallelscan_initialize(current_relation, index_state->iss_RelationDesc, paralleDesc);
+        }
 
         /*
          * Initialize scan descriptor.
