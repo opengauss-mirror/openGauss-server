@@ -364,6 +364,7 @@ Node* transformExpr(ParseState* pstate, Node* expr, ParseExprKind exprKind)
     sv_expr_kind = pstate->p_expr_kind;
     pstate->p_expr_kind = exprKind;
 
+    pstate->p_expr_transform_level = 0;
     result = transformExprRecurse(pstate, expr);
 
     pstate->p_expr_kind = sv_expr_kind;
@@ -380,6 +381,7 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
     }
     /* Guard against stack overflow due to overly complex expressions */
     check_stack_depth();
+    pstate->p_expr_transform_level++;
 
     switch (nodeTag(expr)) {
         case T_ColumnRef:
@@ -1903,7 +1905,7 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
                 if (i != seq) {
                     dopControl.CloseSmp();
                 }
-                lfirst(args) = transformCursorExpression(pstate, (CursorExpression*)arg);
+                lfirst(args) = transformExprRecurse(pstate, arg);
                 dopControl.ResetSmp();
             }
             i++;
@@ -3941,6 +3943,13 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
     newm->options = cursor_expression->options;
     newm->raw_query_str = queryString;
     newm->param = (List*)copyObject(parse_state_parent->cursor_expression_para_var);
+
+    if (pstate->p_pre_columnref_hook == NULL && pstate->p_post_columnref_hook == NULL &&
+        pstate->p_expr_kind == EXPR_KIND_SELECT_TARGET && pstate->p_expr_transform_level == 1) {
+        newm->is_simple_select_target = true;
+    } else {
+        newm->is_simple_select_target =  false;
+    }
 
     list_free_ext(stmt_list);
     list_free_ext(raw_parsetree_list);

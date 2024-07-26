@@ -1712,6 +1712,7 @@ static CursorExpression* _readCursorExpression(void)
     READ_STRING_FIELD(raw_query_str);
     READ_NODE_FIELD(param);
     READ_INT_FIELD(location);
+    READ_BOOL_FIELD(is_simple_select_target);
     READ_DONE();
 }
 

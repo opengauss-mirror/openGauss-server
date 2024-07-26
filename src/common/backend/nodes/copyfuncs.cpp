@@ -5338,6 +5338,7 @@ static CursorExpression* _copyCursorExpression(const CursorExpression* from)
     COPY_STRING_FIELD(raw_query_str);
     COPY_NODE_FIELD(param);
     COPY_SCALAR_FIELD(location);
+    COPY_SCALAR_FIELD(is_simple_select_target);
     return newnode;
 }
 
