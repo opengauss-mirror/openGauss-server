@@ -927,7 +927,7 @@ void UHeapamScanMarkpos(TableScanDesc sscan)
 
 void UHeapamScanInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
 {
-    return UeapInitParallelSeqscan(sscan, dop, dir);
+    return UHeapInitParallelSeqscan(sscan, dop, dir);
 }
 
 void UHeapamScanEndscan(TableScanDesc sscan)

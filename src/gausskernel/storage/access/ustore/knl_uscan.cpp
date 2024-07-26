@@ -1206,7 +1206,7 @@ void UHeapRestRpos(TableScanDesc sscan)
     }
 }
 
-void UeapInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
+void UHeapInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir)
 {
     HeapScanDesc scan = (HeapScanDesc) sscan;
 
