@@ -9656,17 +9656,35 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
 
             /* Source must be of RECORD or composite type */
             if (!type_is_rowtype(valtype)) {
-                Datum values[1] = {value};
-                bool nulls[1] = {false};
-                HeapTuple tuple = NULL;
+                if (value != 0) {
+                    Datum values[1] = {value};
+                    bool nulls[1] = {false};
+                    HeapTuple tuple = NULL;
 
-                tupdesc = CreateTemplateTupleDesc(1, false);
-                TupleDescInitEntry(tupdesc, (AttrNumber)1, "datum", valtype, -1, 0);
-                tuple = (HeapTuple)tableam_tops_form_tuple(tupdesc, values, nulls);
+                    tupdesc = CreateTemplateTupleDesc(1, false);
+                    TupleDescInitEntry(tupdesc, (AttrNumber)1, "datum", valtype, -1, 0);
+                    tuple = (HeapTuple)tableam_tops_form_tuple(tupdesc, values, nulls);
 
-                exec_move_row_from_fields(estate, target, tuple, tupdesc);
-                ReleaseTupleDesc(tupdesc);
-                heap_freetuple_ext(tuple);
+                    exec_move_row_from_fields(estate, target, tuple, tupdesc);
+                    ReleaseTupleDesc(tupdesc);
+                    heap_freetuple_ext(tuple);
+                } else {
+                    HeapTuple newtup = NULL;
+                    bool *newnulls;
+                    TupleDesc tupdesc = rec->tupdesc;
+                    int td_natts = tupdesc ? tupdesc->natts : 0;
+                    int rc = 0;
+                    newnulls = (bool *)palloc(td_natts * sizeof(bool));
+                    rc = memset_s(newnulls, td_natts * sizeof(bool), true, td_natts * sizeof(bool));
+                    securec_check(rc, "\0", "\0");
+                    newtup = (HeapTuple)tableam_tops_form_tuple(tupdesc, NULL, newnulls);
+                    if (rec->freetup) {
+                        heap_freetuple_ext(rec->tup);
+                    }
+                    rec->tup = newtup;
+                    rec->freetup = true;
+                    pfree_ext(newnulls);
+                }
             } else {
                 HeapTupleHeader td;
                 Oid tupType;

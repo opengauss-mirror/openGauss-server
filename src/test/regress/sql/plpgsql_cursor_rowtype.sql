@@ -4,6 +4,70 @@
 drop schema if exists plpgsql_cursor_rowtype;
 create schema plpgsql_cursor_rowtype;
 set current_schema = plpgsql_cursor_rowtype;
+
+CREATE TABLE test_2 (
+    id NUMBER PRIMARY KEY,
+    first_name VARCHAR2(50),
+    last_name VARCHAR2(50), 
+    email VARCHAR2(25) NOT NULL,
+    phone_number VARCHAR2(20),
+    hire_date DATE NOT NULL
+);
+
+INSERT INTO test_2 VALUES (100, 'John', 'Doe','john.doe@example.com', '123-4567-8901', TO_DATE('2000-01-01', 'YYYY-MM-DD'));
+INSERT INTO test_2 VALUES (101, 'Jane', 'Smith','jane.smith@example.com', '456-8324-4579', TO_DATE('1999-02-08', 'YYYY-MM-DD'));
+
+DECLARE    
+     CURSOR curtest_2(p_id INT , p_first_name VARCHAR2, p_last_name VARCHAR2 DEFAULT 'Doe') IS  
+     SELECT id, first_name, last_name, email, phone_number, hire_date  
+        FROM test_2   
+        WHERE (first_name = p_first_name)  
+          AND (last_name = p_last_name)
+          AND (id = p_id);  
+
+     v_result curtest_2%ROWTYPE;
+BEGIN  
+    v_result:=NULL;
+    raise notice 'Result: %', v_result;        
+END;  
+/
+
+DECLARE    
+     CURSOR curtest_2(p_id INT , p_first_name VARCHAR2, p_last_name VARCHAR2 DEFAULT 'Doe') IS  
+     SELECT id, first_name, last_name, email, phone_number, hire_date  
+        FROM test_2   
+        WHERE (first_name = p_first_name)  
+          AND (last_name = p_last_name)
+          AND (id = p_id);  
+
+     v_result curtest_2%ROWTYPE;
+BEGIN  
+    OPEN curtest_2(100,'John');  
+    FETCH curtest_2 INTO v_result;   
+    raise notice 'Result: %', v_result;        
+    CLOSE curtest_2; 
+
+    v_result:=NULL;
+    raise notice 'Result: %', v_result;        
+END;  
+/
+
+DECLARE    
+     CURSOR curtest_2(p_id INT , p_first_name VARCHAR2, p_last_name VARCHAR2 DEFAULT 'Doe') IS  
+     SELECT id, first_name, last_name, email, phone_number, hire_date  
+        FROM test_2   
+        WHERE (first_name = p_first_name)  
+          AND (last_name = p_last_name)
+          AND (id = p_id);  
+
+     v_result curtest_2%ROWTYPE;
+BEGIN
+    raise notice 'Result: %', v_result;        
+END;  
+/
+
+drop table test_2 cascade;
+
 set behavior_compat_options='allow_procedure_compile_check';
 
 create table emp (empno int, ename varchar(10), job varchar(10));
