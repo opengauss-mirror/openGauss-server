@@ -1024,6 +1024,27 @@ end pck_for;
 call pck_for.p1();
 drop package pck_for;
 
+create table t_Compare_Case0013(id int,first_name varchar(100), last_name varchar(100));
+create table t_CurRowtype_PLObject_Case0013(first_name varchar(100), last_name varchar(100));
+insert into t_CurRowtype_PLObject_Case0013 values('Jason','Statham');
+
+create or replace function f_CurRowtype_PLObject_Case0013() returns trigger as
+$$
+declare
+  cursor cur_1 is select * from t_CurRowtype_PLObject_Case0013;
+  source cur_1%rowtype;
+begin
+   source.first_name:=new.first_name;
+   source.last_name:=new.last_name;      
+   insert into t_Compare_Case0013 values (source.first_name,source.last_name);
+   return new;
+end
+$$ language plpgsql;
+
+drop function f_CurRowtype_PLObject_Case0013;
+drop table t_CurRowtype_PLObject_Case0013;
+drop table t_Compare_Case0013;
+
 set behavior_compat_options='';
 set plsql_compile_check_options='for_loop';
 
