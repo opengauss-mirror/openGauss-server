@@ -885,7 +885,11 @@ SELECT replace('abc', 'ab') is null;
 (1 row)
 
 SELECT replace('abc', 'abc') is null;
-ERROR:  function returned NULL
+ ?column? 
+----------
+ t
+(1 row)
+
 SELECT replace('abc', '') is null;
  ?column? 
 ----------
@@ -1781,7 +1785,16 @@ SELECT a as p1, b as p2, c as p3, replace(a, b, c) is null from replace3;
 create table replace2 (a text, b text);
 insert into replace2 values('abc', 'ab'), ('abc', 'abc'), ('abc', ''), ('abc', null), ('', 'ab'), (null, 'ab');
 SELECT a as p1, b as p2, replace(a, b) is null from replace2;
-ERROR:  function returned NULL
+ p1  | p2  | ?column? 
+-----+-----+----------
+ abc | ab  | f
+ abc | abc | t
+ abc |     | f
+ abc |     | f
+     | ab  | t
+     | ab  | t
+(6 rows)
+
 create table split_part3 (a text, b text, c int);
 insert into split_part3 values('1~2~3', '~', 3), ('1~2~3~', '~', 4), ('1~2~3', '', 1), ('1~2~3', null, 1), ('', '~', 1), (null, '~', 1);
 SELECT a as p1, b as p2, c as p3, split_part(a, b, c) is null from split_part3;
