@@ -123,7 +123,7 @@ typedef struct SortCoordinateData *SortCoordinate;
 
 extern Tuplesortstate* tuplesort_begin_heap(TupleDesc tupDesc, int nkeys, AttrNumber* attNums, Oid* sortOperators,
     Oid* sortCollations, const bool* nullsFirstFlags, int64 workMem, bool randomAccess, int64 maxMem = 0,
-    int planId = 0, int dop = 1);
+    int planId = 0, int dop = 1, SortCoordinate coordinate = NULL);
 extern Tuplesortstate* tuplesort_begin_cluster(
     TupleDesc tupDesc, Relation indexRel, int workMem, bool randomAccess, int maxMem, bool relIsUstore);
 extern Tuplesortstate* tuplesort_begin_index_btree(
