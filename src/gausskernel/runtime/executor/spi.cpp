@@ -2802,11 +2802,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
                         my_res = SPI_ERROR_COPY;
                         goto fail;
                     }
-                } else if (IsA(stmt, TransactionStmt)
-#ifndef ENABLE_MULTIPLE_NODES
-                            && !u_sess->attr.attr_sql.dolphin
-#endif
-                ) {
+                } else if (IsA(stmt, TransactionStmt)) {
                     my_res = SPI_ERROR_TRANSACTION;
                     goto fail;
                 } 
