@@ -229,6 +229,8 @@ shrink table row_compression_test_tbl1_kkk;
 shrink table row_compression_test_tbl1_kkk nowait;
 shrink table row_compression_test_tbl1_kkk_idx;
 shrink table row_compression_test_tbl1_kkk_idx nowait;
+shrink table row_compression_test_not_exist;
+shrink table row_compression_test_not_exist nowait;
 
 -- test truncate
 truncate table row_compression_test_tbl1_kkk;
