@@ -397,18 +397,30 @@ Datum float4out(PG_FUNCTION_ARGS)
     errno_t rc = EOK;
 
     if (isnan(num)) {
-        rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "NaN");
+        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Nan");
+        } else {
+            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
+        }
         securec_check_ss(rc, "\0", "\0");
         PG_RETURN_CSTRING(ascii);
     }
 
     switch (is_infinite(num)) {
         case 1:
-            rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "Infinity");
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Inf");
+            } else {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
+            }
             securec_check_ss(rc, "\0", "\0");
             break;
         case -1:
-            rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "-Infinity");
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Inf");
+            } else {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
+            }
             securec_check_ss(rc, "\0", "\0");
             break;
         default: {
@@ -627,17 +639,29 @@ Datum float8out(PG_FUNCTION_ARGS)
     errno_t rc = EOK;
 
     if (isnan(num)) {
-        rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
+        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Nan");
+        } else {
+            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
+        }
         securec_check(rc, "\0", "\0");
         PG_RETURN_CSTRING(ascii);
     }
     switch (is_infinite(num)) {
         case 1:
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Inf");
+            } else {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
+            }
             securec_check(rc, "\0", "\0");
             break;
         case -1:
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Inf");
+            } else {
+                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
+            }
             securec_check(rc, "\0", "\0");
             break;
         default: {
