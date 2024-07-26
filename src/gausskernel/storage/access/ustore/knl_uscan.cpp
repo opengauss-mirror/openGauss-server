@@ -89,36 +89,62 @@ FORCE_INLINE
 bool NextUpage(UHeapScanDesc scan, ScanDirection dir, BlockNumber& page)
 {
     bool finished = false;
-    /*
-     * advance to next/prior page and detect end of scan
-     */
-    if (BackwardScanDirection == dir) {
-        finished = (page == scan->rs_base.rs_startblock);
-        if (page == 0) {
-            page = scan->rs_base.rs_nblocks;
-        }
-        page--;
-    } else {
-        page++;
-        if (page >= scan->rs_base.rs_nblocks) {
-            page = 0;
-        }
-        finished = (page == scan->rs_base.rs_startblock);
+    if (scan->dop > 1) {
+        Assert(scan->rs_parallel == NULL);
+        if (BackwardScanDirection == dir) {
+            finished = (page == 0);
+            if (finished)
+                return finished;
+            page--;
+            if ((scan->rs_base.rs_startblock - page) % PARALLEL_SCAN_GAP == 0) {
+                page -= (scan->dop - 1) * PARALLEL_SCAN_GAP;
+            }
+        } else {
+            page++;
+            if ((page - scan->rs_base.rs_startblock) % PARALLEL_SCAN_GAP == 0) {
+                page += (scan->dop - 1) * PARALLEL_SCAN_GAP;
+            }
 
+            if (scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis) {
+                /* Parallel workers start from different point. */
+                finished =
+                    (page >= scan->rs_base.rs_startblock + scan->rs_base.rs_nblocks - PARALLEL_SCAN_GAP * u_sess->stream_cxt.smp_id);
+            } else {
+                finished = (page >= scan->rs_base.rs_nblocks);
+            }
+        }
+    } else {
         /*
-         * Report our new scan position for synchronization purposes. We
-         * don't do that when moving backwards, however. That would just
-         * mess up any other forward-moving scanners.
-         *
-         * Note: we do this before checking for end of scan so that the
-         * final state of the position hint is back at the start of the
-         * rel.  That's not strictly necessary, but otherwise when you run
-         * the same query multiple times the starting position would shift
-         * a little bit backwards on every invocation, which is confusing.
-         * We don't guarantee any specific ordering in general, though.
-         */
-        if (scan->rs_allow_sync) {
-            ss_report_location(scan->rs_base.rs_rd, page);
+        * advance to next/prior page and detect end of scan
+        */
+        if (BackwardScanDirection == dir) {
+            finished = (page == scan->rs_base.rs_startblock);
+            if (page == 0) {
+                page = scan->rs_base.rs_nblocks;
+            }
+            page--;
+        } else {
+            page++;
+            if (page >= scan->rs_base.rs_nblocks) {
+                page = 0;
+            }
+            finished = (page == scan->rs_base.rs_startblock);
+
+            /*
+            * Report our new scan position for synchronization purposes. We
+            * don't do that when moving backwards, however. That would just
+            * mess up any other forward-moving scanners.
+            *
+            * Note: we do this before checking for end of scan so that the
+            * final state of the position hint is back at the start of the
+            * rel.  That's not strictly necessary, but otherwise when you run
+            * the same query multiple times the starting position would shift
+            * a little bit backwards on every invocation, which is confusing.
+            * We don't guarantee any specific ordering in general, though.
+            */
+            if (scan->rs_allow_sync) {
+                ss_report_location(scan->rs_base.rs_rd, page);
+            }
         }
     }
 
@@ -684,6 +710,7 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys, Pa
     uscan->rs_base.rs_ntuples = 0;
     uscan->rs_cutup = NULL;
     uscan->rs_parallel = parallel_scan;
+    uscan->dop = 1;
     if (uscan->rs_parallel != NULL) {
         /* For parallel scan, believe whatever ParallelHeapScanDesc says. */
         uscan->rs_base.rs_syncscan = uscan->rs_parallel->phs_syncscan;
@@ -780,6 +807,7 @@ static void UHeapinitscan(TableScanDesc sscan, ScanKey key, bool isRescan)
     scan->rs_base.rs_inited = false;
     scan->rs_base.rs_cbuf = InvalidBuffer;
     scan->rs_base.rs_cblock = InvalidBlockNumber;
+    scan->dop = 1;
 
     if (scan->rs_base.rs_rd->rd_tam_ops == TableAmUstore) {
         scan->rs_base.lastVar = -1;

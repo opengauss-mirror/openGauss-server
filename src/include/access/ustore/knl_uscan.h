@@ -38,6 +38,7 @@ typedef struct UHeapScanDescData {
 
     /* these fields only used in page-at-a-time mode and for bitmap scans */
     int rs_mindex;                                   /* marked tuple's saved index */
+    int dop;                                         /* scan parallel degree */
 
     UHeapTuple rs_visutuples[MaxPossibleUHeapTuplesPerPage]; /* visible tuples */
     UHeapTuple rs_cutup;                             /* current tuple in scan, if any */
