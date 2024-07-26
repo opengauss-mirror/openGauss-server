@@ -32539,7 +32539,7 @@ void ShrinkCfsChunkRestore(Oid relationId, LOCKMODE lockmode, bool nowait)
     relation_close(relation, lockmode);
 }
 
-void ShrinkRealtionChunk(ShrinkStmt* shrink)
+void ShrinkRelationChunk(ShrinkStmt* shrink)
 {
     ListCell* cell = NULL;
     foreach (cell, shrink->relations) {
@@ -32553,9 +32553,11 @@ void ShrinkRealtionChunk(ShrinkStmt* shrink)
 
         reloid = RangeVarGetRelid(r, AccessShareLock, true);
         if (!OidIsValid(reloid)) {
-            continue;
+            ereport(ERROR, (errmsg("[shrink] relation %s%s%s does not exist.",
+                                   r->schemaname == NULL ? "" : r->schemaname,
+                                   r->schemaname == NULL ? "" : ".",
+                                   r->relname)));
         }
-
         ShrinkCfsChunkRestore(reloid, AccessShareLock, shrink->nowait);
     }
 }

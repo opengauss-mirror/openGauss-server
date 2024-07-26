@@ -114,7 +114,7 @@ extern void RemoveRelationsonMainExecCN(DropStmt* drop, ObjectAddresses* objects
 
 extern void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExecType* exec_type);
 
-extern void ShrinkRealtionChunk(ShrinkStmt *shrink);
+extern void ShrinkRelationChunk(ShrinkStmt *shrink);
 
 extern void RemoveObjectsonMainExecCN(DropStmt* drop, ObjectAddresses* objects, bool isFirstNode);
 

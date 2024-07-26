@@ -2527,7 +2527,7 @@ ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 #endif
 }
 
-void ExecShrinkRealtionChunkStmt(Node* parse_tree, const char* query_string, bool sent_to_remote)
+void ExecShrinkRelationChunkStmt(Node* parse_tree, const char* query_string, bool sent_to_remote)
 {
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR) {
@@ -2537,18 +2537,18 @@ void ExecShrinkRealtionChunkStmt(Node* parse_tree, const char* query_string, boo
         if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
             ExecUtilityStmtOnNodes_ParallelDDLMode(
                 query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
-            ShrinkRealtionChunk((ShrinkStmt*)(void *)parse_tree);
+            ShrinkRelationChunk((ShrinkStmt*)(void *)parse_tree);
             ExecUtilityStmtOnNodes_ParallelDDLMode(
                 query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
         } else {
-            ShrinkRealtionChunk((ShrinkStmt*)(void *)parse_tree);
+            ShrinkRelationChunk((ShrinkStmt*)(void *)parse_tree);
             ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
         }
     } else {
-        ShrinkRealtionChunk((ShrinkStmt*)(void *)parse_tree);
+        ShrinkRelationChunk((ShrinkStmt*)(void *)parse_tree);
     }
 #else
-    ShrinkRealtionChunk((ShrinkStmt*)(void *)parse_tree);
+    ShrinkRelationChunk((ShrinkStmt*)(void *)parse_tree);
 #endif
 }
 
@@ -4932,7 +4932,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
             break;
 #endif
         case T_ShrinkStmt: {
-            ExecShrinkRealtionChunkStmt(parse_tree, query_string, sent_to_remote);
+            ExecShrinkRelationChunkStmt(parse_tree, query_string, sent_to_remote);
             break;
         }
         case T_ReindexStmt: {
