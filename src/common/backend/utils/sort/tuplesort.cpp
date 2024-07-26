@@ -887,9 +887,9 @@ static Tuplesortstate* tuplesort_begin_common(int64 workMem, bool randomAccess, 
 
 Tuplesortstate* tuplesort_begin_heap(TupleDesc tupDesc, int nkeys, AttrNumber* attNums, Oid* sortOperators,
     Oid* sortCollations, const bool* nullsFirstFlags, int64 workMem, bool randomAccess, int64 maxMem, int planId,
-    int dop)
+    int dop, SortCoordinate coordinate)
 {
-    Tuplesortstate* state = tuplesort_begin_common(workMem, randomAccess);
+    Tuplesortstate* state = tuplesort_begin_common(workMem, randomAccess, coordinate);
     MemoryContext oldcontext;
     int i;
 
