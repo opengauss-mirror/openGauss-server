@@ -72,7 +72,6 @@ bool UHeapScanBitmapNextTuple(TableScanDesc sscan, TBMIterateResult *tbmres, Tup
 bool UHeapScanBitmapNextBlock(TableScanDesc sscan, const TBMIterateResult *tbmres,
                                      bool* has_cur_xact_write = NULL);
 bool UHeapGetPage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write = NULL);
-void UeapInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection dir);
 
 UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir, bool* has_cur_xact_write = NULL);
 extern bool UHeapGetTupPageBatchmode(UHeapScanDesc scan, ScanDirection dir);
