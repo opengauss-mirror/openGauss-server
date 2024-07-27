@@ -192,3 +192,21 @@ DROP USER seq_user;
 DROP SEQUENCE seq;
 drop sequence "QUOTATION_SEQ";
 drop sequence no_quotation_seq;
+
+-- uppercase sequence name
+-- public schema
+create table "T1" (c1 int, c2 int);
+create sequence "SEQ1" increment by 1 maxvalue 9223372036854775807 start with 3 cache 20;
+insert into "T1" values(128, "SEQ1".nextval);
+select * from "T1";
+drop sequence "SEQ1";
+drop table "T1";
+
+-- new schema
+create schema if not exists "NEW_SCHEMA";
+create table "NEW_SCHEMA"."T1" (c1 int, c2 int);
+create sequence "NEW_SCHEMA"."SEQ1" increment by 1 maxvalue 9223372036854775807 start with 3 cache 20;
+insert into "NEW_SCHEMA"."T1" values (128, "NEW_SCHEMA"."SEQ1".nextval);
+select * from "NEW_SCHEMA"."T1";
+drop sequence "NEW_SCHEMA"."SEQ1";
+drop table "NEW_SCHEMA"."T1";
