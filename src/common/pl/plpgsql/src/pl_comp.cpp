@@ -3876,6 +3876,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             rec->refname = pstrdup(refname);
             rec->lineno = lineno;
             rec->expr = dtype->cursorExpr;
+            rec->cursorDno = dtype->cursorDno;
             rec->addNamespace = add2namespace;
             if (ALLOW_PROCEDURE_COMPILE_CHECK) {
                 MemoryContext temp = NULL;
@@ -3883,25 +3884,27 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                 bool *nulls = NULL;
                 errno_t rc = EOK;
 
-                if(u_sess->plsql_cxt.curr_compile_context != NULL && 
-                   u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
-                    target_cxt = u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt;
-                    temp = MemoryContextSwitchTo(target_cxt);
-                }
+                if (rec->expr) {
+                    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+                        u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
+                        target_cxt = u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt;
+                        temp = MemoryContextSwitchTo(target_cxt);
+                    }
 
-                rec->tupdesc = getCursorTupleDesc(rec->expr, false, false);
+                    rec->tupdesc = getCursorTupleDesc(rec->expr, false, false);
 
-                nulls = (bool*)palloc(rec->tupdesc->natts * sizeof(bool));
-                rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
-                securec_check(rc, "\0", "\0");
+                    nulls = (bool *)palloc(rec->tupdesc->natts * sizeof(bool));
+                    rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
+                    securec_check(rc, "\0", "\0");
 
-                rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
-                rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
-                rec->freetup = (rec->tup != NULL) ? true : false;
-                pfree_ext(nulls);
+                    rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
+                    rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
+                    rec->freetup = (rec->tup != NULL) ? true : false;
+                    pfree_ext(nulls);
 
-                if (target_cxt) {
-                    temp = MemoryContextSwitchTo(temp);
+                    if (target_cxt) {
+                        temp = MemoryContextSwitchTo(temp);
+                    }
                 }
             } else {
                 rec->tup = NULL;

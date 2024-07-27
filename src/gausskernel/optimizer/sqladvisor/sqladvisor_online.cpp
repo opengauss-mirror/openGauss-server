@@ -44,7 +44,6 @@
 static bool checkGlobalAdvMemSize();
 static void copyAdviseSearchPathFromSess(AdviseSearchPath* sp);
 static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate);
-static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr);
 static PLpgSQL_nsitem* copyPLpgNsitem(PLpgSQL_nsitem* srcNs);
 static PLpgSQL_function* copyPLpgsqlFunc(PLpgSQL_function* srcFunc);
 static bool equalParam(ParamListInfo bpA, ParamListInfo bpB);
@@ -274,7 +273,7 @@ static bool equalPLpgsqlExpr(PLpgSQL_expr* exprA, PLpgSQL_expr* exprB)
     return false;
 }
 
-static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr)
+PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr)
 {
     if (srcExpr == NULL) {
         return NULL;

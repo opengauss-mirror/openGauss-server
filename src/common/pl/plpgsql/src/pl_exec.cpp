@@ -1173,6 +1173,8 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
     MemoryContext temp = NULL;
     MemoryContext target_cxt = NULL;
 
+    Assert(rec->expr != NULL);
+
     target_cxt = rec->ispkg ? rec->pkg->pkg_cxt : CurrentMemoryContext;
     temp = MemoryContextSwitchTo(target_cxt);
 
@@ -1301,7 +1303,9 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
         }
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
-            exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+            PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
+            if (rec->expr)
+                exec_cursor_rowtype_init(&estate, estate.datums[i], func);
         }
     }
 
@@ -1641,7 +1645,9 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
         }
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
-            exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+            PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
+            if (rec->expr)
+                exec_cursor_rowtype_init(&estate, estate.datums[i], func);
         }
     }
 
@@ -2264,9 +2270,12 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
             estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         } else {
             estate.datums[i] = func->datums[i];
-	}
-	if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
-            exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+	    }
+
+	    if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+            PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
+            if (rec->expr)
+                exec_cursor_rowtype_init(&estate, estate.datums[i], func);
         }
     }
 
@@ -8734,6 +8743,21 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
          * ----------
          */
         query = stmt->query;
+        for (int i = 0; i < estate->ndatums; i++) {
+            if (estate->datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+                PLpgSQL_rec *rec = (PLpgSQL_rec*)estate->datums[i];
+                PLpgSQL_var *cursor = (PLpgSQL_var*)estate->datums[rec->cursorDno];
+                if (rec->cursorDno == curvar->dno) {
+                    MemoryContext temp = NULL;
+                    MemoryContext target_cxt = NULL;
+                    target_cxt = rec->ispkg ? rec->pkg->pkg_cxt : CurrentMemoryContext;
+                    temp = MemoryContextSwitchTo(target_cxt);
+                    rec->expr = copyPLpgsqlExpr(query);
+                    exec_cursor_rowtype_init(estate, estate->datums[i], estate->func);
+                    temp = MemoryContextSwitchTo(temp);
+                }
+            }
+        }
         gsplsql_set_query(query);
         if (query->plan == NULL) {
             exec_prepare_plan(estate, query, stmt->cursor_options);
@@ -14322,7 +14346,9 @@ plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata)
     for (i = 0; i < estate.ndatums; i++) {
         estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
-            exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+            PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
+            if (rec->expr)
+                exec_cursor_rowtype_init(&estate, estate.datums[i], func);
         }
     }
 
