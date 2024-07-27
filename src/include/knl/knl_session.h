@@ -2939,6 +2939,7 @@ typedef struct knl_u_hook_context {
     void *replaceNullOrNotHook;
     void *nullsMinimalPolicyHook;
     void *getIgnoreKeywordTokenHook;
+    void *modifyTypeForPartitionKeyHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

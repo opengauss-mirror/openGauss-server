@@ -550,6 +550,9 @@ void unserializePartitionStringAttribute(Const** outMaxValue, int outMaxValueLen
         value = OidFunctionCall3Coll(
             func, typcollation, CStringGetDatum(max_value->val.str), ObjectIdGetDatum(typelem), Int32GetDatum(typmod));
         /* save the output values */
+        if (u_sess->attr.attr_sql.dolphin) {
+            typid = partKeyDataType[counter];
+        }
         outMaxValue[counter++] = makeConst(typid, typmod, typcollation, typlen, value, false, typbyval);
     }
     list_free_ext(boundary);
@@ -755,7 +758,7 @@ int2vector* getPartitionKeyAttrNo(
         partkey->values[i] = attnum;
         for (j = 0; j < base_table_tupledsc->natts; j++) {
             if (attnum == rel_attrs[j].attnum) {
-                oidArr[i] = rel_attrs[j].atttypid;
+                oidArr[i] = GetAttTypeOid(rel_attrs[j].atttypid);
                 break;
             }
         }

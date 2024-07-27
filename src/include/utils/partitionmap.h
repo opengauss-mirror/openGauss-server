@@ -28,6 +28,7 @@
 #define PARTITIONMAP_H_
 
 #include "postgres.h"
+#include "knl/knl_session.h"
 #include "access/htup.h"
 #include "catalog/pg_type.h"
 #include "nodes/primnodes.h"
@@ -185,5 +186,14 @@ extern void constCompare(Const* value1, Const* value2, Oid collation, int& compa
 
 extern struct ListPartElement* CopyListElements(ListPartElement* src, int elementNum);
 extern struct HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum);
+
+typedef Oid (*modifyTypeForPartitionKey)(Oid attType);
+extern inline Oid GetAttTypeOid(Oid attType)
+{
+    if (u_sess->hook_cxt.modifyTypeForPartitionKeyHook != NULL) {
+        return ((modifyTypeForPartitionKey)(u_sess->hook_cxt.modifyTypeForPartitionKeyHook))(attType);
+    }
+    return attType;
+}
 
 #endif /* PARTITIONMAP_H_ */
