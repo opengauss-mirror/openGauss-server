@@ -298,14 +298,14 @@ function check_version() {
   if [[ ! -f ${GAUSSHOME}/version.cfg ]]; then
     die "Cannot find current version.cfg!" ${err_upgrade_pre}
   fi
-  old_version=$(tail -n 1 $GAUSSHOME/version.cfg)
+  old_version=$(sed -n 3p $GAUSSHOME/version.cfg)
   old_cfg=$(sed -n 2p "$GAUSSHOME"/version.cfg | sed 's/\.//g')
 
   # get new version
   if [[ ! -f $UPGRADE_NEW_PKG_PATH/version.cfg ]]; then
     die "Cannot find new version.cfg!" ${err_upgrade_pre}
   fi
-  new_version=$(tail -n 1 $UPGRADE_NEW_PKG_PATH/version.cfg)
+  new_version=$(sed -n 3p $UPGRADE_NEW_PKG_PATH/version.cfg)
   new_cfg=$(sed -n 2p $UPGRADE_NEW_PKG_PATH/version.cfg | sed 's/\.//g')
 
   if [[ X"$old_version" == X || X"$old_cfg" == X || X"$new_version" == X || X"$new_cfg" == X ]]; then
@@ -510,7 +510,7 @@ function cp_pkg() {
     new_bin_path="$GAUSS_TMP_PATH"/install_bin_"$new_version"
   fi
   #check pkg's version.cfg is equal to version_flag
-  temppkg_version=$(tail -n 1 "$new_bin_path"/version.cfg)
+  temppkg_version=$(sed -n 3p "$new_bin_path"/version.cfg)
   if [[ "$new_version" != "$temppkg_version" ]]; then
     die "pkg's version.cfg is not correct!" ${err_upgrade_bin}
   fi
@@ -1076,7 +1076,7 @@ function check_real_gaussdb_version() {
     die "Get real gaussdb version failed" ${err_upgrade_bin}
   fi
   local new_version=""
-  new_version=`tail -n 1 $UPGRADE_NEW_PKG_PATH/version.cfg`
+  new_version=`sed -n 3p $UPGRADE_NEW_PKG_PATH/version.cfg`
   debug "new_version: $new_version"
   debug "real_gaussdb_version: $real_gaussdb_version"
   if ! echo "$real_gaussdb_version" | grep "$new_version" > /dev/null; then

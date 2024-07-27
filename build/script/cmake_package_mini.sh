@@ -529,6 +529,10 @@ function install_gaussdb()
     commitid=$(LD_PRELOAD=''  ${BUILD_DIR}/bin/gaussdb -V | cut -d ")" -f 1 | awk '{print $NF}')
     echo "${commitid}" >>${SCRIPT_DIR}/version.cfg
     echo "End insert commitid into version.cfg" >> "$LOG_FILE" 2>&1
+
+    #insert the version mode to version.cfg
+    echo "$version_mode" >> ${SCRIPT_DIR}/version.cfg
+    echo "End insert version mode into version cfg" >> "$LOG_FILE" 2>&1
 }
 
 #######################################################################
