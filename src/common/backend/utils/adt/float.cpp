@@ -3035,6 +3035,11 @@ static double to_binary_float_internal(char* origin_num, bool *err)
 
 /*
  * to_binary_float_text()  -  convert to a single precision floating-point number.
+ *
+ *          arg[0]: input arg;
+ *          arg[1]: default arg;
+ *          arg[2]: has default arg;
+ *          arg[3]: default is column ref.
  */
 Datum to_binary_float_text(PG_FUNCTION_ARGS)
 {
@@ -3045,6 +3050,13 @@ Datum to_binary_float_text(PG_FUNCTION_ARGS)
     char *num1, *num2;
     double result, r1, r2;
     bool err1, err2;
+
+    // if default arg is col, report error
+    if (with_default && PG_GETARG_BOOL(3)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("default argument must be a literal or bind")));
+    }
 
     err1 = true;
     if (!str1_null) {
@@ -3111,8 +3123,9 @@ static double handle_float4_overflow(double val)
  */
 Datum to_binary_float_number(PG_FUNCTION_ARGS)
 {
-    if (PG_ARGISNULL(0))
+    if (PG_ARGISNULL(0)) {
         PG_RETURN_NULL();
+    }
 
     float8 val = handle_float4_overflow(PG_GETARG_FLOAT8(0));
     
@@ -3121,14 +3134,20 @@ Datum to_binary_float_number(PG_FUNCTION_ARGS)
 
 Datum to_binary_float_text_number(PG_FUNCTION_ARGS)
 {
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-
     bool with_default = PG_GETARG_BOOL(2);
-
     char *num;
     double result;
     bool err;
+
+    if (with_default && PG_GETARG_BOOL(3)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("default argument must be a literal or bind")));
+    }
+
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
 
     err = false;
     num = TextDatumGetCString(PG_GETARG_TEXT_P(0));

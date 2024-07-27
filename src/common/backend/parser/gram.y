@@ -27770,16 +27770,12 @@ func_application_special:	func_name '(' ')'
 						       (errcode(ERRCODE_SYNTAX_ERROR),
 							   errmsg("The syntax or function is not supported. \"%s\"", $4)));
 					}
-					if (IsA($5, ColumnRef)) {
-						ereport(ERROR,
-							   (errcode(ERRCODE_SYNTAX_ERROR),
-							   errmsg("Default param can't be ColumnRef")));
-					}
 
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = $1;
 					n->args = lappend($3, $5);
 					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
 					n->agg_order = $9;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
