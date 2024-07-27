@@ -383,6 +383,30 @@ select hash_srf(cursor (select * from employees)) limit 10;
  (10,60,abc,def,123,123)
 (10 rows)
 
+explain (costs off) select hash_srf(cursor (select * from employees)) from employees limit 10;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Seq Scan on employees
+(4 rows)
+
+select hash_srf(cursor (select * from employees)) from employees limit 10;
+        hash_srf         
+-------------------------
+ (1,60,abc,def,123,123)
+ (2,60,abc,def,123,123)
+ (3,60,abc,def,123,123)
+ (4,60,abc,def,123,123)
+ (5,60,abc,def,123,123)
+ (6,60,abc,def,123,123)
+ (7,60,abc,def,123,123)
+ (8,60,abc,def,123,123)
+ (9,60,abc,def,123,123)
+ (10,60,abc,def,123,123)
+(10 rows)
+
 -- subquery cannot smp
 explain (costs off) select 1, (select count(*) from hash_srf(cursor (select * from employees)));
                QUERY PLAN                
