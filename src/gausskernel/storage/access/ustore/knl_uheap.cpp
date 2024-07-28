@@ -531,6 +531,7 @@ void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Pag
 static ShortTransactionId UHeapTupleSetModifiedXid(Relation relation,
     Buffer buffer, UHeapTuple utuple, TransactionId xid)
 {
+    Assert(!UHEAP_XID_IS_LOCK(utuple->disk_tuple->flag));
     TransactionId xidbase = InvalidTransactionId;
     ShortTransactionId tupleXid = 0;
     UHeapTupleCopyBaseFromPage(utuple, BufferGetPage(buffer));
@@ -3106,10 +3107,8 @@ check_tup_satisfies_update:
     /* oldtup should be pointing to right place in page */
     Assert(oldtup.disk_tuple == (UHeapDiskTuple)UPageGetRowData(page, lp));
 
-    int16 tmpLockInfo = oldtup.disk_tuple->flag & SINGLE_LOCKER_INFOMASK;
     UHeapTupleHeaderSetTDSlot(oldtup.disk_tuple, oldtupNewTransSlot);
     oldtup.disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
-    oldtup.disk_tuple->flag |= tmpLockInfo;
     oldtup.disk_tuple->flag |= infomaskOldTuple;
     tupleXid = UHeapTupleSetModifiedXid(relation, buffer, &oldtup, fxid);
 
@@ -3119,6 +3118,7 @@ check_tup_satisfies_update:
     uheaptup->disk_tuple->flag |= infomaskNewTuple;
     uheaptup->xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
     if (buffer == newbuf) {
+        Assert(!UHEAP_XID_IS_LOCK(uheaptup->disk_tuple->flag));
         uheaptup->disk_tuple->flag |= SINGLE_LOCKER_XID_IS_TRANS;
         UHeapTupleSetRawXid(uheaptup, tupleXid);
     } else {

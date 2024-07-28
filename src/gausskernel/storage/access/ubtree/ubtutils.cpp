@@ -427,11 +427,6 @@ static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumbe
  */
 TransactionIdStatus UBTreeCheckXid(TransactionId xid)
 {
-    if (xid == FrozenTransactionId || (TransactionIdIsNormal(xid) &&
-        TransactionIdPrecedes(xid, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid)) &&
-        !RecoveryInProgress())) {
-        return XID_COMMITTED;
-    }
     TransactionIdStatus ts = TransactionIdGetStatus(xid);
     /* Please refer to HeapTupleSatisfiesVaccum */
     if (ts == XID_INPROGRESS) {
