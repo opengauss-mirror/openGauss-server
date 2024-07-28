@@ -17,8 +17,6 @@
  *
  * -------------------------------------------------------------------------
  */
-#include <mutex>
-#include <condition_variable>
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -87,9 +85,6 @@ typedef struct BTParallelScanDescData
     int         btps_arrayKeyCount;     /* count indicating number of array
                                          * scan keys processed by parallel
                                          * scan */
-
-    std::mutex btps_mutex;    /* protects above variables */
-    std::condition_variable btps_cv;  /* used to synchronize parallel scan */
 } BTParallelScanDescData;
 
 typedef struct BTParallelScanDescData *BTParallelScanDesc;
@@ -757,10 +752,11 @@ btinitparallelscan(void *target)
 {
     BTParallelScanDesc bt_target = (BTParallelScanDesc) target;
 
-    std::unique_lock<std::mutex> lck(bt_target->btps_mutex);
+    LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
     bt_target->btps_scanPage = InvalidBlockNumber;
     bt_target->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
     bt_target->btps_arrayKeyCount = 0;
+    LWLockRelease(ParallelIndexScanLock);
 }
 
 /*
@@ -781,10 +777,11 @@ btparallelrescan(IndexScanDesc scan)
      * shouldn't be any other workers running at this point, but we do so for
      * consistency.
      */
-    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+    LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
     btscan->btps_scanPage = InvalidBlockNumber;
     btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
     btscan->btps_arrayKeyCount = 0;
+    LWLockRelease(ParallelIndexScanLock);
 }
 
 /*
@@ -819,9 +816,9 @@ _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
 
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
     
-    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
     while (1)
     {
+        LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
         pageStatus = btscan->btps_pageStatus;
 
         if (so->arrayKeyCount < btscan->btps_arrayKeyCount)
@@ -847,10 +844,9 @@ _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
             *pageno = btscan->btps_scanPage;
             exit_loop = true;
         }
+        LWLockRelease(ParallelIndexScanLock);
         if (exit_loop || !status)
             break;
-
-        btscan->btps_cv.wait(lck);
     }
 
     return status;
@@ -870,11 +866,11 @@ _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
 
     {
-        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+        LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
         btscan->btps_scanPage = scan_page;
         btscan->btps_pageStatus = BTPARALLEL_IDLE;
+        LWLockRelease(ParallelIndexScanLock);
     }
-    btscan->btps_cv.notify_one();
 }
 
 /*
@@ -904,17 +900,14 @@ _bt_parallel_done(IndexScanDesc scan)
      * _bt_advance_array_keys.
      */
     {
-        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+        LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
         if (so->arrayKeyCount >= btscan->btps_arrayKeyCount
                 && btscan->btps_pageStatus != BTPARALLEL_DONE) {
             btscan->btps_pageStatus = BTPARALLEL_DONE;
             status_changed = true;
         }
+        LWLockRelease(ParallelIndexScanLock);
     }
-
-    /* wake up all the workers associated with this parallel scan */
-    if (status_changed)
-        btscan->btps_cv.notify_all();
 }
 
 /*
@@ -934,13 +927,14 @@ _bt_parallel_advance_array_keys(IndexScanDesc scan)
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
 
     so->arrayKeyCount++;
-    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+    LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
     if (btscan->btps_pageStatus == BTPARALLEL_DONE)
     {
         btscan->btps_scanPage = InvalidBlockNumber;
         btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
         btscan->btps_arrayKeyCount++;
     }
+    LWLockRelease(ParallelIndexScanLock);
 }
 
 /*
