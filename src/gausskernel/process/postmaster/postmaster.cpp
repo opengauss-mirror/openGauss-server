@@ -15046,32 +15046,31 @@ Datum disable_conn(PG_FUNCTION_ARGS)
         uint32 conn_mode = pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
         if (!WalRcvInProgress() && g_instance.pid_cxt.BarrierPreParsePID == 0) {
             g_instance.csn_barrier_cxt.startBarrierPreParse = true;
-            while (checkTimes--) {
-                if (knl_g_get_redo_finish_status()) {
-                    redoDone = true;
-                    break;
-                }
-                ereport(LOG, (errmsg("%d redo_done", redoDone)));
-                sleep(0.01);
-            }
-            ereport(LOG, (errmsg("%d redo_done", redoDone)));
-            if (!redoDone) {
-                if (!conn_mode) {
-                    pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, true);
-                    // clean redo done
-                    pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, false);
-                }
-                ereport(ERROR, (errcode_for_file_access(),
-                    errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
-            }
-
-            XLogRecPtr replay1 = GetXLogReplayRecPtrInPending();
-            sleep(0.5);
-            XLogRecPtr replay2 = GetXLogReplayRecPtrInPending();
-            if (replay1 != replay2) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not add lock when DN is not redo all xlog.")));
-            } 
         }
+        while (checkTimes--) {
+            if (knl_g_get_redo_finish_status()) {
+                redoDone = true;
+                break;
+            }
+            sleep(0.01);
+        }
+        ereport(LOG, (errmsg("%d redo_done", redoDone)));
+        if (!redoDone) {
+            if (!conn_mode) {
+                pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, true);
+                // clean redo done
+                pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, false);
+            }
+            ereport(ERROR, (errcode_for_file_access(),
+                errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
+        }
+
+        XLogRecPtr replay1 = GetXLogReplayRecPtrInPending();
+        sleep(0.5);
+        XLogRecPtr replay2 = GetXLogReplayRecPtrInPending();
+        if (replay1 != replay2) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not add lock when DN is not redo all xlog.")));
+        } 
     } else {
         pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, false);
     }
