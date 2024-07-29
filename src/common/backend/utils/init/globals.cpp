@@ -76,12 +76,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92943;
+const uint32 GRAND_VERSION_NUM = 92944;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 HBA_CONF_VERSION_NUM = 92944;
 const uint32 PARALLEL_ENABLE_VERSION_NUM = 92941;
 const uint32 NAN_INFINITE_TEST_EXPR = 92940;
 const uint32 STRAIGHT_JOIN_VERSION_NUMBER = 92939;

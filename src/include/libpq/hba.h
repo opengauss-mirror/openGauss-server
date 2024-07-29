@@ -65,6 +65,15 @@ typedef struct HbaLine {
     bool remoteTrust;
 } HbaLine;
 
+/*
+ * A single string token lexed from the HBA config file, together with whether
+ * the token had been quoted.
+ */
+typedef struct HbaToken {
+    char* string;
+    bool quoted;
+} HbaToken;
+
 /* kluge to avoid including libpq/libpq-be.h here */
 typedef struct Port hbaPort;
 
