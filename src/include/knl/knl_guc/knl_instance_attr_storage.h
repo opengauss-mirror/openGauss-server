@@ -129,6 +129,8 @@ typedef struct knl_instance_attr_dms {
     bool enable_bcast_snapshot;
     char* work_thread_pool_attr;
     int32 work_thread_pool_max_cnt;
+    bool enable_dyn_trace;
+    bool enable_reform_trace;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

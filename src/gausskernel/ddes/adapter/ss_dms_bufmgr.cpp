@@ -95,7 +95,7 @@ void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag)
     dlatch->drid.type = locktag.locktag_type;
     dlatch->drid.oid = locktag.locktag_field1;
     dlatch->drid.index = locktag.locktag_field2;
-    dlatch->drid.parent_part = locktag.locktag_field3;
+    dlatch->drid.parent = locktag.locktag_field3;
     dlatch->drid.part = locktag.locktag_field4;
     dlatch->drid.uid = locktag.locktag_field5;
 }
