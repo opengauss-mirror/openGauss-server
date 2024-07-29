@@ -393,7 +393,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
             InvalidBuffer, xlrec->offnum, xid, 
             *hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0,
             *blkprev, *prevurp, &oldTD, utup, blkno, xlundohdr, &undometa);
-        Assert(urecptr == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
         undorec->SetOffset(xlrec->offnum);
         if (!skipInsert) {
             /* Insert the Undo record into the undo store */
@@ -968,7 +968,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
             *hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0, *blkprev,
             inplaceUpdate ? *blkprev : *newblkprev, *prevurp, &oldTD, oldtup,
             inplaceUpdate, &newUrecptr, undoXorDeltaSize, oldblk, newblk, xlundohdr, &undometa);
-        Assert(urecptr == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
 
         if (!skipInsert) {
             if (!inplaceUpdate) {

@@ -1685,7 +1685,7 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     urecptr = UHeapPrepareUndoInsert(xlundohdr->relOid, xlundohdrextra->partitionOid, relNode, spcNode,
         UNDO_PERMANENT, recxid, 0, xlundohdrextra->blkprev, xlundohdrextra->prevurp,
         blockdatarec->insertUndoParse.blkno, xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
     undorec->SetOffset(blockdatarec->insertUndoParse.offnum);
     if (!skipInsert) {
         InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
@@ -1764,7 +1764,7 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         xlundohdrextra->hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0,
         xlundohdrextra->blkprev, xlundohdrextra->prevurp, &oldTD, &utup, blockdatarec->deleteUndoParse.blkno,
         xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
     undorec->SetOffset(blockdatarec->deleteUndoParse.offnum);
     if (!skipInsert) {
         /* Insert the Undo record into the undo store */
@@ -1851,7 +1851,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         inplaceUpdate ? xlundohdrextra->blkprev : xlnewundohdrextra->blkprev, xlundohdrextra->prevurp,
         &oldTD, &oldtup, inplaceUpdate, &newUrecptr, blockdatarec->updateUndoParse.undoXorDeltaSize,
         blockdatarec->updateUndoParse.oldblk, blockdatarec->updateUndoParse.newblk, xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
 
     if (!skipInsert) {
         if (!inplaceUpdate) {
@@ -1956,7 +1956,7 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
          * undo should be inserted at same location as it was during the
          * actual insert (DO operation).
          */
-        Assert((*urecvec)[0]->Urp() == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET((*urecvec)[0]->Urp()) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
         InsertPreparedUndo(urecvec, lsn);
     }
 
