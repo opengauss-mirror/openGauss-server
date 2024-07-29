@@ -1107,6 +1107,10 @@ void ParallelDecodeWorkerMain(void* point)
     pgstat_report_appname("LogicalDecodeWorker");
     pgstat_report_activity(STATE_IDLE, NULL);
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
+
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "parallel decoder resource owner",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 

@@ -1465,6 +1465,8 @@ void PostgresInitializer::InitParallelDecode()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
