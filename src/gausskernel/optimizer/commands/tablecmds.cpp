@@ -243,7 +243,13 @@ typedef struct ViewInfoForAdd {
     char *query_string;
 } ViewInfoForAdd;
 
-
+/* Context for check whether the targetEntry of view's querytree has changed */
+typedef struct {
+    Oid relid;
+    int2 attnum;
+    Query* query;
+    Form_pg_attribute attForm;
+} ViewQueryCheck_context;
 
 /* Struct describing one new constraint to check in Phase 3 scan */
 /* Note: new NOT NULL constraints are handled elsewhere */
@@ -12142,110 +12148,271 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
     return query_str;
 }
 
-
-void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute attForm,
-    int2 old_attnum, char** attName, List **old_query_str)
+static bool check_changed_tle_walker(Node* node, ViewQueryCheck_context* context)
 {
-    List *query_str = NIL;
+    if (node == NULL)
+        return false;
+    if (IsA(node, Var)) {
+        Var* var = (Var*)node;
+        Oid relid = InvalidOid;
+        RangeTblEntry* rte = rt_fetch(var->varno, context->query->rtable);
+        if (rte && rte->rtekind == RTE_RELATION) {
+            relid = rte->relid;
+        } else if (rte && rte->alias == NULL && rte->rtekind == RTE_JOIN && rte->joinaliasvars != NIL) {
+            Var* aliasvar = (Var*)list_nth(rte->joinaliasvars, var->varattno - 1);
+            RangeTblEntry* alias_rte = rt_fetch(aliasvar->varno, context->query->rtable);
+            Assert(alias_rte->rtekind == RTE_RELATION);
+            relid = alias_rte->relid;
+        }
+        if (relid == context->relid &&
+            var->varattno == context->attnum) {
+            return !(var->vartype == context->attForm->atttypid &&
+                   var->vartypmod == context->attForm->atttypmod &&
+                   var->varcollid == context->attForm->attcollation);
+        } else {
+            return false;
+        }
+    }
+    return expression_tree_walker(node, (bool (*)())check_changed_tle_walker, context);
+}
+
+static void CheckPgAttribute(Oid obj_oid, char* attName, Form_pg_attribute new_attribute)
+{
+    if (!OidIsValid(obj_oid) || attName == NULL) {
+        return;
+    }
+    const int keyNum = 2;
+    Relation rel;
+    ScanKeyData key[keyNum];
+    SysScanDesc scan;
+    HeapTuple tuple;
+    HeapTuple new_dep_tuple;
+    Form_pg_attribute attForm;
+    rel = heap_open(AttributeRelationId, RowExclusiveLock);
+    ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(obj_oid));
+    ScanKeyInit(&key[1], Anum_pg_attribute_attname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(attName));
+    scan = systable_beginscan(rel, AttributeRelidNameIndexId, true, SnapshotSelf, keyNum, &key[0]);
+    tuple = systable_getnext(scan);
+    if (!HeapTupleIsValid(tuple)) {
+        systable_endscan(scan);
+        heap_close(rel, RowExclusiveLock);
+        elog(ERROR, "catalog lookup failed for column %s of relation %u", attName, obj_oid);
+    }
+    attForm = (Form_pg_attribute)GETSTRUCT(tuple);
+    Datum values[Natts_pg_attribute] = { 0 };
+    bool nulls[Natts_pg_attribute] = { 0 };
+    bool replaces[Natts_pg_attribute] = { 0 };
+    values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(new_attribute->atttypid);
+    values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(new_attribute->attlen);
+    values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(new_attribute->atttypmod);
+    values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(new_attribute->attbyval);
+    values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(new_attribute->attstorage);
+    values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(new_attribute->attcollation);
+    replaces[Anum_pg_attribute_atttypid - 1] = true;
+    replaces[Anum_pg_attribute_attlen - 1] = true;
+    replaces[Anum_pg_attribute_atttypmod - 1] = true;
+    replaces[Anum_pg_attribute_attbyval - 1] = true;
+    replaces[Anum_pg_attribute_attstorage - 1] = true;
+    replaces[Anum_pg_attribute_attcollation - 1] = true;
+    new_dep_tuple = heap_modify_tuple(tuple, RelationGetDescr(rel), values, nulls, replaces);
+    simple_heap_update(rel, &new_dep_tuple->t_self, new_dep_tuple);
+    CatalogUpdateIndexes(rel, new_dep_tuple);
+    heap_freetuple_ext(new_dep_tuple);
+    CommandCounterIncrement();
+    systable_endscan(scan);
+    heap_close(rel, RowExclusiveLock);
+}
+
+static void UpdatePgAttributeForView(TargetEntry* old_tle, TargetEntry* new_tle, Oid view_oid, Form_pg_attribute att_form)
+{
+    Node* old_node = (Node*)old_tle->expr;
+    Node* new_node = (Node*)new_tle->expr;
+    Assert(nodeTag(old_node) == nodeTag(new_node));
+    char* col_name = old_tle->resname;
+    Oid old_type = exprType(old_node);
+    Oid new_type = exprType(new_node);
+    int32 old_typmod = exprTypmod(old_node);
+    int32 new_typmod = exprTypmod(new_node);
+    if (old_type != new_type || old_typmod != new_typmod) {
+        // get from pg_type
+        HeapTuple tp;
+        tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(new_type));
+        if (HeapTupleIsValid(tp)) {
+            Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
+            att_form->atttypid = new_type;
+            att_form->atttypmod = new_typmod;
+            att_form->attlen = typtup->typlen;
+            att_form->attbyval = typtup->typbyval;
+            att_form->attstorage = typtup->typstorage;
+            att_form->attcollation = typtup->typcollation;
+            ReleaseSysCache(tp);
+        } else {
+            elog(ERROR, "Cannot find the type with oid %u.", new_type);
+        }
+        CheckPgAttribute(view_oid, col_name, att_form);
+    }
+}
+
+static List* GetOriginalViewQuery(Oid rw_oid)
+{
+    List *evAction = NIL;
     ScanKeyData entry;
     ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_oid));
     Relation rewrite_rel = heap_open(RewriteRelationId, RowExclusiveLock);
     SysScanDesc rewrite_scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
     HeapTuple rewrite_tup = systable_getnext(rewrite_scan);
     if (!HeapTupleIsValid(rewrite_tup)) {
-        systable_endscan(rewrite_scan);
-        heap_close(rewrite_rel, RowExclusiveLock);
-        return;
+        elog(ERROR, "Cannot find the rewrite rule with oid %u.", rw_oid);
     }
     Form_pg_rewrite rewrite_form = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
-    if (strcmp(NameStr(rewrite_form->rulename), ViewSelectRuleName) != 0) {
-        systable_endscan(rewrite_scan);
-        heap_close(rewrite_rel, RowExclusiveLock);
-        return;
+    if (strcmp(NameStr(rewrite_form->rulename), "_RETURN") != 0) {
+        elog(ERROR, "The rewrite rule with oid %u has unexpected name %s.", rw_oid, NameStr(rewrite_form->rulename));
     }
     bool is_null = false;
     Datum evActiomDatum = fastgetattr(rewrite_tup, Anum_pg_rewrite_ev_action, rewrite_rel->rd_att, &is_null);
     if (!is_null) {
-        Datum values[Natts_pg_rewrite] = { 0 };
-        bool nulls[Natts_pg_rewrite] = { 0 };
-        bool replaces[Natts_pg_rewrite] = { 0 };
         char *evActionString = TextDatumGetCString(evActiomDatum);
-        List *evAction = (List *)stringToNode(evActionString);
-        Query* query = (Query*)linitial(evAction);
-        // change querytree's targetEntry and RTE
-        ListCell* lc = NULL;
-        foreach (lc, query->targetList) {
-            TargetEntry* tle = (TargetEntry*)lfirst(lc);
-            Index rtevarno = 0;
-            AttrNumber rtevarattno = 0;
-            if (nodeTag((Node*)tle->expr) == T_Var && tle->resorigtbl == rel_oid &&
-                tle->resorigcol == old_attnum) {
-                tle->resorigcol = attForm->attnum;
-                Var *var = (Var *)tle->expr;
-                rtevarno = var->varno;
-                rtevarattno = var->varattno;
-                var->vartype = attForm->atttypid;
-                var->vartypmod = attForm->atttypmod;
-                var->varcollid = attForm->attcollation;
-                *attName = pstrdup(tle->resname);
-            }
-            // change rtable entry
-            if (rtevarno == 0 || rtevarattno == 0) {
-                continue;
-            }
-            RangeTblEntry* rte = rt_fetch(rtevarno, query->rtable);
-            if (!rte || rte->alias != NULL || rte->rtekind != RTE_JOIN || rte->joinaliasvars == NIL) {
-                Var *var = (Var *)tle->expr;
-                var->varattno = attForm->attnum;
-                var->varoattno = attForm->attnum;
-                continue;
-            }
-            Var* aliasvar = (Var*)list_nth(rte->joinaliasvars, rtevarattno - 1);
-            if (IsA(aliasvar, Var)) {
-                aliasvar->varattno = attForm->attnum;
-                aliasvar->varoattno = attForm->attnum;
-                aliasvar->vartype = attForm->atttypid;
-                aliasvar->vartypmod = attForm->atttypmod;
-                aliasvar->varcollid = attForm->attcollation;
-            }
-        }
-        char* actiontree = nodeToString((Node*)evAction);
-        HeapTuple new_dep_tuple;
-        values[Anum_pg_rewrite_ev_action - 1] = CStringGetTextDatum(actiontree);
-        replaces[Anum_pg_rewrite_ev_action - 1] = true;
-        new_dep_tuple = heap_modify_tuple(rewrite_tup, RelationGetDescr(rewrite_rel), values, nulls, replaces);
-        simple_heap_update(rewrite_rel, &new_dep_tuple->t_self, new_dep_tuple);
-        CatalogUpdateIndexes(rewrite_rel, new_dep_tuple);
-        CommandCounterIncrement();
-        StringInfoData buf;
-        initStringInfo(&buf);
-        Relation ev_relation = heap_open(rewrite_form->ev_class, AccessShareLock);
-        get_query_def(query,
-            &buf,
-            NIL,
-            RelationGetDescr(ev_relation),
-            0,
-            -1,
-            0,
-            false,
-            false,
-            NULL,
-            false,
-            false);
-        appendStringInfo(&buf, ";");
-        ViewInfoForAdd * info = static_cast<ViewInfoForAdd *>(palloc(sizeof(ViewInfoForAdd)));
-        info->ev_class = rewrite_form->ev_class;
-        info->query_string = pstrdup(buf.data);
-        heap_close(ev_relation, AccessShareLock);
-        FreeStringInfo(&buf);
-        query_str = lappend(query_str, info);
-        *old_query_str = query_str;
-        heap_freetuple_ext(new_dep_tuple);
-        pfree_ext(evActionString);
-        pfree_ext(actiontree);
+        evAction = (List *)stringToNode(evActionString);
+    } else {
+        elog(ERROR, "Cannot find the rewrite rule with oid %u.", rw_oid);
     }
     systable_endscan(rewrite_scan);
     heap_close(rewrite_rel, RowExclusiveLock);
+    return evAction;
+}
+
+List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid)
+{
+    List* evAction = NIL;
+    Query* query = NULL;
+    HeapTuple tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
+    if (!HeapTupleIsValid(tup)) {
+        elog(ERROR, "Cannot find the view with oid %u.", view_oid);
+    }
+    Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
+    char* view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, rw_oid, view_oid);
+    List* raw_parsetree_list = raw_parser(view_def);
+    Node* stmtNode = (Node*)linitial(raw_parsetree_list);
+    Assert((IsA(stmtNode, ViewStmt) || IsA(stmtNode, CreateTableAsStmt)));
+    if (IsA(stmtNode, ViewStmt)) {
+        ViewStmt* stmt = (ViewStmt*)stmtNode;
+        if (!IsA(stmt->query, Query)) {
+            query = parse_analyze(stmt->query, view_def, NULL, 0);
+        } else {
+            query = (Query*)stmt->query;
+        }
+    } else if (IsA(stmtNode, CreateTableAsStmt)) {
+        CreateTableAsStmt* stmt = (CreateTableAsStmt*)stmtNode;
+        if (!IsA(stmt->query, Query)) {
+            query = parse_analyze(stmt->query, view_def, NULL, 0);
+        } else {
+            query = (Query*)stmt->query;
+        }
+    }
+    evAction = lappend(evAction, query);
+    ReleaseSysCache(tup);
+    pfree(view_def);
+    list_free(raw_parsetree_list);
+    return evAction;
+}
+
+void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
+{
+    List *new_query_str = NIL;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_oid));
+    Relation rewrite_rel = heap_open(RewriteRelationId, RowExclusiveLock);
+    SysScanDesc rewrite_scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
+    HeapTuple rewrite_tup = systable_getnext(rewrite_scan);
+    Form_pg_rewrite rewrite_form = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
+    // update pg_rewrite
+    char* actiontree = nodeToString((Node*)evAction);
+    Datum values[Natts_pg_rewrite] = { 0 };
+    bool nulls[Natts_pg_rewrite] = { 0 };
+    bool replaces[Natts_pg_rewrite] = { 0 };
+    HeapTuple new_dep_tuple;
+    values[Anum_pg_rewrite_ev_action - 1] = CStringGetTextDatum(actiontree);
+    replaces[Anum_pg_rewrite_ev_action - 1] = true;
+    new_dep_tuple = heap_modify_tuple(rewrite_tup, RelationGetDescr(rewrite_rel), values, nulls, replaces);
+    simple_heap_update(rewrite_rel, &new_dep_tuple->t_self, new_dep_tuple);
+    CatalogUpdateIndexes(rewrite_rel, new_dep_tuple);
+    CommandCounterIncrement();
+    heap_freetuple_ext(new_dep_tuple);
+    pfree_ext(actiontree);
+    // get new_query_str from pg_rewrite
+    Query* query = (Query*)linitial(evAction);
+    StringInfoData buf;
+    initStringInfo(&buf);
+    Relation ev_relation = heap_open(rewrite_form->ev_class, AccessShareLock);
+    get_query_def(query,
+        &buf,
+        NIL,
+        RelationGetDescr(ev_relation),
+        0,
+        -1,
+        0,
+        false,
+        false,
+        NULL,
+        false,
+        false);
+    appendStringInfo(&buf, ";");
+    ViewInfoForAdd * info = static_cast<ViewInfoForAdd *>(palloc(sizeof(ViewInfoForAdd)));
+    info->ev_class = rewrite_form->ev_class;
+    info->query_string = pstrdup(buf.data);
+    heap_close(ev_relation, AccessShareLock);
+    FreeStringInfo(&buf);
+    new_query_str = lappend(new_query_str, info);
+    *query_str = new_query_str;
+    systable_endscan(rewrite_scan);
+    heap_close(rewrite_rel, RowExclusiveLock);
+}
+
+bool UpdateChangedColumnForView(Oid viewid, Oid relid, int2 attnum, Oid rw_objid,
+                                       List **p_originEvAction, List **p_newEvAction, Form_pg_attribute attForm)
+{
+    if (*p_originEvAction == NIL) {
+        *p_originEvAction = GetOriginalViewQuery(rw_objid);
+    }
+    PG_TRY();
+    {
+        if (*p_newEvAction == NIL) {
+            *p_newEvAction = GetRefreshedViewQuery(viewid, rw_objid);
+        }
+    }
+    PG_CATCH();
+    {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("The view %s is invalid, please make it valid before operation.",
+                       get_rel_name(viewid)),
+                    errhint("Please re-add missing table fields.")));
+    }
+    PG_END_TRY();
+    List* originEvAction = *p_originEvAction;
+    List* newEvAction = *p_newEvAction;
+    bool is_changed = false;
+    Query* query = (Query*)linitial(originEvAction);
+    Query* freshed_query = (Query*)linitial(newEvAction);
+    ViewQueryCheck_context context;
+    context.relid = relid;
+    context.attnum = attnum;
+    context.query = query;
+    context.attForm = attForm;
+    // check whether the querytree's targetEntry has changed,
+    // and update the pg_attribute entry of the changed column if so
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+    forboth (lc1, query->targetList, lc2, freshed_query->targetList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc1);
+        bool var_changed = check_changed_tle_walker((Node*)(tle->expr), &context);
+        if (var_changed) {
+            TargetEntry* tle2 = (TargetEntry*)lfirst(lc2);
+            UpdatePgAttributeForView(tle, tle2, viewid, attForm);
+        }
+        is_changed |= var_changed;
+    }
+    return is_changed;
 }
 
 /*
@@ -32758,7 +32925,7 @@ static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relati
     def->raw_default = tmp_expr;
 }
 
-static char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
+char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
 {
     StringInfoData buf;
     ViewInfoForAdd* view_info = NULL;
@@ -32767,9 +32934,13 @@ static char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_c
     const char* ns_name = quote_identifier(get_namespace_name(reltup->relnamespace));
 
     initStringInfo(&buf);
-    appendStringInfo(&buf, "CREATE OR REPLACE ");
-    if (reltup->relpersistence == RELPERSISTENCE_TEMP) {
-        appendStringInfo(&buf, "TEMPORARY ");
+    if (reltup->relkind == RELKIND_MATVIEW) {
+        appendStringInfo(&buf, "CREATE MATERIALIZED ");
+    } else {
+        appendStringInfo(&buf, "CREATE OR REPLACE ");
+        if (reltup->relpersistence == RELPERSISTENCE_TEMP) {
+            appendStringInfo(&buf, "TEMPORARY ");
+        }
     }
     if (ns_name) {
         appendStringInfo(&buf, "VIEW %s.%s(", ns_name, quote_identifier(NameStr(reltup->relname)));

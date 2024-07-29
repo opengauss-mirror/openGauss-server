@@ -1037,50 +1037,6 @@ static bool CheckRelationColumnExists(Oid rel_oid, int2 attnum, Form_pg_attribut
     return true;
 }
 
-static void CheckPgAttribute(Oid obj_oid, char* attName, Form_pg_attribute new_attribute)
-{
-    const int keyNum = 2;
-    Relation rel;
-    ScanKeyData key[keyNum];
-    SysScanDesc scan;
-    HeapTuple tuple;
-    HeapTuple new_dep_tuple;
-    Form_pg_attribute attForm;
-    rel = heap_open(AttributeRelationId, RowExclusiveLock);
-    ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(obj_oid));
-    ScanKeyInit(&key[1], Anum_pg_attribute_attname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(attName));
-    scan = systable_beginscan(rel, AttributeRelidNameIndexId, true, SnapshotSelf, keyNum, &key[0]);
-    tuple = systable_getnext(scan);
-    if (!HeapTupleIsValid(tuple)) {
-        systable_endscan(scan);
-        heap_close(rel, RowExclusiveLock);
-        elog(ERROR, "catalog lookup failed for column %s of relation %u", attName, obj_oid);
-    }
-    attForm = (Form_pg_attribute)GETSTRUCT(tuple);
-    Datum values[Natts_pg_attribute] = { 0 };
-    bool nulls[Natts_pg_attribute] = { 0 };
-    bool replaces[Natts_pg_attribute] = { 0 };
-    values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(new_attribute->atttypid);
-    values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(new_attribute->attlen);
-    values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(new_attribute->atttypmod);
-    values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(new_attribute->attbyval);
-    values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(new_attribute->attstorage);
-    values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(new_attribute->attcollation);
-    replaces[Anum_pg_attribute_atttypid - 1] = true;
-    replaces[Anum_pg_attribute_attlen - 1] = true;
-    replaces[Anum_pg_attribute_atttypmod - 1] = true;
-    replaces[Anum_pg_attribute_attbyval - 1] = true;
-    replaces[Anum_pg_attribute_attstorage - 1] = true;
-    replaces[Anum_pg_attribute_attcollation - 1] = true;
-    new_dep_tuple = heap_modify_tuple(tuple, RelationGetDescr(rel), values, nulls, replaces);
-    simple_heap_update(rel, &new_dep_tuple->t_self, new_dep_tuple);
-    CatalogUpdateIndexes(rel, new_dep_tuple);
-    heap_freetuple_ext(new_dep_tuple);
-    CommandCounterIncrement();
-    systable_endscan(scan);
-    heap_close(rel, RowExclusiveLock);
-}
-
 static bool findDependentTable(Relation rel, Oid type_id)
 {
     bool found = false;
@@ -1119,6 +1075,8 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     bool existTable = false;
     Oid rw_objid = InvalidOid;
     Oid type_id = InvalidOid;
+    List* originEvAction = NIL;
+    List* freshedEvAction = NIL;
     // 1. filter the valid view
     if (GetPgObjectValid(view_oid, objType)) {
         return ValidateDependValid;
@@ -1129,7 +1087,6 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
         return ValidateDependCircularDepend;
     }
     *list = lappend_oid(*list, view_oid);
-
     // 2. find pg_rewrite/pg_type entry which depend on this view internally
     const int keyNum = 2;
     ScanKeyData key[keyNum];
@@ -1166,6 +1123,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     scan_dep = systable_beginscan(rel_dep, DependDependerIndexId, true, NULL, keyNum, key_dep);
     Form_pg_attribute newtuple = (Form_pg_attribute)palloc0(sizeof(FormData_pg_attribute));
     bool circularDependency = false;
+    bool is_changed = false;
     while (HeapTupleIsValid((tup_dep = systable_getnext(scan_dep)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup_dep);
         if (depform->refclassid != RelationRelationId || depform->deptype != DEPENDENCY_NORMAL ||
@@ -1181,21 +1139,21 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
             isValid &= CheckRelationColumnExists(dep_objid, dep_objsubid, newtuple);
             if (newtuple->attnum > 0) {
                 // change pg_depend
-                Datum values[Natts_pg_depend] = { 0 };
-                bool nulls[Natts_pg_depend] = { 0 };
-                bool replaces[Natts_pg_depend] = { 0 };
-                HeapTuple new_dep_tuple;
-                values[Anum_pg_depend_refobjsubid - 1] = Int32GetDatum(newtuple->attnum);
-                replaces[Anum_pg_depend_refobjsubid - 1] = true;
-                new_dep_tuple = heap_modify_tuple(tup_dep, RelationGetDescr(rel_dep), values, nulls, replaces);
-                simple_heap_update(rel_dep, &new_dep_tuple->t_self, new_dep_tuple);
-                CatalogUpdateIndexes(rel_dep, new_dep_tuple);
-                heap_freetuple_ext(new_dep_tuple);
-                CommandCounterIncrement();
-                // change pg_rewrite targetEntry
-                CheckPgRewriteWithDroppedColumn(dep_objid, rw_objid, newtuple, dep_objsubid, &attName, &query_str);
-                // change pg_attribute
-                CheckPgAttribute(view_oid, attName, newtuple);
+                if (newtuple->attnum != dep_objsubid) {
+                    Datum values[Natts_pg_depend] = { 0 };
+                    bool nulls[Natts_pg_depend] = { 0 };
+                    bool replaces[Natts_pg_depend] = { 0 };
+                    HeapTuple new_dep_tuple;
+                    values[Anum_pg_depend_refobjsubid - 1] = Int32GetDatum(newtuple->attnum);
+                    replaces[Anum_pg_depend_refobjsubid - 1] = true;
+                    new_dep_tuple = heap_modify_tuple(tup_dep, RelationGetDescr(rel_dep), values, nulls, replaces);
+                    simple_heap_update(rel_dep, &new_dep_tuple->t_self, new_dep_tuple);
+                    CatalogUpdateIndexes(rel_dep, new_dep_tuple);
+                    heap_freetuple_ext(new_dep_tuple);
+                    CommandCounterIncrement();
+                }
+                is_changed |= UpdateChangedColumnForView(view_oid, dep_objid, dep_objsubid, rw_objid,
+                                                         &originEvAction, &freshedEvAction, newtuple);
             }
         } else if (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) {
             char type = relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW;
@@ -1211,10 +1169,8 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
                 // here means dep_objid is valid, we should keep the same view_oid.attr with dep_objid.dep_objsubid
                 // find dep_objid.dep_objsubid
                 CheckViewColumnExists(dep_objid, dep_objsubid, newtuple);
-                // change pg_rewrite targetEntry
-                CheckPgRewriteWithDroppedColumn(dep_objid, rw_objid, newtuple, dep_objsubid, &attName, &query_str);
-                // change pg_attribute
-                CheckPgAttribute(view_oid, attName, newtuple);
+                is_changed |= UpdateChangedColumnForView(view_oid, dep_objid, dep_objsubid, rw_objid,
+                                                         &originEvAction, &freshedEvAction, newtuple);
             }
             circularDependency |= (result == ValidateDependCircularDepend);
         }
@@ -1237,15 +1193,48 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
         elog(ERROR, "The view is invalid. There is a table dependent on the view so it cannot be recompiled.");
     }
     heap_close(rel_dep, RowExclusiveLock);
+    // 3.3 change pg_rewrite's evAction
+    if (is_changed) {
+        UpdatePgrewriteForView(rw_objid, freshedEvAction, &query_str);
+    } 
     // 4. mark the current view valid
     if (!circularDependency) {
         SetPgObjectValid(view_oid, objType, true);
     }
     /* create or replace view */
-    if (!circularDependency && objType == OBJECT_TYPE_VIEW) {
+    if (!circularDependency && query_str != NIL) {
         ReplaceViewQueryFirstAfter(query_str);
         CommandCounterIncrement();
     }
+    list_free_ext(query_str);
+    if (objType == OBJECT_TYPE_MATVIEW) {
+        HeapTuple tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
+        Form_pg_class relform = (Form_pg_class)GETSTRUCT(tup);
+        Oid toastid = relform->reltoastrelid;
+        if (OidIsValid(toastid)) {
+            HeapTuple toasttuple = SearchSysCache1(RELOID, ObjectIdGetDatum(toastid));
+            if (!HeapTupleIsValid(toasttuple)) {
+                Relation rel_class = heap_open(RelationRelationId, RowExclusiveLock);
+                Datum values[Natts_pg_class] = { 0 };
+                bool nulls[Natts_pg_class] = { 0 };
+                bool replaces[Natts_pg_class] = { 0 };
+                HeapTuple newtuple;
+                values[Anum_pg_class_reltoastrelid - 1] = InvalidOid;
+                replaces[Anum_pg_class_reltoastrelid - 1] = true;
+                newtuple = heap_modify_tuple(tup, RelationGetDescr(rel_class), values, nulls, replaces);
+                simple_heap_update(rel_class, &newtuple->t_self, newtuple);
+                CatalogUpdateIndexes(rel_class, newtuple);
+                heap_freetuple_ext(newtuple);
+                CommandCounterIncrement();
+                heap_close(rel_class, RowExclusiveLock);
+            } else {
+                ReleaseSysCache(toasttuple);
+            }
+        }
+        ReleaseSysCache(tup);
+    }
+    list_free(originEvAction);
+    list_free(freshedEvAction);
     /* 0 or 1 */
     return (ValidateDependResult)isValid;
 }
@@ -1420,13 +1409,14 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
     }
     
     if (RelationGetRelkind(rel) == RELKIND_VIEW &&
-        RelationGetRelid(rel) >= FirstNormalObjectId &&
-        ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW) == ValidateDependInvalid) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The view %s is invalid, please make it valid before operation.",
-                       RelationGetRelationName(rel)),
-                    errhint("Please re-add missing table fields.")));
+        RelationGetRelid(rel) >= FirstNormalObjectId) {
+        if (ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW) == ValidateDependInvalid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("The view %s is invalid, please make it valid before operation.",
+                        RelationGetRelationName(rel)),
+                        errhint("Please re-add missing table fields.")));
+        }
     }
     
     if (!u_sess->attr.attr_common.XactReadOnly && rel->rd_id == UserStatusRelationId) {

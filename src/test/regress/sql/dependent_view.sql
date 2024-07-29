@@ -245,6 +245,16 @@ alter table t11 modify b numeric;
 select * from t12;-- ok
 select * from v11;-- expect error
 select * from t12;-- ok
+-- test6 expression dependency
+create table expr_dependency_t1(id int);
+create view expr_dependency_v1 as select id + 1 from expr_dependency_t1;
+alter table expr_dependency_t1 modify id int8;
+select * from expr_dependency_v1;
+
+create table expr_dependency_t2(name varchar(10));
+create view expr_dependency_v2 as select name || 'aa' from expr_dependency_t2;
+alter table expr_dependency_t2 modify name int;
+select * from expr_dependency_v2; 
 
 --- clean
 drop schema dependent_view cascade;
