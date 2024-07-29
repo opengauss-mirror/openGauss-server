@@ -65,25 +65,25 @@ const char* uheap_type_name(uint8 subtype)
     info &= XLOG_UHEAP_OPMASK;
     switch (info) {
         case XLOG_UHEAP_INSERT:
-            return "unheap_insert";
+            return "uheap_insert";
             break;
         case XLOG_UHEAP_DELETE:
-            return "unheap_delete";
+            return "uheap_delete";
             break;
         case XLOG_UHEAP_UPDATE:
-            return "unheap_update";
+            return "uheap_update";
             break;
         case XLOG_UHEAP_FREEZE_TD_SLOT:
-            return "unheap_freeze";
+            return "uheap_freeze";
             break;
         case XLOG_UHEAP_INVALID_TD_SLOT:
-            return "unheap_invalid_slot";
+            return "uheap_invalid_slot";
             break;
         case XLOG_UHEAP_CLEAN:
-            return "unheap_clean";
+            return "uheap_clean";
             break;
         case XLOG_UHEAP_MULTI_INSERT:
-            return "unheap_multi_insert";
+            return "uheap_multi_insert";
             break;
         default:
             return "unknown_type";
