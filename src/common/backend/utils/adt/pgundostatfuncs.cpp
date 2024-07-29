@@ -1912,7 +1912,7 @@ Datum gs_undo_translot_dump_xid(PG_FUNCTION_ARGS)
     TransactionId xid = (TransactionId)PG_GETARG_TRANSACTIONID(0);
     bool read_memory = PG_GETARG_INT32(1);
     
-    if (!TransactionIdIsValid(xid)) {
+    if (!TransactionIdIsValid(xid) || xid >= t_thrd.xact_cxt.ShmemVariableCache->nextXid) {
         elog(ERROR, "xid is invalid");
         PG_RETURN_VOID();
     }
@@ -2012,7 +2012,7 @@ Datum gs_undo_dump_xid(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 #else
     TransactionId xid = (TransactionId)PG_GETARG_TRANSACTIONID(0);
-    if (!TransactionIdIsValid(xid)) {
+    if (!TransactionIdIsValid(xid) || xid >= t_thrd.xact_cxt.ShmemVariableCache->nextXid) {
         elog(ERROR, "xid is invalid");
         PG_RETURN_VOID();
     }
