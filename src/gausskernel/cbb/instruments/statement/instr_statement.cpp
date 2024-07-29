@@ -67,6 +67,7 @@
 #include "commands/copy.h"
 #include "storage/lmgr.h"
 #include "instruments/instr_func_control.h"
+#include "storage/proc.h"
 
 #define MAX_SLOW_QUERY_RETENSION_DAYS 604800
 #define MAX_FULL_SQL_RETENSION_SEC 86400
@@ -2238,8 +2239,8 @@ void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
 static inline bool instr_stmt_level_fullsql_open()
 {
     int fullsql_level = u_sess->statement_cxt.statement_level[0];
-    /* only record query plan when level >= L1 */
-    return fullsql_level >= STMT_TRACK_L1 && fullsql_level <= STMT_TRACK_L2;
+    /* record query plan when level >= L0 */
+    return fullsql_level >= STMT_TRACK_L0 && fullsql_level <= STMT_TRACK_L2;
 }
 
 static inline bool instr_stmt_level_slowsql_only_open()
@@ -2249,8 +2250,8 @@ static inline bool instr_stmt_level_slowsql_only_open()
     }
 
     int slowsql_level = u_sess->statement_cxt.statement_level[1];
-    /* only record query plan when level >= L1 */
-    return slowsql_level >= STMT_TRACK_L1 && slowsql_level <= STMT_TRACK_L2;
+    /* record query plan when level >= L0 */
+    return slowsql_level >= STMT_TRACK_L0 && slowsql_level <= STMT_TRACK_L2;
 }
 
 static inline bool instr_stmt_is_slowsql()
@@ -2282,11 +2283,29 @@ bool instr_stmt_need_track_plan()
     return false;
 }
 
+void instr_stmt_exec_report_query_plan(QueryDesc *queryDesc)
+{
+    if (instr_stmt_level_fullsql_open()) {
+        instr_stmt_report_query_plan(queryDesc);
+        return;
+    }
+
+    if (instr_stmt_level_slowsql_only_open()) {
+        if (CURRENT_STMT_METRIC_HANDLE->slow_query_threshold == 0) {
+            instr_stmt_report_query_plan(queryDesc);
+            return;
+        }
+
+        int delayms = u_sess->attr.attr_storage.log_min_duration_statement;
+        (void)enable_query_plan_sig_alarm(delayms);
+    }
+}
+
 void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-    if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
-        || ssctx->level > STMT_TRACK_L2 || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
+    if (queryDesc == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2 
+        || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
         || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)) {
         return;
     }
@@ -2313,6 +2332,10 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
         (errmodule(MOD_INSTR), errmsg("exec_auto_explain %s %s to %lu",
             ssctx->query_plan, queryDesc->sourceText, u_sess->unique_sql_cxt.unique_sql_id)));
     pfree(es.str->data);
+
+    if (u_sess->statement_cxt.is_exceed_query_plan_threshold) {
+        u_sess->statement_cxt.is_exceed_query_plan_threshold = false;
+    }
 }
 
 /* check the header and valid length of the detail binary data */

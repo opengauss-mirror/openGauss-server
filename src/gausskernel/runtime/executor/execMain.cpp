@@ -466,11 +466,12 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     int instrument_option = 0;
     bool has_track_operator = false;
     char* old_stmt_name = u_sess->pcache_cxt.cur_stmt_name;
+    u_sess->statement_cxt.root_query_plan = queryDesc;
     u_sess->statement_cxt.executer_run_level++;
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
     }
-    instr_stmt_report_query_plan(queryDesc);
+    instr_stmt_exec_report_query_plan(queryDesc);
     exec_explain_plan(queryDesc);
     if (u_sess->attr.attr_resource.use_workload_manager &&
         u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && 
@@ -721,6 +722,7 @@ void ExecutorFinish(QueryDesc *queryDesc)
     } else {
         standard_ExecutorFinish(queryDesc);
     }
+
 }
 
 void standard_ExecutorFinish(QueryDesc *queryDesc)
@@ -772,6 +774,14 @@ void standard_ExecutorFinish(QueryDesc *queryDesc)
  */
 void ExecutorEnd(QueryDesc *queryDesc)
 {
+    /* 
+     * for a very few cases, query plan not be recorded during the execution phase, 
+     * we record again before executor end. 
+     */
+    if (unlikely(u_sess->statement_cxt.is_exceed_query_plan_threshold)) {
+        instr_stmt_report_query_plan(queryDesc);
+    }
+
     if (ExecutorEnd_hook) {
         (*ExecutorEnd_hook)(queryDesc);
     } else {

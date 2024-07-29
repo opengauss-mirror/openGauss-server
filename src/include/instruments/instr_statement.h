@@ -225,6 +225,7 @@ extern void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_tabl
 extern void instr_stmt_report_txid(uint64 txid);
 extern void instr_stmt_report_query(uint64 unique_query_id);
 extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
+extern void instr_stmt_exec_report_query_plan(QueryDesc *queryDesc);
 extern void instr_stmt_report_debug_query_id(uint64 debug_query_id);
 extern void instr_stmt_report_trace_id(char *trace_id);
 extern void instr_stmt_report_start_time();
