@@ -9076,6 +9076,11 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 process_set_names_collate(stmt, action);
                 break;
             } 
+            if (strcasecmp(stmt->name, "identity") == 0 ||
+                strcasecmp(stmt->name, "last_insert_id") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("identity and last_insert_id is not supported for setting")));
+            } 
             (void)set_config_option(stmt->name,
                 ExtractSetVariableArgs(stmt),
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
@@ -10617,6 +10622,10 @@ static char* _ShowOption(struct config_generic* record, bool use_units, bool is_
 
             if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
+            else if (strcasecmp(record->name, "identity") == 0 ||
+                     strcasecmp(record->name, "last_insert_id") == 0) {
+                val = (*conf->show_hook)();
+            }
             else if (*conf->variable && **conf->variable)
                 val = *conf->variable;
             else
