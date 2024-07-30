@@ -69,7 +69,9 @@ typedef int (*dss_get_storage_addr)(int handle, long long offset, char *poolname
 typedef int (*dss_compare_size_equal)(const char *vg_name, long long *au_size);
 typedef int (*dss_aio_prep_pwrite_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef int (*dss_aio_prep_pread_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
-typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size);
+typedef int (*dss_aio_post_pwrite_device)(void *iocb, int handle, size_t count, long long offset);
+typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigned int log_backup_file_count,
+    unsigned long long log_max_file_size);
 typedef void (*dss_refresh_logger_t)(char *log_field, unsigned long long *value);
 typedef int (*dss_set_main)(void);
 typedef struct st_dss_device_op_t {
@@ -109,6 +111,7 @@ typedef struct st_dss_device_op_t {
     dss_compare_size_equal dss_compare_size;
     dss_aio_prep_pwrite_device dss_aio_pwrite;
     dss_aio_prep_pread_device dss_aio_pread;
+    dss_aio_post_pwrite_device dss_aio_post_pwrite;
     dss_init_logger_t dss_init_logger;
     dss_refresh_logger_t dss_refresh_logger;
     dss_set_main dss_set_main_inst;

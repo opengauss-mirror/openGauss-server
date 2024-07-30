@@ -47,6 +47,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/postmaster_gstrace.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "storage/dss/fio_dss.h"
 
 #include <zstd.h>
 
@@ -323,6 +324,8 @@ void incre_ckpt_pagewriter_cxt_init()
             /* 2M AIO buffer */
             char *unaligned_buf = (char *)palloc0(DSS_AIO_BATCH_SIZE * DSS_AIO_UTIL_NUM * BLCKSZ + BLCKSZ);
             pgwr->aio_buf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+            pgwr->aio_extra =
+                (PgwrAioExtraData *)palloc0(DSS_AIO_BATCH_SIZE * DSS_AIO_UTIL_NUM * sizeof(PgwrAioExtraData));
         }
     }
 
@@ -1643,7 +1646,8 @@ void crps_destory_ctxs()
 
 static void incre_ckpt_aio_callback(struct io_event *event)
 {
-    BufferDesc *buf_desc = (BufferDesc *)(event->data);
+    PgwrAioExtraData *tempAioExtra = (PgwrAioExtraData *)(event->data);
+    BufferDesc *buf_desc = (BufferDesc *)(tempAioExtra->aio_bufdesc);
     uint32 written_size = event->obj->u.c.nbytes;
     if (written_size != event->res) {
         ereport(WARNING, (errmsg("aio write failed (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", -(int32)(event->res),
@@ -1686,6 +1690,21 @@ static void incre_ckpt_aio_callback(struct io_event *event)
       
     pfree(origin_buf);
 #endif
+
+    off_t roffset = 0;
+    if (IsSegmentBufferID(buf_desc->buf_id)) {
+        roffset = ((buf_desc->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
+    } else {
+        roffset = ((buf_desc->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+    }
+
+    int aioRet = dss_aio_post_pwrite(event->obj->data, tempAioExtra->aio_fd, event->obj->u.c.nbytes, roffset);
+    if (aioRet != 0) {
+        ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", errno,
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+    }
 
     buf_desc->extra->aio_in_progress = false;
     UnpinBuffer(buf_desc, true);

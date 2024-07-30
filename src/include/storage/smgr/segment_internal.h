@@ -416,7 +416,7 @@ void spc_datafile_create(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknu
 void spc_extend_file(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum, BlockNumber blkno);
 bool spc_datafile_exist(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
 int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
-    const char *buffer, void *iocb_ptr);
+    const char *buffer, void *iocb_ptr, void *tempAioExtra);
 
 extern void spc_shrink_files(SegExtentGroup *seg, BlockNumber target_size, bool redo);
 

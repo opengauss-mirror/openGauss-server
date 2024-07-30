@@ -49,6 +49,11 @@ typedef struct DSSAioCxt {
     AioUtil aio[DSS_AIO_UTIL_NUM];
 } DSSAioCxt;
 
+typedef struct PgwrAioExtraData {
+    int aio_fd;
+    void* aio_bufdesc;
+} PgwrAioExtraData;
+
 void DSSAioInitialize(DSSAioCxt *aio_cxt, aio_callback callback);
 void DSSAioDestroy(DSSAioCxt *aio_cxt);
 struct iocb* DSSAioGetIOCB(DSSAioCxt *aio_cxt);

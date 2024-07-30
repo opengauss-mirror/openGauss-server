@@ -40,8 +40,8 @@
 #include "utils/relfilenodemap.h"
 #include "pgxc/execRemote.h"
 #include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_aio.h"
 #include "storage/file/fio_device.h"
-#include "libaio.h"
 
 static void SSInitSegLogicFile(SegSpace *spc);
 
@@ -108,7 +108,7 @@ void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, con
 }
 
 int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
-    const char *buffer, void *iocb_ptr)
+    const char *buffer, void *iocb_ptr, void *tempAioExtra)
 {
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
@@ -120,6 +120,7 @@ int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum
     SegPhysicalFile spf = df_get_physical_file(seg->segfile, sliceno, blocknum);
     int32 ret;
     if (is_dss_fd(spf.fd)) {
+        ((PgwrAioExtraData *)tempAioExtra)->aio_fd = spf.fd;
         ret = dss_aio_prep_pwrite(iocb_ptr, spf.fd, (void *)buffer, BLCKSZ, roffset);
     } else {
         io_prep_pwrite((struct iocb *)iocb_ptr, spf.fd, (void *)buffer, BLCKSZ, roffset);
