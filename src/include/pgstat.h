@@ -2559,7 +2559,11 @@ extern Size sessionTimeShmemSize(void);
 extern void sessionTimeShmemInit(void);
 
 extern void timeInfoRecordStart(void);
-extern void timeInfoRecordEnd(void);
+extern void timeInfoRecordEnd(bool update_delay = false);
+
+extern void update_sql_state(void);
+
+extern bool nettime_trace_is_working();
 
 extern void getSessionTimeStatus(Tuplestorestate *tupStore, TupleDesc tupDesc,
     void (*insert)(Tuplestorestate *tupStore, TupleDesc tupDesc, const SessionTimeEntry *entry));

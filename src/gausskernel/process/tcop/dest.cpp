@@ -179,6 +179,13 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
     return &donothingDR;
 }
 
+void send_dbtime_to_driver(int64 db_time) {
+    StringInfoData msgbuf;
+    pq_beginmessage(&msgbuf, 'K');
+    pq_sendint64(&msgbuf, db_time);
+    pq_endmessage(&msgbuf);
+}
+
 /* ----------------
  *		EndCommand - clean up the destination at end of command
  * ----------------
