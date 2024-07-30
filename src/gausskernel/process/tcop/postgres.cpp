@@ -7710,6 +7710,11 @@ void LoadSqlPlugin()
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("Please use the original role to connect B-compatibility database first, to load extension dolphin")));
             }
+
+            /* Creating extension dolphin must init mask_password_mem_cxt before */
+            Assert(t_thrd.mem_cxt.mask_password_mem_cxt != NULL);
+            Assert(IsNormalProcessingMode());
+
             /* recheck and load dolphin within lock */
             t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = true;
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
