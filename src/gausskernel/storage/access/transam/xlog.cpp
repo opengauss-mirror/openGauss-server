@@ -20016,7 +20016,6 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-
     if (xlogreader->preReadBuf == NULL) {
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     } else {
