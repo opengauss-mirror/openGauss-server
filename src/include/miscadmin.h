@@ -151,6 +151,7 @@ extern const uint32 ROTATE_UNROTATE_VERSION_NUM;
 extern const uint32 FLOAT_VERSION_NUMBER;
 extern const uint32 STRAIGHT_JOIN_VERSION_NUMBER;
 extern const uint32 PARALLEL_ENABLE_VERSION_NUM;
+extern const uint32 AUDIT_SHA_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
