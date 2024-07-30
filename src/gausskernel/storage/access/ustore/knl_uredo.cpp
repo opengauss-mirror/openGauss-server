@@ -1258,8 +1258,10 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
 static void UHeapXlogUpdate(XLogReaderState *record)
 {
     XlUndoHeader *xlnewundohdr = NULL;
-    UpdateRedoBuffers buffers = { 0 };
-    RelFileNode rnode = {0};
+    UpdateRedoBuffers buffers;
+    buffers.oldbuffer = { 0 };
+    buffers.newbuffer = { 0 };
+    RelFileNode rnode = { 0 };
     BlockNumber oldblk = InvalidBlockNumber;
     BlockNumber newblk = InvalidBlockNumber;
     UHeapTupleData oldtup;
@@ -1761,7 +1763,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapFreeze *xlrec = (XlUHeapFreeze *)XLogRecGetData(record);
     TransactionId cutoffXid = xlrec->cutoff_xid;
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     UHeapTupleData utuple;
     RelFileNode rnode;
     BlockNumber blkno = InvalidBlockNumber;
@@ -1949,7 +1951,7 @@ static void UHeapUndoXlogPageRestore(char *curxlogptr, Buffer buffer, Page page)
  */
 static void UHeapUndoXlogPage(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     uint8 *flags = (uint8 *)XLogRecGetData(record);
     char *curxlogptr = (char *)((char *)flags + sizeof(uint8));
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
@@ -1993,7 +1995,7 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
 
 static void UHeapUndoXlogResetXid(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapUndoResetSlot *xlrec = (XlUHeapUndoResetSlot *)XLogRecGetData(record);
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
@@ -2018,7 +2020,7 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
 
 static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     uint8 *flags = (uint8 *)XLogRecGetData(record);
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapUndoAbortSpecInsert *xlrec = (XlUHeapUndoAbortSpecInsert *)((char *)flags + sizeof(uint8));

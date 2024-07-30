@@ -860,7 +860,7 @@ static void ConstraintsForExecUpsert(Relation resultRelationDesc)
     }
 }
 
-static void update_slot_tuple_info(TupleTableSlot* slot, Tuple tuple) 
+static void update_slot_tuple_info(TupleTableSlot* slot, Tuple tuple)
 {
     bool tuple_is_uheap = TUPLE_IS_UHEAP_TUPLE(tuple);
     if (slot->tts_tupslotTableAm == TAM_USTORE && !tuple_is_uheap) {
@@ -875,14 +875,14 @@ static void update_slot_tuple_info(TupleTableSlot* slot, Tuple tuple)
         slot_tup->xc_node_id = htup->t_xc_node_id;
     } else if (slot->tts_tupslotTableAm == TAM_HEAP && tuple_is_uheap) {
         HeapTuple slot_tup = (HeapTuple) slot->tts_tuple;
-        UHeapTuple htup = (UHeapTuple) tuple;
-        slot_tup->t_self = htup->ctid;
-        slot_tup->t_tableOid = htup->table_oid;
-        slot_tup->t_xid_base = htup->t_xid_base;
-        slot_tup->t_multi_base = htup->t_multi_base;
-        slot_tup->xmin = htup->xmin;
-        slot_tup->xmax = htup->xmax;
-        slot_tup->t_xc_node_id = htup->xc_node_id;
+        UHeapTuple utup = (UHeapTuple) tuple;
+        slot_tup->t_self = utup->ctid;
+        slot_tup->t_tableOid = utup->table_oid;
+        slot_tup->t_xid_base = utup->t_xid_base;
+        slot_tup->t_multi_base = utup->t_multi_base;
+        slot_tup->xmin = utup->xmin;
+        slot_tup->xmax = utup->xmax;
+        slot_tup->t_xc_node_id = utup->xc_node_id;
     } else {
         Assert(false);
     }
