@@ -175,8 +175,19 @@ SELECT TO_BINARY_FLOAT(c1 DEFAULT NULL ON CONVERSION ERROR) FROM tbf ORDER By c1
                8
 (8 rows)
 
-SELECT TO_BINARY_FLOAT(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tbf ORDER By c1;  -- errorя╝М column can't be default param
-ERROR:  Default param can't be ColumnRef
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tbf ORDER By c1;  -- error, column can't be default param
+ to_binary_float 
+-----------------
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+(8 rows)
+
 SELECT TO_BINARY_FLOAT(c2 DEFAULT 3.14 ON CONVERSION ERROR) FROM tbf ORDER By c1;
  to_binary_float 
 -----------------
@@ -434,6 +445,7 @@ SELECT TO_BINARY_FLOAT('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR);
 SELECT TO_BINARY_FLOAT('today' DEFAULT 'roll' ON CONVERSION ERROR);  -- error
 ERROR:  invalid input syntax for type real
 CONTEXT:  referenced column: to_binary_float
+<<<<<<< HEAD
 SELECT TO_BINARY_FLOAT(3.402E+100);
  to_binary_float 
 -----------------
@@ -446,6 +458,112 @@ SELECT TO_BINARY_FLOAT('test' DEFAULT 3.04E+100 ON CONVERSION ERROR);
         Infinity
 (1 row)
 
+=======
+-- test default column
+SELECT TO_BINARY_FLOAT(1.79E+309 DEFAULT y ON CONVERSION ERROR);
+ERROR:  column "y" does not exist
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+309 DEFAULT y ON CONVERSION ERR...
+                                                 ^
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(c3 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1;
+ to_binary_float 
+-----------------
+            1.23
+         3.14157
+     2.02405e+11
+                
+                
+             NaN
+        Infinity
+        Infinity
+(8 rows)
+
+SELECT TO_BINARY_FLOAT(c4 DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1;
+ to_binary_float 
+-----------------
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+(8 rows)
+
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1;
+ to_binary_float 
+-----------------
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+            3.14
+(8 rows)
+
+SELECT TO_BINARY_FLOAT(3.14E+100 DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1;
+ to_binary_float 
+-----------------
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+(8 rows)
+
+SELECT TO_BINARY_FLOAT(3.14E+100 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1;
+ to_binary_float 
+-----------------
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+        Infinity
+(8 rows)
+
+SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- overflow
+ERROR:  "31400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- overflow
+ERROR:  "31400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14' DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14' DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14E+100' DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14E+100' DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14E+400' DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('3.14E+400' DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(NULL DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER BY c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(NULL DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER BY c1; -- error
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_binary_float
+>>>>>>> 1073a6efb (修改第二个参数为列引用时的处理逻辑)
 -- test overflow and null
 SELECT TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 3.14 ON CONVERSION ERROR);
  to_binary_float 
