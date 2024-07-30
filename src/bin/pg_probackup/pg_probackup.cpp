@@ -28,6 +28,7 @@
 #include "oss/include/restore.h"
 
 #define MIN_ULIMIT_STACK_SIZE 8388608     // 1024 * 1024 * 8
+#define PROG_NAME "gs_probackup"
 
 const char  *PROGRAM_NAME = NULL;        /* PROGRAM_NAME_FULL without .exe suffix
                                          * if any */
@@ -824,6 +825,7 @@ int main(int argc, char *argv[])
      * Make command string before getopt_long() will call. It permutes the
      * content of argv.
      */
+    init_audit(PROG_NAME, argc, argv);
     /* TODO why do we do that only for some commands? */
     command_name = gs_pstrdup(argv[1]);
     command = make_command_string(argc, argv);
@@ -911,7 +913,11 @@ int main(int argc, char *argv[])
     initDataPathStruct(IsDssMode());
 
     /* do actual operation */
-    return do_actual_operate();
+    errno_t rc = do_actual_operate();
+    if (rc == 0) {
+        audit_success();
+    }
+    return rc;
 }
 
 static void

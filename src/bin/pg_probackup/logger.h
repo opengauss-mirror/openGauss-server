@@ -11,6 +11,8 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
+#include "bin/elog.h"
+
 #define LOG_NONE    (-10)
 
 /* Log level */
@@ -65,5 +67,4 @@ extern void release_logfile(void);
 extern int parse_log_level(const char *level);
 extern const char *deparse_log_level(int level);
 size_t format_and_insert_text(char *buf, size_t len, const char *fmt, va_list args);
-void GenerateProgressBar(int percent, char* progressBar);
 #endif   /* LOGGER_H */

@@ -35,4 +35,16 @@ extern void init_log(char* prefix_name);
 extern void check_env_value_c(const char* input_env_value);
 extern void check_env_name_c(const char* input_env_value);
 extern void GenerateProgressBar(int percent, char* progressBar);
+
+struct auditConfig
+{
+    bool has_init;
+    bool is_success;
+    const char *process_name;
+    int argc;
+    char **argv;
+};
+
+extern void init_audit(const char* prefix_name, int argc, char** argv); //register audit callback on exit
+extern void audit_success();
 #endif /* COMMON_H */

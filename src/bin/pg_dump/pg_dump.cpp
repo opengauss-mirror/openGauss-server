@@ -746,6 +746,7 @@ int main(int argc, char** argv)
     // log output redirect
     init_log((char*)PROG_NAME);
 
+    init_audit(PROG_NAME, argc, argv);
     validatedumpoptions();
 
     /* Identify archive format to emit */
@@ -1230,6 +1231,7 @@ int main(int argc, char** argv)
 
     encryptArchive(fout, archiveFormat);
     write_msg(NULL, "dump database %s successfully\n", dbname);
+    audit_success();
 
     /* Database Security: Data importing/dumping support AES128. */
     gettimeofday(&aes_end_time, NULL);

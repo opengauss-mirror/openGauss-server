@@ -260,6 +260,7 @@ int main(int argc, char** argv)
     (void)fclose(fp);
     fp = NULL;
 
+    init_audit(PROG_NAME, argc, argv);
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
     if (is_encrypt) {
@@ -385,6 +386,7 @@ int main(int argc, char** argv)
         inputFileSpec = NULL;
     }
     write_msg(NULL, "restore operation successful\n");
+    audit_success();
     (void)gettimeofday(&restoreEndTime, NULL);
     restoreTotalTime = (restoreEndTime.tv_sec - restoreStartTime.tv_sec) * 1000 +
                        (restoreEndTime.tv_usec - restoreStartTime.tv_usec) / 1000;
