@@ -202,13 +202,7 @@ WAIT				{ return K_WAIT; }
 				}
 
 .				{
-					if (u_sess->proc_cxt.clientIsSubscription) {
-						return T_WORD;
-					}
-
-					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("syntax error: unexpected character \"%s\"", yytext)));
+					return T_WORD;
 				}
 %%
 
