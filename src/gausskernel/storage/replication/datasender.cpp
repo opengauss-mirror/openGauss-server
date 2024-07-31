@@ -292,6 +292,8 @@ static void DataSndHandshake(void)
                 }
             } break;
 
+            case 'V': /* client conn driver support trace info*/
+                break;
             case 'X':
                 /* standby is closing the connection */
                 proc_exit(0);
