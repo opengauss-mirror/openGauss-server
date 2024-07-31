@@ -13908,13 +13908,15 @@ struct OndemandParseInfo {
     NodeTag parseType;
     ObjectType objectType;
     RangeVar* relationRangeVar;
+    const char* dbName;
 };
 
-static List* AppendItemToOndemandParseList(List* ondemandParseList, NodeTag parseType, ObjectType objectType, RangeVar* relationRangeVar) {
+static List* AppendItemToOndemandParseList(List* ondemandParseList, NodeTag parseType, ObjectType objectType, RangeVar* relationRangeVar, const char* dbName = NULL) {
     OndemandParseInfo* info = (OndemandParseInfo*)palloc(sizeof(OndemandParseInfo));
     info->parseType = parseType;
     info->objectType = objectType;
     info->relationRangeVar = relationRangeVar;
+    info->dbName = dbName;
     ondemandParseList = lappend(ondemandParseList, info);
     return ondemandParseList;
 }
@@ -14011,7 +14013,8 @@ static void PreRedoInOndemandRecovery(Node* parseTree) {
         case T_ReindexStmt: {
             ReindexStmt* reindexStmt = (ReindexStmt*) parseTree;
             ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_ReindexStmt,
-                                                              reindexStmt->kind, reindexStmt->relation);
+                                                              reindexStmt->kind, reindexStmt->relation,
+                                                              reindexStmt->kind == OBJECT_DATABASE ? reindexStmt->name : NULL);
             break;
         }
         /* ALTER TABLE/INDEX/PROCEDURE/ SET SCHEMA */
@@ -14045,7 +14048,17 @@ static void PreRedoInOndemandRecovery(Node* parseTree) {
                     case T_AlterOwnerStmt: {
                         break;
                     }
-                    case T_ReindexStmt:
+                    case T_ReindexStmt: {
+                        const char* dbName = ondemandParseInfo->dbName;
+                        Oid dbOid = get_database_oid_by_name(dbName);
+                        if (!OidIsValid(dbOid)) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Database \"%s\" does not exist.", dbName)));
+                            break;
+                        }
+                        RedoDatabaseForOndemandExtremeRTO(dbOid);
+                        break;
+                    }
                     default: {
                         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
