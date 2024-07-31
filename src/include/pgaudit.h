@@ -166,7 +166,8 @@ typedef enum {
     AUDIT_NODENAME_INFO,
     AUDIT_THREADID_INFO,
     AUDIT_LOCALPORT_INFO,
-    AUDIT_REMOTEPORT_INFO
+    AUDIT_REMOTEPORT_INFO,
+    AUDIT_SHACODE,
 } AuditStringFieldNum;
 
 struct AuditElasticEvent {
@@ -182,6 +183,7 @@ struct AuditElasticEvent {
     const char* threadIdInfo;
     const char* localPortInfo;
     const char* remotePortInfo;
+    const char* shaCode;
     long long   eventTime;
 };
 
