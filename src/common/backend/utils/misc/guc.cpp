@@ -6689,7 +6689,10 @@ void BeginReportingGUCOptions(void)
         if (conf->flags & GUC_REPORT)
             ReportGUCOption(conf);
     }
-    ReportTraceOption();
+    if (u_sess->attr.attr_common.enable_record_nettime) {
+        ReportTraceOption();
+    }
+    
 }
 
 /*
