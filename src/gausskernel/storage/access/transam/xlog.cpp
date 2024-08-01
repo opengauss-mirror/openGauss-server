@@ -10152,7 +10152,14 @@ void StartupXLOG(void)
         }
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
         /* No need to hold ControlFileLock yet, we aren't up far enough */
-        if (!SS_STANDBY_FAILOVER && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
+        /**
+         * When enable_dms, the following conditions shouldn't update control file here,
+         * because standby node has read the control file from primary node.
+         * 1. standby node failover promoting.
+         * 2. standby node switchover promoting.
+         * 3. standby node start ondemand realtime build.
+         */
+        if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
             UpdateControlFile();
         }
 
