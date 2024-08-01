@@ -716,6 +716,10 @@ static void _outPlanInfo(StringInfo str, Plan* node)
         WRITE_BOOL_FIELD(spq_scan_partial);
     }
 #endif
+    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
+        WRITE_INT_FIELD(cursor_expr_level);
+        WRITE_INT_FIELD(cursor_owner_node_id);
+    }
 }
 
 static void _outPruningResult(StringInfo str, PruningResult* node)
@@ -1210,10 +1214,6 @@ static void _outStream(StringInfo str, Stream* node)
 #ifdef USE_SPQ
     WRITE_INT_FIELD(streamID);
 #endif
-    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
-        WRITE_INT_FIELD(cursor_expr_level);
-        WRITE_INT_FIELD(cursor_owner_node_id);
-    }
 }
 
 /*

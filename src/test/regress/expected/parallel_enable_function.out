@@ -307,6 +307,115 @@ select count(*) from multi_cursor_srf(cursor (select * from employees), cursor (
    100
 (1 row)
 
+-- query dop reset after error
+explain (costs off) select count(*) from multi_cursor_srf(cursor (select * from multi_cursor_srf(cursor (select * from employees))), cursor (select * from employees));
+ERROR:  function multi_cursor_srf(refcursor) does not exist
+LINE 1: explain (costs off) select count(*) from multi_cursor_srf(cu...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+explain (costs off) select * from employees;
+               QUERY PLAN               
+----------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/2)
+   ->  Seq Scan on employees
+(2 rows)
+
+-- test top plan of cursor expr is not stream
+explain (costs off) select count(*) from hash_srf(cursor (select * from employees limit 10)), employees;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Nested Loop
+                     ->  Streaming(type: LOCAL ROUNDROBIN dop: 2/1)
+                           ->  Function Scan on hash_srf
+                     ->  Materialize
+                           ->  Streaming(type: BROADCAST dop: 2/2)
+                                 ->  Seq Scan on employees
+(9 rows)
+
+select count(*) from hash_srf(cursor (select * from employees limit 10)), employees;
+ count 
+-------
+  1000
+(1 row)
+
+explain (costs off) select count(*) from hash_srf(cursor (select * from employees a ,employees b)), employees limit 10;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Limit
+   ->  Aggregate
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Nested Loop
+                           ->  Function Scan on hash_srf
+                           ->  Materialize
+                                 ->  Streaming(type: BROADCAST dop: 2/2)
+                                       ->  Seq Scan on employees
+(9 rows)
+
+select count(*) from hash_srf(cursor (select * from employees a ,employees b)), employees limit 10;
+  count  
+---------
+ 1000000
+(1 row)
+
+-- test initplan not smp
+explain (costs off) select 1, (select count(*) from hash_srf(cursor (select * from employees))) a from employees;
+               QUERY PLAN                
+-----------------------------------------
+ Streaming(type: LOCAL GATHER)
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Function Scan on hash_srf
+   ->  Seq Scan on employees
+(5 rows)
+
+-- test plan hint
+set query_dop = 1;
+explain (costs off) select count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees)); -- not smp
+           QUERY PLAN            
+---------------------------------
+ Aggregate
+   ->  Function Scan on hash_srf
+(2 rows)
+
+select count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees));
+ count 
+-------
+   100
+(1 row)
+
+explain (costs off) select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select * from employees)); -- not smp
+           QUERY PLAN            
+---------------------------------
+ Aggregate
+   ->  Function Scan on hash_srf
+(2 rows)
+
+select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select * from employees));
+ count 
+-------
+   100
+(1 row)
+
+explain (costs off) select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees)); -- smp
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Function Scan on hash_srf
+(4 rows)
+
+select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees));
+ count 
+-------
+   100
+(1 row)
+
+set query_dop = 1002;
 -- nested function call
 explain (costs off) select * from hash_srf(cursor (select * from hash_srf(cursor (select * from employees)))) limit 10;
                   QUERY PLAN                  

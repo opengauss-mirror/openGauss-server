@@ -144,6 +144,31 @@ select * from multi_cursor_srf(cursor (select * from employees), cursor (select 
 explain (costs off) select count(*) from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees));
 select count(*) from multi_cursor_srf(cursor (select * from employees), cursor (select * from employees));
 
+-- query dop reset after error
+explain (costs off) select count(*) from multi_cursor_srf(cursor (select * from multi_cursor_srf(cursor (select * from employees))), cursor (select * from employees));
+explain (costs off) select * from employees;
+
+-- test top plan of cursor expr is not stream
+explain (costs off) select count(*) from hash_srf(cursor (select * from employees limit 10)), employees;
+select count(*) from hash_srf(cursor (select * from employees limit 10)), employees;
+
+explain (costs off) select count(*) from hash_srf(cursor (select * from employees a ,employees b)), employees limit 10;
+select count(*) from hash_srf(cursor (select * from employees a ,employees b)), employees limit 10;
+
+-- test initplan not smp
+explain (costs off) select 1, (select count(*) from hash_srf(cursor (select * from employees))) a from employees;
+
+-- test plan hint
+set query_dop = 1;
+explain (costs off) select count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees)); -- not smp
+select count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees));
+
+explain (costs off) select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select * from employees)); -- not smp
+select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select * from employees));
+
+explain (costs off) select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees)); -- smp
+select /*+ set(query_dop 1002) */ count(*) from hash_srf(cursor (select /*+ set(query_dop 1002) */ * from employees));
+set query_dop = 1002;
 -- nested function call
 explain (costs off) select * from hash_srf(cursor (select * from hash_srf(cursor (select * from employees)))) limit 10;
 select * from hash_srf(cursor (select * from hash_srf(cursor (select * from employees)))) limit 10;

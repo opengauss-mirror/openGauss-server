@@ -832,8 +832,10 @@ public:
     {
         if (likely(u_sess != NULL)) {
             m_smpEnabled = u_sess->opt_cxt.smp_enabled;
+            m_underCursor = u_sess->opt_cxt.is_under_cursor;
         } else {
             m_smpEnabled = true;
+            m_underCursor = false;
         }
     }
 
@@ -841,6 +843,7 @@ public:
     {
         if (u_sess != NULL) {
             u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+            u_sess->opt_cxt.is_under_cursor = m_underCursor;
         }
     }
 
@@ -851,15 +854,24 @@ public:
         }
     }
 
+    void UnderCursor()
+    {
+        if (likely(u_sess != NULL)) {
+            u_sess->opt_cxt.is_under_cursor = true;
+        }
+    }
+
     void ResetSmp()
     {
         if (u_sess != NULL) {
             u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+            u_sess->opt_cxt.is_under_cursor = m_underCursor;
         }
     }
 
 private:
     bool m_smpEnabled;
+    bool m_underCursor;
 };
 
 #ifdef USE_SPQ

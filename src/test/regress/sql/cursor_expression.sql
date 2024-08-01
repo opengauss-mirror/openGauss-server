@@ -527,6 +527,29 @@ create table test_insert(c1 varchar, c2 varchar);
 insert into test_insert SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d;
 select * from test_insert;
 
+reset behavior_compat_options;
+create index on employees(employees_id);
+explain (costs off) SELECT e1.name FROM employees e1 where employees_id < 10;
+set enable_auto_explain = on;
+set auto_explain_level = notice;
+-- test plan hint in cursor expression
+DECLARE CURSOR c1 IS SELECT e.name, CURSOR(SELECT /*+ set(enable_seqscan off) */ e1.name FROM employees e1 where employees_id < 10) abc FROM employees e;
+  v_name VARCHAR2(10);	
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  v_name2 VARCHAR2(10);	
+BEGIN
+  OPEN c1;
+  fetch c1 into v_name,c2;
+  raise notice 'company_name : %  %',v_name, c2;
+  fetch c2 into v_name2;
+  raise notice 'employee_name : %',v_name2;
+  close c2;
+  CLOSE c1;
+END;
+/
+set enable_auto_explain = off;
+
 -- clean
 drop table test_insert;
 drop procedure pro_cursor_0011_02;

@@ -620,8 +620,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
 
     key.queryId = pstmt->queryId;
     key.planNodeId = plan->plan_node_id;
-    key.cursorExprLevel = streamNode->cursor_expr_level;
-    key.cursorParentNodeId = streamNode->cursor_owner_node_id;
+    key.cursorExprLevel = plan->cursor_expr_level;
+    key.cursorParentNodeId = plan->cursor_owner_node_id;
     /*
      * MPPDB with-recursive support
      */
@@ -973,11 +973,13 @@ static void InitStreamFlow(StreamFlowCtl* ctl)
             case T_FunctionScan: {
                 PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)oldPlan)->funcexpr);
                 if (cursorPstmt != NULL) {
-                    Stream* cursorPlan = (Stream*)(cursorPstmt->planTree);
-                    ctl->plan = (Plan*)cursorPlan;
+                    ctl->plan = cursorPstmt->planTree;
+
+                    PlannedStmt* oldPlan = ctl->cursorPstmt;
                     ctl->cursorPstmt = cursorPstmt;
 
                     InitStreamFlow(ctl);
+                    ctl->cursorPstmt = oldPlan;
                     break;
                 }
             } break;
@@ -1191,8 +1193,8 @@ void SetupStreamRuntime(StreamState* node)
 
     key.queryId = node->ss.ps.state->es_plannedstmt->queryId;
     key.planNodeId = streamNode->scan.plan.plan_node_id;
-    key.cursorExprLevel = streamNode->cursor_expr_level;
-    key.cursorParentNodeId = streamNode->cursor_owner_node_id;
+    key.cursorExprLevel = node->ss.ps.plan->cursor_expr_level;
+    key.cursorParentNodeId = node->ss.ps.plan->cursor_owner_node_id;
 
     Assert(u_sess->stream_cxt.global_obj != NULL);
     pair = u_sess->stream_cxt.global_obj->popStreamPair(key);
@@ -1231,8 +1233,8 @@ static void StartupStreamThread(StreamState* node)
 
     key.queryId = node->ss.ps.state->es_plannedstmt->queryId;
     key.planNodeId = node->ss.ps.plan->plan_node_id;
-    key.cursorExprLevel = ((Stream*)node->ss.ps.plan)->cursor_expr_level;
-    key.cursorParentNodeId = ((Stream*)node->ss.ps.plan)->cursor_owner_node_id;
+    key.cursorExprLevel = node->ss.ps.plan->cursor_expr_level;
+    key.cursorParentNodeId = node->ss.ps.plan->cursor_owner_node_id;
     Assert(u_sess->stream_cxt.global_obj != NULL);
     pair = u_sess->stream_cxt.global_obj->popStreamPair(key);
     Assert(pair->producerList != NULL);

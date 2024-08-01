@@ -231,6 +231,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->query_dop_store = 1;
     opt_cxt->query_dop = 1;
     opt_cxt->smp_enabled = true;
+    opt_cxt->is_under_cursor = false;
     opt_cxt->max_query_dop = -1;
     opt_cxt->parallel_debug_mode = 0;
 

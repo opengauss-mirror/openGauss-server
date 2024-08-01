@@ -89,8 +89,6 @@ typedef struct Stream {
 #ifdef USE_SPQ
     int streamID;
 #endif
-    int cursor_expr_level;
-    int cursor_owner_node_id;
 } Stream;
 
 extern void compute_stream_cost(StreamType type, char locator_type, double subrows, double subgblrows,
