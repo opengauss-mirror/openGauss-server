@@ -65,6 +65,15 @@
 #define AT_NUM_PASSES 10
 #endif
 
+/**
+ * state information of alter float datatype result (at float_as_numeric).
+ *
+ * Phase 3 scan if table not empty and 'check_floatasnumeric' > 0, go err.
+ */
+#define AT_FASN_PASS 0
+#define AT_FASN_FAIL_PRECISION 1
+#define AT_FASN_FAIL_TYPE 2
+
 typedef struct AlteredTableInfo {
     /* Information saved before any work commences: */
     Oid relid;         /* Relation to work on */
@@ -78,6 +87,7 @@ typedef struct AlteredTableInfo {
     List* newvals;     /* List of NewColumnValue */
     bool new_notnull;  /* T if we added new NOT NULL constraints */
     int rewrite;      /* Reason if a rewrite is forced */
+    int check_pass_with_relempty; /* alter column check condition, require table empty condition in phase 3 */
     Oid newTableSpace; /* new tablespace; 0 means no change */
     /* Objects to rebuild after completing ALTER TYPE operations */
     List* changedConstraintOids; /* OIDs of constraints to rebuild */

@@ -71,6 +71,15 @@ CREATE TABLE t2(a numeric(1,-84));
 DROP TABLE t1;
 DROP TABLE t2;
 
+-- test alter table to  decrease scale
+CREATE TABLE t1 (c1 int, c2 numeric(5, 2), c3 numeric(5, -2));
+INSERT INTO t1 VALUES (1, 546.12, 456135.12);
+SELECT * FROM t1;
+ALTER TABLE t1 MODIFY (c2 numeric(5, 1)); -- error
+ALTER TABLE t1 MODIFY (c3 numeric(5, -3)); -- error
+SELECT * FROM t1;
+DROP TABLE t1;
+
 CREATE TABLE t3(a numeric(1,1001));
 CREATE TABLE t3(a numeric(1,-85));
 CREATE TABLE t3(a numeric(1,1001));
