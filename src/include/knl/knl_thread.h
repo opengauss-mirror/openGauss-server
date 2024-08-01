@@ -3647,11 +3647,6 @@ inline bool WorkerThreadAmI()
     return (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER);
 }
 
-inline bool StreamWorkerThreadAmI()
-{
-    return (t_thrd.role == STREAM_WORKER);
-}
-
 inline bool WLMThreadAmI()
 {
     return (t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR ||
