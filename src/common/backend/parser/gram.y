@@ -8078,6 +8078,24 @@ ColConstraintElem:
 					n->cooked_expr = NULL;
 					$$ = (Node *)n;
 				}
+			| DEFAULT FCONST_F
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_DEFAULT;
+					n->location = @1;
+					n->raw_expr = makeFloatConst($2, @2);
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
+			| DEFAULT FCONST_D
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_DEFAULT;
+					n->location = @1;
+					n->raw_expr = makeFloatConst($2, @2);;
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
 			| ON_UPDATE_TIME UPDATE b_expr
 				{
 #ifndef ENABLE_MULTIPLE_NODES

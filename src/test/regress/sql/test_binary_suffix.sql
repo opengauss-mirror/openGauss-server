@@ -362,4 +362,25 @@ create type binary_double_nan AS (
 drop type binary_double_nan;
 set disable_keyword_options = '';
 
+set float_suffix_acceptance = on;
+CREATE TABLE employees (
+emp_id INT PRIMARY KEY,
+emp_name VARCHAR(100) NOT NULL,
+emp_salary DECIMAL(10, 2) DEFAULT 3.14f,
+hire_date DATE DEFAULT CURRENT_DATE
+);
+INSERT INTO employees (emp_id, emp_name, hire_date) VALUES (1, 'John Doe', '2024-01-01');
+SELECT * FROM employees;
+DROP TABLE employees;
+
+CREATE TABLE employees (
+emp_id INT PRIMARY KEY,
+emp_name VARCHAR(100) NOT NULL,
+emp_salary DECIMAL(10, 2) DEFAULT 3.14d,
+hire_date DATE DEFAULT CURRENT_DATE
+);
+INSERT INTO employees (emp_id, emp_name, hire_date) VALUES (1, 'John Doe', '2024-01-01');
+SELECT * FROM employees;
+DROP TABLE employees;
+
 drop schema if exists test_binary cascade;
