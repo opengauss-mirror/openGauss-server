@@ -2718,15 +2718,19 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             t_thrd.xlog_cxt.openLogOff = 0;
 
             segs_enough = true;
-            if (g_instance.attr.attr_storage.wal_file_init_num > 0 && g_instance.wal_cxt.globalEndPosSegNo != InvalidXLogSegPtr &&
+            const int fullThreshold = 100;
+            int threshold = u_sess->attr.attr_storage.walFilePreinitThreshold;
+            int initNum = g_instance.attr.attr_storage.wal_file_init_num;
+            if (threshold < fullThreshold && initNum > 0 &&
+                g_instance.wal_cxt.globalEndPosSegNo != InvalidXLogSegPtr &&
                 g_instance.wal_cxt.globalEndPosSegNo >= t_thrd.xlog_cxt.openLogSegNo) {
-                segs_enough = (g_instance.wal_cxt.globalEndPosSegNo - t_thrd.xlog_cxt.openLogSegNo)
-                    > (g_instance.attr.attr_storage.wal_file_init_num * 0.2);
+                segs_enough = (g_instance.wal_cxt.globalEndPosSegNo - t_thrd.xlog_cxt.openLogSegNo) >
+                              (1.0 * initNum * (fullThreshold - threshold) / fullThreshold);
             }
 
             /*
              * Unlock WalAuxiliary thread to init new xlog segment if we are running out
-             * of xlog segments, or available segments is less than wal_file_init_num * 0.2.
+             * of xlog segments, or used segments is more than wal_file_preinit_threshold.
              */
             if (!segs_enough) {
                 g_instance.wal_cxt.globalEndPosSegNo = Max(g_instance.wal_cxt.globalEndPosSegNo, t_thrd.xlog_cxt.openLogSegNo);
