@@ -2110,7 +2110,13 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
         int needWaitTime = Max(1000, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout :
                                u_sess->attr.attr_storage.LockWaitTimeout) - u_sess->attr.attr_storage.DeadlockTimeout);
         if (waitSec > 0) {
-            needWaitTime =Max(1, (waitSec * 1000) - u_sess->attr.attr_storage.DeadlockTimeout);
+            if (t_thrd.storage_cxt.timer_continued.tv_sec != 0 || t_thrd.storage_cxt.timer_continued.tv_usec != 0) {
+                int tmpWaitTime = t_thrd.storage_cxt.timer_continued.tv_sec * 1000 +
+                    t_thrd.storage_cxt.timer_continued.tv_usec / 1000;
+                needWaitTime = Max(1, tmpWaitTime - u_sess->attr.attr_storage.DeadlockTimeout);
+            } else {
+                needWaitTime =Max(1, (waitSec * 1000) - u_sess->attr.attr_storage.DeadlockTimeout);
+            }
         }
 
         if (myWaitStatus == STATUS_WAITING && u_sess->attr.attr_storage.LockWaitTimeout > 0 && 
@@ -2124,7 +2130,7 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
     /*
      * Disable the timer, if it's still running
      */
-    if (!disable_sig_alarm(false))
+    if (!disable_sig_alarm(false, waitSec))
         ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for process wakeup")));
 
     /*
@@ -2747,7 +2753,7 @@ bool disable_idle_in_transaction_session_sig_alarm(void)
  *
  * Returns TRUE if okay, FALSE on failure.
  */
-bool disable_sig_alarm(bool is_statement_timeout)
+bool disable_sig_alarm(bool is_statement_timeout, int waitSec)
 {
     /*
      * Always disable the interrupt if it is active; this avoids being
@@ -2758,11 +2764,16 @@ bool disable_sig_alarm(bool is_statement_timeout)
      */
     if (t_thrd.storage_cxt.statement_timeout_active || t_thrd.storage_cxt.deadlock_timeout_active ||
         t_thrd.storage_cxt.lockwait_timeout_active || t_thrd.wlm_cxt.wlmalarm_timeout_active) {
+        if (waitSec > 0) {
+            gs_signal_get_timer(&(t_thrd.storage_cxt.timer_continued));
+        }
+
         if (gs_signal_canceltimer()) {
             t_thrd.storage_cxt.statement_timeout_active = false;
             t_thrd.storage_cxt.cancel_from_timeout = false;
             t_thrd.storage_cxt.deadlock_timeout_active = false;
             t_thrd.storage_cxt.lockwait_timeout_active = false;
+            t_thrd.storage_cxt.timer_continued = {0, 0};
             t_thrd.wlm_cxt.wlmalarm_timeout_active = false;
             return false;
         }

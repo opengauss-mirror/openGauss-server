@@ -173,6 +173,7 @@ extern int gs_signal_canceltimer(void);
 extern int gs_signal_deletetimer(void);
 
 extern void gs_signal_monitor_startup(void);
+extern void gs_signal_get_timer(struct timeval* timeval);
 
 #ifdef WIN32
 #define pgwin32_dispatch_queued_signals gs_signal_handle

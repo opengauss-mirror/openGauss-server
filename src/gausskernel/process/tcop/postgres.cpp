@@ -2877,6 +2877,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     TRACE_POSTGRESQL_QUERY_DONE(query_string);
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.storage_cxt.timer_continued = {0, 0};
 
     /*
      * @hdfs
@@ -5209,6 +5210,7 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         ShowUsage("EXECUTE MESSAGE STATISTICS");
 
     t_thrd.postgres_cxt.debug_query_string = NULL;
+    t_thrd.storage_cxt.timer_continued = {0, 0};
     gstrace_exit(GS_TRC_ID_exec_execute_message);
 }
 
@@ -8101,6 +8103,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * the storage it points at.
          */
         t_thrd.postgres_cxt.debug_query_string = NULL;
+        t_thrd.storage_cxt.timer_continued = {0, 0};
 
         if (u_sess->unique_sql_cxt.need_update_calls &&
             is_unique_sql_enabled() && is_local_unique_sql()) {
@@ -8242,6 +8245,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->statement_cxt.executer_run_level = 0;
 
         initStringInfo(&input_message);
+        t_thrd.storage_cxt.timer_continued = {0, 0};
         t_thrd.postgres_cxt.debug_query_string = NULL;
         t_thrd.postgres_cxt.g_NoAnalyzeRelNameList = NIL;
         u_sess->analyze_cxt.is_under_analyze = false;
@@ -9208,6 +9212,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     }
                     pfree_ext(completionTag);
                     t_thrd.postgres_cxt.debug_query_string = NULL;
+                    t_thrd.storage_cxt.timer_continued = {0, 0};
                     if (MEMORY_TRACKING_QUERY_PEAK)
                         ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",
                                              (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
