@@ -1922,12 +1922,12 @@ void seg_physical_write(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, B
 }
 
 int32 seg_physical_aio_prep_pwrite(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, BlockNumber blocknum,
-    const char *buffer, void *iocb_ptr)
+    const char *buffer, void *iocb_ptr, void *tempAioExtra)
 {
     SegmentCheck(IsSegmentPhysicalRelNode(rNode));
     SegmentCheck(spc != NULL);
 
-    return spc_aio_prep_pwrite(spc, rNode, forknum, blocknum, buffer, iocb_ptr);
+    return spc_aio_prep_pwrite(spc, rNode, forknum, blocknum, buffer, iocb_ptr, tempAioExtra);
 }
 static bool check_meta_data(BlockNumber extent, uint32 extent_size, uint32* offset_block)
 {

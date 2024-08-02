@@ -121,8 +121,7 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_stat", (void **)&device_op.dss_stat));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_lstat", (void **)&device_op.dss_lstat));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fstat", (void **)&device_op.dss_fstat));
-    SS_RETURN_IFERR(
-        dss_load_symbol(device_op.handle, "dss_set_main_inst", (void **)&device_op.dss_set_main_inst));
+    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_set_main_inst", (void **)&device_op.dss_set_main_inst));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_set_svr_path", (void **)&device_op.dss_set_svr_path));
     SS_RETURN_IFERR(
         dss_load_symbol(device_op.handle, "dss_register_log_callback", (void **)&device_op.dss_register_log_callback));
@@ -131,6 +130,7 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_compare_size_equal", (void **)&device_op.dss_compare_size));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_prep_pwrite", (void **)&device_op.dss_aio_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_prep_pread", (void **)&device_op.dss_aio_pread));
+    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_post_pwrite", (void **)&device_op.dss_aio_post_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_init_logger", (void **)&device_op.dss_init_logger));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_refresh_logger", (void **)&device_op.dss_refresh_logger));
 

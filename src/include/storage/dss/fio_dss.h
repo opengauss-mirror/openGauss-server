@@ -80,5 +80,5 @@ int dss_get_addr(int handle, long long offset, char *poolname, char *imagename, 
 int dss_compare_size(const char *vg_name, long long *au_size);
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset);
 int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long offset);
-
+int dss_aio_post_pwrite(void *iocb, int fd, size_t count, long long offset);
 #endif // FIO_DSS_H
