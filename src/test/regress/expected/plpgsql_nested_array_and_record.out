@@ -26,6 +26,36 @@ NOTICE:  RESULT: 2
 NOTICE:  RESULT: 3
 NOTICE:  RESULT: 4
 NOTICE:  RESULT: 5
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+BEGIN
+        nstarr(1):=1;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+ERROR:  array value must start with "{" or dimension information
+CONTEXT:  PL/pgSQL function test_nested_array() line 5 at assignment
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+arr typ_PLArray_case0001;
+BEGIN
+        arr(1):=1;
+        nstarr(1):=arr;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+NOTICE:  二维数组(1)：{1}
+ test_nested_array 
+-------------------
+ 
+(1 row)
+
 -- record of arrays
 DECLARE
     TYPE arr1 IS VARRAY(5) OF INTEGER;
@@ -87,4 +117,6 @@ NOTICE:  ID: 1, NAME: RECORD
 (1 row)
 
 DROP SCHEMA plpgsql_nested_array_and_record CASCADE;
-NOTICE:  drop cascades to function test_nested()
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function test_nested_array()
+drop cascades to function test_nested()
