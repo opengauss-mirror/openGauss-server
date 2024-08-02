@@ -478,8 +478,12 @@ static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc
     off_t seekpos;
     errno_t rc = EOK;
     uint32 ret = 0;
-    UndoHeader *urec = (UndoHeader *)malloc(sizeof(UndoHeader));
     UndoRecPtr blkprev = INVALID_UNDO_REC_PTR;
+    UndoHeader *urec = (UndoHeader *)malloc(sizeof(UndoHeader));
+    if (!urec) {
+        fprintf(stderr, "malloc UndoHeader failed, out of memory\n");
+        return false;
+    }
     rc = memset_s(urec, sizeof(UndoHeader), (0), sizeof(UndoHeader));
     securec_check(rc, "\0", "\0");
     do {

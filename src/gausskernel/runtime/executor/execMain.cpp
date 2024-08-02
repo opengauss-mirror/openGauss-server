@@ -3777,10 +3777,8 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                     Page page = BufferGetPage(buffer);
                     ItemPointer tid = &tuple.t_self;
                     OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
-                    if (offnum < FirstOffsetNumber || offnum > PageGetMaxOffsetNumber(page)) {
-                        ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
-                            errmsg("out of range items")));
-                    } else if (offnum < FirstOffsetNumber || offnum > UHeapPageGetMaxOffsetNumber(page)) {
+                    if (offnum < FirstOffsetNumber || offnum >
+                            tableam_tops_page_get_max_offsetnumber(fakeRelation, page)) {
                         ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
                             errmsg("out of range items")));
                     } else {
