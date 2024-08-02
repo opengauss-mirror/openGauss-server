@@ -221,6 +221,10 @@ void pg_wcssize(
                     linewidth++;
                     format_size++;
                 } while (linewidth % 8 != 0);
+            } else if (IS_CMPT(pset.dbType, B_FORMAT) && *pwcs == '\b') { /* backspace character */
+                linewidth += w;
+            } else if (IS_CMPT(pset.dbType, B_FORMAT) && *pwcs == '\032') { /* ascii 26（control + Z）*/
+                /* Do nothing for this */
             } else if (w < 0) { /* Other control char */
                 linewidth += 4;
                 format_size += 4;
@@ -298,6 +302,11 @@ void pg_wcsformat(const unsigned char* pwcs, size_t len, int encoding, struct li
                     *ptr++ = ' ';
                     linewidth++;
                 } while (linewidth % 8 != 0);
+            } else if (IS_CMPT(pset.dbType, B_FORMAT) && *pwcs == '\b') { /* backspace character */
+                *(--ptr) = *pwcs;
+                linewidth += w;
+            } else if (IS_CMPT(pset.dbType, B_FORMAT) && *pwcs == '\032') { /* ascii 26（control + Z）*/
+                /* Do nothing for this */
             } else if (w < 0) { /* Other control char */
                 rc = sprintf_s((char*)ptr, max_bytes - linewidth + 1, "\\x%02X", *pwcs);
                 securec_check_ss_c(rc, "\0", "\0");

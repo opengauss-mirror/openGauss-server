@@ -2733,3 +2733,30 @@ bool CheckSpecificExtension(PGconn *connection, char *extension)
     PQclear(res);
     return isHasExtension;
 }
+
+/* Get Database Type */
+DBFormatType GetDatabaseType()
+{
+    char* compatibilityStr;
+    /* Default set A_FORMAT */
+    DBFormatType dbType = A_FORMAT;
+    
+    PGresult* res = PQexec(pset.db, "show sql_compatibility");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        compatibilityStr = PQgetvalue(res, 0, 0);
+        if (strcmp(compatibilityStr, "A") == 0) {
+            dbType = A_FORMAT;
+        } else if (strcmp(compatibilityStr, "B") == 0) {
+            dbType = B_FORMAT;
+        } else if (strcmp(compatibilityStr, "C") == 0) {
+            dbType = C_FORMAT;
+        } else if (strcmp(compatibilityStr, "PG") == 0) {
+            dbType = PG_FORMAT;
+        }
+    }
+
+    PQclear(res);
+    res = NULL;
+
+    return dbType;
+}

@@ -12,6 +12,7 @@
 
 #include "variables.h"
 #include "print.h"
+#include "postgres_fe.h"
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "utils/aes.h"
@@ -85,6 +86,8 @@ typedef struct _psqlSettings {
     FILE* logfile; /* session log file handle */
 
     VariableSpace vars; /* "shell variable" repository */
+
+    DBFormatType dbType;
 
     /*
      * The remaining fields are set by assign hooks associated with entries in
