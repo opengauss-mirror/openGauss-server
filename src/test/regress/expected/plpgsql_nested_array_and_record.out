@@ -144,6 +144,18 @@ WARNING:  syntax error at or near "(" when compile function p_plarray_2(undefine
 DETAIL:  N/A
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  Package Body created with compilation erors.
+declare
+    type typ_PLArray_1 is varray(3) of varchar(50);
+    type typ_PLArray_2 is varray(3) of typ_PLArray_1;
+    nstarr1 typ_PLArray_2;
+    nstarr2 typ_PLArray_2;
+begin
+    nstarr1(1)(1):='第一行第一列';
+    nstarr2:=nstarr1;
+    raise notice '二维数组nstarr(1)(1): %',nstarr2(1)(1);
+end;
+/
+NOTICE:  二维数组nstarr(1)(1): 第一行第一列
 drop package pac_PLArray_Case0021;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function plpgsql_nested_array_and_record.p_plarray_1()
