@@ -10135,6 +10135,16 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
         } else {
             ((HeapScanDesc) scan)->rs_tupdesc = oldTupDesc;
             while ((tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+                if (tab->check_pass_with_relempty == AT_FASN_FAIL_PRECISION) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("column to be modified must be empty to decrease precision or scale")));
+                } else if (tab->check_pass_with_relempty == AT_FASN_FAIL_TYPE) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("column to be modified must be empty to change datatype")));
+                }
+
                 if (tab->rewrite > 0) {
                     Oid tupOid = InvalidOid;
                     int newvals_num = 0;
@@ -16333,6 +16343,76 @@ void CheckHugeToast(AlteredTableInfo *tab, Relation rel, AttrNumber attnum)
     }
 }
 
+/**
+ * Check numeric type modify.
+ *      column to be modified must be empty to decrease precision or scale;
+ *      column to be modified must be empty to change datatype.
+ * 
+ * Only valid numeric scale decrease, And when set behavior_compat_options = 'float_as_numeric'
+ * (float use numeric indicate), valid float(p) can't decrease precision and can't change to other datatype.
+*/
+static int CheckFloatIllegalTypeConversion(Relation rel, Oid origintype, int32 origintypmod, Oid targettype, int32 targettypmod)
+{
+    int32   oriprecision;
+    int16   oriscale;
+    int32   tarprecision;
+    int16   tarscale;
+    bool    compatibilityversion;
+    int     result = AT_FASN_PASS;
+
+    if (RelationIsCUFormat(rel) || !(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)) {
+        return result;
+    }
+
+    compatibilityversion = FLOAT_AS_NUMERIC && t_thrd.proc->workingVersionNum >= FLOAT_VERSION_NUMBER;
+
+    if (origintype == NUMERICOID) {
+        oriprecision = (int32) ((((uint32)(origintypmod - VARHDRSZ)) >> 16) & 0xffff);
+        oriscale = (int16) (((uint32)(origintypmod - VARHDRSZ)) & 0xffff);
+    }
+
+    if (targettype == NUMERICOID) {
+        tarprecision = (int32) ((((uint32)(targettypmod - VARHDRSZ)) >> 16) & 0xffff);
+        tarscale = (int16) (((uint32)(targettypmod - VARHDRSZ)) & 0xffff);
+        
+        if (origintype == NUMERICOID) {
+            if (compatibilityversion) {
+                // float decrease precision
+                if (IS_FLOAT_AS_NUMERIC(oriscale) && IS_FLOAT_AS_NUMERIC(tarscale) && tarprecision < oriprecision) {
+                    result = AT_FASN_FAIL_PRECISION;
+                }
+                // can't change datatype between float and numeric
+                else if (IS_FLOAT_AS_NUMERIC(oriscale) != IS_FLOAT_AS_NUMERIC(tarscale)) {
+                    result = AT_FASN_FAIL_PRECISION;
+                }
+            }
+
+            // numeric decrease scale
+            if (!IS_FLOAT_AS_NUMERIC(oriscale) && !IS_FLOAT_AS_NUMERIC(tarscale) && tarscale < oriscale) {
+                result = AT_FASN_FAIL_PRECISION;
+            }
+
+            return result;
+        } else if (compatibilityversion && IS_FLOAT_AS_NUMERIC(tarscale) 
+                    && (origintype == INT4OID || origintype == INT2OID || origintype ==INT1OID)) {
+            // O* has no int type, so all use NUMBER(38) instead.
+            if (ceil(log10(2) * tarprecision) < 38) {
+                result = AT_FASN_FAIL_PRECISION;
+
+            }
+            // convert int to numeric
+            return result;
+        }
+    }
+
+    if (compatibilityversion && origintype == NUMERICOID && IS_FLOAT_AS_NUMERIC(oriscale) && targettype != origintype) {
+        // can't change other float to other datatype.
+        result = AT_FASN_FAIL_TYPE;
+    }
+
+    return result;
+}
+
 /*
  * ALTER COLUMN TYPE
  */
@@ -16485,6 +16565,8 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
         } else {
             transform = (Node*)makeVar(1, attnum, attTup->atttypid, attTup->atttypmod, attTup->attcollation, 0);
         }
+
+        tab->check_pass_with_relempty = CheckFloatIllegalTypeConversion(rel, attTup->atttypid, attTup->atttypmod, targettype, targettypmod);
 
         transform = coerce_to_target_type(pstate,
             transform,
