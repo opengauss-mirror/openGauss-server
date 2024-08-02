@@ -249,6 +249,12 @@ typedef enum {
     SETENV_STATE_IDLE
 } PGSetenvStatusType;
 
+typedef enum {
+    COMPATIBILITY_A,
+    COMPATIBILITY_B,
+    COMPATIBILITY_PG
+} DBCompatibility;
+
 /* Typedef for the EnvironmentOptions[] array */
 typedef struct PQEnvironmentOption {
     const char *envName, /* name of an environment variable */
@@ -551,6 +557,7 @@ struct pg_conn {
      */
     char* connection_info;
     bool connection_extra_info;
+    DBCompatibility cmpt;
 
 #ifdef HAVE_CE
     PGClientLogic* client_logic;
