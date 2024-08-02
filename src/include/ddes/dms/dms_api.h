@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           163
+#define DMS_LOCAL_VERSION           164
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -841,14 +841,16 @@ typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *buf_ctrl, dms_buf_
 typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
-typedef void(*dms_update_node_lfn)(void *db_handle, unsigned long long lfn, char node_id);
+typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn,
+    unsigned long long *node_data, unsigned int len);
 typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *buf_ctrl, unsigned long long lastest_lfn);
 typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *buf_ctrl);
 typedef unsigned long long (*dms_get_page_scn)(dms_buf_ctrl_t *buf_ctrl);
 typedef unsigned long long(*dms_get_global_lfn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
-typedef unsigned long long(*dms_get_global_flushed_lfn)(void *db_handle);
+typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn,
+    unsigned long long *node_data, unsigned int len);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
     dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
@@ -980,6 +982,8 @@ typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_l
 typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
 typedef int (*dms_standby_stop_thread)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
 typedef int (*dms_standby_reload_node_ctrl)(void *db_handle);
+typedef int (*dms_standby_stop_server)(void *db_handle);
+typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
@@ -1169,6 +1173,8 @@ typedef struct st_dms_callback {
     dms_standby_update_remove_node_ctrl standby_update_remove_node_ctrl;
     dms_standby_stop_thread standby_stop_thread;
     dms_standby_reload_node_ctrl standby_reload_node_ctrl;
+    dms_standby_stop_server standby_stop_server;
+    dms_standby_resume_server standby_resume_server;
     dms_start_lrpl start_lrpl;
     dms_stop_lrpl stop_lrpl;
 
