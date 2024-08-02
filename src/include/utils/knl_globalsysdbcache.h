@@ -186,8 +186,6 @@ private:
     void InitRelForInitSysCacheFlag();
     void InitSysCacheRelIds();
 
-    void RemoveElemFromBucket(GlobalSysDBCacheEntry *entry);
-
     void AddHeadToBucket(Index hash_index, GlobalSysDBCacheEntry *entry);
 
     /* Flag to indicate if inited */

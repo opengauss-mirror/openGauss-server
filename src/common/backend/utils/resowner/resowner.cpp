@@ -2345,7 +2345,7 @@ void ResourceOwnerReleaseGlobalBaseEntry(ResourceOwner owner, bool isCommit)
         }
         if (unlikely(entry->refcount == 0)) {
             /* palloc fail */
-            entry->FreeError();
+            GlobalBaseEntry::Free(entry);
         } else {
             entry->Release();
         }

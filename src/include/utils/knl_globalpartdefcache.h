@@ -48,7 +48,7 @@ public:
      */
     GlobalPartitionEntry *SearchReadOnly(Oid partRelOid, uint32 hash_value)
     {
-        GlobalBaseDefCache::FreeDeadEntrys<false>();
+        GlobalBaseDefCache::FreeDeadElements<false>();
         GlobalPartitionEntry *entry =
                 (GlobalPartitionEntry *)GlobalBaseDefCache::SearchReadOnly(partRelOid, hash_value);
         return entry;
@@ -60,7 +60,7 @@ public:
             return;
         }
         GlobalBaseDefCache::ResetCaches<false, force>();
-        GlobalBaseDefCache::FreeDeadEntrys<false>();
+        GlobalBaseDefCache::FreeDeadElements<false>();
     }
 
     inline void Invalidate(Oid dbOid, Oid partRelOid)

@@ -509,7 +509,7 @@ void GlobalTabDefCache::Insert(Relation rel, uint32 hash_value)
     bool found = GlobalBaseDefCache::EntryExist(rel->rd_id, hash_index);
     if (found) {
         PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_obj_locks[hash_index]);
-        entry->Free<true>(entry);
+        GlobalBaseEntry::Free(entry);
         return;
     }
 

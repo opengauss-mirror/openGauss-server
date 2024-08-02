@@ -76,7 +76,7 @@ void GlobalPartDefCache::Insert(Partition part, uint32 hash_value)
     bool found = GlobalBaseDefCache::EntryExist(part->pd_id, hash_index);
     if (found) {
         PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, obj_lock);
-        entry->Free<false>(entry);
+        GlobalBaseEntry::Free(entry);
         return;
     }
     GlobalBaseDefCache::AddHeadToBucket<false>(hash_index, entry);

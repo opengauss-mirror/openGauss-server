@@ -39,7 +39,9 @@ template <bool force>
 void GlobalSysDBCacheEntry::ResetDBCache()
 {
     m_systabCache->ResetCatCaches<force>();
+    m_systabCache->FreeDeadElements();
     m_tabdefCache->ResetRelCaches<force>();
+    m_tabdefCache->FreeDeadElements<true>();
     if (m_dbOid != InvalidOid) {
         m_partdefCache->ResetPartCaches<force>();
     }
@@ -48,9 +50,12 @@ void GlobalSysDBCacheEntry::ResetDBCache()
 void GlobalSysDBCacheEntry::RemoveTailElements()
 {
     m_systabCache->RemoveAllTailElements();
+    m_systabCache->FreeDeadElements();
     m_tabdefCache->RemoveAllTailElements<true>();
+    m_tabdefCache->FreeDeadElements<true>();
     if (m_dbOid != InvalidOid) {
         m_partdefCache->RemoveAllTailElements<false>();
+        m_partdefCache->FreeDeadElements<false>();
     }
 }
 
