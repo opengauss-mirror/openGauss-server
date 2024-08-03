@@ -840,6 +840,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->rendezvousHash = NULL;
     plsql_cxt->debug_proc_htbl = NULL;
     plsql_cxt->debug_client = NULL;
+    plsql_cxt->gms_debug_idx = -1;
     plsql_cxt->has_step_into = false;
     plsql_cxt->cur_debug_server = NULL;
     plsql_cxt->dbe_output_buffer_limit = DEFAULT_DBE_BUFFER_LIMIT;

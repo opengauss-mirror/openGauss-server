@@ -1147,6 +1147,8 @@ typedef struct PlDebuggerComm {
     volatile bool hasClientErrorOccured;
     /* true during debug procedure is running */
     volatile bool isProcdeureRunning;
+    /* true if pacakge gms_debug used */
+    volatile bool isGmsDebug;
     volatile uint32 lock; /* 1 means locked, 0 means unlock */
     volatile uint64 serverId;
     volatile uint64 clientId;
@@ -1167,6 +1169,11 @@ typedef struct PlDebuggerComm {
     {
         pg_memory_barrier();
         return isProcdeureRunning;
+    }
+    inline bool isGmsRunning()
+    {
+        pg_memory_barrier();
+        return isGmsDebug;
     }
 } PlDebuggerComm;
 

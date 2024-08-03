@@ -1696,6 +1696,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
     if (u_sess->dolphin_errdata_ctx.handler_active)
         u_sess->dolphin_errdata_ctx.handler_active = false;
 #ifndef ENABLE_MULTIPLE_NODES
+    int gms_debug_idx = u_sess->plsql_cxt.gms_debug_idx;
+    if (gms_debug_idx >= 0) {
+        add_gms_debug_func(func->fn_oid, gms_debug_idx);
+    }
     check_debug(func, &estate);
     bool isExecAutoFunc = u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
     bool isInitPkg = u_sess->plsql_cxt.curr_compile_context != NULL &&

@@ -64,7 +64,8 @@ SUBDIRS = \
 		gms_stats       \
 		gms_lob         \
 		gms_sql         \
-		gms_i18n
+		gms_i18n      \
+		gms_debug
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo

@@ -1685,6 +1685,18 @@ const char DEBUG_STEP_INTO_HEADER_AFTER = 'S';
 const char DEBUG_BACKTRACE_HEADER = 't';
 const char DEBUG_SET_VARIABLE_HEADER = 'h';
 const char DEBUG_INFOCODE_HEADER = 'i';
+const char GMS_DEBUG_NEXT_HEADER = 'd';
+const char GMS_DEBUG_NEXT_HEADER_AFTER = 'D';
+const char GMS_DEBUG_STEP_INTO_HEADER = 'j';
+const char GMS_DEBUG_STEP_INTO_HEADER_AFTER = 'J';
+const char GMS_DEBUG_FINISH_HEADER = 'k';
+const char GMS_DEBUG_FINISH_HEADER_AFTER = 'K';
+const char GMS_DEBUG_ABORT_HEADER = 'l';
+const char GMS_DEBUG_ABORT_HEADER_AFTER = 'L';
+const char GMS_DEBUG_CONTINUE_HEADER = 'o';
+const char GMS_DEBUG_CONTINUE_HEADER_AFTER = 'O';
+const char GMS_DEBUG_RUNTIMEINFO_HEADER = 'm';
+const char GMS_DEBUG_ADDBREAKPOINT_HEADER = 'x';
 
 /* server return message */
 const int DEBUG_SERVER_SUCCESS = 0;
@@ -1778,6 +1790,7 @@ void server_pass_upper_debug_opt(DebugInfo* debug);
 void clean_up_debug_client(bool hasError = false);
 void clean_up_debug_server(DebugInfo* debug, bool sessClose, bool hasError);
 void server_send_end_msg(DebugInfo* debug);
+void server_send_gms_end_msg(DebugInfo* debug);
 int GetValidDebugCommIdx();
 void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen);
 bool WakeUpReceiver(int commIdx, bool isClient);
@@ -1786,11 +1799,13 @@ extern void ReportInvalidMsg(const char* buf);
 extern char* AssignStr(char* src, bool copy = true);
 extern PlDebugEntry* has_debug_func(Oid key, bool* found);
 extern bool delete_debug_func(Oid key);
+extern void add_gms_debug_func(Oid funcOid, int commIdx);
 extern void RecvUnixMsg(const char* buf, int bufLen, char* destBuf, int destLen);
 extern char* ResizeDebugBufferIfNecessary(char* buffer, int* oldSize, int needSize);
 extern void ReleaseDebugCommIdx(int idx);
 extern void SendUnixMsg(int socket, const char* val, int len, bool is_client);
 extern List* collect_breakable_line(PLpgSQL_function* func);
+extern bool SetDebugCommGmsUsed(int commIdx, bool flag);
 
 /**********************************************************************
  * Function declarations

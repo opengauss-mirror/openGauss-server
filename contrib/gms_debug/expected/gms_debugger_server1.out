@@ -1,0 +1,181 @@
+-- setups
+create extension if not exists gms_debug;
+drop schema if exists gms_debugger_test1 cascade;
+NOTICE:  schema "gms_debugger_test1" does not exist, skipping
+create schema gms_debugger_test1;
+set search_path = gms_debugger_test1;
+create table test(a int, b varchar(40), c timestamp);
+insert into test values (2, 'Giving to the Needy', '2020-02-02');
+insert into test values (3, 'Prayer', '2021-12-02');
+insert into test values (5, 'Fasting', '2030-03-02');
+insert into test values (7, 'Treasures in Heaven', '2040-04-02');
+CREATE OR REPLACE FUNCTION test_debug(x int) RETURNS SETOF test AS
+$BODY$
+DECLARE
+    sql_stmt VARCHAR2(500);
+    r test%rowtype;
+    rec record;
+    b_tmp text;
+    cnt int;
+    a_tmp int;
+    cur refcursor;
+    n_tmp NUMERIC(24,6);
+    t_tmp tsquery;
+    CURSOR cur_arg(criterion INTEGER) IS
+        SELECT * FROM test WHERE a < criterion;
+BEGIN
+    cnt := 0;
+    FOR r IN SELECT * FROM test
+    WHERE a > x
+    LOOP
+        RETURN NEXT r;
+    END LOOP;
+
+    FOR rec in SELECT * FROM test
+    WHERE a < x
+    LOOP
+        RETURN NEXT rec;
+    END LOOP;
+
+    FORALL index_1 IN 0..1
+        INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1');
+
+    SELECT b FROM test where a = 7 INTO b_tmp;
+    sql_stmt := 'select a from test where b = :1;';
+    OPEN cur FOR sql_stmt USING b_tmp;
+    IF cur%isopen then LOOP
+        FETCH cur INTO a_tmp;
+        EXIT WHEN cur%notfound;
+        END LOOP;
+    END IF;
+    CLOSE cur;
+    WHILE cnt < 3 LOOP
+        cnt := cnt + 1;
+    END LOOP;
+
+    RAISE INFO 'cnt is %', cnt;
+
+    RETURN;
+
+END
+$BODY$
+LANGUAGE plpgsql;
+create table show_code_table(lineno int, code text, canBreak bool);
+do $$
+declare
+    funcoid oid;
+begin
+    select oid from pg_proc into funcoid where proname = 'test_debug';
+    INSERT INTO show_code_table SELECT * FROM dbe_pldebugger.info_code(funcoid);
+end;
+$$;
+select * from show_code_table;
+ lineno |                                       code                                       | canbreak 
+--------+----------------------------------------------------------------------------------+----------
+        | CREATE OR REPLACE FUNCTION gms_debugger_test1.test_debug(x integer)              | f
+        |  RETURNS SETOF test                                                              | f
+        |  LANGUAGE plpgsql                                                                | f
+        |  NOT FENCED NOT SHIPPABLE                                                        | f
+      1 | AS $function$                                                                    | f
+      2 | DECLARE                                                                          | f
+      3 |     sql_stmt VARCHAR2(500);                                                      | f
+      4 |     r test%rowtype;                                                              | f
+      5 |     rec record;                                                                  | f
+      6 |     b_tmp text;                                                                  | f
+      7 |     cnt int;                                                                     | f
+      8 |     a_tmp int;                                                                   | f
+      9 |     cur refcursor;                                                               | f
+     10 |     n_tmp NUMERIC(24,6);                                                         | f
+     11 |     t_tmp tsquery;                                                               | f
+     12 |     CURSOR cur_arg(criterion INTEGER) IS                                         | f
+     13 |         SELECT * FROM test WHERE a < criterion;                                  | f
+     14 | BEGIN                                                                            | f
+     15 |     cnt := 0;                                                                    | t
+     16 |     FOR r IN SELECT * FROM test                                                  | t
+     17 |     WHERE a > x                                                                  | f
+     18 |     LOOP                                                                         | f
+     19 |         RETURN NEXT r;                                                           | t
+     20 |     END LOOP;                                                                    | f
+     21 |                                                                                  | f
+     22 |     FOR rec in SELECT * FROM test                                                | t
+     23 |     WHERE a < x                                                                  | f
+     24 |     LOOP                                                                         | f
+     25 |         RETURN NEXT rec;                                                         | t
+     26 |     END LOOP;                                                                    | f
+     27 |                                                                                  | f
+     28 |     FORALL index_1 IN 0..1                                                       | t
+     29 |         INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1'); | t
+     30 |                                                                                  | f
+     31 |     SELECT b FROM test where a = 7 INTO b_tmp;                                   | t
+     32 |     sql_stmt := 'select a from test where b = :1;';                              | t
+     33 |     OPEN cur FOR sql_stmt USING b_tmp;                                           | t
+     34 |     IF cur%isopen then LOOP                                                      | t
+     35 |         FETCH cur INTO a_tmp;                                                    | t
+     36 |         EXIT WHEN cur%notfound;                                                  | t
+     37 |         END LOOP;                                                                | f
+     38 |     END IF;                                                                      | f
+     39 |     CLOSE cur;                                                                   | t
+     40 |     WHILE cnt < 3 LOOP                                                           | t
+     41 |         cnt := cnt + 1;                                                          | t
+     42 |     END LOOP;                                                                    | f
+     43 |                                                                                  | f
+     44 |     RAISE INFO 'cnt is %', cnt;                                                  | t
+     45 |                                                                                  | f
+     46 |     RETURN;                                                                      | t
+     47 |                                                                                  | f
+     48 | END                                                                              | f
+     49 | $function$;                                                                      | f
+(53 rows)
+
+-- attach fail (target not turned on)
+select * from gms_debug.attach_session('datanode1-0');
+ERROR:  target session should be init first.
+-- turn off without turn on
+select * from gms_debug.debug_off();
+ERROR:  target session should be init first
+select * from gms_debug.initialize();
+ initialize  
+-------------
+ datanode1-0
+(1 row)
+
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- start debug - 1st run
+select * from test_debug(4);
+INFO:  cnt is 3
+ a |          b          |            c             
+---+---------------------+--------------------------
+ 5 | Fasting             | Sat Mar 02 00:00:00 2030
+ 7 | Treasures in Heaven | Mon Apr 02 00:00:00 2040
+ 2 | Giving to the Needy | Sun Feb 02 00:00:00 2020
+ 3 | Prayer              | Thu Dec 02 00:00:00 2021
+(4 rows)
+
+-- start debug - 2nd run - to be aborted
+select * from test_debug(4);
+INFO:  cnt is 3
+ a |           b           |            c             
+---+-----------------------+--------------------------
+ 5 | Fasting               | Sat Mar 02 00:00:00 2030
+ 7 | Treasures in Heaven   | Mon Apr 02 00:00:00 2040
+ 2 | Giving to the Needy   | Sun Feb 02 00:00:00 2020
+ 3 | Prayer                | Thu Dec 02 00:00:00 2021
+ 0 | Happy Children's Day! | Tue Jun 01 00:00:00 2021
+ 1 | Happy Children's Day! | Tue Jun 01 00:00:00 2021
+(6 rows)
+
+drop schema gms_debugger_test1 cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table test
+drop cascades to function test_debug(integer)
+drop cascades to table show_code_table
+drop cascades to function gms_breakpoint(text,integer)
+drop cascades to function gms_continue()
+drop cascades to function gms_next()
+drop cascades to function gms_step()
+drop cascades to function gms_info()
