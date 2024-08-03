@@ -33,7 +33,7 @@
 #include "utils/resowner.h"
 #include "pgstat.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
-
+#include "replication/ss_disaster_cluster.h"
 /* 
  * Segment buffer, used for segment meta data, e.g., segment head, space map head. We separate segment
  * meta data buffer and normal data buffer (in bufmgr.cpp) to avoid potential dead locks.
@@ -323,7 +323,7 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
                           BufferDesc *buf_desc, char *buf)
 {   
 #ifndef USE_ASSERT_CHECKING
-    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS) {
+    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && !SS_DISASTER_STANDBY_CLUSTER) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
         XLogRecPtr lsn_on_mem = PageGetLSN(buf);
             /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
@@ -335,7 +335,7 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
         }
     }       
 #else
-    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION && !SS_DISASTER_STANDBY_CLUSTER) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
         seg_physical_read(spc, rNode, forknum, blocknum, temp_buf);
