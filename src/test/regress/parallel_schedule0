@@ -1016,7 +1016,7 @@ test: ledger_table_case
 
 # select ... for update skip locked
 test: skiplocked_prep
-test: skiplocked_test1_1 skiplocked_test1_2
+test: skiplocked_test1_1 skiplocked_test1_2 skiplocked_inherits
 test: skiplocked_test1_1 skiplocked_test1_3
 test: skiplocked_post
 
