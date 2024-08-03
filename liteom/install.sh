@@ -570,19 +570,10 @@ function decompress()
     fi
     log "kernel: ${kernel}"
 
-    # detect platform information.
-    platform=32
-    bit=$(getconf LONG_BIT)
-    if [ "$bit" -eq 64 ]
-    then
-        platform=64
-    fi
-    platform_arch=$(uname -p)
-    bin_name="openGauss-Lite.*-${kernel}-${platform_arch}"
-	bin_res=$(ls -a | grep -E "${bin_name}.bin")
+    bin_res=$(ls | grep openGauss-Lite*.bin)
 	if [ "${bin_res}" = "" ]
 	then
-		die "can not find suitable bin file, expected bin file is ${bin_name}.bin"
+		die "can not find suitable bin file, expected bin file is ${bin_res}"
 	fi
 	log "bin file: ${bin_res}"
 

@@ -59,14 +59,13 @@ select_package_command
 #######################################################################
 ##get os dist version
 #######################################################################
+os_name=$(cat /etc/os-release | grep -w NAME | awk -F '"' '{print $2}')
 if [[ -f "/etc/openEuler-release" ]]; then
     os_name="openEuler"
 elif [[ -f "/etc/euleros-release" ]]; then
     os_name="EulerOS"
 elif [[ -f "/etc/centos-release" ]]; then
     os_name="CentOS"
-elif [[ -f "/etc/openEuler-release" ]]; then
-    os_name="openEuler"
 elif [[ -f "/etc/FusionOS-release" ]]; then
     os_name="FusionOS"
 elif [[ -f "/etc/kylin-release" ]]; then
@@ -78,13 +77,15 @@ elif [[ -f "/etc/CSIOS-release" ]]; then
 else
     os_name=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z | sed 's/.*/\L&/; s/[a-z]*/\u&/g')
 fi
+os_version=$(cat /etc/os-release | grep -w VERSION_ID | awk -F '"' '{print $2}')
+
+if [ "$os_name"X == ""X ]; then
+    echo "os name is empty"
+    exit 1
+fi
 
 ##add platform architecture information
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$os_name" != "openEuler" ] && [ "$os_name" != "EulerOS" ] && [ "$os_name" != "FusionOS" ] && [ "$os_name" != "Kylin" ] && [ "$dist_version" != "Asianux" ] && [ "$os_name" != "CSIOS" ]; then
-        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), FusionOS(aarch64), Kylin(aarch64), Asianux, CSIOS(aarch64) platform."
-        exit 1
-    fi
     GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
 fi
 
@@ -144,10 +145,9 @@ declare release_file_list="${PLATFORM_ARCH}_${product_mode}_list"
 #######################################################################
 ## declare all package name
 #######################################################################
-declare version_string="${product_name}-${version_number}"
-declare package_pre_name="${version_string}-${os_name}-${PLATFORM}bit"
-declare libpq_package_name="${package_pre_name}-Libpq.tar.gz"
-declare tools_package_name="${package_pre_name}-tools.tar.gz"
-declare kernel_package_name="${package_pre_name}.tar.bz2"
-declare symbol_package_name="${package_pre_name}-symbol.tar.gz"
-declare sha256_name="${package_pre_name}.sha256"
+declare package_version_name="${version_number}-${os_name}${os_version}-${PLATFORM_ARCH}"
+declare libpq_package_name="${product_name}-Libpq-${package_version_name}.tar.gz"
+declare tools_package_name="${product_name}-Tools-${package_version_name}.tar.gz"
+declare kernel_package_name="${product_name}-Server-${package_version_name}.tar.gz"
+declare symbol_package_name="${product_name}-Symbol-${package_version_name}.tar.gz"
+declare sha256_name="${product_name}-Server-${package_version_name}.sha256"

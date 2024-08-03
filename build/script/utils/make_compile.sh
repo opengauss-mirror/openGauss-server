@@ -21,7 +21,7 @@ function gaussdb_pkg_pre_clean()
 function read_gaussdb_version()
 {
     cd ${SCRIPT_DIR}
-    echo "${product_name}-${version_number}" > version.cfg
+    echo "${product_name}-Server-${version_number}" > version.cfg
     #auto read the number from kernal globals.cpp, no need to change it here
 }
 

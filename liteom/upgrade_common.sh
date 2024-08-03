@@ -399,8 +399,7 @@ function check_pkg() {
 
   #detect platform information.
   platform_arch=$(uname -p)
-  bin_name="openGauss-Lite.*-${kernel}-${platform_arch}"
-  binfile=$(ls -a | grep -E "${binname}.bin")
+  binfile=$(ls | grep openGauss-Lite*.bin)
   shafile=${binfile%.*}.sha256
   if [[ ! -f "${binfile}" ]] || [[ ! -f "${shafile}" ]]; then
     die "bin or sha256 file not exit for the platform ${kernel}-${platform_arch}!" ${err_upgrade_pre}
