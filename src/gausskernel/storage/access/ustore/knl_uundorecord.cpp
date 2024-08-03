@@ -492,18 +492,17 @@ static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
         MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
         t_thrd.int_cxt.CritSectionCount = saveCritSectionCount;
         state = undo::CheckUndoRecordValid(urec->Urp(), true, lastXid);
-        if (BufferIsValid(urec->Buff())) {
-            if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
-                GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
-                LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
-            }
-            ReleaseBuffer(urec->Buff());
-            urec->SetBuff(InvalidBuffer);
-        }
         if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
             t_thrd.undo_cxt.fetchRecord = false;
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
-            EmitErrorReport();
+            if (BufferIsValid(urec->Buff())) {
+                if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+                    GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
+                    LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
+                }
+                ReleaseBuffer(urec->Buff());
+                urec->SetBuff(InvalidBuffer);
+            }
             FlushErrorState();
             return state;
         } else {

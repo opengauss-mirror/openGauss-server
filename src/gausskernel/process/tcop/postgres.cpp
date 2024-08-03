@@ -9301,6 +9301,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("wrong role name.")));
                 }
+                if (unlikely(IsAbortedTransactionBlockState())) {
+                    if (InReceivingLocalUserIdChange()) {
+                        SetUserIdAndSecContext(GetOldUserId(true),
+                            u_sess->misc_cxt.SecurityRestrictionContext & (~RECEIVER_LOCAL_USERID_CHANGE));
+                    }
+                    break;
+                }
                 Oid role_oid = GetRoleOid(role_name);
                 Oid save_userid = InvalidOid;
                 int save_sec_context = 0;
