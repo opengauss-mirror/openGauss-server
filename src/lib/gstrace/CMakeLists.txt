@@ -1,6 +1,6 @@
 #This is the main CMAKE for build all components.
 execute_process(
-    COMMAND python ./script/trc_gen.py -s ./config/ -o ${CMAKE_CURRENT_SOURCE_DIR}/../../include/gstrace
+    COMMAND python3 ./script/trc_gen.py -s ./config/ -o ${CMAKE_CURRENT_SOURCE_DIR}/../../include/gstrace
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
