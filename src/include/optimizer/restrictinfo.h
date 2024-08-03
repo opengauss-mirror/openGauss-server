@@ -17,10 +17,10 @@
 #include "nodes/relation.h"
 
 /* Convenience macro for the common case of a valid-everywhere qual */
-#define make_simple_restrictinfo(clause) make_restrictinfo(clause, true, false, false, 0, NULL, NULL, NULL)
+#define make_simple_restrictinfo(clause) make_restrictinfo(clause, true, false, false, 0, NULL, NULL, NULL, false)
 
 extern RestrictInfo* make_restrictinfo(Expr* clause, bool is_pushed_down, bool outerjoin_delayed, bool pseudoconstant,
-    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids);
+    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids, bool is_asof);
 extern List* make_restrictinfo_from_bitmapqual(Path* bitmapqual, bool is_pushed_down, bool include_predicates);
 extern List* make_restrictinfos_from_actual_clauses(PlannerInfo* root, List* clause_list);
 extern bool restriction_is_or_clause(RestrictInfo* restrictinfo);

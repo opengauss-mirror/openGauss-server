@@ -230,4 +230,50 @@ public:
     inline bool isValid();
 };
 
+class SonicSortPartition : public SonicHashPartition {
+
+public:
+    /* where to put data */
+    VectorBatch* m_data;
+    /* For complicate join key */
+    SonicDatumArray* m_hash;
+    /* for sort state */
+    Batchsortstate* m_sortState;
+
+    uint8 m_bucketTypeSize;
+
+    char* m_bucket;
+
+    uint32 m_hashSize;
+
+    uint32 m_mask;
+   /* for the index row of compare */
+    int64 m_cmpIdx;
+    /* for the count of get batch from sort state */
+    uint32 m_fetchCount;
+
+    bool m_isSpill;
+
+
+public:
+    SonicSortPartition(const char* cxtname, bool hasHash, TupleDesc tupleDesc, int64 workMem);
+    ~SonicSortPartition(){};
+
+    void init(uint16 colIdx, DatumDesc* desc);
+
+    void freeResources();
+
+    void SetMatch(int idx);
+
+    void putHash(uint32* hashValues, uint64 nrows);
+
+    inline bool isValid();
+
+    template <bool optspill>
+    void putVal(ScalarValue* val, uint8* flag, uint16 colIdx)
+    {
+        Assert(false);
+    }
+};
+
 #endif /* SRC_INCLUDE_VECTORSONIC_VSONICPARTITION_H_ */

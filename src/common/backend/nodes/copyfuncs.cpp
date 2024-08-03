@@ -1939,7 +1939,26 @@ static VecHashJoin* _copyVecHashJoin(const VecHashJoin* from)
     return newnode;
 }
 
-static VecAgg* _copyVecAgg(const VecAgg* from)
+static VecAsofJoin *_copyVecAsofJoin(const VecAsofJoin *from)
+{
+    VecAsofJoin *newnode = makeNode(VecAsofJoin);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyJoinFields((const Join *)from, (Join *)newnode);
+
+    /*
+     * copy remainder of node
+     */
+    COPY_NODE_FIELD(hashclauses);
+    COPY_NODE_FIELD(mergeclauses);
+    COPY_SCALAR_FIELD(streamBothSides);
+
+    return newnode;
+}
+
+static VecAgg *_copyVecAgg(const VecAgg *from)
 {
     VecAgg* newnode = makeNode(VecAgg);
 
@@ -3520,6 +3539,7 @@ static JoinExpr* _copyJoinExpr(const JoinExpr* from)
     COPY_SCALAR_FIELD(rtindex);
     COPY_SCALAR_FIELD(is_straight_join);
     COPY_SCALAR_FIELD(is_apply_join);
+    COPY_SCALAR_FIELD(isAsof);
 
     return newnode;
 }
@@ -6699,7 +6719,7 @@ static AlterRlsPolicyStmt* _copyAlterRlsPolicyStmt(const AlterRlsPolicyStmt* fro
     return newnode;
 }
 
-static CreateAmStmt* _copyCreateAmStmt(const CreateAmStmt *from)
+static CreateAmStmt *_copyCreateAmStmt(const CreateAmStmt *from)
 {
     CreateAmStmt *newnode = makeNode(CreateAmStmt);
     COPY_STRING_FIELD(amname);
@@ -8309,6 +8329,10 @@ void* copyObject(const void* from)
             break;
         case T_VecHashJoin:
             retval = _copyVecHashJoin((VecHashJoin*)from);
+            break;
+        case T_AsofJoin:
+        case T_VecAsofJoin:
+            retval = _copyVecAsofJoin((VecAsofJoin *)from);
             break;
         case T_VecAgg:
             retval = _copyVecAgg((VecAgg*)from);

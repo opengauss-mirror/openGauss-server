@@ -135,7 +135,7 @@ extern Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid
 extern bool contain_var_unsubstitutable_functions(Node* clause);
 extern void distribute_qual_to_rels(PlannerInfo* root, Node* clause, bool is_deduced, bool below_outer_join,
     JoinType jointype, Index security_level, Relids qualscope, Relids ojscope, Relids outerjoin_nonnullable,
-    Relids deduced_nullable_relids, List **postponed_qual_list);
+    Relids deduced_nullable_relids, List **postponed_qual_list, bool is_asof);
 extern void check_plan_correlation(PlannerInfo* root, Node* expr);
 extern bool findConstraintByVar(Var* var, Oid relid, constraintType conType);
 extern bool is_var_node(Node* node);

@@ -974,6 +974,7 @@ void JoinSkewInfo::traverseSubPath(Path* path)
     switch (path->type) {
         case T_NestPath:
         case T_MergePath:
+        case T_AsofPath:
         case T_HashPath: {
             JoinPath* jpath = (JoinPath*)path;
 
@@ -1252,6 +1253,7 @@ bool JoinSkewInfo::checkPathRedundant(List* streamKeys, Path* path)
     switch (path->pathtype) {
         case T_NestLoop:
         case T_MergeJoin:
+        case T_AsofJoin:
         case T_HashJoin: {
             JoinPath* jpath = (JoinPath*)path;
 
@@ -1590,6 +1592,7 @@ void AggSkewInfo::traverseSubPlan(Plan* plan)
     switch (nodeTag(plan)) {
         case T_NestLoop:
         case T_MergeJoin:
+        case T_AsofJoin:
         case T_HashJoin: {
             Join* join = (Join*)plan;
             if (IS_JOIN_OUTER(join->jointype)) {

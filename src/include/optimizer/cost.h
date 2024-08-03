@@ -29,7 +29,6 @@
  * we are definition that the cost of scanning one tuple is 1/10 times.
  */
 #define COL_TUPLE_COST_MULTIPLIER 10
-
 /*
  * Estimate the overhead per hashtable entry at 64 bytes (same as in
  * planner.c).
@@ -137,6 +136,11 @@ extern void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspac
     Path* outer_path, Path* inner_path, JoinPathExtraData *extra, int dop);
 extern void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* workspace,
     JoinPathExtraData *extra, bool hasalternative, int dop);
+extern void initial_cost_asofjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
+    Path* outer_path, Path* inner_path, List* mergeclauses, List* outersortkeys, List* innersortkeys,
+    JoinPathExtraData *extra, int dop);
+extern void final_cost_asofjoin(PlannerInfo* root, AsofPath* path, JoinCostWorkspace* workspace,
+    JoinPathExtraData *extra, int dop);
 extern void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* output parameters */
     Cost* rescan_total_cost, OpMemInfo* mem_info);
 extern Cost cost_rescan_material(double rows, int width, OpMemInfo* mem_info, bool vectorized, int dop);

@@ -4857,7 +4857,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
             appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
                                 quote_qualified_identifier(nsp, pkgname, name));
         } else if (typname != NULL) {
-            appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
+            appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(",
                                 quote_qualified_identifier(nsp, typname, name));
         } else if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s FUNCTION %s(", 
@@ -11417,7 +11417,7 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
     }
 
     funcname = generate_function_name(wfunc->winfnoid, nargs, argnames, argtypes, false, NULL);
-   
+
     if (pg_strcasecmp(funcname,"\"nth_value\"") == 0) {
         funcname = "nth_value";
     }
@@ -12314,6 +12314,8 @@ static void get_from_clause_item(Node* jtnode, Query* query, deparse_context* co
                 case JOIN_INNER:
                     if (j->quals) {
                         appendContextKeyword(context, " JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
+                    } else if (j->isAsof) {
+                        appendContextKeyword(context, " ASOF JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
                     } else {
                         if (j->is_apply_join) {
                             appendContextKeyword(context, " CROSS APPLY ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 1);

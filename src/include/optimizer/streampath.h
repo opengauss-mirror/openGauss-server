@@ -385,4 +385,43 @@ private:
     List* m_outerSortKeys;
 };
 
+class AsofJoinPathGen : public JoinPathGen {
+public:
+    AsofJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
+        JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
+        List* restrictlist, Relids required_outer, List* hashclauses, List* mergeclauses, List* outersortkeys, List* innersortkeys);
+
+    virtual ~AsofJoinPathGen();
+
+    /* Create Asof join path and add it to path list. */
+    void addAsofJoinPath(JoinCostWorkspace* workspace, Distribution* targetDistribution, int dop);
+
+private:
+    /* Add asof join path to path list. */
+    void addAsofjoinPathToList();
+
+    /* Initial the cost of asof join. */
+    void initialCostAsofjoin();
+
+    /* Finalize the cost of Asof join. */
+    void finalCostAsofjoin(AsofPath* path);
+
+    /* Create asof join path. */
+    Path* createAsofJoinPath();
+
+private:
+    /* Hash clauses for asof join. */
+    List* m_hashClauses;
+
+     /* merge clauses for asof join. */
+    List* m_mergeClauses;
+
+      /* Sort key of inner path. */
+    List* m_innerSortKeys;
+
+    /* Sort key of outer path. */
+    List* m_outerSortKeys;
+};
+
+
 #endif /* STREAMPATH_H */

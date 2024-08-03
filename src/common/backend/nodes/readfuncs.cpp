@@ -858,6 +858,22 @@ THR_LOCAL bool skip_read_extern_fields = false;
     } while (0)
 
 /*
+ * function for _readAsofJoin and _readVecAsofJoin.
+ */
+#define READ_ASOFJOIN_FIELD()             \
+    do {                                  \
+        READ_TEMP_LOCALS();               \
+                                          \
+        /* Read Join */                   \
+        _readJoin(&local_node->join);     \
+                                          \
+        READ_NODE_FIELD(hashclauses);     \
+        READ_NODE_FIELD(mergeclauses);    \
+        READ_BOOL_FIELD(streamBothSides); \
+        READ_DONE();                      \
+    } while (0)
+
+/*
  * function for _readMergeJoin and _readVecMergeJoin.
  */
 #define READ_MERGEJOIN()                      \
@@ -900,10 +916,10 @@ THR_LOCAL bool skip_read_extern_fields = false;
     } while (0)
 
 static Datum readDatum(bool typbyval);
-static Scan* _readScan(Scan* local_node);
+static Scan *_readScan(Scan *local_node);
 extern bool StreamTopConsumerAmI();
-static void read_mem_info(OpMemInfo* local_node);
-static void _readCursorData(Cursor_Data* local_node);
+static void read_mem_info(OpMemInfo *local_node);
+static void _readCursorData(Cursor_Data *local_node);
 
 /*
  * _readBitmapset
@@ -3230,6 +3246,9 @@ static JoinExpr* _readJoinExpr(void)
     IF_EXIST(is_apply_join) {
         READ_BOOL_FIELD(is_apply_join);
     }
+    IF_EXIST(isAsof) {
+        READ_BOOL_FIELD(isAsof);
+    }
 
     READ_DONE();
 }
@@ -4832,7 +4851,13 @@ static HashJoin* _readHashJoin(HashJoin* local_node)
     READ_DONE();
 }
 
-static MergeJoin* _readMergeJoin(MergeJoin* local_node)
+static AsofJoin *_readAsofJoin(AsofJoin *local_node)
+{
+    READ_LOCALS_NULL(AsofJoin);
+    READ_ASOFJOIN_FIELD();
+}
+
+static MergeJoin *_readMergeJoin(MergeJoin *local_node)
 {
     READ_LOCALS_NULL(MergeJoin);
     READ_MERGEJOIN();
@@ -5694,7 +5719,13 @@ static VecHashJoin* _readVecHashJoin(VecHashJoin* local_node)
     READ_HASHJOIN_FIELD();
 }
 
-static VecSetOp* _readVecSetOp(VecSetOp* local_node)
+static VecAsofJoin *_readVecAsofJoin(VecAsofJoin *local_node)
+{
+    READ_LOCALS_NULL(VecAsofJoin);
+    READ_ASOFJOIN_FIELD();
+}
+
+static VecSetOp *_readVecSetOp(VecSetOp *local_node)
 {
     READ_LOCALS_NULL(VecSetOp);
     READ_TEMP_LOCALS();
@@ -6971,6 +7002,8 @@ Node* parseNodeString(void)
         return_value = _readHash(NULL);
     } else if (MATCH("HASHJOIN", 8)) {
         return_value = _readHashJoin(NULL);
+    } else if (MATCH("ASOFJOIN", 8)) {
+        return_value = _readAsofJoin(NULL);
     } else if (MATCH("MERGEJOIN", 9)) {
         return_value = _readMergeJoin(NULL);
     } else if (MATCH("REMOTEQUERY", 11)) {
@@ -7107,6 +7140,8 @@ Node* parseNodeString(void)
         return_value = _readVecSubqueryScan(NULL);
     } else if (MATCH("VECHASHJOIN", 11)) {
         return_value = _readVecHashJoin(NULL);
+    } else if (MATCH("VECASOFJOIN", 11)) {
+        return_value = _readVecAsofJoin(NULL);
     } else if (MATCH("VECAGG", 6)) {
         return_value = _readVecAgg(NULL);
     } else if (MATCH("VECPARTITERATOR", 15)) {

@@ -192,6 +192,9 @@ static const char* debug1_print_pathtype(Path* path, NodeTag pathtype, Path** su
             debug1_print_jointype(path, &ptype);
             *join = true;
             break;
+        case T_AsofJoin:
+            *join = true;
+            break;
 #ifdef STREAMPLAN
         case T_Stream:
         case T_VecStream: {

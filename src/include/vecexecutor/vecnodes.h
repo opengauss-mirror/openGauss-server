@@ -76,6 +76,38 @@ typedef struct VecHashJoinState : public HashJoinState {
     char* jitted_buildHashTable_NeedCopy;
 } VecHashJoinState;
 
+
+typedef struct VecAsofJoinState  {
+    JoinState js;           /* its first field is NodeTag */
+    List* hashclauses;      /* list of ExprState nodes */
+    List* mergeclauses;      /* list of ExprState nodes */
+    List* hj_OuterHashKeys; /* list of ExprState nodes */
+    List* hj_InnerHashKeys; /* list of ExprState nodes */
+    List* hj_OuterSortKeys; /* list of ExprState nodes */
+    List* hj_InnerSortKeys; /* list of ExprState nodes */
+    List* hj_HashOperators; /* list of operator OIDs */
+    int joinState;
+   
+    char* cmpName;
+
+    void* hashTbl;
+
+    FmgrInfo* eqfunctions;
+
+    /*
+     * function pointer to LLVM machine code if hash join qual
+     * can be LLVM optimiezed.
+     */
+    vecqual_func jitted_joinqual;   /* LLVM IR function pointer to point to
+                                     * codegened hash->joinqual expr */
+    vecqual_func jitted_hashclause; /* LLVM IR function pointer to point to
+                                     * codegened hash clause expr */
+
+    char* jitted_innerjoin;        /* jitted inner hash join */
+    char* jitted_matchkey;         /* jitted matchKey for hash join*/
+    
+} VecAsofJoinState;
+
 typedef enum VecAggType {
     AGG_COUNT = 0,
     AGG_SUM,

@@ -53,6 +53,7 @@
 #include "vecexecutor/vecnodesort.h"
 #include "vecexecutor/vecmodifytable.h"
 #include "vecexecutor/vechashjoin.h"
+#include "vecexecutor/vecasofjoin.h"
 #include "vecexecutor/vechashagg.h"
 #include "vecexecutor/vecpartiterator.h"
 #include "vecexecutor/vecappend.h"
@@ -86,6 +87,7 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecRowToVec),
     reinterpret_cast<VectorEngineFunc>(ExecVecAggregation),
     reinterpret_cast<VectorEngineFunc>(ExecVecHashJoin),
+    reinterpret_cast<VectorEngineFunc>(ExecVecAsofJoin),
     reinterpret_cast<VectorEngineFunc>(ExecVecStream),
     reinterpret_cast<VectorEngineFunc>(ExecVecSort),
     reinterpret_cast<VectorEngineFunc>(ExecVecForeignScan),
@@ -386,6 +388,10 @@ void ExecEarlyFreeBody(PlanState* node)
             ExecEarlyFreeVecHashJoin((VecHashJoinState*)node);
             break;
 
+        case T_VecAsofJoinState:
+            ExecEarlyFreeVecAsofJoin((VecAsofJoinState*)node);
+            break;
+            
         case T_HashJoinState:
             ExecEarlyFreeHashJoin((HashJoinState*)node);
             break;

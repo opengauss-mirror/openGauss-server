@@ -1145,6 +1145,209 @@ Path* HashJoinPathGen::createHashJoinPath()
 }
 
 /*
+ * @Description: constructor for AsofJoinPathGen.
+ *
+ * @param[IN] root: the plannerInfo for this join.
+ * @param[IN] joinrel: the join relation.
+ * @param[IN] jointype: join type.
+ * @param[IN] save_jointype: save join type.
+ * @param[IN] sjinfo: extra info about the join for selectivity estimation.
+ * @param[IN] semifactors: contains valid data if jointype is SEMI or ANTI.
+ * @param[IN] hashclauses: the RestrictInfo nodes to use as hash clauses
+ *		                   (this should be a subset of the restrict_clauses list).
+ * @param[IN] restrictlist: all RestrictInfo nodes to apply at the join.
+ * @param[IN] inner_path: the inner subpath for join.
+ * @param[IN] outer_path: the outer subpath for join.
+ * @param[IN] required_outer: the set of required outer rels.
+ */
+AsofJoinPathGen::AsofJoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
+    JoinPathExtraData* extra, Path* outer_path, Path* inner_path, List* restrictlist,
+    Relids required_outer, List* hashclauses, List* mergeclauses, List* outersortkeys, List* innersortkeys)
+    : JoinPathGen(root, joinrel, jointype, save_jointype, extra, hashclauses, restrictlist, outer_path,
+          inner_path, required_outer)
+{
+    m_joinmethod = T_AsofJoin;
+    m_mergeClauses = mergeclauses;
+    m_hashClauses = hashclauses;
+    m_innerSortKeys = innersortkeys;
+    m_outerSortKeys = outersortkeys;
+}
+
+/*
+ * @Description: release memory at deconstruct stage.
+ */
+AsofJoinPathGen::~AsofJoinPathGen()
+{
+    m_hashClauses = NIL;
+    m_innerSortKeys = NIL;
+    m_mergeClauses = NIL;
+    m_outerSortKeys = NIL;
+}
+
+/*
+ * @Description: add asof join path to path list base on the
+ *               target nodegroup and parallel degree.
+ *
+ * @param[IN] workspace: work space for join cost.
+ * @param[IN] targetDistribution: target nodegroup distribution.
+ * @param[IN] dop: target parallel degree.
+ * return void
+ */
+void AsofJoinPathGen::addAsofJoinPath(JoinCostWorkspace* workspace, Distribution* targetDistribution, int dop)
+{
+    m_dop = dop;
+    m_workspace = workspace;
+    m_targetDistribution = targetDistribution;
+
+    initDistribution();
+
+    if (m_dop > 1) {
+        /* Add stream info base on join clauses and subpath distributions. */
+        addStreamMppInfo();
+    } else {
+        setStreamBaseInfo(STREAM_NONE, STREAM_NONE, NIL, NIL);
+    }
+
+    /* Add stream info base on parallel degree. */
+    addStreamParallelInfo();
+    /* Generate asof join paths and add them to path list. */
+    addAsofjoinPathToList();
+
+    /* Reset for next time usage. */
+    reset();
+}
+
+/*
+ * @Description: create stream path for join, then create asof join path
+ *               and add it to path list.
+ *
+ * return void
+ */
+void AsofJoinPathGen::addAsofjoinPathToList()
+{
+    ListCell* lc = NULL;
+    Path* joinpath = NULL;
+
+    if (m_streamInfoList == NIL)
+        return;
+
+    foreach (lc, m_streamInfoList) {
+        m_streamInfoPair = (StreamInfoPair*)lfirst(lc);
+        addJoinStreamPath();
+        joinpath = createAsofJoinPath();
+        addJoinPath(joinpath);
+    }
+}
+
+/*
+ * @Description: create asof join path.
+ *
+ * return Path*:
+ */
+Path* AsofJoinPathGen::createAsofJoinPath()
+{
+    AsofPath* pathnode = makeNode(AsofPath);
+    bool try_eq_related_indirectly = false;
+
+    initialCostAsofjoin();
+
+    pathnode->jpath.path.pathtype = T_AsofJoin;
+    pathnode->jpath.path.parent = m_rel;
+    pathnode->jpath.path.pathtarget = m_rel->reltarget;
+    pathnode->jpath.path.param_info = get_joinrel_parampathinfo(
+        m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
+
+    /*
+     * A hashjoin never has pathkeys, since its output ordering is
+     * unpredictable due to possible batching.      XXX If the inner relation is
+     * small enough, we could instruct the executor that it must not batch,
+     * and then we could assume that the output inherits the outer relation's
+     * ordering, which might save a sort step.      However there is considerable
+     * downside if our estimate of the inner relation size is badly off. For
+     * the moment we don't risk it.  (Note also that if we wanted to take this
+     * seriously, joinpath.c would have to consider many more paths for the
+     * outer rel than it does now.)
+     */
+    pathnode->jpath.path.pathkeys = NIL;
+    pathnode->jpath.path.dop = m_dop;
+    pathnode->jpath.jointype = m_jointype;
+    pathnode->jpath.outerjoinpath = m_outerStreamPath;
+    pathnode->jpath.innerjoinpath = m_innerStreamPath;
+    pathnode->jpath.joinrestrictinfo = m_joinRestrictinfo;
+    pathnode->jpath.skewoptimize = m_streamInfoPair->skew_optimize;
+    pathnode->path_hashclauses = m_hashClauses;
+    pathnode->path_mergeclauses = m_mergeClauses;
+    pathnode->outersortkeys = m_outerSortKeys;
+    pathnode->innersortkeys = m_innerSortKeys;
+
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(m_innerStreamPath, m_outerStreamPath);
+
+#ifdef STREAMPLAN
+    pathnode->jpath.path.locator_type =
+        locator_type_join(m_innerStreamPath->locator_type, m_outerStreamPath->locator_type);
+    ProcessRangeListJoinType(&pathnode->jpath.path, m_outerStreamPath, m_innerStreamPath);
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_STREAM_PLAN) {
+        /* add location information for hash join path */
+        Distribution* distribution = ng_get_join_distribution(m_outerStreamPath, m_innerStreamPath);
+        ng_copy_distribution(&pathnode->jpath.path.distribution, distribution);
+    }
+#endif
+#endif
+
+    /* final_cost_asofjoin will fill in pathnode->num_batches */
+    finalCostAsofjoin(pathnode);
+
+    return (Path*)pathnode;
+}
+
+/*
+ * @Description: Preliminary estimate of the cost of a hashjoin path.
+ *
+ * This must quickly produce lower-bound estimates of the path's startup and
+ * total costs.  If we are unable to eliminate the proposed path from
+ * consideration using the lower bounds, final_cost_hashjoin will be called
+ * to obtain the final estimates.
+ *
+ * The exact division of labor between this function and final_cost_hashjoin
+ * is private to them, and represents a tradeoff between speed of the initial
+ * estimate and getting a tight lower bound.  We choose to not examine the
+ * join quals here (other than by counting the number of hash clauses),
+ * so we can't do much with CPU costs.  We do assume that
+ * ExecChooseHashTableSize is cheap enough to use here.
+ *
+ * return void
+ */
+void AsofJoinPathGen::initialCostAsofjoin()
+{
+    initial_cost_asofjoin(m_root,
+        m_workspace,
+        m_jointype,
+        m_hashClauses,
+        m_outerStreamPath,
+        m_innerStreamPath,
+        m_mergeClauses,
+        m_outerSortKeys,
+        m_innerSortKeys,
+        m_extra,
+        m_dop);
+}
+
+/*
+ * @Description: Final estimate of the cost and result size of a hashjoin path.
+ *
+ * Notice: the numbatches estimate is also saved into 'path' for use later
+ *
+ * @param[IN] path: hash join path
+ * @param[IN] hasalternative: has alternative join.
+ * return void
+ */
+void AsofJoinPathGen::finalCostAsofjoin(AsofPath* path)
+{
+    final_cost_asofjoin(m_root, path, m_workspace, m_extra, path->jpath.path.dop);
+}
+
+/*
  * @Description: Preliminary estimate of the cost of a hashjoin path.
  *
  * This must quickly produce lower-bound estimates of the path's startup and

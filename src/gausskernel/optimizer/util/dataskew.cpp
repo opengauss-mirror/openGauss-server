@@ -1576,6 +1576,9 @@ List* SkewInfo::getJoinClause(Path* jpath) const
     } else if (T_MergePath == jpath->pathtype) {
         MergePath* mpath = (MergePath*)jpath;
         return mpath->path_mergeclauses;
+    } else if (T_AsofPath == jpath->pathtype) {
+        AsofPath* mpath = (AsofPath*)jpath;
+        return mpath->path_hashclauses;
     } else {
         NestPath* npath = (NestPath*)jpath;
         return npath->joinrestrictinfo;

@@ -586,7 +586,7 @@ static void process_security_barrier_quals(
             qual = (Node*)lfirst(cell2);
 
             distribute_qual_to_rels(
-                root, qual, false, below_outer_join, JOIN_INNER, security_level, qualscope, qualscope, NULL, NULL, NULL);
+                root, qual, false, below_outer_join, JOIN_INNER, security_level, qualscope, qualscope, NULL, NULL, NULL, false);
         }
 
         /*
@@ -919,7 +919,7 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
                                         false, below_outer_join, JOIN_INNER,
                                         root->qualSecurityLevel,
                                         *qualscope, NULL, NULL, NULL,
-                                        NULL);
+                                        NULL, FALSE);
             else
                 *postponed_qual_list = lappend(*postponed_qual_list, pq);
         }
@@ -930,7 +930,7 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
         foreach (l, (List*)f->quals) {
             Node* qual = (Node*)lfirst(l);
             distribute_qual_to_rels(root, qual, false, below_outer_join, JOIN_INNER,
-                root->qualSecurityLevel, *qualscope, NULL, NULL, NULL, postponed_qual_list);
+                root->qualSecurityLevel, *qualscope, NULL, NULL, NULL, postponed_qual_list, FALSE);
         }
     } else if (IsA(jtnode, JoinExpr)) {
         JoinExpr* j = (JoinExpr*)jtnode;
@@ -1082,7 +1082,8 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
                 ojscope,
                 nonnullable_rels,
                 NULL,
-                postponed_qual_list);
+                postponed_qual_list,
+                j->isAsof);
         }
 
         /* Now we can add the SpecialJoinInfo to join_info_list */
@@ -1423,7 +1424,7 @@ static SpecialJoinInfo* make_outerjoininfo(
  */
 void distribute_qual_to_rels(PlannerInfo* root, Node* clause, bool is_deduced, bool below_outer_join, JoinType jointype,
     Index security_level, Relids qualscope, Relids ojscope, Relids outerjoin_nonnullable,
-    Relids deduced_nullable_relids, List **postponed_qual_list)
+    Relids deduced_nullable_relids, List **postponed_qual_list, bool is_asof)
 {
     Relids relids;
     bool is_pushed_down = false;
@@ -1652,8 +1653,8 @@ void distribute_qual_to_rels(PlannerInfo* root, Node* clause, bool is_deduced, b
         security_level,
         relids,
         outerjoin_nonnullable,
-        nullable_relids);
-
+        nullable_relids,
+        is_asof);
     /*
      * If it's a join clause (either naturally, or because delayed by
      * outer-join rules), add vars used in the clause to targetlists of their
@@ -2064,7 +2065,8 @@ void process_implied_equality(PlannerInfo* root, Oid opno, Oid collation, Expr* 
         NULL,
         NULL,
         nullable_relids,
-        NULL);
+        NULL,
+        false);
 }
 
 void process_implied_quality(PlannerInfo* root, Node* node, Relids relids, bool below_outer_join)
@@ -2101,7 +2103,7 @@ void process_implied_quality(PlannerInfo* root, Node* node, Relids relids, bool 
         return;
 
     distribute_qual_to_rels(
-        root, node, true, below_outer_join, JOIN_INNER, root->qualSecurityLevel, relids, NULL, NULL, NULL, NULL);
+        root, node, true, below_outer_join, JOIN_INNER, root->qualSecurityLevel, relids, NULL, NULL, NULL, NULL, FALSE);
 }
 
 /*
@@ -2145,7 +2147,8 @@ RestrictInfo* build_implied_join_equality(
         security_level,   /* security_level */
         qualscope,        /* required_relids */
         NULL,             /* outer_relids */
-        nullable_relids); /* nullable_relids */
+        nullable_relids,  /* nullable_relids */
+        false); 
 
     /* Set mergejoinability/hashjoinability flags */
     check_mergejoinable(restrictinfo);

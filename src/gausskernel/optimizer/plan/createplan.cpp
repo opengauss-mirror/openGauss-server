@@ -124,6 +124,7 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
 static NestLoop* create_nestloop_plan(PlannerInfo* root, NestPath* best_path, Plan* outer_plan, Plan* inner_plan);
 static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path, Plan* outer_plan, Plan* inner_plan);
 static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Plan* outer_plan, Plan* inner_plan);
+static AsofJoin* create_asofjoin_plan(PlannerInfo* root, AsofPath* best_path, Plan* outer_plan, Plan* inner_plan);
 static Node* replace_nestloop_params(PlannerInfo* root, Node* expr);
 static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root);
 static void process_subquery_nestloop_params(PlannerInfo *root, List *subplan_params);
@@ -182,6 +183,8 @@ static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclause
     Plan* righttree, JoinType jointype, bool inner_unique);
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
     Plan* righttree, JoinType jointype, bool inner_unique);
+static AsofJoin* make_asofjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses,
+ Plan* lefttree, Plan* righttree, JoinType jointype, bool inner_unique);
 static Hash* make_hash(
     Plan* lefttree, Oid skewTable, AttrNumber skewColumn, bool skewInherit, Oid skewColType, int32 skewColTypmod);
 static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclauses, List* mergeclauses,
@@ -390,6 +393,7 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
         case T_HashJoin:
         case T_MergeJoin:
         case T_NestLoop:
+        case T_AsofJoin:
             plan = create_join_plan(root, (JoinPath*)best_path);
             break;
         case T_Append:
@@ -1221,6 +1225,9 @@ static Plan* create_join_plan(PlannerInfo* root, JoinPath* best_path)
             root->curOuterRels = saveOuterRels;
 
             plan = (Plan*)create_nestloop_plan(root, (NestPath*)best_path, outer_plan, inner_plan);
+            break;
+        case T_AsofJoin:
+            plan = (Plan*)create_asofjoin_plan(root, (AsofPath*)best_path, outer_plan, inner_plan);
             break;
         default: {
             ereport(ERROR,
@@ -3531,6 +3538,7 @@ static void ModifyWorktableWtParam(Node* planNode, int oldWtParam, int newWtPara
         }
 
         case T_HashJoin:
+        case T_AsofJoin:
         case T_NestLoop:
         case T_MergeJoin: {
             Plan* plan = &((Join*)planNode)->plan;
@@ -4674,6 +4682,128 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
 }
 
 /*
+ * extract_actual_join_clauses
+ *
+ * Extract bare clauses from 'restrictinfo_list', separating those that
+ * syntactically match the join level from those that were pushed down.
+ * Pseudoconstant clauses are excluded from the results.
+ *
+ * This is only used at outer joins, since for plain joins we don't care
+ * about pushed-down-ness.
+ */
+static void  extract_actual_asofjoin_clauses(List* restrictinfo_list, List** joinquals, List** otherquals, Relids outerrelids)
+{
+    ListCell* l = NULL;
+    bool other = false;
+
+    if(otherquals != NULL) {
+        other = true;
+        *otherquals = NIL;
+    }
+
+    *joinquals = NIL;
+    foreach (l, restrictinfo_list) {
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(l);
+
+        AssertEreport(IsA(rinfo, RestrictInfo), MOD_OPT, "");
+
+        if (other && rinfo->is_pushed_down) {
+            if (!rinfo->pseudoconstant)
+                *otherquals = lappend(*otherquals, rinfo->clause);
+        } else {
+            if(!other && rinfo->pseudoconstant) {
+                return;
+            }
+            /* joinquals shouldn't have been marked pseudoconstant */
+            AssertEreport(!rinfo->pseudoconstant, MOD_OPT, "");
+
+            OpExpr* clause = (OpExpr*)rinfo->clause;
+
+            Assert(is_opclause(clause));
+            if (bms_is_subset(rinfo->right_relids, outerrelids)) {
+                /*
+                * Duplicate just enough of the structure to allow commuting the
+                * clause without changing the original list.  Could use
+                * copyObject, but a complete deep copy is overkill.
+                */
+                OpExpr* temp = makeNode(OpExpr);
+
+                temp->opno = clause->opno;
+                temp->opfuncid = InvalidOid;
+                temp->opresulttype = clause->opresulttype;
+                temp->opretset = clause->opretset;
+                temp->opcollid = clause->opcollid;
+                temp->inputcollid = clause->inputcollid;
+                temp->args = list_copy(clause->args);
+                temp->location = clause->location;
+                /* Commute it --- note this modifies the temp node in-place. */
+                CommuteOpExpr(temp);
+                *joinquals = lappend(*joinquals, temp);
+                rinfo->outer_is_left = false;
+            } else {
+                Assert(bms_is_subset(rinfo->left_relids, outerrelids));
+                *joinquals = lappend(*joinquals, clause);
+                rinfo->outer_is_left = true;
+            }
+        } 
+    }
+}
+
+static AsofJoin* create_asofjoin_plan(PlannerInfo* root, AsofPath* best_path, Plan* outer_plan, Plan* inner_plan)
+{
+
+    List* tlist = build_relation_tlist(best_path->jpath.path.parent);
+    List* joinclauses = NIL;
+    List* actual_joinclauses = NIL;
+    List* otherclauses = NIL;
+    List* hashclauses = NIL;
+    List* mergeclauses = NIL;
+    ListCell* lc = NULL;
+    AsofJoin* join_plan = NULL;
+
+    /* Sort join qual clauses into best execution order */
+    joinclauses = order_qual_clauses(root, best_path->jpath.joinrestrictinfo);
+
+    /* Get the join qual clauses (in plain expression form) */
+    /* Any pseudoconstant clauses are ignored here */
+    if (IS_OUTER_JOIN((uint32)(best_path->jpath.jointype))) {
+        extract_actual_asofjoin_clauses(joinclauses, &joinclauses, &otherclauses, best_path->jpath.outerjoinpath->parent->relids);
+    } else {
+        /* We can treat all clauses alike for an inner join */
+        extract_actual_asofjoin_clauses(joinclauses, &joinclauses, NULL, best_path->jpath.outerjoinpath->parent->relids);
+        otherclauses = NIL;
+    }
+
+    /*
+     * Remove the hashclauses from the list of join qual clauses, leaving the
+     * list of quals that must be checked as qpquals.
+     */
+    hashclauses = get_switched_clauses(best_path->path_hashclauses, best_path->jpath.outerjoinpath->parent->relids);
+    joinclauses = list_difference(joinclauses, hashclauses);
+    /*
+     * Replace any outer-relation variables with nestloop params.  There
+     * should not be any in the hashclauses.
+     */
+    if (best_path->jpath.path.param_info) {
+        joinclauses = (List*)replace_nestloop_params(root, (Node*)joinclauses);
+        otherclauses = (List*)replace_nestloop_params(root, (Node*)otherclauses);
+    }
+
+
+    join_plan = make_asofjoin(tlist, joinclauses, otherclauses, hashclauses, outer_plan, inner_plan,
+                              best_path->jpath.jointype, best_path->jpath.inner_unique);
+
+
+    if (root->join_null_info)
+        join_plan->join.nulleqqual = make_null_eq_clause(hashclauses, &join_plan->join.joinqual, root->join_null_info);
+
+    /* Set dop from path. */
+    join_plan->join.plan.dop = best_path->jpath.path.dop;
+
+    return join_plan;
+}
+
+/*
  * @Description: Find this expr from targetList.
  * @in expr: Need find expr.
  * @in targetList: Source target List.
@@ -5195,7 +5325,7 @@ static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root)
              * upper-level reference to a lower-level copy of the same PHV.
              */
             PlaceHolderVar *newphv = makeNode(PlaceHolderVar);
-            
+
             errno_t rc = memcpy_s(newphv, sizeof(PlaceHolderVar), phv, sizeof(PlaceHolderVar));
             securec_check_c(rc, "\0", "\0");
             newphv->phexpr = (Expr *)
@@ -7249,6 +7379,25 @@ static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclau
     return node;
 }
 
+static AsofJoin* make_asofjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses,
+ Plan* lefttree, Plan* righttree, JoinType jointype, bool inner_unique)
+{
+    AsofJoin* node = makeNode(AsofJoin);
+    Plan* plan = &node->join.plan;
+
+    /* cost should be inserted by caller */
+    plan->targetlist = tlist;
+    plan->qual = otherclauses;
+    plan->lefttree = lefttree;
+    plan->righttree = righttree;
+    node->hashclauses = hashclauses;
+    node->join.jointype = jointype;
+    node->join.inner_unique = inner_unique;
+    node->join.joinqual = joinclauses;
+
+    return node;
+}
+
 /*
  * make_project_set
  *	  Build a ProjectSet plan node
@@ -8620,7 +8769,7 @@ Limit* make_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* li
 }
 
 Limit *make_limit_with_ties(PlannerInfo* root, Plan* lefttree, Query *parse, int64 offset_est,
-    int64 count_est, bool enable_parallel) 
+    int64 count_est, bool enable_parallel)
 {
     Limit *node = make_limit(root, lefttree, parse->limitOffset, parse->limitCount, offset_est, count_est, enable_parallel);
     AttrNumber *sortColIdx_s = NULL;

@@ -52,7 +52,6 @@ extern Path* find_hinted_path(Path* current_path);
 extern void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path);
 extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
-
 extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop = 1);
 extern Path *create_resultscan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
@@ -106,6 +105,11 @@ extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Jo
     JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path,
     Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
 
+extern AsofPath* create_asofjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
+    JoinCostWorkspace* workspace, JoinPathExtraData* extra, Path* outer_path, Path* inner_path,
+    List* restrict_clauses, Relids required_outer, List* hashclauses, List* mergeclauses,
+    List* outersortkeys, List* innersortkeys,  int dop = 1);
+
 extern ProjectionPath *create_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, PathTarget *target);
 extern Path *apply_projection_to_path(PlannerInfo *root, RelOptInfo *rel, Path *path, PathTarget *target);
 extern ProjectSetPath *create_set_projection_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
@@ -147,6 +151,7 @@ extern void add_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, Path* outer_path, Path* inner_path, List* restrict_clauses,
     List* pathkeys, Relids required_outer, List* mergeclauses, List* outersortkeys, List* innersortkeys,
     Distribution* target_distribution);
+
 extern bool equal_distributekey(PlannerInfo* root, List* distribute_key1, List* distribute_key2);
 extern bool judge_node_compatible(PlannerInfo* root, Node* n1, Node* n2);
 extern List* build_superset_keys_for_rel(
@@ -225,6 +230,9 @@ extern bool CheckJoinExecType(PlannerInfo *root, Path *outer_path, Path *inner_p
 extern bool IsSameJoinExecType(PlannerInfo *root, Path *outer_path, Path *inner_path);
 
 extern bool is_diskey_and_joinkey_compatible(Node* diskey, Node* joinkey);
+
+extern bool IsAsofJoin(RelOptInfo* rel1, RelOptInfo* rel2);
+
 
 #endif
 #endif /* PATHNODE_H */

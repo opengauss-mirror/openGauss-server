@@ -148,6 +148,23 @@ static List* extractNodeVecHashJoin(Plan* plan, List* ancestors, List* rtable, L
     return resSubplan;
 }
 
+static List *extractNodeVecAsofJoin(Plan *plan, List *ancestors, List *rtable, List *subplans)
+{
+    List *resSubplan = NIL;
+    VecAsofJoin *vecAsofJoin = (VecAsofJoin *)plan;
+
+    extractQual(((AsofJoin *)plan)->mergeclauses, plan, ancestors, rtable, subplans);
+    extractQual(((AsofJoin *)plan)->hashclauses, plan, ancestors, rtable, subplans);
+    extractQual(((AsofJoin *)plan)->join.joinqual, plan, ancestors, rtable, subplans);
+    extractQual(plan->qual, plan, ancestors, rtable, subplans);
+    resSubplan = extractSubplan((Expr *)vecAsofJoin->join.plan.targetlist, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr *)vecAsofJoin->join.plan.qual, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr *)vecAsofJoin->join.joinqual, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr *)vecAsofJoin->join.nulleqqual, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr *)vecAsofJoin->hashclauses, resSubplan, subplans);
+    return resSubplan;
+}
+
 static List* extractNodeHashJoin(Plan* plan, List* ancestors, List* rtable, List* subplans)
 {
     List* resSubplan = NIL;
@@ -588,6 +605,10 @@ void extractNode(Plan* plan, List* ancestors, List* rtable, List* subplans)
         } break;
         case T_HashJoin: {
             resSubplan = extractNodeHashJoin(plan, ancestors, rtable, subplans); 
+        } break;
+        case T_AsofJoin:
+        case T_VecAsofJoin: {
+            resSubplan = extractNodeVecAsofJoin(plan, ancestors, rtable, subplans);
         } break;
         case T_VecAgg: {
             resSubplan = extractNodeVecAgg(plan, ancestors, rtable, subplans); 
@@ -1174,8 +1195,10 @@ static double getPlanRows(Plan* plan)
         case T_VecNestLoop:
         case T_NestLoop:
         case T_VecMergeJoin:
-        case T_MergeJoin: 
+        case T_MergeJoin:
+        case T_AsofJoin:
         case T_VecHashJoin:
+        case T_VecAsofJoin:
         case T_HashJoin: {
             rowsWeight = outerPlan(plan)->plan_rows + innerPlan(plan)->plan_rows;
         } break;

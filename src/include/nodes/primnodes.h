@@ -1441,6 +1441,7 @@ typedef struct JoinExpr {
     NodeTag type;
     JoinType jointype; /* type of join */
     bool isNatural;    /* Natural join? Will need to shape table */
+    bool isAsof;       /* Asof join? */
     Node* larg;        /* left subtree */
     Node* rarg;        /* right subtree */
     List* usingClause; /* USING clause, if any (list of String) */

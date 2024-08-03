@@ -73,6 +73,8 @@ const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
     {T_VecMergeJoin,        TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_MERGE},
     {T_HashJoin,            TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_HASH},
     {T_VecHashJoin,         TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_HASH},
+    {T_AsofJoin,            TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_ASOF},
+    {T_VecAsofJoin,         TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_ASOF},
     {T_CStoreScan,          TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
     {T_SeqScan,             TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
 #ifdef USE_SPQ
@@ -940,6 +942,12 @@ static void GetSpecialPlanOptCondition(PlanState* planstate, StringInfo conditio
         case T_MergeJoin:
             GetPlanOptConditionFromQual(((MergeJoin*)plan)->mergeclauses, planstate, condition, maxlen, rtable);
             break;
+        case T_AsofJoin:
+        case T_VecAsofJoin:
+            GetPlanOptConditionFromQual(((VecAsofJoin*)plan)->hashclauses, planstate, condition, maxlen, rtable);
+            GetPlanOptConditionFromQual(((VecAsofJoin*)plan)->mergeclauses, planstate, condition, maxlen, rtable);
+            GetPlanOptConditionFromQual(((VecAsofJoin*)plan)->join.joinqual, planstate, condition, maxlen, rtable);
+            break;
         case T_HashJoin:
         case T_VecHashJoin:
             GetPlanOptConditionFromQual(((HashJoin*)plan)->hashclauses, planstate, condition, maxlen, rtable);
@@ -996,6 +1004,8 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
         case T_NestLoop:
         case T_VecMergeJoin:
         case T_MergeJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_HashJoin:
         case T_VecHashJoin:
         case T_BaseResult:

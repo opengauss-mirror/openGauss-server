@@ -417,6 +417,20 @@ void fix_vars_plannode(PlannerInfo* root, Plan* node)
         }
 
         break;
+        case T_AsofJoin:
+        case T_VecAsofJoin: {
+            VecAsofJoin* aj = (VecAsofJoin*)node;
+
+            /* Fix Vars in *Hash* clause */
+            fix_var_expr(root, (Node*)aj->hashclauses);
+
+            fix_var_expr(root, (Node*)aj->mergeclauses);
+            /* Fix Vars in *Join* clause */
+            fix_var_expr(root, (Node*)aj->join.joinqual);
+            fix_var_expr(root, (Node*)aj->join.nulleqqual);
+            fix_var_expr(root, (Node*)node->var_list);
+        }
+        break;
         case T_NestLoop:
         case T_VecNestLoop: {
             NestLoop* nl = (NestLoop*)node;

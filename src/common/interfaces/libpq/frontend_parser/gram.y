@@ -526,7 +526,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 /* ordinary key words in alphabetical order */
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
-	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND APPLY ARCHIVE ARRAY AS ASC
+	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND APPLY ARCHIVE ARRAY AS ASC ASOF_P
 	ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUDIT_POLICY AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS BLOB_P BLOCKCHAIN BODY_P BOGUS
@@ -597,7 +597,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESPECT_P RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE 
+	RESET RESIZE RESOURCE RESPECT_P RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
 	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
 	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
@@ -708,7 +708,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
  * They wouldn't be given a precedence at all, were it not that we need
  * left-associativity among the JOIN rules themselves.
  */
-%left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED
+%left		JOIN CROSS LEFT FULL RIGHT ASOF_P INNER_P NATURAL ENCRYPTED 
 /* kluge to keep xml_whitespace_option from causing shift/reduce conflicts */
 %right		PRESERVE STRIP_P
 %token <keyword> CONSTRUCTOR FINAL MAP MEMBER RESULT SELF STATIC_P UNDER
@@ -7781,7 +7781,7 @@ sortby:		a_expr USING qual_all_Op opt_nulls_order
 
 select_limit:
 			limit_clause offset_clause
-				{ 
+				{
 					FetchLimit *limitClause = $1;
 					if (limitClause) {
 						limitClause->limitOffset = $2;
@@ -7789,7 +7789,7 @@ select_limit:
 					$$ = limitClause;
 				}
 			| offset_clause limit_clause
-				{ 
+				{
 					FetchLimit *limitClause = $2;
 					if (limitClause) {
 						limitClause->limitOffset = $1;
@@ -7798,7 +7798,7 @@ select_limit:
 				}
 			| limit_clause						{ $$ = $1; }
 			| offset_clause
-				{ 
+				{
 					FetchLimit *limitClause = (FetchLimit *)feparser_malloc0(sizeof(FetchLimit));
 					limitClause->limitOffset = $1;
 					$$ = limitClause;
@@ -8289,6 +8289,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					n->usingClause = NIL;
@@ -8300,6 +8301,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = $2;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					if ($5 != NULL && IsA($5, List))
@@ -8314,6 +8316,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $3;
 					if ($4 != NULL && IsA($4, List))
@@ -8327,6 +8330,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = $3;
 					n->isNatural = TRUE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $5;
 					n->usingClause = NIL; /* figure out which columns later... */
@@ -8339,6 +8343,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = TRUE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					n->usingClause = NIL; /* figure out which columns later... */
@@ -11790,6 +11795,7 @@ unreserved_keyword:
 			| APP
 			| APPEND
 			| APPLY
+			| ASOF_P			
 			| ASSERTION
 			| ASSIGNMENT
 			| AT

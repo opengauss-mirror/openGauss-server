@@ -30,7 +30,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = vechashtable.o vecagg.o vecplainagg.o vecsortagg.o vechashagg.o  vecsort.o vechashjoin.o vecstream.o  vectortorow.o \
-        veccstore.o veccstoreindexscan.o vecrowtovector.o \
+        veccstore.o veccstoreindexscan.o vecrowtovector.o vecasofjoin.o\
 	  vecforeignscan.o vecmodifytable.o vecremotequery.o vecresult.o  vecscan.o vecsubqueryscan.o vecpartiterator.o \
 	   vecrescan.o vecappend.o veclimit.o vecconstraints.o vecsetop.o vecgroup.o vecunique.o vecgrpuniq.o vecmaterial.o vecnestloop.o \
        vecstore.o vecmergejoin.o vecwindowagg.o veccstoreindexheapscan.o veccstoreindexctidscan.o veccstoreindexand.o veccstoreindexor.o \

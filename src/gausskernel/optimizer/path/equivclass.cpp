@@ -1092,13 +1092,22 @@ List* generate_join_implied_equalities_for_ecs(
     foreach (lc, eclasses) {
         EquivalenceClass* ec = (EquivalenceClass*)lfirst(lc);
         List* sublist = NIL;
+        bool checkAsof = false;
+        ListCell *jr = NULL;
 
+        foreach (jr, ec->ec_sources) {
+            RestrictInfo *ri = (RestrictInfo *)lfirst(jr);
+            if (ri->is_asof) {
+                checkAsof = true;
+                break;
+            }
+        }
         /* ECs containing consts do not need any further enforcement */
 #ifdef STREAMPLAN
-        if (!IS_STREAM_PLAN && ec->ec_has_const)
+        if (!IS_STREAM_PLAN && ec->ec_has_const && !checkAsof)
             continue;
 #else
-        if (ec->ec_has_const)
+        if (ec->ec_has_const && !checkAsof)
             continue;
 #endif
 
@@ -1136,6 +1145,17 @@ List* generate_join_implied_equalities_normal(
     List* inner_members = NIL;
     ListCell* lc1 = NULL;
     bool has_const = false;
+    bool check_asof = false;
+    ListCell *jr = NULL;
+
+    foreach (jr, ec->ec_sources) {
+        RestrictInfo *ri = (RestrictInfo *)lfirst(jr);
+        if (ri->is_asof) {
+            check_asof = true;
+            break;
+        }
+    }
+
 
     /*
      * First, scan the EC to identify member values that are computable at the
@@ -1150,7 +1170,7 @@ List* generate_join_implied_equalities_normal(
         EquivalenceMember* cur_em = (EquivalenceMember*)lfirst(lc1);
 
 #ifdef STREAMPLAN
-        if (IS_STREAM_PLAN && cur_em->em_is_const) {
+        if (IS_STREAM_PLAN && cur_em->em_is_const && !check_asof) {
             has_const = true;
             continue;
         }
@@ -2331,4 +2351,3 @@ void delete_eq_member(PlannerInfo* root, List* tlist, List* collectiveGroupExpr)
 
     list_free_ext(group_expr);
 }
-

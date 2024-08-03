@@ -4597,6 +4597,342 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
 }
 
 /*
+ * initial_cost_asofjoin
+ *	  Preliminary estimate of the cost of a asofjoin path.
+ *
+ * This must quickly produce lower-bound estimates of the path's startup and
+ * total costs.  If we are unable to eliminate the proposed path from
+ * consideration using the lower bounds, final_cost_asofjoin will be called
+ * to obtain the final estimates.
+ *
+ * 'workspace' is to be filled with startup_cost, total_cost, and perhaps
+ *		other data to be used by final_cost_hashjoin
+ * 'jointype' is the type of join to be performed
+ * 'hashclauses' is the list of joinclauses to be used as hash clauses
+ * 'outer_path' is the outer input to the join
+ * 'inner_path' is the inner input to the join
+ * 'extra' contains miscellaneous information about the join
+ */
+void initial_cost_asofjoin(PlannerInfo *root, JoinCostWorkspace *workspace, JoinType jointype, List *hashclauses,
+                           Path *outer_path, Path *inner_path, List *mergeclauses, List *outersortkeys,
+                           List *innersortkeys, JoinPathExtraData *extra, int dop)
+{
+    const uint8 ASOFJOIN_OP_ARG_NUM = 2;
+    Assert(dop != 0);
+    Cost startup_cost = 0;
+    Cost run_cost = 0;
+    double outer_path_rows = PATH_LOCAL_ROWS(outer_path) / dop;
+    double inner_path_rows = PATH_LOCAL_ROWS(inner_path) / dop;
+    StreamPath *inner_stream = NULL;
+    StreamPath *outer_stream = NULL;
+    int num_hashclauses = list_length(hashclauses);
+
+    VariableStatData vardata1;
+    VariableStatData vardata2;
+    bool isdefault1 = false;
+    bool isdefault2 = false;
+    double inner_distinct_num = 0;
+    double outer_distinct_num = 0;
+    bool join_is_reversed = false;
+    OpExpr *opclause = NULL;
+
+    double outer_rows, inner_rows, outer_skip_rows, inner_skip_rows;
+    Selectivity outerstartsel, outerendsel, innerstartsel, innerendsel;
+    Path sort_path; /* dummy for result of cost_sort */
+
+    errno_t rc = 0;
+
+    rc = memset_s(&workspace->outer_mem_info, sizeof(OpMemInfo), 0, sizeof(OpMemInfo));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(&workspace->inner_mem_info, sizeof(OpMemInfo), 0, sizeof(OpMemInfo));
+    securec_check(rc, "\0", "\0");
+
+    RestrictInfo *firstclause = (RestrictInfo *)linitial(hashclauses);
+
+    /* Deconstruct the hash clause */
+    if (is_opclause(firstclause->clause)) {
+        opclause = (OpExpr *)firstclause->clause;
+        if (list_length(opclause->args) == ASOFJOIN_OP_ARG_NUM) {
+            get_join_variables(root, opclause->args, extra->sjinfo, &vardata1, &vardata2, &join_is_reversed);
+            double n1 = get_variable_numdistinct(&vardata1, &isdefault1, true, get_join_ratio(&vardata1, extra->sjinfo),
+                                                 extra->sjinfo, STATS_TYPE_GLOBAL, true);
+            double n2 = get_variable_numdistinct(&vardata2, &isdefault2, true, get_join_ratio(&vardata2, extra->sjinfo),
+                                                 extra->sjinfo, STATS_TYPE_GLOBAL, true);
+            ReleaseVariableStats(vardata1);
+            ReleaseVariableStats(vardata2);
+
+            if (join_is_reversed) {
+                outer_distinct_num = n2;
+                inner_distinct_num = n1;
+            } else {
+                outer_distinct_num = n1;
+                inner_distinct_num = n2;
+            }
+
+            if (IsA(inner_path, StreamPath)) {
+                inner_stream = (StreamPath *)inner_path;
+                if (inner_stream->type == STREAM_REDISTRIBUTE) {
+                    inner_path_rows /= inner_distinct_num;
+                }
+            }
+
+            if (IsA(outer_path, StreamPath)) {
+                outer_stream = (StreamPath *)outer_path;
+                if (outer_stream->type == STREAM_REDISTRIBUTE) {
+                    outer_path_rows /= outer_distinct_num;
+                }
+            }
+        }
+    }
+
+    /* Protect some assumptions below that rowcounts aren't zero or NaN */
+    if (outer_path_rows <= 0 || isnan(outer_path_rows))
+        outer_path_rows = 1;
+    if (inner_path_rows <= 0 || isnan(inner_path_rows))
+        inner_path_rows = 1;
+
+    /* cost of source data */
+    startup_cost += outer_path->startup_cost;
+    run_cost += outer_path->total_cost - outer_path->startup_cost;
+
+    startup_cost += inner_path->startup_cost;
+    run_cost += inner_path->total_cost - inner_path->startup_cost;
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_JOIN),
+                     errmsg("Source data cost: startup_cost: %lf, run_cost: %lf", startup_cost, run_cost)));
+
+    /* sours
+     * Cost of computing hash function: must do it once per input tuple. We
+     * charge one cpu_operator_cost for each column's hash function.
+     *
+     * XXX when a hashclause is more complex than a single operator, we really
+     * should charge the extra eval costs of the left or right side, as
+     * appropriate, here.  This seems more work than it's worth at the moment.
+     */
+    startup_cost += (u_sess->attr.attr_sql.cpu_operator_cost * num_hashclauses) * inner_path_rows;
+    run_cost += u_sess->attr.attr_sql.cpu_operator_cost * num_hashclauses * outer_path_rows;
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_JOIN),
+                     errmsg("Add asofjoin function cost: startup_cost: %lf, run_cost: %lf", startup_cost, run_cost)));
+
+    /*
+     * A merge join will stop as soon as it exhausts either input stream
+     * (unless it's an outer join, in which case the outer side has to be
+     * scanned all the way anyway).  Estimate fraction of the left and right
+     * inputs that will actually need to be scanned.  Likewise, we can
+     * estimate the number of rows that will be skipped before the first join
+     * pair is found, which should be factored into startup cost. We use only
+     * the first (most significant) merge clause for this purpose. Since
+     * mergejoinscansel() is a fairly expensive computation, we cache the
+     * results in the merge clause RestrictInfo.
+     */
+    if (mergeclauses != NIL && outersortkeys != NIL && innersortkeys != NIL) {
+        RestrictInfo *firstclause = (RestrictInfo *)linitial(mergeclauses);
+        List *opathkeys = NIL;
+        List *ipathkeys = NIL;
+        PathKey *opathkey = NULL;
+        PathKey *ipathkey = NULL;
+        MergeScanSelCache *cache = NULL;
+
+        /* Get the input pathkeys to determine the sort-order details */
+        opathkeys = outersortkeys;
+        ipathkeys = innersortkeys;
+        AssertEreport(opathkeys != NIL, MOD_OPT,
+                      "The outer pathkeys is null when determining the cost of performing a mergejoin path.");
+        AssertEreport(ipathkeys != NIL, MOD_OPT,
+                      "The inner pathkeys is null when determining the cost of performing a mergejoin path.");
+
+        opathkey = (PathKey *)linitial(opathkeys);
+        ipathkey = (PathKey *)linitial(ipathkeys);
+        /* debugging check */
+        if (!OpFamilyEquals(opathkey->pk_opfamily, ipathkey->pk_opfamily) ||
+            opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation ||
+            opathkey->pk_strategy != ipathkey->pk_strategy || opathkey->pk_nulls_first != ipathkey->pk_nulls_first)
+            ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                            errmsg("left and right pathkeys do not match in mergejoin when initlize cost")));
+
+        /* Get the selectivity with caching */
+        cache = cached_scansel(root, firstclause, opathkey);
+        if (bms_is_subset(firstclause->left_relids, outer_path->parent->relids)) {
+            /* left side of clause is outer */
+            outerstartsel = cache->leftstartsel;
+            outerendsel = cache->leftendsel;
+            innerstartsel = cache->rightstartsel;
+            innerendsel = cache->rightendsel;
+        } else {
+            /* left side of clause is inner */
+            outerstartsel = cache->rightstartsel;
+            outerendsel = cache->rightendsel;
+            innerstartsel = cache->leftstartsel;
+            innerendsel = cache->leftendsel;
+        }
+
+        outerstartsel = 0.0;
+        outerendsel = 1.0;
+
+        /* jointype should not be JOIN_RIGHT_ANTI_FULL,
+         * because JOIN_RIGHT_ANTI_FULL can not create a mergejoin plan.
+         */
+        AssertEreport(jointype != JOIN_RIGHT_ANTI_FULL, MOD_OPT,
+                      "The mergejoin plan with JOIN_RIGHT_ANTI_FULL is not allowed."
+                      "when determining the cost of performing a mergejoin path.");
+    } else {
+        /* cope with clauseless or full mergejoin */
+        outerstartsel = innerstartsel = 0.0;
+        outerendsel = innerendsel = 1.0;
+    }
+
+    /*
+     * Convert selectivities to row counts.  We force outer_rows and
+     * inner_rows to be at least 1, but the skip_rows estimates can be zero.
+     */
+    outer_skip_rows = rint(outer_path_rows * outerstartsel);
+    inner_skip_rows = rint(inner_path_rows * innerstartsel);
+    outer_rows = clamp_row_est(outer_path_rows * outerendsel);
+    inner_rows = clamp_row_est(inner_path_rows * innerendsel);
+
+    AssertEreport(outer_skip_rows <= outer_rows, MOD_OPT,
+                  "The estimated skip rows is larger than rounding outer rows which avoid possible divide-by-zero "
+                  "when determining the cost of performing a mergejoin path.");
+    AssertEreport(inner_skip_rows <= inner_rows, MOD_OPT,
+                  "The estimated skip rows is larger than rounding inner rows which avoid possible divide-by-zero"
+                  "when determining the cost of performing a mergejoin path.");
+
+    /*
+     * Readjust scan selectivities to account for above rounding.  This is
+     * normally an insignificant effect, but when there are only a few rows in
+     * the inputs, failing to do this makes for a large percentage error.
+     */
+    outerstartsel = outer_skip_rows / outer_path_rows;
+    innerstartsel = inner_skip_rows / inner_path_rows;
+    outerendsel = outer_rows / outer_path_rows;
+    innerendsel = inner_rows / inner_path_rows;
+
+    AssertEreport(
+        outerstartsel <= outerendsel, MOD_OPT,
+        "The selectivities corresponding to estimated skip rows is larger than that of above rounding outer rows"
+        "when determining the cost of performing a mergejoin path.");
+    AssertEreport(
+        innerstartsel <= innerendsel, MOD_OPT,
+        "The selectivities corresponding to estimated skip rows is larger than that of above rounding inner rows"
+        "when determining the cost of performing a mergejoin path.");
+
+    /* cost of source data */
+    if (outersortkeys) { /* do we need to sort outer? */
+        int outer_width = get_path_actual_total_width(outer_path, root->glob->vectorized, OP_SORT);
+
+        cost_sort(&sort_path, outersortkeys, outer_path->total_cost, outer_path_rows, outer_width, 0.0,
+                  u_sess->opt_cxt.op_work_mem, -1.0, root->glob->vectorized, dop, &workspace->outer_mem_info);
+        startup_cost += sort_path.startup_cost;
+        startup_cost += (sort_path.total_cost - sort_path.startup_cost) * outerstartsel * outer_distinct_num;
+        run_cost +=
+            (sort_path.total_cost - sort_path.startup_cost) * (outerendsel - outerstartsel) * outer_distinct_num;
+    } else {
+        startup_cost += outer_path->startup_cost;
+        startup_cost += (outer_path->total_cost - outer_path->startup_cost) * outerstartsel * outer_distinct_num;
+        run_cost +=
+            (outer_path->total_cost - outer_path->startup_cost) * (outerendsel - outerstartsel) * outer_distinct_num;
+    }
+
+    if (innersortkeys) { /* do we need to sort inner? */
+        int inner_width = get_path_actual_total_width(inner_path, root->glob->vectorized, OP_SORT);
+
+        cost_sort(&sort_path, innersortkeys, inner_path->total_cost, inner_path_rows, inner_width, 0.0,
+                  u_sess->opt_cxt.op_work_mem, -1.0, root->glob->vectorized, dop, &workspace->inner_mem_info);
+        startup_cost += sort_path.startup_cost;
+        startup_cost += (sort_path.total_cost - sort_path.startup_cost) * innerstartsel * inner_distinct_num;
+        run_cost = (sort_path.total_cost - sort_path.startup_cost) * (innerendsel - innerstartsel) * inner_distinct_num;
+    } else {
+        startup_cost += inner_path->startup_cost;
+        startup_cost += (inner_path->total_cost - inner_path->startup_cost) * innerstartsel * inner_distinct_num;
+        run_cost =
+            (inner_path->total_cost - inner_path->startup_cost) * (innerendsel - innerstartsel) * inner_distinct_num;
+    }
+
+    /* CPU costs left for later */
+    /* Public result fields */
+    workspace->startup_cost = startup_cost;
+    workspace->total_cost = startup_cost + run_cost;
+    workspace->run_cost = run_cost;
+    workspace->outer_rows = outer_rows;
+    workspace->inner_rows = inner_rows;
+    workspace->outer_skip_rows = outer_skip_rows;
+    workspace->inner_skip_rows = inner_skip_rows;
+    workspace->inner_distinct_num = inner_distinct_num;
+    workspace->outer_distinct_num = outer_distinct_num;
+
+    ereport(
+        DEBUG1,
+        (errmodule(MOD_OPT_JOIN),
+         errmsg("Initial asofjoin cost: startup_cost: %lf, total_cost: %lf, work_mem: %d, esti_work_mem: %d",
+                workspace->startup_cost, workspace->total_cost, u_sess->opt_cxt.op_work_mem, root->glob->estiopmem)));
+}
+
+/*
+ * final_cost_asofjoin
+ *	  Final estimate of the cost and result size of a asofjoin path.
+ *
+ * 'path' is already filled in except for the rows and cost fields and
+ *		skip_mark_restore and materialize_inner
+ * 'workspace' is the result from initial_cost_asofjoin
+ * 'extra' contains miscellaneous information about the join
+ */
+void final_cost_asofjoin(PlannerInfo *root, AsofPath *path, JoinCostWorkspace *workspace, JoinPathExtraData *extra,
+                         int dop)
+{
+    Assert(dop != 0);
+    Path *outer_path = path->jpath.outerjoinpath;
+    Path *inner_path = path->jpath.innerjoinpath;
+    List *mergeclauses = path->path_mergeclauses;
+    Cost startup_cost = workspace->startup_cost;
+    Cost run_cost = workspace->run_cost;
+    double outer_rows = workspace->outer_rows;
+    double inner_rows = workspace->inner_rows;
+    double outer_skip_rows = workspace->outer_skip_rows;
+    double inner_skip_rows = workspace->inner_skip_rows;
+    double inner_distinct_num = workspace->inner_distinct_num;
+    double outer_distinct_num = workspace->outer_distinct_num;
+    QualCost merge_qual_cost;
+
+    /* Mark the path with the correct row estimate */
+    set_rel_path_rows(&path->jpath.path, path->jpath.path.parent, path->jpath.path.param_info);
+
+    /*
+     * If inner_path or outer_path is EC functioinScan without stream,
+     * we should set the multiple particularly.
+     */
+    set_joinpath_multiple_for_EC(root, &path->jpath.path, outer_path, inner_path);
+
+    cost_qual_eval(&merge_qual_cost, mergeclauses, root);
+
+    /*
+     * For each tuple that gets through the mergejoin proper, we charge
+     * cpu_tuple_cost plus the cost of evaluating additional restriction
+     * clauses that are to be applied at the join.	(This is pessimistic since
+     * not all of the quals may get evaluated at each tuple.)
+     *
+     * Note: we could adjust for SEMI/ANTI joins skipping some qual
+     * evaluations here, but it's probably not worth the trouble.
+     */
+    startup_cost += merge_qual_cost.startup;
+    startup_cost +=
+        merge_qual_cost.per_tuple * (outer_skip_rows * outer_distinct_num + inner_skip_rows * inner_distinct_num);
+    run_cost += merge_qual_cost.per_tuple * ((outer_rows - outer_skip_rows) * outer_distinct_num +
+                                             (inner_rows - inner_skip_rows) * inner_distinct_num);
+
+    copy_mem_info(&path->outer_mem_info, &workspace->outer_mem_info);
+    copy_mem_info(&path->inner_mem_info, &workspace->inner_mem_info);
+
+    path->jpath.path.startup_cost = startup_cost / dop;
+    path->jpath.path.total_cost = (startup_cost + run_cost) / dop;
+    path->jpath.path.stream_cost = outer_path->stream_cost;
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_JOIN),
+                     errmsg("final cost asof join: stream_cost: %lf, startup_cost: %lf, total_cost: %lf",
+                            path->jpath.path.stream_cost, path->jpath.path.startup_cost, path->jpath.path.total_cost)));
+}
+
+/*
  * cost_subplan
  *		Figure the costs for a SubPlan (or initplan).
  *

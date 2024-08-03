@@ -4582,6 +4582,9 @@ static void print_path(PlannerInfo* root, Path* path, int indent)
         case T_MergeJoin:
             join = true;
             break;
+        case T_AsofJoin:
+            join = true;
+            break;
         case T_HashJoin:
             join = true;
             break;
