@@ -621,7 +621,7 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_
         uheapTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, scan->xs_snapshot, all_dead);
     } else {
         if (!scan->xs_continue_hot) {
-            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDesc));
+            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDescData));
             undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
         } else {
             undoChainEnd = UHeapSearchBufferShowAnyTuplesFromUndo(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
@@ -701,7 +701,7 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead, bool* has_cur_xact_write)
                                                 has_cur_xact_write);
     } else {
         if (!scan->xs_continue_hot) {
-            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDesc));
+            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDescData));
             undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
         } else {
             undoChainEnd = UHeapSearchBufferShowAnyTuplesFromUndo(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);

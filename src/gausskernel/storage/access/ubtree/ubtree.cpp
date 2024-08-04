@@ -905,9 +905,10 @@ restart:
         if (minoff <= maxoff) {
             stats->num_index_tuples += maxoff - minoff + 1;
         }
-        
-        if(vstate->cycleid !=0 && opaque->btpo_cycleid == vstate->cycleid
-           && !(opaque->btpo_flags & BTP_SPLIT_END) && !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno){
+
+        if (vstate->cycleid != 0 && opaque->btpo_cycleid == vstate->cycleid
+            && !(opaque->btpo_flags & BTP_SPLIT_END)
+            && !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno) {
             recurseTo = opaque->btpo_next;
         }
     }

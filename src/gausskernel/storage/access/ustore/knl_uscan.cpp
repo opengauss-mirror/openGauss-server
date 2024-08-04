@@ -429,8 +429,8 @@ get_next_tuple:
             } else {
                 if (!scan->xs_continue_undo) {
                     ItemPointerSet(&scan->curTid, BufferGetBlockNumber(scan->rs_base.rs_cbuf), lineoff);
-                    errno_t rc = memset_s(scan->xc_undo_scan, sizeof(UstoreUndoScanDesc),
-                        0, sizeof(UstoreUndoScanDesc));
+                    errno_t rc = memset_s(scan->xc_undo_scan, sizeof(UstoreUndoScanDescData),
+                        0, sizeof(UstoreUndoScanDescData));
                     securec_check(rc, "\0", "\0");
                     undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(&scan->curTid, scan->rs_base.rs_rd,
                         scan->rs_base.rs_cbuf, scan->xc_undo_scan);
