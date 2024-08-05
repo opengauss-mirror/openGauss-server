@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           162
+#define DMS_LOCAL_VERSION           163
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -60,6 +60,7 @@ extern "C" {
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
 #define DMS_LOG_PATH_LEN        (256)
+#define DMS_CMD_DESC_LEN        64
 
 // The values of the following two macros must be same with (GS_MAX_XA_BASE16_GTRID_LEN GS_MAX_XA_BASE16_BQUAL_LEN)
 #define DMS_MAX_XA_BASE16_GTRID_LEN    (128)
@@ -1370,6 +1371,30 @@ typedef struct st_driver_ping_info {
     unsigned long long major_version;
     unsigned long long minor_version;
 } driver_ping_info_t;
+
+typedef struct st_mes_msg_info {
+    unsigned int cmd;
+    unsigned short sid;
+} mes_msg_info_t;
+
+typedef struct st_mes_worker_msg_stats_info {
+    unsigned char is_active;
+    unsigned int tid;
+    int priority;
+    unsigned long long get_msgitem_time;
+    unsigned long long msg_ruid;
+    unsigned int msg_src_inst;
+    mes_msg_info_t msg_info;
+    char msg_cmd_desc[DMS_CMD_DESC_LEN];
+} mes_worker_msg_stats_info_t;
+
+typedef struct st_mes_task_priority_stats_info {
+    int priority;
+    unsigned int worker_num;
+    unsigned long long inqueue_msgitem_num;
+    unsigned long long finished_msgitem_num;
+    unsigned long long msgitem_free_num;
+} mes_task_priority_stats_info_t;
 
 #ifdef __cplusplus
 }
