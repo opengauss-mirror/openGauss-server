@@ -1142,3 +1142,18 @@ gs_sigfunc gspqsignal(int signo, gs_sigfunc func)
 {
     return gs_signal_register_handler(t_thrd.signal_slot->gssignal, signo, func);
 }
+
+void gs_signal_get_timer(struct timeval* timeval)
+{
+    struct itimerspec restime;
+    /* Save rest time for future resume */
+    if (timer_gettime(t_thrd.utils_cxt.sigTimerId, /* the created timer */
+        &restime)) {
+        timeval->tv_sec = 0;
+        timeval->tv_usec = 0;
+        return;
+    }
+    timeval->tv_sec = restime.it_value.tv_sec;
+    timeval->tv_usec = restime.it_value.tv_nsec / 1000ULL;
+    return;
+}
