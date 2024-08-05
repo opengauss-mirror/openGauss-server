@@ -1287,7 +1287,7 @@ extern Datum btbuildempty(PG_FUNCTION_ARGS);
 extern Datum btinsert(PG_FUNCTION_ARGS);
 extern Datum btbeginscan(PG_FUNCTION_ARGS);
 extern void* btbuildparallelscan(void);
-extern void btinitparallelscan(void *target);
+extern void Btinitparallelscan(void *target);
 extern Datum btgettuple(PG_FUNCTION_ARGS);
 extern Datum btgetbitmap(PG_FUNCTION_ARGS);
 extern Datum cbtreegetbitmap(PG_FUNCTION_ARGS);
@@ -1301,7 +1301,7 @@ extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
 
 extern void btparallelrescan(IndexScanDesc scan);
-extern void btinitparallelscan(void *target);
+extern void Btinitparallelscan(void *target);
 /*
  * prototypes for internal functions in nbtree.c
  */

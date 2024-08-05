@@ -180,12 +180,11 @@ typedef struct IndexScanDescData {
 } IndexScanDescData;
 
 /* Generic structure for parallel scans */
-typedef struct ParallelIndexScanDescData
-{
+typedef struct ParallelIndexScanDescData {
     Oid         ps_relid;
     Oid         ps_indexid;
     void*       ps_btpscan;
-}           ParallelIndexScanDescData;
+} ParallelIndexScanDescData;
 
 #define SizeofIndexScanDescData (offsetof(IndexScanDescData, xs_ctbuf_hdr) + SizeofHeapTupleHeader)
 

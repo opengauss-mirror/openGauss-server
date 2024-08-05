@@ -29,4 +29,6 @@ extern int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState 
 extern TupleTableSlot* ExecBitmapHeapScan(PlanState* state);
 extern void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
 
+#define BITMAP_PREFETCH_PAGE_RATIO 2
+
 #endif /* NODEBITMAPHEAPSCAN_H */

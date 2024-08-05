@@ -1221,7 +1221,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      */
     csquared = indexCorrelation * indexCorrelation;
 
-    run_cost += (max_IO_cost + csquared * (min_IO_cost - max_IO_cost)) / dop;
+    if (dop == 0) {
+        run_cost += (max_IO_cost + csquared * (min_IO_cost - max_IO_cost));
+    } else {
+        run_cost += (max_IO_cost + csquared * (min_IO_cost - max_IO_cost)) / dop;
+    }
 
     ereport(DEBUG2,
         (errmodule(MOD_OPT),
@@ -1256,7 +1260,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
 
     run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
-    run_cost += cpu_per_tuple * tuples_fetched / dop;
+    if (dop == 0) {
+        run_cost += cpu_per_tuple * tuples_fetched;
+    } else {
+        run_cost += cpu_per_tuple * tuples_fetched / dop;
+    }
 
     ereport(DEBUG2,
         (errmodule(MOD_OPT),

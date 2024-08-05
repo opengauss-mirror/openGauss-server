@@ -64,25 +64,23 @@ typedef struct {
  * BTPARALLEL_DONE indicates that the scan is complete (including error exit).
  * We reach this state once for every distinct combination of array keys.
  */
-typedef enum
-{
+typedef enum BTPS_State {
     BTPARALLEL_NOT_INITIALIZED,
     BTPARALLEL_ADVANCING,
     BTPARALLEL_IDLE,
     BTPARALLEL_DONE
-} BTPS_State;
+};
 
 /*
  * BTParallelScanDescData contains btree specific shared information required
  * for parallel scan.
  */
-typedef struct BTParallelScanDescData
-{
+typedef struct BTParallelScanDescData {
     BlockNumber btps_scanPage;  /* latest or next page to be scanned */
-    BTPS_State  btps_pageStatus;/* indicates whether next page is available
+    BTPS_State  btpsPageStatus;/* indicates whether next page is available
                                  * for scan. see above for possible states of
                                  * parallel scan. */
-    int         btps_arrayKeyCount;     /* count indicating number of array
+    int         btpsArrayKeyCount;     /* count indicating number of array
                                          * scan keys processed by parallel
                                          * scan */
 } BTParallelScanDescData;
@@ -745,25 +743,23 @@ void btrestrpos_internal(IndexScanDesc scan)
 
 
 /*
- * btinitparallelscan -- initialize BTParallelScanDesc for parallel btree scan
+ * Btinitparallelscan -- initialize BTParallelScanDesc for parallel btree scan
  */
-void
-btinitparallelscan(void *target)
+void Btinitparallelscan(void *target)
 {
-    BTParallelScanDesc bt_target = (BTParallelScanDesc) target;
+    BTParallelScanDesc btTarget = (BTParallelScanDesc) target;
 
     LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
-    bt_target->btps_scanPage = InvalidBlockNumber;
-    bt_target->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
-    bt_target->btps_arrayKeyCount = 0;
+    btTarget->btps_scanPage = InvalidBlockNumber;
+    btTarget->btpsPageStatus = BTPARALLEL_NOT_INITIALIZED;
+    btTarget->btpsArrayKeyCount = 0;
     LWLockRelease(ParallelIndexScanLock);
 }
 
 /*
  *  btparallelrescan() -- reset parallel scan
  */
-void
-btparallelrescan(IndexScanDesc scan)
+void btparallelrescan(IndexScanDesc scan)
 {
     BTParallelScanDesc btscan;
     ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
@@ -779,8 +775,8 @@ btparallelrescan(IndexScanDesc scan)
      */
     LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
     btscan->btps_scanPage = InvalidBlockNumber;
-    btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
-    btscan->btps_arrayKeyCount = 0;
+    btscan->btpsPageStatus = BTPARALLEL_NOT_INITIALIZED;
+    btscan->btpsArrayKeyCount = 0;
     LWLockRelease(ParallelIndexScanLock);
 }
 
@@ -802,12 +798,11 @@ btparallelrescan(IndexScanDesc scan)
  *
  * Callers should ignore the value of pageno if the return value is false.
  */
-bool
-_bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
+bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
 {
     BTScanOpaque so = (BTScanOpaque) scan->opaque;
     BTPS_State  pageStatus;
-    bool        exit_loop = false;
+    bool        exitLoop = false;
     bool        status = true;
     ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
     BTParallelScanDesc btscan;
@@ -816,37 +811,32 @@ _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
 
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
     
-    while (1)
-    {
+    while (1) {
         LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
-        pageStatus = btscan->btps_pageStatus;
+        pageStatus = btscan->btpsPageStatus;
 
-        if (so->arrayKeyCount < btscan->btps_arrayKeyCount)
-        {
+        if (so->arrayKeyCount < btscan->btpsArrayKeyCount) {
             /* Parallel scan has already advanced to a new set of scankeys. */
             status = false;
-        }
-        else if (pageStatus == BTPARALLEL_DONE)
-        {
+        } else if (pageStatus == BTPARALLEL_DONE) {
             /*
              * We're done with this set of scankeys.  This may be the end, or
              * there could be more sets to try.
              */
             status = false;
-        }
-        else if (pageStatus != BTPARALLEL_ADVANCING)
-        {
+        } else if (pageStatus != BTPARALLEL_ADVANCING) {
             /*
              * We have successfully seized control of the scan for the purpose
              * of advancing it to a new page!
              */
-            btscan->btps_pageStatus = BTPARALLEL_ADVANCING;
+            btscan->btpsPageStatus = BTPARALLEL_ADVANCING;
             *pageno = btscan->btps_scanPage;
-            exit_loop = true;
+            exitLoop = true;
         }
         LWLockRelease(ParallelIndexScanLock);
-        if (exit_loop || !status)
+        if (exitLoop || !status) {
             break;
+        }
     }
 
     return status;
@@ -857,8 +847,7 @@ _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
  *      new page.  We now have the new value btps_scanPage; some other backend
  *      can now begin advancing the scan.
  */
-void
-_bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
+void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
 {
     ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
     BTParallelScanDesc btscan;
@@ -868,7 +857,7 @@ _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
     {
         LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
         btscan->btps_scanPage = scan_page;
-        btscan->btps_pageStatus = BTPARALLEL_IDLE;
+        btscan->btpsPageStatus = BTPARALLEL_IDLE;
         LWLockRelease(ParallelIndexScanLock);
     }
 }
@@ -880,17 +869,17 @@ _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
  * notify other workers.  Otherwise, they might wait forever for the scan to
  * advance to the next page.
  */
-void
-_bt_parallel_done(IndexScanDesc scan)
+void _bt_parallel_done(IndexScanDesc scan)
 {
     BTScanOpaque so = (BTScanOpaque) scan->opaque;
     ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
     BTParallelScanDesc btscan;
-    bool        status_changed = false;
+    bool        statusChanged = false;
 
     /* Do nothing, for non-parallel scans */
-    if (parallel_scan == NULL)
+    if (parallel_scan == NULL) {
         return;
+    }
 
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
 
@@ -901,10 +890,10 @@ _bt_parallel_done(IndexScanDesc scan)
      */
     {
         LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
-        if (so->arrayKeyCount >= btscan->btps_arrayKeyCount
-                && btscan->btps_pageStatus != BTPARALLEL_DONE) {
-            btscan->btps_pageStatus = BTPARALLEL_DONE;
-            status_changed = true;
+        if (so->arrayKeyCount >= btscan->btpsArrayKeyCount
+                && btscan->btpsPageStatus != BTPARALLEL_DONE) {
+            btscan->btpsPageStatus = BTPARALLEL_DONE;
+            statusChanged = true;
         }
         LWLockRelease(ParallelIndexScanLock);
     }
@@ -917,8 +906,7 @@ _bt_parallel_done(IndexScanDesc scan)
  * Updates the count of array keys processed for both local and parallel
  * scans.
  */
-void
-_bt_parallel_advance_array_keys(IndexScanDesc scan)
+void _bt_parallel_advance_array_keys(IndexScanDesc scan)
 {
     BTScanOpaque so = (BTScanOpaque) scan->opaque;
     ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
@@ -928,11 +916,10 @@ _bt_parallel_advance_array_keys(IndexScanDesc scan)
 
     so->arrayKeyCount++;
     LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
-    if (btscan->btps_pageStatus == BTPARALLEL_DONE)
-    {
+    if (btscan->btpsPageStatus == BTPARALLEL_DONE) {
         btscan->btps_scanPage = InvalidBlockNumber;
-        btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
-        btscan->btps_arrayKeyCount++;
+        btscan->btpsPageStatus = BTPARALLEL_NOT_INITIALIZED;
+        btscan->btpsArrayKeyCount++;
     }
     LWLockRelease(ParallelIndexScanLock);
 }
@@ -1634,9 +1621,8 @@ static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple po
 /*
  * btestimateparallelscan -- estimate storage for BTParallelScanDescData
  */
-void*
-btbuildparallelscan(void)
+void* btbuildparallelscan(void)
 {
-    void *bt_pscan = (void*)new BTParallelScanDescData;
-	return bt_pscan;
+    void *btPscan = new BTParallelScanDescData;
+    return btPscan;
 }
