@@ -34,12 +34,14 @@
 #endif /* FRONTEND_PARSER */
 #include "storage/tcap.h"
 #include "parser/parse_utilcmd.h"
+#include "parser/parse_type.h"
 
 static bool query_check_no_flt_walker(Node* node, void* context);
 static bool query_check_srf_walker(Node* node, void* context);
 static bool expression_returns_set_walker(Node* node, void* context);
 static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
+static void AssertExprCollation(const Node* expr, Oid collation);
 Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*));
 
 /*
@@ -1070,6 +1072,15 @@ Oid exprInputCollation(const Node* expr)
     return coll;
 }
 
+static void AssertExprCollation(const Node* expr, Oid collation)
+{
+    Oid expr_collation = exprCollation(expr);
+    if (DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) {
+        expr_collation = BINARY_COLLATION_OID;
+    }
+    Assert(collation == expr_collation);
+}
+
 /*
  *	exprSetCollation -
  *	  Assign collation information to an expression tree node.
@@ -1114,7 +1125,7 @@ void exprSetCollation(Node* expr, Oid collation)
             ((FuncExpr*)expr)->funccollid = collation;
             break;
         case T_NamedArgExpr:
-            Assert(collation == exprCollation((Node*)((NamedArgExpr*)expr)->arg));
+            AssertExprCollation((Node*)((NamedArgExpr*)expr)->arg, collation);
             break;
         case T_OpExpr:
             ((OpExpr*)expr)->opcollid = collation;
@@ -1148,7 +1159,7 @@ void exprSetCollation(Node* expr, Oid collation)
                 tent = (TargetEntry*)linitial(qtree->targetList);
                 Assert(IsA(tent, TargetEntry));
                 Assert(!tent->resjunk);
-                Assert(collation == exprCollation((Node*)tent->expr));
+                AssertExprCollation((Node*)tent->expr, collation);
             } else {
                 /* for all other sublink types, result is boolean */
                 Assert(!OidIsValid(collation));
