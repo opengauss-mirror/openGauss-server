@@ -1392,7 +1392,8 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
             retcode = MAKE_SQLSTATE(sqlstate[0], sqlstate[1], sqlstate[2], sqlstate[3], sqlstate[4]);
         }
         if (retcode == ERRCODE_UNDEFINED_FILE) {
-            if (t_thrd.role != APPLY_WORKER) {
+            /* in SS dorado standby cluster, the walreceiver not need to receive wal */
+            if (t_thrd.role != APPLY_WORKER && !SS_DORADO_STANDBY_CLUSTER) {
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
             }
             SpinLockAcquire(&walrcv->mutex);
