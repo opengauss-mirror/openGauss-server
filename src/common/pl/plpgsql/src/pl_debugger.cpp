@@ -224,12 +224,12 @@ static void set_debugger_procedure_state(int commIdx, bool state)
 void server_debug_main(PLpgSQL_function* func, PLpgSQL_execstate* estate)
 {
     DebugInfo* debug_ptr = func->debug;
-    debug_ptr->cur_stmt = estate->err_stmt;
     if (unlikely(debug_ptr == NULL || debug_ptr->comm == NULL)) {
         ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
                             errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                             errmsg("Invalid debug info from func %s", func->fn_signature)));
     }
+    debug_ptr->cur_stmt = estate->err_stmt;
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[debug_ptr->comm->comm_idx];
     /* stop to wait client conn if need */
     debug_ptr->stop_next_stmt = debug_ptr->stop_next_stmt ||
