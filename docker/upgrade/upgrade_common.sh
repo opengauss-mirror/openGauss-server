@@ -988,6 +988,27 @@ function upgrade_pre() {
     log "no need do upgrade_pre step"
   fi
 }
+
+function cp_dolphin_upgrade_script_step1() {
+  if ls "$GAUSSHOME"/share/postgresql/extension/ | grep -qE "dolphin--(.*)--(.*)sql" ; then
+    if cp -f "$GAUSSHOME"/share/postgresql/extension/dolphin--*--*sql "$GAUSS_TMP_PATH"/ ; then
+      log "cp dolphin upgrade script step1[upgrade_pre] successfully"
+    else
+      die "cp dolphin upgrade script step1[upgrade_pre] failed" ${err_upgrade_pre}
+    fi
+  fi
+}
+
+function cp_dolphin_upgrade_script_step2() {
+  if ls "$GAUSS_TMP_PATH/" | grep -qE "dolphin--(.*)--(.*)sql" ; then
+    if cp -f "$GAUSS_TMP_PATH"/dolphin--*--*sql "$GAUSSHOME"/share/postgresql/extension/ ; then
+      log "cp dolphin upgrade script step1[upgrade_bin] successfully"
+    else
+      die "cp dolphin upgrade script step1[upgrade_bin] failed" ${err_upgrade_pre}
+    fi
+  fi
+}
+
 function upgrade_pre_step1() {
   check_disk
   check_version
@@ -996,6 +1017,7 @@ function upgrade_pre_step1() {
     prepare_sql_all
   fi
   bak_gauss
+  cp_dolphin_upgrade_script_step1
   record_step 1
 }
 
@@ -1024,6 +1046,7 @@ function upgrade_pre_step2() {
 
 function upgrade_bin() {
   parses_step
+  cp_dolphin_upgrade_script_step2
   if [[ "$current_step" -lt 0 ]]; then
     die "Step file may be changed invalid" ${err_upgrade_bin}
   elif [[ "$current_step" -lt 2 ]]; then
@@ -1146,6 +1169,13 @@ function upgrade_post_step56() {
       die "Guassdb is not running" ${err_upgrade_post}
     fi
     record_step 5
+
+    if exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_rollback-post_maindb.sql maindb && exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_rollback-post_otherdb.sql otherdb; then
+      debug "upgrade-rollback post sql successfully"
+    else
+      die "upgrade-rollback post sql failed" ${err_rollback_post}
+    fi
+
     if exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_upgrade-post_maindb.sql maindb && exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_upgrade-post_otherdb.sql otherdb; then
       debug "upgrade post sql successfully"
     else
