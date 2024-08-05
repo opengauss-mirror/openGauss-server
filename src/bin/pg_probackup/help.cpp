@@ -86,6 +86,8 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
@@ -93,6 +95,8 @@ void help_pg_probackup(void)
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s del-instance -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s set-config -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
@@ -115,6 +119,8 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
@@ -123,15 +129,22 @@ void help_pg_probackup(void)
 
     printf(_("\n  %s set-backup -B backup-path --instance=instance_name -i backup-id\n"), PROGRAM_NAME);
     printf(_("                 [--note=text] [--ttl=interval] [--expire-time=time]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
+    printf(_("                 [--s3-status=s3|local]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s show-config -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
     printf(_("                 [--format=plain|json]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s show -B backup-path\n"), PROGRAM_NAME);
     printf(_("                 [--instance=instance_name [-i backup-id]]\n"));
     printf(_("                 [--archive] [--format=plain|json]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s backup -B backup-path --instance=instance_name -b backup-mode\n"), PROGRAM_NAME);
@@ -161,6 +174,8 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
@@ -181,6 +196,8 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
@@ -218,6 +235,8 @@ void help_pg_probackup(void)
     printf(_("                 [--log-directory=log-directory]\n"));
     printf(_("                 [--log-rotation-size=log-rotation-size]\n"));
     printf(_("                 [--log-rotation-age=log-rotation-age]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s validate -B backup-path\n"), PROGRAM_NAME);
@@ -233,6 +252,8 @@ void help_pg_probackup(void)
     printf(_("                 [--log-directory=log-directory]\n"));
     printf(_("                 [--log-rotation-size=log-rotation-size]\n"));
     printf(_("                 [--log-rotation-age=log-rotation-age]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
     printf(_("                 [--help]\n"));
 
     exit(0);
@@ -251,9 +272,11 @@ static void help_add_instance(void)
     printf(_("                 [-E external-directories-paths]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
-    printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n\n"));
+    printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
@@ -278,6 +301,14 @@ static void help_add_instance(void)
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
+
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
@@ -289,10 +320,20 @@ static void help_add_instance(void)
 
 static void help_del_instance(void)
 {
-    printf(_("\n%s del-instance -B backup-path --instance=instance_name\n\n"), PROGRAM_NAME);
+    printf(_("\n%s del-instance -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance to delete\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 }
 
 static void help_set_config(void)
@@ -318,6 +359,8 @@ static void help_set_config(void)
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
@@ -384,6 +427,14 @@ static void help_set_config(void)
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
+
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
@@ -396,7 +447,10 @@ static void help_set_config(void)
 static void help_set_backup(void)
 {
     printf(_("\n%s set-backup -B backup-path --instance=instance_name -i backup-id\n"), PROGRAM_NAME);
-    printf(_("                 [--note=text] [--ttl=interval] [--expire-time=time]\n\n"));
+    printf(_("                 [--note=text] [--ttl=interval] [--expire-time=time]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
+    printf(_("                 [--s3-status=s3|local]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -408,16 +462,35 @@ static void help_set_backup(void)
     printf(_("                                   (example: --ttl=20d)\n"));
     printf(_("      --expire-time=time           pin backup until specified time stamp\n"));
     printf(_("                                   (example: --expire-time='2024-01-01 00:00:00+03')\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
+    printf(_("      --s3-status                  current backup set status\n"));
 }
 
 static void help_show_config(void)
 {
     printf(_("\n%s show-config -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
-    printf(_("                 [--format=format]\n\n"));
+    printf(_("                 [--format=format]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
     printf(_("      --format=format              show format=PLAIN|JSON\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 }
 
 static void help_show(void)
@@ -425,12 +498,22 @@ static void help_show(void)
     printf(_("\n%s show -B backup-path\n"), PROGRAM_NAME);
     printf(_("                 [--instance=instance_name [-i backup-id]]\n"));
     printf(_("                 [--archive] [--format=format]\n\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     show info about specific instance\n"));
     printf(_("  -i, --backup-id=backup-id        show info about specific backups\n"));
     printf(_("      --archive                    show WAL archive information\n"));
     printf(_("      --format=format              show format=PLAIN|JSON\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 }
 
 static void help_backup(void)
@@ -462,12 +545,14 @@ static void help_backup(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
-    printf(_("                 [--ttl=interval] [--expire-time=time]\n\n"));
-    printf(_("                 [--backup-pg-replslot]\n"));
+    printf(_("                 [--ttl=interval] [--expire-time=time]\n"));
+    printf(_("                 [--backup-pg-replslot]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -553,6 +638,14 @@ static void help_backup(void)
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
+
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
@@ -583,6 +676,8 @@ static void help_restore(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
     printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
@@ -634,6 +729,14 @@ static void help_restore(void)
     printf(_("      --remote-libpath=libpath         library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
@@ -719,7 +822,9 @@ static void help_delete(void)
     printf(_("                 [--error-log-filename=error-log-filename]\n"));
     printf(_("                 [--log-directory=log-directory]\n"));
     printf(_("                 [--log-rotation-size=log-rotation-size]\n"));
-    printf(_("                 [--log-rotation-age=log-rotation-age]\n\n"));
+    printf(_("                 [--log-rotation-age=log-rotation-age]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -762,6 +867,14 @@ static void help_delete(void)
     printf(_("      --log-rotation-age=log-rotation-age\n"));
     printf(_("                                   rotate logfile if its age exceeds this value; 0 disables; (default: 0)\n"));
     printf(_("                                   available units: 'ms', 's', 'min', 'h', 'd' (default: min)\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 }
 
 static void help_validate(void)
@@ -778,7 +891,9 @@ static void help_validate(void)
     printf(_("                 [--error-log-filename=error-log-filename]\n"));
     printf(_("                 [--log-directory=log-directory]\n"));
     printf(_("                 [--log-rotation-size=log-rotation-size]\n"));
-    printf(_("                 [--log-rotation-age=log-rotation-age]\n\n"));
+    printf(_("                 [--log-rotation-age=log-rotation-age]\n"));
+    printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
+    printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -816,4 +931,12 @@ static void help_validate(void)
     printf(_("      --log-rotation-age=log-rotation-age\n"));
     printf(_("                                   rotate logfile if its age exceeds this value; 0 disables; (default: 0)\n"));
     printf(_("                                   available units: 'ms', 's', 'min', 'h', 'd' (default: min)\n\n"));
+
+    printf(_("\n  S3 options:\n"));
+    printf(_("      --media-type=type            media type for storing backups, including: s3 and disk\n"));
+    printf(_("      --access-id=ak               access key id, used to identify the user\n"));
+    printf(_("      --access-key=sk              secret access key, used to verify the user's identity\n"));
+    printf(_("      --access-bucket=bucket       name of the bucket created on the object storage\n"));
+    printf(_("      --endpoint=endpoint          accessing domain name which can be in the form of IP: port\n"));
+    printf(_("      --region=region              geographical region, optional parameters\n"));
 }
