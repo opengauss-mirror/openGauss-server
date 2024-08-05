@@ -2947,6 +2947,7 @@ typedef struct knl_u_hook_context {
     void *deparseQueryHook;
     void *checkSqlFnRetvalHook;
     void *typeTransfer;
+    void *isBinaryType;
     void *forTsdbHook;
     void *pluginPlannerHook;
     void *groupingplannerHook;
