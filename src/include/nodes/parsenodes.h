@@ -1409,6 +1409,7 @@ typedef struct AlterFunctionStmt {
     NodeTag type;
     FuncWithArgs* func; /* name and args of function */
     List* actions;      /* list of DefElem */
+    bool isProcedure = false;
 } AlterFunctionStmt;
 
 enum CompileEntry {

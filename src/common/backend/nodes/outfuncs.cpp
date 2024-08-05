@@ -4358,6 +4358,9 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
         WRITE_NODE_FIELD(update_default);
     }
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        WRITE_STRING_FIELD(initdefval);
+    }
 }
 
 static void _outTypeName(StringInfo str, TypeName* node)

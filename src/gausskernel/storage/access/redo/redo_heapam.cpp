@@ -1631,6 +1631,8 @@ XLogRecParseState *Heap3RedoParseToBlock(XLogReaderState *record, uint32 *blockn
         case XLOG_HEAP3_INVALID:
             recordblockstate = HeapXlogInvalidParseBlock(record, blocknum);
             break;
+        case XLOG_HEAP3_TRUNCATE:
+            break;
         default:
             ereport(PANIC, (errmsg("Heap3RedoParseToBlock: unknown op code %u", info)));
     }
@@ -1649,6 +1651,8 @@ void Heap3RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_HEAP3_INVALID:
             HeapXlogInvalidBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_HEAP3_TRUNCATE:
             break;
         default:
             ereport(PANIC, (errmsg("heap3_redo_block: unknown op code %u", info)));

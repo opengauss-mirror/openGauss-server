@@ -121,6 +121,11 @@
 #define PRETTYFLAG_PAREN 1
 #define PRETTYFLAG_INDENT 2
 
+/* Standard conversion of a "bool pretty" option to detailed flags */
+#define GET_PRETTY_FLAGS(pretty) \
+    ((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT) \
+     : PRETTYFLAG_INDENT)
+
 /* Default line length for pretty-print wrapping */
 #define WRAP_COLUMN_DEFAULT 79
 
@@ -244,10 +249,11 @@ static char* deparse_expression_pretty(
     bool no_alias = false);
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
+extern char* pg_get_trigger_whenclause(Form_pg_trigger trigrec,Node* whenClause, bool pretty);
 static char* pg_get_triggerdef_worker(Oid trigid, bool pretty);
 static void decompile_column_index_array(Datum column_index_array, Oid relId, StringInfo buf);
 static char* pg_get_ruledef_worker(Oid ruleoid, int prettyFlags);
-static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *excludeOps, bool attrsOnly, bool showTblSpc,
+static char* pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid* excludeOps, bool attrsOnly, bool showTblSpc,
     int prettyFlags, bool dumpSchemaOnly = false, bool showPartitionLocal = true, bool showSubpartitionLocal = true);
 void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
     bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal);
@@ -623,7 +629,27 @@ char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn)
 
 char* pg_get_viewdef_string(Oid viewid)
 {
-    return pg_get_viewdef_worker(viewid, 0, -1);
+    StringInfoData buf;
+    Relation	pg_rewrite;
+    HeapTuple	ruletup;
+    TupleDesc	rulettc;
+
+    initStringInfo(&buf);
+    pg_rewrite = relation_open(RewriteRelationId, AccessShareLock);
+
+    ruletup = SearchSysCache2(RULERELNAME,
+                              ObjectIdGetDatum(viewid),
+                              PointerGetDatum(ViewSelectRuleName));
+    if (!HeapTupleIsValid(ruletup)) {
+        elog(ERROR, "cache lookup failed for rewrite rule for view with OID %u", viewid);
+    }
+
+    rulettc = pg_rewrite->rd_att;
+    make_viewdef(&buf, ruletup, rulettc, 0, WRAP_COLUMN_DEFAULT);
+    ReleaseSysCache(ruletup);
+    relation_close(pg_rewrite, AccessShareLock);
+
+    return buf.data;
 }
 
 /*
@@ -3318,6 +3344,76 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
     return buf.data;
 }
 
+/*
+ * Pass back the TriggerWhen clause of a trigger given the pg_trigger record and
+ * the expression tree (in nodeToString() representation) from pg_trigger.tgqual
+ * for the trigger's WHEN condition.
+ */
+char* pg_get_trigger_whenclause(Form_pg_trigger trigrec, Node* whenClause, bool pretty)
+{
+    StringInfoData buf;
+    char        relkind;
+    deparse_context context;
+    deparse_namespace dpns;
+    RangeTblEntry *oldrte;
+    RangeTblEntry *newrte;
+
+    initStringInfo(&buf);
+
+    relkind = get_rel_relkind(trigrec->tgrelid);
+
+    /* Build minimal OLD and NEW RTEs for the rel */
+    oldrte = makeNode(RangeTblEntry);
+    oldrte->rtekind = RTE_RELATION;
+    oldrte->relid = trigrec->tgrelid;
+    oldrte->relkind = relkind;
+    oldrte->alias = makeAlias("old", NIL);
+    oldrte->eref = oldrte->alias;
+    oldrte->lateral = false;
+    oldrte->inh = false;
+    oldrte->inFromCl = true;
+
+    newrte = makeNode(RangeTblEntry);
+    newrte->rtekind = RTE_RELATION;
+    newrte->relid = trigrec->tgrelid;
+    newrte->relkind = relkind;
+    newrte->alias = makeAlias("new", NIL);
+    newrte->eref = newrte->alias;
+    newrte->lateral = false;
+    newrte->inh = false;
+    newrte->inFromCl = true;
+
+    /* Build two-element rtable */
+    errno_t rc = memset_s(&dpns, sizeof(dpns), 0, sizeof(dpns));
+    securec_check(rc, "\0", "\0");
+    dpns.rtable = list_make2(oldrte, newrte);
+    dpns.ctes = NIL;
+
+
+    /* Set up context with one-deep namespace stack */
+    context.buf = &buf;
+    context.namespaces = list_make1(&dpns);
+    context.windowClause = NIL;
+    context.windowTList = NIL;
+    context.varprefix = true;
+    context.prettyFlags = GET_PRETTY_FLAGS(pretty);
+#ifdef PGXC
+    context.finalise_aggs = false;
+    context.sortgroup_colno = false;
+    context.parser_arg = NULL;
+#endif /* PGXC */
+    context.viewdef = false;
+    context.is_fqs = false;
+    context.wrapColumn = WRAP_COLUMN_DEFAULT;
+    context.indentLevel = PRETTYINDENT_STD;
+    context.qrw_phase = false;
+    context.is_upsert_clause =  false;
+
+    get_rule_expr(whenClause, &context, false);
+
+    return buf.data;
+}
+
 /* ----------
  * get_indexdef			- Get the definition of an index
  *
@@ -4558,6 +4654,17 @@ Datum pg_get_functiondef(PG_FUNCTION_ARGS)
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+
+char* pg_get_functiondef_string(Oid funcid)
+{
+    char* funcdef = NULL;
+    int headerlines = 0;
+
+    funcdef = pg_get_functiondef_worker(funcid, &headerlines);
+
+    return funcdef;
 }
 
 /*

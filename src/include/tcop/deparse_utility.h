@@ -38,6 +38,7 @@ typedef struct CollectedATSubcmd
 {
     ObjectAddress   address; /* affected column, constraint, index, ... */
     Node           *parsetree;
+    char       *usingexpr;
 } CollectedATSubcmd;
  
 typedef struct CollectedCommand
@@ -61,6 +62,7 @@ typedef struct CollectedCommand
         {
             Oid     objectId;
             Oid     classId;
+            bool    rewrite;
             List   *subcmds;
         } alterTable;
  

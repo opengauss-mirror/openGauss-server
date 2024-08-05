@@ -82,6 +82,8 @@ static void AreaDecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
 static void DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void AreaDecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 
+static void DecodeTruncate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
+
 static void DecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 
@@ -748,6 +750,10 @@ static void DecodeHeap3Op(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
         case XLOG_HEAP3_INVALID:
             break;
         case XLOG_HEAP3_REWRITE:
+            break;
+        case XLOG_HEAP3_TRUNCATE:
+            if (SnapBuildProcessChange(builder, xid, buf->origptr))
+                DecodeTruncate(ctx, buf);
             break;
         default:
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -1928,6 +1934,42 @@ static void AreaDecodeUDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     if (toastData != NULL) {
         pfree(toastData);
     }
+}
+
+
+/*
+ * Parse XLOG_HEAP_TRUNCATE from wal
+ */
+static void DecodeTruncate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
+{
+    XLogReaderState *r = buf->record;
+    xl_heap_truncate *xlrec;
+    ReorderBufferChange *change;
+    int rc = 0;
+    xlrec = (xl_heap_truncate *) XLogRecGetData(r);
+    /* only interested in our database */
+    if (xlrec->dbId != ctx->slot->data.database) {
+        return;
+    }
+
+    /* output plugin doesn't look for this origin, no need to queue */
+    if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
+        return;
+    }
+
+    change = ReorderBufferGetChange(ctx->reorder);
+    change->action = REORDER_BUFFER_CHANGE_TRUNCATE;
+    change->origin_id = XLogRecGetOrigin(r);
+    if (xlrec->flags & XLH_TRUNCATE_CASCADE)
+        change->data.truncate.cascade = true;
+    if (xlrec->flags & XLH_TRUNCATE_RESTART_SEQS)
+        change->data.truncate.restart_seqs = true;
+    change->data.truncate.nrelids = xlrec->nrelids;
+    change->data.truncate.relids = (Oid*)palloc(xlrec->nrelids * sizeof(Oid));
+    rc = memcpy_s(change->data.truncate.relids, xlrec->nrelids * sizeof(Oid), xlrec->relids,
+                  xlrec->nrelids * sizeof(Oid));
+    securec_check(rc, "", "");
+    ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change);
 }
 
 /*

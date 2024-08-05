@@ -159,6 +159,10 @@ extern void ExecuteTruncate(TruncateStmt* stmt, const char* sql_statement);
 extern void ExecuteTruncate(TruncateStmt* stmt);
 #endif
 
+extern void ExecuteTruncateGuts(
+    List *explicit_rels, List *relids, List *relids_logged, List *rels_in_redis,
+    DropBehavior behavior, bool restart_seqs, TruncateStmt* stmt);
+
 extern void SetRelationHasSubclass(Oid relationId, bool relhassubclass);
 
 extern ObjectAddress renameatt(RenameStmt* stmt);
@@ -169,6 +173,7 @@ extern ObjectAddress RenameRelation(RenameStmt* stmt);
 
 extern void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema = NULL);
 
+extern void ResetRelRewrite(Oid myrelid);
 extern void find_composite_type_dependencies(Oid typeOid, Relation origRelation, const char* origTypeName);
 
 extern void check_of_type(HeapTuple typetuple);

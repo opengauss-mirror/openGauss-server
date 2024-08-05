@@ -21,11 +21,14 @@
  */
 typedef enum DeparsedCommandType
 {
-    DCT_ObjectCreate,
-    DCT_ObjectDrop,
     DCT_SimpleCmd,
     DCT_TableDropEnd,
-    DCT_TableDropStart
+    DCT_TableDropStart,
+    DCT_TableAlter,
+    DCT_ObjectCreate,
+    DCT_ObjectDrop,
+    DCT_TypeDropStart,
+    DCT_TypeDropEnd
 } DeparsedCommandType;
 
 /*

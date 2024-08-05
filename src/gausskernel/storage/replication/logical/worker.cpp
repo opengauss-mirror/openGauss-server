@@ -943,7 +943,7 @@ static void apply_handle_update(StringInfo s)
         int remoteattnum = rel->attrmap[i];
         if (!att->attisdropped && remoteattnum >= 0) {
             Assert(remoteattnum < newtup.ncols);
-            if (newtup.colstatus[i] != LOGICALREP_COLUMN_UNCHANGED) {
+            if (newtup.colstatus[remoteattnum] != LOGICALREP_COLUMN_UNCHANGED) {
                 target_rte->updatedCols = bms_add_member(target_rte->updatedCols,
                                                      i + 1 - FirstLowInvalidHeapAttributeNumber);
             }
@@ -1166,6 +1166,66 @@ static void apply_handle_delete(StringInfo s)
     CleanupEstate(estate, &epqstate, rel);
 }
 
+
+/*
+ * Handle TRUNCATE message.
+ */
+static void apply_handle_truncate(StringInfo s)
+{
+    bool cascade = false;
+    bool restart_seqs = false;
+    List *remote_relids = NIL;
+    List *remote_rels = NIL;
+    List *rels = NIL;
+    List *relids = NIL;
+    List *relids_logged = NIL;
+    ListCell *lc;
+    LOCKMODE lockmode = AccessExclusiveLock;
+
+    ensure_transaction();
+
+    remote_relids = logicalrep_read_truncate(s, &cascade, &restart_seqs);
+
+    foreach(lc, remote_relids)
+    {
+        LogicalRepRelId relid = lfirst_oid(lc);
+        LogicalRepRelMapEntry *rel;
+
+        rel = logicalrep_rel_open(relid, lockmode);
+        if (!should_apply_changes_for_rel(rel)) {
+            /*
+             * The relation can't become interesting in the middle of the
+             * transaction so it's safe to unlock it.
+             */
+            logicalrep_rel_close(rel, lockmode);
+            continue;
+        }
+
+        ereport(LOG, (errmsg("apply [truncate] for %s", RelationGetRelationName(rel->localrel))));
+
+        remote_rels = lappend(remote_rels, rel);
+        rels = lappend(rels, rel->localrel);
+        relids = lappend_oid(relids, rel->localreloid);
+        if (RelationIsLogicallyLogged(rel->localrel))
+            relids_logged = lappend_oid(relids_logged, rel->localreloid);
+    }
+
+    /*
+     * Even if we used CASCADE on the upstream master we explicitly
+     * default to replaying changes without further cascading.
+     * This might be later changeable with a user specified option.
+     */
+    ExecuteTruncateGuts(rels, relids, relids_logged, NIL, DROP_RESTRICT, restart_seqs, NULL);
+
+    foreach(lc, remote_rels)
+    {
+        LogicalRepRelMapEntry *rel = (LogicalRepRelMapEntry*)lfirst(lc);
+
+        logicalrep_rel_close(rel, NoLock);
+    }
+
+    CommandCounterIncrement();
+}
 
 /*
  * Handle CREATE TABLE command
@@ -1429,6 +1489,9 @@ static void apply_dispatch(StringInfo s)
         /* DELETE */
         case 'D':
             apply_handle_delete(s);
+            break;
+        case 'T':
+            apply_handle_truncate(s);
             break;
         /* RELATION */
         case 'R':
@@ -1909,6 +1972,7 @@ void ApplyWorkerMain()
 {
     MemoryContext oldctx;
     char originname[NAMEDATALEN];
+    char dbname[NAMEDATALEN];
     XLogRecPtr origin_startpos;
     char *myslotname;
     int rc = 0;
@@ -2033,6 +2097,14 @@ void ApplyWorkerMain()
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(NULL, t_thrd.applyworker_cxt.curWorker->dbid, NULL,
         t_thrd.applyworker_cxt.curWorker->userid);
     t_thrd.proc_cxt.PostInit->InitApplyWorker();
+    /* has setDatabase and LockDatabase in InitApplyWorker */
+    t_thrd.proc_cxt.PostInit->GetDatabaseName(dbname);
+    oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    if (u_sess->proc_cxt.MyProcPort->database_name)
+        pfree_ext(u_sess->proc_cxt.MyProcPort->database_name);
+    u_sess->proc_cxt.MyProcPort->database_name = pstrdup(dbname);
+    (void)MemoryContextSwitchTo(oldctx);
+
     pgstat_report_appname("ApplyWorker");
     pgstat_report_activity(STATE_IDLE, NULL);
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))

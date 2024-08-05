@@ -1,0 +1,4 @@
+47c47
+<     g timestamp(0) with time zone GENERATED ALWAYS AS (((b)::double precision + 1::double precision)) STORED,
+---
+>     g timestamp(0) with time zone GENERATED ALWAYS AS (((b)::double precision + (1)::double precision)) STORED,

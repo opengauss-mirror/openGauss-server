@@ -30,6 +30,7 @@ typedef enum OutputPluginOutputType {
  */
 typedef struct OutputPluginOptions {
     OutputPluginOutputType output_type;
+    bool receive_rewrites;
 } OutputPluginOptions;
 
 /*
@@ -76,6 +77,15 @@ typedef void (*ParallelLogicalDecodeChangeCB)(
     struct ParallelLogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation, ParallelReorderBufferChange* change);
 
 /*
+ * Callback for every TRUNCATE in a successful transaction.
+ */
+typedef void (*LogicalDecodeTruncateCB) (struct LogicalDecodingContext *ctx,
+                                         ReorderBufferTXN *txn,
+                                         int nrelations,
+                                         Relation relations[],
+                                         ReorderBufferChange *change);
+
+/*
  * Called for every (explicit or implicit) COMMIT of a successful transaction.
  */
 typedef void (*LogicalDecodeCommitCB)(struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
@@ -107,6 +117,7 @@ typedef struct OutputPluginCallbacks {
     LogicalDecodeStartupCB startup_cb;
     LogicalDecodeBeginCB begin_cb;
     LogicalDecodeChangeCB change_cb;
+    LogicalDecodeTruncateCB truncate_cb;
     LogicalDecodeCommitCB commit_cb;
     LogicalDecodeAbortCB abort_cb;
     LogicalDecodePrepareCB prepare_cb;
@@ -119,6 +130,7 @@ typedef struct ParallelOutputPluginCallbacks {
     LogicalDecodeStartupCB startup_cb;
     LogicalDecodeBeginCB begin_cb;
     ParallelLogicalDecodeChangeCB change_cb;
+    LogicalDecodeTruncateCB truncate_cb;
     LogicalDecodeCommitCB commit_cb;
     LogicalDecodeShutdownCB shutdown_cb;
     LogicalDecodeFilterByOriginCB filter_by_origin_cb;

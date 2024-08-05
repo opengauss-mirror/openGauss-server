@@ -5889,6 +5889,9 @@ static ColumnDef* _readColumnDef()
     IF_EXIST(update_default) {
         READ_NODE_FIELD(update_default);
     }
+    IF_EXIST(initdefval) {
+        READ_STRING_FIELD(initdefval);
+    }
     READ_DONE();
 }
 

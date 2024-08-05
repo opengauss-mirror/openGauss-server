@@ -254,6 +254,7 @@ static relopt_int intRelOpts[] = {
      0,
      7},
     {{ "collate", "set relation default collation", RELOPT_KIND_HEAP }, 0, 0, 2000000000 },
+    {{ "relrewrite", "set relation relrewrite", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST }, 0, 0, 2000000000 },
     /* list terminator */
     {{NULL}}
 };
@@ -2048,7 +2049,8 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
             /* SPQ index B-Tree build: btree index build use spq */
         {"spq_build", RELOPT_TYPE_STRING, offsetof(StdRdOptions, spq_bt_build_offset)},
 #endif
-        { "deduplication", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, deduplication)}
+        { "deduplication", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, deduplication)},
+        { "relrewrite", RELOPT_TYPE_INT, offsetof(StdRdOptions, relrewrite)},
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2757,8 +2759,8 @@ void check_collate_in_options(List *user_options)
  */
 void ForbidOutUsersToSetInnerOptions(List *userOptions)
 {
-    static const char* innnerOpts[] = {
-        "internal_mask", "start_ctid_internal", "end_ctid_internal", "append_mode_internal", "wait_clean_gpi"};
+    static const char *innnerOpts[] = {"internal_mask",        "start_ctid_internal", "end_ctid_internal",
+                                       "append_mode_internal", "wait_clean_gpi",      "relrewrite"};
 
     if (userOptions != NULL) {
         int firstInvalidOpt = -1;

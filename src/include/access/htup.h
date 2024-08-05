@@ -751,6 +751,8 @@ inline HeapTuple heaptup_alloc(Size size)
 #define XLOG_HEAP3_NEW_CID 0x00
 #define XLOG_HEAP3_REWRITE 0x10
 #define XLOG_HEAP3_INVALID 0x20
+/* XLOG_HEAP_TRUNCATE with 0x30 in heap in PG14 */
+#define XLOG_HEAP3_TRUNCATE 0x30
 
 /* we used to put all xl_heap_* together, which made us run out of opcodes (quickly)
  * when trying to add a DELETE_IS_SUPER operation. Thus we split the codes carefully
@@ -805,6 +807,26 @@ typedef struct xl_heap_delete {
 
 #define SizeOfOldHeapDelete (offsetof(xl_heap_delete, flags) + sizeof(uint8))
 #define SizeOfHeapDelete (offsetof(xl_heap_delete, infobits_set) + sizeof(uint8))
+
+/*
+ * xl_heap_delete flag values, 8 bits are available.
+ */
+#define XLH_TRUNCATE_CASCADE                    (1<<0)
+#define XLH_TRUNCATE_RESTART_SEQS                (1<<1)
+
+/*
+ * For truncate we list all truncated relids in an array, followed by all
+ * sequence relids that need to be restarted, if any.
+ * All rels are always within the same database, so we just list dbid once.
+ */
+typedef struct xl_heap_truncate {
+    Oid            dbId;
+    uint32        nrelids;
+    uint8        flags;
+    Oid relids[FLEXIBLE_ARRAY_MEMBER];
+} xl_heap_truncate;
+
+#define SizeOfHeapTruncate    (offsetof(xl_heap_truncate, relids))
 
 /*
  * We don't store the whole fixed part (HeapTupleHeaderData) of an inserted

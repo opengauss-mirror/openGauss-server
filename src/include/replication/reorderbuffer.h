@@ -73,6 +73,7 @@ enum ReorderBufferChangeType {
     REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID,
     REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID,
     REORDER_BUFFER_CHANGE_DDL,
+    REORDER_BUFFER_CHANGE_TRUNCATE,
     REORDER_BUFFER_CHANGE_UINSERT,
     REORDER_BUFFER_CHANGE_UUPDATE,
     REORDER_BUFFER_CHANGE_UDELETE
@@ -115,6 +116,17 @@ typedef struct ReorderBufferChange {
             CommitSeqNo snapshotcsn;
         } tp;
 
+        /*
+         * Truncate data for REORDER_BUFFER_CHANGE_TRUNCATE representing
+         * one set of relations to be truncated.
+         */
+        struct {
+            Size        nrelids;
+            bool        cascade;
+            bool        restart_seqs;
+            Oid           *relids;
+        } truncate;
+    
         /* Old, new utuples when action == UHEAP_INSERT|UPDATE|DELETE */
         struct {
             /* relation that has been changed */
@@ -213,8 +225,8 @@ typedef struct ReorderBufferTXN {
     XLogRecPtr restart_decoding_lsn;
 
     /* origin of the change that caused this transaction */
-    RepOriginId origin_id;
-    XLogRecPtr	origin_lsn;
+    RepOriginId   origin_id;
+    XLogRecPtr    origin_lsn;
 
     /* The csn of the transaction */
     CommitSeqNo csn;
@@ -317,7 +329,9 @@ typedef struct ReorderBuffer ReorderBuffer;
 /* change callback signature */
 typedef void (*ReorderBufferApplyChangeCB)(
     ReorderBuffer* rb, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change);
-
+/* truncate callback signature */
+typedef void (*ReorderBufferApplyTruncateCB) (
+    ReorderBuffer *rb, ReorderBufferTXN *txn, int nrelations, Relation relations[], ReorderBufferChange *change);
 /* begin callback signature */
 typedef void (*ReorderBufferBeginCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
 
@@ -374,6 +388,7 @@ struct ReorderBuffer {
      */
     ReorderBufferBeginCB begin;
     ReorderBufferApplyChangeCB apply_change;
+    ReorderBufferApplyTruncateCB apply_truncate;
     ReorderBufferCommitCB commit;
     ReorderBufferAbortCB abort;
     ReorderBufferPrepareCB prepare;
@@ -383,6 +398,11 @@ struct ReorderBuffer {
      * Pointer that will be passed untouched to the callbacks.
      */
     void* private_data;
+
+    /*
+     * Saved output plugin option
+     */
+    bool output_rewrites;
 
     /*
      * Private memory context.

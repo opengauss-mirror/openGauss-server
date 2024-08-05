@@ -767,6 +767,15 @@ INSERT INTO func_index_heap VALUES('ABCD', 'EF');
 -- but this shouldn't:
 INSERT INTO func_index_heap VALUES('QWERTY');
 
+DROP TABLE if exists tb_truncate;
+CREATE TABLE tb_truncate (f1 text primary key, f2 text);
+INSERT INTO tb_truncate VALUES('ABC','DEF');
+INSERT INTO tb_truncate VALUES('AB','CDEFG');
+INSERT INTO tb_truncate VALUES('QWE','RTY');
+INSERT INTO tb_truncate VALUES('ABCD', 'EF');
+INSERT INTO tb_truncate VALUES('QWERTY','IJBN');
+truncate TABLE tb_truncate;
+
 --
 -- Also try building functional, expressional, and partial indexes on
 -- tables that already contain data.
@@ -820,3 +829,15 @@ DROP INDEX CONCURRENTLY "concur_index4";
 DROP INDEX CONCURRENTLY "concur_index5";
 DROP INDEX CONCURRENTLY "concur_index1";
 DROP INDEX CONCURRENTLY "concur_heap_expr_idx";
+
+
+CREATE TABLE Ctlt1 (a text CHECK (length(a) > 2) PRIMARY KEY, b text);
+CREATE INDEX ctlt1_b_key ON Ctlt1 (b);
+CREATE INDEX ctlt1_fnidx ON Ctlt1 ((a || b));
+COMMENT ON COLUMN Ctlt1.a IS 'A';
+COMMENT ON COLUMN Ctlt1.b IS 'B';
+COMMENT ON CONSTRAINT ctlt1_a_check ON Ctlt1 IS 't1_a_check';
+COMMENT ON INDEX ctlt1_pkey IS 'index pkey';
+COMMENT ON INDEX ctlt1_b_key IS 'index b_key';
+ALTER TABLE Ctlt1 ALTER COLUMN a SET STORAGE MAIN;
+
