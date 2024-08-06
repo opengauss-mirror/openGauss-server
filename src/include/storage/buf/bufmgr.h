@@ -410,6 +410,7 @@ extern void RangeForgetBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber 
 
 extern void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum);
 extern int GetThreadBufferLeakNum(void);
+extern bool CheckForBufferPin(void);
 extern void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl = NULL);
 /* in localbuf.c */
 extern void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum);
