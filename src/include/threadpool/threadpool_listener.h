@@ -78,6 +78,7 @@ private:
     Dlelem *GetSessFromReadySessionList(ThreadPoolWorker *worker);
     void AddIdleSessionToTail(knl_session_context* session);
     void AddIdleSessionToHead(knl_session_context* session);
+    Dlelem *TryRemoveReadySessListHead();
 
 private:
     ThreadId m_tid;
