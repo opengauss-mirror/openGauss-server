@@ -701,6 +701,8 @@ int main(int argc, char* argv[])
 
     SyncVariables();
 
+    pset.dbType = GetDatabaseType();
+
     if (options.action == ACT_LIST_DB && !isparseonly) {
         int success;
 

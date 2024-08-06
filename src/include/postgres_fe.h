@@ -56,6 +56,15 @@ typedef enum {
     TD_FORMAT,
     M_FORMAT
 } DatabaseType;
+
+typedef enum {
+    A_FORMAT = 0x0001,
+    B_FORMAT = 0x0002,
+    C_FORMAT = 0x0004,
+    PG_FORMAT = 0x0008
+} DBFormatType;
+#define IS_CMPT(cmpt, flag) (((uint32)(cmpt) & (uint32)(flag)) != 0)
+
 #endif // HAVE_DATABASE_TYPE
 
 #endif /* POSTGRES_FE_H */

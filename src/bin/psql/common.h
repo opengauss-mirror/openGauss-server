@@ -99,6 +99,7 @@ extern void ResetQueryRetryController();
 extern bool QueryRetryController(const char* query);
 extern bool SendQuery(const char* query, bool is_print = true, bool print_error = true);
 extern bool MakeCopyWorker(const char* query, int nclients);
+extern DBFormatType GetDatabaseType();
 
 extern bool is_superuser(void);
 extern bool standard_strings(void);
