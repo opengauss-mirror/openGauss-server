@@ -488,3 +488,6 @@ test: gin_select
 
 # test for binary_double suffix and Constant values
 test: test_binary_suffix
+
+# test for rotate and unrotate function
+test: gb_ora_rotate_unrotate
