@@ -8779,6 +8779,11 @@ static char* get_variable(
     schemaname = NULL; /* default assumptions */
     refname = rte->eref->aliasname;
 
+    if (NULL != rte->relname && u_sess->hook_cxt.forTsdbHook) {
+        rte->relname = get_rel_name(rte->relid);
+        rte->eref->aliasname = rte->relname;
+    }
+
     /* Exceptions occur only if the RTE is alias-less */
     if (rte->alias == NULL) {
         if (rte->rtekind == RTE_RELATION || no_alias) {
