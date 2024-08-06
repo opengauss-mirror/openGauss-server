@@ -3469,6 +3469,14 @@ static RangeTblEntry* _readRangeTblEntry(void)
         local_node->subpartitionOidList = lappend_oid(local_node->subpartitionOidList, local_node->subpartitionOid);
     }
 
+    IF_EXIST(partitionNameList) {
+        READ_NODE_FIELD(partitionNameList);
+    }
+
+    IF_EXIST(subpartitionNameList) {
+        READ_NODE_FIELD(subpartitionNameList);
+    }
+
     READ_DONE();
 }
 

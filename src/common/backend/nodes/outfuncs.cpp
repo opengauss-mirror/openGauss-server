@@ -5236,6 +5236,23 @@ static void _outIndexHintDefinition(StringInfo str, IndexHintDefinition* node)
     WRITE_ENUM_FIELD(index_type, IndexHintType);
 }
 
+static void _outPartitionNameList(StringInfo str, List *list, const char *key)
+{
+    ListCell *lc = NULL;
+    List *names = NIL;
+    foreach(lc, list) {
+        Oid id = lfirst_oid(lc);
+        char *name = "";
+        if (OidIsValid(id)) {
+            name = getPartitionName(id, false);
+        }
+        Value *val = makeString(name);
+        names = lappend(names, val);
+    }
+    appendStringInfo(str, key);
+    _outList(str, names);
+}
+
 static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 {
     WRITE_NODE_TYPE("RTE");
@@ -5354,6 +5371,15 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_PARTITIONS_VERSION_NUM) {
         WRITE_NODE_FIELD(partitionOidList);
         WRITE_NODE_FIELD(subpartitionOidList);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= PARTITION_NAME_VERSION_NUM) {
+        if (node->partitionOidList != NIL) {
+            _outPartitionNameList(str, node->partitionOidList, " :partitionNameList ");
+        }
+        if (node->subpartitionOidList != NIL) {
+            _outPartitionNameList(str, node->subpartitionOidList, " :subpartitionNameList ");
+        }
     }
 }
 
