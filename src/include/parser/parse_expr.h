@@ -39,6 +39,6 @@ extern bool IsQuerySWCBRewrite(Query *query);
 extern bool IsSWCBRewriteRTE(RangeTblEntry *rte);
 extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
 typedef Datum (*getTypeZeroValueFunc)(Form_pg_attribute att_tup);
-extern PlannedStmt* getCursorStreamFromFuncArg(FuncExpr* funcexpr);
+extern PlannedStmt* getCursorStreamFromFuncArg(FuncExpr* funcexpr, CursorExpression** ce = NULL);
 
 #endif /* PARSE_EXPR_H */

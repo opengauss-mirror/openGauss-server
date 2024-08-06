@@ -767,12 +767,6 @@ THR_LOCAL bool skip_read_extern_fields = false;
         READ_INT_FIELD(stream_level);                       \
         READ_NODE_FIELD(origin_consumer_nodes);             \
         READ_BOOL_FIELD(is_recursive_local);                \
-        IF_EXIST(cursor_expr_level) {                       \
-            READ_INT_FIELD(cursor_expr_level);              \
-        }                                                   \
-        IF_EXIST(cursor_owner_node_id) {                    \
-            READ_INT_FIELD(cursor_owner_node_id);           \
-        }                                                   \
         READ_STREAM_ID();                                   \
                                                             \
         READ_DONE();                                        \
@@ -3538,6 +3532,12 @@ static Plan* _readPlan(Plan* local_node)
         READ_BOOL_FIELD(spq_scan_partial);
     }
 #endif
+    IF_EXIST(cursor_expr_level) {
+        READ_INT_FIELD(cursor_expr_level);
+    }
+    IF_EXIST(cursor_owner_node_id) {
+        READ_INT_FIELD(cursor_owner_node_id);
+    }
     READ_DONE();
 }
 

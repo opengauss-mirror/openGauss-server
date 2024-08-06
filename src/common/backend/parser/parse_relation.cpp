@@ -1794,7 +1794,7 @@ RangeTblEntry* addRangeTableEntryForFunction(
      */
     if (IsA(funcexpr, FuncExpr)) {
         PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr);
-        if (cursorPstmt != NULL) {
+        if (cursorPstmt != NULL && IsA(cursorPstmt->planTree, Stream)) {
             rte->cursorDop = cursorPstmt->planTree->lefttree->dop;
         }
     }

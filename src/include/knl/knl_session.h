@@ -360,6 +360,7 @@ typedef struct knl_u_optimizer_context {
 
     /* Mark smp is enabled in procedure. */
     bool smp_enabled;
+    bool is_under_cursor;
 
     double smp_thread_cost;
 

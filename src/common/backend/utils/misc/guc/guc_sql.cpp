@@ -3354,7 +3354,8 @@ static void AssignQueryDop(int newval, void* extra)
 #ifndef ENABLE_MULTIPLE_NODES
     /* do not reset backend threads tag */
     if (u_sess->opt_cxt.query_dop > 1 &&
-        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER) &&
+        !u_sess->opt_cxt.is_under_cursor) {
         u_sess->opt_cxt.smp_enabled = true;
     }
 #endif

@@ -6193,6 +6193,40 @@ static PartIterator* create_partIterator_plan(
     return partItr;
 }
 
+PlannedStmt* ReBuildNonSmpPlanForCursorExpr(const char* queryString)
+{
+    List* raw_parsetree_list = NIL;
+    List* plantree_list = NIL;
+    List* stmt_list = NIL;
+    AutoDopControl dopControl;
+    ListCell* raw_parsetree_cell = NULL;
+
+    dopControl.CloseSmp();
+    dopControl.UnderCursor();
+
+    PG_TRY();
+    {
+        raw_parsetree_list = pg_parse_query(queryString);
+        foreach (raw_parsetree_cell, raw_parsetree_list) {
+            Node* parsetree = (Node*)lfirst(raw_parsetree_cell);
+            List* querytree_list = pg_analyze_and_rewrite(parsetree, queryString, NULL, 0);
+            stmt_list = list_concat(stmt_list, querytree_list);
+        }
+
+        plantree_list = pg_plan_queries(stmt_list, 0, NULL);
+    }
+    PG_CATCH();
+    {
+        dopControl.ResetSmp();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    /* restore smp */
+    dopControl.ResetSmp();
+
+    return castNode(PlannedStmt, linitial(plantree_list));
+}
+
 static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanrelid, Node* funcexpr, List* funccolnames,
     List* funccoltypes, List* funccoltypmods, List* funccolcollations)
 {
@@ -6211,38 +6245,53 @@ static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanre
     node->funccoltypmods = funccoltypmods;
     node->funccolcollations = funccolcollations;
 
+    CursorExpression* ce = NULL;
+    PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr, &ce);
+    if (cursorPstmt == NULL) {
+        return node;
+    }
+
     if (IS_STREAM_PLAN && u_sess->opt_cxt.query_dop > 1) {
         FunctionPartitionStrategy strategy;
         List* partkey = NIL;
         strategy = GetParallelStrategyAndKey(((FuncExpr*)funcexpr)->funcid, &partkey);
 
-        PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr);
-        if (cursorPstmt != NULL) {
-            Plan* cursorPlan = cursorPstmt->planTree;
-            Stream* stream = (Stream*)cursorPlan;
+        Plan* cursorPlan = cursorPstmt->planTree;
 
-            /* set plan->dop according to cursorplan */
-            inherit_plan_locator_info(plan, cursorPlan->lefttree);
-            stream->smpDesc.consumerDop = plan->dop;
+        /* If top-plan is not stream, functionscan can not be parallel executed */
+        if (!IsA(cursorPlan, Stream)) {
+            return node;
+        }
 
-            /* if FUNC_PARTITION_HASH is specified, set distributed_keys and distriType */
-            if (strategy == FUNC_PARTITION_HASH && partkey != NIL) {
-                ListCell* lc1 = NULL;
-                foreach (lc1, cursorPlan->targetlist) {
-                    TargetEntry* entry = (TargetEntry*)lfirst(lc1);
-                    ListCell* lc2 = NULL;
-                    foreach (lc2, partkey) {
-                        if (strcmp(entry->resname, (char*)lfirst(lc2)) == 0) {
-                            stream->distribute_keys = lappend(stream->distribute_keys, entry->expr);
-                            break;
-                        }
+        Stream* stream = (Stream*)cursorPlan;
+
+        /* set plan->dop according to cursorplan */
+        inherit_plan_locator_info(plan, cursorPlan->lefttree);
+        stream->smpDesc.consumerDop = plan->dop;
+
+        /* if FUNC_PARTITION_HASH is specified, set distributed_keys and distriType */
+        if (strategy == FUNC_PARTITION_HASH && partkey != NIL) {
+            ListCell* lc1 = NULL;
+            foreach (lc1, cursorPlan->targetlist) {
+                TargetEntry* entry = (TargetEntry*)lfirst(lc1);
+                ListCell* lc2 = NULL;
+                foreach (lc2, partkey) {
+                    if (strcmp(entry->resname, (char*)lfirst(lc2)) == 0) {
+                        stream->distribute_keys = lappend(stream->distribute_keys, entry->expr);
+                        break;
                     }
                 }
-                plan->distributed_keys = stream->distribute_keys;
-                stream->smpDesc.distriType = list_length(plan->distributed_keys) > 0 ?
-                                                LOCAL_DISTRIBUTE : stream->smpDesc.distriType;
             }
+            plan->distributed_keys = stream->distribute_keys;
+            stream->smpDesc.distriType = list_length(plan->distributed_keys) > 0 ?
+                                            LOCAL_DISTRIBUTE : stream->smpDesc.distriType;
         }
+    } else {
+        /* 
+         * if functionscan is disallowed to smp, and cursorPlan has stream node,
+         * rebuild non-smp plan. For example, subplan is not support smp.
+         */
+        ce->plan = (Node*)ReBuildNonSmpPlanForCursorExpr(pstrdup(ce->raw_query_str));
     }
 
     return node;
