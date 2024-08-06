@@ -4156,8 +4156,13 @@ static Node *transformStartWithWhereClauseColumnRef(ParseState *pstate, ColumnRe
     return NULL;
 }
 
-PlannedStmt* getCursorStreamFromFuncArg(FuncExpr* funcexpr, CursorExpression** ce)
+PlannedStmt* getCursorStreamFromFuncArg(Node* node, CursorExpression** ce)
 {
+    if (!IsA(node, FuncExpr)) {
+        return NULL;
+    }
+
+    FuncExpr* funcexpr = (FuncExpr*)node;
     ListCell* lc = NULL;
     foreach (lc, funcexpr->args) {
         Node* arg = (Node*)lfirst(lc);

@@ -1898,7 +1898,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                 }
             } break;
             case T_FunctionScan: {
-                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)result_plan)->funcexpr);
+                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg(((FunctionScan*)result_plan)->funcexpr);
                 if (cursorPstmt != NULL) {
                     cursorPstmt->planTree->cursor_owner_node_id = result_plan->plan_node_id;
                     set_stream_plan_cursor_walker(cursorPstmt->planTree);

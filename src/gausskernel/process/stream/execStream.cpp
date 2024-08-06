@@ -971,7 +971,7 @@ static void InitStreamFlow(StreamFlowCtl* ctl)
                 InitStreamFlow(ctl);
             } break;
             case T_FunctionScan: {
-                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)oldPlan)->funcexpr);
+                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg(((FunctionScan*)oldPlan)->funcexpr);
                 if (cursorPstmt != NULL) {
                     ctl->plan = cursorPstmt->planTree;
 

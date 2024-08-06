@@ -6246,7 +6246,7 @@ static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanre
     node->funccolcollations = funccolcollations;
 
     CursorExpression* ce = NULL;
-    PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)funcexpr, &ce);
+    PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg(funcexpr, &ce);
     if (cursorPstmt == NULL) {
         return node;
     }
