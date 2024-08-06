@@ -3007,12 +3007,12 @@ static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
                 }
                 values[i++] = BoolGetDatum(verifyResult); /* verify_result */
             } else {
-                values[i++] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result*/
-                nulls[i] = true;
+                values[i] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result */
+                nulls[i++] = true;
             }
         } else {
-            values[i++] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result*/
-            nulls[i] = true;
+            values[i] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result */
+            nulls[i++] = true;
         }
     }
     if (newVersion) {
