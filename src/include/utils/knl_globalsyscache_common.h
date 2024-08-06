@@ -76,18 +76,7 @@ struct GlobalBaseEntry {
     volatile uint64 refcount;
     Dlelem cache_elem;
     void Release();
-    template <bool is_relation>
     static void Free(GlobalBaseEntry *entry);
-
-    void FreeError()
-    {
-        if (type == GLOBAL_RELATION_ENTRY) {
-            Free<true>(this);
-        } else {
-            Assert(type == GLOBAL_PARTITION_ENTRY);
-            Free<false>(this);
-        }
-    }
 };
 struct GlobalRelationEntry : public GlobalBaseEntry {
     Relation rel;
