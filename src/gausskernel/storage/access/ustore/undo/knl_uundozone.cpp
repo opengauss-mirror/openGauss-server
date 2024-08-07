@@ -885,6 +885,7 @@ UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
     int retZid = -1;
     uzone->PrepareSwitch();
     LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+    uzone->ReleaseSlotBuffer();
     UndoZone *newUzone = getUnusedZone(upersistence, &retZid, zid);
     WHITEBOX_TEST_STUB(UNDO_SWITCH_ZONE_FAILED, WhiteboxDefaultErrorEmit);
     newUzone->Attach();
