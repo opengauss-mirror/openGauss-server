@@ -3231,7 +3231,6 @@ static void SetUstoreDefaultFillfactor(void *rdopts, relopt_value *options,
     for (int i = 0; i < numoptions; i++) {
         if (ff_options_idx == -1 && pg_strcasecmp("fillfactor", options[i].gen->name) == 0) {
             ff_options_idx = i;
-            break;
         }
     }
 
@@ -3242,6 +3241,7 @@ static void SetUstoreDefaultFillfactor(void *rdopts, relopt_value *options,
         }
         if (storage_type_idx == -1 && pg_strcasecmp("storage_type", elems[i].optname) == 0) {
             storage_type_idx = i;
+            continue;
         }
     }
 

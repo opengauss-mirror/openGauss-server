@@ -3897,7 +3897,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
      * Try to extend the ITL array now.
      */
     if (urecPtr != NULL) {
-        urecPtr = INVALID_UNDO_REC_PTR;
+        *urecPtr = INVALID_UNDO_REC_PTR;
     }
 
     nExtended = UPageExtendTDSlots(relation, buf);

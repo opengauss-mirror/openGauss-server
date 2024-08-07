@@ -76,7 +76,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         /* already processed. */
         if (rc != UNDO_TRAVERSAL_COMPLETE) {
             ereport(ERROR, (errmodule(MOD_USTORE),
-                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu), rc(%d)",
+                errmsg("[Rollback Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu), rc(%d)",
                     fullXid, toUrecptr, fromUrecptr, rc)));
             return false;
         }
@@ -105,7 +105,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
          * for this transaction, otherwise we need to fetch the next batch of
          * the undo records.
          */
-        if (!IS_VALID_UNDO_REC_PTR(urecPtr)){
+        if (!IS_VALID_UNDO_REC_PTR(urecPtr)) {
             break;
         }
             
@@ -117,7 +117,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         URecVector *urecvec = FetchUndoRecordRange(&urecPtr, toUrecptr, undoApplySize, false);
         if (urecvec->Size() == 0){
             ereport(ERROR, (errmodule(MOD_USTORE),
-                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu)",
+                errmsg("[Rollback Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu)",
                     fullXid, toUrecptr, fromUrecptr)));
             break;
         }
