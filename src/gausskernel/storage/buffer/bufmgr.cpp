@@ -4764,6 +4764,29 @@ int GetThreadBufferLeakNum(void)
     return refCountErrors;
 }
 
+bool CheckForBufferPin(void)
+{
+    PrivateRefCountEntry *res = NULL;
+
+    for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
+        res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
+
+        if (res->buffer != InvalidBuffer) {
+            return true;
+        }
+    }
+
+    if (t_thrd.storage_cxt.PrivateRefCountOverflowed) {
+        HASH_SEQ_STATUS hstat;
+        hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
+        while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            hash_seq_term(&hstat);
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  *		CheckForBufferLeaks - ensure this backend holds no buffer pins
  *

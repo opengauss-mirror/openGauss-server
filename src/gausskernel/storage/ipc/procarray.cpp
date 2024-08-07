@@ -2120,6 +2120,8 @@ RETRY:
     bool retry_get = false;
     uint64 retry_count = 0;
     const static uint64 WAIT_COUNT = 0x7FFFF;
+    bool get_snapshot_by_self = CheckForBufferPin() || forHSFeedBack;
+
     /* reset xmin before acquiring lwlock, in case blocking redo */
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
@@ -2184,7 +2186,7 @@ RETRY_GET:
                 goto RETRY_GET;
             }
 #ifndef ENABLE_MULTIPLE_NODES
-        } else if (forHSFeedBack) {
+        } else if (get_snapshot_by_self) {
             LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
             if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin
                 <= t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin)
