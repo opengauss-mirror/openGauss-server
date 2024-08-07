@@ -102,8 +102,9 @@ SELECT TO_BINARY_FLOAT(2.22507485850720E-100);
 (1 row)
 
 SELECT TO_BINARY_FLOAT(1.79769313486231E+310); -- error: overflow
-ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79769313486231E+310);
+                               ^
 SELECT TO_BINARY_FLOAT('1.79769313486231E+100'); 
  to_binary_float 
 -----------------
@@ -459,10 +460,9 @@ SELECT TO_BINARY_FLOAT('test' DEFAULT 3.04E+100 ON CONVERSION ERROR);
 
 -- test default column
 SELECT TO_BINARY_FLOAT(1.79E+309 DEFAULT y ON CONVERSION ERROR);
-ERROR:  column "y" does not exist
+ERROR:  number overflow at or near "1.79E+309"
 LINE 1: SELECT TO_BINARY_FLOAT(1.79E+309 DEFAULT y ON CONVERSION ERR...
-                                                 ^
-CONTEXT:  referenced column: to_binary_float
+                               ^
 SELECT TO_BINARY_FLOAT(c3 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1;
  to_binary_float 
 -----------------
@@ -532,11 +532,13 @@ SELECT TO_BINARY_FLOAT(3.14E+100 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER 
 (8 rows)
 
 SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- overflow
-ERROR:  "31400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "3.14E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c3 ON CONVERSION ER...
+                               ^
 SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- overflow
-ERROR:  "31400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "3.14E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT c4 ON CONVERSION ER...
+                               ^
 SELECT TO_BINARY_FLOAT('3.14' DEFAULT c3 ON CONVERSION ERROR) FROM tbf ORDER By c1; -- error
 ERROR:  default argument must be a literal or bind
 CONTEXT:  referenced column: to_binary_float
@@ -561,6 +563,14 @@ CONTEXT:  referenced column: to_binary_float
 SELECT TO_BINARY_FLOAT(NULL DEFAULT c4 ON CONVERSION ERROR) FROM tbf ORDER BY c1; -- error
 ERROR:  default argument must be a literal or bind
 CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT ab ON CONVERSION ERROR) FROM tbf ORDER BY c1; -- overflow
+ERROR:  number overflow at or near "3.14E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14E+400 DEFAULT ab ON CONVERSION ER...
+                               ^
+SELECT TO_BINARY_FLOAT('3.14E+400 DEFAULT' ab ON CONVERSION ERROR) FROM tbf ORDER BY c1; -- error
+ERROR:  syntax error at or near "ab"
+LINE 1: SELECT TO_BINARY_FLOAT('3.14E+400 DEFAULT' ab ON CONVERSION ...
+                                                   ^
 -- test overflow and null
 SELECT TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 3.14 ON CONVERSION ERROR);
  to_binary_float 
@@ -587,8 +597,9 @@ SELECT TO_BINARY_FLOAT('2.22507485850720E-100' DEFAULT 3.14 ON CONVERSION ERROR)
 (1 row)
 
 SELECT TO_BINARY_FLOAT(1.79769313486231E+310 DEFAULT 3.14 ON CONVERSION ERROR);	-- error: overflow
-ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79769313486231E+310 DEFAULT 3.14 ON...
+                               ^
 SELECT TO_BINARY_FLOAT('1.79769313486231E+310' DEFAULT 3.14 ON CONVERSION ERROR); -- inf
  to_binary_float 
 -----------------
@@ -608,8 +619,9 @@ SELECT TO_BINARY_FLOAT(3.14 DEFAULT '1.79769313486231E+100' ON CONVERSION ERROR)
 (1 row)
 
 SELECT TO_BINARY_FLOAT(3.14 DEFAULT 1.79769313486231E+310 ON CONVERSION ERROR); -- error: overflow
-ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14 DEFAULT 1.79769313486231E+310 ON...
+                                            ^
 SELECT TO_BINARY_FLOAT(3.14 DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
  to_binary_float 
 -----------------
@@ -629,8 +641,9 @@ SELECT TO_BINARY_FLOAT('1.79769313486231E+100' DEFAULT NULL ON CONVERSION ERROR)
 (1 row)
 
 SELECT TO_BINARY_FLOAT(1.79769313486231E+310 DEFAULT NULL ON CONVERSION ERROR); -- error: overflow
-ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79769313486231E+310 DEFAULT NULL ON...
+                               ^
 SELECT TO_BINARY_FLOAT('1.79769313486231E+310' DEFAULT NULL ON CONVERSION ERROR); -- inf
  to_binary_float 
 -----------------
@@ -650,8 +663,9 @@ SELECT TO_BINARY_FLOAT(NULL DEFAULT '1.79769313486231E+100' ON CONVERSION ERROR)
 (1 row)
 
 SELECT TO_BINARY_FLOAT(NULL DEFAULT 1.79769313486231E+310 ON CONVERSION ERROR); -- error: overflow
-ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  referenced column: to_binary_float
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_BINARY_FLOAT(NULL DEFAULT 1.79769313486231E+310 ON...
+                                            ^
 SELECT TO_BINARY_FLOAT(NULL DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR); -- NULL
  to_binary_float 
 -----------------
@@ -746,9 +760,21 @@ EXECUTE default_param_text2(13, NULL, 3.14);
 EXECUTE default_param_text2(14, 1.79769313486231E+100, 3.14);
 EXECUTE default_param_text2(15, 3.14, 1.79769313486231E+100);
 EXECUTE default_param_text2(16, 1.79769313486231E+400, 3.14);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(16, 1.79769313486231E+400, 3.14)...
+                                        ^
 EXECUTE default_param_text2(17, 3.14, 1.79769313486231E+400);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(17, 3.14, 1.79769313486231E+400)...
+                                              ^
 EXECUTE default_param_text2(18, 1.79769313486231E+400, NULL);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(18, 1.79769313486231E+400, NULL)...
+                                        ^
 EXECUTE default_param_text2(19, NULL, 1.79769313486231E+400);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(19, NULL, 1.79769313486231E+400)...
+                                              ^
 PREPARE default_param_text_num(int, text, float8) AS INSERT INTO t2 VALUES ($1, CONCAT('TO_BINARY_FLOAT(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_BINARY_FLOAT($2 DEFAULT $3 ON CONVERSION ERROR));
 ERROR:  relation "t2" does not exist on datanode1
 LINE 1: ..._param_text_num(int, text, float8) AS INSERT INTO t2 VALUES ...
@@ -759,43 +785,43 @@ EXECUTE default_param_text2(22, '1.79769313486231E+100', 6.666666);
 EXECUTE default_param_text2(23, '6.666666', 1.79769313486231E+100);
 EXECUTE default_param_text2(24, '1.79769313486231E+400', 6.666666);
 EXECUTE default_param_text2(25, '6.666666', 1.79769313486231E+400);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(25, '6.666666', 1.79769313486231...
+                                                    ^
 PREPARE default_param_num_text(int, float8, text) AS INSERT INTO tbf2 VALUES ($1, CONCAT('TO_BINARY_FLOAT(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_BINARY_FLOAT($2 DEFAULT $3 ON CONVERSION ERROR));
 EXECUTE default_param_text2(26, 1.79769313486231E+100, '6.666666');
 EXECUTE default_param_text2(27, 6.666666, '1.79769313486231E+100');
 EXECUTE default_param_text2(28, 1.79769313486231E+400, '6.666666');
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(28, 1.79769313486231E+400, '6.66...
+                                        ^
 EXECUTE default_param_text2(29, 6.666666, '1.79769313486231E+400');
 SELECT * FROM tbf2 ORDER BY c1;
- c1 |                                                                                                                                                                                                                                func_info                                                                                                                                                                                                                                |   res    
-----+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------
-  1 | TO_BINARY_FLOAT(3.14 DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                  |     3.14
-  2 | TO_BINARY_FLOAT(3.14# DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                 |     6.66
-  4 | TO_BINARY_FLOAT(  -3.14   DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                             |    -3.14
-  5 | TO_BINARY_FLOAT( DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                      |         
-  6 | TO_BINARY_FLOAT(6.66 DEFAULT  ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                      |     6.66
-  7 | TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT  ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                     | Infinity
-  8 | TO_BINARY_FLOAT( DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                     |         
-  9 | TO_BINARY_FLOAT(1.79769313486231E+400 DEFAULT  ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                     | Infinity
- 10 | TO_BINARY_FLOAT( DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                     |         
- 11 | TO_BINARY_FLOAT(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                              |     3.14
- 12 | TO_BINARY_FLOAT(3.14 DEFAULT  ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                      |     3.14
- 13 | TO_BINARY_FLOAT( DEFAULT 3.14 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                                      |         
- 14 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 3.14 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                 | Infinity
- 15 | TO_BINARY_FLOAT(3.14 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                 |     3.14
- 16 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 3.14 ON CONVERSION ERROR)     | Infinity
- 17 | TO_BINARY_FLOAT(3.14 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR)     |     3.14
- 18 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT  ON CONVERSION ERROR)         | Infinity
- 19 | TO_BINARY_FLOAT( DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR)         |         
- 20 | TO_BINARY_FLOAT(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                              |     3.14
- 21 | TO_BINARY_FLOAT(  +3.14  DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                                          |     3.14
- 22 | TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                             | Infinity
- 23 | TO_BINARY_FLOAT(6.666666 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                             |  6.66667
- 24 | TO_BINARY_FLOAT(1.79769313486231E+400 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                             | Infinity
- 25 | TO_BINARY_FLOAT(6.666666 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR) |  6.66667
- 26 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                             | Infinity
- 27 | TO_BINARY_FLOAT(6.666666 DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                             |  6.66667
- 28 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 6.666666 ON CONVERSION ERROR) | Infinity
- 29 | TO_BINARY_FLOAT(6.666666 DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                                                                                                                                                                                                                                                                                                                                             |  6.66667
-(28 rows)
+ c1 |                                                                          func_info                                                                          |   res    
+----+-------------------------------------------------------------------------------------------------------------------------------------------------------------+----------
+  1 | TO_BINARY_FLOAT(3.14 DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                      |     3.14
+  2 | TO_BINARY_FLOAT(3.14# DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                     |     6.66
+  4 | TO_BINARY_FLOAT(  -3.14   DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                 |    -3.14
+  5 | TO_BINARY_FLOAT( DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                          |         
+  6 | TO_BINARY_FLOAT(6.66 DEFAULT  ON CONVERSION ERROR)                                                                                                          |     6.66
+  7 | TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT  ON CONVERSION ERROR)                                                                                         | Infinity
+  8 | TO_BINARY_FLOAT( DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                                         |         
+  9 | TO_BINARY_FLOAT(1.79769313486231E+400 DEFAULT  ON CONVERSION ERROR)                                                                                         | Infinity
+ 10 | TO_BINARY_FLOAT( DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                                         |         
+ 11 | TO_BINARY_FLOAT(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                  |     3.14
+ 12 | TO_BINARY_FLOAT(3.14 DEFAULT  ON CONVERSION ERROR)                                                                                                          |     3.14
+ 13 | TO_BINARY_FLOAT( DEFAULT 3.14 ON CONVERSION ERROR)                                                                                                          |         
+ 14 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 3.14 ON CONVERSION ERROR)     | Infinity
+ 15 | TO_BINARY_FLOAT(3.14 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR)     |     3.14
+ 20 | TO_BINARY_FLOAT(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                                  |     3.14
+ 21 | TO_BINARY_FLOAT(  +3.14  DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                              |     3.14
+ 22 | TO_BINARY_FLOAT(1.79769313486231E+100 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                 | Infinity
+ 23 | TO_BINARY_FLOAT(6.666666 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR) |  6.66667
+ 24 | TO_BINARY_FLOAT(1.79769313486231E+400 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                 | Infinity
+ 26 | TO_BINARY_FLOAT(17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 DEFAULT 6.666666 ON CONVERSION ERROR) | Infinity
+ 27 | TO_BINARY_FLOAT(6.666666 DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                                 |  6.66667
+ 29 | TO_BINARY_FLOAT(6.666666 DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                                 |  6.66667
+(22 rows)
 
 DROP TABLE tbf;
 DROP TABLE tbf2;
