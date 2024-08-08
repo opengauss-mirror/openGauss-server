@@ -54,6 +54,8 @@ static List* ExpandSingleTable(ParseState* pstate, RangeTblEntry* rte, int locat
 static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist);
 static int FigureColnameInternal(Node* node, char** name);
 
+extern void checkArrayTypeInsert(ParseState* pstate, Expr* expr);
+
 /*
  * @Description: return the last filed's name and ignore * or subscrpts
  * @in field: list of field to search
@@ -442,6 +444,10 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
     /* Now we can use exprType() safely. */
     type_id = exprType((Node*)expr);
     type_mod = exprTypmod((Node*)expr);
+
+    if (IsA(expr, Param) || (IsA(expr, ArrayRef) && ((ArrayRef*)expr)->refexpr != NULL)) {
+        checkArrayTypeInsert(pstate, expr);
+    }
 
     ELOG_FIELD_NAME_START(colname);
 
