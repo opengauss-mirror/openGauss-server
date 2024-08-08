@@ -65,7 +65,8 @@ void ReleaseSlotBuffer();
 void InitUndoCountThreshold();
 void RebuildUndoZoneBitmap();
 UndoRecPtr GetPrevUrp(UndoRecPtr currUrp);
-void initUndoZoneLock();
+void InitUndoZoneLock();
+void ResetUndoZoneLock();
 } // namespace undo
 
 extern void GetUndoFileDirectory(char *path, int len, UndoPersistence upersistence);

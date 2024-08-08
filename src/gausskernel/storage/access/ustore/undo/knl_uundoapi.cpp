@@ -786,7 +786,7 @@ void ReleaseSlotBuffer()
     }
 }
 
-void initUndoZoneLock()
+void InitUndoZoneLock()
 {
     if (g_instance.undo_cxt.uZones != NULL) {
         int persistZoneCount = PERSIST_ZONE_COUNT;
@@ -797,13 +797,41 @@ void initUndoZoneLock()
                 int zoneId = (int)(idx + persist * PERSIST_ZONE_COUNT);
                 UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
                 if (uzone == NULL) {
-                    break;
+                    continue;
                 }
-                uzone->InitLock();
-                uzone->GetUndoSpace()->LockInit();
-                uzone->GetSlotSpace()->LockInit();
+                if (!(uzone->GetLock())) {
+                    uzone->InitLock();
+                }
+                if (!(uzone->GetUndoSpace()->GetLock())) {
+                    uzone->GetUndoSpace()->LockInit();
+                }
+                if (!(uzone->GetSlotSpace()->GetLock())) {
+                    uzone->GetSlotSpace()->LockInit();
+                }
             }
         }
     }
 }
+
+void ResetUndoZoneLock()
+{
+    if (g_instance.undo_cxt.uZones != NULL) {
+        int persistZoneCount = PERSIST_ZONE_COUNT;
+        for (int persist = (int)UNDO_PERMANENT; persist <= (int)UNDO_TEMP; persist++) {
+            CHECK_FOR_INTERRUPTS();
+            for (auto idx = 0; idx < persistZoneCount; idx++) {
+                CHECK_FOR_INTERRUPTS();
+                int zoneId = (int)(idx + persist * PERSIST_ZONE_COUNT);
+                UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
+                if (uzone == NULL) {
+                    continue;
+                }
+                uzone->SetLock(NULL);
+                uzone->GetUndoSpace()->SetLock(NULL);
+                uzone->GetSlotSpace()->SetLock(NULL);
+            }
+        }
+    }
+}
+
 } // namespace undo
