@@ -5686,3 +5686,29 @@ Oid searchsubtypebytypeId(Oid typeOid, int32 *typmod)
     }
     return type == TYPTYPE_TABLEOF ? searchsubtypebytypeId(resultType, typmod) : resultType;
 }
+
+void checkArrayTypeInsert(ParseState* pstate, Expr* expr)
+{
+    Param* param = NULL;
+    if (IsA(expr, Param)) {
+        param = (Param*)expr;
+    } else if (IsA(expr, ArrayRef) && IsA(((ArrayRef*)expr)->refexpr, Param)) {
+        param = (Param*)((ArrayRef*)expr)->refexpr;
+    } else {
+        return;
+    }
+
+    if (pstate->p_pre_columnref_hook == plpgsql_pre_column_ref && pstate->p_ref_hook_state != NULL) {
+        PLpgSQL_expr* pl_expr = (PLpgSQL_expr*)pstate->p_ref_hook_state;
+
+        if (pl_expr->func != NULL && param->paramid <= pl_expr->func->ndatums &&
+            pl_expr->func->datums[param->paramid - 1]->dtype == PLPGSQL_DTYPE_VAR) {
+            PLpgSQL_var* var = (PLpgSQL_var*)pl_expr->func->datums[param->paramid - 1];
+
+            if (var->nest_table != NULL && (IsA(expr, Param) ||
+                var->nest_layers != list_length(((ArrayRef*)expr)->refupperindexpr))) {
+                ereport(ERROR, (errmsg("The tableof type variable cannot be used as an insertion value. ")));
+            }
+        }
+    }
+}
