@@ -142,6 +142,57 @@ INFO:  2
  
 (1 row)
 
+-- test change cxt
+drop table if exists t_CurRowtype_Use_Case0007_1;
+NOTICE:  table "t_currowtype_use_case0007_1" does not exist, skipping
+create table t_CurRowtype_Use_Case0007_1(col1 varchar(30),col2 varchar(30));
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_a', 'col2_aa');
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_b', 'col2_bb');
+drop table if exists t_CurRowtype_Use_Case0007_2;
+NOTICE:  table "t_currowtype_use_case0007_2" does not exist, skipping
+create table t_CurRowtype_Use_Case0007_2(col1 varchar(30),col2 varchar(30));
+create or replace package pac_CurRowtype_Use_Case0007_5 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_5();
+end pac_CurRowtype_Use_Case0007_5;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_5 is
+procedure p_CurRowtype_Use_Case0007_5() is
+begin
+  var1.col1:='pack5_proc_col1';
+  var1.col2:='pack5_proc_col2';
+  insert into t_CurRowtype_Use_Case0007_2 values(var1.col1,var1.col2);
+end;
+end pac_CurRowtype_Use_Case0007_5;
+/
+create or replace package pac_CurRowtype_Use_Case0007_6 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_6;
+end pac_CurRowtype_Use_Case0007_6;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_6 is
+procedure p_CurRowtype_Use_Case0007_6 is
+begin
+  open cur1;
+  fetch cur1 into var1;
+  pac_CurRowtype_Use_Case0007_5.p_CurRowtype_Use_Case0007_5();
+end;
+end pac_CurRowtype_Use_Case0007_6;
+/
+call pac_CurRowtype_Use_Case0007_6.p_CurRowtype_Use_Case0007_6();
+ p_currowtype_use_case0007_6 
+-----------------------------
+ 
+(1 row)
+
+drop table if exists t_CurRowtype_Use_Case0007_1;
+drop table if exists t_CurRowtype_Use_Case0007_2;
+drop package pac_CurRowtype_Use_Case0007_5;
+--?.*
+drop package pac_CurRowtype_Use_Case0007_6;
+NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p_currowtype_use_case0007_6()
 -- test alias error 
 create or replace procedure pro_cursor_args
 is
