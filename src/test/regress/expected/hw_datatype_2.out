@@ -808,6 +808,12 @@ select least(0.9, 1);
     .9
 (1 row)
 
+select * from greatest(1, 1.1);
+ greatest 
+----------
+      1.1
+(1 row)
+
 create or replace function test_cast(a numeric)
 returns int as
 $$
