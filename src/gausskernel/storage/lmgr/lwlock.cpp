@@ -681,7 +681,6 @@ static void InitializeLWLocks(int numLocks)
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_UNKNOWN);
     }
-    undo::initUndoZoneLock();
 }
 
 const char *GetBuiltInTrancheName(int trancheId)
