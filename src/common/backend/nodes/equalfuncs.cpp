@@ -591,6 +591,10 @@ static bool _equalMinMaxExpr(const MinMaxExpr* a, const MinMaxExpr* b)
     COMPARE_SCALAR_FIELD(op);
     COMPARE_NODE_FIELD(args);
     COMPARE_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(cmptype);
+        COMPARE_NODE_FIELD(cmpargs);
+    }
 
     return true;
 }
