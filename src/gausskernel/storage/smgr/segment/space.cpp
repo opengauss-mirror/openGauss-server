@@ -245,7 +245,7 @@ void InitSpaceNode(SegSpace *spc, Oid spcNode, Oid dbNode, bool is_redo)
         }
     }
 
-    if (ENABLE_DMS) {
+    if (SS_STANDBY_MODE) {
         SSInitSegLogicFile(spc);
     }
 }
