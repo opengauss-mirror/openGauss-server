@@ -3898,8 +3898,9 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                     securec_check(rc, "\0", "\0");
 
                     rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
-                    rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
-                    rec->freetup = (rec->tup != NULL) ? true : false;
+                    /* compile_tmp_cx will automatically free, there is no need to set free mark. */
+                    rec->freetupdesc = false;
+                    rec->freetup = false;
                     pfree_ext(nulls);
 
                     if (target_cxt) {
