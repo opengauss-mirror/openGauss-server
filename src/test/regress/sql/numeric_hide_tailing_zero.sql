@@ -6,7 +6,18 @@ select cast(0 as numeric(15,10));
 select cast(009.0000 as numeric(15,10));
 set behavior_compat_options='hide_tailing_zero,hide_tailing_zero';
 select cast(123.123 as numeric(15,10));
+show behavior_compat_options;
+set behavior_compat_options='hide_tailing_zero,hide_tailing_zero,truncate_numeric_tail_zero,display_leading_zero';
+show behavior_compat_options;
+select cast(123.123 as numeric(15,10));
+set behavior_compat_options='hide_tailing_zero,truncate_numeric_tail_zero,display_leading_zero,display_leading_zero,correct_to_number';
+show behavior_compat_options;
+select cast(123.123 as numeric(15,10));
+set behavior_compat_options='truncate_numeric_tail_zero,truncate_numeric_tail_zero, hide_tailing_zero,hide_tailing_zero,hide_tailing_zero, truncate_numeric_tail_zero,hide_tailing_zero';
+show behavior_compat_options;
+select cast(123.123 as numeric(15,10));
 set behavior_compat_options='';
+show behavior_compat_options;
 
 set behavior_compat_options='truncate_numeric_tail_zero';
 create table test_num_zero (a number,b int);

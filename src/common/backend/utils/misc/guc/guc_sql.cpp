@@ -179,6 +179,7 @@ static bool check_b_format_behavior_compat_options(char **newval, void **extra, 
 static void assign_b_format_behavior_compat_options(const char *newval, void *extra);
 static bool check_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_behavior_compat_options(const char* newval, void* extra);
+static const char* show_behavior_compat_options(void);
 static bool check_plsql_compile_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_plsql_compile_behavior_compat_options(const char* newval, void* extra);
 static void assign_connection_info(const char* newval, void* extra);
@@ -2919,7 +2920,7 @@ static void InitSqlConfigureNamesString()
             "",
             check_behavior_compat_options,
             assign_behavior_compat_options,
-            NULL},
+            show_behavior_compat_options},
         {{"disable_keyword_options",
           PGC_USERSET,
           NODE_ALL,
@@ -3704,6 +3705,43 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     list_free(elemlist);
 
     u_sess->utils_cxt.behavior_compat_flags = result;
+}
+
+static const char* show_behavior_compat_options(void)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    int start = 0;
+    int64 result = 0;
+    StringInfoData strInfo;
+    bool isFirst = true;
+    initStringInfo(&strInfo);
+
+    rawstring = pstrdup(u_sess->attr.attr_sql.behavior_compat_string);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+
+    foreach (cell, elemlist) {
+        for (start = 0; start < OPT_MAX; start++) {
+            const char *item = (const char*)lfirst(cell);
+
+            if (strcmp(item, behavior_compat_options[start].name) == 0
+                && (result & behavior_compat_options[start].flag) == 0) {
+                result += behavior_compat_options[start].flag;
+                if (isFirst) {
+                    isFirst = false;
+                    appendStringInfo(&strInfo, "%s", item);
+                } else {
+                    appendStringInfo(&strInfo, ",%s", item);
+                }
+            }
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    return (const char *)strInfo.data;
 }
 
 typedef int16 (*getIgnoreKeywordTokenHook)(const char *item);
