@@ -545,7 +545,7 @@ static HeapTuple cross_level_index_getnext(IndexScanDesc scan, ScanDirection dir
  * ------------------------------------------------------------------------
  */
 
-IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot, 
+IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot,
     int nkeys, int norderbys, ScanState* scan_state, ParallelIndexScanDesc pscan)
 {
     if (unlikely(RELATION_OWN_BUCKET(heap_relation))) {
@@ -555,7 +555,7 @@ IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_
     }
 }
 
-void scan_handler_idx_parallelscan_initialize(Relation heap_relation, 
+void scan_handler_idx_parallelscan_initialize(Relation heap_relation,
     Relation index_relation, ParallelIndexScanDesc p_index_scan)
 {
     index_parallelscan_initialize(heap_relation, index_relation, p_index_scan);

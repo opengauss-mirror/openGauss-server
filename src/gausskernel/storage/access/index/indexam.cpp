@@ -144,7 +144,7 @@
     }                                                                           \
 } while (0)
 
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot, 
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot,
     ParallelIndexScanDesc pscan = NULL);
 
 /* ----------------
@@ -298,7 +298,7 @@ IndexScanDesc index_beginscan_bitmap(Relation index_relation, Snapshot snapshot,
 /*
  * index_beginscan_internal --- common code for index_beginscan variants
  */
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot, 
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot,
     ParallelIndexScanDesc pscan)
 {
     IndexScanDesc scan;
@@ -511,8 +511,7 @@ void index_parallelscan_initialize(Relation heap_relation, Relation index_relati
     if (!target) {
         return;
     }
-    Size        offset;
-
+    Size offset;
     RELATION_CHECKS;
 
     target->ps_relid = RelationGetRelid(heap_relation);

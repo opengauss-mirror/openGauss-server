@@ -17,7 +17,6 @@
  *
  * -------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/nbtree.h"
@@ -80,7 +79,7 @@ typedef struct BTParallelScanDescData {
     BTPS_State  btpsPageStatus;/* indicates whether next page is available
                                  * for scan. see above for possible states of
                                  * parallel scan. */
-    int         btpsArrayKeyCount;     /* count indicating number of array
+    int btpsArrayKeyCount;     /* count indicating number of array
                                          * scan keys processed by parallel
                                          * scan */
 } BTParallelScanDescData;
