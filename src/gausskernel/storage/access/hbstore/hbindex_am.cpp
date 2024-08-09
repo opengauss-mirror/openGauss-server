@@ -584,7 +584,7 @@ void scan_handler_idx_rescan(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey
 void scan_handler_idx_rescan_parallel(IndexScanDesc scan)
 {
     Assert(scan != NULL);
-    index_rescan_parallel(scan);
+    IndexRescanParallel(scan);
 }
 
 void scan_handler_idx_rescan_local(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys)

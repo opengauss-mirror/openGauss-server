@@ -620,7 +620,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
      * way while keeping other participating processes waiting.  If the scan
      * has already begun, use the page number from the shared structure.
      */
-    if (scan->parallel_scan != NULL) {
+    if (scan->parallelScan != NULL) {
         status = _bt_parallel_seize(scan, &blkno);
         if (!status) {
             return false;
@@ -1215,7 +1215,7 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
     /* allow next page be processed by parallel worker */
-    if (scan->parallel_scan) {
+    if (scan->parallelScan) {
         if (ScanDirectionIsForward(dir))
             _bt_parallel_release(scan, opaque->btpo_next);
         else
@@ -1406,7 +1406,7 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
         so->currPos.buf = InvalidBuffer;
 
         /* Walk right to the next page with data */
-        if (scan->parallel_scan != NULL) {
+        if (scan->parallelScan != NULL) {
             /*
              * Seize the scan to get the next block number; if the scan has
              * ended already, bail out.
@@ -1424,7 +1424,7 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
     } else {
         /* Remember we left a page with data */
         so->currPos.moreRight = true;
-        if (scan->parallel_scan != NULL) {
+        if (scan->parallelScan != NULL) {
             /*
              * Seize the scan to get the current block number; if the scan has
              * ended already, bail out.
@@ -1492,7 +1492,7 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
                 if (_bt_readpage(scan, dir, P_FIRSTDATAKEY(opaque))) {
                     break;
                 }
-            } else if (scan->parallel_scan != NULL) {
+            } else if (scan->parallelScan != NULL) {
                 /* allow next page be processed by parallel worker */
                 _bt_parallel_release(scan, opaque->btpo_next);
             }
@@ -1502,7 +1502,7 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
             so->currPos.buf = InvalidBuffer;
 
             /* nope, keep going */
-            if (scan->parallel_scan != NULL) {
+            if (scan->parallelScan != NULL) {
                 status = _bt_parallel_seize(scan, &blkno);
                 if (!status) {
                     return false;
@@ -1553,7 +1553,7 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
             }
 
             /* Step to next physical page */
-		    Buffer temp = so->currPos.buf;
+            Buffer temp = so->currPos.buf;
             so->currPos.buf = InvalidBuffer;
             so->currPos.buf = _bt_walk_left(rel, temp);
 
@@ -1576,8 +1576,8 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
                 /* note that this will clear moreLeft if we can stop */
                 if (_bt_readpage(scan, dir, PageGetMaxOffsetNumber(page))) {
                     break;
-                }  
-            } else if (scan->parallel_scan != NULL) {
+                }
+            } else if (scan->parallelScan != NULL) {
                 /* allow next page be processed by parallel worker */
                 _bt_parallel_release(scan, BufferGetBlockNumber(so->currPos.buf));
             }
@@ -1588,11 +1588,10 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
              * worker has already advanced the scan to a different page.  We
              * must continue based on the latest page scanned by any worker.
              */
-            if (scan->parallel_scan != NULL) {
+            if (scan->parallelScan != NULL) {
                 _bt_relbuf(rel, so->currPos.buf);
                 status = _bt_parallel_seize(scan, &blkno);
-                if (!status)
-                {
+                if (!status) {
                     so->currPos.buf = InvalidBuffer;
                     return false;
                 }

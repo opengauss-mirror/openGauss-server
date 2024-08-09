@@ -329,7 +329,7 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
 #endif
 
     /* Initialize information for parallel scan. */
-    scan->parallel_scan = pscan;
+    scan->parallelScan = pscan;
 
     return scan;
 }
@@ -383,9 +383,9 @@ void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys,
  * ----------------
  */
 
-void index_rescan_parallel(IndexScanDesc scan)
+void IndexRescanParallel(IndexScanDesc scan)
 {
-    if (scan->parallel_scan) {
+    if (scan->parallelScan) {
         btparallelrescan(scan);
     }
 }
@@ -518,7 +518,7 @@ void index_parallelscan_initialize(Relation heap_relation, Relation index_relati
     target->ps_relid = RelationGetRelid(heap_relation);
     target->ps_indexid = RelationGetRelid(index_relation);
 
-    btinitparallelscan(target->ps_btpscan);
+    Btinitparallelscan(target->psBtpscan);
 }
 
 /* ----------------

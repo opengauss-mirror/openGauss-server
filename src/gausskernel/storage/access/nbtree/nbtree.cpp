@@ -762,11 +762,11 @@ void Btinitparallelscan(void *target)
 void btparallelrescan(IndexScanDesc scan)
 {
     BTParallelScanDesc btscan;
-    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    ParallelIndexScanDesc parallel_scan = scan->parallelScan;
 
     Assert(parallel_scan);
 
-    btscan = (BTParallelScanDesc) parallel_scan->ps_btpscan;
+    btscan = (BTParallelScanDesc) parallel_scan->psBtpscan;
 
     /*
      * In theory, we don't need to acquire the spinlock here, because there
@@ -804,12 +804,12 @@ bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
     BTPS_State  pageStatus;
     bool        exitLoop = false;
     bool        status = true;
-    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    ParallelIndexScanDesc parallel_scan = scan->parallelScan;
     BTParallelScanDesc btscan;
 
     *pageno = P_NONE;
 
-    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+    btscan = (BTParallelScanDesc) (parallel_scan->psBtpscan);
     
     while (1) {
         LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
@@ -849,10 +849,10 @@ bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
  */
 void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
 {
-    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    ParallelIndexScanDesc parallel_scan = scan->parallelScan;
     BTParallelScanDesc btscan;
 
-    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+    btscan = (BTParallelScanDesc) (parallel_scan->psBtpscan);
 
     {
         LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
@@ -872,7 +872,7 @@ void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
 void _bt_parallel_done(IndexScanDesc scan)
 {
     BTScanOpaque so = (BTScanOpaque) scan->opaque;
-    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    ParallelIndexScanDesc parallel_scan = scan->parallelScan;
     BTParallelScanDesc btscan;
     bool        statusChanged = false;
 
@@ -881,7 +881,7 @@ void _bt_parallel_done(IndexScanDesc scan)
         return;
     }
 
-    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+    btscan = (BTParallelScanDesc) (parallel_scan->psBtpscan);
 
     /*
      * Mark the parallel scan as done for this combination of scan keys,
@@ -909,10 +909,10 @@ void _bt_parallel_done(IndexScanDesc scan)
 void _bt_parallel_advance_array_keys(IndexScanDesc scan)
 {
     BTScanOpaque so = (BTScanOpaque) scan->opaque;
-    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    ParallelIndexScanDesc parallel_scan = scan->parallelScan;
     BTParallelScanDesc btscan;
 
-    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+    btscan = (BTParallelScanDesc) (parallel_scan->psBtpscan);
 
     so->arrayKeyCount++;
     LWLockAcquire(ParallelIndexScanLock, LW_EXCLUSIVE);
@@ -1621,7 +1621,7 @@ static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple po
 /*
  * btestimateparallelscan -- estimate storage for BTParallelScanDescData
  */
-void* btbuildparallelscan(void)
+void* Btbuildparallelscan(void)
 {
     void *btPscan = new BTParallelScanDescData;
     return btPscan;

@@ -171,7 +171,7 @@ typedef struct IndexScanDescData {
 #endif
     IndexFetchTableData *xs_heapfetch;
     /* parallel index scan information, in global variables */
-    struct ParallelIndexScanDescData *parallel_scan;
+    struct ParallelIndexScanDescData *parallelScan;
     /* put decompressed heap tuple data into xs_ctbuf_hdr be careful! when malloc memory  should give extra mem for
      *xs_ctbuf_hdr. t_bits which is varlength arr
      */
@@ -183,7 +183,7 @@ typedef struct IndexScanDescData {
 typedef struct ParallelIndexScanDescData {
     Oid         ps_relid;
     Oid         ps_indexid;
-    void*       ps_btpscan;
+    void*       psBtpscan;
 } ParallelIndexScanDescData;
 
 #define SizeofIndexScanDescData (offsetof(IndexScanDescData, xs_ctbuf_hdr) + SizeofHeapTupleHeader)
