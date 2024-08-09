@@ -45,8 +45,9 @@ copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 c
 ERROR:  value too long for type character(3)
 CONTEXT:  COPY test, line 1, column mes1: "mmoo"
 copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1E400, mes3 timestamp with time zone AS date_trunc('year', mes3));
-ERROR:  "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
-CONTEXT:  COPY test, line 1: "1	mmoo	12.6789	Thu Jan 01 15:04:28 1970 PST	32767"
+ERROR:  number overflow at or near "1E400"
+LINE 1: ...(mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1E400, mes...
+                                                             ^
 copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes5 text AS mes1 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
 ERROR:  column "mes5" of relation "test" does not exist
 copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes5 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
