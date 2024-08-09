@@ -184,6 +184,7 @@ typedef struct RelationMetaData {
  */
 #define TABLE_ACCESS_METHOD_ASTORE "ASTORE"
 #define TABLE_ACCESS_METHOD_USTORE "USTORE"
+#define TABLE_ACCESS_METHOD_USTORE_LOWER "ustore"
 
 #define FILESYSTEM_GENERAL "general"
 #define FILESYSTEM_HDFS "hdfs"
