@@ -82,6 +82,14 @@ extern MergeAppendPath* create_merge_append_path(
     PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* pathkeys, Relids required_outer);
 extern ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals, Path* subpath = NULL, Bitmapset *upper_params = NULL);
 extern MaterialPath* create_material_path(Path* subpath, bool materialize_all = false);
+extern MemoizePath *create_memoize_path(PlannerInfo *root,
+                                        RelOptInfo *rel,
+                                        Path *subpath,
+                                        List *param_exprs,
+                                        List *hash_operators,
+                                        bool singlerow,
+                                        bool binary_mode,
+                                        double calls);
 extern UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, SpecialJoinInfo* sjinfo);
 extern Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer, List *subplan_params);
 extern Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer, List *subplan_params);

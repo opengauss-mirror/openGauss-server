@@ -1304,6 +1304,47 @@ typedef struct Material {
 
 typedef struct VecMaterial : public Material {
 } VecMaterial;
+/* ----------------
+ *        memoize node
+ * ----------------
+ */
+typedef struct Memoize
+{
+    Plan plan;
+
+    /* size of the two arrays below */
+    int numKeys;
+
+    /* hash operators for each key */
+    Oid *hashOperators;
+
+    /* collations for each key */
+    Oid *collations;
+
+    /* cache keys in the form of exprs containing parameters */
+    List *param_exprs;
+
+    /*
+     * true if the cache entry should be marked as complete after we store the
+     * first tuple in it.
+     */
+    bool singlerow;
+
+    /*
+     * true when cache key should be compared bit by bit, false when using
+     * hash equality ops
+     */
+    bool binary_mode;
+
+    /*
+     * The maximum number of entries that the planner expects will fit in the
+     * cache, or 0 if unknown
+     */
+    uint32 est_entries;
+
+    /* paramids from param_exprs */
+    Bitmapset *keyparamids;
+} Memoize;
 
 /* ----------------
  *		sort node

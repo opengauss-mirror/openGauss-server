@@ -1469,7 +1469,26 @@ typedef struct MaterialPath {
     bool materialize_all; /* true for materialize above streamed subplan */
     OpMemInfo mem_info;   /* Memory info for materialize */
 } MaterialPath;
-
+/*
+ * MemoizePath represents a Memoize plan node, i.e., a cache that caches
+ * tuples from parameterized paths to save the underlying node from having to
+ * be rescanned for parameter values which are already cached.
+ */
+typedef struct MemoizePath
+{
+    Path path;
+    Path *subpath; /* outerpath to cache tuples from */
+    List *hash_operators; /* OIDs of hash equality ops for cache keys */
+    List *param_exprs; /* expressions that are cache keys */
+    bool singlerow; /* true if the cache entry is to be marked as
+                           * complete after caching the first record. */
+    bool binary_mode; /* true when cache key should be compared bit
+                                 * by bit, false when using hash equality ops */
+    double calls; /* expected number of rescans */
+    uint32 est_entries; /* The maximum number of entries that the
+                                 * planner expects will fit in the cache, or 0
+                                 * if unknown */
+} MemoizePath;
 /*
  * UniquePath represents elimination of distinct rows from the output of
  * its subpath.
@@ -1903,6 +1922,9 @@ typedef struct RestrictInfo {
     /* cache space for hashclause processing; -1 if not yet set */
     BucketSize left_bucketsize;  /* avg bucketsize of left side */
     BucketSize right_bucketsize; /* avg bucketsize of right side */
+    /* hash equality operators used for memoize nodes, else InvalidOid */
+    Oid left_hasheqoperator;
+    Oid right_hasheqoperator;
 } RestrictInfo;
 
 /*

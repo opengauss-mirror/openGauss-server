@@ -37,6 +37,7 @@
 #include "executor/node/nodeLimit.h"
 #include "executor/node/nodeLockRows.h"
 #include "executor/node/nodeMaterial.h"
+#include "executor/node/nodeMemoize.h"
 #include "executor/node/nodeMergeAppend.h"
 #include "executor/node/nodeMergejoin.h"
 #include "executor/node/nodeModifyTable.h"
@@ -250,6 +251,10 @@ void ExecReScanByType(PlanState* node)
 
         case T_HashJoinState:
             ExecReScanHashJoin((HashJoinState*)node);
+            break;
+
+        case T_MemoizeState:
+            ExecReScanMemoize((MemoizeState*)(node));
             break;
 
         case T_MaterialState:
@@ -646,6 +651,7 @@ bool ExecSupportsBackwardScan(Plan* node)
 #endif
 
         case T_Material:
+        case T_Memoize:
         case T_Sort:
             /* these don't evaluate tlist */
             return true;
@@ -724,6 +730,7 @@ bool ExecMaterializesOutput(NodeTag plantype)
 {
     switch (plantype) {
         case T_Material:
+        case T_Memoize:
         case T_FunctionScan:
         case T_CteScan:
         case T_WorkTableScan:

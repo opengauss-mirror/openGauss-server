@@ -33,6 +33,7 @@
 #include "optimizer/var.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
+#include "utils/typcache.h"
 #include "utils/lsyscache.h"
 #include "catalog/index.h"
 #include "catalog/pg_amop.h"
@@ -52,6 +53,7 @@ static bool check_outerjoin_delay(PlannerInfo* root, Relids* relids_p, Relids* n
 static bool check_equivalence_delay(PlannerInfo* root, RestrictInfo* restrictinfo);
 static bool check_redundant_nullability_qual(PlannerInfo* root, Node* clause);
 static void check_mergejoinable(RestrictInfo* restrictinfo);
+static void check_memoizable(RestrictInfo *restrictinfo);
 
 /*****************************************************************************
  *
@@ -1993,6 +1995,8 @@ void distribute_restrictinfo_to_rels(PlannerInfo* root, RestrictInfo* restrictin
              */
             check_hashjoinable(restrictinfo);
 
+            check_memoizable(restrictinfo);
+
             /*
              * Add clause to the join lists of all the relevant relations.
              */
@@ -2173,6 +2177,7 @@ RestrictInfo* build_implied_join_equality(
     /* Set mergejoinability/hashjoinability flags */
     check_mergejoinable(restrictinfo);
     check_hashjoinable(restrictinfo);
+    check_memoizable(restrictinfo);
 
     return restrictinfo;
 }
@@ -2333,4 +2338,47 @@ void check_plan_correlation(PlannerInfo* root, Node* expr)
     if (param_expr != NULL) {
         list_free_ext(param_expr);
     }
+}
+/*
+ * check_memoizable
+ *      If the restrictinfo's clause is suitable to be used for a Memoize node,
+ *      set the left_hasheqoperator and right_hasheqoperator to the hash equality
+ *      operator that will be needed during caching.
+ */
+static void
+check_memoizable(RestrictInfo *restrictinfo)
+{
+    TypeCacheEntry *typentry;
+    Expr *clause = restrictinfo->clause;
+    Oid lefttype;
+    Oid righttype;
+
+    if (restrictinfo->pseudoconstant) {
+        return;
+    }
+    if (!is_opclause(clause)) {
+        return;
+    }
+    if (list_length(((OpExpr *) clause)->args) != 2) {
+        return;
+    }
+
+    lefttype = exprType((Node*)linitial(((OpExpr *) clause)->args));
+
+    typentry = lookup_type_cache(lefttype, TYPECACHE_HASH_PROC |
+                                 TYPECACHE_EQ_OPR);
+    if (OidIsValid(typentry->hash_proc) && OidIsValid(typentry->eq_opr))
+        restrictinfo->left_hasheqoperator = typentry->eq_opr;
+    righttype = exprType((Node*)lsecond(((OpExpr *) clause)->args));
+
+    /*
+     * Lookup the right type, unless it's the same as the left type, in which
+     * case typentry is already pointing to the required TypeCacheEntry.
+     */
+    if (lefttype != righttype)
+        typentry = lookup_type_cache(righttype, TYPECACHE_HASH_PROC |
+                                     TYPECACHE_EQ_OPR);
+
+    if (OidIsValid(typentry->hash_proc) && OidIsValid(typentry->eq_opr))
+        restrictinfo->right_hasheqoperator = typentry->eq_opr;
 }

@@ -182,6 +182,12 @@ static inline uint32 pg_rotate_right32(uint32 word, int n)
     return (word >> n) | (word << (sizeof(word) * BITS_PER_BYTE - n));
 }
 
+static inline uint32
+pg_rotate_left32(uint32 word, int n)
+{
+    return (word << n) | (word >> (32 - n));
+}
+
 /* calculate ceil(log base 2) of num */
 static inline uint64 sh_log2(uint64 num)
 {

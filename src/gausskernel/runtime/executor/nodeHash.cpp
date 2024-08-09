@@ -2313,3 +2313,25 @@ static void* dense_alloc(HashJoinTable hashtable, Size size)
     /* return pointer to the start of the tuple memory */
     return ptr;
 }
+/*
+ * Calculate the limit on how much memory can be used by Hash and similar
+ * plan types.  This is work_mem times hash_mem_multiplier, and is
+ * expressed in bytes.
+ *
+ * Exported for use by the planner, as well as other hash-like executor
+ * nodes.  This is a rather random place for this, but there is no better
+ * place.
+ */
+const double HashMemMultiplier = 2.0 * 1024.0;
+size_t GetHashMemoryLimit(void)
+{
+    double memLimit;
+
+    /* Do initial calculation in double arithmetic */
+    memLimit = (double) u_sess->attr.attr_memory.work_mem * HashMemMultiplier;
+
+    /* Clamp in case it doesn't fit in size_t */
+    memLimit = Min(memLimit, (double) SIZE_MAX);
+
+    return (size_t) memLimit;
+}
