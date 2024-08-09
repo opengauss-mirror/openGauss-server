@@ -203,6 +203,7 @@ static ParallelStateEntry* GetMyPSEntry(ParallelState* pstate);
 static void archive_close_connection(int code, void* arg);
 static void take_down_nsname_in_drop_stmt(const char *stmt, char *result, int len);
 static void get_role_password(RestoreOptions* opts);
+static char* GetBehaviorCompatOptions(ArchiveHandle* fout);
 
 /*
  *	Wrapper functions.
@@ -2835,6 +2836,11 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
     if (findDBCompatibility(&AH->publicArc, PQdb(GetConnection(&AH->publicArc))) && hasSpecificExtension(&AH->publicArc, "dolphin"))
         (void)ahprintf(AH, "SET dolphin.sql_mode = 'sql_mode_full_group,pipes_as_concat,ansi_quotes,pad_char_to_full_length';\n");
 
+    /* set behavior_compat_options */
+    char* compatOptions = GetBehaviorCompatOptions(AH);
+    (void)ahprintf(AH, "SET behavior_compat_options = '%s';\n", compatOptions);
+    free(compatOptions);
+
     (void)ahprintf(AH, "\n");
 }
 
@@ -5292,4 +5298,21 @@ bool hasSpecificExtension(Archive* fout, const char* extensionName)
     PQclear(res);
     destroyPQExpBuffer(query);
     return ntups != 0;
+}
+
+static char* GetBehaviorCompatOptions(ArchiveHandle* fout)
+{
+    char* val = NULL;
+    PGresult* res = PQexec(fout->connection, "show behavior_compat_options;");
+
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        val = gs_strdup(PQgetvalue(res, 0, 0));
+    } else {
+        val = gs_strdup("");
+    }
+
+    PQclear(res);
+    res = NULL;
+
+    return val;
 }
