@@ -438,9 +438,19 @@ static char *mppdb_deparse_command_type(DeparsedCommandType cmdtype)
         case DCT_SimpleCmd:
             return "Simple";
         case DCT_TableDropStart:
-            return "Drop table";
+            return "Drop Table";
         case DCT_TableDropEnd:
             return "Drop Table End";
+        case DCT_TableAlter:
+            return "Alter Table";
+        case DCT_ObjectCreate:
+            return "Create Object";
+        case DCT_ObjectDrop:
+            return "Drop Object";
+        case DCT_TypeDropStart:
+            return "Drop Type";
+        case DCT_TypeDropEnd:
+            return "Drop Type End";
         default:
             Assert(false);
     }
@@ -476,7 +486,7 @@ static void pg_decode_ddl(LogicalDecodingContext *ctx,
                      sz,
                      message);
 
-    if (cmdtype != DCT_TableDropStart) {
+    if (cmdtype != DCT_TableDropStart && cmdtype != DCT_TypeDropStart) {
         char *tmp = pstrdup(message);
         char *owner = NULL;
         char *decodestring = deparse_ddl_json_to_string(tmp, &owner);

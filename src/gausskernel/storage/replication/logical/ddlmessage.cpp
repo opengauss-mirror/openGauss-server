@@ -55,7 +55,7 @@ LogLogicalDDLMessage(const char *prefix, Oid relid, DeparsedCommandType cmdtype,
     char *tmp = pstrdup(message);
     char *owner = NULL;
 
-    if (cmdtype != DCT_TableDropStart) {
+    if (cmdtype != DCT_TableDropStart && cmdtype != DCT_TypeDropStart) {
         char *decodestring = deparse_ddl_json_to_string(tmp, &owner);
         elog(LOG, "will decode to : %s, [owner %s]", decodestring, owner ? owner : "none");
     }

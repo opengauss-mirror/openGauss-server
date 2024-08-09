@@ -82,6 +82,9 @@ static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relat
 static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
     ParallelReorderBufferChange *change);
 
+static void truncate_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+                                int nrelations, Relation relations[], ReorderBufferChange *change);
+
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
 static void ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
@@ -183,6 +186,7 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     /* wrap output plugin callbacks, so we can add error context information */
     ctx->reorder->begin = begin_cb_wrapper;
     ctx->reorder->apply_change = change_cb_wrapper;
+    ctx->reorder->apply_truncate = truncate_cb_wrapper;
     ctx->reorder->commit = commit_cb_wrapper;
     ctx->reorder->ddl = ddl_cb_wrapper;
 
@@ -453,6 +457,8 @@ LogicalDecodingContext *CreateInitDecodingContext(const char *plugin, List *outp
         startup_cb_wrapper(ctx, &ctx->options, true);
     (void)MemoryContextSwitchTo(old_context);
 
+    ctx->reorder->output_rewrites = ctx->options.receive_rewrites;
+
     return ctx;
 }
 
@@ -525,6 +531,7 @@ LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output
     if (ctx->callbacks.startup_cb != NULL)
         startup_cb_wrapper(ctx, &ctx->options, false);
     (void)MemoryContextSwitchTo(old_context);
+    ctx->reorder->output_rewrites = ctx->options.receive_rewrites;
 
     ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
         errmsg("starting logical decoding for slot %s", NameStr(slot->data.name)),
@@ -1003,6 +1010,48 @@ static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relat
     ctx->write_location = change->lsn;
 
     ctx->callbacks.change_cb(ctx, txn, relation, change);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void truncate_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+                                int nrelations, Relation relations[], ReorderBufferChange *change)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    if (!ctx->callbacks.truncate_cb) {
+        return;
+    }
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "truncate";
+    state.report_location = change->lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    if (txn != NULL) {
+        ctx->write_xid = txn->xid;
+    }
+
+    /*
+     * report this change's lsn so replies from clients can give an up2date
+     * answer. This won't ever be enough (and shouldn't be!) to confirm
+     * receipt of this transaction, but it might allow another transaction's
+     * commit to be confirmed with one message.
+     */
+    ctx->write_location = change->lsn;
+
+    ctx->callbacks.truncate_cb(ctx, txn, nrelations, relations, change);
 
     /* Pop the error context stack */
     t_thrd.log_cxt.error_context_stack = errcallback.previous;

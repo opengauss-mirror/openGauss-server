@@ -33,6 +33,7 @@
 #include "parser/parse_func.h"
 #include "parser/parser.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_expr.h"
 #include "pgstat.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
@@ -111,6 +112,7 @@ static const event_trigger_support_data event_trigger_support[] = {
     {"PACKAGE SPECIFICATION", true},
     {"ROW LEVEL SECURITY POLICY", true},
     {"SYNONYM", true},
+    {"EVENT", true},
     { NULL, false }    
 };
 
@@ -1614,6 +1616,7 @@ void EventTriggerAlterTableStart(Node *parsetree)
 
     command->d.alterTable.classId = RelationRelationId;
     command->d.alterTable.objectId = InvalidOid;
+    command->d.alterTable.rewrite = false;
     command->d.alterTable.subcmds = NIL;
     command->parsetree = (Node*)copyObject(parsetree);
     command->parent = currentEventTriggerState->currentCommand;
@@ -1645,7 +1648,7 @@ void EventTriggerAlterTableRelid(Oid objectId)
   * itself, they are all concerned with AlterTableCmd nodes that are generated
   * internally, so that's all that this code needs to handle at the moment.
   */
-void EventTriggerCollectAlterTableSubcmd(Node *subcmd, ObjectAddress address)
+void EventTriggerCollectAlterTableSubcmd(Node *subcmd, ObjectAddress address, bool rewrite)
 {
     MemoryContext   oldcxt;
     CollectedATSubcmd *newsub;
@@ -1664,13 +1667,193 @@ void EventTriggerCollectAlterTableSubcmd(Node *subcmd, ObjectAddress address)
     newsub = (CollectedATSubcmd*) palloc(sizeof(CollectedATSubcmd));
     newsub->address = address;
     newsub->parsetree = (Node*)copyObject(subcmd);
- 
+
+    currentEventTriggerState->currentCommand->d.alterTable.rewrite |= rewrite;
     currentEventTriggerState->currentCommand->d.alterTable.subcmds =
         lappend(currentEventTriggerState->currentCommand->d.alterTable.subcmds, newsub);
  
     MemoryContextSwitchTo(oldcxt);
 }
- 
+
+/*
+ * EventTriggerAlterTypeStart
+ *        Save data about a single part of an ALTER TYPE.
+ *
+ * ALTER TABLE can have multiple subcommands which might include DROP COLUMN
+ * command and ALTER TYPE referring the drop column in USING expression.
+ * As the dropped column cannot be accessed after the execution of DROP COLUMN,
+ * a special trigger is required to handle this case before the drop column is
+ * executed.
+ */
+void EventTriggerAlterTypeStart(AlterTableCmd *subcmd, Relation rel)
+{
+    MemoryContext oldcxt;
+    CollectedATSubcmd *newsub;
+    ColumnDef  *def;
+    Relation    attrelation;
+    HeapTuple    heapTup;
+    Form_pg_attribute attTup;
+    AttrNumber    attnum;
+    ObjectAddress address;
+
+    /* ignore if event trigger context not set, or collection disabled */
+    if (!currentEventTriggerState || currentEventTriggerState->commandCollectionInhibited) {
+        return;
+    }
+
+    Assert(IsA(subcmd, AlterTableCmd));
+    Assert(subcmd->subtype == AT_AlterColumnType);
+    Assert(currentEventTriggerState->currentCommand != NULL);
+    Assert(OidIsValid(currentEventTriggerState->currentCommand->d.alterTable.objectId));
+
+    def = (ColumnDef *) subcmd->def;
+    Assert(IsA(def, ColumnDef));
+
+    oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+    newsub = (CollectedATSubcmd*) palloc(sizeof(CollectedATSubcmd));
+    newsub->parsetree = (Node *)copyObject(subcmd);
+
+    attrelation = table_open(AttributeRelationId, RowExclusiveLock);
+
+    /* Look up the target column */
+    heapTup = SearchSysCacheCopyAttName(RelationGetRelid(rel), subcmd->name);
+    if (!HeapTupleIsValid(heapTup)) /* shouldn't happen */
+        ereport(ERROR,
+                (
+                errmsg("column \"%s\" of relation \"%s\" does not exist",
+                       subcmd->name, RelationGetRelationName(rel))));
+
+    attTup = (Form_pg_attribute) GETSTRUCT(heapTup);
+    attnum = attTup->attnum;
+
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    heap_freetuple(heapTup);
+    table_close(attrelation, RowExclusiveLock);
+    newsub->address = address;
+    newsub->usingexpr = NULL;
+
+    if (def->raw_default) {
+        OverrideSearchPath *overridePath;
+        char       *defexpr;
+
+        /*
+         * We want all object names to be qualified when deparsing the
+         * expression, so that results are "portable" to environments with
+         * different search_path settings. Rather than inject what would be
+         * repetitive calls to override search path all over the place, we do
+         * it centrally here.
+         */
+        if (def->cooked_default) {
+            defexpr = nodeToString(def->cooked_default);
+        } else {
+            ParseState* pstate = make_parsestate(NULL);
+            RangeTblEntry* rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
+            addRTEtoQuery(pstate, rte, false, true, true);
+            Node* transform = transformExpr(pstate, def->raw_default, EXPR_KIND_ALTER_COL_TRANSFORM);
+
+            AlterTableCmd *curcmd = (AlterTableCmd*)(newsub->parsetree);
+            ColumnDef *curdef = (ColumnDef *) curcmd->def;
+            curdef->cooked_default = transform;
+
+            defexpr = nodeToString(transform);
+        }
+
+        overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+        overridePath->schemas = NIL;
+        overridePath->addCatalog = false;
+        overridePath->addTemp = true;
+        PushOverrideSearchPath(overridePath);
+
+        newsub->usingexpr =
+            TextDatumGetCString(DirectFunctionCall2(pg_get_expr, CStringGetTextDatum(defexpr), RelationGetRelid(rel)));
+        PopOverrideSearchPath();
+    }
+
+    currentEventTriggerState->currentCommand->d.alterTable.subcmds =
+        lappend(currentEventTriggerState->currentCommand->d.alterTable.subcmds, newsub);
+
+    MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * EventTriggerAlterTypeEnd
+ *        Finish up saving an ALTER TYPE command, and add it to command list.
+ */
+void EventTriggerAlterTypeEnd(Node *subcmd, ObjectAddress address, int rewrite)
+{
+    MemoryContext oldcxt;
+    CollectedATSubcmd *newsub;
+    ListCell   *cell;
+    CollectedCommand *cmd;
+    AlterTableCmd *altsubcmd = (AlterTableCmd *)subcmd;
+
+    /* ignore if event trigger context not set, or collection disabled */
+    if (!currentEventTriggerState || currentEventTriggerState->commandCollectionInhibited) {
+        return;
+    }
+
+    cmd = currentEventTriggerState->currentCommand;
+
+    Assert(IsA(subcmd, AlterTableCmd));
+    Assert(cmd != NULL);
+    Assert(OidIsValid(cmd->d.alterTable.objectId));
+
+    foreach(cell, cmd->d.alterTable.subcmds) {
+        CollectedATSubcmd *sub = (CollectedATSubcmd *) lfirst(cell);
+        AlterTableCmd *collcmd = (AlterTableCmd *) sub->parsetree;
+
+        if (collcmd->subtype == altsubcmd->subtype &&
+            address.classId == sub->address.classId &&
+            address.objectId == sub->address.objectId &&
+            address.objectSubId == sub->address.objectSubId) {
+            cmd->d.alterTable.rewrite |= rewrite;
+            return;
+        }
+    }
+
+    oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+    newsub = (CollectedATSubcmd*)palloc(sizeof(CollectedATSubcmd));
+    newsub->address = address;
+    newsub->parsetree = (Node *) copyObject(subcmd);
+
+    cmd->d.alterTable.rewrite |= rewrite;
+    cmd->d.alterTable.subcmds = lappend(cmd->d.alterTable.subcmds, newsub);
+
+    MemoryContextSwitchTo(oldcxt);
+}
+
+void EventTriggerAlterTypeUpdate(ObjectAddress address, AttrNumber old_attnum)
+{
+    ListCell   *cell;
+    CollectedCommand *cmd;
+
+    /* ignore if event trigger context not set, or collection disabled */
+    if (!currentEventTriggerState || currentEventTriggerState->commandCollectionInhibited) {
+        return;
+    }
+
+    cmd = currentEventTriggerState->currentCommand;
+
+    Assert(cmd != NULL);
+    Assert(OidIsValid(cmd->d.alterTable.objectId));
+
+    foreach(cell, cmd->d.alterTable.subcmds) {
+        CollectedATSubcmd *sub = (CollectedATSubcmd *) lfirst(cell);
+        AlterTableCmd *collcmd = (AlterTableCmd *) sub->parsetree;
+
+        if (collcmd->subtype == AT_AlterColumnType&&
+            address.classId == sub->address.classId &&
+            address.objectId == sub->address.objectId &&
+            old_attnum == sub->address.objectSubId) {
+            sub->address.objectSubId = address.objectSubId;
+            return;
+        }
+    }
+}
+
  /*
   * EventTriggerAlterTableEnd
   *     Finish up saving an ALTER TABLE command, and add it to command list.

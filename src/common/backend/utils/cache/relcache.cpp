@@ -2312,6 +2312,7 @@ static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool b
         } else {
             relation->relreplident = CharGetDatum(datum);
         }
+
         /*
          * initialize the relation's relation id (relation->rd_id)
          */
@@ -5428,6 +5429,8 @@ void RelationCacheInvalidOid(Relation relation)
     HeapTuple htup;
     Form_pg_class relp;
     int natts = 0;
+    Datum datum;
+    bool isnull = false;
 
     htup = SearchSysCache1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
     if (!HeapTupleIsValid(htup))
@@ -7283,6 +7286,10 @@ struct PublicationActions* GetRelationPublicationActions(Relation relation)
         pubactions->pubinsert |= pubform->pubinsert;
         pubactions->pubupdate |= pubform->pubupdate;
         pubactions->pubdelete |= pubform->pubdelete;
+        pubactions->pubtruncate |= pubform->pubtruncate;
+
+        if (pubactions->pubddl != PUBDDL_ALL)
+            pubactions->pubddl |= pubform->pubddl;
 
         ReleaseSysCache(tup);
 
@@ -7290,7 +7297,9 @@ struct PublicationActions* GetRelationPublicationActions(Relation relation)
          * If we know everything is replicated, there is no point to check
          * for other publications.
          */
-        if (pubactions->pubinsert && pubactions->pubupdate && pubactions->pubdelete)
+        if (pubactions->pubinsert && pubactions->pubupdate &&
+            pubactions->pubdelete && pubactions->pubtruncate &&
+            pubactions->pubddl == PUBDDL_ALL)
             break;
     }
 
@@ -8763,6 +8772,7 @@ Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tu
     } else {
         relation->relreplident = CharGetDatum(datum);
     }
+
     /* 
      * If it's an index, initialize index-related information.
      * We modify RelationInitIndexAccessInfo interface to input index tuple which cached by ourself.

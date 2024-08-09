@@ -110,8 +110,7 @@ extern void EventTriggerCollectSimpleCommand(ObjectAddress address,
 
 extern void EventTriggerAlterTableStart(Node *parsetree);
 extern void EventTriggerAlterTableRelid(Oid objectId);
-extern void EventTriggerCollectAlterTableSubcmd(Node *subcmd,
-                                 ObjectAddress address);
+extern void EventTriggerCollectAlterTableSubcmd(Node *subcmd, ObjectAddress address, bool rewrite);
 extern void EventTriggerAlterTableEnd(void);
 
 extern void EventTriggerCollectGrant(InternalGrant *istmt);
@@ -124,6 +123,8 @@ extern void EventTriggerCollectCreateOpClass(CreateOpClassStmt *stmt,
 extern void EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt,
                                 Oid cfgId, Oid *dictIds, int ndicts);
 extern void EventTriggerCollectAlterDefPrivs(AlterDefaultPrivilegesStmt *stmt);
-
+extern void EventTriggerAlterTypeStart(AlterTableCmd *subcmd, Relation rel);
+extern void EventTriggerAlterTypeEnd(Node *subcmd, ObjectAddress address, int rewrite);
+extern void EventTriggerAlterTypeUpdate(ObjectAddress address, AttrNumber old_attnum);
 #endif   /* EVENT_TRIGGER_H */
 

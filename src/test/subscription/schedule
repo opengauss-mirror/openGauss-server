@@ -1,4 +1,5 @@
 rep_changes
+ddl_replication
 pub_switchover
 types
 constraints
@@ -15,5 +16,4 @@ skiplsn
 disable
 pub_subconflict
 bugs
-ddl_replication
 dump

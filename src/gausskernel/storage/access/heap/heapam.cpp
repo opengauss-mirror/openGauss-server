@@ -9550,6 +9550,13 @@ void heap3_redo(XLogReaderState* record)
         case XLOG_HEAP3_INVALID:
             heap_xlog_invalid(record);
             break;
+        case XLOG_HEAP3_TRUNCATE:
+            /*
+             * TRUNCATE is a no-op because the actions are already logged as
+             * SMGR WAL records.  TRUNCATE WAL record only exists for logical
+             * decoding.
+             */
+            break;
         default:
             ereport(PANIC, (errmsg("heap3_redo: unknown op code %hhu", info)));
     }

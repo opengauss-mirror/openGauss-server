@@ -1,0 +1,4 @@
+386c386
+<     CONSTRAINT at4acc_test1 CHECK (((test OPERATOR(dolphin_catalog.+) test2) < (test3 OPERATOR(dolphin_catalog.*) 4)))
+---
+>     CONSTRAINT at4acc_test1 CHECK ((((test)::bigint + (test2)::bigint) < ((test3)::bigint * (4)::bigint)))

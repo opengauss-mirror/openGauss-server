@@ -43,6 +43,9 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
 static void pgoutput_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
 static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, Relation rel,
     ReorderBufferChange *change);
+static void pgoutput_truncate(LogicalDecodingContext *ctx,
+                              ReorderBufferTXN *txn, int nrelations, Relation relations[],
+                              ReorderBufferChange *change);
 static void pgoutput_ddl(LogicalDecodingContext *ctx,
                          ReorderBufferTXN *txn, XLogRecPtr message_lsn,
                          const char *prefix, Oid relid,
@@ -60,6 +63,7 @@ typedef struct PGOutputTxnData
 {
     bool sent_begin_txn;    /* flag indicating where BEGIN has been set */
     List *deleted_relids;   /* maintain list of deleted table oids */
+    List       *deleted_typeids;  /* maintain list of deleted type oids */
 } PGOutputTxnData;
 
 /* Entry in the map used to remember which relation schemas we sent. */
@@ -86,6 +90,7 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
     cb->startup_cb = pgoutput_startup;
     cb->begin_cb = pgoutput_begin_txn;
     cb->change_cb = pgoutput_change;
+    cb->truncate_cb = pgoutput_truncate;
     cb->commit_cb = pgoutput_commit_txn;
     cb->abort_cb = pgoutput_abort_txn;
     cb->filter_by_origin_cb = pgoutput_origin_filter;
@@ -163,6 +168,7 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
 
     /* This plugin uses binary protocol. */
     opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
+    opt->receive_rewrites = true;
 
     /*
      * This is replication start and not slot initialization.
@@ -225,6 +231,7 @@ clean_txn_data(ReorderBufferTXN *txn)
         return;
 
     list_free(txndata->deleted_relids);
+    list_free(txndata->deleted_typeids);
     pfree(txndata);
     txn->output_plugin_private = NULL;
 }
@@ -368,6 +375,22 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     PGOutputData *data = (PGOutputData *)ctx->output_plugin_private;
     MemoryContext old;
     RelationSyncEntry *relentry;
+    Oid relrewrite = RelationGetRelrewriteOption(relation);
+    bool table_rewrite = false;
+
+    if (OidIsValid(relrewrite)) {
+        table_rewrite = true;
+        relation = RelationIdGetRelation(relrewrite);
+    
+        if (REORDER_BUFFER_CHANGE_INSERT == change->action) {
+            Oid replidindex = RelationGetReplicaIndex(relation);
+            if (!OidIsValid(replidindex)) {
+                return;
+            }
+        } else if (REORDER_BUFFER_CHANGE_UPDATE != change->action) {
+            return;
+        }
+    }
 
     if (!is_publishable_relation(relation))
         return;
@@ -375,6 +398,14 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     relentry = get_rel_sync_entry(data, RelationGetRelid(relation));
     /* First check the table filter */
     if (!CheckAction(change->action, relentry->pubactions)) {
+        return;
+    }
+
+    /*
+     * We don't publish table rewrite change unless we publish the rewrite ddl
+     * message.
+     */
+    if (table_rewrite && relentry->pubactions.pubddl == PUBDDL_NONE) {
         return;
     }
 
@@ -391,7 +422,17 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
         case REORDER_BUFFER_CHANGE_INSERT:
             if (change->data.tp.newtuple != NULL) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
+                /*
+                * Convert the rewrite inserts to updates so that the subscriber
+                * can replay it. This is needed to make sure the data between
+                * publisher and subscriber is consistent.
+                */
+                if (table_rewrite) {
+                    logicalrep_write_update(ctx->out, relation,
+                                            NULL, &change->data.tp.newtuple->tuple, data->binary);
+                } else {
+                    logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
+                }
                 OutputPluginWrite(ctx, true);
             }
             break;
@@ -450,10 +491,53 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     MemoryContextReset(data->common.context);
 }
 
+static void pgoutput_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+                              int nrelations, Relation relations[], ReorderBufferChange *change)
+{
+    PGOutputData *data = (PGOutputData *) ctx->output_plugin_private;
+    MemoryContext old;
+    RelationSyncEntry *relentry;
+    int i;
+    int nrelids;
+    Oid *relids;
+
+    old = MemoryContextSwitchTo(data->common.context);
+
+    relids = (Oid*)palloc0(nrelations * sizeof(Oid));
+    nrelids = 0;
+
+    for (i = 0; i < nrelations; i++) {
+        Relation    relation = relations[i];
+        Oid            relid = RelationGetRelid(relation);
+
+        if (!is_publishable_relation(relation)) {
+            continue;
+        }
+
+        relentry = get_rel_sync_entry(data, relid);
+        if (!relentry->pubactions.pubtruncate) {
+            continue;
+        }
+
+        relids[nrelids++] = relid;
+        MaybeSendSchema(ctx, relation, relentry);
+    }
+
+    if (nrelids > 0) {
+        OutputPluginPrepareWrite(ctx, true);
+        logicalrep_write_truncate(ctx->out,
+                                  nrelids,
+                                  relids,
+                                  change->data.truncate.cascade,
+                                  change->data.truncate.restart_seqs);
+        OutputPluginWrite(ctx, true);
+    }
+    MemoryContextSwitchTo(old);
+    MemoryContextReset(data->common.context);
+}
 
 /* Check if the given object is published. */
-static bool
-is_object_published_ddl(LogicalDecodingContext *ctx, Oid objid)
+static bool is_object_published_ddl(LogicalDecodingContext *ctx, Oid objid)
 {
     RelationSyncEntry *relentry;
     PGOutputData *data = (PGOutputData *) ctx->output_plugin_private;
@@ -483,11 +567,8 @@ is_object_published_ddl(LogicalDecodingContext *ctx, Oid objid)
 /*
  * Send the decoded DDL message.
  */
-static void
-pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
-             XLogRecPtr message_lsn,
-             const char *prefix, Oid relid, DeparsedCommandType cmdtype,
-             Size sz, const char *message)
+static void pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr message_lsn, const char *prefix,
+                         Oid relid, DeparsedCommandType cmdtype, Size sz, const char *message)
 {
     PGOutputTxnData *txndata = (PGOutputTxnData *) txn->output_plugin_private;
 
@@ -496,7 +577,7 @@ pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
      * we cannot get the required information from the catalog, so we skip the
      * check for them.
      */
-    if (cmdtype != DCT_TableDropEnd && !is_object_published_ddl(ctx, relid)) {
+    if (cmdtype != DCT_TableDropEnd && cmdtype != DCT_TypeDropEnd && !is_object_published_ddl(ctx, relid)) {
         return;
     }
 
@@ -527,6 +608,61 @@ pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
                 return;
 
             txndata->deleted_relids = list_delete_oid(txndata->deleted_relids,
+                                                      relid);
+            break;
+
+        case DCT_TableAlter:
+
+            /*
+             * For table rewrite ddl, we first send the original ddl message
+             * to subscriber, then convert the upcoming rewrite INSERT to
+             * UPDATE and send them to subscriber so that the data between
+             * publisher and subscriber can always be consistent.
+             *
+             * We do this way because of two reason:
+             *
+             * (1) The data before the rewrite ddl could already be different
+             * among publisher and subscriber. To make sure the extra data in
+             * subscriber which doesn't exist in publisher also get rewritten,
+             * we need to let the subscriber execute the original rewrite ddl
+             * to rewrite all the data at first.
+             *
+             * (2) the data after executing rewrite ddl could be different
+             * among publisher and subscriber(due to different
+             * functions/operators used during rewrite), so we need to
+             * replicate the rewrite UPDATEs to keep the data consistent.
+             *
+             * TO IMPROVE: We could improve this by letting the subscriber
+             * only rewrite the extra data instead of doing fully rewrite and
+             * use the upcoming rewrite UPDATEs to rewrite the rest data.
+             * Besides, we may not need to send rewrite changes for all type
+             * of rewrite ddl, for example, it seems fine to skip sending
+             * rewrite changes for ALTER TABLE SET LOGGED as the data in the
+             * table doesn't actually be changed.
+             */
+            break;
+
+        case DCT_TypeDropStart: {
+                MemoryContext    old;
+
+                init_txn_data(ctx, txn);
+
+                txndata = (PGOutputTxnData *) txn->output_plugin_private;
+                
+                old = MemoryContextSwitchTo(ctx->context);
+
+                txndata->deleted_typeids = lappend_oid(txndata->deleted_typeids,
+                                                        relid);
+
+                MemoryContextSwitchTo(old);
+            }
+            return;
+
+        case DCT_TypeDropEnd:
+            if (!list_member_oid(txndata->deleted_typeids, relid)) {
+                return;
+            }
+            txndata->deleted_typeids = list_delete_oid(txndata->deleted_typeids,
                                                       relid);
             break;
 
@@ -691,6 +827,7 @@ static void RefreshRelationEntry(RelationSyncEntry *entry, PGOutputData *data, O
     entry->pubactions.pubinsert = false;
     entry->pubactions.pubupdate = false;
     entry->pubactions.pubdelete = false;
+    entry->pubactions.pubtruncate = false;
     entry->pubactions.pubddl = 0;
 
     foreach (lc, data->publications) {
@@ -722,14 +859,17 @@ static void RefreshRelationEntry(RelationSyncEntry *entry, PGOutputData *data, O
             entry->pubactions.pubinsert |= pub->pubactions.pubinsert;
             entry->pubactions.pubupdate |= pub->pubactions.pubupdate;
             entry->pubactions.pubdelete |= pub->pubactions.pubdelete;
+            entry->pubactions.pubtruncate |= pub->pubactions.pubtruncate;
             if (entry->pubactions.pubddl != PUBDDL_ALL) {
                 entry->pubactions.pubddl |= pub->pubactions.pubddl;
             }
         }
 
-        if (entry->pubactions.pubinsert && entry->pubactions.pubupdate && entry->pubactions.pubdelete &&
-            pub->pubactions.pubddl == PUBDDL_ALL)
-            break;
+        if (entry->pubactions.pubinsert && entry->pubactions.pubupdate &&
+            entry->pubactions.pubdelete && entry->pubactions.pubtruncate &&
+            pub->pubactions.pubddl == PUBDDL_ALL) {
+                break;
+            }
     }
 
     list_free_ext(pubids);

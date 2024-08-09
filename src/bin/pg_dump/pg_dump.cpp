@@ -302,6 +302,7 @@ const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
 const uint32 RB_OBJECT_VERSION_NUM = 92831;
 const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
+const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -4411,6 +4412,7 @@ void getPublications(Archive *fout)
     int i_pubinsert;
     int i_pubupdate;
     int i_pubdelete;
+    int i_pubtruncate = 0;
     int i_pubddl = 0;
     int i, ntups;
 
@@ -4423,7 +4425,14 @@ void getPublications(Archive *fout)
     resetPQExpBuffer(query);
 
     /* Get the publications. */
-    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete, p.pubtruncate, p.pubddl "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
         appendPQExpBuffer(query,
             "SELECT p.tableoid, p.oid, p.pubname, "
             "(%s p.pubowner) AS rolname, "
@@ -4456,7 +4465,10 @@ void getPublications(Archive *fout)
     i_pubinsert = PQfnumber(res, "pubinsert");
     i_pubupdate = PQfnumber(res, "pubupdate");
     i_pubdelete = PQfnumber(res, "pubdelete");
-    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        i_pubtruncate = PQfnumber(res, "pubtruncate");
+        i_pubddl = PQfnumber(res, "pubddl");
+    } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
         i_pubddl = PQfnumber(res, "pubddl");
     }
 
@@ -4473,7 +4485,10 @@ void getPublications(Archive *fout)
         pubinfo[i].pubinsert = (strcmp(PQgetvalue(res, i, i_pubinsert), "t") == 0);
         pubinfo[i].pubupdate = (strcmp(PQgetvalue(res, i, i_pubupdate), "t") == 0);
         pubinfo[i].pubdelete = (strcmp(PQgetvalue(res, i, i_pubdelete), "t") == 0);
-        if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+            pubinfo[i].pubtruncate = (strcmp(PQgetvalue(res, i, i_pubtruncate), "t") == 0);
+            pubinfo[i].pubddl = atoxid(PQgetvalue(res, i, i_pubddl));
+        } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
             pubinfo[i].pubddl = atol(PQgetvalue(res, i, i_pubddl));
         }
 
@@ -4536,6 +4551,14 @@ static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
             appendPQExpBufferStr(query, ", ");
         }
         appendPQExpBufferStr(query, "delete");
+        first = false;
+    }
+
+    if (pubinfo->pubtruncate) {
+        if (!first) {
+            appendPQExpBufferStr(query, ", ");
+        }
+        appendPQExpBufferStr(query, "truncate");
         first = false;
     }
 
@@ -23698,7 +23721,8 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
 static bool eventtrigger_filter(EventTriggerInfo *evtinfo)
 {
     static char *reserved_trigger_prefix[] = {PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
-                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START};
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START,
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_TBL_REWRITE};
     static const size_t triggerPrefixLength = sizeof(reserved_trigger_prefix) / sizeof(reserved_trigger_prefix[0]);
 
     for (size_t i = 0; i < triggerPrefixLength; ++i) {

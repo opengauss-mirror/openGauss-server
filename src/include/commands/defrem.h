@@ -210,10 +210,12 @@ extern Oid GetFunctionNodeGroupByFuncid(Oid funcid);
 extern Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt);
 
 /* commands/eventcmds.c */
-extern void CreateEventCommand(CreateEventStmt* stmt);
-extern void AlterEventCommand(AlterEventStmt* stmt);
+extern ObjectAddress CreateEventCommand(CreateEventStmt* stmt);
+extern ObjectAddress AlterEventCommand(AlterEventStmt* stmt);
 extern void DropEventCommand(DropEventStmt* stmt);
- 
+extern char* parseIntervalExprString(Node *intervalNode);
+extern char* parseTimeExprString(Node* timeExpr);
+
 #endif /* !FRONTEND_PARSER */
 extern DefElem* defWithOids(bool value);
 #endif /* DEFREM_H */

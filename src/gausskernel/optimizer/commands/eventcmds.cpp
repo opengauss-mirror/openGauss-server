@@ -199,6 +199,28 @@ Datum ParseIntevalExpr(Node *intervalNode)
     return CStringGetTextDatum(buf.data);
 }
 
+char* parseIntervalExprString(Node *intervalNode)
+{
+    char *res;
+    StringInfoData buf;
+    initStringInfo(&buf);
+
+    TypeCast *tc = (TypeCast *)intervalNode;
+    A_Const *ac = (A_Const *)tc->arg;
+    A_Const *tm = (A_Const *)lfirst(list_head(tc->typname->typmods));
+    const char *tm_str = NULL;
+    tm_str = IntervalTypmodParse(tm);
+    if (IsA(&ac->val, Integer)) {
+        char *quantity_str = (char *)palloc(INTERVAL_QUALITY_LENGTH);
+        pg_itoa((int)ac->val.val.ival, quantity_str);
+        appendStringInfo(&buf, " \'%s\' ", quantity_str);
+    } else if (IsA(&ac->val, String) || IsA(&ac->val, Float)) {
+        appendStringInfo(&buf, " \'%s\' ", (char *)ac->val.val.str);
+    }
+    appendStringInfo(&buf, "%s", tm_str);
+    return pstrdup(buf.data);
+}
+
 Datum ExecTimeExpr(Node *node)
 {
     /* Check whether the execution result of the time expression is of the timestamp type */
@@ -230,6 +252,14 @@ Datum ExecTimeExpr(Node *node)
     }
     FreeExecutorState(estate);
     return result;
+}
+
+char* parseTimeExprString(Node* timeEexpr)
+{
+    Datum timeres;
+
+    timeres = ExecTimeExpr(timeEexpr);
+    return DatumGetCString(DirectFunctionCall1(timestamp_out, timeres));
 }
 
 void GetTimeExecResult(CreateEventStmt *stmt, Datum &start_time, Datum &interval_time, Datum &end_time)
@@ -453,11 +483,20 @@ void CheckEventPrivilege(char* schema_name, char* event_name, AclMode mode, bool
     ReleaseSysCache(tup);
 }
 
-void CreateEventCommand(CreateEventStmt *stmt)
+ObjectAddress CreateEventCommand(CreateEventStmt *stmt)
 {
+    ObjectAddress myself;
+
     char *event_name_str = stmt->event_name->relname;
     char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
+    if (!stmt->event_name->schemaname) {
+        stmt->event_name->schemaname = pstrdup(schema_name_str);
+    }
     CheckEventPrivilege(schema_name_str, event_name_str, ACL_CREATE, true);
+
+    myself.classId = PgJobRelationId;
+    myself.objectId = 0;
+    myself.objectSubId = 0;
 
     Datum schema_name = DirectFunctionCall1(namein, CStringGetDatum(schema_name_str));
     Datum ev_name = CStringGetTextDatum(event_name_str);
@@ -465,7 +504,7 @@ void CreateEventCommand(CreateEventStmt *stmt)
     const short nrgs_job = ARG_19;
 
     if (CheckEventExists(ev_name, stmt->if_not_exists)) {
-        return;
+        return myself;
     }
 
     InitFunctionCallInfoData(ev_arg, NULL, nrgs_job, InvalidOid, NULL, NULL);
@@ -478,6 +517,8 @@ void CreateEventCommand(CreateEventStmt *stmt)
     PrepareFuncArg(stmt, ev_name, schema_name, &ev_arg);
 
     create_job_raw(&ev_arg);
+
+    return myself;
 }
 
 Datum GetInlineJobName(Datum ev_name)
@@ -837,10 +878,14 @@ void UpdatePgJobParam(AlterEventStmt *stmt, Datum ev_name)
     UpdateMultiJob(ev_name, values, nulls, replaces);
 }
 
-void AlterEventCommand(AlterEventStmt *stmt)
+ObjectAddress AlterEventCommand(AlterEventStmt *stmt)
 {
+    ObjectAddress myself;
     char *event_name_str = stmt->event_name->relname;
     char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
+    if (!stmt->event_name->schemaname) {
+        stmt->event_name->schemaname = pstrdup(schema_name_str);
+    }
 
     Datum ev_name = CStringGetTextDatum(event_name_str);
     CheckEventPrivilege(schema_name_str, event_name_str, ACL_USAGE, false);
@@ -859,13 +904,20 @@ void AlterEventCommand(AlterEventStmt *stmt)
     UpdateAttributeParam(stmt, ev_name);
     UpdatePgJobProcParam(stmt, ev_name);
     UpdatePgJobParam(stmt, ev_name);
+
+    myself.classId = PgJobRelationId;
+    myself.objectId = 0;
+    myself.objectSubId = 0;
+    return myself;
 }
 
 void DropEventCommand(DropEventStmt *stmt)
 {
     char *event_name_str = stmt->event_name->relname;
     char *schema_name_str = (stmt->event_name->schemaname) ? stmt->event_name->schemaname : get_real_search_schema();
-
+    if (!stmt->event_name->schemaname) {
+        stmt->event_name->schemaname = pstrdup(schema_name_str);
+    }
     Datum ev_name = CStringGetTextDatum(event_name_str);
     if (CheckEventNotExists(ev_name, stmt->missing_ok)) {
         return;

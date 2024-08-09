@@ -139,6 +139,7 @@
 #include "storage/tcap.h"
 #include "streaming/streaming_catalog.h"
 #include "tcop/utility.h"
+#include "tcop/ddldeparse.h"
 #include "utils/acl.h"
 #include "utils/aiomem.h"
 #include "utils/builtins.h"
@@ -278,6 +279,8 @@ typedef struct NewColumnValue {
     bool is_generated;     /* is it a GENERATED expression? */
     bool is_autoinc;
     bool is_addloc;          /* is add column first or after */
+    bool is_alter_using;          /* have alter type using clause */
+    bool make_dml_change;
     AttrNumber newattnum;   /* is modify column first or after
                                -1 denote add;
                                0 denote modify without first|after;
@@ -796,6 +799,37 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
 static void check_unsupported_charset_for_column(Oid collation, const char* col_name);
 static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
                                                 Oid nspOid, ObjectAddresses* objsMoved, char* newrelname);
+
+
+static inline void validate_relation_kind(Relation r)
+{
+	if (r->rd_rel->relkind == RELKIND_INDEX ||
+		// r->rd_rel->relkind == RELKIND_PARTITIONED_INDEX ||
+		r->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
+		elog(ERROR,
+				"cannot open relation \"%s\"",
+						RelationGetRelationName(r));
+}
+
+/* ----------------
+ *		table_open - open a table relation by relation OID
+ *
+ *		This is essentially relation_open plus check that the relation
+ *		is not an index nor a composite type.  (The caller should also
+ *		check that it's not a view or foreign table before assuming it has
+ *		storage.)
+ * ----------------
+ */
+Relation table_open(Oid relationId, LOCKMODE lockmode)
+{
+	Relation	r;
+
+	r = relation_open(relationId, lockmode);
+
+	validate_relation_kind(r);
+
+	return r;
+}
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
@@ -4292,15 +4326,9 @@ void ExecuteTruncate(TruncateStmt* stmt)
 {
     List* rels = NIL;
     List* relids = NIL;
-    List* seq_relids = NIL;
-    List* autoinc_seqoids = NIL;
+    List* relids_logged = NIL;
     List* rels_in_redis = NIL;
-    EState* estate = NULL;
-    ResultRelInfo* resultRelInfos = NULL;
-    ResultRelInfo* resultRelInfo = NULL;
-    SubTransactionId mySubid;
     ListCell* cell = NULL;
-    bool isDfsTruncate = false;
 #ifdef PGXC
     char* FirstExecNode = NULL;
     bool isFirstNode = false;
@@ -4430,6 +4458,10 @@ void ExecuteTruncate(TruncateStmt* stmt)
         rels = lappend(rels, rel);
         relids = lappend_oid(relids, myrelid);
 
+        /* Log this relation only if needed for logical decoding */
+        if (RelationIsLogicallyLogged(rel))
+            relids_logged = lappend_oid(relids_logged, myrelid);
+
         if (recurse) {
             ListCell* child = NULL;
             List* children = NIL;
@@ -4447,6 +4479,9 @@ void ExecuteTruncate(TruncateStmt* stmt)
                 truncate_check_rel(rel);
                 rels = lappend(rels, rel);
                 relids = lappend_oid(relids, childrelid);
+                /* Log this relation only if needed for logical decoding */
+                if (RelationIsLogicallyLogged(rel))
+                    relids_logged = lappend_oid(relids_logged, childrelid);
             }
         }
 
@@ -4518,21 +4553,66 @@ void ExecuteTruncate(TruncateStmt* stmt)
 #endif
     }
 
+    ExecuteTruncateGuts(rels, relids, relids_logged, rels_in_redis,
+                        stmt->behavior, stmt->restart_seqs, stmt);
+
+    /* And close the rels */
+    foreach(cell, rels)
+    {
+        Relation    rel = (Relation) lfirst(cell);
+
+        heap_close(rel, NoLock);
+    }
+}
+
+
+/*
+ * ExecuteTruncateGuts
+ *
+ * Internal implementation of TRUNCATE.  This is called by the actual TRUNCATE
+ * command (see above) as well as replication subscribers that execute a
+ * replicated TRUNCATE action.
+ *
+ * explicit_rels is the list of Relations to truncate that the command
+ * specified.  relids is the list of Oids corresponding to explicit_rels.
+ * relids_logged is the list of Oids (a subset of relids) that require
+ * WAL-logging.  This is all a bit redundant, but the existing callers have
+ * this information handy in this form.
+ */
+void ExecuteTruncateGuts(
+    List *explicit_rels, List *relids, List *relids_logged, List *rels_in_redis,
+    DropBehavior behavior, bool restart_seqs, TruncateStmt* stmt)
+{
+    List       *rels;
+    List       *seq_relids = NIL;
+    EState       *estate;
+    ResultRelInfo *resultRelInfos;
+    ResultRelInfo *resultRelInfo;
+    SubTransactionId mySubid;
+    ListCell   *cell;
+    Oid           *logrelids;
+    List* autoinc_seqoids = NIL;
+    bool isDfsTruncate = false;
+
     /*
-     * In CASCADE mode, suck in all referencing relations as well.	This
+     * Open, exclusive-lock, and check all the explicitly-specified relations
+     *
+     * In CASCADE mode, suck in all referencing relations as well.  This
      * requires multiple iterations to find indirectly-dependent relations. At
      * each phase, we need to exclusive-lock new rels before looking for their
-     * dependencies, else we might miss something.	Also, we check each rel as
+     * dependencies, else we might miss something.  Also, we check each rel as
      * soon as we open it, to avoid a faux pas such as holding lock for a long
      * time on a rel we have no permissions for.
      */
-    if (stmt->behavior == DROP_CASCADE) {
+    rels = list_copy(explicit_rels);
+    if (behavior == DROP_CASCADE) {
         for (;;) {
             List* newrelids = NIL;
 
             newrelids = heap_truncate_find_FKs(relids);
-            if (newrelids == NIL)
+            if (newrelids == NIL) {
                 break; /* nothing else to add */
+            }
 
             foreach (cell, newrelids) {
                 Oid relid = lfirst_oid(cell);
@@ -4547,6 +4627,9 @@ void ExecuteTruncate(TruncateStmt* stmt)
                 truncate_check_rel(rel);
                 rels = lappend(rels, rel);
                 relids = lappend_oid(relids, relid);
+                /* Log this relation only if needed for logical decoding */
+                if (RelationIsLogicallyLogged(rel))
+                    relids_logged = lappend_oid(relids_logged, relid);
             }
         }
     }
@@ -4559,7 +4642,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
 #ifdef USE_ASSERT_CHECKING
     heap_truncate_check_FKs(rels, false);
 #else
-    if (stmt->behavior == DROP_RESTRICT)
+    if (behavior == DROP_RESTRICT)
         heap_truncate_check_FKs(rels, false);
 #endif
 
@@ -4569,7 +4652,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
      * We want to do this early since it's pointless to do all the truncation
      * work only to fail on sequence permissions.
      */
-    if (stmt->restart_seqs) {
+    if (restart_seqs) {
         foreach (cell, rels) {
             Relation rel = (Relation)lfirst(cell);
             List* seqlist = getOwnedSequences(RelationGetRelid(rel));
@@ -4788,6 +4871,41 @@ void ExecuteTruncate(TruncateStmt* stmt)
     }
 
     /*
+     * Write a WAL record to allow this set of actions to be logically decoded.
+     *
+     * Assemble an array of relids so we can write a single WAL record for the
+     * whole action.
+     */
+    if (list_length(relids_logged) > 0)
+    {
+        xl_heap_truncate xlrec;
+        int            i = 0;
+
+        /* should only get here if wal_level >= logical */
+        Assert(XLogLogicalInfoActive());
+
+        logrelids = (Oid*)palloc(list_length(relids_logged) * sizeof(Oid));
+        foreach (cell, relids_logged)
+            logrelids[i++] = lfirst_oid(cell);
+
+        xlrec.dbId = u_sess->proc_cxt.MyDatabaseId;
+        xlrec.nrelids = list_length(relids_logged);
+        xlrec.flags = 0;
+        if (behavior == DROP_CASCADE)
+            xlrec.flags |= XLH_TRUNCATE_CASCADE;
+        if (restart_seqs)
+            xlrec.flags |= XLH_TRUNCATE_RESTART_SEQS;
+
+        XLogBeginInsert();
+        XLogRegisterData((char *) &xlrec, SizeOfHeapTruncate);
+        XLogRegisterData((char *) logrelids, list_length(relids_logged) * sizeof(Oid));
+
+        // XLogSetRecordFlags(XLOG_INCLUDE_ORIGIN);
+
+        (void) XLogInsert(RM_HEAP3_ID, XLOG_HEAP3_TRUNCATE);
+    }
+
+    /*
      * Process all AFTER STATEMENT TRUNCATE triggers.
      */
     resultRelInfo = resultRelInfos;
@@ -4798,86 +4916,88 @@ void ExecuteTruncate(TruncateStmt* stmt)
     }
 
 #ifdef ENABLE_MULTIPLE_NODES
-    /*
-     * In Postgres-XC, TRUNCATE needs to be launched to remote nodes before the
-     * AFTER triggers are launched. This insures that the triggers are being fired
-     * by correct events.
-     */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        if (u_sess->attr.attr_sql.enable_parallel_ddl && !isFirstNode) {
-            bool is_temp = false;
-            RemoteQuery* step = makeNode(RemoteQuery);
-            ExecNodes* exec_nodes = NULL;
+    if (stmt) {
+        /*
+         * In Postgres-XC, TRUNCATE needs to be launched to remote nodes before the
+         * AFTER triggers are launched. This insures that the triggers are being fired
+         * by correct events.
+         */
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            if (u_sess->attr.attr_sql.enable_parallel_ddl && !isFirstNode) {
+                bool is_temp = false;
+                RemoteQuery* step = makeNode(RemoteQuery);
+                ExecNodes* exec_nodes = NULL;
 
-            /* Check un-allowed case where truncate tables from different node groups */
-            if (!ObjectsInSameNodeGroup(stmt->relations, T_TruncateStmt)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("NOT-SUPPORT: Not support TRUNCATE multiple objects different nodegroup")));
-            }
-
-            foreach (cell, stmt->relations) {
-                Oid relid;
-                RangeVar* rel = (RangeVar*)lfirst(cell);
-
-                relid = RangeVarGetRelid(rel, NoLock, false);
-
-                if (exec_nodes == NULL) {
-                    exec_nodes = RelidGetExecNodes(relid);
+                /* Check un-allowed case where truncate tables from different node groups */
+                if (!ObjectsInSameNodeGroup(stmt->relations, T_TruncateStmt)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("NOT-SUPPORT: Not support TRUNCATE multiple objects different nodegroup")));
                 }
 
-                if (IsTempTable(relid)) {
-                    is_temp = true;
-                    break;
-                }
-            }
+                foreach (cell, stmt->relations) {
+                    Oid relid;
+                    RangeVar* rel = (RangeVar*)lfirst(cell);
 
-            step->combine_type = COMBINE_TYPE_SAME;
-            step->exec_nodes = exec_nodes;
-            step->sql_statement = pstrdup(sql_statement);
-            step->force_autocommit = false;
-            step->exec_type = EXEC_ON_DATANODES;
-            step->is_temp = is_temp;
-            ExecRemoteUtility_ParallelDDLMode(step, FirstExecNode);
-            pfree_ext(step->sql_statement);
-            pfree_ext(step);
-        } else {
-            bool is_temp = false;
-            RemoteQuery* step = makeNode(RemoteQuery);
-            ExecNodes* exec_nodes = NULL;
+                    relid = RangeVarGetRelid(rel, NoLock, false);
 
-            /* Check un-allowed case where truncate tables from different node groups */
-            if (!ObjectsInSameNodeGroup(stmt->relations, T_TruncateStmt)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("NOT-SUPPORT: Not support TRUNCATE multiple objects different nodegroup")));
-            }
+                    if (exec_nodes == NULL) {
+                        exec_nodes = RelidGetExecNodes(relid);
+                    }
 
-            foreach (cell, stmt->relations) {
-                Oid relid;
-                RangeVar* rel = (RangeVar*)lfirst(cell);
-
-                relid = RangeVarGetRelid(rel, NoLock, false);
-
-                if (exec_nodes == NULL) {
-                    exec_nodes = RelidGetExecNodes(relid);
+                    if (IsTempTable(relid)) {
+                        is_temp = true;
+                        break;
+                    }
                 }
 
-                if (IsTempTable(relid)) {
-                    is_temp = true;
-                    break;
-                }
-            }
+                step->combine_type = COMBINE_TYPE_SAME;
+                step->exec_nodes = exec_nodes;
+                step->sql_statement = pstrdup(sql_statement);
+                step->force_autocommit = false;
+                step->exec_type = EXEC_ON_DATANODES;
+                step->is_temp = is_temp;
+                ExecRemoteUtility_ParallelDDLMode(step, FirstExecNode);
+                pfree_ext(step->sql_statement);
+                pfree_ext(step);
+            } else {
+                bool is_temp = false;
+                RemoteQuery* step = makeNode(RemoteQuery);
+                ExecNodes* exec_nodes = NULL;
 
-            step->combine_type = COMBINE_TYPE_SAME;
-            step->exec_nodes = exec_nodes;
-            step->sql_statement = pstrdup(sql_statement);
-            step->force_autocommit = false;
-            step->exec_type = is_temp ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES;
-            step->is_temp = is_temp;
-            ExecRemoteUtility(step);
-            pfree_ext(step->sql_statement);
-            pfree_ext(step);
+                /* Check un-allowed case where truncate tables from different node groups */
+                if (!ObjectsInSameNodeGroup(stmt->relations, T_TruncateStmt)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("NOT-SUPPORT: Not support TRUNCATE multiple objects different nodegroup")));
+                }
+
+                foreach (cell, stmt->relations) {
+                    Oid relid;
+                    RangeVar* rel = (RangeVar*)lfirst(cell);
+
+                    relid = RangeVarGetRelid(rel, NoLock, false);
+
+                    if (exec_nodes == NULL) {
+                        exec_nodes = RelidGetExecNodes(relid);
+                    }
+
+                    if (IsTempTable(relid)) {
+                        is_temp = true;
+                        break;
+                    }
+                }
+
+                step->combine_type = COMBINE_TYPE_SAME;
+                step->exec_nodes = exec_nodes;
+                step->sql_statement = pstrdup(sql_statement);
+                step->force_autocommit = false;
+                step->exec_type = is_temp ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES;
+                step->is_temp = is_temp;
+                ExecRemoteUtility(step);
+                pfree_ext(step->sql_statement);
+                pfree_ext(step);
+            }
         }
     }
 #endif
@@ -4904,7 +5024,11 @@ void ExecuteTruncate(TruncateStmt* stmt)
     /* We can clean up the EState now */
     FreeExecutorState(estate);
 
-    /* And close the rels (can't do this while EState still holds refs) */
+    /*
+     * Close any rels opened by CASCADE (can't do this while EState still
+     * holds refs)
+     */
+    rels = list_difference_ptr(rels, explicit_rels);
     foreach (cell, rels) {
         Relation rel = (Relation)lfirst(cell);
 
@@ -6418,6 +6542,14 @@ static ObjectAddress RenameTableFeature(RenameStmt* stmt)
         storageTable[tableName_Count].schemaname = pstrdup(orgiSchema);
         storageTable[tableName_Count].relname = pstrdup(orgitable);
         tableName_Count++;
+
+        if (temp_name->schemaname == NULL) {
+            if (t_thrd.mem_cxt.msg_mem_cxt) {
+                temp_name->schemaname = MemoryContextStrdup(t_thrd.mem_cxt.msg_mem_cxt, orgiSchema);
+            } else {
+                temp_name->schemaname = pstrdup(orgiSchema);
+            }
+        }
     }
 
     if (stmt->renameTargetList->length >= 2) {
@@ -6487,6 +6619,10 @@ static ObjectAddress RenameTableFeature(RenameStmt* stmt)
             /* if modfytable table has no schema specified,
              * it's the same as orgiNameSpace */
             modfyNameSpace = orgiNameSpace;
+        }
+
+        if (temp_name->schemaname == NULL) {
+            temp_name->schemaname = MemoryContextStrdup(t_thrd.mem_cxt.msg_mem_cxt, orgiSchema);
         }
 
         /* Check whether exist Synonym on old table name and new table name */
@@ -6960,6 +7096,67 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema
      * Close rel, but keep exclusive lock!
      */
     relation_close(targetrelation, NoLock);
+}
+
+/*
+ *		ResetRelRewrite - reset relrewrite
+ */
+void ResetRelRewrite(Oid myrelid)
+{
+    HeapTuple newTuple;
+    Relation pg_class;
+    HeapTuple tuple;
+    Datum relOptions;
+    Datum newOptions;
+    List* defList = NIL;
+    Datum replVal[Natts_pg_class];
+    bool replNull[Natts_pg_class];
+    bool replRepl[Natts_pg_class];
+    bool isNull = false;
+    bool removed = false;
+    errno_t rc;
+
+    /*
+     * Find relation's pg_class tuple.
+     */
+    pg_class = heap_open(RelationRelationId, RowExclusiveLock);
+    tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(myrelid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not find tuple for relation %u", myrelid)));
+    }
+
+    relOptions = fastgetattr(tuple, Anum_pg_class_reloptions, RelationGetDescr(pg_class), &isNull);
+    if (!isNull) {
+        defList = untransformRelOptions(relOptions);
+        defList = RemoveRelOption(defList, "relrewrite", &removed);
+        if (removed) {
+            newOptions = transformRelOptions((Datum)0, defList, NULL, NULL, false, false);
+
+            rc = memset_s(replVal, sizeof(replVal), 0, sizeof(replVal));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(replNull, sizeof(replNull), false, sizeof(replNull));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(replRepl, sizeof(replRepl), false, sizeof(replRepl));
+            securec_check(rc, "\0", "\0");
+            if (PointerIsValid(newOptions)) {
+                replVal[Anum_pg_class_reloptions - 1] = newOptions;
+                replNull[Anum_pg_class_reloptions - 1] = false;
+            } else {
+                replNull[Anum_pg_class_reloptions - 1] = true;
+            }
+            replRepl[Anum_pg_class_reloptions - 1] = true;
+            newTuple = heap_modify_tuple(tuple, RelationGetDescr(pg_class), replVal, replNull, replRepl);
+            simple_heap_update(pg_class, &newTuple->t_self, newTuple);
+            CatalogUpdateIndexes(pg_class, newTuple);
+
+            heap_freetuple_ext(newTuple);
+        }
+        list_free_ext(defList);
+    }
+    heap_freetuple_ext(tuple);
+
+    heap_close(pg_class, RowExclusiveLock);
 }
 
 /*
@@ -7534,7 +7731,7 @@ typedef enum {
  * 4. the default value is actually null
  */
 static AT_INSTANT_DEFAULT_VALUE shouldUpdateAllTuples(
-    Expr* defaultExpr, Oid typeOid, int attLen, bool attByVal, bytea** defaultVal)
+    Expr* defaultExpr, Oid typeOid, int attLen, bool attByVal, bytea** defaultVal, char** initdefval)
 {
     bool isNull = false;
     int i;
@@ -7609,6 +7806,13 @@ static AT_INSTANT_DEFAULT_VALUE shouldUpdateAllTuples(
     (void)MemoryContextSwitchTo(oldcxt);
 
     if (!isNull) {
+        if (initdefval) {
+            Oid typoutput = 0;
+            bool typisvarlena = false;
+            getTypeOutputInfo(typeOid, &typoutput, &typisvarlena);
+            *initdefval = pstrdup(OidOutputFunctionCall(typoutput, value));
+        }
+
         if (attByVal) {
             result = (bytea*)palloc(attLen + VARHDRSZ);
             SET_VARSIZE(result, attLen + VARHDRSZ);
@@ -8258,6 +8462,8 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
      * numbers in different children).
      */
     cmd = (AlterTableCmd*)copyObject(cmd);
+
+    cmd->recursing = recursing;
     /*
      * Do permissions checking, recursion to child tables if needed, and any
      * additional phase-1 processing needed.
@@ -8409,6 +8615,7 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             break;
         case AT_AlterColumnType: /* ALTER COLUMN TYPE */
             ATSimplePermissions(rel, ATT_TABLE | ATT_COMPOSITE_TYPE | ATT_FOREIGN_TABLE);
+            EventTriggerAlterTypeStart(cmd, rel);
             /* Performs own recursion */
             ATPrepAlterColumnType(wqueue, tab, rel, recurse, recursing, cmd, lockmode);
             pass = AT_PASS_ALTER_TYPE;
@@ -9060,6 +9267,7 @@ static void ATCreateColumComments(Oid relOid, ColumnDef* columnDef)
 static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode, bool fromReplace)
 {
     ObjectAddress address = InvalidObjectAddress;
+    bool commandCollected = false;
     elog(ES_LOGLEVEL, "[ATExecCmd] cmd subtype: %d", cmd->subtype);
 
     if (PARTITION_DDL_CMD(cmd->subtype) && RELATION_IS_PARTITIONED(rel)) {
@@ -9107,9 +9315,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
         case AT_AddStatistics: /* ADD STATISTICS */
             ATExecAddStatistics(rel, cmd->def, lockmode);
+            /* prepare work es_check_alter_table_statistics broken the cmd->def, don't pass to event trigger */
+            commandCollected = true;
             break;
         case AT_DeleteStatistics: /* DELETE STATISTICS */
             ATExecDeleteStatistics(rel, cmd->def, lockmode);
+            commandCollected = true;
             break;
         case AT_SetOptions: /* ALTER COLUMN SET ( options ) */
             address = ATExecSetOptions(rel, cmd->name, cmd->def, false, lockmode);
@@ -9204,6 +9415,8 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
         case AT_AlterColumnType: /* ALTER COLUMN TYPE */
             address = ATExecAlterColumnType(tab, rel, cmd, lockmode);
+            EventTriggerAlterTypeEnd((Node *) cmd, address, tab->rewrite);
+            commandCollected = true;
             break;
         case AT_AlterColumnGenericOptions: /* ALTER COLUMN OPTIONS */
             address = ATExecAlterColumnGenericOptions(rel, cmd->name, (List*)cmd->def, lockmode);
@@ -9398,12 +9611,6 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         UpdatePgObjectMtime(tab->relid, objectType);
     }
 
-    /*
-     * Report the subcommand to interested event triggers.
-     */
-    EventTriggerCollectAlterTableSubcmd((Node *) cmd, address);
-
-
     /* take ExclusiveLock to avoid PARTITION DDL COMMIT until we finish the InitPlan. Oid info will be masked here, and
      * be locked in CommitTransaction. Distribute mode doesn't support partition DDL/DML parallel work, no need this
      * action */
@@ -9412,6 +9619,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         AddPartitionDDLInfo(RelationGetRelid(rel));
     }
 #endif
+
+    /*
+     * Report the subcommand to interested event triggers.
+     */
+    if (cmd && !commandCollected)
+        EventTriggerCollectAlterTableSubcmd((Node *) cmd, address, tab->rewrite);
 
     /*
      * Bump the command counter to ensure the next subcommand in the sequence
@@ -9759,6 +9972,185 @@ static void UpdateGeneratedColumnIsnull(AlteredTableInfo* tab, bool* isnull, boo
     }
 }
 
+static void repl_update_addcolumn_default(AlteredTableInfo* tab, Relation oldrel,  Relation newrel, List* notnull_attrs)
+{
+    TupleDesc newTupDesc;
+    int i;
+    ListCell* l = NULL;
+    EState* estate = NULL;
+    CommandId mycid;
+    BulkInsertState bistate;
+    uint32 hi_options;
+    newTupDesc = RelationGetDescr(oldrel); /* includes all mods */
+
+    CommandCounterIncrement();
+
+    mycid = GetCurrentCommandId(true);
+
+    bistate = GetBulkInsertState();
+    hi_options = TABLE_INSERT_SKIP_FSM;
+
+    estate = CreateExecutorState();
+
+    ExprContext* econtext = NULL;
+    Datum* values = NULL;
+    bool* isnull = NULL;
+    bool* repl = NULL;
+    TupleTableSlot* newslot = NULL;
+    TableScanDesc scan;
+    HeapTuple tuple;
+    HeapTuple htup;
+    MemoryContext oldCxt;
+    errno_t rc = EOK;
+
+    /* estate has been freed, prepare again */
+    foreach (l, tab->constraints) {
+        NewConstraint* con = (NewConstraint*)lfirst(l);
+        if (con->isdisable)
+            continue;
+
+        switch (con->contype) {
+            case CONSTR_CHECK:
+                if (estate->es_is_flt_frame){
+                    con->qualstate = (List*)ExecPrepareExprList((List*)con->qual, estate);
+                } else {
+                    con->qualstate = (List*)ExecPrepareExpr((Expr*)con->qual, estate);
+                }
+                break;
+            case CONSTR_FOREIGN:
+                /* Nothing to do here */
+                break;
+            default: {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized constraint type: %d", (int)con->contype)));
+            } break;
+        }
+    }
+
+    econtext = GetPerTupleExprContext(estate);
+    newslot = MakeSingleTupleTableSlot(newTupDesc, false, oldrel->rd_tam_ops);
+
+    i = newTupDesc->natts;
+    values = (Datum*)palloc(i * sizeof(Datum));
+    isnull = (bool*)palloc(i * sizeof(bool));
+    repl = (bool*)palloc(i * sizeof(bool));
+    rc = memset_s(values, i * sizeof(Datum), 0, i * sizeof(Datum));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(isnull, i * sizeof(bool), true, i * sizeof(bool));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(repl, i * sizeof(bool), false, i * sizeof(bool));
+    securec_check(rc, "\0", "\0");
+
+
+    scan = tableam_scan_begin(newrel, SnapshotNow, 0, NULL);
+    oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+
+    ((HeapScanDesc) scan)->rs_tupdesc = newTupDesc;
+    while ((tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+        ItemPointer searchSlotTid;
+        searchSlotTid = tableam_tops_get_t_self(newrel, tuple);
+        tableam_tops_deform_tuple(tuple, newTupDesc, values, isnull);
+
+        (void)ExecStoreTuple(tuple, newslot, InvalidBuffer, false);
+                    econtext->ecxt_scantuple = newslot;
+
+        foreach (l, tab->newvals) {
+            NewColumnValue* ex = (NewColumnValue*)lfirst(l);
+            /* ex->attnum 可能不是最终的字段下标 */
+            if (ex->make_dml_change) {
+                int attnum = -1;
+                for (int n = 0; n < newTupDesc->natts; ++n) {
+                    Form_pg_attribute thisattr = &newTupDesc->attrs[n];
+
+                    /* skip the dropped and rewritted columns */
+                    if (!thisattr->attisdropped && ex->col_name &&
+                        pg_strcasecmp(ex->col_name, NameStr(thisattr->attname)) == 0) {
+                        attnum = thisattr->attnum;
+                        break;
+                    }
+                }
+
+                if (attnum <= 0) {
+                    ereport(ERROR, (
+                        errmsg("can not find column \"%s\"", ex->col_name)));
+                }
+
+                values[attnum - 1] = ExecEvalExpr(ex->exprstate, econtext, &isnull[attnum - 1], NULL);
+                repl[attnum - 1] = true;
+            }
+        }
+
+        htup = heap_modify_tuple(tuple, newTupDesc, values, isnull, repl);
+
+        /* Now check any constraints on the possibly-changed tuple */
+        (void)ExecStoreTuple(htup, newslot, InvalidBuffer, false);
+        econtext->ecxt_scantuple = newslot;
+
+        foreach (l, notnull_attrs) {
+            int attn = lfirst_int(l);
+
+            /* replace heap_attisnull with relationAttIsNull
+            * due to altering table instantly
+            */
+            if (relationAttIsNull(htup, attn + 1, newTupDesc))
+                ereport(ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                    errmsg("column \"%s\" contains null values", NameStr(newTupDesc->attrs[attn].attname))));
+        }
+
+        foreach (l, tab->constraints) {
+            NewConstraint* con = (NewConstraint*)lfirst(l);
+
+            switch (con->contype) {
+                case CONSTR_CHECK:
+                    if (!ExecQual(con->qualstate, econtext, true))
+                        ereport(ERROR,
+                            (errcode(ERRCODE_CHECK_VIOLATION),
+                                errmsg("check constraint \"%s\" is violated by some row", con->name)));
+                    break;
+                case CONSTR_FOREIGN:
+                    /* Nothing to do here */
+                    break;
+                default: {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized constraint type: %d", (int)con->contype)));
+                }
+            }
+        }
+
+
+        TM_FailureData tmfd;
+        bool updateIndexes = false;
+        Bitmapset *modifiedIdxAttrs = NULL;
+        bool allowInplaceUpdate = true;
+        
+        (void)tableam_tuple_update(newrel, NULL, searchSlotTid, htup, mycid, InvalidSnapshot, estate->es_snapshot, true, &newslot, &tmfd, &updateIndexes, &modifiedIdxAttrs,
+            false, allowInplaceUpdate);
+
+        ResetExprContext(econtext);
+
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    MemoryContextSwitchTo(oldCxt);
+    tableam_scan_end(scan);
+    ExecDropSingleTupleTableSlot(newslot);
+
+    FreeExecutorState(estate);
+    FreeBulkInsertState(bistate);
+    if (((hi_options & TABLE_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication()) &&
+        !RelationIsSegmentTable(newrel))
+        heap_sync(newrel);
+    /*
+        * After the temporary table is rewritten, the relfilenode changes.
+        * We need to find new TmptableCacheEntry with new relfilenode.
+        * Then set new auto_increment counter value in new TmptableCacheEntry.
+        */
+    CopyTempAutoIncrement(oldrel, newrel);
+
+}
+
 /*
  * change ATRewriteTable() input: oid->rel
  */
@@ -9782,6 +10174,9 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
 
     oldTupDesc = tab->oldDesc;
     newTupDesc = RelationGetDescr(oldrel); /* includes all mods */
+
+    bool repl_modify = false;
+    bool need_dml_change_col = false;
 
     /*
      * Prepare a BulkInsertState and options for heap_insert. Because we're
@@ -9834,11 +10229,27 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
         }
     }
 
+    if (newrel && RelationIsRowFormat(oldrel) && 
+        tab->rewrite > 0 && XLogLogicalInfoActive() &&
+        oldrel->rd_rel->relpersistence != RELPERSISTENCE_TEMP &&
+        oldrel->relreplident == REPLICA_IDENTITY_FULL) {
+
+        repl_modify = true;
+    }
+
     foreach (l, tab->newvals) {
         NewColumnValue* ex = (NewColumnValue*)lfirst(l);
 
         /* expr already planned */
         ex->exprstate = ExecInitExpr((Expr*)ex->expr, NULL);
+
+        if (ex->is_generated || ex->is_alter_using) {
+            repl_modify = false;
+        }
+
+        if (ex->make_dml_change) {
+            need_dml_change_col = true;
+        }
     }
 
     notnull_attrs = NIL;
@@ -10184,7 +10595,13 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                             continue;
                         }
 
-                        values[ex->attnum - 1] = ExecEvalExpr(ex->exprstate, econtext, &isnull[ex->attnum - 1]);
+                        if (repl_modify && ex->make_dml_change) {
+                            isnull[ex->attnum - 1] = true;
+                        } else {
+                            values[ex->attnum - 1] = ExecEvalExpr(ex->exprstate, econtext, &isnull[ex->attnum - 1]);
+                        }
+
+                        
                         if (ex->is_autoinc) {
                             need_autoinc = (autoinc_attnum > 0);
                         }
@@ -10230,61 +10647,74 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                  */
                 tuple = EvaluateGenExpr<HeapTuple, TAM_HEAP>(tab, tuple, newTupDesc, econtext, values, isnull);
 
-                foreach (l, notnull_attrs) {
-                    int attn = lfirst_int(l);
+                if (!repl_modify) {
+                    foreach (l, notnull_attrs) {
+                        int attn = lfirst_int(l);
 
-                    /* replace heap_attisnull with relationAttIsNull
-                     * due to altering table instantly
-                     */
-                    if (relationAttIsNull(tuple, attn + 1, newTupDesc))
-                        ereport(ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                            errmsg("column \"%s\" contains null values", NameStr(newTupDesc->attrs[attn].attname))));
-                }
+                        /* replace heap_attisnull with relationAttIsNull
+                        * due to altering table instantly
+                        */
+                        if (relationAttIsNull(tuple, attn + 1, newTupDesc))
+                            ereport(ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                                errmsg("column \"%s\" contains null values", NameStr(newTupDesc->attrs[attn].attname))));
+                    }
 
-                foreach (l, tab->constraints) {
-                    NewConstraint* con = (NewConstraint*)lfirst(l);
-                    ListCell* lc = NULL;
+                    foreach (l, tab->constraints) {
+                        NewConstraint* con = (NewConstraint*)lfirst(l);
+                        ListCell* lc = NULL;
 
-                    switch (con->contype) {
-                        case CONSTR_CHECK:
-                        {
-                            if (estate->es_is_flt_frame){
-                                foreach (lc, con->qualstate) {
-                                    ExprState* exprState = (ExprState*)lfirst(lc);
+                        switch (con->contype) {
+                            case CONSTR_CHECK:
+                            {
+                                if (estate->es_is_flt_frame){
+                                    foreach (lc, con->qualstate) {
+                                        ExprState* exprState = (ExprState*)lfirst(lc);
 
-                                    if (!ExecCheckByFlatten(exprState, econtext))
+                                        if (!ExecCheckByFlatten(exprState, econtext))
+                                            ereport(ERROR,
+                                                (errcode(ERRCODE_CHECK_VIOLATION),
+                                                    errmsg("check constraint \"%s\" is violated by some row",
+                                                            con->name)));
+                                    }
+                                } else {
+                                    if (!ExecQualByRecursion(con->qualstate, econtext, true)){
                                         ereport(ERROR,
-                                            (errcode(ERRCODE_CHECK_VIOLATION),
-                                                errmsg("check constraint \"%s\" is violated by some row",
-                                                        con->name)));
+                                                (errcode(ERRCODE_CHECK_VIOLATION),
+                                                    errmsg("check constraint \"%s\" is violated by some row",
+                                                            con->name)));
+                                    }
                                 }
-                            } else {
-                                if (!ExecQualByRecursion(con->qualstate, econtext, true)){
-                                    ereport(ERROR,
-                                            (errcode(ERRCODE_CHECK_VIOLATION),
-                                                errmsg("check constraint \"%s\" is violated by some row",
-                                                        con->name)));
                                 }
-                            }
-                            }
+                                    break;
+                            case CONSTR_FOREIGN:
+                                /* Nothing to do here */
                                 break;
-                        case CONSTR_FOREIGN:
-                            /* Nothing to do here */
-                            break;
-                        default: {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                                    errmsg("unrecognized constraint type: %d", (int)con->contype)));
+                            default: {
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                        errmsg("unrecognized constraint type: %d", (int)con->contype)));
+                            }
                         }
                     }
                 }
 
                 /* Write the tuple out to the new relation */
                 if (newrel) {
-                    (void)tableam_tuple_insert(newrel, tuple, mycid, hi_options, bistate);
+                    if (repl_modify) {
+                        /* deal with "add column c1 mytyp default expr"
+                         */
+                        tuple = (HeapTuple)heap_form_tuple(newTupDesc, values, isnull);
+                        (void)tableam_tuple_insert(newrel, tuple, mycid, hi_options, bistate);
 
-                    if (autoinc > 0) {
-                        SetRelAutoIncrement(oldrel, newTupDesc, autoinc);
+                        if (autoinc > 0) {
+                            SetRelAutoIncrement(oldrel, newTupDesc, autoinc);
+                        }
+                    } else {
+                        (void)tableam_tuple_insert(newrel, tuple, mycid, hi_options, bistate);
+
+                        if (autoinc > 0) {
+                            SetRelAutoIncrement(oldrel, newTupDesc, autoinc);
+                        }
                     }
                 }
                 ResetExprContext(econtext);
@@ -10321,6 +10751,10 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
          * Then set new auto_increment counter value in new TmptableCacheEntry.
          */
         CopyTempAutoIncrement(oldrel, newrel);
+    }
+
+    if (repl_modify) {
+        repl_update_addcolumn_default(tab, oldrel, newrel, notnull_attrs);
     }
 }
 
@@ -10913,7 +11347,7 @@ static void ATPrepCheckDefault(Node* node)
 }
 
 static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Expr* defval, _out_ AlteredTableInfo* tab,
-                                                ColumnDef  *colDef, bool is_autoinc, bool is_addloc)
+                                                ColumnDef  *colDef, bool is_autoinc, bool is_addloc, bool make_dml_change = false)
 {
     NewColumnValue* newval;
 
@@ -10928,6 +11362,7 @@ static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Exp
     newval->is_generated = (colDef->generatedCol != '\0');
     newval->col_name = pstrdup(colDef->colname);
     newval->is_autoinc = is_autoinc;
+    newval->make_dml_change = make_dml_change;
     tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
 }
 
@@ -13017,13 +13452,40 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
                         errmsg("It's not supported to alter table add column default with nextval expression.")));
             } else if (RelationIsCUFormat(rel)) {
                 ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, false);
-            } else if (tab->rewrite>0 || colDef->generatedCol ||
-                RelationUsesSpaceType(rel->rd_rel->relpersistence) == SP_TEMP) {
+            } else if (colDef->generatedCol ) {
                 ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true);
+            } else if (RelationUsesSpaceType(rel->rd_rel->relpersistence) == SP_TEMP) {
+                bytea* value = NULL;
+                colDef->initdefval = NULL;
+                (void)shouldUpdateAllTuples(defval, attribute.atttypid, attribute.attlen, attribute.attbyval, &value, &colDef->initdefval);
+                ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true);
+            } else if (tab->rewrite) {
+                bytea* value = NULL;
+                bool addcolumndef = false;
+
+                if (XLogLogicalInfoActive() && RelationIsRowFormat(rel)) {
+                    if (IsA(defval, Const) && constIsNull((Const*)defval)) {
+                        ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true);
+                    } else {
+                        colDef->initdefval = NULL;
+                        AT_INSTANT_DEFAULT_VALUE ret =
+                        shouldUpdateAllTuples(defval, attribute.atttypid, attribute.attlen, attribute.attbyval, &value, &colDef->initdefval);
+
+                        if (ret == DEFAULT_OTHER) {
+                            addcolumndef = true;
+                            colDef->initdefval = NULL;
+                        }
+                        
+                        ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true, addcolumndef);
+                    }
+                } else {
+                    ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, true);
+                }
             } else {
                 bytea* value = NULL;
+                colDef->initdefval = NULL;
                 AT_INSTANT_DEFAULT_VALUE ret =
-                    shouldUpdateAllTuples(defval, attribute.atttypid, attribute.attlen, attribute.attbyval, &value);
+                    shouldUpdateAllTuples(defval, attribute.atttypid, attribute.attlen, attribute.attbyval, &value, &colDef->initdefval);
 
                 if (ret == DEFAULT_NOT_NULL_CONST) {
                     Assert(value != NULL);
@@ -13035,6 +13497,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
                      */
                     testNotNull = false;
                 } else if (ret == DEFAULT_OTHER) {
+                    colDef->initdefval = NULL;
                     if (isDfsTable) {
                         ereport(ERROR,
                             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -13044,7 +13507,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
                                               "2. the storage length of default value may be greater than 127.\n"
                                               "3. the data type of new column is not supported."))));
                     }
-                    ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, false);
+                    ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, false, true);
                 }
                 /* nothing to do if ret is DEFAULT_NULL */
             }
@@ -16604,6 +17067,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
         newval->newattnum = 0;
         newval->col_name = pstrdup(colName);
         newval->generate_attnum = 0;
+        newval->is_alter_using = (def->raw_default ? true : false);
         newval->is_updated = false;
 
         tab->newvals = lappend(tab->newvals, newval);
@@ -18045,7 +18509,7 @@ static void AttachEachCommandInQueue(
                             con = (Constraint*)cmd->def;
                             con->old_pktable_oid = refRelId;
                             /* rewriting neither side of a FK */
-                            if (con->contype == CONSTR_FOREIGN && !rewrite && tab->rewrite <= 0)
+                            if (con->contype == CONSTR_FOREIGN && !rewrite && tab->rewrite == 0)
                                 TryReuseForeignKey(oldId, con);
                             cmd->subtype = AT_ReAddConstraint;
                             tab->subcmds[AT_PASS_OLD_CONSTR] = lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);

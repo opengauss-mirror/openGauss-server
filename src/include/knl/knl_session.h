@@ -2956,6 +2956,7 @@ typedef struct knl_u_hook_context {
     void *nullsMinimalPolicyHook;
     void *getIgnoreKeywordTokenHook;
     void *modifyTypeForPartitionKeyHook;
+    void *deparseCollectedCommandHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

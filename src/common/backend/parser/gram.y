@@ -17457,6 +17457,7 @@ AlterProcedureStmt:
 			ALTER PROCEDURE function_with_argtypes alterfunc_opt_list opt_restrict
 				{
 					AlterFunctionStmt *n = makeNode(AlterFunctionStmt);
+					n->isProcedure = true;
 					n->func = $3;
 					n->actions = $4;
 					$$ = (Node *) n;

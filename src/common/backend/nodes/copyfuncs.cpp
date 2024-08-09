@@ -4456,6 +4456,10 @@ static ColumnDef* _copyColumnDef(const ColumnDef* from)
     COPY_NODE_FIELD(clientLogicColumnRef);
     COPY_NODE_FIELD(position);
     COPY_NODE_FIELD(update_default);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_STRING_FIELD(initdefval);
+    }
+
     return newnode;
 }
 
@@ -5214,6 +5218,9 @@ static AlterTableCmd* _copyAlterTableCmd(const AlterTableCmd* from)
     COPY_SCALAR_FIELD(alterGPI);
     COPY_SCALAR_FIELD(is_first);
     COPY_STRING_FIELD(after_name);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(recursing);
+    }
 
     return newnode;
 }
@@ -5683,6 +5690,9 @@ static AlterFunctionStmt* _copyAlterFunctionStmt(const AlterFunctionStmt* from)
 
     COPY_NODE_FIELD(func);
     COPY_NODE_FIELD(actions);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isProcedure);
+    }
 
     return newnode;
 }
@@ -5733,6 +5743,9 @@ static RenameStmt* _copyRenameStmt(const RenameStmt* from)
     COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(renameTargetList);
     COPY_SCALAR_FIELD(renameTableflag);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(is_modifycolumn);
+    }
 
     return newnode;
 }
