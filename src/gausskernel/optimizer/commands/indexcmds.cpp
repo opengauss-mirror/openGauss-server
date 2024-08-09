@@ -1284,7 +1284,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         CheckPredicate((Expr*)stmt->whereClause);
 
     if (RelationIsUstoreFormat(rel)) {
-        DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
+        DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE_LOWER));
         if (stmt->options == NULL) {
             stmt->options = list_make1(def);
         } else {
