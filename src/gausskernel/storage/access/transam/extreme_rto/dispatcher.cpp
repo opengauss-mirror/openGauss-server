@@ -209,7 +209,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
 #ifdef ENABLE_MOT
     {DispatchMotRecord, NULL, RM_MOT_ID, 0, 0},
 #endif
-    { DispatchUHeapRecord, RmgrRecordInfoValid, RM_UHEAP_ID, XLOG_UHEAP_INSERT, XLOG_UHEAP_MULTI_INSERT },
+    { DispatchUHeapRecord, RmgrRecordInfoValid, RM_UHEAP_ID, XLOG_UHEAP_INSERT, XLOG_UHEAP_NEW_PAGE },
     { DispatchUHeap2Record, RmgrRecordInfoValid, RM_UHEAP2_ID, XLOG_UHEAP2_BASE_SHIFT, XLOG_UHEAP2_EXTEND_TD_SLOTS },
     { DispatchUHeapUndoRecord, RmgrRecordInfoValid, RM_UNDOLOG_ID, XLOG_UNDO_EXTEND, XLOG_UNDO_DISCARD },
     { DispatchUndoActionRecord, RmgrRecordInfoValid, RM_UHEAPUNDO_ID, 
@@ -1599,6 +1599,7 @@ static void GetUndoSlotIds(XLogReaderState *record)
         }
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
+        case XLOG_UHEAP_NEW_PAGE:
         case XLOG_UHEAP_CLEAN: {
             /* No undo actions to redo */
             return;

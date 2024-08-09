@@ -1827,6 +1827,14 @@ static void UHeapXlogFreeze(XLogReaderState *record)
         UnlockReleaseBuffer(buffer.buf);
     }
 }
+void UHeapXlogNewPage(XLogReaderState *record)
+{
+    RedoBufferInfo buffer = { 0 };
+    if (XLogReadBufferForRedo(record, UHEAP_NEWPAGE_ORIG_BLOCK_NUM, &buffer) != BLK_RESTORED) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unexpected result when restoring backup block")));
+    }
+    UnlockReleaseBuffer(buffer.buf);
+}
 
 void UHeapRedo(XLogReaderState *record)
 {
@@ -1857,6 +1865,9 @@ void UHeapRedo(XLogReaderState *record)
             break;
         case XLOG_UHEAP_MULTI_INSERT:
             UHeapXlogMultiInsert(record);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            UHeapXlogNewPage(record);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedo: unknown op code %u", (uint8)info)));

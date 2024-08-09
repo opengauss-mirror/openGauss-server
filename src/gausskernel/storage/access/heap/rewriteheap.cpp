@@ -294,8 +294,11 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
      * even new_heap is a partitional relation, its rd_rel is copied from its pareent
      * relation. so don't worry the compress property about new_heap;
      */
-    if (!RelationIsUstoreFormat(old_heap))
+    if (!RelationIsUstoreFormat(old_heap)) {
         state->rs_doCmprFlag = RowRelationIsCompressed(new_heap);
+    } else {
+        state->rs_doCmprFlag = false;
+    }
 
     if (state->rs_doCmprFlag) {
         state->rs_compressor = New(rw_cxt) PageCompress(new_heap, rw_cxt);
@@ -320,21 +323,23 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
         state->rs_size = 0;
     }
 
-    /* Initialize hash tables used to track update chains */
-    errorno = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
-    securec_check(errorno, "", "");
-    hash_ctl.keysize = sizeof(TidHashKey);
-    hash_ctl.entrysize = sizeof(UnresolvedTupData);
-    hash_ctl.hcxt = state->rs_cxt;
-    hash_ctl.hash = tag_hash;
+    if (!RelationIsUstoreFormat(old_heap)) {
+        /* Initialize hash tables used to track update chains */
+        errorno = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+        securec_check(errorno, "", "");
+        hash_ctl.keysize = sizeof(TidHashKey);
+        hash_ctl.entrysize = sizeof(UnresolvedTupData);
+        hash_ctl.hcxt = state->rs_cxt;
+        hash_ctl.hash = tag_hash;
 
-    state->rs_unresolved_tups = hash_create("Rewrite / Unresolved ctids", 128, /* arbitrary initial size */
-                                            &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        state->rs_unresolved_tups = hash_create("Rewrite / Unresolved ctids", 128, /* arbitrary initial size */
+                                                &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-    hash_ctl.entrysize = sizeof(OldToNewMappingData);
+        hash_ctl.entrysize = sizeof(OldToNewMappingData);
 
-    state->rs_old_new_tid_map = hash_create("Rewrite / Old to new tid map", 128, /* arbitrary initial size */
-                                            &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        state->rs_old_new_tid_map = hash_create("Rewrite / Old to new tid map", 128, /* arbitrary initial size */
+                                                &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    }
 
     (void)MemoryContextSwitchTo(old_cxt);
 
@@ -367,7 +372,11 @@ static void rewrite_write_one_page(RewriteState state, Page page)
         STORAGE_SPACE_OPERATION(state->rs_new_rel, BLCKSZ);
 
         if (state->rs_use_wal) {
-            log_newpage(&state->rs_new_rel->rd_node, MAIN_FORKNUM, state->rs_blockno, page, true, &tde_info);
+            if (!RelationIsUstoreFormat(state->rs_old_rel)) {
+                log_newpage(&state->rs_new_rel->rd_node, MAIN_FORKNUM, state->rs_blockno, page, true, &tde_info);
+            } else {
+                LogUHeapNewPage(&state->rs_new_rel->rd_node, MAIN_FORKNUM, state->rs_blockno, page, true, &tde_info);
+            }
         }
 
         RelationOpenSmgr(state->rs_new_rel);
@@ -416,13 +425,14 @@ void end_heap_rewrite(RewriteState state)
      * Write any remaining tuples in the UnresolvedTups table. If we have any
      * left, they should in fact be dead, but let's err on the safe side.
      */
-    hash_seq_init(&seq_status, state->rs_unresolved_tups);
+    if (!RelationIsUstoreFormat(state->rs_old_rel)) {
+        hash_seq_init(&seq_status, state->rs_unresolved_tups);
 
-    while ((unresolved = (UnresolvedTupData *)hash_seq_search(&seq_status)) != NULL) {
-        ItemPointerSetInvalid(&unresolved->tuple->t_data->t_ctid);
-        raw_heap_insert(state, unresolved->tuple);
+        while ((unresolved = (UnresolvedTupData *)hash_seq_search(&seq_status)) != NULL) {
+            ItemPointerSetInvalid(&unresolved->tuple->t_data->t_ctid);
+            raw_heap_insert(state, unresolved->tuple);
+        }
     }
-
     /* Write the last page, if any */
     if (state->rs_buffer_valid) {
         rewrite_write_one_page(state, state->rs_buffer);
@@ -1379,7 +1389,7 @@ static void RawUHeapInsert(RewriteState state, UHeapTuple tup)
     if (!state->rs_buffer_valid) {
         UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
         /* Initialize a new empty page */
-        UPageInit<UPAGE_HEAP>(page, BLCKSZ, UHEAP_SPECIAL_SIZE, RelationGetInitTd(state->rs_new_rel));
+        UPageInit<UPAGE_HEAP>(page, BLCKSZ, UHEAP_SPECIAL_SIZE, UHEAP_MIN_TD);
         uheappage->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
         uheappage->pd_multi_base = 0;
         state->rs_buffer_valid = true;

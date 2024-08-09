@@ -750,9 +750,6 @@ bool UHeapamTopsPageGetItem(Relation rel, Tuple tuple, Page page, OffsetNumber t
         return false;
     }
     uDiskTuple = (UHeapDiskTuple)UPageGetRowData(page, uTupleItem);
-    /* set freeze options for rows in merging file */
-    UHeapTupleHeaderSetTDSlot(uDiskTuple, UHEAPTUP_SLOT_FROZEN);
-
     ((UHeapTuple)tuple)->disk_tuple = uDiskTuple;
     ((UHeapTuple)tuple)->disk_tuple_size = RowPtrGetLen(uTupleItem);
     ((UHeapTuple)tuple)->tupTableType = UHEAP_TUPLE;
