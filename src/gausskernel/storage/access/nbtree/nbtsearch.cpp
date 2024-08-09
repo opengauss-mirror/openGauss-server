@@ -597,6 +597,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     bool status = true;
     StrategyNumber strat_total;
     BTScanPosItem *currItem = NULL;
+    bool match = false;
     BlockNumber blkno;
 
     pgstat_count_index_scan(rel);
@@ -800,7 +801,6 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
      * there.
      */
     if (keysCount == 0) {
-        bool        match;
         match = _bt_endpoint(scan, dir);
         if (!match) {
             /* No match, so mark (parallel) scan finished */
