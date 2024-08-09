@@ -2576,7 +2576,7 @@ static Const* _copyConst(const Const* from)
     COPY_SCALAR_FIELD(constcollid);
     COPY_SCALAR_FIELD(constlen);
 
-    if (from->constbyval || from->constisnull) {
+    if (from->constbyval || from->constisnull || from->constlen == 0) {
         /*
          * passed by value so just copy the datum. Also, don't try to copy
          * struct when value is null!
