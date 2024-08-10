@@ -467,197 +467,212 @@ static int OpenUndoBlock(int zoneId, BlockNumber blockno)
 
     return fd;
 }
-static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc tupDesc)
+static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc tupDesc,
+    TransactionId xid, UndoRecPtr startUrp)
 {
-    char buffer[BLCKSZ] = {'\0'};
-    BlockNumber blockno = UNDO_PTR_GET_BLOCK_NUM(urp);
-    int zoneId = UNDO_PTR_GET_ZONE_ID(urp);
-    int startingByte = ((urp) & ((UINT64CONST(1) << 44) - 1)) % BLCKSZ;
-    int fd = -1;
-    int alreadyRead = 0;
-    off_t seekpos;
-    errno_t rc = EOK;
-    uint32 ret = 0;
-    UndoRecPtr blkprev = INVALID_UNDO_REC_PTR;
-    UndoHeader *urec = (UndoHeader *)malloc(sizeof(UndoHeader));
-    if (!urec) {
-        fprintf(stderr, "malloc UndoHeader failed, out of memory\n");
-        return false;
-    }
-    rc = memset_s(urec, sizeof(UndoHeader), (0), sizeof(UndoHeader));
-    securec_check(rc, "\0", "\0");
     do {
-        CHECK_FOR_INTERRUPTS();
-        fd = OpenUndoBlock(zoneId, blockno);
-        if (fd < 0) {
-            free(urec);
+        char buffer[BLCKSZ] = {'\0'};
+        BlockNumber blockno = UNDO_PTR_GET_BLOCK_NUM(urp);
+        int zoneId = UNDO_PTR_GET_ZONE_ID(urp);
+        int startingByte = ((urp) & ((UINT64CONST(1) << 44) - 1)) % BLCKSZ;
+        int fd = -1;
+        int alreadyRead = 0;
+        off_t seekpos;
+        errno_t rc = EOK;
+        uint32 ret = 0;
+        UndoHeader *urec = (UndoHeader *)malloc(sizeof(UndoHeader));
+        if (!urec) {
+            fprintf(stderr, "malloc UndoHeader failed, out of memory\n");
             return false;
         }
-        seekpos = (off_t)BLCKSZ * (blockno % ((BlockNumber)UNDOSEG_SIZE));
-        lseek(fd, seekpos, SEEK_SET);
-        rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
+        rc = memset_s(urec, sizeof(UndoHeader), (0), sizeof(UndoHeader));
         securec_check(rc, "\0", "\0");
-        ret = read(fd, (char *)buffer, BLCKSZ);
-        if (ret != BLCKSZ) {
-            close(fd);
+        do {
+            CHECK_FOR_INTERRUPTS();
+            fd = OpenUndoBlock(zoneId, blockno);
+            if (fd < 0) {
+                free(urec);
+                return false;
+            }
+            seekpos = (off_t)BLCKSZ * (blockno % ((BlockNumber)UNDOSEG_SIZE));
+            lseek(fd, seekpos, SEEK_SET);
+            rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
+            securec_check(rc, "\0", "\0");
+            ret = read(fd, (char *)buffer, BLCKSZ);
+            if (ret != BLCKSZ) {
+                close(fd);
+                free(urec);
+                fprintf(stderr, "Read undo meta page failed, expect size(8192), real size(%u).\n", ret);
+                return false;
+            }
+            if (ReadUndoRecord(urec, buffer, startingByte, &alreadyRead)) {
+                break;
+            }
+            startingByte = UNDO_LOG_BLOCK_HEADER_SIZE;
+            blockno++;
+        } while (true);
+        if (TransactionIdIsValid(xid) && urec->whdr_.xid != xid) {
             free(urec);
-            fprintf(stderr, "Read undo meta page failed, expect size(8192), real size(%u).\n", ret);
-            return false;
-        }
-        if (ReadUndoRecord(urec, buffer, startingByte, &alreadyRead)) {
             break;
         }
-        startingByte = UNDO_LOG_BLOCK_HEADER_SIZE;
-        blockno++;
-    } while (true);
-    blkprev = urec->wblk_.blkprev;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    bool nulls[21] = {false};
-    Datum values[21];
+        char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
+        bool nulls[21] = {false};
+        Datum values[21];
 
-    rc = memset_s(textBuffer, STAT_UNDO_LOG_SIZE, 0, STAT_UNDO_LOG_SIZE);
-    securec_check(rc, "\0", "\0");
-    values[ARR_0] = ObjectIdGetDatum(urp);
-    values[ARR_1] = ObjectIdGetDatum(urec->whdr_.xid);
+        rc = memset_s(textBuffer, STAT_UNDO_LOG_SIZE, 0, STAT_UNDO_LOG_SIZE);
+        securec_check(rc, "\0", "\0");
+        values[ARR_0] = ObjectIdGetDatum(urp);
+        values[ARR_1] = ObjectIdGetDatum(urec->whdr_.xid);
 
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->whdr_.cid);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_2] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->whdr_.reloid);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_3] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-        urec->whdr_.relfilenode);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_4] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->whdr_.uinfo);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_5] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->wblk_.blkprev);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_6] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->wblk_.blkno);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_7] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->wblk_.offset);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_8] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, urec->wtxn_.prevurp);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_9] = CStringGetTextDatum(textBuffer);
-
-    rc =
-        snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-        UNDO_REC_PTR_FORMAT, urec->wpay_.payloadlen);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_10] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-        UNDO_REC_PTR_FORMAT, urec->wtd_.oldxactid);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_11] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-        UNDO_REC_PTR_FORMAT, urec->wpart_.partitionoid);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_12] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-        UNDO_REC_PTR_FORMAT, urec->wtspc_.tablespace);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_13] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, alreadyRead);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_14] = CStringGetTextDatum(textBuffer);
-
-    char prevLen[2];
-    UndoRecordSize byteToRead = sizeof(UndoRecordSize);
-    char *readptr = buffer + startingByte - byteToRead;
-    for (auto i = 0; i < byteToRead; i++) {
-        prevLen[i] = *readptr;
-        readptr++;
-    }
-    UndoRecordSize prevRecLen = *(UndoRecordSize *)(prevLen);
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_UFORMAT, prevRecLen);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_15] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_16] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_17] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_18] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_19] = CStringGetTextDatum(textBuffer);
-
-    rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
-    securec_check_ss(rc, "\0", "\0");
-    values[ARR_20] = CStringGetTextDatum(textBuffer);
-
-    if (urec->whdr_.utype != UNDO_INSERT && urec->whdr_.utype != UNDO_MULTI_INSERT &&
-        urec->rawdata_.len > 0 && urec->rawdata_.data != NULL) {
-        UHeapDiskTupleDataHeader diskTuple;
-        if (urec->whdr_.utype == UNDO_INPLACE_UPDATE) {
-            Assert(urec->rawdata_.len >= (int)SizeOfUHeapDiskTupleData);
-            errno_t rc = memcpy_s((char *)&diskTuple + OffsetTdId, SizeOfUHeapDiskTupleHeaderExceptXid,
-                urec->rawdata_.data + sizeof(uint8), SizeOfUHeapDiskTupleHeaderExceptXid);
-            securec_check(rc, "", "");
-            diskTuple.xid = (ShortTransactionId)InvalidTransactionId;
-        } else {
-            Assert(urec->rawdata_.len >= (int)SizeOfUHeapDiskTupleHeaderExceptXid);
-            errno_t rc = memcpy_s(((char *)&diskTuple + OffsetTdId), SizeOfUHeapDiskTupleHeaderExceptXid,
-                urec->rawdata_.data, SizeOfUHeapDiskTupleHeaderExceptXid);
-            securec_check(rc, "", "");
-            diskTuple.xid = (ShortTransactionId)InvalidTransactionId;
-        }
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_UFORMAT, diskTuple.td_id);
+            UNDO_REC_PTR_FORMAT, urec->whdr_.cid);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_2] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->whdr_.reloid);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_3] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->whdr_.relfilenode);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_4] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->whdr_.uinfo);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_5] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wblk_.blkprev);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_6] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wblk_.blkno);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_7] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wblk_.offset);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_8] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wtxn_.prevurp);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_9] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wpay_.payloadlen);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_10] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wtd_.oldxactid);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_11] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wpart_.partitionoid);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_12] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, urec->wtspc_.tablespace);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_13] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+            UNDO_REC_PTR_FORMAT, alreadyRead);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_14] = CStringGetTextDatum(textBuffer);
+
+        char prevLen[2];
+        UndoRecordSize byteToRead = sizeof(UndoRecordSize);
+        char *readptr = buffer + startingByte - byteToRead;
+        for (auto i = 0; i < byteToRead; i++) {
+            prevLen[i] = *readptr;
+            readptr++;
+        }
+        UndoRecordSize prevRecLen = *(UndoRecordSize *)(prevLen);
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_UFORMAT, prevRecLen);
+        securec_check_ss(rc, "\0", "\0");
+        values[ARR_15] = CStringGetTextDatum(textBuffer);
+
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_16] = CStringGetTextDatum(textBuffer);
 
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_UFORMAT, diskTuple.reserved);
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_17] = CStringGetTextDatum(textBuffer);
 
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_UFORMAT, diskTuple.flag);
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_18] = CStringGetTextDatum(textBuffer);
 
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_UFORMAT, diskTuple.flag2);
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_19] = CStringGetTextDatum(textBuffer);
 
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_UFORMAT, diskTuple.t_hoff);
+        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_DFORMAT, -1);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_20] = CStringGetTextDatum(textBuffer);
-    }
 
-    tuplestore_putvalues(tupstore, tupDesc, values, nulls);
-    free(urec);
-    close(fd);
-    if (blkprev != INVALID_UNDO_REC_PTR) {
-        ParseUndoRecord(blkprev, tupstore, tupDesc);
-    }
+        if (urec->whdr_.utype != UNDO_INSERT && urec->whdr_.utype != UNDO_MULTI_INSERT &&
+            urec->rawdata_.len > 0 && urec->rawdata_.data != NULL) {
+            UHeapDiskTupleDataHeader diskTuple;
+            if (urec->whdr_.utype == UNDO_INPLACE_UPDATE) {
+                Assert(urec->rawdata_.len >= (int)SizeOfUHeapDiskTupleData);
+                errno_t rc = memcpy_s((char *)&diskTuple + OffsetTdId, SizeOfUHeapDiskTupleHeaderExceptXid,
+                    urec->rawdata_.data + sizeof(uint8), SizeOfUHeapDiskTupleHeaderExceptXid);
+                securec_check(rc, "", "");
+                diskTuple.xid = (ShortTransactionId)InvalidTransactionId;
+            } else {
+                Assert(urec->rawdata_.len >= (int)SizeOfUHeapDiskTupleHeaderExceptXid);
+                errno_t rc = memcpy_s(((char *)&diskTuple + OffsetTdId), SizeOfUHeapDiskTupleHeaderExceptXid,
+                    urec->rawdata_.data, SizeOfUHeapDiskTupleHeaderExceptXid);
+                securec_check(rc, "", "");
+                diskTuple.xid = (ShortTransactionId)InvalidTransactionId;
+            }
+            rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+                UNDO_REC_PTR_UFORMAT, diskTuple.td_id);
+            securec_check_ss(rc, "\0", "\0");
+            values[ARR_16] = CStringGetTextDatum(textBuffer);
+
+            rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+                UNDO_REC_PTR_UFORMAT, diskTuple.reserved);
+            securec_check_ss(rc, "\0", "\0");
+            values[ARR_17] = CStringGetTextDatum(textBuffer);
+
+            rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+                UNDO_REC_PTR_UFORMAT, diskTuple.flag);
+            securec_check_ss(rc, "\0", "\0");
+            values[ARR_18] = CStringGetTextDatum(textBuffer);
+
+            rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+                UNDO_REC_PTR_UFORMAT, diskTuple.flag2);
+            securec_check_ss(rc, "\0", "\0");
+            values[ARR_19] = CStringGetTextDatum(textBuffer);
+
+            rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
+                UNDO_REC_PTR_UFORMAT, diskTuple.t_hoff);
+            securec_check_ss(rc, "\0", "\0");
+            values[ARR_20] = CStringGetTextDatum(textBuffer);
+        }
+
+        tuplestore_putvalues(tupstore, tupDesc, values, nulls);
+        free(urec);
+        close(fd);
+        if (TransactionIdIsValid(xid) && IS_VALID_UNDO_REC_PTR(startUrp) && urp > startUrp) {
+            urp = GetPrevUrp(urp);
+        } else {
+            break;
+        }
+    } while (true);
+    
     return true;
 }
 
@@ -2002,7 +2017,7 @@ Datum gs_undo_dump_record(PG_FUNCTION_ARGS)
         rsinfo->setDesc = tupDesc;
         MemoryContextSwitchTo(oldcontext);
     
-        ParseUndoRecord(undoptr, tupstore, tupDesc);
+        ParseUndoRecord(undoptr, tupstore, tupDesc, InvalidTransactionId, INVALID_UNDO_REC_PTR);
         tuplestore_donestoring(tupstore);
     
         PG_RETURN_VOID();
@@ -2064,7 +2079,7 @@ Datum gs_undo_dump_xid(PG_FUNCTION_ARGS)
         PG_RETURN_VOID();
     }
     UndoRecPtr undoptr = GetPrevUrp(miniSlot.endUndoPtr);
-    ParseUndoRecord(undoptr, tupstore, tupDesc);
+    ParseUndoRecord(undoptr, tupstore, tupDesc, xid, miniSlot.startUndoPtr);
     tuplestore_donestoring(tupstore);
 
     PG_RETURN_VOID();
@@ -2187,7 +2202,7 @@ Datum gs_undo_record(PG_FUNCTION_ARGS)
     rsinfo->setDesc = tupDesc;
     MemoryContextSwitchTo(oldcontext);
 
-    ParseUndoRecord(undoptr, tupstore, tupDesc);
+    ParseUndoRecord(undoptr, tupstore, tupDesc, InvalidTransactionId, INVALID_UNDO_REC_PTR);
     tuplestore_donestoring(tupstore);
 
     PG_RETURN_VOID();
