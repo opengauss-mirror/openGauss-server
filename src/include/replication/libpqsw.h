@@ -131,9 +131,10 @@ typedef struct {
 } RedirectState;
 
 // the max len =(PBEPBEDS) == 8, 20 is enough
-#define PBE_MESSAGE_STACK (20)
+#define PBE_MESSAGE_STACK (25)
 #define PBE_MESSAGE_MERGE_ID (PBE_MESSAGE_STACK - 1)
 #define PBE_MAX_SET_BLOCK (10)
+#define PBE_MESSAGE_MAX_CUR_FOR_PBE (PBE_MESSAGE_STACK - 6)
 enum RedirectType {
     RT_NORMAL, //transfer to standby
     RT_TXN_STATUS,
@@ -199,6 +200,11 @@ public:
     bool lots_of_message()
     {
         return list_length(messages) == PBE_MAX_SET_BLOCK;
+    }
+
+    int curpos_of_message()
+    {
+        return ((RedirectMessage *)llast(messages))->cur_pos;
     }
 
     // is pre last message S or Q
@@ -278,6 +284,11 @@ public:
         if (qtype == 'S' || qtype == 'Q') {
             return state.already_connected || messages_manager.lots_of_message();
         }
+
+        if (qtype == 'E' && messages_manager.curpos_of_message() > PBE_MESSAGE_MAX_CUR_FOR_PBE) {
+            return true;
+        }
+
         return false;
     }
 

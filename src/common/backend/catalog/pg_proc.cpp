@@ -1234,7 +1234,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
      * But when we are in inplace-upgrade, we can create function with polymorphic return type
      */
     if (!u_sess->attr.attr_common.enable_full_encryption && !u_sess->attr.attr_common.IsInplaceUpgrade &&
-        (fullEncryptedInParam || fullEncryptedOutParam || is_enc_type(returnType))) {
+        (fullEncryptedInParam || fullEncryptedOutParam || is_enc_type(returnType)) && t_thrd.role != SW_SENDER) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmsg("cannot create function"),
             errdetail("function does not support full encrypted type parameter when client encryption is disabled.")));
     }
