@@ -1343,6 +1343,11 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
     }
 #endif
 
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errmsg("SS Standby node does not support invoking autonomous transactions.")));
+    }
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (plcallstack.prev != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
         PLpgSQL_execstate* estate_tmp = (PLpgSQL_execstate*)(plcallstack.prev->elem);

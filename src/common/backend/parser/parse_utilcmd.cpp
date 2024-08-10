@@ -1324,7 +1324,7 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-        if (!u_sess->attr.attr_common.enable_full_encryption) {
+        if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
