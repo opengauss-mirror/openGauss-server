@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           164
+#define DMS_LOCAL_VERSION           165
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -1401,6 +1401,13 @@ typedef struct st_mes_task_priority_stats_info {
     unsigned long long finished_msgitem_num;
     unsigned long long msgitem_free_num;
 } mes_task_priority_stats_info_t;
+
+typedef struct st_mem_info_stat {
+    const char *area;
+    unsigned long long total;
+    unsigned long long used;
+    double used_percentage;
+} mem_info_stat_t;
 
 #ifdef __cplusplus
 }
