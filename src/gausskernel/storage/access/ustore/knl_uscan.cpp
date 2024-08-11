@@ -1637,8 +1637,8 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
     if (!scan->rs_base.rs_inited) {
         if (scan->rs_base.rs_nblocks == 0) {
             Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
-            tuple = NULL;
-            return tuple;
+            scan->rs_cutup = NULL;
+            return false;
         }
         page = scan->rs_base.rs_startblock;
         scan->rs_base.rs_cblock = page;
@@ -1672,6 +1672,7 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
         }
         PG_END_TRY();
         if (finished) {
+            scan->rs_cutup = NULL;
             return isValidPage;
         }
         lineOff = 0;

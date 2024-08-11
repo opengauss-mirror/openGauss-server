@@ -11969,6 +11969,7 @@ void ShutdownXLOG(int code, Datum arg)
     g_instance.ckpt_cxt_ctl->snapshotBlockLock = NULL;
     g_instance.bgwriter_cxt.rel_hashtbl_lock = NULL;
     g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = NULL;
+    undo::ResetUndoZoneLock();
 
     if (ENABLE_DSS && IsInitdb && 
         g_instance.dms_cxt.SSReformerControl.primaryInstId == INVALID_INSTANCEID) {

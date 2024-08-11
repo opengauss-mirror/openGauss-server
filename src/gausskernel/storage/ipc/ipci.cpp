@@ -391,6 +391,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     HaShmemInit();
     AsyncRollbackHashShmemInit();
     UndoWorkerShmemInit();
+    undo::InitUndoZoneLock();
     heartbeat_shmem_init();
     MatviewShmemInit();
 #ifndef ENABLE_MULTIPLE_NODES

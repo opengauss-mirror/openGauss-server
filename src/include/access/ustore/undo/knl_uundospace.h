@@ -63,6 +63,10 @@ public:
     {
         return lsn_;
     }
+    inline LWLock* GetLock(void)
+    {
+        return lock_;
+    }
     uint32 Used(int zoneId);
 
     /* Setter, used for redo. */
@@ -81,6 +85,10 @@ public:
     inline void SetLSN(XLogRecPtr lsn)
     {
         lsn_ = lsn;
+    }
+    inline void SetLock(LWLock* lock)
+    {
+        lock_ = lock;
     }
 
     /* Space lock/unlock. */
