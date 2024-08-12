@@ -883,6 +883,35 @@ end pck_for;
 call pck_for.p1();
 drop package pck_for;
 
+drop table test1;
+drop table test2;
+
+create table test1(id int, name varchar, job varchar);
+create table test2(id int, age int);
+insert into test1 values (1, 'zhang', 'worker'),(2, 'li', 'teacher'),(3, 'wang', 'engineer');
+insert into test2 values (1, 20),(2, 30),(3, 40);
+
+DECLARE 
+  CURSOR c1 IS SELECT t.age, CURSOR(SELECT name FROM test1 t1 where t1.id = t.id) abc FROM test2 t;-- 在匿名块中使用游标表达式样例
+  age_temp int;
+  name_temp varchar;
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  source c1%rowtype;
+BEGIN
+  OPEN c1;
+  loop
+    fetch c1 into source;
+    exit when c1%notfound;
+    raise notice '%',source;
+  end loop;
+  close c1;
+END;
+/
+
+drop table test1;
+drop table test2;
+
 -- (c) select only one col
 create or replace package pck_for is
 temp_result int;
