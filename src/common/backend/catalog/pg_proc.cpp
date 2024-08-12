@@ -1521,49 +1521,6 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             ObjectIdGetDatum(procNamespace));
 #endif
     }
-#ifndef ENABLE_MULTIPLE_NODES
-    if (enable_out_param_override() && !u_sess->attr.attr_common.IsInplaceUpgrade && !IsInitdb && !proIsProcedure &&
-        IsPlpgsqlLanguageOid(languageObjectId)) {
-        bool findOutParamFunc = false;
-        CatCList *catlist = NULL;
-        if (t_thrd.proc->workingVersionNum < 92470) {
-            catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(procedureName));
-        } else {
-            catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
-        }
-        for (int i = 0; i < catlist->n_members; ++i) {
-            HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
-            Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
-            bool isNull = false;
-            Datum packageOidDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
-            Oid packageOid = InvalidOid;
-            if (!isNull) {
-                packageOid = DatumGetObjectId(packageOidDatum);
-            }
-            if (packageOid == propackageid && procform->pronamespace == procNamespace) {
-                isNull = false;
-                (void)SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proallargtypes, &isNull);
-                if (!isNull) {
-                    findOutParamFunc = true;
-                    break;
-                }
-            }
-        }
-
-        ReleaseSysCacheList(catlist);
-        if (existOutParam) {
-            if (!HeapTupleIsValid(oldtup) && findOutParamFunc) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
-                         (errmsg("\"%s\" functions with plpgsql language and out params are not supported Overloaded.",
-                                 procedureName),
-                          errdetail("N/A."),
-                          errcause("functions with plpgsql language and out params are not supported Overloaded."),
-                          erraction("Drop function before create function."))));
-            }
-        }
-    }
-#endif
     if (HeapTupleIsValid(oldtup)) {
         /* There is one; okay to replace it? */
         bool isNull = false;

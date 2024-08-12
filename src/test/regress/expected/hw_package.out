@@ -467,8 +467,13 @@ function autonomous_f_150_2_private(pnum1 int) return int
   end;
 end autonomous_pkg_150_2;
 /
+ERROR:  function "autonomous_pkg_150_1.autonomous_f_150_1_private" doesn't exist 
+CONTEXT:  compilation of PL/pgSQL package near line 2
 select autonomous_pkg_150_2.autonomous_f_150_2_private(1);
-ERROR:  not support call package private function or procedure
+ERROR:  function autonomous_pkg_150_2.autonomous_f_150_2_private(integer) does not exist
+LINE 1: select autonomous_pkg_150_2.autonomous_f_150_2_private(1);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: autonomous_f_150_2_private
 drop table if exists au_pkg;
 create table au_pkg(id int,name varchar);
@@ -1667,9 +1672,7 @@ drop table if exists test.emp_t;
 drop schema if exists test cascade;
 drop table if exists au_pkg;
 drop package autonomous_pkg_150_2;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to function public.autonomous_f_150_2(integer)
-drop cascades to function public.autonomous_f_150_2_private(integer)
+NOTICE:  drop cascades to function public.autonomous_f_150_2(integer)
 drop package autonomous_pkg_150_1;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function public.autonomous_f_150_1(integer)
