@@ -114,6 +114,7 @@ static void addunicode(pg_wchar c, yyscan_t yyscanner);
 static void set_is_delimiter_name(char* text, core_yyscan_t yyscanner );
 static int process_decimal_float(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval);
 static int process_decimal_double(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lval);
+static char *handle_float_overflow(char *token, core_yyscan_t yyscanner);
 
 #define yyerror(msg)  scanner_yyerror(msg, yyscanner)
 
@@ -1040,7 +1041,9 @@ other			.
 				}
 {decimal}		{
 					SET_YYLLOC();
-					yylval->str = pstrdup(yytext);
+					char* val = pstrdup(yytext);
+					val = handle_float_overflow(val, yyscanner);
+					yylval->str = pstrdup(val);
 					yyextra->is_hint_str = false;
 					return FCONST;
 				}
@@ -1109,7 +1112,9 @@ other			.
 				}
 {real}			{
 					SET_YYLLOC();
-					yylval->str = pstrdup(yytext);
+					char* val = pstrdup(yytext);
+					val = handle_float_overflow(val, yyscanner);
+					yylval->str = pstrdup(val);
 					yyextra->is_hint_str = false;
 					return FCONST;
 				}
@@ -1600,7 +1605,9 @@ process_decimal_float(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *lv
 {
 	startlit();
 	addlit(token, len-1, yyscanner);
-	lval->str = litbufdup(yyscanner);
+	char *val = litbufdup(yyscanner);
+	val = handle_float_overflow(val, yyscanner);
+	lval->str = val;
 	return FCONST_F;
 }
 
@@ -1609,8 +1616,39 @@ process_decimal_double(char *token, int len, core_yyscan_t yyscanner, YYSTYPE *l
 {
 	startlit();
 	addlit(token, len-1, yyscanner);
-	lval->str = litbufdup(yyscanner);
+	char *val = litbufdup(yyscanner);
+	val = handle_float_overflow(val, yyscanner);
+	lval->str = val;
 	return FCONST_D;
+}
+
+/* prejudge whether float const overflow */
+static char *
+handle_float_overflow(char *token, core_yyscan_t yyscanner)
+{
+
+	double 		val;
+	char	   *endptr;
+	char	   *result = token;
+
+	if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+		return result;
+	}
+
+	errno = 0;
+    val = strtod(result, &endptr);
+
+	// if val < 1E-130, we assume it is 0
+	if (val != 0 && log10(val) < -130) {
+		result = "0";
+	} else if (errno == ERANGE) {
+		if (val == 0.0) {
+			result = "0";
+		} else {
+			yyerror("number overflow");
+		}
+	}
+	return result;
 }
 
 static unsigned int
