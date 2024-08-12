@@ -333,6 +333,11 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      */
     StorePreparedStatement(stmt->name, plansource, true);
 
+    if (ENABLE_REMOTE_EXECUTE) {
+        const char* commandTag = CreateCommandTag(stmt->query);
+        (void)libpqsw_process_query_message(commandTag, query_list, queryString, false, false);
+    }
+
 #ifdef ENABLE_MOT
     // Try MOT JIT code generation only after the plan source is saved.
     if ((plansource->storageEngineType == SE_TYPE_MOT || plansource->storageEngineType == SE_TYPE_UNSPECIFIED) &&
@@ -380,6 +385,11 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     if (!entry->plansource->fixed_result && FORCE_VALIDATE_PLANCACHE_RESULT)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("EXECUTE does not support variable-result cached plans")));
+
+    if (ENABLE_REMOTE_EXECUTE &&
+        libpqsw_process_query_message(psrc->commandTag, psrc->query_list, queryString, false, false)) {
+        return;
+    }
 
     /* Evaluate parameters, if any */
     if (entry->plansource->num_params > 0) {
