@@ -31,6 +31,9 @@
 #include "storage/lock/lwlock.h"
 #include "catalog/storage_xlog.h"
 
+
+void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState);
+
 /*
  * Add xlog reader private structure for page read.
  */
@@ -533,6 +536,10 @@ bool IsRecParseStateHaveChildState(XLogRecParseState *checkState)
     return false;
 }
 
+/**
+ * Find out target blockState from checkState and its nextrecords, by checking if any blockState
+ * has the same blockhead with the target blockState, and release others. Used in ondemand-recovery redo phase.
+ */
 static XLogRecParseState *OndemandFindTargetBlockStateInOndemandRedo(XLogRecParseState *checkState,
     XLogRecParseState *srcState)
 {
@@ -601,6 +608,7 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *hashmapBlockS
     // step3: find target parse state
     XLogRecParseState *targetState = OndemandFindTargetBlockStateInOndemandRedo(recordBlockState, hashmapBlockState);
     if (targetState == NULL) {
+        PrintXLogRecParseStateBlockHead(hashmapBlockState);
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("[On-demand] reload xlog record failed at %X/%X, spc/db/rel/bucket "
                         "fork-block: %u/%u/%u/%d %d-%u, errormsg: can not find target block-record",
@@ -682,4 +690,28 @@ void OnDemandNotifyHashMapPruneIfNeed()
     if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
         ondemand_extreme_rto::StartupSendMarkToBatchRedo(&ondemand_extreme_rto::g_hashmapPruneMark);
     }
+}
+
+void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState) {
+    StringInfoData res;
+    initStringInfo(&res);
+    appendStringInfo(&res, "{start_ptr: %X/%X, ",  (uint32)(blockState->blockparse.blockhead.start_ptr>> 32), (uint32)blockState->blockparse.blockhead.start_ptr);
+    appendStringInfo(&res, "end_ptr: %X/%X, ", (uint32)(blockState->blockparse.blockhead.end_ptr>> 32), (uint32)blockState->blockparse.blockhead.end_ptr);
+    appendStringInfo(&res, "blkno: %u, ", blockState->blockparse.blockhead.blkno);
+    appendStringInfo(&res, "relNode: %u, ", blockState->blockparse.blockhead.relNode);
+    appendStringInfo(&res, "block_valid: %u, ", (uint32)(blockState->blockparse.blockhead.block_valid));
+    appendStringInfo(&res, "xl_info: %u, ", (uint32)(blockState->blockparse.blockhead.xl_info));
+    appendStringInfo(&res, "block_valid: %u, ", (uint32)(blockState->blockparse.blockhead.xl_info));
+    appendStringInfo(&res, "xl_rmid: %u, ", (uint32)(blockState->blockparse.blockhead.xl_rmid));
+    appendStringInfo(&res, "forknum: %d, ", blockState->blockparse.blockhead.forknum);
+    appendStringInfo(&res, "xl_xid: %lu, ", blockState->blockparse.blockhead.xl_xid);
+    appendStringInfo(&res, "spcNode: %u, ", (uint32)(blockState->blockparse.blockhead.spcNode));
+    appendStringInfo(&res, "dbNode: %u, ", (uint32)(blockState->blockparse.blockhead.dbNode));
+    appendStringInfo(&res, "bucketNode: %d, ", (int)(blockState->blockparse.blockhead.bucketNode));
+    appendStringInfo(&res, "opt: %u, ", (uint32)(blockState->blockparse.blockhead.opt));
+    appendStringInfo(&res, "is_conflict_type: %u, ", (uint32)(blockState->blockparse.blockhead.is_conflict_type));
+    appendStringInfo(&res, "hasCSN: %u}; ", (uint32)(blockState->blockparse.blockhead.hasCSN));
+    ereport(LOG,
+        (errmsg("[On-demand][redo] blockState->blockparse.blockhead: %s.",
+        res.data)));
 }
