@@ -775,7 +775,7 @@ select pg_get_tabledef('test_us');
      us2 character varying(20) NOT NULL                                                           +
  )                                                                                                +
  WITH (orientation=row, storage_type=ustore, compression=no);                                     +
- ALTER TABLE test_us ADD CONSTRAINT u1 PRIMARY KEY USING ubtree  (us2) WITH (storage_type=USTORE);
+ ALTER TABLE test_us ADD CONSTRAINT u1 PRIMARY KEY USING ubtree  (us2) WITH (storage_type=ustore);
 (1 row)
 
  
