@@ -2104,6 +2104,7 @@ static void InitConfigureNamesBool()
             STATS_COLLECTOR,
             gettext_noop("Enable record network time"),
             NULL,
+            GUC_REPORT
             },
             &u_sess->attr.attr_common.enable_record_nettime,
             false,
@@ -4590,7 +4591,6 @@ static void InitializeGUCOptionsFromEnvironment(void);
 static void InitializeOneGUCOption(struct config_generic* gconf);
 static void push_old_value(struct config_generic* gconf, GucAction action);
 static void ReportGUCOption(struct config_generic* record);
-static void ReportTraceOption();
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* pHolder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
@@ -6689,21 +6689,7 @@ void BeginReportingGUCOptions(void)
         if (conf->flags & GUC_REPORT)
             ReportGUCOption(conf);
     }
-    if (u_sess->attr.attr_common.enable_record_nettime) {
-        ReportTraceOption();
-    }
     
-}
-
-/*
- * notify client connection driver support trace, low version server does not send this message. 
- */
-static void ReportTraceOption() {
-    StringInfoData msgbuf;
-    pq_beginmessage(&msgbuf, 'S');
-    pq_sendstring(&msgbuf, "server_support_trace");
-    pq_sendstring(&msgbuf, "1");
-    pq_endmessage(&msgbuf);
 }
 
 /*
