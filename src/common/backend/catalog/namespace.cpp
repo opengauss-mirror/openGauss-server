@@ -1656,6 +1656,10 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
                 if (pkg_oid != package_oid) {
                     continue;
                 }
+                Datum pro_is_private_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proisprivate, &isNull);
+                if (!isNull && !u_sess->is_autonomous_session && DatumGetBool(pro_is_private_datum)) {
+                    continue;
+                }
                 namespaceId = GetPackageNamespace(pkg_oid);
             } else if (caller_pkg_oid == package_oid) {
                 if (pkgname != NULL) {
