@@ -1493,42 +1493,31 @@ FuncCandidateList sort_candidate_func_list(FuncCandidateList oldCandidates)
         candidates[index++] = cur;
         cur = cur->next;
     }
-	
-    FuncCandidateList sortedCandidates = NULL;
-    FuncCandidateList lastCandidate = NULL;
-    for (int i = 0; i < size; i++) {
-        if (candidates[i] == NULL) {
-            continue;
-        }
-        int smallestIndex = i;
-        for (int j = 0; j < size; j++) {
-            FuncCandidateList cur2 = candidates[j];
-            if (cur2 != NULL && candidates[smallestIndex]->allArgNum > cur2->allArgNum) {
-                smallestIndex = j;
+
+    int i, j;
+    FuncCandidateList temp;
+    for (i = 0; i < index - 1; i++) {
+        for (j = 0; j < index - (i + 1); j++) {
+            if (candidates[j]->allArgNum > candidates[j + 1]->allArgNum) {
+                temp = candidates[j];
+                candidates[j] = candidates[j + 1];
+                candidates[j + 1] = temp;
             }
         }
+    }
 
-        FuncCandidateList smallest = candidates[smallestIndex];
-        if (lastCandidate == NULL) {
-            lastCandidate = smallest;
-            sortedCandidates = smallest;
-        } else {
-            lastCandidate->next = smallest;
-            lastCandidate = lastCandidate->next;
-            smallest->next = NULL;
-        }
-        candidates[smallestIndex] = NULL;
-    }
-    
-    for (int i = 0; i < size; i++) {
-        if (candidates[i] != NULL) {
-            lastCandidate->next = candidates[i];
-            lastCandidate = lastCandidate->next;
+    FuncCandidateList sorted_candidates = candidates[0];
+    FuncCandidateList next_candidates = sorted_candidates;
+    for (i = 0; i < index; i++) {
+        candidates[i]->next = NULL;
+        if (i != 0) {
+            next_candidates->next = candidates[i];
+            next_candidates = next_candidates->next;
         }
     }
-    lastCandidate->next = NULL;
+
     pfree(candidates);
-    return sortedCandidates;
+    return sorted_candidates;
 }
 
 /* func_get_detail()
