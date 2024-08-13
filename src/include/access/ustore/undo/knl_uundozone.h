@@ -143,6 +143,10 @@ public:
     {
         return attachPid_;
     }
+    inline LWLock* GetLock(void)
+    {
+        return lock_;
+    }
     inline bool Attached(void)
     {
         return pg_atomic_read_u32(&attached_) == UNDO_ZONE_ATTACHED;
@@ -219,6 +223,10 @@ public:
     inline void SetAttach(uint32 attach)
     {
         attached_ = attach;
+    }
+    inline void SetLock(LWLock* lock)
+    {
+        lock_ = lock;
     }
     inline bool Used(void)
     {

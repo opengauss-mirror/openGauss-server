@@ -1318,7 +1318,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             res = list_make2(def1, def2);
             if (g_instance.attr.attr_storage.enable_ustore && u_sess->attr.attr_sql.enable_default_ustore_table &&
                 relkind != RELKIND_MATVIEW && !IsSystemNamespace(relnamespace) && !assignedStorageType) {
-                DefElem* def3 = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
+                DefElem* def3 = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE_LOWER));
                 res = lappend(res, def3);
             }
         } else {
