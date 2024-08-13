@@ -1,0 +1,36 @@
+create user u_hash password '1234@abcd';
+grant all privileges to u_hash;
+
+create database db_hash;
+create database db_restore;
+\c db_hash
+create table t_hash_2nd_partition
+(
+    c1_date date not null,
+    c2_int int not null,
+    c3_varchar2 varchar2(30)
+)
+partition by hash(c1_date) subpartition by range(c2_int)
+(
+  partition p1
+  (
+    subpartition p1_a values less than(100),
+    subpartition p1_b values less than(200)
+  ),
+  partition p2
+  (
+    subpartition p2_a values less than(100),
+    subpartition p2_b values less than(200)
+  )
+);
+
+\! @abs_bindir@/gs_dump -p @portstring@ db_hash -f @abs_bindir@/dump -F c -w > @abs_bindir@/gs_dump_2hash.log 2>&1 ; echo $?
+
+\! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_hash -W 1234@abcd -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_2hash.log 2>&1 ; echo $?
+
+\c db_restore
+select *from t_hash_2nd_partition;
+
+\c postgres
+drop database db_hash;
+drop database db_restore;

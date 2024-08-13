@@ -495,3 +495,6 @@ test: gb_ora_rotate_unrotate
 
 # test backup tool audit log
 test: backup_tool_audit
+
+
+test: gs_dump_2hash
