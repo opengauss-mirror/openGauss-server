@@ -515,6 +515,7 @@ void ParseUheapOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
         case XLOG_UHEAP_CLEAN:
+        case XLOG_UHEAP_NEW_PAGE:
             break;
 
         case XLOG_UHEAP_MULTI_INSERT:

@@ -229,6 +229,19 @@ static XLogRecParseState *UHeapXlogCleanParseBlock(XLogReaderState *record, uint
     return recordstatehead;
 }
 
+static XLogRecParseState *UHeapXlogNewPageParseBlock(XLogReaderState *record, uint32 *blocknum)
+{
+    XLogRecParseState *recordstatehead = NULL;
+
+    *blocknum = 1;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    XLogRecSetBlockDataState(record, UHEAP_NEWPAGE_ORIG_BLOCK_NUM, recordstatehead);
+    return recordstatehead;
+}
+
 XLogRecParseState *UHeapRedoParseToBlock(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -261,6 +274,9 @@ XLogRecParseState *UHeapRedoParseToBlock(XLogReaderState *record, uint32 *blockn
             break;
         case XLOG_UHEAP_MULTI_INSERT:
             recordblockstate = UHeapXlogMultiInsertParseBlock(record, blocknum);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            recordblockstate = UHeapXlogNewPageParseBlock(record, blocknum);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedoParseToBlock: unknown op code %u", info)));
@@ -1486,6 +1502,16 @@ static void UHeapXlogCleanBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     }
 }
 
+static void UHeapXlogNewpageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+    RedoBufferInfo *bufferinfo)
+{
+    XLogBlockDataParse *datadecode = blockdatarec;
+    XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+    if (action != BLK_RESTORED)
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("UHeapXlogNewpageBlock unexpected result when restoring backup block")));
+}
+
 void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
 {
     uint8 info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
@@ -1511,6 +1537,9 @@ void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_UHEAP_CLEAN:
             UHeapXlogCleanBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            UHeapXlogNewpageBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedoDataBlock: unknown op code %u", info)));

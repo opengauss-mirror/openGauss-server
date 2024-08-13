@@ -24,6 +24,7 @@
 #include "storage/lmgr.h"
 #include "storage/lock/lock.h"
 #include "storage/freespace.h"
+#include "storage/smgr/segment_internal.h"
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
@@ -5261,6 +5262,42 @@ XLogRecPtr LogUHeapClean(Relation reln, Buffer buffer, OffsetNumber target_offnu
 
     recptr = XLogInsert(RM_UHEAP_ID, XLOG_UHEAP_CLEAN);
 
+    return recptr;
+}
+
+XLogRecPtr LogUHeapNewPage(RelFileNode* rnode, ForkNumber forkNum, BlockNumber blkno, Page page, bool page_std,
+                       TdeInfo* tdeinfo)
+{
+    int flags;
+    XLogRecPtr recptr;
+    if (IsSegmentFileNode(*rnode)) {
+        /*
+         * Make sure extents in the segment are created before this xlog, otherwise Standby does not know where to
+         * read the new page when replaying this xlog.
+         */
+        seg_preextend(*rnode, forkNum, blkno);
+    }
+
+    /* NO ELOG(ERROR) from here till newpage op is logged */
+    START_CRIT_SECTION();
+    flags = REGBUF_FORCE_IMAGE;
+    if (page_std) {
+        flags |= REGBUF_STANDARD;
+    }
+
+    XLogBeginInsert();
+    XLogRegisterBlock(0, rnode, forkNum, blkno, page, flags, NULL, tdeinfo);
+    recptr = XLogInsert(RM_UHEAP_ID, XLOG_UHEAP_NEW_PAGE);
+
+    /*
+     * The page may be uninitialized. If so, we can't set the LSN and TLI
+     * because that would corrupt the page.
+     */
+    if (!PageIsNew(page)) {
+        PageSetLSN(page, recptr);
+    }
+
+    END_CRIT_SECTION();
     return recptr;
 }
 

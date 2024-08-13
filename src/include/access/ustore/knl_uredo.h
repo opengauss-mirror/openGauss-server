@@ -39,6 +39,7 @@
 #define XLOG_UHEAP_INVALID_TD_SLOT 0x40
 #define XLOG_UHEAP_CLEAN 0x50
 #define XLOG_UHEAP_MULTI_INSERT 0x60
+#define XLOG_UHEAP_NEW_PAGE 0x70
 #define XLOG_UHEAP_OPMASK 0x70
 /*
  * When we insert 1st item on new page in INSERT, UPDATE, HOT_UPDATE,
