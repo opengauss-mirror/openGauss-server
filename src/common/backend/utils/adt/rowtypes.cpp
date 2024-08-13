@@ -194,8 +194,13 @@ Datum record_in(PG_FUNCTION_ARGS)
                 }
             }
 
-            column_data = buf.data;
-            nulls[i] = false;
+            if ((0 == buf.len) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
+                    column_data = NULL;
+                    nulls[i] = true;
+            } else {
+                    column_data = buf.data;
+                    nulls[i] = false;
+            }
         }
 
         /*
