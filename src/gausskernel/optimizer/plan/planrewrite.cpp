@@ -166,6 +166,20 @@ void inlist2join_qrw_optimization(PlannerInfo* root, int rti)
     }
 
     /*
+     * if rowmarks effect on this rel is true lock,
+     * bypass inlist optimize to avoid conflict
+     */
+    ListCell* lc = NULL;
+    foreach(lc, root->rowMarks) {
+        PlanRowMark* rc = (PlanRowMark*)lfirst(lc);
+        if ((int)rc->rti == rti) {
+            if (RowMarkRequiresRowShareLock(rc->markType)) {
+                return;
+            }
+        }
+    }
+
+    /*
      * Return directly if inlist2join optimization can not apply to current rel,
      *  [1]. When inlist2join optimization is not enabled
      *  [2]. When there no convert-safe inlist conditions on baserel
