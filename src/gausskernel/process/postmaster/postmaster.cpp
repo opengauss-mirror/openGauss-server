@@ -3732,7 +3732,7 @@ static int ServerLoop(void)
          * let cbm writer thread exit if enable_cbm_track gus is switched off
          */
         if (!u_sess->attr.attr_storage.enable_cbm_tracking && g_instance.pid_cxt.CBMWriterPID != 0 &&
-            pmState == PM_RUN) {
+            (pmState == PM_RUN || pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY)) {
             ereport(LOG,
                 (errmsg("stop cbm writer thread because enable_cbm_tracking is switched off, "
                         "cbm writer thread pid=%lu",
