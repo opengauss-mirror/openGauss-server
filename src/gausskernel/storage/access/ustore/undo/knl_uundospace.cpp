@@ -87,9 +87,9 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     while (tail < offset) {
         if ((!t_thrd.xlog_cxt.InRecovery) && (static_cast<int>(g_instance.undo_cxt.undoTotalSize) +
             static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= u_sess->attr.attr_storage.undo_space_limit_size)) {
-            uint64 undoSize = (g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize) * BLCKSZ /
+            uint64 undoSize = ((uint64)g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize) * BLCKSZ /
                 (1024 * 1024);
-            uint64 limitSize = u_sess->attr.attr_storage.undo_space_limit_size * BLCKSZ / (1024 * 1024);
+            uint64 limitSize = (uint64)(u_sess->attr.attr_storage.undo_space_limit_size) * BLCKSZ / (1024 * 1024);
             smgrclose(reln);
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "undo space size %luM > limit size %luM. Please increase the undo_space_limit_size."),
