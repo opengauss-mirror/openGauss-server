@@ -1794,8 +1794,10 @@ static int connectDBComplete(PGconn* conn)
 #ifdef ENABLE_LITE_MODE
                 destroyPQExpBuffer(errMsgBuf);
 #endif
-                char* dbName = conn->dbName;
-                if (conn->status == CONNECTION_OK && dbName != NULL && strcmp(dbName, "replication") != 0) {
+                char* replication = conn->replication;
+                if (conn->status == CONNECTION_OK && (replication == NULL || strcasecmp(replication, "false") == 0 || 
+                    strcasecmp(replication, "off") == 0 || strcasecmp(replication, "no") == 0 || 
+                    strcasecmp(replication, "0") == 0)) {
                     PQgetDBCompatibility(conn);
                 }
                 return 1; /* success! */
