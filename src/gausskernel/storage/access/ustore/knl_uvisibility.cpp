@@ -949,7 +949,7 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
             savedTdSlot = tdinfo.td_slot;
         }
         if (tdinfo.cid == InvalidCommandId) {
-            ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
+            ereport(ERROR, (errmodule(MOD_USTORE), errmsg(
                 "invalid cid! "
                 "LogInfo: undo state %d, tuple flag %u, tupXid %lu. "
                 "OldTd: tdxid %lu, tdid %d, undoptr %lu. NewTd: tdxid %lu, tdid %d, undoptr %lu. "

@@ -933,6 +933,7 @@ static void DecodeUheapOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
         case XLOG_UHEAP_CLEAN:
+        case XLOG_UHEAP_NEW_PAGE:
             break;
 
         case XLOG_UHEAP_MULTI_INSERT:

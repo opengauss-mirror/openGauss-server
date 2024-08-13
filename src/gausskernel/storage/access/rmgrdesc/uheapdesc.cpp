@@ -66,28 +66,22 @@ const char* uheap_type_name(uint8 subtype)
     switch (info) {
         case XLOG_UHEAP_INSERT:
             return "uheap_insert";
-            break;
         case XLOG_UHEAP_DELETE:
             return "uheap_delete";
-            break;
         case XLOG_UHEAP_UPDATE:
             return "uheap_update";
-            break;
         case XLOG_UHEAP_FREEZE_TD_SLOT:
             return "uheap_freeze";
-            break;
         case XLOG_UHEAP_INVALID_TD_SLOT:
             return "uheap_invalid_slot";
-            break;
         case XLOG_UHEAP_CLEAN:
             return "uheap_clean";
-            break;
         case XLOG_UHEAP_MULTI_INSERT:
             return "uheap_multi_insert";
-            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            return "uheap_new_page";
         default:
             return "unknown_type";
-            break;
     }
 }
 
@@ -470,6 +464,10 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                     appendStringInfo(buf, "]");
                 }
             }
+            break;
+        }
+        case XLOG_UHEAP_NEW_PAGE: {
+            appendStringInfo(buf, "new uheap page");
             break;
         }
         default:
