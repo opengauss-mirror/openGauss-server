@@ -445,7 +445,7 @@ bool queryIsReadOnly(Query* query)
             case CMD_MERGE: {
                 if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE && query->utilityStmt != NULL &&
                     (query->utilityStmt->type == T_PrepareStmt || query->utilityStmt->type == T_ExecuteStmt ||
-                    query->utilityStmt->type == T_DeallocateStmt)) {
+                    query->utilityStmt->type == T_DeallocateStmt || query->utilityStmt->type == T_CopyStmt)) {
                     return true;
                 }
 
