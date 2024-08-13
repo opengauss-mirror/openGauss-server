@@ -36,6 +36,8 @@
 #include "postmaster/pagerepair.h"
 #include "ddes/dms/ss_common_attr.h"
 
+#define DSS_FD_CHECK(fd) (ENABLE_DSS) && (fd < DSS_HANDLE_BASE) 
+
 static const mode_t SEGMENT_FILE_MODE = S_IWUSR | S_IRUSR;
 
 static int dv_open_file(char *filename, int flags, int mode);
@@ -492,6 +494,13 @@ void df_open_files(SegLogicFile *sf)
 void df_extend_internal(SegLogicFile *sf)
 {
     int fd = sf->segfiles[sf->file_num - 1].fd;
+    
+    if (DSS_FD_CHECK(fd)) {
+        /* If fd = 0 under the DSS environment, we should open again. */
+        char *filename = slice_filename(sf->filename, sf->file_num - 1);
+        fd = dv_open_file(filename, O_RDWR | PG_BINARY, (int)SEGMENT_FILE_MODE);
+        sf->segfiles[sf->file_num - 1].fd = fd;
+    }
 
     off_t last_file_size = lseek(fd, 0L, SEEK_END);
     SegmentCheck(last_file_size <= DF_FILE_SLICE_SIZE);
