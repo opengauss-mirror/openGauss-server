@@ -1,0 +1,16 @@
+drop database if exists dump_synonym;
+create database dump_synonym;
+create database restore_synonym_db;
+\c dump_synonym
+create schema t1;
+create schema t2;
+create table t1.test1(col1 int);
+create or replace synonym t1.syn1 for t1.test1;
+create or replace synonym t2.syn2 for t1.test1;
+\! @abs_bindir@/gs_dump -p @portstring@ -n t1 -f @abs_bindir@/dump_synonym.dmp -s dump_synonym  > @abs_bindir@/gs_dump.log 2>&1 ; echo $?
+\! @abs_bindir@/gsql -d restore_synonym_db -p @portstring@ -f @abs_bindir@/dump_synonym.dmp  > @abs_bindir@/gs_dump.log 2>&1 ; echo $?
+\c restore_synonym_db
+select synname from pg_synonym;
+drop database dump_synonym;
+\c regression
+drop database restore_synonym_db;
