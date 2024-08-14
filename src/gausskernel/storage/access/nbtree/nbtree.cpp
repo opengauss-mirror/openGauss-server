@@ -126,17 +126,17 @@ Datum btbuild(PG_FUNCTION_ARGS)
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
-#ifdef USE_SPQ
-    if (enable_spq_btbuild(index)) {
-        return spqbtbuild(heap, index, indexInfo);
-    }
-#endif
     IndexBuildResult *result = btbuild_internal(heap, index, indexInfo);
     PG_RETURN_POINTER(result);
 }
 
 IndexBuildResult *btbuild_internal(Relation heap, Relation index, IndexInfo *indexInfo)
 {
+#ifdef USE_SPQ
+    if (enable_spq_btbuild(index)) {
+        return spqbtbuild(heap, index, indexInfo);
+    }
+#endif
     IndexBuildResult *result = NULL;
     double reltuples = 0;
     BTBuildState buildstate;

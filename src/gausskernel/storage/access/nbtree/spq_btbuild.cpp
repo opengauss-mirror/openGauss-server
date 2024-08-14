@@ -209,7 +209,7 @@ IndexTuple index_form_tuple_allocated(TupleDesc tuple_descriptor, Datum *values,
 /*
  *  spq based btree build
  */
-Datum spqbtbuild(Relation heap, Relation index, IndexInfo *indexInfo)
+IndexBuildResult *spqbtbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
     IndexBuildResult *result = NULL;
     BTBuildState buildstate;
@@ -261,7 +261,7 @@ Datum spqbtbuild(Relation heap, Relation index, IndexInfo *indexInfo)
     if (!indexInfo->ii_Concurrent)
         spq_btbuild_update_pg_class(heap, index);
 
-    PG_RETURN_POINTER(result);
+    return result;
 }
 
 void spq_leader_finish(SPQLeaderState *spqleader)
