@@ -1158,6 +1158,29 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
     return tupleDesc;
 }
 
+static void rowtype_column_len_check(Form_pg_attribute tattr, HeapTuple var_tup, TupleDesc var_tupdesc, Oid valtype, int fnum)
+{
+    if (tattr->atttypid == VARCHAROID || tattr->atttypid == CHAROID) {
+        int maxlen = tattr->atttypmod - VARHDRSZ;
+        if (valtype == VARCHAROID||
+            valtype == NVARCHAR2OID||
+            valtype == CHAROID||
+            valtype == UNKNOWNOID||
+            valtype == CSTRINGOID||
+            valtype == TEXTOID||
+            valtype == NAMEOID) {
+            char *val = SPI_getvalue(var_tup, var_tupdesc, fnum + 1);
+            if (val && maxlen > 0) {
+                int valLen = strlen(val);
+                if (valLen > maxlen) {
+                    ereport(ERROR, (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                        errmsg("value too long for type character varying(%d)", maxlen)));
+                }
+            }
+        }
+    }
+}
+
 static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *datum, PLpgSQL_function *func)
 {
     bool *replaces = NULL;
@@ -1207,15 +1230,17 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
         bool isnull;
         Oid valtype;
         int32 valtypmod;
-        Oid reqtype = TupleDescAttr(new_tupdesc, fnum)->atttypid;
+        Form_pg_attribute tattr = TupleDescAttr(new_tupdesc, fnum);
+        Form_pg_attribute attr = TupleDescAttr(rec->tupdesc, anum);
+        Oid reqtype = tattr->atttypid;
 
-        while (anum < new_natts && TupleDescAttr(rec->tupdesc, anum)->attisdropped)
+        while (anum < new_natts && attr->attisdropped) {
             anum++; /* skip dropped column in tuple */
-
+        }
         if (anum < new_natts) {
             value = SPI_getbinval(rec->tup, rec->tupdesc, anum + 1, &isnull);
-            valtype = TupleDescAttr(rec->tupdesc, anum)->atttypid;
-            valtypmod = TupleDescAttr(rec->tupdesc, anum)->atttypmod;
+            valtype = attr->atttypid;
+            valtypmod = attr->atttypmod;
             anum++;
         } else {
             /* When source value is missing */
@@ -1225,6 +1250,7 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
                     errdetail("%s check is active.", "strict_multi_assignment"),
                     errhint("Make sure the query returns the exact list of columns.")));
         }
+        rowtype_column_len_check(tattr, rec->tup, rec->tupdesc, valtype, anum);
         newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
         newnulls[fnum] = isnull;
     }
@@ -9482,6 +9508,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
         /* Walk over destination columns */
         for (fnum = 0; fnum < vtd_natts; fnum++) {
             Form_pg_attribute attr = TupleDescAttr(var_tupdesc, fnum);
+            Form_pg_attribute tattr = TupleDescAttr(tupdesc, fnum);
             Datum value;
             bool isnull;
             Oid valtype;
@@ -9504,6 +9531,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
                              errdetail("%s check is active.", "strict_multi_assignment"),
                              errhint("Make sure the query returns the exact list of columns.")));
             }
+            rowtype_column_len_check(tattr, var_tup, var_tupdesc, valtype, fnum);
             newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
             newnulls[fnum] = isnull;
         }
