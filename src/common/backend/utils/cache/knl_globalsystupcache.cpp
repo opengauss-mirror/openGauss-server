@@ -783,14 +783,24 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
     cur_skey[2].sk_argument = arguments[2];
     cur_skey[3].sk_argument = arguments[3];
 
+    HeapTuple ntp;
+    SysScanDesc scandesc = NULL;
+
+    if (u_sess->hook_cxt.pluginSearchCatHook != NULL) {
+        ntp = ((searchCatFunc)(u_sess->hook_cxt.pluginSearchCatHook))(relation,
+            m_relinfo.cc_indexoid, cc_id, m_relinfo.cc_nkeys, cur_skey, &scandesc);
+    } else {
+        scandesc =
+            systable_beginscan(relation, m_relinfo.cc_indexoid, IndexScanOK(cc_id), NULL,
+                m_relinfo.cc_nkeys, cur_skey);
+    }
+
     if (tup_info->has_concurrent_lock) {
         AcquireGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
     }
-    HeapTuple ntp;
-    SysScanDesc scandesc = NULL;
+
     if (u_sess->hook_cxt.pluginSearchCatHook != NULL) {
-        if (HeapTupleIsValid(ntp = ((searchCatFunc)(u_sess->hook_cxt.pluginSearchCatHook))(relation,
-            m_relinfo.cc_indexoid, cc_id, m_relinfo.cc_nkeys, cur_skey, &scandesc))) {
+        if (HeapTupleIsValid(ntp)) {
             tup_info->ntp = ntp;
             if (!tup_info->has_concurrent_lock) {
                 tup_info->canInsertGSC = false;
@@ -804,9 +814,6 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
             ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
         }
     } else {
-        scandesc =
-            systable_beginscan(relation, m_relinfo.cc_indexoid, IndexScanOK(cc_id), NULL,
-                m_relinfo.cc_nkeys, cur_skey);
         while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
             tup_info->ntp = ntp;
             if (!tup_info->has_concurrent_lock) {
