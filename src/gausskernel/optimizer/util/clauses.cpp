@@ -3409,6 +3409,22 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                 return eval_const_expressions_mutator((Node*)phv->phexpr, context);
             }
             break;
+        case T_TypeCast:
+            {
+                TypeCast *tc = (TypeCast*)node;
+                Node *defResNode = tc->arg;
+                Oid sourceTypeId = exprType(defResNode);
+                Oid ptype = tc->typname->typeOid;
+                if (can_coerce_type(1, &sourceTypeId, &ptype, COERCION_IMPLICIT)) {
+                    return coerce_type(NULL, defResNode, sourceTypeId, ptype, -1,
+                        COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                } else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_CANNOT_COERCE), errmsg("could not convert type %s to %s",
+                            format_type_be(sourceTypeId), format_type_be(ptype))));
+                }
+                break;
+            }
         default:
             break;
     }

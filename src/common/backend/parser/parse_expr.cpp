@@ -2216,7 +2216,33 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     /* casecollid will be set by parse_collate.c */
 
     /* Convert default result clause, if necessary */
-    newc->defresult = (Expr*)coerce_to_common_type(pstate, (Node*)newc->defresult, ptype, "CASE/ELSE");
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && c->fromDecode) {
+        Node *defResNode = (Node*)newc->defresult;
+        Oid sourceTypeId = exprType(defResNode);
+        if (sourceTypeId != ptype) {
+            /*
+            * only check if type can be coerced, return TypeCast node
+            * the TypeCast node will be executed when truly needed
+            */
+            if (can_coerce_type(1, &sourceTypeId, &ptype, COERCION_IMPLICIT)) {
+                TypeCast *n = makeNode(TypeCast);
+                n->arg = defResNode;
+                n->typname = makeTypeNameFromOid(ptype, -1);
+                n->location = -1;
+                newc->defresult = (Expr*)n;
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CANNOT_COERCE),
+                        errmsg("%s could not convert type %s to %s",
+                            "CASE/ELSE",
+                            format_type_be(sourceTypeId),
+                            format_type_be(ptype)),
+                            parser_errposition(pstate, exprLocation(defResNode))));
+            }
+        }
+    } else {
+        newc->defresult = (Expr*)coerce_to_common_type(pstate, (Node*)newc->defresult, ptype, "CASE/ELSE");
+    }
 
     /* Convert when-clause results, if necessary */
     foreach (l, newc->args) {
