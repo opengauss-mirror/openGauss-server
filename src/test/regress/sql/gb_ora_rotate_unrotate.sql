@@ -7,6 +7,10 @@ create table original_orders (id int, year int, order_mode text, order_total int
 insert into original_orders values (1,2020,'direct',5000), (2,2020,'online',1000), (3,2021,'online',1000), (4,2021,'direct',1000), (5,2022,'direct',5000), (6,2020,'direct',500);
 
 select * from ( select year, order_mode, order_total from original_orders) rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
+with tt as (
+    select year, order_mode, order_total from original_orders
+)
+select * from  tt rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
 
 select * from (select year, order_mode, order_total from original_orders) rotate (sum(order_total) for order_mode in ('online' as internet )) order by year;
 
@@ -14,6 +18,10 @@ create table rotate_orders as (select * from (select year, order_mode, order_tot
 
 -- test not rotate (column transform to row)
 select * from rotate_orders not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'));
+with tt as (
+    select * from rotate_orders
+)
+select * from tt not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online')) order by year;
 
 select * from rotate_orders not rotate exclude nulls (yearly_total for order_mode in ( store as 'direct', internet as 'online'));
 
@@ -23,6 +31,10 @@ select * from rotate_orders not rotate include nulls ( yearly_total for ordre_mo
 select * from (select year, direct, online from (select year, order_mode, order_total from original_orders) rotate (sum(order_total) for order_mode in ('direct', 'online')) order by year) as rotate_t not rotate ( yearly_total for order_mode in (direct, online));
 
 select * from (select year, order_mode, yearly_total from (select * from rotate_orders not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online')))) rotate (sum(yearly_total) for order_mode in ('direct' as store, 'online' as internet) ) order by year;
+with tt as(
+    select year, order_mode, order_total from original_orders
+)
+select * from (select year, direct, online from tt rotate (sum(order_total) for order_mode in ('direct', 'online')) order by year) as rotate_t not rotate ( yearly_total for order_mode in (direct, online));
 
 -- create view
 create view rotate_view as (select * from (select year, order_mode, order_total from original_orders) as t rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year);
@@ -36,12 +48,34 @@ drop view notrotate_view;
 
 -- 子查询
 select * from (select year, direct as store, online as internet from (select year, order_mode, order_total from original_orders ) as orders rotate (sum(order_total) for order_mode in ('direct', 'online')) )order by year;
+with orders as (
+    select year, order_mode, order_total from original_orders
+)
+select * from (select year, direct as store, online as internet from orders rotate (sum(order_total) for order_mode in ('direct', 'online')) )order by year;
 
 select year, order_mode, yearly_total from(select * from rotate_orders not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'))) where year> 2020;
 
+with a_tab as (
+    select * from (select year, order_mode, order_total from original_orders ) as orders rotate (sum(order_total) for order_mode in ('direct', 'online')) order by year
+),
+b_tab as (
+    select * from a_tab
+)
+select * from b_tab;
+
+with a_tab as (
+    select * from rotate_orders
+),
+b_tab as (select * from (select * from a_tab not rotate exclude nulls (yearly_total for order_mode in ( store as 'direct', internet as 'online'))) order by year )
+select * from b_tab;
 -- SMP
 set query_dop = 4;
 select * from ( select year, order_mode, order_total from original_orders) rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
+with tt as (
+    select year, order_mode, order_total from original_orders
+)
+select * from  tt rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
+
 select * from rotate_orders not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'));
 set query_dop = 1;
 
@@ -55,6 +89,29 @@ select * from "ROTATEorders" not rotate ( yearly_total for order_mode in ( store
 create table "rotate@orders" as (select * from (select year, order_mode, order_total from original_orders) as t rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year);
 select * from "rotate@orders" not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'));
 
+--procedure
+CREATE OR REPLACE PROCEDURE proc_rotate is
+DECLARE
+    total_max int;
+BEGIN
+    SELECT max(order_total)
+    INTO total_max
+    FROM original_orders;
+RAISE NOTICE 'total_max: %', total_max;
+CREATE TABLE proc_rotate_tt AS
+    SELECT * FROM (
+        SELECT * FROM rotate_orders 
+        WHERE  store < total_max )
+    not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'));
+    COMMIT;
+END;
+/
+
+call proc_rotate();
+select * from proc_rotate_tt;
+
+drop procedure proc_rotate;
+drop table proc_rotate_tt;
 drop table "'rotate'orders";
 drop table "ROTATEorders";
 drop table "rotate@orders";
@@ -112,6 +169,10 @@ insert into product_column values
 (1,'a',10),(2,'b',20),(3,'c',30),(4,'a',40),(5,'b',50),(6,'c',60);
 select * from (select name, value from product_column) rotate(sum(value) for name in ('a','b','c'));
 
+with tt as (
+    select name, value from product_column
+)
+select * from tt rotate(sum(value) for name in ('a','b','c'));
 create table product_column_un (a int, b int, c int) with (orientation = column);
 insert into product_column_un values(50,70,90);
 select * from product_column_un not rotate (value for name in (a,b,c));
@@ -124,8 +185,16 @@ create table orders_par (id int, year int, order_mode text, order_total int) par
 insert into orders_par values (1,2020,'direct',500), (2,2020,'online',1000), (3,2021,'online',200), (4,2021,'direct',100), (5,2022,'direct',2000), (6,2020,'direct',5000);
 select * from ( select year, order_mode, order_total from orders_par) rotate (sum(order_total)
 for order_mode in ('direct' as store, 'online' as internet)) order by year;
+with tt as (
+    select year, order_mode, order_total from orders_par
+)
+select * from tt rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
 select * from ( select year, order_mode, order_total from orders_par partition(par1)) rotate (sum(order_total)
 for order_mode in ('direct' as store, 'online' as internet)) order by year;
+with tt as (
+    select year, order_mode, order_total from orders_par partition(par1)
+)
+select * from tt rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year;
 
 create table rotate_orders_par(year int, store int, internet int) partition by range(store)(partition par1 values less than (1000),partition par2 values less than (maxvalue));
 insert into rotate_orders_par values (2020, 5500,1000),(2021,100,200),(2022,2000,null);
@@ -138,6 +207,10 @@ drop table rotate_orders_par;
 create table product_ustore(id int, name varchar(10), value int) with (storage_type=ustore);
 insert into product_ustore values (10,'a',10),(20,'b',20),(30,'c',30),(101,'a',40),(201,'b',50),(301,'c',60);
 select * from (select name, value from product_ustore) rotate(sum(value) for name in ('a','b','c'));
+with tt as (
+    select name, value from product_ustore
+)
+select * from tt rotate(sum(value) for name in ('a','b','c'));
 
 create table stu_ustore (name varchar(20), math int, english int, chinese int) with (storage_type=ustore);
 insert into stu_ustore values('Tom',10,20,30);
@@ -150,6 +223,10 @@ drop table stu_ustore;
 create table product_segment(id int, name varchar(10), value int) with (segment=on);
 insert into product_segment values (1,'a',10),(2,'b',20),(3,'c',30),(4,'a',40),(5,'b',50),(6,'c',60);
 select * from (select name, value from product_segment) rotate(sum(value) for name in ('a','b','c'));
+with tt as (
+    select name, value from product_segment
+)
+select * from tt rotate(sum(value) for name in ('a','b','c'));
 
 create table stu_segment (name varchar(20), math int, english int, chinese int) with (segment=on);
 insert into stu_segment values('Tom',10,20,30);
