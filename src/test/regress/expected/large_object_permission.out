@@ -1,0 +1,51 @@
+create database large_object_test_db;
+\c large_object_test_db
+SELECT lo_create(100);
+ lo_create 
+-----------
+       100
+(1 row)
+
+CREATE USER u1 with password 'qwer@1234';
+CREATE USER u2 with password 'qwer@1234';
+GRANT SELECT ON LARGE OBJECT 100 to u1;
+SET SESSION AUTHORIZATION u1 PASSWORD 'qwer@1234';
+SELECT SESSION_USER, CURRENT_USER;
+ session_user | current_user 
+--------------+--------------
+ u1           | u1
+(1 row)
+
+select lo_open(100, CAST(x'20000' | x'40000' AS integer));
+ERROR:  permission denied for large object 100
+CONTEXT:  referenced column: lo_open
+select lo_open(100, CAST(x'40000' AS integer));
+ lo_open 
+---------
+       0
+(1 row)
+
+SET SESSION AUTHORIZATION u2 PASSWORD 'qwer@1234';
+SELECT SESSION_USER, CURRENT_USER;
+ session_user | current_user 
+--------------+--------------
+ u2           | u2
+(1 row)
+
+select lo_open(100, CAST(x'20000' | x'40000' AS integer));
+ERROR:  permission denied for large object 100
+CONTEXT:  referenced column: lo_open
+select lo_open(100, CAST(x'40000' AS integer));
+ERROR:  permission denied for large object 100
+CONTEXT:  referenced column: lo_open
+\c regression
+reset session AUTHORIZATION;
+SELECT SESSION_USER, CURRENT_USER;
+ session_user | current_user 
+--------------+--------------
+--?.*
+(1 row)
+
+drop database large_object_test_db;
+drop user u1;
+drop user u2;
