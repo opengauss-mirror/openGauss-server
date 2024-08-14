@@ -1203,6 +1203,11 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
 
     rec->expr->func = func;
     new_tupdesc = get_cursor_tupledesc_exec(rec->expr, false, false);
+    if (new_tupdesc == NULL) {
+        temp = MemoryContextSwitchTo(temp);
+        return;
+    }
+
     new_natts = new_tupdesc->natts;
 
     newnulls = (bool *)palloc(new_natts * sizeof(bool));
