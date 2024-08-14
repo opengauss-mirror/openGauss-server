@@ -60,4 +60,52 @@ END;
 /
 CALL test_nested();
 
+set behavior_compat_options='plpgsql_dependency';
+
+create or replace package pac_PLArray_Case0021 is
+  type typ_PLArray_1 is table of varchar(100);
+  type typ_PLArray_2 is table of typ_PLArray_1;
+  nstarr typ_PLArray_2;
+
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_2);
+end pac_PLArray_Case0021;
+/
+
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_2) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+
+create or replace package pac_PLArray_Case0021 is
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_3);
+end pac_PLArray_Case0021;
+/
+
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_3) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+
+drop package pac_PLArray_Case0021;
+
 DROP SCHEMA plpgsql_nested_array_and_record CASCADE;
