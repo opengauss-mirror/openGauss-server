@@ -17,7 +17,7 @@
 CREATE EVENT TRIGGER name
     ON event
     [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
-    EXECUTE PROCEDURE function name()
+    EXECUTE PROCEDURE function_name()
 </synopsis>
 </refsynopsisdiv>
 </refentry>

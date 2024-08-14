@@ -8,7 +8,7 @@ Syntax:
 CREATE EVENT TRIGGER name
     ON event
     [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
-    EXECUTE PROCEDURE function name()
+    EXECUTE PROCEDURE function_name()
 
 \h drop event trigger
 Command:     DROP EVENT TRIGGER
@@ -750,7 +750,7 @@ Syntax:
 CREATE EVENT TRIGGER name
     ON event
     [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
-    EXECUTE PROCEDURE function name()
+    EXECUTE PROCEDURE function_name()
 
 \h drop event trigger
 Command:     DROP EVENT TRIGGER
@@ -1492,7 +1492,7 @@ Syntax:
 CREATE EVENT TRIGGER name
     ON event
     [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
-    EXECUTE PROCEDURE function name()
+    EXECUTE PROCEDURE function_name()
 
 \h drop event trigger
 Command:     DROP EVENT TRIGGER
