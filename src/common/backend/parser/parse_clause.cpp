@@ -629,7 +629,7 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
         prev = NULL;
         if (1 == list_length(subQueryStmt->targetList)) {
             List *wholeTarget = NIL;
-            ParseState *pstate1 = make_parsestate(NULL);
+            ParseState *pstate1 = make_parsestate(pstate);
             pstate1->p_sourcetext = pstate->p_sourcetext;
 
             transformFromClause(pstate1, subQueryStmt->fromClause);

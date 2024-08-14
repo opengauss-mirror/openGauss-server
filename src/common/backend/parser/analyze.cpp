@@ -3121,9 +3121,12 @@ static List* removeTargetListByNameList(List* targetList, List* nameList)
     for (targetCell = list_head(targetList); targetCell; targetCell = next) {
         ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
         next = lnext(targetCell);
+        isfind = false;
         if (IsA(resTarget->val, ColumnRef)) {
-            isfind = false;
-            char *colName = strVal(linitial(((ColumnRef *)resTarget->val)->fields));
+            Node *field = (Node *)linitial(((ColumnRef *)resTarget->val)->fields);
+            if (IsA(field, A_Star))
+                continue;
+            const char *colName = strVal(field);
             foreach (cell, nameList) {
                 if (strcmp(strVal((Value *)lfirst(cell)), colName) == 0) {
                     targetList = list_delete_cell(targetList, targetCell, prev);
@@ -3131,9 +3134,9 @@ static List* removeTargetListByNameList(List* targetList, List* nameList)
                     break;
                 }
             }
-            if (!isfind)
-                prev = targetCell;
         }
+        if (!isfind)
+            prev = targetCell;
     }
     return targetList;
 }
@@ -3149,7 +3152,12 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
     int in_counter = 0;
     List *targetList = NIL;
     List *aStarList = NIL;
-    ParseState *pstate1 = make_parsestate(NULL);
+
+    if (stmt->withClause) {
+        WithClause *withclause = (WithClause *)copyObject(stmt->withClause);
+        (void)transformWithClause(pstate, withclause);
+    }
+    ParseState *pstate1 = make_parsestate(pstate);
     pstate1->p_sourcetext = pstrdup(pstate->p_sourcetext);
 
     transformFromClause(pstate1, stmt->fromClause);
@@ -3159,9 +3167,11 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
         appendStringInfo(&from_clause_sql, " FROM %s ", quote_identifier(rte->relname));
     else if (RTE_SUBQUERY == rte->rtekind) {
         StringInfo select_sql = makeStringInfo();
-        deparse_query(rte->subquery, select_sql, NIL, false, false);
+        deparse_query(rte->subquery, select_sql, NIL, false, false, (void*)pstate1->p_ref_hook_state);
         appendStringInfo(&from_clause_sql, " FROM (%s) ", select_sql->data);
         DestroyStringInfo(select_sql);
+    } else if (RTE_CTE == rte->rtekind) {
+        appendStringInfo(&from_clause_sql, " FROM %s ", quote_identifier(rte->ctename));
     } else {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in from clause error")));
     }
@@ -3205,7 +3215,10 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
                 }
                 for (targetCell = list_head(stmt_targetList); targetCell; targetCell = next) {
                     ResTarget *rt = (ResTarget *)lfirst(targetCell);
-                    char *colName1 = strVal((Value *)linitial(((ColumnRef *)rt->val)->fields));
+                    Node *field = (Node *)linitial(((ColumnRef *)rt->val)->fields);
+                    if (IsA(field, A_Star))
+                        continue;
+                    const char *colName1 = strVal((Value *)field);
                     next = lnext(targetCell);
                     if (strcmp(colName1, colName) == 0)
                         stmt_targetList = list_delete_cell(stmt_targetList, targetCell, prev);
@@ -3346,6 +3359,11 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
     list_free_ext(stmt->unrotateInfo->forColName);
     list_free_ext(stmt->unrotateInfo->inExprList);
     pfree_ext(stmt->unrotateInfo);
+
+    list_free(pstate->p_ctenamespace);
+    pstate->p_ctenamespace = NIL;
+    list_free(pstate->p_future_ctes);
+    pstate->p_future_ctes = NIL;
 
     return transformStmt(pstate, (Node *)stmt);
 }
