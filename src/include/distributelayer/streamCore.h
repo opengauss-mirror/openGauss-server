@@ -28,7 +28,6 @@
 #define SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_
 
 #include <signal.h>
-#include <unordered_map>
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -58,6 +57,8 @@
 #define PRINTTRUE(A) (((A) == true) ? "true" : "false")
 
 #define TupleVectorMaxSize 100
+
+#define STREAM_DESC_HASH_NUMBER 256
 
 #define IS_STREAM_PORTAL (!StreamThreadAmI() && portal->streamInfo.streamGroup != NULL)
 
@@ -103,6 +104,11 @@ typedef struct {
 typedef struct {
     uint64 key;
 } StreamConnectSyncElement;
+
+typedef struct {
+    StreamKey key;
+    ParallelIndexScanDescData* parallelDesc;
+} StreamDescElement;
 
 enum StreamObjType {
     STREAM_PRODUCER,
@@ -526,21 +532,7 @@ private:
     /* Mark Stream query quit status. */
     StreamObjStatus m_quitStatus;
 #endif
-    struct KeyHash {
-        std::size_t operator()(const StreamKey& k) const
-        {
-            return std::hash<uint>()(k.queryId) ^
-                    (std::hash<uint>()(k.planNodeId) << 1);
-        }
-    };
-
-    struct KeyEqual {
-        bool operator()(const StreamKey& lhs, const StreamKey& rhs) const
-        {
-            return lhs.queryId == rhs.queryId && lhs.planNodeId == rhs.planNodeId;
-        }
-    };
-    std::unordered_map<StreamKey, void*, KeyHash, KeyEqual> m_streamDesc;
+    static HTAB* m_streamDescHashTbl;
 };
 
 extern bool IsThreadProcessStreamRecursive();
