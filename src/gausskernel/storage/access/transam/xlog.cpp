@@ -10162,8 +10162,9 @@ void StartupXLOG(void)
          * 1. standby node failover promoting.
          * 2. standby node switchover promoting.
          * 3. standby node start ondemand realtime build.
+         * 4. last ondemand-recovery redo phase failed, so read control file from origin primary during normal reform.
          */
-        if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
+        if (!(ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id != SS_MY_INST_ID)) {
             UpdateControlFile();
         }
 
