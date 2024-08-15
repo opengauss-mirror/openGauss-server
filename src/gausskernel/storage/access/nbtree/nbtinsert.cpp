@@ -506,7 +506,7 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                 /*
                  * If we are doing an index recheck (UNIQUE_CHECK_EXISTING mode), we expect
                  * to find tuple already in ubtree. Once the index tuple matched, it will be
-                 * marked found. Traverse all tuples, if no matching tuple is found, report 
+                 * marked found. Traverse all tuples, if no matching tuple is found, report
                  * an error. For GPI, part oid should be the same as heapRel oid.
                  */
                 if (checkUnique == UNIQUE_CHECK_EXISTING && !RelationIsGlobalIndex(rel)
