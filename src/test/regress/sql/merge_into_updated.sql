@@ -115,4 +115,28 @@ end;
 \parallel off
 select c1, c2, to_char(c3, 'yyyy-mm-dd') from t1 order by c1;
 
+-- materialized view
+drop table if exists t_a;
+drop table if exists t_b;
+create table t_a(
+a_id int,
+a_name varchar2(100)
+);
+create table t_b(
+b_id int,
+b_name varchar2(100)
+);
+DROP materialized VIEW if exists v_t_b;
+create materialized view v_t_b as select * from t_b;
+
+MERGE INTO t_a a  
+USING v_t_b vb
+on (a.a_id=vb.b_id)
+WHEN MATCHED THEN
+update set a.a_name=vb.b_name;
+
+DROP materialized VIEW v_t_b;
+drop table t_a;
+drop table t_b;
+
 drop schema merge_into_updated cascade;
