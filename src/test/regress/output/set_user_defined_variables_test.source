@@ -1520,6 +1520,11 @@ SELECT TRIM(TRAILING ', ' FROM @sequence);
  1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 (1 row)
 
+set enable_set_variable_b_format = 1;
+CREATE TABLE userset_t1 (a VARCHAR(500) CHARACTER SET UTF8);
+SET @num=1000;
+INSERT INTO userset_t1 VALUES (CONCAT((@num:=@num+1), 'a'));
+set enable_set_variable_b_format = default;
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1

@@ -1191,6 +1191,9 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
     } else if (IsA(node, Query) && context->deep) {
         /* Recurse into subselects */
         return query_tree_walker((Query*)node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context, 0);
+    } else if (IsA(node, UserSetElem)) {
+        /* UserSetElem is volatile */
+        return context->checktype == CONTAIN_VOLATILE_FUNTION;
     }
     return expression_tree_walker(node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context);
 }
