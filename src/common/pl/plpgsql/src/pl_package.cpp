@@ -683,6 +683,7 @@ void delete_package(PLpgSQL_package* pkg)
     /* free package memory,*/
     plpgsql_pkg_HashTableDelete(pkg);
     plpgsql_free_package_memory(pkg);
+    pfree_ext(pkg);
 }
 
 static void plpgsql_pkg_append_dlcell(plpgsql_pkg_HashEnt* entity)
@@ -703,7 +704,6 @@ static void plpgsql_pkg_append_dlcell(plpgsql_pkg_HashEnt* entity)
         /* delete from the hash and delete the function's compile */
         CheckCurrCompileDependOnPackage(pkg->pkg_oid);
         delete_package(pkg);
-        pfree_ext(pkg);
     }
 }
 
@@ -825,7 +825,8 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
     PLpgSQL_compile_context* curr_compile = createCompileContext(context_name);
     SPI_NESTCOMPILE_LOG(curr_compile->compile_cxt);
     bool pkg_is_null = false;
-    if (pkg == NULL) {
+    /* pkg_cxt is null, means that delete_package has been done, and pkg has been freed. */
+    if (pkg == NULL || pkg->pkg_cxt == NULL) {
         pkg = (PLpgSQL_package*)MemoryContextAllocZero(
             SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(PLpgSQL_package));
         pkg->pkg_cxt = curr_compile->compile_cxt;
@@ -1330,6 +1331,10 @@ Oid findPackageParameter(const char* objname)
                     }
                     break;
                 }
+                case PLPGSQL_NSTYPE_TABLE:
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("nested-table type is not supported for parameter yet")));
+                    break;
                 default:
                     toid = InvalidOid;
             }
