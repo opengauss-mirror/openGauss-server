@@ -991,8 +991,10 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
     MemoryContext oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
 
     if (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)) {
-        if (nodeTag(planstate) == T_SeqScanState) {
+        if (IsA(planstate, SeqScanState)) {
             scan_handler_tbl_restrpos(castNode(SeqScanState, planstate)->ss_currentScanDesc);
+        } else if (IsA(planstate, IndexScanState)) {
+            ExecReScan(planstate);
         }
     }
 
