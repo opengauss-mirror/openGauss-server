@@ -20,15 +20,16 @@ select count(*) from ((select * from test_tablesample tablesample SYSTEM(20) REP
 (1 row)
 
 explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Nested Loop Anti Join
-   Join Filter: (test_tablesample.id = test_tablesample2.id)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Hash Anti Join
+   Hash Cond: (test_tablesample.id = test_tablesample2.id)
    ->  Sample Scan on test_tablesample
          Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-   ->  Sample Scan on test_tablesample2
-         Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-(6 rows)
+   ->  Hash
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
+(7 rows)
 
 select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
  id | name | salary | id | name | salary 
@@ -37,15 +38,19 @@ select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left j
 
 set enable_hashjoin to off;
 explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Nested Loop Anti Join
-   Join Filter: (test_tablesample.id = test_tablesample2.id)
-   ->  Sample Scan on test_tablesample
-         Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-   ->  Sample Scan on test_tablesample2
-         Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-(6 rows)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Merge Anti Join
+   Merge Cond: (test_tablesample.id = test_tablesample2.id)
+   ->  Sort
+         Sort Key: test_tablesample.id
+         ->  Sample Scan on test_tablesample
+               Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
+   ->  Sort
+         Sort Key: test_tablesample2.id
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
+(10 rows)
 
 select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
  id | name | salary | id | name | salary 
@@ -54,15 +59,16 @@ select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left j
 
 set enable_mergejoin to off;
 explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Nested Loop Anti Join
    Join Filter: (test_tablesample.id = test_tablesample2.id)
    ->  Sample Scan on test_tablesample
          Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-   ->  Sample Scan on test_tablesample2
-         Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
-(6 rows)
+   ->  Materialize
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::double precision) REPEATABLE (200::double precision)
+(7 rows)
 
 select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
  id | name | salary | id | name | salary 
@@ -315,8 +321,61 @@ select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join
 ----+------+--------+----+------+--------
 (0 rows)
 
+-- test rows estimation of samplescan
+set enable_hashjoin to on;
+create table ss_rows_t1 (a int);
+create table ss_rows_t2 (b int);
+create table ss_rows_t3 (c int);
+insert into ss_rows_t1 values (generate_series(1, 20000));
+insert into ss_rows_t2 values (generate_series(1, 20000));
+insert into ss_rows_t3 values (generate_series(1, 20000));
+explain select a from  ss_rows_t1 tablesample system (99.999999);
+--?.*
+--?.*
+--? Sample Scan on ss_rows_t1  (cost=.* rows=\d{5} width=4)
+   Sampling: system (99.999999::double precision)
+(2 rows)
+
+explain select b from  ss_rows_t2 tablesample bernoulli (99.999999);
+--?.*
+--?.*
+--? Sample Scan on ss_rows_t2  (cost=.* rows=\d{5} width=4)
+   Sampling: bernoulli (99.999999::double precision)
+(2 rows)
+
+explain select c from  ss_rows_t3 tablesample hybrid (99.999999,99.999999);
+--?.*
+--?.*
+--? Sample Scan on ss_rows_t3  (cost=.* rows=\d{5} width=4)
+   Sampling: hybrid (99.999999::double precision, 99.999999::double precision)
+(2 rows)
+
+explain select a, b, c from
+    ss_rows_t1 tablesample system (99.999999) repeatable (325),
+    ss_rows_t2 tablesample bernoulli (99.999999) repeatable (0),
+    ss_rows_t3 tablesample hybrid (99.999999,99.999999) repeatable (510)
+    where a = b and b = c;
+--?.*
+--?.*
+--? Hash Join  (.* width=12)
+   Hash Cond: (ss_rows_t1.a = ss_rows_t3.c)
+--?   ->  Hash Join  (.* width=8)
+         Hash Cond: (ss_rows_t1.a = ss_rows_t2.b)
+--?         ->  Sample Scan on ss_rows_t1  (cost=.* rows=\d{5} width=4)
+               Sampling: system (99.999999::double precision) REPEATABLE (325::double precision)
+--?         ->  Hash  (cost=.* rows=\d{5} width=4)
+--?               ->  Sample Scan on ss_rows_t2  (cost=.* rows=\d{5} width=4)
+                     Sampling: bernoulli (99.999999::double precision) REPEATABLE (0::double precision)
+--?   ->  Hash  (cost=.* rows=\d{5} width=4)
+--?         ->  Sample Scan on ss_rows_t3  (cost=.* rows=\d{5} width=4)
+               Sampling: hybrid (99.999999::double precision, 99.999999::double precision) REPEATABLE (510::double precision)
+(12 rows)
+
 reset search_path;
 drop schema  tablesample_schema4 cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table tablesample_schema4.test_tablesample
 drop cascades to table tablesample_schema4.test_tablesample2
+drop cascades to table tablesample_schema4.ss_rows_t1
+drop cascades to table tablesample_schema4.ss_rows_t2
+drop cascades to table tablesample_schema4.ss_rows_t3
