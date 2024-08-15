@@ -35,3 +35,10 @@ create user pg_error_username password 'test-1234';
 drop role samedb_schema_cn_role_02_001;
 
 drop schema test_ns_schema_1 cascade;
+
+CREATE ROLE test_mul_role IDENTIFIED BY 'Aa123456';
+create schema if not exists test_mul_schema AUTHORIZATION test_mul_role;
+create schema if not exists test_mul_schema AUTHORIZATION test_mul_role;
+create schema if not exists test_mul_schema AUTHORIZATION test_mul_role;
+drop schema test_mul_schema cascade;
+drop role test_mul_role;
