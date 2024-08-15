@@ -1,0 +1,13 @@
+DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, text, text[]);
+DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, xml, text[]);
+DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, xml);
+DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, text);
+DROP FUNCTION IF EXISTS pg_catalog.existsnode (xml, character varying);
+DROP FUNCTION IF EXISTS pg_catalog.extract_internal (xml, character varying);
+DROP FUNCTION IF EXISTS pg_catalog.extract_internal (xml, character varying, text[]);
+DROP FUNCTION IF EXISTS pg_catalog.extractvalue (xml, character varying);
+DROP FUNCTION IF EXISTS pg_catalog.extractvalue (xml, character varying, text[]);
+DROP FUNCTION IF EXISTS pg_catalog.getstringval (xml);
+DROP FUNCTION IF EXISTS pg_catalog.getstringval (xml[]);
+DROP FUNCTION IF EXISTS pg_catalog.xmlsequence (xml);
+DROP FUNCTION IF EXISTS pg_catalog.xmlsequence (xml[]);

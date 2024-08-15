@@ -81,6 +81,16 @@ extern char* map_sql_identifier_to_xml_name(char* ident, bool fully_escaped, boo
 extern char* map_xml_name_to_sql_identifier(char* name);
 extern char* map_sql_value_to_xml_value(Datum value, Oid type, bool xml_escape_strings);
 
+/* xmltype functions */
+extern Datum xmltype_extract(PG_FUNCTION_ARGS);
+extern Datum xmltype_extractvalue(PG_FUNCTION_ARGS);
+extern Datum xmltype_existsnode(PG_FUNCTION_ARGS);
+extern Datum xmltype_getstringval(PG_FUNCTION_ARGS);
+extern Datum xmltype_getstringval_array(PG_FUNCTION_ARGS);
+extern Datum xmltype_xmlsequence(PG_FUNCTION_ARGS);
+extern Datum xmltype_xmlsequence_array(PG_FUNCTION_ARGS);
+extern Datum xmltype_appendchildxml(PG_FUNCTION_ARGS);
+
 extern THR_LOCAL int xmloption; /* XmlOptionType, but int for guc enum */
 
 #endif /* XML_H */

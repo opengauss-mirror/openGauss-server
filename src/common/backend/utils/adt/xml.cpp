@@ -133,7 +133,7 @@ static int parse_xml_decl(const xmlChar* str, size_t* lenp, xmlChar** version, x
 static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encoding, int standalone);
 static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding, bool can_ignore = false);
 static text* xml_xmlnodetoxmltype(xmlNodePtr cur);
-static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate);
+static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate, PgXmlErrorContext *xmlerrcxt);
 #endif /* USE_LIBXML */
 
 static StringInfo query_to_xml_internal(const char* query, char* tablename, const char* xmlschema, bool nulls,
@@ -1122,7 +1122,20 @@ static xmlChar* xml_pnstrdup(const xmlChar* str, size_t len)
     xmlChar* result = NULL;
 
     result = (xmlChar*)palloc((len + 1) * sizeof(xmlChar));
-    MemCpy(result, str, len * sizeof(xmlChar));
+    errno_t rc = memcpy_s(result, (len + 1) * sizeof(xmlChar), str, len * sizeof(xmlChar));
+    securec_check(rc, "\0", "\0");
+    result[len] = 0;
+    return result;
+}
+
+/* Ditto, except input is char* */
+static xmlChar* xml_charpnstrdup(char* str, size_t len)
+{
+    xmlChar* result = NULL;
+
+    result = (xmlChar*)palloc((len + 1) * sizeof(xmlChar));
+    errno_t rc = memcpy_s(result, (len + 1) * sizeof(xmlChar), str, len);
+    securec_check(rc, "\0", "\0");
     result[len] = 0;
     return result;
 }
@@ -2124,7 +2137,8 @@ static char* _SPI_strdup(const char* s)
     size_t len = strlen(s) + 1;
     char* ret = (char*)SPI_palloc(len);
 
-    MemCpy(ret, s, len);
+    errno_t rc = memcpy_s(ret, len, s, len);
+    securec_check(rc, "\0", "\0");
     return ret;
 }
 
@@ -3633,7 +3647,7 @@ static text* xml_xmlnodetoxmltype(xmlNodePtr cur)
  * representations.  Primitive values (float, double, string) are converted
  * to a single-element array containing the value's string representation.
  */
-static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate)
+static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate, PgXmlErrorContext *xmlerrcxt)
 {
     int result = 0;
     Datum datum;
@@ -3725,7 +3739,7 @@ static void xpath_internal(
     Datum* ns_names_uris = NULL;
     bool* ns_names_uris_nulls = NULL;
     int ns_count;
-    errno_t rc = 0;
+    size_t xmldecl_len = 0;
     /*
      * Namespace mappings are passed as text[].  If an empty array is passed
      * (ndim = 0, "0-dimensional"), then there are no namespace mappings.
@@ -3765,17 +3779,12 @@ static void xpath_internal(
     if (xpath_len == 0)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("empty XPath expression")));
 
-    string = (xmlChar*)palloc((len + 1) * sizeof(xmlChar));
-    rc = memcpy_s(string, (len + 1) * sizeof(xmlChar), datastr, len);
-    securec_check(rc, "\0", "\0");
+    string = xml_charpnstrdup(datastr, len);
+    xpath_expr = xml_charpnstrdup(VARDATA(xpath_expr_text), xpath_len);
 
-    string[len] = '\0';
-
-    xpath_expr = (xmlChar*)palloc((xpath_len + 1) * sizeof(xmlChar));
-    rc = memcpy_s(xpath_expr, (xpath_len + 1) * sizeof(xmlChar), VARDATA(xpath_expr_text), xpath_len);
-    securec_check(rc, "\0", "\0");
-    xpath_expr[xpath_len] = '\0';
-
+    if (GetDatabaseEncoding() == PG_UTF8) {
+        parse_xml_decl(string, &xmldecl_len, NULL, NULL, NULL);
+    }
     xmlerrcxt = pg_xml_init(PG_XML_STRICTNESS_ALL);
 
     PG_TRY();
@@ -3789,7 +3798,7 @@ static void xpath_internal(
         ctxt = xmlNewParserCtxt();
         if (ctxt == NULL || xmlerrcxt->err_occurred)
             xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate parser context");
-        doc = xmlCtxtReadMemory(ctxt, (char*)string, len, NULL, NULL, 0);
+        doc = xmlCtxtReadMemory(ctxt, (char*)string + xmldecl_len, len - xmldecl_len, NULL, NULL, 0);
         if (doc == NULL || xmlerrcxt->err_occurred)
             xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_XML_DOCUMENT, "could not parse XML document");
         xpathctx = xmlXPathNewContext(doc);
@@ -3838,9 +3847,9 @@ static void xpath_internal(
          * Extract the results as requested.
          */
         if (res_nitems != NULL)
-            *res_nitems = xml_xpathobjtoxmlarray(xpathobj, astate);
+            *res_nitems = xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
         else
-            (void)xml_xpathobjtoxmlarray(xpathobj, astate);
+            (void)xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
     }
     PG_CATCH();
     {
@@ -3869,8 +3878,624 @@ static void xpath_internal(
 
     pg_xml_done(xmlerrcxt, false);
 }
+
+static xmlChar* buildXpathAbsolutePath(text* xpath_expr_text)
+{
+    xmlChar* xpath_expr = NULL;
+
+    int xpath_len = VARSIZE(xpath_expr_text) - VARHDRSZ;
+    if (xpath_len == 0)
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("empty XPath expression")));
+
+    xpath_expr = xml_charpnstrdup(VARDATA(xpath_expr_text), xpath_len);
+
+    return xpath_expr;
+}
+/*
+ * Common code for xmltype_extract(), xmltype_xmlsequence() and xmltype_existsnode()
+ *
+ * Evaluate XPath expression and return number of nodes in res_items
+ * and array of XML values in astate.  Either of those pointers can be
+ * NULL if the corresponding result isn't wanted.
+ *
+ * It is up to the user to ensure that the XML passed is in fact
+ * an XML document - XPath doesn't work easily on fragments without
+ * a context node being known.
+ */
+static void extract_internal(
+    xmltype* data, text* xpath_expr_text, ArrayType* namespaces, int* res_nitems, ArrayBuildState** astate)
+{
+    PgXmlErrorContext* xmlerrcxt = NULL;
+    volatile xmlDocPtr doc = NULL;
+    volatile xmlXPathContextPtr xpathctx = NULL;
+    volatile xmlXPathObjectPtr xpathobj = NULL;
+    xmlChar* xpath_expr = NULL;
+    int i = 0;
+    int ndim = 0;
+    Datum* ns_names_uris = NULL;
+    bool* ns_names_uris_nulls = NULL;
+    int ns_count = 0;
+
+    ndim = namespaces ? ARR_NDIM(namespaces) : 0;
+    if (ndim != 0) {
+        int* dim = NULL;
+        dim = ARR_DIMS(namespaces);
+        if (ndim != 2 && dim[1] != 2) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("invalid array for XML namespaces mapping"),
+                    errdetail("The array mast be two-dimensional with the length of second axis equal to 2.")));
+        } else {
+            ns_names_uris = NULL;
+            ns_names_uris_nulls = NULL;
+            ns_count = 0;
+        }
+
+        Assert(ARR_ELEMTYPE(namespaces) == TEXTOID);
+        deconstruct_array(namespaces, TEXTOID, -1, false, 'i', &ns_names_uris, &ns_names_uris_nulls, &ns_count);
+
+        Assert(ns_count % 2 == 0);
+        ns_count /= 2;
+    }
+
+    xpath_expr = buildXpathAbsolutePath(xpath_expr_text);
+
+    xmlerrcxt = pg_xml_init(PG_XML_STRICTNESS_ALL);
+
+    PG_TRY();
+    {
+        doc = xml_parse(data, XMLOPTION_DOCUMENT, true, GetDatabaseEncoding());
+
+        xpathctx = xmlXPathNewContext(doc);
+        if (xpathctx == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate XPath context");
+        }
+        xpathctx->node = xmlDocGetRootElement(doc);
+        if (xpathctx->node == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_UNDEFINED_OBJECT, "could not find root XML element");
+        }
+
+        if (ns_count > 0) {
+            for (i = 0; i < ns_count; i++) {
+                char* ns_name = NULL;
+                char* ns_uri = NULL;
+
+                if (ns_names_uris_nulls[i * 2] || ns_names_uris_nulls[i * 2 + 1]) {
+                    ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                            errmsg("neither namespace name nor URI may be null")));
+                }
+                ns_name = TextDatumGetCString(ns_names_uris_nulls[i * 2]);
+                ns_uri = TextDatumGetCString(ns_names_uris_nulls[i * 2 + 1]);
+                if (xmlXPathRegisterNs(xpathctx, (xmlChar*)ns_name, (xmlChar*)ns_uri) != 0) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("could not register XML namespace with name \"%s\" and \
+                                URI \"%s\"", ns_name, ns_uri)));
+                }
+            }
+        }
+        xpathobj = xmlXPathEvalExpression(xpath_expr, xpathctx);
+        if (xpathobj == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_OPERATION, "could not create XPath object");
+        }
+
+        if (res_nitems != NULL) {
+            *res_nitems = xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
+        } else {
+            (void)xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
+        }
+    }
+    PG_CATCH();
+    {
+        if (xpathobj) {
+            xmlXPathFreeObject(xpathobj);
+        }
+        if (xpathctx) {
+            xmlXPathFreeContext(xpathctx);
+        }
+        if (doc) {
+            xmlFreeDoc(doc);
+        }
+
+        pg_xml_done(xmlerrcxt, true);
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    xmlXPathFreeObject(xpathobj);
+    xmlXPathFreeContext(xpathctx);
+    xmlFreeDoc(doc);
+
+    pg_xml_done(xmlerrcxt, false);
+}
+
+/*
+ * Get xmltype node value
+ */
+static char* xpath_extractvalue(xmltype* data, text* xpath_expr_text, ArrayType* namespaces)
+{
+    PgXmlErrorContext* xmlerrcxt = NULL;
+    volatile xmlDocPtr doc = NULL;
+    volatile xmlXPathContextPtr xpathctx = NULL;
+    volatile xmlXPathObjectPtr xpathobj = NULL;
+    xmlChar* xpath_expr = NULL;
+    char* result = NULL;
+    xmlChar* value = NULL;
+    int i = 0;
+    int ndim = 0;
+    Datum* ns_names_uris = NULL;
+    bool* ns_names_uris_nulls = NULL;
+    int ns_count = 0;
+    int div_num = 2;
+
+    ndim = namespaces ? ARR_NDIM(namespaces) : 0;
+    if (ndim != 0) {
+        int* dim = NULL;
+        dim = ARR_DIMS(namespaces);
+        if (ndim != 2 && dim[1] != 2) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("invalid array for XML namespaces mapping"),
+                    errdetail("The array mast be two-dimensional with the length of second axis equal to 2.")));
+        } else {
+            ns_names_uris = NULL;
+            ns_names_uris_nulls = NULL;
+            ns_count = 0;
+        }
+
+        Assert(ARR_ELEMTYPE(namespaces) == TEXTOID);
+        deconstruct_array(namespaces, TEXTOID, -1, false, 'i', &ns_names_uris, &ns_names_uris_nulls, &ns_count);
+
+        Assert(ns_count % div_num == 0);
+        ns_count /= div_num;
+    }
+
+    xpath_expr = buildXpathAbsolutePath(xpath_expr_text);
+
+    xmlerrcxt = pg_xml_init(PG_XML_STRICTNESS_ALL);
+    PG_TRY();
+    {
+        doc = xml_parse(data, XMLOPTION_DOCUMENT, true, GetDatabaseEncoding());
+
+        xpathctx = xmlXPathNewContext(doc);
+        if (xpathctx == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate XPath context");
+        }
+        xpathctx->node = xmlDocGetRootElement(doc);
+        if (xpathctx->node == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_UNDEFINED_OBJECT, "could not find root XML element");
+        }
+        if (ns_count > 0) {
+            for (i = 0; i < ns_count; i++) {
+                char* ns_name = NULL;
+                char* ns_uri = NULL;
+
+                if (ns_names_uris_nulls[i * 2] || ns_names_uris_nulls[i * 2 + 1]) {
+                    ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                            errmsg("neither namespace name nor URI may be null")));
+                }
+                ns_name = TextDatumGetCString(ns_names_uris_nulls[i * 2]);
+                ns_uri = TextDatumGetCString(ns_names_uris_nulls[i * 2 + 1]);
+                if (xmlXPathRegisterNs(xpathctx, (xmlChar*)ns_name, (xmlChar*)ns_uri) != 0) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("could not register XML namespace with name \"%s\" and URI \"%s\"", ns_name, ns_uri)));
+                }
+            }
+        }
+
+        xpathobj = xmlXPathEvalExpression(xpath_expr, xpathctx);
+        if (xpathobj == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_OPERATION, "could not create XPath object");
+        }
+
+        if (xpathobj->type == XPATH_NODESET && xpathobj->nodesetval != NULL) {
+            if (xpathobj->nodesetval->nodeNr > 1) {
+                xml_ereport(xmlerrcxt,
+                    ERROR, ERRCODE_UNEXPECTED_NULL_VALUE, "EXTRACTVALUE returns value of only one node.");
+            } else if (xpathobj->nodesetval->nodeNr == 1) {
+                xmlNodePtr node = xpathobj->nodesetval->nodeTab[0];
+                value = xmlXPathCastNodeToString(node);
+                if (value) {
+                    result = pstrdup((char*)value);
+                    xmlFree(value);
+                    value = NULL;
+                }
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        if (xpathobj) {
+            xmlXPathFreeObject(xpathobj);
+        }
+        if (xpathctx) {
+            xmlXPathFreeContext(xpathctx);
+        }
+        if (doc) {
+            xmlFreeDoc(doc);
+        }
+
+        pg_xml_done(xmlerrcxt, true);
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    xmlXPathFreeObject(xpathobj);
+    xmlXPathFreeContext(xpathctx);
+    xmlFreeDoc(doc);
+
+    pg_xml_done(xmlerrcxt, false);
+
+    return result;
+}
+
+static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
+                                  ArrayType* namespaces, text* appendData_text)
+{
+    PgXmlErrorContext* xmlerrcxt = NULL;
+    xmlDocPtr doc = NULL;
+    xmlChar* xpathStr = NULL;
+    xmlNodePtr curNode = NULL;
+    xmlDocPtr appendDoc = NULL;
+    xmlNodePtr appendNode = NULL;
+    int i = 0;
+    int nodeSize = 0;
+    xmlChar* resdata = NULL;
+    int rescount = 0;
+    xmlXPathContextPtr xpathctx = NULL;
+    xmlXPathObjectPtr xpathObj = NULL;
+    Datum* ns_names_uris = NULL;
+    bool* ns_names_uris_nulls = NULL;
+    int ns_count = 0;
+    int ndim;
+
+    xmlerrcxt = pg_xml_init(PG_XML_STRICTNESS_ALL);
+
+    xpathStr = buildXpathAbsolutePath(xpath_expr_text);
+    ndim = namespaces ? ARR_NDIM(namespaces) : 0;
+    if (ndim != 0) {
+        int* dim = NULL;
+        dim = ARR_DIMS(namespaces);
+        if (ndim != 2 || dim[1] != 2) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("invalid array for XML namespace mapping"),
+                    errdetail("The array mast be two-dimensional with the length of second axis equal to 2.")));
+        }
+        Assert(ARR_ELEMTYPE(namespaces) == TEXTOID);
+        deconstruct_array(namespaces, TEXTOID, -1, false, 'i', &ns_names_uris, &ns_names_uris_nulls, &ns_count);
+
+        Assert(ns_count % 2 == 0);
+        ns_count /= 2;
+    } else {
+        ns_names_uris = NULL;
+        ns_names_uris_nulls = NULL;
+        ns_count = 0;
+    }
+
+    PG_TRY();
+    {
+        xmlKeepBlanksDefault(0);
+        doc = xml_parse(rootxml, XMLOPTION_DOCUMENT, true, GetDatabaseEncoding());
+
+        xpathctx = xmlXPathNewContext(doc);
+        if (xpathctx == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate XPath context");
+        }
+        xpathctx->node = xmlDocGetRootElement(doc);
+        if (xpathctx->node == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_UNDEFINED_OBJECT, "could not find root XML element");
+        }
+
+        if (ns_count > 0) {
+            for (i = 0; i < ns_count; i++) {
+                char* ns_name = NULL;
+                char* ns_uri = NULL;
+
+                if (ns_names_uris_nulls[i * 2] || ns_names_uris_nulls[i * 2 + 1]) {
+                    ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                            errmsg("neither namespace name nor URI may be null")));
+                }
+                ns_name = TextDatumGetCString(ns_names_uris[i * 2]);
+                ns_uri = TextDatumGetCString(ns_names_uris[i * 2 + 1]);
+                if (xmlXPathRegisterNs(xpathctx, (xmlChar*)ns_name, (xmlChar*)ns_uri) != 0) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("could not register XML namespace with name \"%s\" and URI \"%s\"", ns_name, ns_uri)));
+                }
+            }
+        }
+
+        xpathObj = xmlXPathEvalExpression(xpathStr, xpathctx);
+        if (xpathObj == NULL || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_OPERATION, "could not create XPath object");
+        }
+        char* appendstr = text_to_cstring(appendData_text);
+        if (appendstr[0] == '<') {
+            appendDoc = xml_parse(appendData_text, XMLOPTION_DOCUMENT, true, GetDatabaseEncoding());
+            appendNode = xmlDocGetRootElement(appendDoc);
+            if (appendNode == NULL || xmlerrcxt->err_occurred) {
+                xml_ereport(xmlerrcxt, ERROR, ERRCODE_UNDEFINED_OBJECT, "could not find root XML element");
+            }
+        } else {
+            appendNode = xmlNewText((xmlChar*)appendstr);
+            if (appendNode == NULL || xmlerrcxt->err_occurred) {
+                xml_ereport(xmlerrcxt, ERROR, ERRCODE_UNDEFINED_OBJECT, "could not parse XML content");
+            }
+        }
+
+        nodeSize = (xpathObj->nodesetval) ? xpathObj->nodesetval->nodeNr : 0;
+        for (i = 0; i < nodeSize; i++) {
+            curNode = xpathObj->nodesetval->nodeTab[i];
+            xmlNodePtr resNode = xmlAddChildList(curNode, xmlCopyNode(appendNode, 1));
+            if (resNode == NULL || xmlerrcxt->err_occurred) {
+                xml_ereport(xmlerrcxt, ERROR, ERRCODE_OPERATE_FAILED, "append child xml failed");
+            }
+        }
+        xmlDocDumpFormatMemory(doc, &resdata, &rescount, 1);
+        if (rescount == 0 || xmlerrcxt->err_occurred) {
+            xml_ereport(xmlerrcxt, ERROR, ERRCODE_OPERATE_FAILED, "xml document dump failed");
+        }
+    }
+
+    PG_CATCH();
+    {
+        if (xpathObj) {
+            xmlXPathFreeObject(xpathObj);
+        }
+        if (xpathctx) {
+            xmlXPathFreeContext(xpathctx);
+        }
+        if (appendDoc) {
+            xmlFreeDoc(appendDoc);
+        } else if (appendNode) {
+            xmlFreeNodeList(appendNode);
+        }
+        if (doc) {
+            xmlFreeDoc(doc);
+        }
+
+        pg_xml_done(xmlerrcxt, true);
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    xmlXPathFreeObject(xpathObj);
+    xmlXPathFreeContext(xpathctx);
+    if (appendDoc) {
+        xmlFreeDoc(appendDoc);
+    } else if (appendNode) {
+        xmlFreeNodeList(appendNode);
+    }
+    xmlFreeDoc(doc);
+
+    pg_xml_done(xmlerrcxt, false);
+
+    return resdata;
+}
+
 #endif /* USE_LIBXML */
 
+static void XMLTYPE_SUPPORT()
+{
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("Functions for xmltype is onle supported in database which dbcompatibility = 'A'.")));
+    }
+}
+
+Datum xmltype_extract(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid XPATH expression")));
+    }
+    text* xpath_expr_text = PG_GETARG_TEXT_P(1);
+    xmltype* data = PG_GETARG_XML_P(0);
+    ArrayType* namespaces = PG_GETARG_ARRAYTYPE_P(2);
+    int res_nitems = 0;
+    ArrayBuildState* astate = NULL;
+
+    extract_internal(data, xpath_expr_text, namespaces, &res_nitems, &astate);
+    if (res_nitems == 0) {
+        PG_RETURN_NULL();
+    } else {
+        StringInfoData buf;
+        initStringInfo(&buf);
+
+        for (int i = 0; i < astate->nelems; ++i) {
+            if (astate->dnulls && astate->dnulls[i]) {
+                continue;
+            } else {
+                xmltype* xml = (xmltype*)astate->dvalues[i];
+                char* xmlchar = text_to_cstring((text*)xml);
+                appendStringInfo(&buf, "%s\n", xmlchar);
+            }
+        }
+        buf.data[buf.len - 1] = '\0';
+        buf.len--;
+        PG_RETURN_XML_P(stringinfo_to_xmltype(&buf));
+    }
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_extractvalue(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    text* xpath_expr_text = PG_GETARG_TEXT_P(1);
+    xmltype* data = PG_GETARG_XML_P(0);
+    ArrayType* namespaces = PG_GETARG_ARRAYTYPE_P(2);
+
+    char* resvalue = NULL;
+    resvalue = xpath_extractvalue(data, xpath_expr_text, namespaces);
+    if (resvalue == NULL) {
+        PG_RETURN_NULL();
+    }
+
+    PG_RETURN_CSTRING(cstring_to_text((char*)resvalue));
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_xmlsequence(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
+    }
+    xmltype* data = PG_GETARG_XML_P(0);
+    ArrayBuildState* astate = NULL;
+    MemoryContext oldcontext = CurrentMemoryContext;
+
+    PG_TRY();
+    {
+        xmlDocPtr doc = NULL;
+        doc = xml_parse(data, XMLOPTION_DOCUMENT, true, GetDatabaseEncoding());
+        xmlFreeDoc(doc);
+        astate = accumArrayResult(astate, PointerGetDatum(data), false, XMLOID, CurrentMemoryContext);
+        if (astate->nelems == 0) {
+            PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
+        } else {
+            PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+        }
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+        MemoryContextSwitchTo(oldcontext);
+        int res_nitems = 0;
+        StringInfoData buf;
+        initStringInfo(&buf);
+
+        char* node_open = "<begin>";
+        char* node_close = "</begin>";
+        appendStringInfo(&buf, "%s", node_open);
+        appendStringInfo(&buf, "%s", text_to_cstring((text*)data));
+        appendStringInfo(&buf, "%s", node_close);
+
+        xmltype* xmlbuf = stringinfo_to_xmltype(&buf);
+
+        char* xpath_root_node = "/begin/*";
+        text* xpath_root_path = cstring_to_text(xpath_root_node);
+        extract_internal(xmlbuf, xpath_root_path, NULL, &res_nitems, &astate);
+        if (res_nitems == 0) {
+            PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
+        } else {
+            PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+        }
+    }
+    PG_END_TRY();
+    return 0;
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_xmlsequence_array(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    PG_RETURN_ARRAYTYPE_P(PG_GETARG_ARRAYTYPE_P(0));
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_existsnode(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    text* xpath_expr_text = PG_GETARG_TEXT_P(1);
+    xmltype* data = PG_GETARG_XML_P(0);
+    int res_nitems = 0;
+
+    extract_internal(data, xpath_expr_text, NULL, &res_nitems, NULL);
+
+    if (res_nitems > 0) {
+        PG_RETURN_UINT8(1);
+    } else {
+        PG_RETURN_UINT8(0);
+    }
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_getstringval(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    xmltype* data = PG_GETARG_XML_P(0);
+    PG_RETURN_VARCHAR_P((VarChar*)data);
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_getstringval_array(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        PG_RETURN_NULL();
+    }
+    VarChar* resvalue;
+    FunctionCallInfoData info;
+
+    InitFunctionCallInfoData(info, fcinfo->flinfo, 2, InvalidOid, NULL, NULL);
+    info.arg[0] = fcinfo->arg[0];
+    info.arg[1] = CStringGetTextDatum(" \n");
+    info.argnull[0] = false;
+    info.argnull[1] = false;
+
+    resvalue = (VarChar*)DatumGetPointer(array_to_text(&info));
+    PG_RETURN_VARCHAR_P(resvalue);
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif
+}
+
+Datum xmltype_appendchildxml(PG_FUNCTION_ARGS)
+{
+    XMLTYPE_SUPPORT();
+#ifdef USE_LIBXML
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_XML_DOCUMENT),
+                errmsg("invaild xml tag, got no context")));
+    }
+    if (PG_ARGISNULL(1)) {
+        PG_RETURN_NULL();
+    }
+    if (PG_ARGISNULL(2)) {
+        PG_RETURN_XML_P(PG_GETARG_XML_P(0));
+    }
+    xmltype* data = PG_GETARG_XML_P(0);
+    text* xpath_expr_text = PG_GETARG_TEXT_P(1);
+    text* appendData = PG_GETARG_TEXT_P(2);
+    ArrayType* namespaces = NULL;
+
+    if (!PG_ARGISNULL(3)) {
+        namespaces = PG_GETARG_ARRAYTYPE_P(3);
+    }
+    xmlChar* res = appendNewChildXml(data, xpath_expr_text, namespaces, appendData);
+
+    PG_RETURN_XML_P(cstring_to_xmltype((char*)res));
+#else
+    NO_XML_SUPPORT();
+    return 0;
+#endif /* USE_LIBXML */
+}
 /*
  * Evaluate XPath expression and return array of XML values.
  *

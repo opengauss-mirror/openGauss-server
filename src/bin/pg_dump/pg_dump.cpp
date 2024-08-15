@@ -2390,7 +2390,7 @@ static void selectDumpableNamespace(NamespaceInfo* nsinfo)
              strcmp(nsinfo->dobj.name, "cstore") == 0 || strcmp(nsinfo->dobj.name, "snapshot") == 0 ||
              strcmp(nsinfo->dobj.name, "information_schema") == 0 || strcmp(nsinfo->dobj.name, "pkg_service") == 0 ||
              strcmp(nsinfo->dobj.name, "blockchain") == 0 || strcmp(nsinfo->dobj.name, "sqladvisor") == 0 ||
-             strcmp(nsinfo->dobj.name, "coverage") == 0
+             strcmp(nsinfo->dobj.name, "coverage") == 0 || strcmp(nsinfo->dobj.name, "xmltype") == 0
 #ifdef ENABLE_MULTIPLE_NODES
              || strcmp(nsinfo->dobj.name, "db4ai") == 0
 #endif
