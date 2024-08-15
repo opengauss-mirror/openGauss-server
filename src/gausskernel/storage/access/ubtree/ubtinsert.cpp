@@ -787,24 +787,17 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                 }
 
                 /*
-                 * If we are doing a recheck, we expect to find the tuple we
-                 * are rechecking.	It's not a duplicate, but we have to keep
-                 * scanning. For global partition index, part oid in index tuple
-                 * is supposed to be same as heapRel oid, add check in case
-                 * abnormal condition.
+                 * If we are doing an index recheck (UNIQUE_CHECK_EXISTING mode), we expect
+                 * to find tuple already in ubtree. Once the index tuple matched, it will be
+                 * marked found. Traverse all tuples, if no matching tuple is found, report 
+                 * an error. For GPI, part oid should be the same as heapRel oid.
                  */
-                if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0) {
-                    if (RelationIsGlobalIndex(rel) && curPartOid != heapRel->rd_id) {
-                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("failed to re-find tuple within GPI \"%s\"",
-                                       RelationGetRelationName(rel))));
-                    }
+                if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0
+                    && !RelationIsGlobalIndex(rel)) {
                     found = true;
-                    /*
-                     * We check the whole HOT-chain to see if there is any tuple
-                     * that satisfies SnapshotDirty.  This is necessary because we
-                     * have just a single index entry for the entire chain.
-                     */
+                } else if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0
+                    && curPartOid == heapRel->rd_id && RelationIsGlobalIndex(rel)) {
+                    found = true;
                 } else {
                     TransactionId xmin, xmax;
                     bool isdead = false;
