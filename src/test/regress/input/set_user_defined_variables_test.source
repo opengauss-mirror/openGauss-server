@@ -789,8 +789,12 @@ SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
 drop table account_instance_stats;
 set enable_seqscan = default;
 set enable_bitmapscan = default;
-set enable_set_variable_b_format = default;
 
+CREATE TABLE userset_t1 (a VARCHAR(500) CHARACTER SET UTF8);
+SET @num=1000;
+INSERT INTO userset_t1 VALUES (CONCAT((@num:=@num+1), 'a'));
+
+set enable_set_variable_b_format = default;
 \c regression
 drop database if exists test_set;
 
