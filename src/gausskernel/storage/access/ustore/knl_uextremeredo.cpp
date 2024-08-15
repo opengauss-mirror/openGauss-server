@@ -748,15 +748,12 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
             affixLens->suffixlen = *suffixlenPtr;
         }
     } else {
-        Size initPageXtraInfo = 0;
         if (isinit) {
             /* has xidBase */
             xidBase = (TransactionId *)curxlogptr;
             curxlogptr += sizeof(TransactionId);
-            initPageXtraInfo += sizeof(TransactionId);
             tdCount = (uint16 *)curxlogptr;
             curxlogptr += sizeof(uint16);
-            initPageXtraInfo += sizeof(uint16);
 
             Page newpage = buffers->newbuffer.pageinfo.page;
             if (istoast) {
@@ -885,11 +882,13 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
 
     if (onlyCopyDelta) {
         UHeapTupleHeaderSetTDSlot(oldtup->disk_tuple, xlhdr.td_id);
+        oldtup->disk_tuple->xid = (ShortTransactionId) FrozenTransactionId;
         oldtup->disk_tuple->flag2 = xlhdr.flag2;
         oldtup->disk_tuple->flag = xlhdr.flag;
         oldtup->disk_tuple->t_hoff = xlhdr.t_hoff;
     } else {
         UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
+        newtup->xid = (ShortTransactionId) FrozenTransactionId;
         newtup->flag2 = xlhdr.flag2;
         newtup->flag = xlhdr.flag;
         newtup->t_hoff = xlhdr.t_hoff;
