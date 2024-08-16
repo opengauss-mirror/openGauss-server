@@ -350,16 +350,9 @@ function read_mpp_number()
     version_num=$(echo $version_num1 | tr -d ";")
     #remove the blank
     version_num=$(echo $version_num)
-
-    if echo $version_num | grep -qE '^92[0-9]+$'
-    then
-        # get the last three number
-        latter=${version_num:2}
-        echo "92.${latter}" >>${SCRIPT_DIR}/version.cfg
-    else
-        echo "Cannot get the version number from globals.cpp."
-        exit 1
-    fi
+    form=${version_num:0:2}
+    latter=${version_num:2}
+    echo "${form}.${latter}" >>${SCRIPT_DIR}/version.cfg
 }
 read_mpp_number
 
