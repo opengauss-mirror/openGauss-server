@@ -281,7 +281,7 @@ void UHeapXlogInsert(XLogReaderState *record)
             
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &targetNode, blkno, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -476,7 +476,7 @@ static void UHeapXlogDelete(XLogReaderState *record)
             
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &targetNode, blkno, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -537,7 +537,7 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -582,7 +582,7 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -731,7 +731,7 @@ static void UHeapXlogClean(XLogReaderState *record)
         
         Page page = BufferGetPage(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1318,7 +1318,7 @@ static void UHeapXlogUpdate(XLogReaderState *record)
             
             Page page = BufferGetPage(buffers.newbuffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &rnode, BufferGetBlockNumber(buffers.newbuffer.buf), true);
         }
 
         if (BufferIsValid(buffers.newbuffer.buf) && buffers.newbuffer.buf != buffers.oldbuffer.buf) {
@@ -1645,7 +1645,7 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
         
         Page page = BufferGetPage(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     pfree(ufreeOffsetRanges);
@@ -1674,7 +1674,7 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1744,7 +1744,7 @@ static void UHeapXlogExtendTDSlot(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1821,7 +1821,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
     if (BufferIsValid(buffer.buf)) {
         UnlockReleaseBuffer(buffer.buf);
@@ -1997,7 +1997,7 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
         MarkBufferDirty(buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))
@@ -2022,7 +2022,7 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
         
         Page page = BufferGetPage(buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))
@@ -2087,7 +2087,7 @@ static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
 
         Page page = BufferGetPage(buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))

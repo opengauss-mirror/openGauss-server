@@ -297,7 +297,7 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
         END_CRIT_SECTION();
     }
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, BufferGetBlockNumber(buffer));
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
@@ -612,7 +612,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     }
 
     END_CRIT_SECTION();
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relationData.relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relationData.relation, NULL,
+        BufferGetBlockNumber(buffer));
 
     UnlockReleaseBuffer(buffer);
 

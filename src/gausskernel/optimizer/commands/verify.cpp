@@ -1898,7 +1898,7 @@ static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, ForkNum
                 UBTRecycleQueueVerifyPageOffline(rel, page, blkno);
             }
         } else {
-            UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel);
+            UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, blkno);
         }
         
     }
