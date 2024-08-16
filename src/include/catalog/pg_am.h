@@ -70,6 +70,7 @@ CATALOG(pg_am,2601) BKI_SCHEMA_MACRO
 	regproc		amcostestimate; /* estimate cost of an indexscan */
 	regproc		amoptions;		/* parse AM-specific parameters */
 	regproc		amhandler;		/* handler function */
+	regproc		amdelete;		/* index delete function */
 } FormData_pg_am;
 
 /* ----------------
@@ -83,7 +84,7 @@ typedef FormData_pg_am *Form_pg_am;
  *		compiler constants for pg_am
  * ----------------
  */
-#define Natts_pg_am						32
+#define Natts_pg_am						33
 #define Anum_pg_am_amname				1
 #define Anum_pg_am_amstrategies			2
 #define Anum_pg_am_amsupport			3
@@ -116,43 +117,46 @@ typedef FormData_pg_am *Form_pg_am;
 #define Anum_pg_am_amcostestimate		30
 #define Anum_pg_am_amoptions			31
 #define Anum_pg_am_amhandler			32
+#define Anum_pg_am_amdelete				33
 
 /* ----------------
  *		initial contents of pg_am
  * ----------------
  */
 
-DATA(insert OID = 403 (  btree		5 3 t f t t t t t t f t t 0 btinsert btbeginscan btgettuple btgetbitmap btrescan btendscan btmarkpos btrestrpos btmerge btbuild btbuildempty btbulkdelete btvacuumcleanup btcanreturn btcostestimate btoptions -));
+DATA(insert OID = 403 (  btree		5 3 t f t t t t t t f t t 0 btinsert btbeginscan btgettuple btgetbitmap btrescan btendscan btmarkpos btrestrpos btmerge btbuild btbuildempty btbulkdelete btvacuumcleanup btcanreturn btcostestimate btoptions - -));
 DESCR("b-tree index access method");
 #define BTREE_AM_OID 403
-DATA(insert OID = 405 (  hash		1 1 f f t f f f f f f f f 23 hashinsert hashbeginscan hashgettuple hashgetbitmap hashrescan hashendscan hashmarkpos hashrestrpos hashmerge hashbuild hashbuildempty hashbulkdelete hashvacuumcleanup - hashcostestimate hashoptions -));
+DATA(insert OID = 405 (  hash		1 1 f f t f f f f f f f f 23 hashinsert hashbeginscan hashgettuple hashgetbitmap hashrescan hashendscan hashmarkpos hashrestrpos hashmerge hashbuild hashbuildempty hashbulkdelete hashvacuumcleanup - hashcostestimate hashoptions - -));
 DESCR("hash index access method");
 #define HASH_AM_OID 405
-DATA(insert OID = 783 (  gist		0 8 f t f f t t f t t t f 0 gistinsert gistbeginscan gistgettuple gistgetbitmap gistrescan gistendscan gistmarkpos gistrestrpos gistmerge gistbuild gistbuildempty gistbulkdelete gistvacuumcleanup - gistcostestimate gistoptions -));
+DATA(insert OID = 783 (  gist		0 8 f t f f t t f t t t f 0 gistinsert gistbeginscan gistgettuple gistgetbitmap gistrescan gistendscan gistmarkpos gistrestrpos gistmerge gistbuild gistbuildempty gistbulkdelete gistvacuumcleanup - gistcostestimate gistoptions - -));
 DESCR("GiST index access method");
 #define GIST_AM_OID 783
-DATA(insert OID = 2742 (  gin		0 6 f f f f t t f f t f f 0 gininsert ginbeginscan - gingetbitmap ginrescan ginendscan ginmarkpos ginrestrpos ginmerge ginbuild ginbuildempty ginbulkdelete ginvacuumcleanup - gincostestimate ginoptions -));
+DATA(insert OID = 2742 (  gin		0 6 f f f f t t f f t f f 0 gininsert ginbeginscan - gingetbitmap ginrescan ginendscan ginmarkpos ginrestrpos ginmerge ginbuild ginbuildempty ginbulkdelete ginvacuumcleanup - gincostestimate ginoptions - -));
 DESCR("GIN index access method");
 #define GIN_AM_OID 2742
-DATA(insert OID = 4000 (  spgist	0 5 f f f f f t f t f f f 0 spginsert spgbeginscan spggettuple spggetbitmap spgrescan spgendscan spgmarkpos spgrestrpos spgmerge spgbuild spgbuildempty spgbulkdelete spgvacuumcleanup spgcanreturn spgcostestimate spgoptions -));
+DATA(insert OID = 4000 (  spgist	0 5 f f f f f t f t f f f 0 spginsert spgbeginscan spggettuple spggetbitmap spgrescan spgendscan spgmarkpos spgrestrpos spgmerge spgbuild spgbuildempty spgbulkdelete spgvacuumcleanup spgcanreturn spgcostestimate spgoptions - -));
 DESCR("SP-GiST index access method");
 #define SPGIST_AM_OID 4000
 
-DATA(insert OID = 4039 (  psort		5 1 f f f f t t f t f f f 0 - - psortgettuple psortgetbitmap - - - - - psortbuild - - - psortcanreturn psortcostestimate psortoptions -));
+DATA(insert OID = 4039 (  psort		5 1 f f f f t t f t f f f 0 - - psortgettuple psortgetbitmap - - - - - psortbuild - - - psortcanreturn psortcostestimate psortoptions - -));
 DESCR("psort index access method");
 #define PSORT_AM_OID 4039
 
-DATA(insert OID = 4239 (  cbtree		5 1 f f f t t t f t f f t 0 btinsert btbeginscan cbtreegettuple cbtreegetbitmap btrescan btendscan - - - cbtreebuild btbuildempty - - cbtreecanreturn cbtreecostestimate cbtreeoptions -));
+DATA(insert OID = 4239 (  cbtree		5 1 f f f t t t f t f f t 0 btinsert btbeginscan cbtreegettuple cbtreegetbitmap btrescan btendscan - - - cbtreebuild btbuildempty - - cbtreecanreturn cbtreecostestimate cbtreeoptions - -));
 DESCR("cstore btree index access method");
 #define CBTREE_AM_OID 4239
 
-DATA(insert OID = 4444 (  cgin		0 6 f f f f t t f f t f f 0 gininsert ginbeginscan - cgingetbitmap ginrescan ginendscan ginmarkpos ginrestrpos ginmerge cginbuild ginbuildempty ginbulkdelete ginvacuumcleanup - gincostestimate ginoptions -));
+DATA(insert OID = 4444 (  cgin		0 6 f f f f t t f f t f f 0 gininsert ginbeginscan - cgingetbitmap ginrescan ginendscan ginmarkpos ginrestrpos ginmerge cginbuild ginbuildempty ginbulkdelete ginvacuumcleanup - gincostestimate ginoptions - -));
 DESCR("cstore GIN index access method");
 #define CGIN_AM_OID 4444
 
-DATA(insert OID = 4439 (  ubtree		5 3 t f t t t t t t f t t 0 ubtinsert ubtbeginscan ubtgettuple ubtgetbitmap ubtrescan ubtendscan ubtmarkpos ubtrestrpos ubtmerge ubtbuild ubtbuildempty ubtbulkdelete ubtvacuumcleanup ubtcanreturn ubtcostestimate ubtoptions -));
+DATA(insert OID = 4439 (  ubtree		5 3 t f t t t t t t f t t 0 ubtinsert ubtbeginscan ubtgettuple ubtgetbitmap ubtrescan ubtendscan ubtmarkpos ubtrestrpos ubtmerge ubtbuild ubtbuildempty ubtbulkdelete ubtvacuumcleanup ubtcanreturn ubtcostestimate ubtoptions - -));
 DESCR("ustore b-tree index access method");
 #define UBTREE_AM_OID 4439
+
+#define HNSW_AM_OID 4446
 
 #define OID_IS_BTREE(oid) ((oid) == BTREE_AM_OID || (oid) == UBTREE_AM_OID)
 

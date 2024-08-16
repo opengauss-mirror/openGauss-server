@@ -208,8 +208,46 @@ bool UBTreeDelete(Relation indexRelation, Datum* values, const bool* isnull, Ite
 void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid,
     bool isRollbackIndex)
 {
-    /* Assert(Ustore) Assert(B tree) */
-    UBTreeDelete(index_relation, values, isnull, heap_t_ctid, isRollbackIndex);
+    if (RelationIsUstoreIndex(index_relation)) {
+        /* Assert(Ustore) Assert(B tree) */
+        UBTreeDelete(index_relation, values, isnull, heap_t_ctid, isRollbackIndex);
+    } else {
+        HeapTuple tuple;
+        char* accessMethodName;
+        Form_pg_am accessMethodForm;
+        FmgrInfo flinfo;
+        FunctionCallInfoData fcinfo;
+        Datum result;
+
+        switch (index_relation->rd_rel->relam) {
+            case HNSW_AM_OID:
+                accessMethodName = DEFAULT_HNSW_INDEX_TYPE;
+                break;
+            default:
+                Assert(false);
+                break;
+        }
+
+        tuple = SearchSysCache1(AMNAME, PointerGetDatum(accessMethodName));
+        accessMethodForm = (Form_pg_am)GETSTRUCT(tuple);
+
+        fmgr_info(accessMethodForm->amdelete, &flinfo);
+        InitFunctionCallInfoData(fcinfo, &flinfo, 5, InvalidOid, NULL, NULL);
+        fcinfo.arg[0] = PointerGetDatum(index_relation);
+        fcinfo.arg[1] = PointerGetDatum(values);
+        fcinfo.arg[2] = PointerGetDatum(isnull);
+        fcinfo.arg[3] = PointerGetDatum(heap_t_ctid);
+        fcinfo.arg[4] = BoolGetDatum(isRollbackIndex);
+        fcinfo.argnull[0] = false;
+        fcinfo.argnull[1] = false;
+        fcinfo.argnull[2] = false;
+        fcinfo.argnull[3] = false;
+        fcinfo.argnull[4] = false;
+
+        result = FunctionCallInvoke(&fcinfo);
+
+        ReleaseSysCache(tuple);
+    }
 }
 
 

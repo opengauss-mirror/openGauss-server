@@ -135,11 +135,15 @@ ObjectAddress CreateAccessMethod(CreateAmStmt *stmt)
     FILL_ANUM_PG_AM_REGPROC_VAULE(Anum_pg_am_amcanreturn, amRoutine->amcanreturnfuncname);
     FILL_ANUM_PG_AM_REGPROC_VAULE(Anum_pg_am_amcostestimate, amRoutine->amcostestimatefuncname);
     FILL_ANUM_PG_AM_REGPROC_VAULE(Anum_pg_am_amoptions, amRoutine->amoptionsfuncname);
+    FILL_ANUM_PG_AM_REGPROC_VAULE(Anum_pg_am_amdelete, amRoutine->amdeletefuncname);
 
     values[Anum_pg_am_amhandler - 1] = ObjectIdGetDatum(amHandler);
 
     tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
+    if (strcmp(stmt->amname, "hnsw") == 0) {
+        HeapTupleSetOid(tup, HNSW_AM_OID);
+    }
     amOid = simple_heap_insert(rel, tup);
     CatalogUpdateIndexes(rel, tup);
     heap_freetuple(tup);
@@ -184,7 +188,7 @@ void RemoveAccessMethodById(Oid amOid)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
             errmsg("must be superuser to drop an access method.")));
 
-    if (IsSystemObjOid(amOid))
+    if (IsSystemObjOid(amOid) && amOid != HNSW_AM_OID)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
             errmsg("amOid %u is a builtin access method, it can not be droped", amOid)));
 
@@ -249,6 +253,10 @@ static Oid lookup_regproc_am_handler_func(int16 procIndex, IndexAmRoutine *amRou
         case Anum_pg_am_amendscan:
             nargs = PG_AM_ENDSCAN_ARGS_NUM;
             funcName = amRoutine->amendscanfuncname;
+            break;
+        case Anum_pg_am_amdelete:
+            nargs = PG_AM_DELETE_ARGS_NUM;
+            funcName = amRoutine->amdeletefuncname;
             break;
         case Anum_pg_am_ambuild:
             nargs = PG_AM_BUILD_ARGS_NUM;
