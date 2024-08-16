@@ -83,6 +83,7 @@ const uint32 GRAND_VERSION_NUM = 92999;
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 FLUSH_LSN_FUN_VERSION_NUM = 92951;
 const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
 const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM = 92948;
 const uint32 PARTITION_NAME_VERSION_NUM = 92947;
