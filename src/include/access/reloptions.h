@@ -51,8 +51,9 @@ typedef enum relopt_kind {
     RELOPT_KIND_NPARSER = (1 << 12),  /* text search configuration options defined by ngram */
     RELOPT_KIND_CBTREE = (1 << 13),
     RELOPT_KIND_PPARSER = (1 << 14), /* text search configuration options defined by pound */
+    RELOPT_KIND_DATAVEC = (1 << 15),
     /* if you add a new kind, make sure you update "last_default" too */
-    RELOPT_KIND_LAST_DEFAULT = RELOPT_KIND_PPARSER,
+    RELOPT_KIND_LAST_DEFAULT = RELOPT_KIND_DATAVEC,
     /* some compilers treat enums as signed ints, so we can't use 1 << 31 */
     RELOPT_KIND_MAX = (1 << 30)
 } relopt_kind;
