@@ -3183,9 +3183,9 @@ ALTER TABLE test_at_modify_view_column  MODIFY column f1 varchar(20), ADD COLUMN
 ERROR:  cannot change data type of view column "f1" from integer to character varying(20)
 ALTER TABLE test_at_modify_view_column  MODIFY column f1 int, ADD COLUMN f0 int;
 SELECT pg_get_viewdef('test_modify_view_star'::regclass);
-               pg_get_viewdef               
---------------------------------------------
- SELECT  * FROM test_at_modify_view_column;
+                                                                           pg_get_viewdef                                                                           
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SELECT test_at_modify_view_column.f4, test_at_modify_view_column.f3, test_at_modify_view_column.f2, test_at_modify_view_column.f1 FROM test_at_modify_view_column;
 (1 row)
 
 SELECT * FROM test_modify_view_star;
@@ -3388,9 +3388,9 @@ ALTER TABLE test_at_modify_view_column  CHANGE column f1 c1 varchar(20), ADD COL
 ERROR:  cannot change data type of view column "f1" from integer to character varying(20)
 ALTER TABLE test_at_modify_view_column  CHANGE column f1 c1 int, ADD COLUMN f0 int;
 SELECT pg_get_viewdef('test_modify_view_star'::regclass);
-               pg_get_viewdef               
---------------------------------------------
- SELECT  * FROM test_at_modify_view_column;
+                                                                              pg_get_viewdef                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SELECT test_at_modify_view_column.f4, test_at_modify_view_column.f3, test_at_modify_view_column.f2, test_at_modify_view_column.c1 AS f1 FROM test_at_modify_view_column;
 (1 row)
 
 SELECT * FROM test_modify_view_star;
