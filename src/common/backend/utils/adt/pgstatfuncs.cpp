@@ -15288,9 +15288,6 @@ Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, Bloc
         int is_found = 0;
 
         int ret = get_drc_info(&is_found, drc_info);
-        if (ret != DMS_SUCCESS) {
-            ereport(ERROR, (errmsg("[SS] some errors occurred while querying DRC!")));
-        }
         if (!is_found) {
             ereport(INFO, (errmsg("[SS] could not find a DRC entry in DRC for page (%u/%u/%u/%d/%d %d-%u)!",
                     rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt, fork, blockno)));
@@ -15302,6 +15299,10 @@ Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, Bloc
         iterate->iterate_idx = 0;
         count = (drc_info->claimed_owner == masterId) ? count : count + 1;
 
+        if (ret != DMS_SUCCESS) {
+            ereport(WARNING, (errmsg("[SS] some errors occurred while querying DRC!")));
+            iterate->iterate_idx = DMS_MAX_INSTANCES;
+        }
         funcctx->user_fctx = (void*)iterate;
         funcctx->tuple_desc = create_query_page_distribution_info_tupdesc();
         funcctx->max_calls = (!is_found) ? 0 : (count + 1);
