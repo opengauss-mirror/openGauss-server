@@ -822,16 +822,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
      * old tuple, and the data stored in the WAL record.
      */
 
-    bool onlyCopyDelta = (inplaceUpdate && oldtup->disk_tuple->t_hoff == xlhdr.t_hoff &&
-        (newlen == oldtup->disk_tuple_size) && !blockInplaceUpdate);
-    uint32 bitmaplen = 0;
-    uint32 deltalen = 0;
-    char *bitmapData = NULL;
-    char *deltaData = NULL;
-    char *newp = NULL;
-    if (!onlyCopyDelta) {
-        newp = (char *)newtup + SizeOfUHeapDiskTupleData;
-    }
+    char *newp = (char *)newtup + SizeOfUHeapDiskTupleData;
 
     if (affixLens->prefixlen > 0) {
         int len;
@@ -839,36 +830,24 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
         /* copy bitmap [+ padding] [+ oid] from WAL record */
         len = xlhdr.t_hoff - SizeOfUHeapDiskTupleData;
         if (len > 0) {
-            if (onlyCopyDelta) {
-                bitmaplen = len;
-                bitmapData = recdata;
-            } else {
-                rc = memcpy_s(newp, tuplen, recdata, len);
-                securec_check(rc, "\0", "\0");
-                newp += len;
-            }
+            rc = memcpy_s(newp, tuplen, recdata, len);
+            securec_check(rc, "\0", "\0");
+            newp += len;
             recdata += len;
         }
 
         /* copy prefix from old tuple */
-        if (!onlyCopyDelta) {
-            rc = memcpy_s(newp, affixLens->prefixlen, (char *)oldtup->disk_tuple +
-                oldtup->disk_tuple->t_hoff, affixLens->prefixlen);
-            securec_check(rc, "\0", "\0");
-            newp += affixLens->prefixlen;
-        }
+        rc = memcpy_s(newp, affixLens->prefixlen, (char *)oldtup->disk_tuple +
+            oldtup->disk_tuple->t_hoff, affixLens->prefixlen);
+        securec_check(rc, "\0", "\0");
+        newp += affixLens->prefixlen;
 
         /* copy new tuple data from WAL record */
         len = tuplen - (xlhdr.t_hoff - SizeOfUHeapDiskTupleData);
         if (len > 0) {
-            if (onlyCopyDelta) {
-                deltalen = len;
-                deltaData = recdata;
-            } else {
-                rc = memcpy_s(newp, tuplen, recdata, len);
-                securec_check(rc, "\0", "\0");
-                newp += len;
-            }
+            rc = memcpy_s(newp, tuplen, recdata, len);
+            securec_check(rc, "\0", "\0");
+            newp += len;
             recdata += len;
         }
     } else {
@@ -876,39 +855,26 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
          * copy bitmap [+ padding] [+ oid] + data from record, all in one
          * go
          */
-        if (onlyCopyDelta) {
-            deltalen = tuplen;
-            deltaData = recdata;
-        } else {
-            rc = memcpy_s(newp, tuplen, recdata, tuplen);
-            securec_check(rc, "\0", "\0");
-            newp += tuplen;
-        }
+        rc = memcpy_s(newp, tuplen, recdata, tuplen);
+        securec_check(rc, "\0", "\0");
+        newp += tuplen;
         recdata += tuplen;
     }
 
     Assert(recdata == recdataEnd);
 
     /* copy suffix from old tuple */
-    if (affixLens->suffixlen > 0 && !onlyCopyDelta) {
+    if (affixLens->suffixlen > 0) {
         rc = memcpy_s(newp, affixLens->suffixlen, (char *)oldtup->disk_tuple + oldtup->disk_tuple_size -
             affixLens->suffixlen, affixLens->suffixlen);
         securec_check(rc, "\0", "\0");
     }
+    UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
+    newtup->xid = (ShortTransactionId) FrozenTransactionId;
+    newtup->flag2 = xlhdr.flag2;
+    newtup->flag = xlhdr.flag;
+    newtup->t_hoff = xlhdr.t_hoff;
 
-    if (onlyCopyDelta) {
-        UHeapTupleHeaderSetTDSlot(oldtup->disk_tuple, xlhdr.td_id);
-        oldtup->disk_tuple->xid = (ShortTransactionId) FrozenTransactionId;
-        oldtup->disk_tuple->flag2 = xlhdr.flag2;
-        oldtup->disk_tuple->flag = xlhdr.flag;
-        oldtup->disk_tuple->t_hoff = xlhdr.t_hoff;
-    } else {
-        UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
-        newtup->xid = (ShortTransactionId) FrozenTransactionId;
-        newtup->flag2 = xlhdr.flag2;
-        newtup->flag = xlhdr.flag;
-        newtup->t_hoff = xlhdr.t_hoff;
-    }
 
     Buffer oldbuf = buffers->oldbuffer.buf;
     Buffer newbuf = buffers->newbuffer.buf;
@@ -919,7 +885,6 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
     Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
 
     if (blockInplaceUpdate) {
-        Assert(!onlyCopyDelta);
         RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
         PutLinkUpdateTuple(oldpage, (Item)newtup, rp, newlen);
         /* update the potential freespace */
@@ -933,26 +898,14 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
          * the tuple header.
          */
         RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
-        RowPtrChangeLen(rp, newlen);
-        if (onlyCopyDelta) {
-            // only copy delta
-            if (affixLens->prefixlen > 0) {
-                if (bitmaplen > 0) {
-                    rc = memcpy_s((char *)oldtup->disk_tuple->data, bitmaplen, bitmapData, bitmaplen);
-                    securec_check(rc, "\0", "\0");
-                }
-            }
-
-            if (deltalen > 0) {
-                rc = memcpy_s((char *)oldtup->disk_tuple->data + bitmaplen + affixLens->prefixlen, deltalen, deltaData,
-                    deltalen);
-                securec_check(rc, "\0", "\0");
-            }
-        } else {
-            // use new constructed tuple
-            rc = memcpy_s((char *)oldtup->disk_tuple, newlen, (char *)newtup, newlen);
-            securec_check(rc, "\0", "\0");
+        if (newlen >= RowPtrGetLen(rp) || (xlrec->flags & XLZ_UPDATE_PREFIX_FROM_OLD) != 0 ||
+            (xlrec->flags & XLZ_UPDATE_SUFFIX_FROM_OLD) != 0) {
+            RowPtrChangeLen(rp, newlen);
         }
+
+        // use new constructed tuple
+        rc = memcpy_s((char *)oldtup->disk_tuple, newlen, (char *)newtup, newlen);
+        securec_check(rc, "\0", "\0");
 
         if (newlen < oldtup->disk_tuple_size) {
             /* new tuple is smaller, a prunable candidate */
