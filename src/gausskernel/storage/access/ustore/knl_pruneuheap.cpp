@@ -367,7 +367,8 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
 
     END_CRIT_SECTION();
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_ROWS));
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(relbuf->buffer),
+        false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_ROWS));
 
     /*
      * Report the number of tuples reclaimed to pgstats. This is ndeleted

@@ -1222,13 +1222,12 @@ static void UBTRecycleQueueVerifyHeader(UBTRecycleQueueHeader header, Relation r
 
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
     uint32 urqBlocks = MaxBlockNumber;
-    Oid relOid = InvalidOid;
     bool headerError = false;
+    RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
     
     if (rel != NULL) {
         RelationOpenSmgr(rel);
         urqBlocks = Max(minRecycleQueueBlockNumber, smgrnblocks(rel->rd_smgr, FSM_FORKNUM));
-        relOid = rel->rd_id;
     }
 
     headerError = (header->flags > (URQ_HEAD_PAGE | URQ_TAIL_PAGE)) || (IsNormalOffset(header->head) && !IsNormalOffset(header->tail)) ||
@@ -1238,13 +1237,14 @@ static void UBTRecycleQueueVerifyHeader(UBTRecycleQueueHeader header, Relation r
     
     if (headerError) {
         ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
-            "[Verify URQ] urq header is invalid : oid=%u, blkno=%u, flags=%u, head=%d, tail=%d,"
-            " free_items=%d, free_list_head=%d, prev_blkno=%u, next_blkno=%u", relOid, blkno, header->flags,
-            header->head, header->tail, header->freeItems, header->freeListHead, header->prevBlkno, header->nextBlkno)));
+            "[Verify URQ] urq header is invalid : flags=%u, head=%d, tail=%d, "
+            "free_items=%d, free_list_head=%d, prev_blkno=%u, next_blkno=%u, rnode[%u,%u,%u], block %u.",
+            header->flags, header->head, header->tail, header->freeItems, header->freeListHead,
+            header->prevBlkno, header->nextBlkno, rNode.spcNode, rNode.dbNode, rNode.relNode, blkno)));
     }
 }
 
-void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Oid oid, BlockNumber blkno)
+static void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Relation rel, BlockNumber blkno)
 {
     TransactionId maxXid = ReadNewTransactionId();
     TransactionId prevXid = 0;
@@ -1254,7 +1254,8 @@ void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Oid oid, BlockN
     uint16 prevOffset = InvalidOffset;
     
     UBTRecycleQueueItem item = NULL;
- 
+    RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
+    
     while (IsNormalOffset(currOffset) && itemCount <= itemMaxNum) {
         if (currOffset == itemMaxNum) {
             break;
@@ -1287,9 +1288,10 @@ void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Oid oid, BlockN
  
     if (itemCount + header->freeItems != itemMaxNum) {
         ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
-            "[Verify URQ] urq items are invalid : oid %u, blkno %u, (items info : curr_item_offset = %u, "
-            "prev_offset = %u, item_count = %u, free_list_offset = %u, free_items = %u, next_xid = %ld)",
-            oid, blkno, currOffset, prevOffset, itemCount, freelistOffset, header->freeItems, maxXid)));
+            "[Verify URQ] urq items are invalid : (items info : curr_item_offset = %u, "
+            "prev_offset = %u, item_count = %u, free_list_offset = %u, free_items = %u, next_xid = %ld), "
+            "rnode[%u,%u,%u], block %u", currOffset, prevOffset, itemCount, freelistOffset, header->freeItems,
+            maxXid, rNode.spcNode, rNode.dbNode, rNode.relNode, blkno)));
     }
 }
 
@@ -1298,10 +1300,9 @@ static void UBTRecycleQueueVerifyItem(UBTRecycleQueueHeader header, Relation rel
     BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
 
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
-
-    Oid relOid = (rel ? rel->rd_id : InvalidOid);
     bool itemError = false;
     UBTRecycleQueueItem item = NULL;
+    RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
  
     if (offnum != InvalidOffset) {
         item = &header->items[offnum];
@@ -1313,25 +1314,26 @@ static void UBTRecycleQueueVerifyItem(UBTRecycleQueueHeader header, Relation rel
         }
         if (itemError) {
             ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
-                 "[Verify URQ] urq item is invalid: oid=%u, blkno=%u, offset=%u, "
-                "(item info : xid=%ld blkno=%u prev=%u next=%u)", relOid, blkno, offnum,
-                item->xid, item->blkno, item->prev, item->next)));
+                "[Verify URQ] urq item is invalid: xid=%ld, blkno=%u, prev=%u, next=%u, rnode[%u,%u,%u], block %u",
+                item->xid, item->blkno, item->prev, item->next, rNode.spcNode, rNode.dbNode, rNode.relNode, blkno)));
         }
     }
  
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_COMPLETE)
 
-    UBTRecycleQueueVerifyAllItems(header, relOid, blkno);
+    UBTRecycleQueueVerifyAllItems(header, rel, blkno);
 }
  
 static void UBTRecycleMetaDataVerify(UBTRecycleMeta metaData, Relation rel, BlockNumber metaBlkno)
 {
     BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
     
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
     BlockNumber indexBlocks = (rel == NULL ? metaData->nblocksUpper : RelationGetNumberOfBlocks(rel));
     uint32 urqBlocks = MaxBlockNumber;
     Oid oid = InvalidOid;
     bool metaError = false;
+    RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
 
     if (rel != NULL) {
         RelationOpenSmgr(rel);
@@ -1344,9 +1346,9 @@ static void UBTRecycleMetaDataVerify(UBTRecycleMeta metaData, Relation rel, Bloc
  
     if (metaError) {
         ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
-            "[Verify URQ] urq meta is invalid : oid=%u, meta_blkno=%u, (meta info : headBlkno = %u, tailBlkno = %u, "
-            "nblocksUpper = %u, nblocksLower = %u; urq_blocks = %u, index_blocks = %u)",
+            "[Verify URQ] urq meta is invalid : (meta info : headBlkno = %u, tailBlkno = %u, "
+            "nblocksUpper = %u, nblocksLower = %u; urq_blocks = %u, index_blocks = %u), rnode[%u,%u,%u], block %u",
             oid, metaBlkno, metaData->headBlkno, metaData->tailBlkno, metaData->nblocksUpper,
-            metaData->nblocksLower, urqBlocks, indexBlocks)));
+            metaData->nblocksLower, urqBlocks, indexBlocks, rNode.spcNode, rNode.dbNode, rNode.relNode, metaBlkno)));
     }
 }

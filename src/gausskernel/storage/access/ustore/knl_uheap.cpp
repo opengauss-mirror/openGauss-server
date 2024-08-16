@@ -722,7 +722,7 @@ reacquire_buffer:
     /* Clean up */
     Assert(UHEAP_XID_IS_TRANS(tuple->disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, false, 
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, blkno, false,
             (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), 
             ItemPointerGetOffsetNumber(&(tuple->ctid)));
         UndoRecordVerify(undorec);
@@ -2316,7 +2316,7 @@ check_tup_satisfies_update:
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(utuple.disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, blkno, false,
             (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), offnum);
 
         UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
@@ -3315,13 +3315,16 @@ check_tup_satisfies_update:
     Assert(UHEAP_XID_IS_TRANS(uheaptup->disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
 
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
-            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&oldtup.ctid));
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(buffer),
+            false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),
+            ItemPointerGetOffsetNumber(&oldtup.ctid));
 
         if (!useInplaceUpdate) {
             Page newPage = BufferGetPage(newbuf);
-            UpageVerify((UHeapPageHeader)newPage, InvalidXLogRecPtr, NULL, relation, false, 
-            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
+            UpageVerify((UHeapPageHeader)newPage, InvalidXLogRecPtr, NULL, relation, NULL,
+                BufferGetBlockNumber(newbuf), false,
+                (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),
+                ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
         }
     }
 
@@ -3653,9 +3656,10 @@ reacquire_buffer:
         END_CRIT_SECTION();
 
         if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-            UpageVerifyHeader((UHeapPageHeader)page, InvalidXLogRecPtr, relation);
+            BlockNumber blkno = BufferGetBlockNumber(buffer);
+            UpageVerifyHeader((UHeapPageHeader)page, InvalidXLogRecPtr, &relation->rd_node, blkno);
             for (int k = 0; k < nthispage; k++) {
-                UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+                UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, false,
                     (USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),  verifyOffnum[k]);
             }
         }
@@ -4199,7 +4203,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
     }
 
 cleanup:
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(buf));
 
     if (frozenSlots != NULL)
         pfree(frozenSlots);
@@ -5788,7 +5792,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
 
     END_CRIT_SECTION();
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, blkno);
 
     UnlockReleaseBuffer(buffer);
 
