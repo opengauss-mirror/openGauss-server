@@ -80,6 +80,13 @@ bool GsPolicyLabel::operator < (const GsPolicyLabel& arg) const
     if (res > 0) {
         return false;
     }
+    /* if data value is equal, compare by object oid */
+    if (m_data_value_fqdn.m_value_object < arg.m_data_value_fqdn.m_value_object) {
+        return true;
+    }
+    if (m_data_value_fqdn.m_value_object > arg.m_data_value_fqdn.m_value_object) {
+        return false;
+    }
     /* if data value is equal, compare by data type */
     return (strcasecmp(m_data_type.c_str(), arg.m_data_type.c_str()) < 0);
 }
