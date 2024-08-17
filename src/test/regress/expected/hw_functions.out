@@ -731,4 +731,196 @@ ERROR:  NEW_TIME is only supported in A compatibility database.
 CONTEXT:  referenced column: new_time
 \c regression
 drop database db_mysql;
+-- test to_char for timestamp with nls param
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+     to_char      
+------------------
+ MON, 05-AUG-2024
+(1 row)
+
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = aMeRiCan') ;
+     to_char      
+------------------
+ MON, 05-AUG-2024
+(1 row)
+
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', '') ;
+ to_char 
+---------
+ 
+(1 row)
+
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE=xxx') ;
+ERROR:  NLS parameter NLS_DATE_LANGUAGE=xxx is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'yyy=ENGLISH') ;
+ERROR:  NLS parameter yyy=ENGLISH is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '2024-08-05', 'ERROR', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ to_char 
+---------
+ EOR
+(1 row)
+
+SELECT TO_CHAR(DATE '2024-13-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ERROR:  date/time field value out of range: "2024-13-05"
+LINE 1: SELECT TO_CHAR(DATE '2024-13-05', 'DY, DD-MON-YYYY', 'NLS_DA...
+                            ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '2024-11-31', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ERROR:  date/time field value out of range: "2024-11-31"
+LINE 1: SELECT TO_CHAR(DATE '2024-11-31', 'DY, DD-MON-YYYY', 'NLS_DA...
+                            ^
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '2024-12-31', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+     to_char      
+------------------
+ TUE, 31-DEC-2024
+(1 row)
+
+SELECT TO_CHAR(DATE '10000-12-31', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ERROR:  invalid data for "year =  10000", value must be between -4712 and 9999, and not be 0
+LINE 1: SELECT TO_CHAR(DATE '10000-12-31', 'DY, DD-MON-YYYY', 'NLS_D...
+                            ^
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '0-12-31', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ERROR:  date/time field value out of range: "0-12-31"
+LINE 1: SELECT TO_CHAR(DATE '0-12-31', 'DY, DD-MON-YYYY', 'NLS_DATE_...
+                            ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR('2023-10-24 14:30:00'::timestamp, 'Day, DDth Month YYYY HH:MI:SS AM', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+                  to_char                   
+--------------------------------------------
+ Tuesday  , 24th October   2023 02:30:00 PM
+(1 row)
+
+SELECT TO_CHAR('January 8, 4711 BC'::date, 'YYYY-MM-DD AD', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+    to_char    
+---------------
+ 4711-01-08 BC
+(1 row)
+
+SELECT TO_CHAR('January 8, 4714 BC'::date, 'YYYY-MM-DD AD', 'NLS_DATE_LANGUAGE = ENGLISH') ;
+ERROR:  timestamp out of range: "January 8, 4714 BC"
+LINE 1: SELECT TO_CHAR('January 8, 4714 BC'::date, 'YYYY-MM-DD AD', ...
+                       ^
+CONTEXT:  referenced column: to_char
+SELECT to_char('2024-01-01 25:61:61'::timestamp, 'YYYY-MM-DD HH24:MI:SS', 'NLS_DATE_LANGUAGE = ENGLISH');
+ERROR:  date/time field value out of range: "2024-01-01 25:61:61"
+LINE 1: SELECT to_char('2024-01-01 25:61:61'::timestamp, 'YYYY-MM-DD...
+                       ^
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYY-MON', 'NLS_DATE_LANGUAGE = ENGLISH');
+ to_char 
+---------
+ +123-02
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '-1-2' YEAR TO MONTH, 'YYY-MON');
+ to_char 
+---------
+ -01-02
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '1 11:11:11' DAY TO SECOND, 'YYYY-MON-DD');
+   to_char    
+--------------
+ +01 11:11:11
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '1 -11:11:11' DAY TO SECOND, 'YYYY-MON-DD');
+   to_char    
+--------------
+ +01 11:11:11
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '-11:11:11' DAY TO SECOND, 'YYYY-MON-DD');
+   to_char    
+--------------
+ -00 11:11:11
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '-1-2' YEAR TO MONTH, 'YYYY-MON-DD', '') ;
+ to_char 
+---------
+ 
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '-1-2' YEAR TO MONTH, '', 'NLS_DATE_LANGUAGE=ENGLISH') ;
+ to_char 
+---------
+ 
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '1 year 2 months 3 days', 'YYYY-MON-DD') ;
+ERROR:  Interval simultaneously includes 'year to month' and 'day to second' is not supported in A format
+DETAIL:  Not support the given interval data.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'NLS_DATE_LANGUAGE=xxx') ;
+ERROR:  NLS parameter NLS_DATE_LANGUAGE=xxx is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'yyy=ENGLISH') ;
+ERROR:  NLS parameter yyy=ENGLISH is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+CREATE TABLE blob_table (c1 BLOB);
+INSERT INTO blob_table (c1) VALUES ( (encode('Hello World!','hex'))::RAW );
+SELECT to_char(c1, 873) FROM blob_table ;
+   to_char    
+--------------
+ Hello World!
+(1 row)
+
+SELECT to_char(c1) FROM blob_table ;
+   to_char    
+--------------
+ Hello World!
+(1 row)
+
+CREATE TABLE blob_t 
+(
+    c1 BLOB
+) ;
+INSERT INTO blob_t VALUES(empty_blob());
+SELECT to_char(c1,873) FROM blob_t ;
+ to_char 
+---------
+ 
+(1 row)
+
+SELECT to_char(c1) FROM blob_t ;
+ to_char 
+---------
+ 
+(1 row)
+
+SELECT to_char(c1, 0) FROM blob_table ;
+ERROR:  CSID 0 is not supported!
+DETAIL:  Not support the given CSID.
+CONTEXT:  referenced column: to_char
+SELECT to_char(c1, 666) FROM blob_table ;
+ERROR:  CSID 666 is not supported!
+DETAIL:  Not support the given CSID.
+CONTEXT:  referenced column: to_char
+SELECT to_char(c1, 1000) FROM blob_table ;
+ERROR:  CSID 1000 is not supported!
+DETAIL:  Not support the given CSID.
+CONTEXT:  referenced column: to_char
+SELECT to_char(c1, -1) FROM blob_table ;
+ERROR:  CSID -1 is not supported!
+DETAIL:  Not support the given CSID.
+CONTEXT:  referenced column: to_char
+DROP TABLE blob_table;
+CREATE TABLE blob_table (c1 BLOB);
+INSERT INTO blob_table (c1) VALUES ( hextoraw('C0AF') );
+SELECT to_char(c1, 873) FROM blob_table ;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc0 0xaf
+CONTEXT:  referenced column: to_char
+DROP TABLE blob_table;
+DROP TABLE blob_t;
 drop schema basefunc cascade;

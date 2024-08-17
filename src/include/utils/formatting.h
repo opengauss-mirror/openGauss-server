@@ -93,6 +93,7 @@ extern char* asc_initcap(const char* buff, size_t nbytes);
 extern Datum timestamp_to_char(PG_FUNCTION_ARGS);
 extern Datum timestamptz_to_char(PG_FUNCTION_ARGS);
 extern Datum interval_to_char(PG_FUNCTION_ARGS);
+extern Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS);
 extern Datum to_timestamp(PG_FUNCTION_ARGS);
 extern Datum to_date(PG_FUNCTION_ARGS);
 extern Datum numeric_to_number(PG_FUNCTION_ARGS);
@@ -133,11 +134,17 @@ extern void Init_NUM_cache(void);
     } while (0)
 extern Datum timestamp_to_char_default_format(PG_FUNCTION_ARGS);
 extern Datum timestamptz_to_char_default_format(PG_FUNCTION_ARGS);
+extern Datum timestamp_to_char_nlsparam(PG_FUNCTION_ARGS);
+extern Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS);
 extern text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid collid);
 
 extern void check_datetime_format(char* fmt);
 extern void* get_time_format(char* fmt_str);
 extern void to_timestamp_from_format(struct pg_tm* tm, fsec_t* fsec, char* date_str, void* format);
+
+extern Datum blob_to_char(PG_FUNCTION_ARGS);
+extern Datum blob_to_char_default(PG_FUNCTION_ARGS);
+
 #ifdef ENABLE_UT
 extern void general_to_timestamp_from_user_format(struct pg_tm* tm, fsec_t* fsec, char* date_str, void* in_format);
 extern void optimized_to_timestamp_from_user_format(struct pg_tm* tm, fsec_t* fsec, char* date_str, void* in_format);

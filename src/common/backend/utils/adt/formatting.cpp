@@ -58,6 +58,9 @@
  * -----------------------------------------------------------------------
  */
 
+#include "fmgr.h"
+#include "fmgr/fmgr_comp.h"
+#include "utils/palloc.h"
 #ifdef DEBUG_TO_FROM_CHAR
 #define DEBUG_elog_output DEBUG3
 #endif
@@ -1639,6 +1642,51 @@ static const int NUM_index[KeyWord_INDEX_SIZE] = {
     /* ---- chars over 126 are skipped ---- */
 };
 
+const int MAX_CSID = 900;
+char* g_csid2enc[MAX_CSID];
+
+void initialize_csid() __attribute__((constructor));
+
+void initialize_csid()
+{
+    g_csid2enc[1] = "SQL_ASCII";
+    g_csid2enc[837] = "EUC_JP";
+    g_csid2enc[850] = "EUC_CN";
+    g_csid2enc[846] = "EUC_KR";
+    g_csid2enc[862] = "EUC_TW";
+    g_csid2enc[830] = "EUC_JIS_2004";
+    g_csid2enc[852] = "GBK";
+    g_csid2enc[873] = "UTF8";
+    g_csid2enc[31] = "LATIN1";
+    g_csid2enc[32] = "LATIN2";
+    g_csid2enc[33] = "LATIN3";
+    g_csid2enc[34] = "LATIN4";
+    g_csid2enc[39] = "LATIN5";
+    g_csid2enc[40] = "LATIN6";
+    g_csid2enc[47] = "LATIN7";
+    g_csid2enc[48] = "LATIN8";
+    g_csid2enc[46] = "LATIN9";
+    g_csid2enc[560] = "WIN1256";
+    g_csid2enc[45] = "WIN1258";
+    g_csid2enc[41] = "WIN874";
+    g_csid2enc[196] = "KOI8R";
+    g_csid2enc[171] = "WIN1251";
+    g_csid2enc[178] = "WIN1252";
+    g_csid2enc[35] = "ISO_8859_5";
+    g_csid2enc[36] = "ISO_8859_6";
+    g_csid2enc[37] = "ISO_8859_7";
+    g_csid2enc[38] = "ISO_8859_8";
+    g_csid2enc[170] = "WIN1250";
+    g_csid2enc[173] = "WIN1253";
+    g_csid2enc[177] = "WIN1254";
+    g_csid2enc[175] = "WIN1255";
+    g_csid2enc[179] = "WIN1257";
+    g_csid2enc[51] = "KOI8U";
+    g_csid2enc[854] = "GB18030";
+    g_csid2enc[832] = "SJIS";
+    g_csid2enc[865] = "BIG5";
+}
+
 /* ----------
  * Number processor struct
  * ----------
@@ -2204,6 +2252,16 @@ static void parse_format(
     n->suffix = 0;
     return;
 }
+
+/*
+* Predefined format for interval in A compatibility
+*/
+#define A_FORMAT_INTERVAL_YEAR2 "YY-MM"
+#define A_FORMAT_INTERVAL_YEAR3 "YYY-MM"
+#define A_FORMAT_INTERVAL_YEAR "YYYY-MM"
+#define A_FORMAT_INTERVAL_DAY "DD HH:MI:SS"
+#define POSITIVE_FORMAT(fmt) ("+" fmt)
+#define NEGETIVE_FORMAT(fmt) ("-" fmt)
 
 /* ----------
  * DEBUG: Dump the FormatNode Tree (debug)
@@ -4253,6 +4311,47 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
     return res;
 }
 
+/**
+* Check nls param is valid. Don't need get the value yet.
+ */
+bool check_nls_args(const char *argname)
+{
+    List *nlslist = NULL;
+    char *nlskey = NULL;
+    char *nlsvalue = NULL;
+
+    char *raw = pstrdup(argname);
+
+    /*
+     * Split string like: NLS_DATA_LANGUAGE=ENGLISH.
+     * Converting strings to lowercase and removing back and forth spaces.
+     */
+    if (!SplitIdentifierString(raw, '=', &nlslist) || list_length(nlslist) != 2) {
+        list_free(nlslist);
+        FREE_POINTER(raw);
+        return false;
+    }
+
+    nlskey = (char *)linitial(nlslist);
+    if (strcmp(nlskey, "nls_date_language")) {
+        list_free(nlslist);
+        FREE_POINTER(raw);
+        return false;
+    }
+
+    nlsvalue = (char *)lsecond(nlslist);
+    if (strcmp(nlsvalue, "english") && strcmp(nlsvalue, "american")) {
+        list_free(nlslist);
+        FREE_POINTER(raw);
+        return false;
+    }
+
+    list_free(nlslist);
+    FREE_POINTER(raw);
+
+    return true;
+}
+
 /****************************************************************************
  *				Public routines
  ***************************************************************************/
@@ -4344,6 +4443,48 @@ Datum timestamptz_to_char_default_format(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(res);
 }
 
+Datum timestamp_to_char_nlsparam(PG_FUNCTION_ARGS)
+{
+    char *nls_arg = NULL;
+    text* res = NULL;
+
+    nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
+    if (check_nls_args(nls_arg)) {
+        res = (text *)DirectFunctionCall2Coll(timestamp_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
+                                              PG_GETARG_DATUM(1));
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
+    }
+
+    pfree_ext(nls_arg);
+    PG_RETURN_TEXT_P(res);
+}
+
+Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS)
+{
+    char *nls_arg = NULL;
+    text* res = NULL;
+
+    if (PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
+
+    nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
+    if (check_nls_args(nls_arg)) {
+        res = (text *)DirectFunctionCall2Coll(timestamptz_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
+                                              PG_GETARG_DATUM(1));
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
+    }
+
+    pfree_ext(nls_arg);
+    PG_RETURN_TEXT_P(res);
+}
+
 /* -------------------
  * INTERVAL to_char()
  * -------------------
@@ -4366,11 +4507,107 @@ Datum interval_to_char(PG_FUNCTION_ARGS)
 
     /* wday is meaningless, yday approximates the total span in days */
     tm->tm_yday = (tm->tm_year * MONTHS_PER_YEAR + tm->tm_mon) * DAYS_PER_MONTH + tm->tm_mday;
+    if (DB_IS_CMPT(A_FORMAT)) {
+        tm->tm_year = Abs(tm->tm_year);
+        tm->tm_mon = Abs(tm->tm_mon);
+        tm->tm_mday = Abs(tm->tm_mday);
+        tm->tm_hour = Abs(tm->tm_hour);
+        tm->tm_min = Abs(tm->tm_min);
+        tm->tm_sec = Abs(tm->tm_sec);
+        FormatNode* format = NULL;
+        bool incache = FALSE;
+        text* fmt_a_format = NULL;
 
-    if (!(res = datetime_to_char_body(&tmtc, fmt, true, PG_GET_COLLATION())))
+        const char *fmt_a_format_str = NULL;
+        if (it->month != 0 && (it->day!=0 || it->time!=0)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+                            errmsg("Interval simultaneously includes 'year to month' and 'day to second' is not "
+                                   "supported in A format"),
+                            errdetail("Not support the given interval data."), errcause("Error in the interval data."),
+                            erraction("Please check and revise your parameter.")));
+        } else if (it->month != 0) {
+            if (tm->tm_year < 100 && tm->tm_year > - 100) {
+                fmt_a_format_str = it->month >= 0 ? POSITIVE_FORMAT(A_FORMAT_INTERVAL_YEAR2)
+                                                  : NEGETIVE_FORMAT(A_FORMAT_INTERVAL_YEAR2);
+            } else if (tm->tm_year < 1000 && tm->tm_year > - 1000) {
+                fmt_a_format_str = it->month >= 0 ? POSITIVE_FORMAT(A_FORMAT_INTERVAL_YEAR3)
+                                                  : NEGETIVE_FORMAT(A_FORMAT_INTERVAL_YEAR3);
+            } else {
+                fmt_a_format_str = it->month >= 0 ? POSITIVE_FORMAT(A_FORMAT_INTERVAL_YEAR)
+                                                  : NEGETIVE_FORMAT(A_FORMAT_INTERVAL_YEAR);
+            }
+        } else if (it->day != 0 || it->time != 0) {
+            fmt_a_format_str = (it->day > 0 || (it->day == 0 && it->time >= 0))
+                                   ? POSITIVE_FORMAT(A_FORMAT_INTERVAL_DAY)
+                                   : NEGETIVE_FORMAT(A_FORMAT_INTERVAL_DAY);
+        } else {
+            // e.g.
+            // SELECT TO_CHAR(INTERVAL '0' MONTH, 'fmt')
+            // SELECT TO_CHAR(INTERVAL '0' DAYS, 'fmt')
+            // can't determine use which format, just use A_FORMAT_INTERVAL_YEAR
+            fmt_a_format_str = POSITIVE_FORMAT(A_FORMAT_INTERVAL_YEAR);
+        }
+        fmt_a_format = cstring_to_text(fmt_a_format_str);
+        if (!(res = datetime_to_char_body(&tmtc, fmt_a_format, true, PG_GET_COLLATION()))) {
+            pfree_ext(fmt_a_format);
+            PG_RETURN_NULL();
+        }
+        pfree_ext(fmt_a_format);
+    } else if (!(res = datetime_to_char_body(&tmtc, fmt, true, PG_GET_COLLATION()))) {
         PG_RETURN_NULL();
+    }
 
     PG_RETURN_TEXT_P(res);
+}
+
+Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS)
+{
+    char *nls_arg = NULL;
+    text* res = NULL;
+
+    if (PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
+
+    nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
+    if (check_nls_args(nls_arg)) {
+        res = (text *)DirectFunctionCall2Coll(interval_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
+                                              PG_GETARG_DATUM(1));
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
+    }
+
+    pfree_ext(nls_arg);
+    PG_RETURN_TEXT_P(res);
+}
+
+Datum blob_to_char(PG_FUNCTION_ARGS)
+{
+    Datum result;
+    const char* enc = NULL;
+    int32 csid = PG_GETARG_INT32(1);
+    if (csid < 0 || csid >= MAX_CSID || g_csid2enc[csid] == NULL) {
+ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+            errmsg("CSID %d is not supported!", csid), errdetail("Not support the given CSID."),
+            errcause("Error in the CSID."), erraction("Please check and revise your parameter.")));
+    }
+    enc = g_csid2enc[csid];
+    if (csid == 0) {
+        enc = GetDatabaseEncodingName();
+    }
+    
+    result = DirectFunctionCall3(pg_convert, PG_GETARG_DATUM(0), CStringGetDatum(enc), CStringGetDatum(enc));
+
+    PG_RETURN_DATUM(result);
+}
+
+Datum blob_to_char_default(PG_FUNCTION_ARGS)
+{
+    Datum result = DirectFunctionCall3(pg_convert, PG_GETARG_DATUM(0), CStringGetDatum(GetDatabaseEncodingName()),
+                                       CStringGetDatum(GetDatabaseEncodingName()));
+    PG_RETURN_DATUM(result);
 }
 
 /* ---------------------
