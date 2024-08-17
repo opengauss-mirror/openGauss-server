@@ -10008,30 +10008,58 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
              * Evaluate the subscripts, switch into left-to-right order.
              * Like ExecEvalArrayRef(), complain if any subscript is null.
              */
-            for (i = 0; i < nsubscripts; i++) {
-                bool subisnull = false;
+            bool isNestedArray = ((PLpgSQL_var*)target)->nest_table != NULL;
 
-                subscriptvals[i] = exec_eval_integer(estate, subscripts[nsubscripts - 1 - i], &subisnull);
-                if (subisnull) {
+            if (isNestedArray) {
+                Oid subscriptType = ((PLpgSQL_var*)target)->datatype->tableOfIndexType;
+                HTAB* elemTableOfIndex = ((PLpgSQL_var*)target)->tableOfIndex;
+                PLpgSQL_var* innerVar = evalSubsciptsNested(estate, (PLpgSQL_var*)target, subscripts, nsubscripts,
+                                                   0, subscriptvals, subscriptType, elemTableOfIndex);
+                target = (PLpgSQL_datum*)innerVar;
+                /* should assign inner var as an array, copy value's index */
+                if (innerVar->ispkg) {
+                    MemoryContext temp = MemoryContextSwitchTo(innerVar->pkg->pkg_cxt);
+                    innerVar->tableOfIndex = copyTableOfIndex(tableOfIndex);
+                    MemoryContextSwitchTo(temp);
+                } else {
+                    innerVar->tableOfIndex = copyTableOfIndex(tableOfIndex);
+                }
+                if (tableOfIndexInfo != NULL && innerVar->nest_layers != tableOfIndexInfo->tableOfLayers) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmodule(MOD_PLSQL),
-                            errmsg("array subscript in assignment must not be null")));
+                            errmsg("Nest layer of assigned value is miss match to tableof var(%s)'s expection",
+                                   innerVar->refname)));
                 }
 
-                /*
-                 * Clean up in case the subscript expression wasn't
-                 * simple. We can't do exec_eval_cleanup, but we can do
-                 * this much (which is safe because the integer subscript
-                 * value is surely pass-by-value), and we must do it in
-                 * case the next subscript expression isn't simple either.
-                 */
-                if (estate->eval_tuptable != NULL) {
-                    SPI_freetuptable(estate->eval_tuptable);
+                exec_assign_value(estate, target, PointerGetDatum(value),
+                                  valtype, isNull, innerVar->tableOfIndex);
+                break;
+            } else {
+                for (i = 0; i < nsubscripts; i++) {
+                    bool subisnull = false;
+
+                    subscriptvals[i] = exec_eval_integer(estate, subscripts[nsubscripts - 1 - i], &subisnull);
+                    if (subisnull) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                                errmodule(MOD_PLSQL),
+                                errmsg("array subscript in assignment must not be null")));
+                    }
+
+                    /*
+                    * Clean up in case the subscript expression wasn't
+                    * simple. We can't do exec_eval_cleanup, but we can do
+                    * this much (which is safe because the integer subscript
+                    * value is surely pass-by-value), and we must do it in
+                    * case the next subscript expression isn't simple either.
+                    */
+                    if (estate->eval_tuptable != NULL) {
+                        SPI_freetuptable(estate->eval_tuptable);
+                    }
+                    estate->eval_tuptable = NULL;
                 }
-                estate->eval_tuptable = NULL;
             }
-
             /* Now we can restore caller's SPI_execute result if any. */
             AssertEreport(estate->eval_tuptable == NULL, MOD_PLSQL, "eval tuptable should not be null");
             estate->eval_tuptable = save_eval_tuptable;
