@@ -234,6 +234,7 @@ wal_level = hot_standby			# minimal, archive, hot_standby or logical
 enable_incremental_checkpoint = on	# enable incremental checkpoint
 incremental_checkpoint_timeout = 60s	# range 1s-1h
 #pagewriter_sleep = 100ms		# dirty page writer sleep time, 0ms - 1h
+enable_double_write = on		# enable double write
 
 # - Archiving -
 

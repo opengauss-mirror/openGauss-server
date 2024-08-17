@@ -4035,6 +4035,30 @@ static XLogRecPtr RequestPrimaryCkptAndUpdateCkptRedoPtr()
     return ckptRedoPtr;
 }
 
+const char *PauseStatus2Str(ondemand_recovery_pause_status_t pauseState)
+{
+    switch (pauseState) {
+        case NOT_PAUSE:
+            return "not_pause";
+            break;
+        case PAUSE_FOR_SYNC_REDO:
+            return "sync_redo";
+            break;
+        case PAUSE_FOR_PRUNE_HASHMAP:
+            return "prune_hashmap";
+            break;
+        case PAUSE_FOR_PRUNE_SEG_QUEUE:
+            return "prune_seg_queue";
+            break;
+        case PAUSE_FOR_PRUNE_TRXN_QUEUE:
+            return "prune_trxn_queue";
+            break;
+        default:
+            return "unkown";
+            break;
+    }
+}
+
 static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activatePauseFunc,
     OndemandCheckPauseCB continuePauseFunc, OndemandProcPauseStatusCB refreshPauseStatusFunc,
     OndemandProcPauseStatusCB logPauseStatusFunc, ondemand_recovery_pause_status_t pauseState,
@@ -4049,7 +4073,7 @@ static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activa
         int level = SS_ONDEMAND_REALTIME_BUILD_NORMAL ? LOG : WARNING;
         g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status = pauseState;
         ereport(level, (errcode(ERRCODE_LOG),
-            errmsg("[On-demand] ondemand recovery meet pause status, type %d", pauseState)));
+            errmsg("[On-demand] ondemand recovery meet pause status, type %s", PauseStatus2Str(pauseState))));
         do {
             // other redo workers will proc pause state directly if primary node crash
             if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
@@ -4067,6 +4091,8 @@ static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activa
             RedoInterruptCallBack();
             pg_usleep(100000L);	/* 100 ms */
         } while (continuePauseFunc());
+        ereport(LOG, (errcode(ERRCODE_LOG),
+            errmsg("[On-demand] ondemand recovery cancel pause status")));
     }
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
 }
