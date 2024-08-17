@@ -168,7 +168,7 @@ static TupleTableSlot* ExecIndexScan(PlanState* state)
     /*
      * If we have runtime keys and they've not already been set up, do it now.
      */
-    if (node->iss_NumRuntimeKeys != 0 && (!node->iss_RuntimeKeysReady || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)))) {
+    if (node->iss_NumRuntimeKeys != 0 && !node->iss_RuntimeKeysReady) {
         /*
          * set a flag for partitioned table, so we can deal with it specially
          * when we rescan the partitioned table
@@ -181,6 +181,10 @@ static TupleTableSlot* ExecIndexScan(PlanState* state)
         } else {
             ExecReScan((PlanState*)node);
         }
+    } else if (DB_IS_CMPT(B_FORMAT) && node->iss_NumRuntimeKeys != 0 && u_sess->parser_cxt.has_set_uservar) {
+        ExprContext* econtext = node->iss_RuntimeContext;
+        ResetExprContext(econtext);
+        ExecIndexEvalRuntimeKeys(econtext, node->iss_RuntimeKeys, node->iss_NumRuntimeKeys);
     }
 
     return ExecScan(&node->ss, (ExecScanAccessMtd)IndexNext, (ExecScanRecheckMtd)IndexRecheck);
