@@ -51,14 +51,14 @@ VACUUM FREEZE range_list1 SUBPARTITION (p_201902_a);
 VACUUM VERBOSE range_list1 PARTITION (p_201901);
 --?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
 --?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
-DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--?DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. 0 pages have dead items. OldestXid .*. CPU 0.00s/0.00u sec elapsed 0.00 sec.
 --?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
 --?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
-DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--?DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. 0 pages have dead items. OldestXid .*. CPU 0.00s/0.00u sec elapsed 0.00 sec.
 VACUUM VERBOSE range_list1 SUBPARTITION (p_201902_a);
 --?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
 --?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
-DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--?DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. 0 pages have dead items. OldestXid .*. CPU 0.00s/0.00u sec elapsed 0.00 sec.
 --vacuum option all
 VACUUM (FULL, VERBOSE, FREEZE) range_list1 PARTITION (p_201901);
 INFO:  skipping segment table "range_list1" --- please use gs_space_shrink to recycle segment space.

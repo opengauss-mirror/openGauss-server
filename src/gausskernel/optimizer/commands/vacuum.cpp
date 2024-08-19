@@ -2971,6 +2971,32 @@ void vacuum_delay_point(void)
     }
 }
 
+/*
+ * bypass_lazy_vacuum_index --- check if lazy_vacuum_index() can by bypassed.
+ *
+ * The following factors should be all satisfied when bypass is true:
+ * 1. non-aggresive mode.
+ * 2. relation has indexes.
+ * 3. don't support dead tuples belong to different relations or buckets.
+ * 4. no index scan has been done.
+ * 5. number of pages contain dead items is too small. (i.e. 2% of rel_pages)
+ * 6. memory usage of dead items is too small. (i.e. 32MB)
+ */
+bool bypass_lazy_vacuum_index(
+     const LVRelStats *vacrelstats, const bool aggresive, const int nindexes)
+{
+    bool bypass = false;
+    if (!aggresive
+        && nindexes > 0
+        && InvalidBktId == vacrelstats->currVacuumBktId
+        && 0 == vacrelstats->num_index_scans
+        && (double) vacrelstats->lpdead_item_pages < (double) vacrelstats->rel_pages * BYPASS_THRESHOLD_PAGES
+        && TidStoreMemoryUsage(vacrelstats->dead_items_info.dead_items) < BYPASS_THRESHOLD_MEMORY_USAGE) {
+        bypass = true;
+    }
+    return bypass;
+}
+
 void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tuples, BlockNumber num_all_visible_pages,
     TransactionId frozenxid, MultiXactId minmulti)
 {
