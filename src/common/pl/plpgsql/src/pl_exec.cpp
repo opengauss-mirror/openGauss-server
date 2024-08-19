@@ -1106,6 +1106,7 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
             Node *parsetree = (Node *)lfirst(cell);
             t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
             if (nodeTag(parsetree) == T_SelectStmt) {
+                ListCell* target_lc = NULL;
                 if (checkSelectIntoParse((SelectStmt*)parsetree)) {
                     list_free_deep(parsetreeList);
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1113,6 +1114,17 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
                     errdetail("query \"%s\" is not supported in cursor or for..in loop condition yet.", expr->query),
                     errcause("feature not supported"),
                     erraction("modify the query")));
+                }
+                SelectStmt *select_stmt = (SelectStmt*)parsetree;
+                foreach(target_lc, select_stmt->targetList) {
+                    Node *res_node = (Node*)lfirst(target_lc);
+                    if (res_node->type == T_ResTarget) {
+                        ResTarget* res_target = (ResTarget*)res_node;
+                        if (res_target->val->type == T_CursorExpression) {
+                            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), 
+                                    errmsg("obtain rowtype form nested cursor is not supported")));
+                        }
+                    }
                 }
             } else {
                 if (isOnlySelect) {
