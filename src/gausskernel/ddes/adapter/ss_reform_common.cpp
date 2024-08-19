@@ -105,8 +105,10 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
     securec_check_ss(errorno, "", "");
 
     errno = ENOENT;
-    ereport(emode, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m", path,
-                                                      XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno)))); 
+    if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        ereport(emode, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m", path,
+                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+    }
 
     return -1;
 }
