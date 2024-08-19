@@ -106,6 +106,7 @@ QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Sna
     qd->planstate = NULL;
     qd->totaltime = NULL;
     qd->executed = false;
+    qd->for_simplify_func = false;
 #ifdef ENABLE_MOT
     if (motJitContext != nullptr && JitExec::IsJitContextValid(motJitContext)) {
         qd->mot_jit_context = motJitContext;
@@ -141,6 +142,7 @@ QueryDesc* CreateUtilityQueryDesc(
     qd->planstate = NULL;
     qd->totaltime = NULL;
     qd->executed = false;
+    qd->for_simplify_func = false;
 #ifdef ENABLE_MOT
     qd->mot_jit_context = nullptr;
 #endif
