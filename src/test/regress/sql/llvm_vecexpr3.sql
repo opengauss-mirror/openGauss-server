@@ -163,6 +163,81 @@ select col_int, col_real, col_decimal from llvm_vecexpr_table_04 where nullif(co
 
 select col_int, col_intervaltz from llvm_vecexpr_table_04 where nullif(col_intervaltz, '["1937-06-11 23:59:12+08" "2001-11-14 15:14:21+08"]') is not NULL order by 1, 2;
 
+CREATE TABLE t_rate_calculation (
+    id character varying(32) NOT NULL,
+    dispatch_no character varying(32) NOT NULL,
+    waybill_no character varying(32) NOT NULL,
+    adjustment_price numeric(18,4),
+	artifical_assessmen_price numeric(18,2),
+	manual_change numeric(18,2)
+) WITH (orientation=row, compression=no);
+
+CREATE TABLE t_vehicle_plan (
+    id character varying(32),
+    waybill_no character varying(20)
+) WITH (orientation=row, compression=no);
+
+CREATE TABLE t_plan_vehicle (
+    id character varying(32) NOT NULL,
+    plan_id character varying(32),
+    carrier_id character varying(32),
+    dispatch_no character varying(32)
+) WITH (orientation=row, compression=no);
+
+CREATE TABLE t_carrier_info (
+    id character varying(32) NOT NULL,
+    carrier_code character varying(20)
+) WITH (orientation=row, compression=no);
+
+CREATE TABLE t_waybill_info_local (
+    id character varying(32) NOT NULL,
+    waybill_no character varying(20)
+) WITH (orientation=row, compression=no);
+
+CREATE TABLE t_waybill_carrier (
+    id character varying(32) NOT NULL,
+    waybill_no character varying(20),
+    carrier_code character varying(20)
+) WITH (orientation=row, compression=no);
+
+insert into t_rate_calculation values (generate_series(1,10000),generate_series(1,10000),generate_series(1,10000),generate_series(1,10000),generate_series(1,10000),generate_series(1,10000));
+insert into t_vehicle_plan values (generate_series(1,10000),generate_series(1,10000));
+insert into t_plan_vehicle values (generate_series(1,10000),generate_series(1,10000),generate_series(1,10000),generate_series(1,10000));
+insert into t_carrier_info values (generate_series(1,10000),generate_series(1,10000));
+insert into t_waybill_info_local values (generate_series(1,10000),generate_series(1,10000));
+insert into t_waybill_carrier values (generate_series(1,10000),generate_series(1,10000),generate_series(1,10000));
+
+set try_vector_engine_strategy='force';
+set codegen_cost_threshold = 100;
+set enable_codegen = on;
+
+explain (costs off) declare xc no scroll cursor for select rc.waybill_no 邮路代码, rc.dispatch_no 派车单, rc.adjustment_price+rc.artifical_assessmen_price +rc.manual_change 手工调账考核 from t_rate_calculation rc 
+left JOIN t_plan_vehicle pv on pv.dispatch_no=rc.dispatch_no
+left join t_carrier_info ci on pv.carrier_id=ci.id--承运商
+left join t_vehicle_plan vp on pv.plan_id=vp.id
+left join t_waybill_info_local wl on vp.waybill_no=wl.waybill_no
+left join t_waybill_carrier wc on ci.carrier_code=wc.carrier_code and wc.waybill_no=wl.waybill_no;
+
+begin;
+declare xc no scroll cursor for select rc.waybill_no 邮路代码, rc.dispatch_no 派车单, rc.adjustment_price+rc.artifical_assessmen_price +rc.manual_change 手工调账考核 from t_rate_calculation rc 
+left JOIN t_plan_vehicle pv on pv.dispatch_no=rc.dispatch_no
+left join t_carrier_info ci on pv.carrier_id=ci.id--承运商
+left join t_vehicle_plan vp on pv.plan_id=vp.id
+left join t_waybill_info_local wl on vp.waybill_no=wl.waybill_no
+left join t_waybill_carrier wc on ci.carrier_code=wc.carrier_code and wc.waybill_no=wl.waybill_no;
+
+move 1000 xc;
+select 1;
+move 1000 xc;
+end;
+
+drop table t_rate_calculation;
+drop table t_vehicle_plan;
+drop table t_plan_vehicle;
+drop table t_carrier_info;
+drop table t_waybill_info_local;
+drop table t_waybill_carrier;
+
 ----
 --- clean table and resource
 ----

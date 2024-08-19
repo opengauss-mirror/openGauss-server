@@ -207,6 +207,7 @@ EState* CreateExecutorState()
     estate->cur_insert_autoinc = 0;
     estate->next_autoinc = 0;
     estate->es_is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
+    estate->compileCodegen = false;
     /*
      * Return the executor state structure
      */

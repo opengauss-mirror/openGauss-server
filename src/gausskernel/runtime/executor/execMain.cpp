@@ -608,6 +608,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         } else {
             CodeGenThreadRuntimeCodeGenerate();
         }
+        estate->compileCodegen = true;
     }
 #endif
 
@@ -843,8 +844,11 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
 #ifdef ENABLE_LLVM_COMPILE
-   /* Do not release codegen in Fmgr and Procedure */
-    if (!t_thrd.codegen_cxt.g_runningInFmgr && u_sess->SPI_cxt._connected == -1) {
+   /*
+    * Do not release codegen in Fmgr and Procedure. And if codegen modulre
+    * is compiled, only estate which has compiled it can release.
+    */
+    if (u_sess->SPI_cxt._connected == -1 && (CodeGenThreadObjectReady() || estate->compileCodegen)) {
         CodeGenThreadTearDown();
     }
 #endif
