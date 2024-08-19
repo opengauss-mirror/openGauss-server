@@ -345,7 +345,7 @@ static void verifyXid(TransactionSlot *slot)
     if (TransactionIdIsValid(xid) && 
         TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. slot xactId %lu >= nextXid%lu"), 
+            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. slot xactId %lu >= nextXid %lu"),
             xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
     }
 }
