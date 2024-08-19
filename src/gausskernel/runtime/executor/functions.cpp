@@ -798,6 +798,8 @@ static void postquel_start(execution_state* es, SQLFunctionCachePtr fcache)
         es->qd = CreateUtilityQueryDesc(es->stmt, fcache->src, GetActiveSnapshot(), dest, fcache->paramLI);
     }
 
+    es->qd->for_simplify_func = true;
+
     /* Utility commands don't need Executor. */
     if (es->qd->utilitystmt == NULL) {
         /*
