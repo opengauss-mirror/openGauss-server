@@ -349,10 +349,11 @@ inline OffsetNumber UHeapPageGetMaxOffsetNumber(char *upage)
 
 #define USTORE_VERIFY_UPAGE_DEFAULT (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROWS)
 
-void UpageVerify(UHeapPageHeader header, XLogRecPtr lastRedo, TupleDesc tupDesc, Relation rel, 
-    bool isRedo = false, uint8 mask = USTORE_VERIFY_UPAGE_DEFAULT, 
-    OffsetNumber num = InvalidOffsetNumber  /* for single TUPLE and ROW */);
+void UpageVerify(UHeapPageHeader header, XLogRecPtr lastRedo, TupleDesc tupDesc, Relation rel,
+    RelFileNode* rNode, BlockNumber blkno, bool isRedo = false, uint8 mask = USTORE_VERIFY_UPAGE_DEFAULT,
+    OffsetNumber num = InvalidOffsetNumber);
 
-void UpageVerifyHeader(UHeapPageHeader header, XLogRecPtr lastRedo, Relation rel, bool isRedo = false);
+void UpageVerifyHeader(UHeapPageHeader header, XLogRecPtr lastRedo, RelFileNode* rNode,
+    BlockNumber blkno, bool isRedo = false);
 
 #endif

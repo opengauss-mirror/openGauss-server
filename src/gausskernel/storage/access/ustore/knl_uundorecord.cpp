@@ -632,22 +632,22 @@ void UndoRecordVerify(_in_ UndoRecord *urec)
 {
     UNDO_BYPASS_VERIFY;
 
-    CHECK_VERIFY_LEVEL(USTORE_VERIFY_DEFAULT)
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
     if (!TransactionIdIsValid(urec->Xid())) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. xid %lu is invalid"), urec->Xid())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. xid %lu is invalid, urp %lu"), urec->Xid(), urec->Urp())));
     }
     if (TransactionIdIsValid(urec->Xid()) &&
         TransactionIdFollowsOrEquals(urec->Xid(), t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. xid %lu >= nextXid %lu"),
-            urec->Xid(), t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. xid %lu >= nextXid %lu, urp %lu"),
+            urec->Xid(), t_thrd.xact_cxt.ShmemVariableCache->nextXid, urec->Urp())));
     }
     if (TransactionIdIsValid(urec->OldXactId()) &&
         TransactionIdFollowsOrEquals(urec->OldXactId(), t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. oldXactId %lu >= nextXid %lu"),
-            urec->OldXactId(), t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. oldXactId %lu >= nextXid %lu, urp %lu"),
+            urec->OldXactId(), t_thrd.xact_cxt.ShmemVariableCache->nextXid, urec->Urp())));
     }
     if (!(IS_VALID_UNDO_REC_PTR(urec->Urp()))) {
         ereport(WARNING, (errmodule(MOD_UNDO),
@@ -655,6 +655,7 @@ void UndoRecordVerify(_in_ UndoRecord *urec)
         return;
     }
 
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_COMPLETE)
     int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urec->Urp());
     undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
     Assert(uzone != NULL);
@@ -673,37 +674,39 @@ void UndoRecordVerify(_in_ UndoRecord *urec)
         undo::UndoZone *blkPrevZone = undo::UndoZoneGroup::GetUndoZone(blkPrevZid, false);
         if (urec->Blkprev() > blkPrevZone->GetInsertURecPtr()) {
             ereport(WARNING, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. Blkprev %lu > insertURecPtr %lu, zoneId %d"),
-                urec->Blkprev(), uzone->GetInsertURecPtr(), zoneId))); 
+                errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. Blkprev %lu > insertURecPtr %lu, zoneId %d, urp %lu"),
+                urec->Blkprev(), uzone->GetInsertURecPtr(), zoneId, urec->Urp())));
         }
     }
     if ((urec->Uinfo() & UNDO_UREC_INFO_TRANSAC) != 0 || (urec->Uinfo() & UNDO_UREC_INFO_BLOCK) != 0) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. uinfo %d error"), (int)urec->Uinfo())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. uinfo %d error, urp %lu"),
+            (int)urec->Uinfo(), urec->Urp())));
     }
     if ((urec->Uinfo() & UNDO_UREC_INFO_OLDTD) != 0 && !TransactionIdIsValid(urec->OldXactId())) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed.  uinfo %d, oldXactId %lu is invalid"),
-            (int)urec->Uinfo(), urec->OldXactId())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. uinfo %d, oldXactId %lu is invalid, urp %lu"),
+            (int)urec->Uinfo(), urec->OldXactId(), urec->Urp())));
     }
     if ((urec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0 && urec->Partitionoid() == InvalidOid) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-        errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. urp %lu, uinfo %d, partitionoid is invalid"),
-                urec->Urp(), (int)urec->Uinfo())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. uinfo %d, partitionoid is invalid, urp %lu"),
+            (int)urec->Uinfo(), urec->Urp())));
     }
     if ((urec->Uinfo() & UNDO_UREC_INFO_HAS_TABLESPACEOID) != 0 && urec->Tablespace() == InvalidOid) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. urp %lu,  uinfo %d, tablespace is invalid"),
-            urec->Urp(), (int)urec->Uinfo())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. uinfo %d, tablespace is invalid, urp %lu"),
+            (int)urec->Uinfo(), urec->Urp())));
     }
     if (urec->Utype() <= UNDO_UNKNOWN || urec->Utype() > UNDO_UPDATE) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed.  utype %d is invalid"), urec->Utype())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed. utype %d is invalid, urp %lu"),
+            urec->Utype(), urec->Urp())));
     }
     if ((urec->Utype() == UNDO_INSERT && urec->PayLoadLen() != 0) ||
         (urec->Utype() == UNDO_INSERT && (urec->Uinfo() & UNDO_UREC_INFO_PAYLOAD) != 0)) {
         ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed.  utype %d , payLoadLen %hu, uinfo %d"),
-                urec->Utype(), urec->PayLoadLen(), (int)urec->Uinfo())));
+            errmsg(UNDOFORMAT("[UNDO_RECORD_VERIFY]failed.  utype %d , payLoadLen %hu, uinfo %d, urp %lu"),
+            urec->Utype(), urec->PayLoadLen(), (int)urec->Uinfo(), urec->Urp())));
     }
 }
