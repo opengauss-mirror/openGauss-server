@@ -519,6 +519,7 @@ static void dumpColumnEncryptionKeys(Archive* fout, const Oid nspoid, const char
 #endif
 static void dumpEncoding(Archive* AH);
 static void dumpStdStrings(Archive* AH);
+static void DumpBehaviorCompat(Archive* archive);
 static void binary_upgrade_set_type_oids_by_type_oid(
     Archive* Afout, PQExpBuffer upgrade_buffer, Oid pg_type_oid, bool error_table);
 static bool binary_upgrade_set_type_oids_by_rel_oid(
@@ -1130,6 +1131,9 @@ int main(int argc, char** argv)
     write_msg(NULL, "Start dumping objects \n");
     pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
+
+    /* Set special option: behavior_compat_options */
+    DumpBehaviorCompat(fout);
 
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
@@ -4149,6 +4153,45 @@ static void dumpStdStrings(Archive* AH)
         "",
         false,
         "STDSTRINGS",
+        SECTION_PRE_DATA,
+        qry->data,
+        "",
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+
+    destroyPQExpBuffer(qry);
+}
+
+/*
+ * DumpBehaviorCompat: put the correct behavior_compat_options into the archive
+ */
+static void DumpBehaviorCompat(Archive* archive)
+{
+    ddr_Assert(archive != NULL);
+    PGconn* conn = GetConnection(archive);
+    PGresult* res;
+    PQExpBuffer qry = createPQExpBuffer();
+
+    res = PQexec(conn, "show behavior_compat_options;");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        appendPQExpBuffer(qry, "SET behavior_compat_options = '%s';\n", PQgetvalue(res, 0, 0));
+    } else {
+        appendPQExpBuffer(qry, "SET behavior_compat_options = '';\n");
+    }
+    PQclear(res);
+
+    ArchiveEntry(archive,
+        nilCatalogId,
+        createDumpId(),
+        "BEHAVIORCOMPAT",
+        NULL,
+        NULL,
+        "",
+        false,
+        "BEHAVIORCOMPAT",
         SECTION_PRE_DATA,
         qry->data,
         "",
