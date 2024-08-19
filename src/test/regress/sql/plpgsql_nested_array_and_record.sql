@@ -18,6 +18,30 @@ BEGIN
 END;
 /
 
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+BEGIN
+        nstarr(1):=1;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+arr typ_PLArray_case0001;
+BEGIN
+        arr(1):=1;
+        nstarr(1):=arr;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+
 -- record of arrays
 DECLARE
     TYPE arr1 IS VARRAY(5) OF INTEGER;
