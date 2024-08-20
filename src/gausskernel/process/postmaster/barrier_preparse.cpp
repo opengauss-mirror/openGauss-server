@@ -45,7 +45,7 @@ typedef struct XLogPageReadPrivate {
 } XLogPageReadPrivate;
 
 #define NEED_INSERT_INTO_HASH \
-    ((record->xl_rmid == RM_BARRIER_ID) && ((info == XLOG_BARRIER_SWITCHOVER) || \
+    (IS_MULTI_DISASTER_RECOVER_MODE && (record->xl_rmid == RM_BARRIER_ID) && ((info == XLOG_BARRIER_SWITCHOVER) || \
         (IS_PGXC_COORDINATOR && info == XLOG_BARRIER_COMMIT) || (IS_PGXC_DATANODE && info == XLOG_BARRIER_CREATE)))
 
 static void InitBarrierHash()
@@ -93,6 +93,65 @@ static void SetBarrieID(const char *barrierId, XLogRecPtr lsn)
         ereport(LOG, (errmsg("[BarrierPreParse] SetBarrieID set the barrier ID is %s, the barrier LSN is %08X/%08X",
             barrierId, (uint32)(lsn >> shiftSize), (uint32)lsn)));
     }
+}
+
+static void request_wal_stream_for_preparse(XLogRecPtr recptr)
+{
+    if (t_thrd.barrier_preparse_cxt.shutdown_requested) {
+        return;
+    }
+    if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0) {
+        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+        SpinLockAcquire(&walrcv->mutex);
+        walrcv->receivedUpto = 0;
+        SpinLockRelease(&walrcv->mutex);
+        if (t_thrd.xlog_cxt.readFile >= 0) {
+            (void)close(t_thrd.xlog_cxt.readFile);
+            t_thrd.xlog_cxt.readFile = -1;
+        }
+
+        ereport(LOG, (errmsg("[BarrierPreParse] preparse thread request xlog streaming")));
+        if (t_thrd.xlog_cxt.is_cascade_standby) {
+            RequestXLogStreaming(&recptr, NULL, REPCONNTARGET_STANDBY, NULL, true);
+        } else {
+            RequestXLogStreaming(&recptr, NULL, REPCONNTARGET_PRIMARY, NULL, true);
+        }
+    }
+}
+
+static XLogRecPtr get_preparse_start_lsn()
+{
+    XLogRecPtr start_lsn = InvalidXLogRecPtr;
+    const uint32 shift_size = 32;
+
+    while (XLogRecPtrIsInvalid(start_lsn)) {
+        GetXLogReplayRecPtr(NULL, &start_lsn);
+        if (t_thrd.barrier_preparse_cxt.shutdown_requested) {
+            return start_lsn;
+        }
+    }
+    ereport(LOG, (errmsg("[BarrierPreParse] preparse thread start at %08X/%08X",
+        (uint32)(start_lsn >> shift_size), (uint32)start_lsn)));
+    return start_lsn;
+}
+
+static bool check_preparse_run_time(TimestampTz *start_time)
+{
+    long secs;
+    int usecs;
+
+    if (!IS_MULTI_DISASTER_RECOVER_MODE && g_instance.csn_barrier_cxt.max_run_time > 0) {
+        if (*start_time < 0) {
+            *start_time = GetCurrentTimestamp();
+        }
+        TimestampDifference(*start_time, GetCurrentTimestamp(), &secs, &usecs);
+        if (secs >= g_instance.csn_barrier_cxt.max_run_time) {
+            g_instance.csn_barrier_cxt.max_run_time = 0;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static void BarrierPreParseSigHupHandler(SIGNAL_ARGS)
@@ -168,9 +227,58 @@ void SetBarrierPreParseLsn(XLogRecPtr startptr)
     SpinLockRelease(&walrcv->mutex);
 }
 
+bool check_preparse_result(XLogRecPtr *recptr)
+{
+    if (t_thrd.barrier_preparse_cxt.shutdown_requested) {
+        return false;
+    }
+    if (XLogRecPtrIsInvalid(g_instance.csn_barrier_cxt.latest_valid_record)) {
+        XLogRecPtr lastReplayRecPtr = InvalidXLogRecPtr;
+        (void)GetXLogReplayRecPtr(NULL, &lastReplayRecPtr);
+        if (XLogRecPtrIsInvalid(lastReplayRecPtr)) {
+            *recptr = lastReplayRecPtr;
+        }
+        return false;
+    }
+    if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0) {
+        return true;
+    }
+    return true;
+}
+
+void check_exit_preparse_conditions(XLogReaderState *xlogreader, TimestampTz *start_time,
+    XLogRecPtr *start_lsn, int try_time)
+{
+    int rc;
+    const int max_try_times = 20;
+
+    if (check_preparse_result(start_lsn)) {
+        request_wal_stream_for_preparse(*start_lsn);
+    }
+
+    if (!IS_MULTI_DISASTER_RECOVER_MODE && g_instance.csn_barrier_cxt.max_run_time == 0 && try_time > max_try_times) {
+        ereport(LOG, (errmsg("[BarrierPreParse] preparse thread shut down")));
+        XLogReaderFree(xlogreader);
+        proc_exit(0);
+    }
+
+    if (check_preparse_run_time(start_time)) {
+        ereport(LOG, (errmsg("[BarrierPreParse] preparse thread shut down")));
+        XLogReaderFree(xlogreader);
+        proc_exit(0);
+    }
+
+    const long sleepTime = 1000;
+    rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, sleepTime);
+    if (((unsigned int)rc) & WL_POSTMASTER_DEATH) {
+        XLogReaderFree(xlogreader);
+        ereport(LOG, (errmsg("[BarrierPreParse] preparse thread shut down with code 1")));
+        gs_thread_exit(1);
+    }
+}
+
 void BarrierPreParseMain(void)
 {
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     MemoryContext preParseContext;
     XLogRecord *record = NULL;
     XLogReaderState *xlogreader = NULL;
@@ -182,11 +290,19 @@ void BarrierPreParseMain(void)
     XLogRecPtr barrierLSN = InvalidXLogRecPtr;
     char *xLogBarrierId = NULL;
     char barrierId[MAX_BARRIER_ID_LENGTH] = {0};
-    const uint32 shiftSize = 32;
+    TimestampTz start_time = -1;
+    int try_time = 0;
+    XLogRecPtr latest_valid_record;
+    pg_crc32 latest_record_crc;
+    uint32 latest_record_len;
     int rc;
 
     ereport(LOG, (errmsg("[BarrierPreParse] barrier preparse thread started")));
 
+    /* Init preparse information*/
+    g_instance.csn_barrier_cxt.preparseStartLocation = InvalidXLogRecPtr;
+    g_instance.csn_barrier_cxt.preparseEndLocation = InvalidXLogRecPtr;
+    
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -226,11 +342,10 @@ void BarrierPreParseMain(void)
 
     g_instance.proc_base->BarrierPreParseLatch = &t_thrd.proc->procLatch;
 
-    startLSN = walrcv->lastReceivedBarrierLSN;
-    ereport(LOG, (errmsg("[BarrierPreParse] preparse thread start at %08X/%08X", (uint32)(startLSN >> shiftSize),
-                         (uint32)startLSN)));
+    startLSN = get_preparse_start_lsn();
+    g_instance.csn_barrier_cxt.preparseStartLocation = startLSN;
 
-    if (g_instance.csn_barrier_cxt.barrier_hash_table == NULL) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.csn_barrier_cxt.barrier_hash_table == NULL) {
         InitBarrierHash();
     }
 
@@ -260,13 +375,7 @@ void BarrierPreParseMain(void)
             proc_exit(0); /* done */
         }
 
-        if (XLogRecPtrIsInvalid(startLSN)) {
-            ereport(ERROR, (errmsg("[BarrierPreParse] startLSN is invalid")));
-        }
-
         preStartLSN = startLSN;
-        ereport(DEBUG1, (errmsg("[BarrierPreParse] start to preparse at: %08X/%08X",
-            (uint32)(startLSN >> shiftSize), (uint32)startLSN)));
         startLSN = XLogFindNextRecord(xlogreader, startLSN);
         if (XLogRecPtrIsInvalid(startLSN)) {
             startLSN = preStartLSN;
@@ -287,6 +396,9 @@ void BarrierPreParseMain(void)
                 break;
             }
             lastReadLSN = xlogreader->ReadRecPtr;
+            latest_valid_record = lastReadLSN;
+            latest_record_crc = record->xl_crc;
+            latest_record_len = record->xl_tot_len;
             uint8 info = XLogRecGetInfo(xlogreader) & ~XLR_INFO_MASK;
             if (NEED_INSERT_INTO_HASH) {
                 xLogBarrierId = XLogRecGetData(xlogreader);
@@ -311,18 +423,19 @@ void BarrierPreParseMain(void)
         CloseXlogFile();
         XLogReaderInvalReadState(xlogreader);
 
+        g_instance.csn_barrier_cxt.latest_valid_record = latest_valid_record;
+        g_instance.csn_barrier_cxt.latest_record_crc = latest_record_crc;
+        g_instance.csn_barrier_cxt.latest_record_len = latest_record_len;
+
         startLSN = XLogRecPtrIsInvalid(lastReadLSN) ? preStartLSN : lastReadLSN;
 
         if (XLogRecPtrIsInvalid(xlogreader->ReadRecPtr) && errormsg) {
             ereport(LOG, (errmsg("[BarrierPreParse] preparse thread get an error info %s", errormsg)));
         }
-        const long sleepTime = 1000;
-        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, sleepTime);
-        if (((unsigned int)rc) & WL_POSTMASTER_DEATH) {
-            XLogReaderFree(xlogreader);
-            ereport(LOG, (errmsg("[BarrierPreParse] preparse thread shut down with code 1")));
-            gs_thread_exit(1);
-        }
+        g_instance.csn_barrier_cxt.preparseEndLocation = startLSN;
+
+        try_time++;
+        check_exit_preparse_conditions(xlogreader, &start_time, &startLSN, try_time);
     }
 }
 
@@ -334,3 +447,4 @@ void WakeUpBarrierPreParseBackend()
         }
     }
 }
+

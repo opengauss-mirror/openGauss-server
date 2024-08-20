@@ -285,8 +285,8 @@ extern void ShutdownWalRcv(void);
 extern bool WalRcvInProgress(void);
 extern bool WalRcvIsRunning(void);
 extern void connect_dn_str(char* conninfo, int replIndex);
-extern void RequestXLogStreaming(
-    XLogRecPtr* recptr, const char* conninfo, ReplConnTarget conn_target, const char* slotname);
+extern void RequestXLogStreaming(XLogRecPtr* recptr, const char* conninfo, ReplConnTarget conn_target,
+    const char* slotname, bool for_preparse = false);
 extern StringInfo get_rcv_slot_name(void);
 extern XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr* latestChunkStart);
 extern XLogRecPtr GetWalStartPtr();

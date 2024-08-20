@@ -526,6 +526,21 @@ void KillWalRcvWriter(void)
     }
 }
 
+/* Set last valid record if walreceiver is requested by preparse thread. */
+void wal_rcv_set_last_record_by_preparse(bool for_preparse)
+{
+    if (!for_preparse || XLogRecPtrIsInvalid(g_instance.csn_barrier_cxt.latest_valid_record)) {
+        return;
+    }
+
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->latestValidRecord = g_instance.csn_barrier_cxt.latest_valid_record;
+    walrcv->latestRecordCrc = g_instance.csn_barrier_cxt.latest_record_crc;
+    walrcv->latestRecordLen = g_instance.csn_barrier_cxt.latest_record_len;
+    SpinLockRelease(&walrcv->mutex);
+}
+
 /*
  * Stop walreceiver (if running) and wait for it to die.
  * Executed by the Startup process.
@@ -602,7 +617,8 @@ void ShutdownWalRcv(void)
  * is a libpq connection string to use, and slotname is, optionally, the name
  * of a replication slot to acquire.
  */
-void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
+void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname,
+    bool for_preparse)
 {
     if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
         ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.shareStorageXLogCtl;
@@ -701,6 +717,7 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
     walrcv->latestRecordCrc = latestRecordCrc;
     walrcv->latestRecordLen = latestRecordLen;
     SpinLockRelease(&walrcv->mutex);
+    wal_rcv_set_last_record_by_preparse(for_preparse);
     WalRcvSetPercentCountStartLsn(walrcv->latestValidRecord);
     if (XLByteLT(latestValidRecord, Lcrecptr))
         ereport(LOG, (errmsg("latest valid record at %X/%X, wal receiver start point at %X/%X",

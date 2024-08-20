@@ -3671,15 +3671,16 @@ static int ServerLoop(void)
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         /* when execuating xlog redo in standby cluster,
           * pmState is PM_HOT_STANDBY, neither PM_RECOVERY nor PM_RUN
           */
-        if (pmState == PM_HOT_STANDBY && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
-            !dummyStandbyMode && IS_MULTI_DISASTER_RECOVER_MODE) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+            (pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
+            !dummyStandbyMode && !g_instance.csn_barrier_cxt.pre_parse_started) {
+            g_instance.csn_barrier_cxt.pre_parse_started = true;
             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
         }
-#endif
+
         /*
          * If no background writer process is running, and we are not in a
          * state that prevents it, start one.  It doesn't matter if this
@@ -5474,11 +5475,11 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.sharedStorageXlogCopyThreadPID, SIGHUP);
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
             signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGHUP);
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (g_instance.pid_cxt.TsCompactionPID != 0) {
             signal_child(g_instance.pid_cxt.TsCompactionPID, SIGHUP);
         }
@@ -5610,11 +5611,9 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
             }
 
-#ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
                 signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
             }
-#endif
 
             if (g_instance.pid_cxt.PageRepairPID != 0) {
                 signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
@@ -7237,7 +7236,6 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         if (pid == g_instance.pid_cxt.BarrierPreParsePID) {
             g_instance.pid_cxt.BarrierPreParsePID = 0;
             write_stderr("%s LOG: barrier pre parse thread exit\n", GetReaperLogPrefix(logBuf, ReaperLogBufSize));
@@ -7246,6 +7244,7 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (pid == g_instance.pid_cxt.TsCompactionPID) {
             g_instance.pid_cxt.TsCompactionPID = 0;
             if (!EXIT_STATUS_0(exitstatus))
@@ -7700,10 +7699,10 @@ static void PostmasterStateMachineReadOnly(void)
                 csnminsync_thread_shutdown();
                 signal_child(g_instance.pid_cxt.CsnminSyncPID, SIGTERM);
             }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
             if (g_instance.pid_cxt.BarrierPreParsePID != 0)
                 signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
-#endif   /* ENABLE_MULTIPLE_NODES */
 
             if (g_instance.pid_cxt.UndoLauncherPID != 0)
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
@@ -7849,8 +7848,8 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
             g_instance.pid_cxt.StackPerfPID == 0 &&
             g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
-#ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.BarrierPreParsePID == 0 &&
+#ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
             g_instance.pid_cxt.TsCompactionPID == 0 && g_instance.pid_cxt.TsCompactionAuxiliaryPID == 0
             && g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
@@ -8896,11 +8895,6 @@ static void handle_begin_hot_standby()
                 wal_get_role_string(get_cur_mode()))));
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
-#ifdef ENABLE_MULTIPLE_NODES
-        if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
-            g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
-        }
-#endif
         pmState = PM_HOT_STANDBY;
     }
 }
@@ -9322,6 +9316,11 @@ static void PaxosPromoteLeader(void)
 #endif
 }
 
+static bool check_start_preparse_signal() {
+    return CheckSignalByFile(WAL_PREPARSER_SIGNAL_FILE,
+        &g_instance.csn_barrier_cxt.max_run_time, sizeof(g_instance.csn_barrier_cxt.max_run_time));
+}
+
 /*
  * sigusr1_handler - handle signal conditions from child processes
  */
@@ -9585,6 +9584,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_threadPoolControler != NULL) {
             g_threadPoolControler->AddWorkerIfNecessary();
         }
+    }
+
+    if (g_instance.pid_cxt.BarrierPreParsePID == 0 && check_start_preparse_signal()) {
+        g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -12398,10 +12401,10 @@ static void SetAuxType()
         case SHARE_STORAGE_XLOG_COPYER:
             t_thrd.bootstrap_cxt.MyAuxProcType = XlogCopyBackendProcess;
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
             break;
@@ -12688,11 +12691,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             SharedStorageXlogCopyBackendMain();
             proc_exit(1);
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             BarrierPreParseMain();
             proc_exit(1);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
             proc_exit(1);
@@ -12930,8 +12933,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case PAGEREPAIR_THREAD:
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
@@ -13467,10 +13470,10 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_LAUNCHER>, APPLY_LAUNCHER, "applylauncher", "apply launcher" },
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
+    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
-    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
       "timeseries compaction" },
     { GaussDbThreadMain<TS_COMPACTION_CONSUMER>, TS_COMPACTION_CONSUMER, "TScompconsumer",
