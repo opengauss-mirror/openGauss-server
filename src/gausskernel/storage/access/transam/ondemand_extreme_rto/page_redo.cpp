@@ -1784,6 +1784,10 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
         TrxnManagerProcHashMapPrune();
     } else {
         if (XLByteLT(item->record.EndRecPtr, g_redoWorker->nextPrunePtr)) {
+            if (XactHasSegpageRelFiles(&item->record)) {
+                uint32 expected = 1;
+                pg_atomic_compare_exchange_u32((volatile uint32 *)&(g_dispatcher->segpageXactDoneFlag), &expected, 0);
+            }
             DereferenceRedoItem(item);
             return exitFlag;
         }

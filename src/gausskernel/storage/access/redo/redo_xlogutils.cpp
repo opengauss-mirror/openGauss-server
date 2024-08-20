@@ -316,6 +316,7 @@ void XLogRecSetBlockCommonState(XLogReaderState *record, XLogBlockParseEnum bloc
     blockparse->blockhead.opt = filenode.rnode.node.opt;
     blockparse->blockhead.blkno = filenode.segno;
     blockparse->blockhead.forknum = filenode.forknumber;
+    blockparse->blockhead.hasCSN = XLogRecHasCSN(record);
 
     blockparse->redohead.xl_term = XLogRecGetTerm(record);
     
@@ -432,7 +433,6 @@ void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecPa
 
     XLogRecSetBlockDataStateContent(record, blockid, blockdatarec);
     recordblockstate->blockparse.blockhead.is_conflict_type = is_conflict_type;
-    recordblockstate->blockparse.blockhead.hasCSN = XLogRecHasCSN(record);
 }
 
 void XLogRecSetAuxiBlkNumState(XLogBlockDataParse *blockdatarec, BlockNumber auxilaryblkn1, BlockNumber auxilaryblkn2)

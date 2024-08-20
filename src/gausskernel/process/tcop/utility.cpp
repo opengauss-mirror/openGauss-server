@@ -664,6 +664,7 @@ void PreventCommandDuringSSOndemandRedo(Node* parseTree)
         case T_CreateFunctionStmt: /* no need to adapt */
         case T_AlterFunctionStmt: /* no need to adapt */
         case T_CompileStmt:
+        case T_DoStmt:
         case T_RenameStmt:
         case T_TransactionStmt:
         case T_ViewStmt: /* no need to adapt */
