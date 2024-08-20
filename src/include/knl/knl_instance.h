@@ -767,7 +767,13 @@ typedef struct knl_g_csn_barrier_context {
     struct HTAB* barrier_hash_table;
     LWLock* barrier_hashtbl_lock;
     char stopBarrierId[MAX_BARRIER_ID_LENGTH];
+    bool pre_parse_started;
+    int max_run_time;
     MemoryContext barrier_context;
+
+    XLogRecPtr latest_valid_record;
+    pg_crc32 latest_record_crc;
+    uint32 latest_record_len;
 } knl_g_csn_barrier_context;
 
 typedef struct knl_g_comm_context {
