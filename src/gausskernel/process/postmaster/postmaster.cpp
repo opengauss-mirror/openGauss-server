@@ -4206,15 +4206,16 @@ static int ServerLoop(void)
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         /* when execuating xlog redo in standby cluster,
           * pmState is PM_HOT_STANDBY, neither PM_RECOVERY nor PM_RUN
           */
-        if (pmState == PM_HOT_STANDBY && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
-            !dummyStandbyMode && IS_MULTI_DISASTER_RECOVER_MODE) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+            (pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
+            !dummyStandbyMode && !g_instance.csn_barrier_cxt.pre_parse_started) {
+            g_instance.csn_barrier_cxt.pre_parse_started = true;
             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
         }
-#endif
+
         /*
          * If no background writer process is running, and we are not in a
          * state that prevents it, start one.  It doesn't matter if this
@@ -6073,11 +6074,11 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.sharedStorageXlogCopyThreadPID, SIGHUP);
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
             signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGHUP);
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (g_instance.pid_cxt.TsCompactionPID != 0) {
             signal_child(g_instance.pid_cxt.TsCompactionPID, SIGHUP);
         }
@@ -6213,11 +6214,9 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
             }
 
-#ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
                 signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
             }
-#endif
 
             if (g_instance.pid_cxt.PageRepairPID != 0) {
                 signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
@@ -8020,7 +8019,6 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
-#ifdef ENABLE_MULTIPLE_NODES
         if (pid == g_instance.pid_cxt.BarrierPreParsePID) {
             g_instance.pid_cxt.BarrierPreParsePID = 0;
             write_stderr("%s LOG: barrier pre parse thread exit\n", GetReaperLogPrefix(logBuf, ReaperLogBufSize));
@@ -8029,6 +8027,7 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (pid == g_instance.pid_cxt.TsCompactionPID) {
             g_instance.pid_cxt.TsCompactionPID = 0;
             if (!EXIT_STATUS_0(exitstatus))
@@ -8485,10 +8484,10 @@ static void PostmasterStateMachineReadOnly(void)
                 csnminsync_thread_shutdown();
                 signal_child(g_instance.pid_cxt.CsnminSyncPID, SIGTERM);
             }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
             if (g_instance.pid_cxt.BarrierPreParsePID != 0)
                 signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
-#endif   /* ENABLE_MULTIPLE_NODES */
 
             if (g_instance.pid_cxt.UndoLauncherPID != 0)
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
@@ -8640,8 +8639,8 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.StackPerfPID == 0 &&
             g_instance.pid_cxt.CfsShrinkerPID == 0 &&
             g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
-#ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.BarrierPreParsePID == 0 &&
+#ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
             g_instance.pid_cxt.TsCompactionPID == 0 && g_instance.pid_cxt.TsCompactionAuxiliaryPID == 0
             && g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
@@ -9767,11 +9766,6 @@ static void handle_begin_hot_standby()
                 wal_get_role_string(get_cur_mode()))));
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
-#ifdef ENABLE_MULTIPLE_NODES
-        if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
-            g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
-        }
-#endif
         pmState = PM_HOT_STANDBY;
     }
 }
@@ -10194,6 +10188,11 @@ static void PaxosPromoteLeader(void)
     ereport(LOG, (errmsg("Write dcf promote result %d into switchover status file, %s, successfully!",
         promoteRes, SwitchoverStatusFile)));
 #endif
+}
+
+static bool check_start_preparse_signal() {
+    return CheckSignalByFile(WAL_PREPARSER_SIGNAL_FILE,
+        &g_instance.csn_barrier_cxt.max_run_time, sizeof(g_instance.csn_barrier_cxt.max_run_time));
 }
 
 /*
@@ -10796,6 +10795,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_threadPoolControler != NULL) {
             g_threadPoolControler->AddWorkerIfNecessary();
         }
+    }
+
+    if (g_instance.pid_cxt.BarrierPreParsePID == 0 && check_start_preparse_signal()) {
+        g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
     }
 
 #ifndef ENABLE_MULTIPLE_NODES

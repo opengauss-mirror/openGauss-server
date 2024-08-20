@@ -8186,13 +8186,6 @@ static bool CheckApplyDelayReady(void)
         return false;
     }
 
-    /* the walreceiver process is started behind here,
-     * ensure that the walreceiver process has been started,
-     * otherwise, the stream replication will be disconnected */
-    if (g_instance.pid_cxt.WalReceiverPID == 0) {
-        return false;
-    }
-
     return true;
 }
 
@@ -11442,15 +11435,6 @@ static void sendPMBeginHotStby()
             pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.hotStdby), ATOMIC_TRUE);
             ereport(LOG, (errmsg("send signal to be hot standby at %X/%X", (uint32)(lastReplayedEndRecPtr >> 32),
                                  (uint32)lastReplayedEndRecPtr)));
-#ifdef ENABLE_MULTIPLE_NODES
-            /*
-             * If we are in cluster-standby-mode, we need launch barreir preparse
-             * thread from the minrecoverypoint point.
-             */
-            if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
-                SetBarrierPreParseLsn(t_thrd.xlog_cxt.minRecoveryPoint);
-            }
-#endif
             SendPostmasterSignal(PMSIGNAL_BEGIN_HOT_STANDBY);
         }
     }

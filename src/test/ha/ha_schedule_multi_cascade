@@ -3,3 +3,4 @@ cascade/failover_with_data
 cascade/switchover
 cascade/switchover_timeout
 cascade/inc_build_failover
+cascade/startwalrcv
