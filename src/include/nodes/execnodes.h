@@ -739,6 +739,7 @@ typedef struct EState {
 #ifdef USE_SPQ
     List *es_sharenode;
 #endif
+    bool compileCodegen;
 } EState;
 
 /*
