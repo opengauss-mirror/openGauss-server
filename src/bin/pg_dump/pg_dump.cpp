@@ -1535,7 +1535,6 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 break;
             case 'n': /* include schema(s) */
                 simple_string_list_append(&schema_include_patterns, optarg);
-                include_everything = false;
                 break;
 
             case 'N': /* exclude schema(s) */
@@ -22539,6 +22538,7 @@ static void dumpSynonym(Archive* fout)
     int i_tableoid = 0;
     int i_synname = 0;
     int i_nspname = 0;
+    int i_nspoid = 0;
     int i_rolname = 0;
     int i_synobjschema = 0;
     int i_synobjname = 0;
@@ -22569,7 +22569,7 @@ static void dumpSynonym(Archive* fout)
      * Only the super user can access pg_authid. Therefore, user verification is ignored.
      */
     appendPQExpBuffer(query,
-        "SELECT s.oid, s.tableoid, s.synname, n.nspname, a.rolname, s.synobjschema, s.synobjname "
+        "SELECT s.oid, s.tableoid, s.synname, n.nspname, n.oid as nspoid, a.rolname, s.synobjschema, s.synobjname "
         "FROM pg_synonym s, pg_namespace n, pg_authid a "
         "WHERE n.oid = s.synnamespace AND s.synowner = a.oid;");
 
@@ -22586,11 +22586,16 @@ static void dumpSynonym(Archive* fout)
     i_tableoid = PQfnumber(res, "tableoid");
     i_synname = PQfnumber(res, "synname");
     i_nspname = PQfnumber(res, "nspname");
+    i_nspoid = PQfnumber(res, "nspoid");
     i_rolname = PQfnumber(res, "rolname");
     i_synobjschema = PQfnumber(res, "synobjschema");
     i_synobjname = PQfnumber(res, "synobjname");
 
     for (i = 0; i < ntups; i++) {
+        Oid schemaOid = atooid(PQgetvalue(res, i, i_nspoid));
+        if (!simple_oid_list_member(&schema_include_oids, schemaOid)) {
+            continue;
+        }
         char* synname = NULL;
         char* nspname = NULL;
         char* rolname = NULL;
