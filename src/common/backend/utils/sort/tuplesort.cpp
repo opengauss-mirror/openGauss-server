@@ -1968,8 +1968,6 @@ static bool tuplesort_gettuple_common(Tuplesortstate* state, bool forward, SortT
 
         case TSS_SORTEDONTAPE:
             Assert(forward || state->randomAccess);
-            Assert(state->slabAllocatorUsed);
-            
             /*
              * The slot that held the tuple that we returned in previous
              * gettuple call can now be reused.

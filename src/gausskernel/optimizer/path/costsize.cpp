@@ -998,6 +998,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     double pages_fetched;
     bool ispartitionedindex = path->indexinfo->rel->isPartitionedTable;
     bool disable_path = false;
+    int dop = SET_DOP(path->path.dop);
+    
     if (enable_parametrized_path(root, baserel, (Path*)path) ||
         (!u_sess->attr.attr_sql.enable_indexscan && !indexonly) ||
         (!u_sess->attr.attr_sql.enable_indexonlyscan && indexonly)) {
@@ -1219,7 +1221,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      */
     csquared = indexCorrelation * indexCorrelation;
 
-    run_cost += max_IO_cost + csquared * (min_IO_cost - max_IO_cost);
+    if (dop == 0) {
+        run_cost += (max_IO_cost + csquared * (min_IO_cost - max_IO_cost));
+    } else {
+        run_cost += (max_IO_cost + csquared * (min_IO_cost - max_IO_cost)) / dop;
+    }
 
     ereport(DEBUG2,
         (errmodule(MOD_OPT),
@@ -1253,7 +1259,12 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     else
         cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
 
-    run_cost += cpu_per_tuple * tuples_fetched;
+    run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
+    if (dop == 0) {
+        run_cost += cpu_per_tuple * tuples_fetched;
+    } else {
+        run_cost += cpu_per_tuple * tuples_fetched / dop;
+    }
 
     ereport(DEBUG2,
         (errmodule(MOD_OPT),

@@ -1532,6 +1532,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
             (IS_SPQ_COORDINATOR && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
 #endif
             plannedstmt->planTree->plan_node_id == list_nth_int(plannedstmt->subplan_ids, i - 1))) {
+
             estate->es_under_subplan = true;
             subplanstate = ExecInitNode(subplan, estate, sp_eflags);
 
@@ -1562,6 +1563,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         plan->initPlan = plannedstmt->initPlan;
         estate->es_subplan_ids = plannedstmt->subplan_ids;
     }
+
     planstate = ExecInitNode(plan, estate, eflags);
 
     if (estate->pruningResult) {

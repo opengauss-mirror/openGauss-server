@@ -83,6 +83,7 @@
 #include "storage/predicate.h"
 #include "storage/procarray.h"
 #include "storage/smgr/smgr.h"
+#include "access/nbtree.h"
 #include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_uscan.h"
 #include "utils/snapmgr.h"
@@ -143,7 +144,8 @@
     }                                                                           \
 } while (0)
 
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot);
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot,
+    ParallelIndexScanDesc pscan = NULL);
 
 /* ----------------
  *		index_open - open an index relation by relation OID
@@ -246,11 +248,12 @@ bool index_insert(Relation index_relation, Datum *values, const bool *isnull, It
  * Caller must be holding suitable locks on the heap and the index.
  */
 IndexScanDesc index_beginscan(
-    Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state)
+    Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state,
+    ParallelIndexScanDesc pscan)
 {
     IndexScanDesc scan;
 
-    scan = index_beginscan_internal(index_relation, nkeys, norderbys, snapshot);
+    scan = index_beginscan_internal(index_relation, nkeys, norderbys, snapshot, pscan);
 
     /*
      * Save additional parameters into the scandesc.  Everything else was set
@@ -295,7 +298,8 @@ IndexScanDesc index_beginscan_bitmap(Relation index_relation, Snapshot snapshot,
 /*
  * index_beginscan_internal --- common code for index_beginscan variants
  */
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot)
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot,
+    ParallelIndexScanDesc pscan)
 {
     IndexScanDesc scan;
     FmgrInfo *procedure = NULL;
@@ -323,6 +327,9 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
 #ifdef USE_SPQ
     scan->spq_scan = NULL;
 #endif
+
+    /* Initialize information for parallel scan. */
+    scan->parallelScan = pscan;
 
     return scan;
 }
@@ -368,6 +375,18 @@ void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys,
     } else {
         (void)FunctionCall5(procedure, PointerGetDatum(scan), PointerGetDatum(keys), Int32GetDatum(nkeys),
                             PointerGetDatum(orderbys), Int32GetDatum(norderbys));
+    }
+}
+
+/* ----------------
+ *      index_rescan_parallel - reset parallel index scan variables
+ * ----------------
+ */
+
+void IndexRescanParallel(IndexScanDesc scan)
+{
+    if (scan->parallelScan) {
+        btparallelrescan(scan);
     }
 }
 
@@ -474,6 +493,31 @@ void index_restrpos(IndexScanDesc scan)
         (void)FunctionCall1(procedure, PointerGetDatum(scan));
     }
 
+}
+
+/*
+ * index_parallelscan_initialize - initialize parallel scan
+ *
+ * We initialize both the ParallelIndexScanDesc proper and the AM-specific
+ * information which follows it.
+ *
+ * This function calls access method specific initialization routine to
+ * initialize am specific information.  Call this just once in the leader
+ * process; then, individual workers attach via index_beginscan_parallel.
+ */
+void index_parallelscan_initialize(Relation heap_relation, Relation index_relation,
+    ParallelIndexScanDesc target)
+{
+    if (!target) {
+        return;
+    }
+    Size offset;
+    RELATION_CHECKS;
+
+    target->ps_relid = RelationGetRelid(heap_relation);
+    target->ps_indexid = RelationGetRelid(index_relation);
+
+    Btinitparallelscan(target->psBtpscan);
 }
 
 /* ----------------

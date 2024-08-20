@@ -914,7 +914,8 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     bool index_is_ordered = false;
     bool index_only_scan = false;
     int indexcol;
-
+    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype) &&
+                        (!rel->isPartitionedTable);
     /*
      * Check that index supports the desired scan type(s)
      */
@@ -1072,6 +1073,22 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             upper_params,
             loop_count);
         result = lappend(result, ipath);
+        if (can_parallel) {
+            ipath = create_index_path(root,
+                index,
+                index_clauses,
+                clause_columns,
+                NIL,
+                NIL,
+                useful_pathkeys,
+                index_is_ordered ? ForwardScanDirection : NoMovementScanDirection,
+                index_only_scan,
+                outer_relids,
+                upper_params,
+                loop_count,
+                u_sess->opt_cxt.query_dop);
+            result = lappend(result, ipath);
+        }
     }
 
     /*
@@ -1097,6 +1114,23 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
                 upper_params,
                 loop_count);
             result = lappend(result, ipath);
+
+            if (can_parallel) {
+                ipath = create_index_path(root,
+                    index,
+                    index_clauses,
+                    clause_columns,
+                    NIL,
+                    NIL,
+                    useful_pathkeys,
+                    BackwardScanDirection,
+                    index_only_scan,
+                    outer_relids,
+                    upper_params,
+                    loop_count,
+                    u_sess->opt_cxt.query_dop);
+                result = lappend(result, ipath);
+            }
         }
     }
 
