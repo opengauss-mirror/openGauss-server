@@ -577,7 +577,7 @@ static int32 IdentifyRemoteVersion()
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DORADO_MAIN_STANDBY_NODE) {
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DISASTER_MAIN_STANDBY_NODE) {
         if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm) &&
             !AM_HADR_WAL_RECEIVER) {
             PQclear(res);
