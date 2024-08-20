@@ -13280,6 +13280,8 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
         query_str = CheckPgRewriteFirstAfter(rel);
         tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
         tab->is_first_after = true;
+    } else if (rel->rd_rel->relkind == RELKIND_RELATION) {
+        query_str = CheckPgRewriteFirstAfter(rel);
     }
 
     InsertPgAttributeTuple(attrdesc, &attribute, NULL);
@@ -13322,6 +13324,19 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
 
         /* create or replace view */
         ReplaceViewQueryFirstAfter(query_str);
+    } else if (rel->rd_rel->relkind == RELKIND_RELATION && query_str != NIL) {
+        ListCell* viewinfo = NULL;
+        bool isViewValid = true;
+        foreach (viewinfo, query_str) {
+            ViewInfoForAdd *info = (ViewInfoForAdd *)lfirst(viewinfo);
+            isViewValid &= GetPgObjectValid(info->ev_class, OBJECT_TYPE_VIEW);
+            if (!isViewValid) {
+                break;
+            }
+        }
+        if (isViewValid) {
+            ReplaceViewQueryFirstAfter(query_str);
+        }
     }
 
     /*
