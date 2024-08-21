@@ -208,6 +208,29 @@ select * from t_type1;
 
 drop table t_type1;
 drop type comp1;
+create type comp1 as(c1 char(10), c2 varchar(100), c3 text, c4 clob);
+create table t_type1(a serial, b comp1);
+NOTICE:  CREATE TABLE will create implicit sequence "t_type1_a_seq" for serial column "t_type1.a"
+set behavior_compat_options='';
+insert into t_type1(b) values(('','','',''));
+select * from t_type1;
+ a |   b   
+---+-------
+ 1 | (,,,)
+(1 row)
+
+delete from t_type1;
+set behavior_compat_options='accept_empty_str';
+insert into t_type1(b) values(('','','',''));
+select * from t_type1;
+ a |            b            
+---+-------------------------
+ 2 | ("          ","","","")
+(1 row)
+
+reset behavior_compat_options;
+drop table t_type1;
+drop type comp1;
 --date/time type
 create type comp1 as(c1 date, c2 timestamp with time zone, c3 INTERVAL DAY(3) TO SECOND (4));
 create table t_type1(a serial, b comp1) ;
