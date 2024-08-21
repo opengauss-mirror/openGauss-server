@@ -249,7 +249,21 @@ LargeObjectDesc* inv_open(Oid lobjId, int flags, MemoryContext mcxt)
     /* Can't use LargeObjectExists here because it always uses SnapshotNow */
     if (!myLargeObjectExists(lobjId, snapshot))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobjId)));
-    
+
+    /* Apply permission checks, again specifying snapshot */
+    if ((descflags & IFS_RDLOCK) != 0) {
+        if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+            pg_largeobject_aclcheck_snapshot(lobjId, GetUserId(), ACL_SELECT, snapshot) != ACLCHECK_OK)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied for large object %u", lobjId)));
+    }
+    if ((descflags & IFS_WRLOCK) != 0) {
+        if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+            pg_largeobject_aclcheck_snapshot(lobjId, GetUserId(), ACL_UPDATE, snapshot) != ACLCHECK_OK)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied for large object %u", lobjId)));
+    }
+
     /*
      * We must register the snapshot in TopTransaction's resowner, because
      * it must stay alive until the LO is closed rather than until the
@@ -542,7 +556,9 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     Assert(buf != NULL);
 
     /* enforce writability because snapshot is probably wrong otherwise */
-    Assert(obj_desc->flags & IFS_WRLOCK);
+    if ((obj_desc->flags & IFS_WRLOCK) == 0)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("permission denied for large object %u", obj_desc->id)));
 
     if (nbytes <= 0) {
         return 0;
@@ -722,7 +738,9 @@ void inv_truncate(LargeObjectDesc* obj_desc, int64 len)
     Assert(PointerIsValid(obj_desc));
 
     /* enforce writability because snapshot is probably wrong otherwise */
-    Assert(obj_desc->flags & IFS_WRLOCK);
+    if ((obj_desc->flags & IFS_WRLOCK) == 0)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("permission denied for large object %u", obj_desc->id)));
 
     /*
      * use errmsg_internal here because we don't want to expose INT64_FORMAT
