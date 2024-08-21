@@ -774,6 +774,13 @@ END WHILE label_1;
 end;
 /
 SELECT TRIM(TRAILING ', ' FROM @sequence);
+
+set enable_set_variable_b_format = 1;
+CREATE TABLE userset_t1 (a VARCHAR(500) CHARACTER SET UTF8);
+SET @num=1000;
+INSERT INTO userset_t1 VALUES (CONCAT((@num:=@num+1), 'a'));
+
+set enable_set_variable_b_format = default;
 \c regression
 drop database if exists test_set;
 

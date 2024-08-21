@@ -2098,8 +2098,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
         case T_UserSetElem: {
-            p2walker(((UserSetElem*)node)->val, context);
-            return true;
+            return p2walker(((UserSetElem*)node)->val, context);
         }
         case T_PriorExpr:
             return p2walker(((PriorExpr*)node)->node, context);
