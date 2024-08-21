@@ -20442,7 +20442,7 @@ retry:
     /* In ss dorado replication, we don't start walrecwrite thread, so t_thrd.xlog_cxt.receivedUpto = 0 */
     if (t_thrd.xlog_cxt.readFile < 0 || 
         (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM && XLByteLT(t_thrd.xlog_cxt.receivedUpto, RecPtr))) {
-        if (t_thrd.xlog_cxt.StandbyMode && t_thrd.xlog_cxt.startup_processing) {
+        if (t_thrd.xlog_cxt.startup_processing) {
             for (;;) {
                 /*
                  * Need to check here also for the case where consistency level is
