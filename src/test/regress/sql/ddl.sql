@@ -219,3 +219,12 @@ drop table tr_sub;
 drop table table_without_key;
 drop table bmsql_order_line;
 drop sequence toasttable_rand_seq;
+
+CREATE publication pub1 FOR ALL TABLES with (ddl = 'all');
+select 'init' from pg_create_logical_replication_slot('slot1', 'mppdb_decoding');
+create table test_truncate(id int);
+truncate table test_truncate;
+SELECT data FROM pg_logical_slot_get_changes('slot1', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT pg_drop_replication_slot('slot1');
+drop publication pub1;
+drop table test_truncate;
