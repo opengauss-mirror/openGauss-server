@@ -116,6 +116,68 @@ NOTICE:  ID: 1, NAME: RECORD
  
 (1 row)
 
+set behavior_compat_options='plpgsql_dependency';
+create or replace package pac_PLArray_Case0021 is
+  type typ_PLArray_1 is table of varchar(100);
+  type typ_PLArray_2 is table of typ_PLArray_1;
+  nstarr typ_PLArray_2;
+
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_2);
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_2 does not exist.
+ERROR:  nested-table type is not supported for parameter yet
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_2) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+ERROR:  package spec not found
+create or replace package pac_PLArray_Case0021 is
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_3);
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_3 does not exist.
+WARNING:  The header information of function p_plarray_2 is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_3) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_3 does not exist.
+WARNING:  The header information of function p_plarray_2 is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  function "nstarr" doesn't exist 
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  syntax error at or near "(" when compile function p_plarray_2(undefined)
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package Body created with compilation erors.
+drop package pac_PLArray_Case0021;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function plpgsql_nested_array_and_record.p_plarray_1()
+drop cascades to function plpgsql_nested_array_and_record.p_plarray_2(undefined)
 DROP SCHEMA plpgsql_nested_array_and_record CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function test_nested_array()
