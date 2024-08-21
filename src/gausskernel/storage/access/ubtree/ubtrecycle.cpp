@@ -1329,26 +1329,32 @@ static void UBTRecycleMetaDataVerify(UBTRecycleMeta metaData, Relation rel, Bloc
     BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
     
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
-    BlockNumber indexBlocks = (rel == NULL ? metaData->nblocksUpper : RelationGetNumberOfBlocks(rel));
-    uint32 urqBlocks = MaxBlockNumber;
-    Oid oid = InvalidOid;
-    bool metaError = false;
+    BlockNumber urqBlocks = MaxBlockNumber;
+    BlockNumber indexBlocks = metaData->nblocksUpper;
     RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
 
     if (rel != NULL) {
         RelationOpenSmgr(rel);
         urqBlocks = Max(minRecycleQueueBlockNumber, smgrnblocks(rel->rd_smgr, FSM_FORKNUM));
-        oid = rel->rd_id;
+        indexBlocks = RelationGetNumberOfBlocks(rel);
     }
 
-    metaError = ((metaData->headBlkno == 1 - metaBlkno) || (metaData->tailBlkno == 1 - metaBlkno)) ||
-        (metaData->headBlkno >= urqBlocks || metaData->tailBlkno >= urqBlocks) || (metaData->nblocksUpper > indexBlocks);
- 
+    bool metaError = (metaData->headBlkno == 1 - metaBlkno) || (metaData->tailBlkno == 1 - metaBlkno);
+    if (!metaError && rel != NULL) {
+        if (metaData->headBlkno >= urqBlocks || metaData->tailBlkno >= urqBlocks) {
+            urqBlocks = Max(minRecycleQueueBlockNumber, smgrnblocks(rel->rd_smgr, FSM_FORKNUM));
+            metaError = metaData->headBlkno >= urqBlocks || metaData->tailBlkno >= urqBlocks;
+        }
+        if (!metaError && metaData->nblocksUpper > indexBlocks) {
+            indexBlocks = RelationGetNumberOfBlocks(rel);
+            metaError = metaData->nblocksUpper > indexBlocks;
+        }
+    }
     if (metaError) {
         ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
             "[Verify URQ] urq meta is invalid : (meta info : headBlkno = %u, tailBlkno = %u, "
             "nblocksUpper = %u, nblocksLower = %u; urq_blocks = %u, index_blocks = %u), rnode[%u,%u,%u], block %u",
-            oid, metaBlkno, metaData->headBlkno, metaData->tailBlkno, metaData->nblocksUpper,
-            metaData->nblocksLower, urqBlocks, indexBlocks, rNode.spcNode, rNode.dbNode, rNode.relNode, metaBlkno)));
+            metaData->headBlkno, metaData->tailBlkno, metaData->nblocksUpper, metaData->nblocksLower,
+            urqBlocks, indexBlocks, rNode.spcNode, rNode.dbNode, rNode.relNode, metaBlkno)));
     }
 }
