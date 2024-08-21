@@ -361,3 +361,32 @@ drop table tr_sub;
 drop table table_without_key;
 drop table bmsql_order_line;
 drop sequence toasttable_rand_seq;
+CREATE publication pub1 FOR ALL TABLES with (ddl = 'all');
+select 'init' from pg_create_logical_replication_slot('slot1', 'mppdb_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+create table test_truncate(id int);
+truncate table test_truncate;
+SELECT data FROM pg_logical_slot_get_changes('slot1', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
+--?.*
+ BEGIN
+--?.*
+--?.*
+--?.*
+ BEGIN
+ table public.test_truncate: TRUNCATE: (no-flags)
+--?.*
+(6 rows)
+
+SELECT pg_drop_replication_slot('slot1');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+drop publication pub1;
+--?.*
