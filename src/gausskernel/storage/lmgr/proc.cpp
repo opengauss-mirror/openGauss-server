@@ -54,6 +54,7 @@
 #include "postmaster/cfs_shrinker.h"
 #include "postmaster/rbcleaner.h"
 #include "replication/slot.h"
+#include "replication/ss_disaster_cluster.h"
 #ifdef PGXC
     #include "pgxc/pgxc.h"
     #include "pgxc/poolmgr.h"
@@ -2491,7 +2492,7 @@ void ProcSendSignal(ThreadId pid)
 {
     PGPROC* proc = NULL;
 
-    if (RecoveryInProgress() || SS_IN_ONDEMAND_RECOVERY) {
+    if (RecoveryInProgress() || SS_IN_ONDEMAND_RECOVERY || SS_DISASTER_STANDBY_CLUSTER) {
         ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
         /*
