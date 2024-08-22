@@ -2486,8 +2486,8 @@ bool free_space_enough(int buf_id)
     BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
     BufferTag* tag = &buf_desc->tag;
 
-    /* only the heap page's pd_lower and pd_upper space is valid to store the buftag */
-    if (tag->forkNum != MAIN_FORKNUM || IS_UNDO_RECORD_BUFFER(tag->rnode) || IS_TRANS_SLOT_BUFFER(tag->rnode)) {
+    /* only the heap page's pd_lower and pd_upper space is valid to save buf_tag */
+    if (tag->forkNum != MAIN_FORKNUM || IS_UNDO_RECORD_BUFFER(tag->rnode) || IS_UNDO_SLOT_BUFFER(tag->rnode)) {
         return false;
     }
 

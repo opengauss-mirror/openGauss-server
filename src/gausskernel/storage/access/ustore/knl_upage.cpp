@@ -522,8 +522,8 @@ LocateUsableItemIds(Page page, UHeapTuple *tuples, int ntuples, Size saveFreeSpa
         }
 
         if (!RowPtrIsUsed(rp) && !RowPtrHasStorage(rp)) {
-            UHeapTuple      uheaptup = tuples[*nthispage]; 
-            Size            neededSpace;
+            UHeapTuple uheaptup = tuples[*nthispage];
+            Size neededSpace;
             if (isFirstInsert) {
                 neededSpace = *usedSpace + uheaptup->disk_tuple_size;
                 isFirstInsert = false;
