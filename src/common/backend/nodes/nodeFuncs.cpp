@@ -259,7 +259,15 @@ Oid exprType(const Node* expr)
         case T_CursorExpression:
              type = REFCURSOROID;
              break;
-
+        case T_TypeCast:
+            {
+                TypeCast *tc = (TypeCast*)expr;
+                if (tc->typname == NULL || !OidIsValid(tc->typname->typeOid)) {
+                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid typecast node")));
+                }
+                type = tc->typname->typeOid;
+                break;
+            }
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1238,6 +1246,7 @@ void exprSetCollation(Node* expr, Oid collation)
         case T_PriorExpr:
             return exprSetCollation((Node*)((const PriorExpr*)expr)->node, collation);
         case T_CursorExpression:
+        case T_TypeCast:
             break;
         default:
             ereport(
@@ -1767,6 +1776,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Rownum:
         case T_UserVar:
         case T_SetVariableExpr:
+        case T_TypeCast:
 #ifdef USE_SPQ
         case T_DMLActionExpr:
 #endif
