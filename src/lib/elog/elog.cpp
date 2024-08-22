@@ -732,11 +732,31 @@ static void report_command(FILE *fp, auditConfig *audit_cfg) {
     securec_check_c(rc, "\0", "\0");
     rc = strcat_s(command, MAXPGPATH, " ");
     securec_check_c(rc, "\0", "\0");
+    
+    bool is_pass = false;
     for (int i = 1; i<argc; i++) {
-        if (!strcmp(argv[i], "-W")) {
-            i++;
+        if (!strcmp(argv[i], "-W") || !strcmp(argv[i], "--password")) {
+            is_pass = true;
             continue;
         }
+        if (is_pass) {
+            is_pass = false;
+            continue;
+        }
+        if (strncmp(argv[i], "postgresql://", strlen("postgresql://")) == 0) {
+            char *off_argv = argv[i] + strlen("postgresql://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            securec_check_c(rc, "\0", "\0");
+        } else if (strncmp(argv[i], "postgres://", strlen("postgres://")) == 0) {
+            char *off_argv = argv[i] + strlen("postgres://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            securec_check_c(rc, "\0", "\0");
+        } else if (strncmp(argv[i], "--password", strlen("--password")) == 0) {
+            continue;
+        } else if (strncmp(argv[i], "-W", strlen("-W")) == 0) {
+            continue;
+        }
+
         rc = strcat_s(command, MAXPGPATH, argv[i]);
         securec_check_c(rc, "\0", "\0");
         if (i<argc - 1) {
