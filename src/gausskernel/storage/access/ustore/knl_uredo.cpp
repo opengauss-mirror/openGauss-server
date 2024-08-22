@@ -40,7 +40,6 @@
 using namespace undo;
 
 static const int FREESPACE_FRACTION = 5;
-static const int HIGH_BITS_LEN_OF_LSN = 32;
 
 union TupleBuffer {
     UHeapDiskTupleData hdr;
@@ -227,7 +226,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
     Size newlen = datalen - SizeOfUHeapHeader;
     Page page = BufferGetPage(buf);
     if (UHeapPageGetMaxOffsetNumber(page) + 1 < xlrec->offnum) {
-        elog(PANIC, "Invalid max offset number");
+        UPagePrintErrorInfo(page, "The max offset number is invalid");
     }
 
     /*
@@ -243,7 +242,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
     bufpage.page = NULL;
     FastVerifyUTuple(utup, InvalidBuffer);
     if (UPageAddItem(NULL, &bufpage, (Item)utup, newlen, xlrec->offnum, true) == InvalidOffsetNumber) {
-        elog(PANIC, "Failed to add tuple");
+        UPagePrintErrorInfo(page, "UPageAddItem failed");
     }
 
     /* decrement the potential freespace of this page */
@@ -421,7 +420,7 @@ static void PerformDeleteRedoAction(XLogReaderState *record, UHeapTupleData *utu
     if (UHeapPageGetMaxOffsetNumber(page) >= xlrec->offnum) {
         rp = UPageGetRowPtr(page, xlrec->offnum);
     } else {
-        elog(PANIC, "invalid rp");
+        UPagePrintErrorInfo(page, "The max offset number is invalid");
     }
 
     /* increment the potential freespace of this page */
@@ -1019,7 +1018,7 @@ static void PerformUpdateOldRedoAction(XLogReaderState *record, UHeapTupleData *
     if (UHeapPageGetMaxOffsetNumber(oldpage) >= xlrec->old_offnum) {
         rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
     } else {
-        elog(PANIC, "Invalid max offset number");
+        UPagePrintErrorInfo(oldpage, "The max offset number is invalid");
     }
 
     /* Ensure old tuple points to the tuple in page. */
@@ -1193,14 +1192,16 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
     Page newpage = buffers->newbuffer.pageinfo.page;
 
     /* max offset number should be valid */
-    Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
+    if (UHeapPageGetMaxOffsetNumber(newpage) + 1 < xlrec->new_offnum) {
+        UPagePrintErrorInfo(newpage, "The max offset number is invalid");
+    }
 
     if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
         UHeapBufferPage bufpage = {newbuf, NULL};
 
         if (UPageAddItem(NULL, &bufpage, (Item)tuples->newtup, newlen, xlrec->new_offnum, true) ==
             InvalidOffsetNumber) {
-            elog(PANIC, "Failed to add tuple");
+            UPagePrintErrorInfo(newpage, "UPageAddItem failed");
         }
 
         /* Update the page potential freespace */
@@ -1576,7 +1577,7 @@ static void PerformMultiInsertRedoAction(XLogReaderState *record, XlUHeapMultiIn
 
         /* max offset should be valid */
         if (UHeapPageGetMaxOffsetNumber(page) + 1 < offnum) {
-            elog(PANIC, "Invalid max offset number");
+            UPagePrintErrorInfo(page, "The max offset number is invalid");
         }
 
         UHeapDiskTuple uhtup = GetUHeapDiskTupleFromMultiInsertRedoData(&tupdata, &newlen, tbuf);
@@ -1584,7 +1585,7 @@ static void PerformMultiInsertRedoAction(XLogReaderState *record, XlUHeapMultiIn
         bufpage.buffer = buffer->buf;
         bufpage.page = NULL;
         if (UPageAddItem(NULL, &bufpage, (Item)uhtup, newlen, offnum, true) == InvalidOffsetNumber) {
-            elog(PANIC, "Failed to add tuple");
+            UPagePrintErrorInfo(page, "UPageAddItem failed,");
         }
 
         /* decrement the potential freespace of this page */

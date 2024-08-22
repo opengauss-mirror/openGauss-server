@@ -3153,7 +3153,7 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
                     return NULL; /* keep compiler quiet */
             }
         } else {
-            Page        page;
+            Page page;
             buffer =
                 ReadBuffer(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation, ItemPointerGetBlockNumber(tid));
 
@@ -3168,12 +3168,12 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
             LockBuffer(buffer, BUFFER_LOCK_SHARE);
 
             page = BufferGetPage(buffer);
-            RowPtr      *rp = UPageGetRowPtr(page, ItemPointerGetOffsetNumber(tid));
+            RowPtr *rp = UPageGetRowPtr(page, ItemPointerGetOffsetNumber(tid));
             UHeapDiskTuple diskTuple = NULL;
 
             Assert(RowPtrIsUsed(rp));
 
-            diskTuple = (UHeapDiskTuple) UPageGetRowData(page, rp);
+            diskTuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
             uheaptupdata.disk_tuple_size = rp->len;
             errorNo = memcpy_s((char*)uheaptupdata.disk_tuple, rp->len, (char*)diskTuple, rp->len);
             securec_check(errorNo, "\0", "\0");

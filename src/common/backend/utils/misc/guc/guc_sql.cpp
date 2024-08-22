@@ -2974,7 +2974,7 @@ static void InitSqlConfigureNamesString()
             PGC_USERSET,
             NODE_ALL,
             CLIENT_CONN,
-            gettext_noop("Configure UStore optimizations."),
+            gettext_noop("Configure Ustore optimizations."),
             NULL,
             GUC_LIST_INPUT | GUC_LIST_QUOTE},
             &u_sess->attr.attr_sql.ustore_attr,
