@@ -33431,7 +33431,8 @@ void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode)
         Relation idxrel = index_open(lfirst_oid(l), AccessShareLock);
         Form_pg_index index = idxrel->rd_index;
 
-        if (IndexIsValid(index) && (index->indisunique || index->indisprimary) &&
+        /* auto_increment column in dolphin support non-unique/primary index */
+        if (IndexIsValid(index) && (u_sess->attr.attr_sql.dolphin || index->indisunique || index->indisprimary) &&
             index->indkey.values[0] == autoinc_attnum) {
             found = true;
             index_close(idxrel, AccessShareLock);
