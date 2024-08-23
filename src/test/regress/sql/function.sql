@@ -2,7 +2,15 @@ create database pl_test_funcion DBCOMPATIBILITY 'pg';
 \c pl_test_funcion;
 create schema distribute_function;
 set current_schema = distribute_function;
-
+select nls_initcap('hello word');
+select nls_initcap('журнал журнал');--俄语
+SELECT nls_initcap('el gato negro');--西班牙语
+SELECT nls_initcap('o gato preto');--葡萄牙语
+SELECT nls_initcap('HELLO ß world', 'NLS_SORT = XGERMAN'); --第二个参数不支持。
+select nls_initcap('hello   word'); --3个空格
+select nls_initcap('hello        word'); --2个tab键等作为分隔符
+select nls_initcap('hello *** &&& （）（）（） 你好啦 word'); --中间有其他非英文字母，或者中文等
+SELECT nls_initcap('o gato preto','o gato preto','o gato preto');--报错
 create table function_table_01(f1 int, f2 float, f3 text);
 insert into function_table_01 values(1,2.0,'abcde'),(2,4.0,'abcde'),(3,5.0,'affde');
 insert into function_table_01 values(4,7.0,'aeede'),(5,1.0,'facde'),(6,3.0,'affde');

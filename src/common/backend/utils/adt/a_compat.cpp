@@ -114,6 +114,41 @@ Datum initcap(PG_FUNCTION_ARGS)
 
 /********************************************************************
  *
+ * nls_initcap
+ *
+ * Syntax:
+ *
+ *	 text nls_initcap(text string)
+ *
+ * Purpose:
+ *
+ *	 Returns string, with first letter of each word in uppercase, all
+ *	 other letters in lowercase. A word is defined as a sequence of
+ *	 alphanumeric characters, delimited by non-alphanumeric
+ *	 characters.
+ *
+ ********************************************************************/
+
+Datum nls_initcap(PG_FUNCTION_ARGS)
+{
+    text* in_string = PG_GETARG_TEXT_PP(0);
+    if (!PG_ARGISNULL(1)) {
+        ereport(NOTICE,
+            (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+            errmsg("The second parameter of this function will not take effect.")));
+    }
+    char* out_string = NULL;
+    text* result = NULL;
+    FUNC_CHECK_HUGE_POINTER(false, in_string, "nls_initcap()");
+
+    out_string = str_initcap(VARDATA_ANY(in_string), VARSIZE_ANY_EXHDR(in_string), PG_GET_COLLATION());
+    result = cstring_to_text(out_string);
+    pfree_ext(out_string);
+
+    PG_RETURN_TEXT_P(result);
+}
+/********************************************************************
+ *
  * lpad
  *
  * Syntax:
