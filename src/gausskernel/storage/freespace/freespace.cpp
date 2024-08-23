@@ -33,6 +33,7 @@
 #include "storage/fsm_internals.h"
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "commands/tablespace.h"
 #include "utils/aiomem.h"
 #include "gstrace/gstrace_infra.h"
@@ -174,30 +175,41 @@ void UpdateFreeSpaceMap(Relation rel, BlockNumber startBlkNum, BlockNumber endBl
  * XLogRecordPageWithFreeSpace - like RecordPageWithFreeSpace, for use in
  *		WAL replay
  */
-void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, Size spaceAvail)
+void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, Size spaceAvail, XLogPhyBlock *pblk)
 {
-    /*
-     * FSM can not be read by physical location in recovery. It is possible to write on wrong places
-     * if the FSM fork is dropped and then allocated when replaying old xlog.
-     * Since FSM does not have to be totally accurate anyway, just skip it.
-     */
-    if (IsSegmentFileNode(rnode)) {
-        return;
-    }
-
     int new_cat = fsm_space_avail_to_cat(spaceAvail);
     FSMAddress addr;
     uint16 slot;
     BlockNumber blkno;
     Buffer buf;
     Page page;
+    XLogPhyBlock fsm_pblk;
 
     /* Get the location of the FSM byte representing the heap block */
     addr = fsm_get_location(heapBlk, &slot);
     blkno = fsm_logical_to_physical(addr);
 
+    /* For segment storage we don't change fsm if fsm block is not extented yet */
+    if (IsSegmentFileNode(rnode)) {
+        SMgrRelation reln = smgropen(rnode, InvalidBackendId);
+        SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, false);
+        SegmentCheck(!PointerIsValid(pblk) || PhyBlockIsValid(*pblk));
+
+        fsm_pblk.relNode = InvalidOid;
+        fsm_pblk.block = blkno;
+        if (spc == NULL || !seg_fork_exists(spc, reln, FSM_FORKNUM, pblk, &fsm_pblk) ||
+            fsm_pblk.relNode == InvalidOid) {
+            smgrclose(reln);
+            return;
+        }
+    }
+
     /* If the page doesn't exist already, extend */
-    buf = XLogReadBufferExtended(rnode, FSM_FORKNUM, blkno, RBM_ZERO_ON_ERROR, NULL);
+    if (IsSegmentFileNode(rnode)) {
+        buf = XLogReadBufferExtended(rnode, FSM_FORKNUM, blkno, RBM_ZERO_ON_ERROR, &fsm_pblk);
+    } else {
+        buf = XLogReadBufferExtended(rnode, FSM_FORKNUM, blkno, RBM_ZERO_ON_ERROR, NULL);
+    }
 
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
@@ -205,8 +217,15 @@ void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, 
     if (PageIsNew(page))
         PageInit(page, BLCKSZ, 0);
 
-    if (fsm_set_avail(page, (int)slot, (uint8)new_cat))
-        MarkBufferDirtyHint(buf, false);
+    if (fsm_set_avail(page, (int)slot, (uint8)new_cat)) {
+        if (IsSegmentFileNode(rnode)) {
+            XlogRecordSetFsmPageLsn(page, pblk->lsn);
+            MarkBufferDirty(buf);
+        } else {
+            MarkBufferDirtyHint(buf, false);
+        }
+    }
+
     UnlockReleaseBuffer(buf);
 }
 
@@ -693,8 +712,14 @@ static int fsm_set_and_search(Relation rel, const FSMAddress &addr, uint16 slot,
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
     page = BufferGetPage(buf);
-    if (fsm_set_avail(page, slot, newValue))
-        MarkBufferDirtyHint(buf, false);
+    if (fsm_set_avail(page, slot, newValue)) {
+        if (IsSegmentFileNode(rel->rd_node)) {
+            PageSetLSN(page, GetXLogInsertRecPtr());
+            MarkBufferDirty(buf);
+        } else {
+            MarkBufferDirtyHint(buf, false);
+        }
+    }
 
     if (minValue != 0 && search) {
         /* Search while we still hold the lock */
@@ -833,8 +858,14 @@ static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof_p)
             /* Update information about the child */
             if (fsm_get_avail(page, slot) != child_avail) {
                 LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-                fsm_set_avail(page, slot, (uint8)child_avail);
-                MarkBufferDirtyHint(buf, false);
+                if (fsm_set_avail(page, slot, (uint8)child_avail)) {
+                    if (IsSegmentFileNode(rel->rd_node)) {
+                        PageSetLSN(page, GetXLogInsertRecPtr());
+                        MarkBufferDirty(buf);
+                    } else {
+                        MarkBufferDirtyHint(buf, false);
+                    }
+                }
                 LockBuffer(buf, BUFFER_LOCK_UNLOCK);
             }
         }

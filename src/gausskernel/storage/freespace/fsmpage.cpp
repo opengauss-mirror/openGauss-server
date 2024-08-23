@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "storage/buf/bufmgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/fsm_internals.h"
 
 /* Macros to navigate the tree within a page. Root has index zero. */
@@ -273,7 +274,12 @@ restart:
                 exclusive_lock_held = true;
             }
             fsm_rebuild_page(page);
-            MarkBufferDirtyHint(buf, false);
+            if (IsSegmentFileNode(rnode)) {
+                PageSetLSN(page, GetXLogInsertRecPtr());
+                MarkBufferDirty(buf);
+            } else {
+                MarkBufferDirtyHint(buf, false);
+            }
             goto restart;
         }
     }

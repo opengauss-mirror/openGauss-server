@@ -18,6 +18,7 @@
 #include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
+#include "access/xlog_basic.h"
 
 typedef uint64 XLogRecPtr;
 
@@ -83,7 +84,8 @@ extern BlockNumber GetPageWithFreeSpace(Relation rel, Size spaceNeeded);
 extern BlockNumber RecordAndGetPageWithFreeSpace(
     Relation rel, BlockNumber oldPage, Size oldSpaceAvail, Size spaceNeeded);
 extern void RecordPageWithFreeSpace(Relation rel, BlockNumber heapBlk, Size spaceAvail);
-extern void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, Size spaceAvail);
+extern void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, Size spaceAvail,
+    XLogPhyBlock *pblk = NULL);
 
 extern void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks);
 extern void FreeSpaceMapVacuum(Relation rel);

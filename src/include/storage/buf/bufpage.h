@@ -412,6 +412,15 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     }
     PageSetLSNInternal(page, LSN);
 }
+
+/* fsm page set lsn only if `LSN` bigger in redo */
+inline void XlogRecordSetFsmPageLsn(Page page, XLogRecPtr LSN)
+{
+    if (XLByteLT(PageGetLSN(page), LSN)) {
+        PageSetLSNInternal(page, LSN);
+    }
+}
+
 #endif
 
 #define PageHasFreeLinePointers(page) (((PageHeader)(page))->pd_flags & PD_HAS_FREE_LINES)
