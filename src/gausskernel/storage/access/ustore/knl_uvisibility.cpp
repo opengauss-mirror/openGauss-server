@@ -384,7 +384,7 @@ static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid
          * snapshot belongs to an older CID, then we need the CID for this
          * tuple to make a final visibility decision.
          */
-        if (GetCurrentCommandIdUsed() || GetCurrentCommandId(false) >= snapshot->curcid)
+        if (GetCurrentCommandIdUsed() || GetCurrentCommandId(false) != snapshot->curcid)
             return UVERSION_CHECK_CID;
         if (op == UTUPLETID_GONE) {
             return UVERSION_NONE;
@@ -394,8 +394,6 @@ static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid
             }
             return UVERSION_CURRENT;
         }
-        /* Nothing has changed since our scan started. */
-        return ((op == UTUPLETID_GONE) ? UVERSION_NONE : UVERSION_CURRENT);
     }
     if (!XidVisibleInSnapshot(xid, snapshot, &hintstatus, (RecoveryInProgress() ? buffer : InvalidBuffer), NULL)) {
         /*

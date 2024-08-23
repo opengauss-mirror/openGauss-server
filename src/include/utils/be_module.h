@@ -150,7 +150,7 @@ enum ModuleId {
 
     MOD_GPI, /* debug info for global partition index */
     MOD_PARTITION,
-    MOD_UBT_NEWPAGE, /* debug info for UBTreeGetNewPage */
+    MOD_UBTREE, /* debug info for UBTree */
     MOD_SRF, /* debug info for SRF */
     MOD_SS_TXNSTATUS, /* debug info for SS TXNSTATUS */
 

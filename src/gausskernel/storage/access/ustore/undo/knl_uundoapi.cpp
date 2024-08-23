@@ -65,13 +65,13 @@ bool CheckNeedSwitch(UndoPersistence upersistence)
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
 {
     t_thrd.undo_cxt.transUndoSize += size;
-    uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
+    uint64 transUndoThresholdSize = GET_UNDO_LIMIT_SIZE_PER_XACT * BLCKSZ;
     if ((!t_thrd.xlog_cxt.InRecovery) && (t_thrd.undo_cxt.transUndoSize > transUndoThresholdSize)) {
-        ereport(ERROR, (errmsg(UNDOFORMAT("xid %lu, the undo size %lu of the transaction exceeds the threshold %lu."
-            "trans_undo_threshold_size %lu, undo_space_limit_size %lu."),
-            xid, t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize,
+        ereport(ERROR, (errmsg(UNDOFORMAT("The undo size %lu of the transaction exceeds the threshold %lu."
+            "undo_limit_size_trans = %lu, undo_space_limit_size = %lu. Current xid = %lu."),
+            t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize,
             (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction,
-            (uint64)u_sess->attr.attr_storage.undo_space_limit_size)));
+            (uint64)u_sess->attr.attr_storage.undo_space_limit_size, xid)));
     }
     return;
 }
@@ -724,7 +724,7 @@ void OnUndoProcExit(int code, Datum arg)
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("on undo exit, thrd: %d"), t_thrd.myLogicTid)));
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
-        if (upersistence == UNDO_TEMP || upersistence == UNDO_UNLOGGED) {
+        if (upersistence == UNDO_TEMP) {
             TransactionId topXid = GetTopTransactionIdIfAny();
             undo::TransactionSlot *slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[upersistence]);
             UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[upersistence];

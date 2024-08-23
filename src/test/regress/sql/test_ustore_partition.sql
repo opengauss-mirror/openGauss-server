@@ -157,23 +157,23 @@ INSERT INTO ustore_part values(1, 11) on duplicate key update c3 = 10;
 drop table ustore_part;
 
 create table ustore_part(
-  tc1 timetz default now(),
   a int,
-  id int,
   b text
-) with (storage_type=USTORE) 
-partition by range(id)
+) with (storage_type=USTORE)
+partition by range(a)
 (
-partition ustore_part_p1 values less than(4),
-partition ustore_part_p2 values less than(7),
-partition ustore_part_p3 values less than(10)
+partition part1 values less than(10),
+partition part2 values less than(20),
+partition part3 values less than(30),
+partition part4 values less than(40),
+partition part5 values less than(50)
 );
-INSERT INTO ustore_part values(now(), 1, generate_series(1,3), 'p1');
-INSERT INTO ustore_part values(now(), 2, generate_series(4,6), 'p2');
-INSERT INTO ustore_part values(now(), 3, generate_series(7,9), 'p3');
-INSERT INTO ustore_part values(now(), NULL, generate_series(3,4), 'pn');
-select ctid, a, id ,b from ustore_part;
+INSERT INTO ustore_part values(generate_series(0, 2), 'partition_a_lt_10');
+INSERT INTO ustore_part values(generate_series(10, 12), 'partition_a_lt_20');
+INSERT INTO ustore_part values(generate_series(20, 22), 'partition_a_lt_30');
+INSERT INTO ustore_part values(generate_series(30, 32), 'partition_a_lt_40');
+INSERT INTO ustore_part values(generate_series(40, 42), 'partition_a_lt_50');
+select * from ustore_part;
 drop table ustore_part;
-
 reset search_path;
 drop schema test_ustore_part cascade;

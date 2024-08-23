@@ -8312,7 +8312,7 @@ UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence)
 void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
 {
     if (!u_sess->attr.attr_storage.enable_ustore_sync_rollback &&
-        !(IsSubTransaction() || pLevel == UNDO_TEMP || pLevel == UNDO_UNLOGGED)) {
+        !(IsSubTransaction() || pLevel == UNDO_TEMP)) {
         return;
     }
 

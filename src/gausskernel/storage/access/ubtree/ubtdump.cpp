@@ -26,7 +26,7 @@
 #include "access/transam.h"
 #include "access/ubtree.h"
 #include "utils/builtins.h"
-#include "storage/procarray.h" 
+#include "storage/procarray.h"
 
 
 static void UBTreeVerifyTupleKey(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum,
@@ -419,7 +419,6 @@ static bool UBTreeVerifyTupleTransactionStatus(Relation rel, BlockNumber blkno, 
         case XID_ABORTED:
             tranStatusError = (xminStatus == XID_ABORTED && xmaxStatus != XID_ABORTED);
             break;
-
         default:
             break;
     }
@@ -435,7 +434,7 @@ static bool UBTreeVerifyTupleTransactionStatus(Relation rel, BlockNumber blkno, 
     }
     return true;
 }
- 
+
 static int ItemCompare(const void *item1, const void *item2)
 {
     return ((ItemIdSort)item1)->start - ((ItemIdSort)item2)->start;
@@ -444,7 +443,7 @@ static int ItemCompare(const void *item1, const void *item2)
 void UBTreeVerifyHikey(Relation rel, Page page, BlockNumber blkno)
 {
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
- 
+
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
 
     if (P_RIGHTMOST(opaque))
@@ -538,9 +537,11 @@ static void UBTreeVerifyAllTuplesTransactionInfo(Relation rel, Page page, BlockN
     TransactionId minCommittedXmax = MaxTransactionId;
     TransactionId pruneXid = ShortTransactionIdToNormal(xidBase, ((PageHeader)page)->pd_prune_xid);
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
-
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    if (rel && RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+        GetOldestXminForUndo(&oldestXmin);
+    }
     for (OffsetNumber offnum = startoffset; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         ItemId itemid = PageGetItemId(page, offnum);
         IndexTuple tuple = (IndexTuple)PageGetItem(page, itemid);
