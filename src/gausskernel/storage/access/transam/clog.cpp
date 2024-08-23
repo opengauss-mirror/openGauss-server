@@ -1083,6 +1083,10 @@ void TruncateCLOG(TransactionId oldestXact)
  */
 static void WriteZeroPageXlogRec(int64 pageno)
 {
+    if (SS_STANDBY_MODE) {
+        return;
+    }
+
     XLogBeginInsert();
     XLogRegisterData((char *)(&pageno), sizeof(int64));
     (void)XLogInsert(RM_CLOG_ID, CLOG_ZEROPAGE);
