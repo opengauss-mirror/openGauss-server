@@ -741,30 +741,37 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
-         case CURSOR:
-             GET_NEXT_TOKEN();
-             core_yystype_1 = cur_yylval;  // the value of cursor
-             cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
-             next_token_1 = next_token;    // the token after curosr
-             GET_NEXT_TOKEN();
-             core_yystype_2 = cur_yylval;   // the value after cursor
-             cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
-             next_token_2 = next_token;   // the token after after curosr
+        case CURSOR:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;  // the value of cursor
+            cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
+            next_token_1 = next_token;    // the token after curosr
+            if (next_token_1 != '(') {
+                /* save the lookahead token for next time */
+                SET_LOOKAHEAD_TOKEN();
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+            } else {
+                GET_NEXT_TOKEN();
+                core_yystype_2 = cur_yylval;   // the value after cursor
+                cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
+                next_token_2 = next_token;   // the token after after curosr
 
-             if (next_token_1 == '(' && (is_select_stmt_definitely(next_token))) {
-                 PARSE_CURSOR_PARENTHESES_AS_EXPR();
-             } else if (is_prefer_parse_cursor_parentheses_as_expr() && !is_cursor_function_exist()) {
-                 PARSE_CURSOR_PARENTHESES_AS_EXPR();
-             } else {
-                 PARSE_CURSOR_PARENTHESES_AS_FUNCTION();
-             }
-
-             if (t_thrd.proc->workingVersionNum < CURSOR_EXPRESSION_VERSION_NUMBER &&
-                cur_token == CURSOR_EXPR) {
-                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Unsupported feature: cursor expression during the upgrade")));
-             }
-             break;
+                if (next_token_1 == '(' && (is_select_stmt_definitely(next_token))) {
+                    PARSE_CURSOR_PARENTHESES_AS_EXPR();
+                } else if (is_prefer_parse_cursor_parentheses_as_expr() && !is_cursor_function_exist()) {
+                    PARSE_CURSOR_PARENTHESES_AS_EXPR();
+                } else {
+                    PARSE_CURSOR_PARENTHESES_AS_FUNCTION();
+                }
+                if (t_thrd.proc->workingVersionNum < CURSOR_EXPRESSION_VERSION_NUMBER &&
+                    cur_token == CURSOR_EXPR) {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature: cursor expression during the upgrade")));
+                }
+            }
+            break;
         default:
             break;
     }
