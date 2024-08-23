@@ -1999,12 +1999,12 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
     if (OidIsValid(relationid)) {
-        Relation parent_rel = try_relation_open(relationid, NoLock);
-        if (parent_rel != NULL) {
-            if (RelationIsUstoreFormat(parent_rel) && parent_rel->rd_rel->relhasindex) {
+        Relation parentRel = try_relation_open(relationid, NoLock);
+        if (parentRel != NULL) {
+            if (RelationIsUstoreFormat(parentRel) && parentRel->rd_rel->relhasindex) {
                 lmodePartTable = ExclusiveLock;
             }
-            relation_close(parent_rel, NoLock);
+            relation_close(parentRel, NoLock);
         }
     }
 

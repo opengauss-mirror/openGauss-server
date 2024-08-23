@@ -34,6 +34,7 @@
 #define UHP_ALL_VISIBLE 0x0004     /* all tuples on page are visible to \
                                     * everyone */
 #define UHEAP_VALID_FLAG_BITS 0xFFFF /* OR of all valid flag bits */
+#define XLOG_UHEAP_LSN_HIGH_OFF 32
 
 #define UPageHasFreeLinePointers(_page) (((UHeapPageHeaderData *)(_page))->pd_flags & UHEAP_HAS_FREE_LINES)
 #define UPageSetHasFreeLinePointers(_page) (((UHeapPageHeaderData *)(_page))->pd_flags |= UHEAP_HAS_FREE_LINES)
@@ -213,6 +214,21 @@
     / (MaxUHeapTupFixedSize)))
 
 #define UPageGetPruneXID(_page) ((UHeapPageHeaderData)(_page))->pd_prune_xid
+
+#define UPagePrintErrorInfo(_page, _msg)                                                                          \
+    do {                                                                                                          \
+        UHeapPageHeaderData *pageHeader = (UHeapPageHeaderData *)_page;                                           \
+        elog(PANIC,                                                                                               \
+             "%s, UPageHeaderInfo: pd_lsn:%X/%X, pd_checksum:%u, "                                                \
+             "pd_flags:%u, pd_lower:%u, "                                                                         \
+             "pd_upper:%u, pd_special:%u, pd_pagesize_version:%u, potential_freespace:%u, td_count:%u, "          \
+             "pd_prune_xid:%lu, pd_xid_base:%lu, pd_multi_base:%lu" _msg,                                         \
+             pageHeader->pd_lsn.xlogid,                                                                           \
+             pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF + pageHeader->pd_lsn.xrecoff,                   \
+             pageHeader->pd_checksum, pageHeader->pd_flags, pageHeader->pd_lower, pageHeader->pd_upper,           \
+             pageHeader->pd_special, pageHeader->pd_pagesize_version, pageHeader->potential_freespace,            \
+             pageHeader->td_count, pageHeader->pd_prune_xid, pageHeader->pd_xid_base, pageHeader->pd_multi_base); \
+    } while (0)
 
 const uint8 UHEAP_DEFAULT_TOAST_TD_COUNT = 4;
 const uint8 UHEAP_MAX_ATTR_PAD = 3;

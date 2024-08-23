@@ -36,6 +36,7 @@
 #define HEAP_INSERT_SPECULATIVE 0x0008
 #define HEAP_INSERT_SKIP_ERROR 0x0010
 #define HEAP_INSERT_SPLIT_PARTITION 0x0020
+#define XLOG_HEAP_LSN_HIGH_OFF 32
 
 /* ----------------------------------------------------------------
  *               Scan State Information
@@ -188,6 +189,17 @@ static const struct {
 #define ConditionalLockTupleTuplock(_rel, _tup, _mode) \
     ConditionalLockTuple((_rel), (_tup), TupleLockExtraInfo[_mode].hwlock)
 
+#define PagePrintErrorInfo(_page, _msg)                                                                 \
+    do {                                                                                                \
+        PageHeader pageHeader = (PageHeader)page;                                                       \
+        elog(PANIC,                                                                                     \
+             "%s, PageHeaderInfo: pd_lsn:%X/%X, pd_checksum:%u, pd_flags:%u, "                          \
+             "pd_lower:%u, pd_upper:%u, pd_special:%u, pd_pagesize_version:%u, pd_prune_xid:%u",        \
+             _msg, pageHeader->pd_lsn.xlogid,                                                           \
+             pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF + pageHeader->pd_lsn.xrecoff,         \
+             pageHeader->pd_checksum, pageHeader->pd_flags, pageHeader->pd_lower, pageHeader->pd_upper, \
+             pageHeader->pd_special, pageHeader->pd_pagesize_version, pageHeader->pd_prune_xid);        \
+    } while (0)
 /*
  * This table maps tuple lock strength values for each particular
  * MultiXactStatus value.

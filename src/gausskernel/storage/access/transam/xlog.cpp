@@ -17038,8 +17038,8 @@ void rm_redo_error_callback(void *arg)
     initStringInfo(&buf);
     RmgrTable[XLogRecGetRmid(record)].rm_desc(&buf, record);
 
-    errcontext("xlog redo at lsn %X/%X, %s", (uint32)(record->EndRecPtr >> XLOG_LSN_SWAP),
-        (uint32)record->EndRecPtr, buf.data);
+    errcontext("xlog redo lsn %X/%X, %s",
+        (uint32)(record->EndRecPtr >> XLOG_LSN_SWAP), (uint32)record->EndRecPtr, buf.data);
 
     pfree_ext(buf.data);
 }
