@@ -938,7 +938,20 @@ NOTICE:
 CONTEXT:  PL/pgSQL function inline_code_block line 10 at FETCH
 NOTICE:  employee_name : zhangsan
 set enable_auto_explain = off;
+create table abort_test(cid int,fid int);
+-- expect error
+start transaction;
+cursor 'abort' for select * from abort_test order by 1;
+ERROR:  syntax error at or near "'abort'"
+LINE 1: cursor 'abort' for select * from abort_test order by 1;
+               ^
+close 'abort';
+ERROR:  syntax error at or near "'abort'"
+LINE 1: close 'abort';
+              ^
+commit;
 -- clean
+drop table abort_test;
 drop table test_insert;
 drop procedure pro_cursor_0011_02;
 drop table t_cursor_0011_01;
