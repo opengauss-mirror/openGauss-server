@@ -932,11 +932,9 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
 
     IndexInfo *indexInfo = BuildIndexInfo(toastidx);
     EState *estate = NULL;
-    bool estateIsNotNull = false;
 
     if (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL) {
         estate = CreateExecutorState();
-        estateIsNotNull = true;
     }
 
     /* The toast table of ustore table should also be of ustore type */
@@ -973,11 +971,11 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
         Datum values[INDEX_MAX_KEYS];
         bool isnulls[INDEX_MAX_KEYS];
 
-        if (estateIsNotNull && estate != NULL) {
+        if (estate != NULL) {
             ExprContext *econtext = GetPerTupleExprContext(estate);
             econtext->ecxt_scantuple = slot;
         }
-        FormIndexDatum(indexInfo, slot, estateIsNotNull ? estate : NULL, values, isnulls);
+        FormIndexDatum(indexInfo, slot, estate, values, isnulls);
         index_delete(toastidx, values, isnulls, &toasttup->ctid, false);
     }
 

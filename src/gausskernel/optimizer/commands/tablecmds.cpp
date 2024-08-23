@@ -20664,7 +20664,7 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
             UnlockReleaseBuffer(buf);
         } else {
             if (RelationIsUstoreFormat(rel)) {
-                if (ExecuteUndoActionsPageForPartition(rel, dst, forkNum, blkno, blkno, ROLLBACK_OP_FOR_MOVE_TBLSPC)) {
+                if (ExecuteUndoActionsForPartition(rel, dst, forkNum, blkno, blkno, ROLLBACK_OP_FOR_MOVE_TBLSPC)) {
                     *dstptr = dst = smgropen(newFileNode, backendId);
                     src = rel->rd_smgr;
                 }
@@ -20913,7 +20913,7 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
                     pToastInfo.destToastRelOid = dest->rd_id;
                     pToastInfo.chunkIdHashTable = chunkIdHashTable;
                 }
-                if (ExecuteUndoActionsPageForPartition(src, dest->rd_smgr, forkNum, src_blkno, dest_blkno,
+                if (ExecuteUndoActionsForPartition(src, dest->rd_smgr, forkNum, src_blkno, dest_blkno,
                     ROLLBACK_OP_FOR_MERGE_PARTITION, &pToastInfo)) {
                     RelationOpenSmgr(dest);
                 }
@@ -27970,7 +27970,7 @@ static bool checkChunkIdRepeat(List* srcPartToastRels, int selfIndex, Oid chunkI
     return false;
 }
 
-static void ExecUndoActionsPageForRelation(Relation rel)
+static void ExecuteUndoActionsForRelation(Relation rel)
 {
     Assert(RelationIsUstoreFormat(rel));
 
@@ -27983,25 +27983,25 @@ static void ExecUndoActionsPageForRelation(Relation rel)
     } 
 
     for (BlockNumber blkno = 0; blkno < srcHeapBlocks; blkno ++) {
-        ExecuteUndoActionsPageForPartition(rel, rel->rd_smgr, MAIN_FORKNUM, blkno, blkno,
+        ExecuteUndoActionsForPartition(rel, rel->rd_smgr, MAIN_FORKNUM, blkno, blkno,
             ROLLBACK_OP_FOR_EXCHANGE_PARTITION);
     }
 
     RelationCloseSmgr(rel);
 }
 
-static void ExecUndoActionsPageForExchangePartition(Relation partTableRel, Oid partOid, Relation ordTableRel)
+static void ExecuteUndoActionsForExchangePartition(Relation partTableRel, Oid partOid, Relation ordTableRel)
 {
     Partition part = NULL;
     Relation partRel = NULL;
 
     part = partitionOpen(partTableRel, partOid, NoLock);
     partRel = partitionGetRelation(partTableRel, part);
-    ExecUndoActionsPageForRelation(partRel);
+    ExecuteUndoActionsForRelation(partRel);
     releaseDummyRelation(&partRel);
     partitionClose(partTableRel, part, NoLock);
 
-    ExecUndoActionsPageForRelation(ordTableRel);
+    ExecuteUndoActionsForRelation(ordTableRel);
 }
 
 // Description : Execute exchange
@@ -28086,7 +28086,7 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
     checkIndexForExchange(partTableRel, partOid, ordTableRel, &partIndexList, &ordIndexList);
 
     if (RelationIsUstoreFormat(partTableRel)) {
-        ExecUndoActionsPageForExchangePartition(partTableRel, partOid, ordTableRel);
+        ExecuteUndoActionsForExchangePartition(partTableRel, partOid, ordTableRel);
     }
 
     // Check if the tables are colstore
@@ -33171,7 +33171,7 @@ void ExecutePurge(PurgeStmt *stmt)
         }
         case PURGE_RECYCLEBIN: {
             Oid userId = GetUserId();
-            /* 
+            /*
              * Superusers bypass all permission checking.
              * Database Security: Support seperation of privilege.
              */

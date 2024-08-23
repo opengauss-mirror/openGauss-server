@@ -417,7 +417,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
         uint8 undotype = undorecord->Utype();
         if (undorecord->Blkno() != blkno) {
             ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("Blkno %u of undorecord is different from buffer %u.", undorecord->Blkno(), blkno)));
+                            errmsg("UHeapUndoActions error: UndoRecord's blkno %u is not same with buffer %u.",
+                            undorecord->Blkno(), blkno)));
         }
         /*
          * If the current UndoRecPtr on the slot is less than the
@@ -1076,7 +1077,7 @@ bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloi
     return true;
 }
 
-bool ExecuteUndoActionsPageForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
+bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
     BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo)
 {
     RelationOpenSmgr(src);
@@ -1170,7 +1171,6 @@ bool ExecuteUndoActionsPageForPartition(Relation src, SMgrRelation dest, ForkNum
                         hashkey.oldChunkId = toastPointer->va_valueid;
                         mapping = (OldToNewChunkIdMapping)hash_search(toastInfo->chunkIdHashTable,
                             &hashkey, HASH_FIND, NULL);
-
                         if (PointerIsValid(mapping)) {
                             toastPointer->va_valueid = mapping->newChunkId;
                         }
@@ -1193,7 +1193,6 @@ bool ExecuteUndoActionsPageForPartition(Relation src, SMgrRelation dest, ForkNum
                     hashkey.oldChunkId = toastPointer->va_valueid;
                     mapping = (OldToNewChunkIdMapping)hash_search(toastInfo->chunkIdHashTable,
                         &hashkey, HASH_FIND, NULL);
-
                     if (PointerIsValid(mapping)) {
                         toastPointer->va_valueid = mapping->newChunkId;
                     }

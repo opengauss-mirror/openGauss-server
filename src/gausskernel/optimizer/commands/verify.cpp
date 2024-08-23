@@ -1267,9 +1267,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber f
     char* buf = (char*)palloc(BLCKSZ);
     BlockNumber nblocks;
     BlockNumber blkno;
-    
     bool isValidRelationPage = true;
-
     char* namespace_name = get_namespace_name(RelationGetNamespace(rel));
 
     RelationOpenSmgr(rel);
@@ -1900,7 +1898,6 @@ static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, ForkNum
         } else {
             UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, blkno);
         }
-        
     }
     PG_CATCH();
     {

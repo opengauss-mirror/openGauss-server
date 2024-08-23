@@ -38,7 +38,7 @@ static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNum
     BlockNumber blkno, TransactionId xid);
 static Buffer StepNextPage(Relation rel, Buffer buf);
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, NewPageState* npstate = NULL);
+    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UBTreeGetNewPageStats* stats = NULL);
 static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access);
 static uint16 PageAllocateItem(Buffer buf);
 static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf);
@@ -293,8 +293,7 @@ void UBTreeInitializeRecycleQueue(Relation rel)
 static bool UBTreeTryRecycleEmptyPageInternal(Relation rel)
 {
     UBTRecycleQueueAddress addr;
-    NewPageState *npstate = NULL;
-    Buffer buf = UBTreeGetAvailablePage(rel, RECYCLE_EMPTY_FORK, &addr, npstate);
+    Buffer buf = UBTreeGetAvailablePage(rel, RECYCLE_EMPTY_FORK, &addr, NULL);
     if (!BufferIsValid(buf)) {
         return false; /* no available page to recycle */
     }
@@ -365,15 +364,15 @@ static Buffer StepNextPage(Relation rel, Buffer buf)
 }
 
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, NewPageState* npstate)
+    TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UBTreeGetNewPageStats* stats)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
 
     uint16 curOffset = header->head;
     while (IsNormalOffset(curOffset)) {
-        if (npstate != NULL) {
-            npstate->itemsCount++;
+        if (stats) {
+            stats->urqItemsCount++;
         }
         UBTRecycleQueueItem item = HeaderGetItem(header, curOffset);
         if (TransactionIdFollowsOrEquals(item->xid, WaterLevelXid)) {
@@ -384,9 +383,6 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
             curOffset = item->next;
             continue;
         }
-        if (npstate != NULL) {
-            npstate->itemsValidCount++;
-        }
         Buffer targetBuf = ReadBuffer(rel, item->blkno);
         _bt_checkbuffer_valid(rel, targetBuf);
         if (ConditionalLockBuffer(targetBuf)) {
@@ -394,9 +390,6 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
             bool pageUsable = true;
             if (forkNumber == RECYCLE_FREED_FORK) {
                 pageUsable = UBTreePageRecyclable(BufferGetPage(targetBuf));
-                if (npstate != NULL) {
-                    npstate->itemsValidConditionalLockCount++;
-                }
             } else if (forkNumber == RECYCLE_EMPTY_FORK) {
                 /* make sure that it's not half-dead or the deletion is not reserved yet */
                 Page indexPage = BufferGetPage(targetBuf);
@@ -434,11 +427,9 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
 }
 
 Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress *addr,
-    NewPageState *npstate)
+    UBTreeGetNewPageStats *stats)
 {
     TimestampTz startTime = 0;
-    TimestampTz elapsedTime = 0;
-    uint32 getAvailablePageCount = 0;
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
         TransactionId frozenXid = g_instance.undo_cxt.globalFrozenXid;
@@ -446,29 +437,15 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
         TransactionId waterLevelXid = ((forkNumber == RECYCLE_EMPTY_FORK) ? recycleXid : frozenXid);
         oldestXmin = Min(oldestXmin, waterLevelXid);
     }
-    if (npstate != NULL) {
-        getAvailablePageCount = npstate->firstGetAvailablePageCount + npstate->secondGetAvailablePageCount;
-        startTime = GetCurrentTimestamp();
-    }
     Buffer queueBuf = RecycleQueueGetEndpointPage(rel, forkNumber, true, BT_READ);
-    if (npstate != NULL) {
-        npstate->getHeadTime += GetCurrentTimestamp() - startTime;
-    }
     Buffer indexBuf = InvalidBuffer;
     bool continueScan = false;
-    for (BlockNumber bufCount = 0; bufCount < URQ_MAX_GET_PAGE_TIMES; bufCount++) {
-        if (npstate != NULL) {
-            npstate->getAvailablePageOnPageCount++;
-            npstate->avgTravelQueuePages = (npstate->getAvailablePageOnPageCount * 1.0) / getAvailablePageCount;
+    for (BlockNumber bufCount = 0; bufCount < URQ_GET_PAGE_MAX_RETRY_TIMES; bufCount++) {
+        if (stats) {
             startTime = GetCurrentTimestamp();
         }
-        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan, npstate);
-        if (npstate != NULL) {
-            elapsedTime = GetCurrentTimestamp() - startTime;
-            npstate->getAvailablePageOnPageTimeMax = Max(npstate->getAvailablePageOnPageTimeMax, elapsedTime);
-            npstate->getAvailablePageOnPageTime += elapsedTime;
-            npstate->avgTravelQueueItems = (npstate->itemsCount * 1.0) / npstate->getAvailablePageOnPageCount;
-        }
+        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan, stats);
+        UBTreeRecordGetNewPageCost(stats, URQ_GET_PAGE, startTime);
         if (!continueScan) {
             break;
         }
@@ -488,8 +465,8 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
         return InvalidBuffer;
     }
 
-    if (npstate != NULL) {
-        npstate->checkNewCreatePagesCount++;
+    if (stats) {
+        stats->checkNonTrackedPagesCount++;
     }
 
     /* no available page found, but we can check new created pages */
@@ -514,9 +491,6 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
         indexBuf = ReadBuffer(rel, curBlkno);
         if (ConditionalLockBuffer(indexBuf)) {
             if (PageIsNew(BufferGetPage(indexBuf))) {
-                if (npstate != NULL) {
-                    npstate->getFromNewCreatePagesCount++;
-                }
                 break;
             }
             LockBuffer(indexBuf, BUFFER_LOCK_UNLOCK);
@@ -1252,7 +1226,6 @@ static void UBTRecycleQueueVerifyAllItems(UBTRecycleQueueHeader header, Relation
     uint16 itemMaxNum = BlockGetMaxItems(blkno);
     uint16 currOffset = header->head;
     uint16 prevOffset = InvalidOffset;
-    
     UBTRecycleQueueItem item = NULL;
     RelFileNode rNode = rel ? rel->rd_node : RelFileNode{InvalidOid, InvalidOid, InvalidOid};
     

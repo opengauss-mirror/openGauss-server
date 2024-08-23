@@ -150,7 +150,7 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     }
     smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
-        "unlink undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu, old_head:%lu."),
+        "unlink undo log, total blocks=%u, zoneid=%d, dbid=%u, head=%lu, old_head:%lu."),
         g_instance.undo_cxt.undoTotalSize, zid, dbId, offset, old_head)));
     return;
 }
@@ -171,7 +171,7 @@ void UndoSpace::unlink_residual_log(int zid, UndoLogOffset start, UndoLogOffset 
         BlockNumber block = (BlockNumber)(start / BLCKSZ);
         smgrdounlink(reln, t_thrd.xlog_cxt.InRecovery, block);
         ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
-            "unlink_residual_log, zid=%d, dbid=%u, start=%lu, end=%lu, segId:%lu, endSegId:%lu."),
+            "unlink_residual_log, zoneid=%d, dbid=%u, start=%lu, end=%lu, segId:%lu, endSegId:%lu."),
             zid, db_id, start, end, start/seg_size, end/seg_size)));
         start += seg_size;
     }
@@ -196,7 +196,7 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
         if (!smgrexists(reln, MAIN_FORKNUM, blockno)) {
             smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
             ereport(DEBUG1, (errmodule(MOD_UNDO), 
-                errmsg(UNDOFORMAT("undo file not exists: zid %d, blockno %u, dbid %u."), 
+                errmsg(UNDOFORMAT("undo file not exists: zoneid %d, blockno %u, dbid %u."),
                     zid, blockno, dbId)));
             pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
@@ -456,7 +456,7 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
         }
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used(zoneId));
         UndoZoneVerify(uzone);
-        uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
+        uint64 transUndoThresholdSize = GET_UNDO_LIMIT_SIZE_PER_XACT * BLCKSZ;
         const uint64 MAX_OFFSET = (UNDO_LOG_MAX_SIZE - transUndoThresholdSize) - segSize;
         if (usp->Tail() < usp->Head() || usp->Tail() > MAX_OFFSET) {
             g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT] =
