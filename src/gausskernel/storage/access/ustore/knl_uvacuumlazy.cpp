@@ -564,14 +564,14 @@ static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *v
 
 
 /*
- * ForceVacuumUHeapRelBypass() -- deal with force AutoVacuum for UStore
+ * ForceVacuumUHeapRelBypass() -- deal with force AutoVacuum for Ustore
  *
- *  AutoVacuum will only apply to UStore by force vacuum for recycle clog
+ *  AutoVacuum will only apply to Ustore by force vacuum for recycle clog
  *
  *  we just need to get a FrozenXid for this relation that all clog of xid less than
  *  that FrozenXid can be safely recycled.
  *
- *  Note: UStore with undo module can use oldestXidInUndo to ensure that every xid we
+ *  Note: Ustore with undo module can use oldestXidInUndo to ensure that every xid we
  *        found in heap page less than that value is already committed, otherwise we
  *        won't find it (rollback is already performed).
  */
@@ -579,8 +579,8 @@ void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAcces
 {
     Assert(IsAutoVacuumWorkerProcess());
     ereport(LOG, (errmodule(MOD_AUTOVAC), errcode(ERRCODE_LOG),
-        errmsg("start force vacuum index of table %s, oid %u, globalRecycleXid %lu,"
-        "RecentGlobalDataXmin %lu, nextXid %lu",
+        errmsg("ForceVacuumUHeapRelBypass Begin: Table %s, oid %u"
+        "GlobalRecycleXid %lu, RecentGlobalDataXmin %lu, NextXid %lu",
         onerel ? RelationGetRelationName(onerel) : "unknown",
         onerel ? onerel->rd_id : InvalidOid,
         pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
@@ -678,8 +678,8 @@ void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAcces
     pfree_ext(vacrelstats);
 
     ereport(LOG, (errmodule(MOD_AUTOVAC), errcode(ERRCODE_LOG),
-        errmsg("start force vacuum index of table %s, oid %u, globalRecycleXid %lu,"
-        "RecentGlobalDataXmin %lu, nextXid %lu",
+        errmsg("ForceVacuumUHeapRelBypass End: table %s, oid %u"
+        "GlobalRecycleXid %lu," "RecentGlobalDataXmin %lu, NextXid %lu",
         onerel ? RelationGetRelationName(onerel) : "unknown",
         onerel ? onerel->rd_id : InvalidOid,
         pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),

@@ -3064,7 +3064,8 @@ check_tup_satisfies_update:
             undoXorDeltaSize += sizeof(uint16);
     }
 
-    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag */
+    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag
+     */
     undoXorDeltaSize += sizeof(uint8) + oldtup.disk_tuple->t_hoff - OffsetTdId + sizeof(uint8);
     undoXorDeltaSize += oldlen - prefixlen - suffixlen;
 
