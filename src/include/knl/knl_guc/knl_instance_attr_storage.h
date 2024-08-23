@@ -126,6 +126,7 @@ typedef struct knl_instance_attr_dms {
     int32 sslog_max_file_size; //Unit:KB
     int parallel_thread_num;
     int32 txnstatus_cache_size;
+    bool enable_bcast_getoldestxmin;
     bool enable_bcast_snapshot;
     char* work_thread_pool_attr;
     int32 work_thread_pool_max_cnt;

@@ -3109,7 +3109,9 @@ int PostmasterMain(int argc, char* argv[])
         if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
             /* need to initialize before STARTUP */
             DMSInit();
-            g_instance.pid_cxt.DmsAuxiliaryPID = initialize_util_thread(DMS_AUXILIARY_THREAD);
+            if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
+                g_instance.pid_cxt.DmsAuxiliaryPID = initialize_util_thread(DMS_AUXILIARY_THREAD);
+            }
         }
     }
 
