@@ -550,7 +550,15 @@ END;
 /
 set enable_auto_explain = off;
 
+create table abort_test(cid int,fid int);
+-- expect error
+start transaction;
+cursor 'abort' for select * from abort_test order by 1;
+close 'abort';
+commit;
+
 -- clean
+drop table abort_test;
 drop table test_insert;
 drop procedure pro_cursor_0011_02;
 drop table t_cursor_0011_01;
