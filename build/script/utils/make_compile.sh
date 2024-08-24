@@ -30,6 +30,7 @@ ROACH_DIR="${ROOT_DIR}/distribute/bin/roach"
 MPPDB_DECODING_DIR="${ROOT_DIR}/contrib/mppdb_decoding"
 XLOG_DUMP_DIR="${ROOT_DIR}/contrib/pg_xlogdump"
 PAGE_HACK_DIR="${ROOT_DIR}/contrib/pagehack"
+ARCH_CLEAN_DIR="${ROOT_DIR}/contrib/pg_archivecleanup"
 
 
 ###################################
@@ -325,6 +326,12 @@ function install_gaussdb()
     make -sj >> "$LOG_FILE" 2>&1
     make install -sj >> "$LOG_FILE" 2>&1
     echo "End make install pagehack" >> "$LOG_FILE" 2>&1
+
+    cd "$ARCH_CLEAN_DIR"
+    make clean >> "$LOG_FILE" 2>&1
+    make -sj >> "$LOG_FILE" 2>&1
+    make install -sj >> "$LOG_FILE" 2>&1
+    echo "End make install archivecleanup" >> "$LOG_FILE" 2>&1
 
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
