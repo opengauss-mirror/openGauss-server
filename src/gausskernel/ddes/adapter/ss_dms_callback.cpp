@@ -854,8 +854,8 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 (void)PinBuffer(buf_desc, NULL);
             }
 
-            SS_FAULT_INJECTION_CALL(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, dms_fi_change_buffertag_blocknum);
-            FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, tag->blockNum += 1);
+            SS_FAULT_INJECTION_CALL(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, ss_fi_change_buffertag_blocknum);
+            SS_FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, tag->blockNum += 1);
             if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                 DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
                 buftag_equal = false;

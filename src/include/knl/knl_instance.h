@@ -1449,6 +1449,9 @@ typedef struct knl_instance_context {
 #ifdef USE_SPQ
     knl_g_spq_context spq_cxt;
 #endif
+#ifdef USE_ASSERT_CHECKING
+    void *shared_fi_ctx;
+#endif
 } knl_instance_context;
 
 extern long random();

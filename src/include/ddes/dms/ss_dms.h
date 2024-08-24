@@ -93,12 +93,20 @@ typedef struct st_ss_dms_func {
     void (*dms_get_cmd_stat)(int index, wait_cmd_stat_result_t *cmd_stat_result);
     int (*dms_req_opengauss_immediate_ckpt)(dms_context_t *dms_ctx, unsigned long long *ckpt_loc);
     void (*dms_fsync_logfile)(void);
-    int (*dms_fi_set_entries)(unsigned int type, unsigned int *entries, unsigned int count);
-    int (*dms_fi_set_entry_value)(unsigned int type, unsigned int value);
-    int (*dms_fi_get_tls_trigger_custom)(void);
-    void (*dms_fi_set_tls_trigger_custom)(int val);
-    void (*fault_injection_call)(unsigned int point, ...);
-    unsigned char (*dms_fi_entry_custom_valid)(unsigned int point);
+
+    int (*ddes_fi_get_context_size)(void);
+    void (*ddes_fi_set_and_init_context)(void *context);
+    int (*ddes_fi_set_entries)(unsigned int type, unsigned int *entries, unsigned int count);
+    unsigned int (*ddes_fi_get_entry_value)(unsigned int type);
+    int (*ddes_fi_set_entry_value)(unsigned int type, unsigned int value);
+    int (*ddes_fi_get_tls_trigger_custom)(void);
+    void (*ddes_fi_set_tls_trigger_custom)(int val);
+    unsigned char (*ddes_fi_entry_custom_valid)(unsigned int point);
+
+    // this is for macro calling
+    void (*ddes_fi_call)(unsigned int point, ...);
+    // this is for function calling
+    void (*ddes_fi_call_ex)(unsigned int point, va_list args);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
