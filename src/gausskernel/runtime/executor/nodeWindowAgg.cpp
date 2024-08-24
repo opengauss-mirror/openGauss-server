@@ -51,6 +51,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "windowapi.h"
+#include "executor/node/nodeAgg.h"
 
 static TupleTableSlot* ExecWindowAgg(PlanState* state);
 static void initialize_windowaggregate(
@@ -137,7 +138,18 @@ static void advance_windowaggregate(
          * just keep the prior transValue.
          */
         for (i = 1; i <= num_arguments; i++) {
-            if (fcinfo->argnull[i]) {
+            Oid aggtranstype = perfuncstate->wfunc->wintype;
+            ListCell* arg = list_head(perfuncstate->wfunc->args);
+            TargetEntry *tle = (TargetEntry *)lfirst(arg);
+            if (fcinfo->argnull[i] && strcmp(get_func_name(perfuncstate->wfunc->winfnoid), "bit_and") == 0 &&
+                is_binary_type_in_dolphin(aggtranstype) &&
+                peraggstate->transValueIsNull && IsA(tle, Var)) {
+                Var* var = (Var*)tle;
+                peraggstate->transValue = get_bit_and_initval(aggtranstype, var->vartypmod);
+                peraggstate->transValueIsNull = false;
+                MemoryContextSwitchTo(old_context);
+                return;
+            } else if (fcinfo->argnull[i]) {
                 MemoryContextSwitchTo(old_context);
                 return;
             }

@@ -488,5 +488,7 @@ extern void agg_spill_to_disk(AggWriteFileControl* TempFileControl, TupleHashTab
     int64 numGroups, bool isAgg, int planId, int dop, Instrumentation* intrument = NULL);
 extern void ExecEarlyFreeAggregation(AggState* node);
 extern void ExecReSetAgg(AggState* node);
+extern bool is_binary_type_in_dolphin(Oid typeOid);
+extern Datum get_bit_and_initval(Oid aggtranstype, int initValLen);
 
 #endif /* NODEAGG_H */
