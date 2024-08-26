@@ -671,7 +671,7 @@ void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAcces
         vac_close_indexes(nindexes, irel, NoLock);
     }
 
-    /* SETP 6: cleanup */
+    /* STEP 6: cleanup */
     for (int i = 0; i < nindexes; i++) {
         /* summarize the index status information */
         if (indstats[i] != NULL) {

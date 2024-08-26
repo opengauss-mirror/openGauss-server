@@ -136,7 +136,6 @@ TransactionSlot *UndoSlotBuffer::FetchTransactionSlot(UndoSlotPtr slotPtr)
         PageInit(page, BLCKSZ, 0);
     }
     TransactionSlot *slot = (TransactionSlot *)((char *)page + slotOffset);
-    UndoTranslotVerifyBuffer(slotPtr);
     return slot;
 }
 
@@ -325,107 +324,31 @@ UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr)
     return MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(slotPtr), offset);
 }
 
-static void verifyXid(TransactionSlot *slot)
-{
-    UNDO_BYPASS_VERIFY;
- 
-    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
-    TransactionId xid = slot->XactId();
-    if (!TransactionIdIsValid(xid)) {
-        ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. slot xactId %lu is invalid"), xid)));
-        return;
-    }
-    if (TransactionIdIsValid(xid) && 
-        TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-        ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. slot xactId %lu >= nextXid %lu"),
-            xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-    }
-}
-
-void UndoTranslotVerifyPtr(TransactionSlot *slot, UndoSlotPtr slotPtr)
+void TransactionSlotVerify(TransactionSlot *slot, UndoSlotPtr slotPtr)
 {
     UNDO_BYPASS_VERIFY;
  
     CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
     int zoneId = (int)UNDO_PTR_GET_ZONE_ID(slot->StartUndoPtr());
     UndoZone *zone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
-    if (slot->StartUndoPtr() > slot->EndUndoPtr() || slot->EndUndoPtr() > zone->GetInsertURecPtr()) {
-        ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. startUndoPtr %lu , endUndoPtr %lu, zoneId %d, insertUrecPtr %lu "),
-            slot->StartUndoPtr(), slot->EndUndoPtr(), zoneId, zone->GetInsertURecPtr())));
+    if (slot->StartUndoPtr() > slot->EndUndoPtr() || slot->EndUndoPtr() > zone->GetInsertURecPtr() ||
+        zoneId != (int)UNDO_PTR_GET_ZONE_ID(slot->EndUndoPtr()) ||
+        zoneId != (int)UNDO_PTR_GET_ZONE_ID(slotPtr)) {
+        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("TransactionSlotVerify invalid: slotPtr %lu, startUndoPtr %lu , endUndoPtr %lu, zoneId %d, "
+            "insertUrecPtr %lu.", slotPtr, slot->StartUndoPtr(), slot->EndUndoPtr(), zoneId,
+            zone->GetInsertURecPtr())));
     }
-    if (zoneId != (int)UNDO_PTR_GET_ZONE_ID(slot->EndUndoPtr()) ||
-        (slotPtr != INVALID_UNDO_SLOT_PTR && zoneId != (int)UNDO_PTR_GET_ZONE_ID(slotPtr))) {
-        ereport(WARNING, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. startUndoPtr %lu and endUndoPtr %lu have different zoneIds zid %d, insert %lu "),
-            slot->StartUndoPtr(), slot->EndUndoPtr(), zoneId, zone->GetInsertURecPtr())));
+    TransactionId xid = slot->XactId();
+    if (!TransactionIdIsValid(xid)) {
+        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("TransactionSlotVerify invalid: slotPtr %lu, xid is invalid %lu.", slotPtr, xid)));
     }
-}
-
-void UndoTranslotVerifyBuffer(UndoSlotPtr slotPtr)
-{
-    UNDO_BYPASS_VERIFY;
- 
-    CHECK_VERIFY_LEVEL(USTORE_VERIFY_COMPLETE)
-    TransactionSlot *slot = NULL;
-    RelFileNode rnode;
-    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
-    Buffer buffer = ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, UNDO_PTR_GET_BLOCK_NUM(slotPtr), RBM_NORMAL,
-        NULL, RELPERSISTENCE_PERMANENT);
-    Page page = BufferGetPage(buffer);
-    VerifyPageHeader(page);
- 
-    UndoSlotOffset prevEndUndoPtr = INVALID_UNDO_SLOT_PTR;
-    TransactionId prevXid = InvalidTransactionId;
- 
-    for (uint32 offset = UNDO_LOG_BLOCK_HEADER_SIZE; offset < BLCKSZ - MAXALIGN(sizeof(TransactionSlot));
-        offset += MAXALIGN(sizeof(TransactionSlot))) {
-        slot = (TransactionSlot *)(page + offset);
- 
-        int zoneId = (int)UNDO_PTR_GET_ZONE_ID(slot->StartUndoPtr());
-        UndoZone *zone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
-        if (zone == NULL) {
-            ereport(WARNING, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. zone is null. zoneId %d, startUndoPtr %lu, offset %u"),
-                zoneId, slot->StartUndoPtr(), offset)));
-            break;
-        }
- 
-        UndoSlotPtr currSlotPtr = slotPtr - slotPtr % BLCKSZ + offset;
-        if (currSlotPtr >= zone->GetAllocateTSlotPtr()) {
-            break;
-        }
- 
-        if (prevEndUndoPtr != INVALID_UNDO_SLOT_PTR && slot->StartUndoPtr() != prevEndUndoPtr) {
-            ereport(WARNING, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. startUndoPtr%lu is not equal to prevEndUndoPtr %lu"),
-                slot->StartUndoPtr(), prevEndUndoPtr)));
-        }
-        prevEndUndoPtr = slot->EndUndoPtr();
-        if (TransactionIdIsValid(prevXid) && prevXid >= slot->XactId()) {
-            ereport(WARNING, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("[VERIFY_UNDO_TRANSLOT]failed. prevXid %lu >= xactId %lu"),
-                slot->StartUndoPtr(), prevEndUndoPtr)));
-        }
-        prevXid = slot->XactId();
-        verifyXid(slot);
-        UndoTranslotVerifyPtr(slot, currSlotPtr);
+    if (TransactionIdIsValid(xid) && TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("TransactionSlotVerify invalid: slotPtr %lu, xid %lu, nextXid %lu.", slotPtr, xid,
+            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
     }
-    ReleaseBuffer(buffer);
-}
-
-void UndoTranslotVerify(TransactionSlot *slot, UndoSlotPtr slotPtr)
-{
-    UNDO_BYPASS_VERIFY;
-
-    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
-    verifyXid(slot);
-    UndoTranslotVerifyPtr(slot, slotPtr);
-
-    CHECK_VERIFY_LEVEL(USTORE_VERIFY_COMPLETE)
-    UndoTranslotVerifyBuffer(slotPtr);
 }
 
 } // namespace undo

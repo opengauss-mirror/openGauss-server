@@ -172,11 +172,7 @@ private:
 
 UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr);
 
-void UndoTranslotVerifyPtr(TransactionSlot *slot, UndoSlotPtr slotPtr);
-
-void UndoTranslotVerifyBuffer(UndoSlotPtr slotPtr);
-
-void UndoTranslotVerify(TransactionSlot *slot, UndoSlotPtr slotPtr);
+void TransactionSlotVerify(TransactionSlot *slot, UndoSlotPtr slotPtr);
 
 } // namespace undo
 #endif // __KNL_UUNDOTXN_H__
