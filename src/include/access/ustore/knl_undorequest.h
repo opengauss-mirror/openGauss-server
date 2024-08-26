@@ -94,7 +94,7 @@ void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId
 bool UHeapUndoActionsOpenRelation(Oid reloid, Oid partitionoid, UndoRelationData *relationData);
 void UHeapUndoActionsCloseRelation(UndoRelationData *relationData);
 bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloid, Oid *partitionoid);
-bool ExecuteUndoActionsPageForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
+bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
     BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo = NULL);
 
 #endif

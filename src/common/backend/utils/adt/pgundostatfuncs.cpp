@@ -672,7 +672,7 @@ static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc
             break;
         }
     } while (true);
-    
+
     return true;
 }
 
@@ -829,7 +829,7 @@ static void PutTranslotInfoToTuple(int zoneId, uint32 offset, TransactionSlot *s
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT, offset);
         securec_check_ss(rc, "\0", "\0");
         values[ARR_4] = CStringGetTextDatum(textBuffer);
-        if (UHeapTransactionIdDidCommit((uint64)slot->XactId())) {
+        if (TransactionIdDidCommit((uint64)slot->XactId())) {
             values[ARR_5] = COMMITED_STATUS;
         } else if (TransactionIdIsInProgress((uint64)slot->XactId())) {
             values[ARR_5] = INPROCESS_STATUS;
@@ -997,7 +997,7 @@ static void ReadTranslotFromMemory(int startIdx, int endIdx,
                 UNDO_PTR_GET_OFFSET(slotPtr));
             securec_check_ss(rc, "\0", "\0");
             values[ARR_4] = CStringGetTextDatum(textBuffer);
-            if (UHeapTransactionIdDidCommit((uint64)slot->XactId())) {
+            if (TransactionIdDidCommit((uint64)slot->XactId())) {
                 values[ARR_5] = COMMITED_STATUS;
             } else if (TransactionIdIsInProgress((uint64)slot->XactId())) {
                 values[ARR_5] = INPROCESS_STATUS;

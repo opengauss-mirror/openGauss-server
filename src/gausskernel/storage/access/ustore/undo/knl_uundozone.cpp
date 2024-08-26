@@ -85,7 +85,7 @@ bool UndoZone::CheckNeedSwitch(void)
                 slotSpace_.Tail())));
         return true;
     }
-    uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
+    uint64 transUndoThresholdSize = GET_UNDO_LIMIT_SIZE_PER_XACT * BLCKSZ;
     UndoLogOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(insertURecPtr_, transUndoThresholdSize);
     if (unlikely(newInsert + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE ||
         undoSpace_.Tail() + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE ||
@@ -798,13 +798,12 @@ static int ReleaseUndoZoneId(int zid, UndoPersistence upersistence)
     return tempZid;
 }
 
-static UndoZone *getUnusedZone(UndoPersistence upersistence, int *retZid, int oldZid)
+static UndoZone *GetUnusedZone(UndoPersistence upersistence, int *retZid, int oldZid)
 {
     int zid = -1;
     UndoZone *newUzone = NULL;
     if (upersistence >= UNDO_PERSISTENT_BUTT || upersistence < UNDO_PERMANENT) {
-        ereport(ERROR, (errmsg("getUnusedZone upersistence out of range [%d]", 
-                upersistence)));
+        ereport(ERROR, (errmsg("GetUnusedZone upersistence out of range [%d]", upersistence)));
     }
     int basecount = (int)upersistence * PERSIST_ZONE_COUNT;
     for (int i = PERSIST_ZONE_COUNT - 1; i >= 0; i--) {
@@ -812,7 +811,7 @@ static UndoZone *getUnusedZone(UndoPersistence upersistence, int *retZid, int ol
         newUzone = UndoZoneGroup::GetUndoZone(zid, true);
         if (newUzone == NULL) {
             zid = -1;
-            ereport(WARNING, (errmsg(UNDOFORMAT("can not palloc undo zone memory for zone %d"), zid)));
+            ereport(WARNING, (errmsg(UNDOFORMAT("Can not palloc undo zone memory for zone %d"), zid)));
             continue;
         }
         if (newUzone->Attached() || newUzone->GetPersitentLevel() != upersistence ||
@@ -838,7 +837,7 @@ static UndoZone *getUnusedZone(UndoPersistence upersistence, int *retZid, int ol
         ereport(ERROR, (errmsg("SwitchZone: zone id is invalid, there're too many working threads.")));
     }
     *retZid = zid;
-    g_instance.undo_cxt.uZoneBitmap[upersistence] = 
+    g_instance.undo_cxt.uZoneBitmap[upersistence] =
         bms_del_member(g_instance.undo_cxt.uZoneBitmap[upersistence], (zid - basecount));
     return newUzone;
 }
@@ -886,7 +885,7 @@ UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
     uzone->PrepareSwitch();
     LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
     uzone->ReleaseSlotBuffer();
-    UndoZone *newUzone = getUnusedZone(upersistence, &retZid, zid);
+    UndoZone *newUzone = GetUnusedZone(upersistence, &retZid, zid);
     WHITEBOX_TEST_STUB(UNDO_SWITCH_ZONE_FAILED, WhiteboxDefaultErrorEmit);
     newUzone->Attach();
     LWLockRelease(UndoZoneLock);

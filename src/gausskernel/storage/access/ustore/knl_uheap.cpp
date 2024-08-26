@@ -2774,9 +2774,9 @@ check_tup_satisfies_update:
         useInplaceUpdate = false;
         useLinkUpdate = false;
     } else if (!useInplaceUpdate) {
-        bool pruned = UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize);
         lp = UPageGetRowPtr(page, oldOffnum);
-        if (pruned && (RowPtrGetOffset(lp) + newtupsize <= BLCKSZ)) {
+        if (UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize)
+            && (RowPtrGetOffset(lp) + newtupsize <= BLCKSZ)) {
             useInplaceUpdate = true;
         }
         /* The page might have been modified, so refresh disk_tuple */
@@ -5682,7 +5682,8 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     /* Apply undo action for an INSERT */
     if (urec->Blkno() != blkno) {
         ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("Blkno %u of undorecord is different from buffer %u.", urec->Blkno(), blkno)));
+                        errmsg("UHeapAbortSpeculative error: UndoRecord's blkno %u is not same with buffer %u.",
+                        urec->Blkno(), blkno)));
     }
     ExecuteUndoForInsert(relation, buffer, urec->Offset(), urec->Xid());
 

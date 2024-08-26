@@ -917,7 +917,7 @@ restart:
         /* Run pagedel in a temp context to avoid memory leakage */
         MemoryContextReset(vstate->pagedelcontext);
         MemoryContext oldcontext = MemoryContextSwitchTo(vstate->pagedelcontext);
-        BTStack dummy_del_blknos = (BTStack) palloc0(sizeof(BTStackData));
+        BTStack dummy_del_blknos = (BTStack)palloc0(sizeof(BTStackData));
 
         int ndel = UBTreePageDel(rel, buf, dummy_del_blknos);
         if (ndel) {

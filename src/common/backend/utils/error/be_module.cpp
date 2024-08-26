@@ -136,7 +136,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_DSS, "DSS_API"},
     {MOD_GPI, "GPI"},
     {MOD_PARTITION, "PARTITION"},
-    {MOD_UBT_NEWPAGE, "UBT_NEWPAGE"},
+    {MOD_UBTREE, "UBTREE"},
     {MOD_SRF, "SRF"},
     {MOD_SS_TXNSTATUS, "SS_TXNSTATUS"},
 

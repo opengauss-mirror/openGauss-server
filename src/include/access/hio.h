@@ -20,7 +20,6 @@
 #include "utils/relcache.h"
 #include "storage/buf/buf.h"
 #include "storage/buf/bufmgr.h"
-#include "ubtree.h"
 
 /*
  * state for bulk inserts --- private to heapam.c and hio.c
@@ -40,6 +39,6 @@ extern Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer othe
     BulkInsertState bistate, Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block);
 extern Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dictSize, BulkInsertState bistate);
 extern Buffer ReadBufferBI(Relation relation, BlockNumber targetBlock, ReadBufferMode mode, BulkInsertState bistate);
-extern void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, NewPageState* npState = NULL);
+extern void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate);
 
 #endif /* HIO_H */

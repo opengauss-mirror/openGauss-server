@@ -707,7 +707,15 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     double newLiveTuples;
     Relation *indexrel = NULL;
     Partition *indexpart = NULL;
-
+    if (IsAutoVacuumWorkerProcess()) {
+        /* In the autovacuum process, build fsm tree for common tables, toast tables, or partitions. */
+        FreeSpaceMapVacuum(onerel);
+        if (vacstmt->needFreeze) {
+            /* Force vacuum for recycle clog. */
+            ForceVacuumUHeapRelBypass(onerel, vacstmt, bstrategy);
+        }
+        return;
+    }
     /* the statFlag is used in PgStat_StatTabEntry, seen in pgstat_report_vacuum and pgstat_recv_vacuum */
     uint32 statFlag = InvalidOid;
     if (RelationIsSubPartitionOfSubPartitionTable(onerel)) {

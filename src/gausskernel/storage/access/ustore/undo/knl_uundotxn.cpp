@@ -274,15 +274,9 @@ void UndoSlotBufferCache::RemoveSlotBuffer(UndoSlotPtr slotPtr)
     }
     size_--;
     if (size_ != 0) {
-        UndoSlotPtr headTag = INVALID_UNDO_SLOT_PTR;
-        UndoSlotPtr tailTag = INVALID_UNDO_SLOT_PTR;
-        if (head_ != NULL) {
-            headTag = head_->tag_;
-        }
-        if (tail_ != NULL) {
-            tailTag = tail_->tag_;
-        }
-        ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry %lu head_ %lu tail_ %lu size %d."),
+        UndoSlotPtr headTag = (head_ != NULL) ? head_->tag_ : INVALID_UNDO_SLOT_PTR;
+        UndoSlotPtr tailTag = (tail_ != NULL) ? tail_->tag_ : INVALID_UNDO_SLOT_PTR;
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry tag %lu head %lu tail %lu size %d."),
             entry->tag_, headTag, tailTag, size_)));
     } else {
         ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry %lu.SlotBuffer is empty"),
