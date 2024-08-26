@@ -8580,7 +8580,7 @@ inline void PrintCkpXctlControlFile(XLogRecPtr oldCkpLoc, CheckPoint *oldCkp, XL
 
 void CheckForRestartPoint()
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (SS_IN_ONDEMAND_RECOVERY || SS_DISASTER_CLUSTER) {
         return;
     }
 
