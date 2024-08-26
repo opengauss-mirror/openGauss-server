@@ -181,7 +181,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     HeapTuple partTuple, at_partitioned_table* ap_entry, PgStat_StatTabEntry* tabentry, bool is_recheck, bool* dovacuum,
     bool* doanalyze, bool* need_freeze);
 static autovac_table* partition_recheck_autovac(
-    vacuum_object* vacObj, HTAB* table_relopt_map, HTAB* partitioned_tables_map, TupleDesc partTupDesc);
+    vacuum_object* vacObj, HTAB* table_relopt_map, HTAB* partitioned_tables_map, TupleDesc pg_class_desc);
 extern void DoVacuumMppTable(VacuumStmt* stmt, const char* queryString, bool isTopLevel, bool sentToRemote);
 /*
  * Called when the AutoVacuum is ending.
@@ -3026,7 +3026,8 @@ static autovac_table* table_recheck_autovac(
         return NULL;
     classForm = (Form_pg_class)GETSTRUCT(classTup);
     bytea *rawRelopts = extractRelOptions(classTup, pg_class_desc, InvalidOid);
-    
+    bool isUstorePartitionTable = (rawRelopts != NULL && RelationIsTableAccessMethodUStoreType(rawRelopts) &&
+        isPartitionedRelation(classForm));
     /*
      * Get the applicable reloptions.  If it is a TOAST table, try to get the
      * main table reloptions if the toast table itself doesn't have.
@@ -3067,12 +3068,12 @@ static autovac_table* table_recheck_autovac(
     }
 
     /* OK, it needs something done */
-    if (doanalyze || dovacuum || dovacuum_toast) {
+    if (doanalyze || dovacuum || dovacuum_toast || isUstorePartitionTable) {
         tab = calculate_vacuum_cost_and_freezeages(avopts, doanalyze, need_freeze);
         if (tab != NULL) {
             tab->at_relid = relid;
             tab->at_sharedrel = classForm->relisshared;
-            tab->at_dovacuum = dovacuum || dovacuum_toast;
+            tab->at_dovacuum = isUstorePartitionTable ? true : (dovacuum || dovacuum_toast);
             tab->at_gpivacuumed = vacObj->gpi_vacuumed;
         }
     }
@@ -3179,7 +3180,6 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* ra
     bool delta_vacuum = false;
     bool av_enabled = false;
     bool userEnabled = true;
-    bool ustoreTable = false;
     /* pg_class.reltuples */
     float4 reltuples;
 
@@ -3297,16 +3297,6 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* ra
     }
 
     *dovacuum = *dovacuum && userEnabled;
-
-    /* The AutoVacuum function is temporarily enabled for the ustore table. */
-    ustoreTable = (rawRelopts != NULL && RelationIsTableAccessMethodUStoreType(rawRelopts));
-    if (ustoreTable && !(*dovacuum)) {
-        Relation tmprel = heap_open(relid, NoLock);
-        if(RelationIsPartitioned(tmprel)) {
-             *dovacuum = true;
-        }
-        heap_close(tmprel, NoLock);
-    }
 
     if (*dovacuum || *doanalyze) {
         AUTOVAC_LOG(DEBUG2, "vac \"%s\": recheck = %s need_freeze = %s dovacuum = %s (dead tuples %ld "
@@ -3780,12 +3770,6 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         *doanalyze = (anltuples > anlthresh) && false;
     }
 
-    ustorePartTbl = (partoptions != NULL && RelationIsTableAccessMethodUStoreType(partoptions));
-    if (ustorePartTbl && av_enabled && ap_entry->at_allowvacuum) {
-        *dovacuum = true;
-    }
-    pfree_ext(partoptions);
-
     if (!is_recheck && (*dovacuum || *doanalyze)) {
         AUTOVAC_LOG(DEBUG2, "vac table \"%s\" partition(\"%s\"): recheck = %s need_freeze = %s "
             "dovacuum = %s (dead tuples %ld vacuum threshold %.0f)",
@@ -3800,7 +3784,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
 }
 
 static autovac_table* partition_recheck_autovac(
-    vacuum_object* vacObj, HTAB* table_relopt_map, HTAB* partitioned_tables_map, TupleDesc partTupDesc)
+    vacuum_object* vacObj, HTAB* table_relopt_map, HTAB* partitioned_tables_map, TupleDesc pg_class_desc)
 {
     Oid partid = vacObj->tab_oid;
     bool dovacuum = false;
