@@ -4189,6 +4189,34 @@ static SortGroup* _readSortGroup(SortGroup* local_node)
     READ_DONE();
 }
 
+static SortBy* _readSortBy(SortBy* local_node)
+{
+    READ_LOCALS_NULL(SortBy);
+    READ_TEMP_LOCALS();
+
+    READ_NODE_FIELD(node);
+    READ_ENUM_FIELD(sortby_dir, SortByDir);
+    READ_ENUM_FIELD(sortby_nulls, SortByNulls);
+    READ_NODE_FIELD(useOp);
+    READ_INT_FIELD(location);
+
+    READ_DONE();
+}
+
+static A_Const* _readAConst(A_Const* local_node)
+{
+    READ_LOCALS_NULL(A_Const);
+    READ_TEMP_LOCALS();
+
+    token = pg_strtok(&length);
+    Value *ptr = (Value*)nodeRead(NULL, 0);
+    errno_t err = memcpy_s(&local_node->val, sizeof(Value), ptr, sizeof(Value));
+    securec_check(err, "\0", "\0");
+    READ_INT_FIELD(location);
+
+    READ_DONE();
+}
+
 static Unique* _readUnique(Unique* local_node)
 {
     READ_LOCALS_NULL(Unique);
@@ -6765,6 +6793,10 @@ Node* parseNodeString(void)
         return_value = _readSort(NULL);
     }  else if (MATCH("SORTGROUP", 9)) {
         return_value = _readSortGroup(NULL);
+    } else if (MATCH("SORTBY", 6)) {
+        return_value = _readSortBy(NULL);  
+    } else if (MATCH("A_CONST", 7)) {
+        return_value = _readAConst(NULL);
     } else if (MATCH("UNIQUE", 6)) {
         return_value = _readUnique(NULL);
     } else if (MATCH("PLANNEDSTMT", 11)) {
