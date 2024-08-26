@@ -172,8 +172,13 @@ TidStoreCreateLocal(size_t max_bytes, bool insert_only)
      *
      * STACK_CONTEXT can reduce memory bloat problem for
      * such a multi small memory allocation scene.
+     *
+     * Since disable_memory_stats = on is suitable for
+     * STANDARD_CONTEXT only, STACK_CONTEXT won't be used
+     * when such a switch is on.
      */
-    MemoryContextType type = insert_only ? STACK_CONTEXT : STANDARD_CONTEXT;
+    MemoryContextType type = (insert_only && !g_instance.attr.attr_memory.disable_memory_stats) ?
+                             STACK_CONTEXT : STANDARD_CONTEXT;
     ts->rt_context = AllocSetContextCreate(CurrentMemoryContext,
                                            "TID storage",
                                            minContextSize,
