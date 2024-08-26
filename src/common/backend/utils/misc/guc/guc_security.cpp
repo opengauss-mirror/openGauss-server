@@ -161,6 +161,8 @@ static bool check_ssl(bool* newval, void** extra, GucSource source);
 /* Database Security: Support password complexity */
 static bool check_int_parameter(int* newval, void** extra, GucSource source);
 static bool check_ssl_ciphers(char** newval, void** extra, GucSource source);
+static bool check_password_min_length(int* newval, void** extra, GucSource source);
+static bool check_password_max_length(int* newval, void** extra, GucSource source);
 
 static void InitSecurityConfigureNamesBool();
 static void InitSecurityConfigureNamesInt();
@@ -625,7 +627,7 @@ static void InitSecurityConfigureNamesInt()
             8,
             6,
             MAX_PASSWORD_LENGTH,
-            check_int_parameter,
+            check_password_min_length,
             NULL,
             NULL},
 
@@ -640,7 +642,7 @@ static void InitSecurityConfigureNamesInt()
             32,
             6,
             MAX_PASSWORD_LENGTH,
-            check_int_parameter,
+            check_password_max_length,
             NULL,
             NULL},
 
@@ -1447,3 +1449,18 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
     return true;
 }
 
+static bool check_password_min_length(int* newval, void** extra, GucSource source)
+{
+    if (*newval >= 0 && *newval <= u_sess->attr.attr_security.Password_max_length) {
+        return true;
+    }
+    return false;
+}
+
+static bool check_password_max_length(int* newval, void** extra, GucSource source)
+{
+    if (*newval >= 0 && *newval >= u_sess->attr.attr_security.Password_min_length) {
+        return true;
+    }
+    return false;
+}
