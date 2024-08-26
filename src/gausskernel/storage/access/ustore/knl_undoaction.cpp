@@ -87,7 +87,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         urec->SetUrp(toUrecptr);
         UndoTraversalState rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId, false, NULL);
-         DELETE_EX(urec);
+        DELETE_EX(urec);
         /* already processed. */
         if (rc != UNDO_TRAVERSAL_COMPLETE) {
             ereport(ERROR, (errmodule(MOD_USTORE),
@@ -97,7 +97,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         }
     }
 
-/*
+    /*
      * Fetch the multiple undo records which can fit into uur_segment; sort
      * them in order of reloid and block number then apply them together
      * page-wise. Repeat this until we get invalid undo record pointer.
@@ -174,14 +174,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
     
     return true;
 }
-/*
- * execute_undo_actions - Execute the undo actions
- *
- * xid - Transaction id that is getting rolled back.
- * fromUrecptr - undo record pointer from where to start applying undo action.
- * toUrecptr   - undo record pointer upto which point apply undo action.
- * isTopTxn    - true if rollback is for top transaction.
- */
+
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
     UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel)
 {

@@ -1220,7 +1220,8 @@ static void IndexPageShiftBase(Relation rel, Page page, int64 delta, bool needWa
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, page, BufferGetBlockNumber(buf), InvalidOffsetNumber, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf));
+    
     WHITEBOX_TEST_STUB("IndexPageShiftBase-end", WhiteboxDefaultErrorEmit);
 }
 

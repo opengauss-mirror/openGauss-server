@@ -279,7 +279,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, page, BufferGetBlockNumber(buf), InvalidOffsetNumber, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf));
+    
     return has_pruned;
 }
 
@@ -1311,7 +1312,8 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         }
 
         END_CRIT_SECTION();
-        UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+        UBTreeVerify(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+
         /* release buffers */
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
@@ -1860,7 +1862,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
 
     END_CRIT_SECTION();
     Page page = BufferGetPage(actualInsertBuf);
-    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
 
     /* discard this page from the Recycle Queue */
     UBTreeRecordUsedPage(rel, addr);
@@ -2244,7 +2246,8 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bo
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), offset, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf), offset);
+
     bool needRecordEmpty = (opaque->activeTupleCount == 0);
     if (needRecordEmpty) {
         /*
@@ -2553,7 +2556,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, rootpage, rootblknum, InvalidOffsetNumber, false);
+    UBTreeVerify(rel, rootpage, rootblknum);
 
     /* done with metapage */
     _bt_relbuf(rel, metabuf);

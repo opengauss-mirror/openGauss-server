@@ -14158,7 +14158,6 @@ static void analysis_options_guc_assign(const char* newval, void* extra)
 #define DEFAULT_SYNC_ROLLBACK true
 #define DEFAULT_ASYNC_ROLLBACK true
 #define DEFAULT_PAGE_ROLLBACK true
-#define DEFAULT_USTORE_VERIFY false
 
 static void InitUStoreAttr()
 {
@@ -14168,7 +14167,6 @@ static void InitUStoreAttr()
     u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
     u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
     u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
-    u_sess->attr.attr_storage.ustore_verify = DEFAULT_USTORE_VERIFY;
     u_sess->attr.attr_storage.enable_ustore_sync_rollback = DEFAULT_SYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_async_rollback = DEFAULT_ASYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_page_rollback = DEFAULT_PAGE_ROLLBACK;
