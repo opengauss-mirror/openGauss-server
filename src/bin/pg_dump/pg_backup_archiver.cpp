@@ -25,6 +25,7 @@
 #include "dumputils.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_extension.h"
+#include "pg_backup_cipher.h"
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "compress_io.h"
@@ -143,7 +144,7 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool disable_progress;
 #endif
 
-static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
+static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode, CryptoModuleCheckParam* cryptoModluleCheckParam = NULL);
 static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* AH);
 static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt, bool isData, bool acl_pass);
 static char* replace_line_endings(const char* str);
@@ -223,9 +224,9 @@ Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int 
 
 /* Open an existing archive */
 /* Public */
-Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt)
+Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt, CryptoModuleCheckParam* cryptoModluleCheckParam)
 {
-    ArchiveHandle* AH = _allocAH(FileSpec, fmt, 0, archModeRead);
+    ArchiveHandle* AH = _allocAH(FileSpec, fmt, 0, archModeRead, cryptoModluleCheckParam);
 
     return (Archive*)AH;
 }
@@ -574,9 +575,9 @@ void RestoreArchive(Archive* AHX)
         SetOutput(AH, ropt->filename, ropt->compression);
 
     /*
-     * Put the rand value to encrypt file for decrypt.
+     * Put the rand value to encrypt file for decrypt if use soft crypto.
      */
-    if ((true == AHX->encryptfile) && (NULL == encrypt_salt)) {
+    if ((true == AHX->encryptfile) && (NULL == encrypt_salt) && AHX->crypto_modlue_params[0] == '\0') {
         p = (char*)pg_malloc(RANDOM_LEN + 1);
         rc = memset_s(p, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
         securec_check_c(rc, "\0", "\0");
@@ -1730,7 +1731,9 @@ int ahwrite(const void* ptr, size_t size, size_t nmemb, ArchiveHandle* AH)
                     (size * nmemb),
                     MAX_DECRYPT_BUFF_LEN,
                     AH->publicArc.Key,
-                    AH->publicArc.rand);
+                    AH->publicArc.rand,
+                    AH->publicArc.cryptoModlueCtx.key_ctx,
+                    crypto_encrypt_decrypt_use);
                 if (!encrypt_result)
                     exit_horribly(modulename, "Encryption failed: %s\n", strerror(errno));
             } else {
@@ -2231,7 +2234,7 @@ static int _discoverArchiveFormat(ArchiveHandle* AH)
 /*
  * Allocate an archive handle
  */
-static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode)
+static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode, CryptoModuleCheckParam* cryptoModuleCheckParam)
 {
     ArchiveHandle* AH = NULL;
 
@@ -2315,6 +2318,10 @@ static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, co
         AH->format = fmt;
 
     AH->promptPassword = TRI_DEFAULT;
+
+    if (cryptoModuleCheckParam && cryptoModuleCheckParam->module_params) {
+        CryptoModuleParamsCheck(AH, cryptoModuleCheckParam->module_params, cryptoModuleCheckParam->mode, cryptoModuleCheckParam->key, cryptoModuleCheckParam->salt, cryptoModuleCheckParam->genkey);
+    }
 
     switch (AH->format) {
         case archCustom:
@@ -3720,6 +3727,9 @@ void on_exit_close_archive(Archive* AHX)
 {
     shutdown_info.AHX = AHX;
     on_exit_nicely(archive_close_connection, &shutdown_info);
+    on_exit_nicely(releaseCryptoCtx, AHX);
+    on_exit_nicely(releaseCryptoSession, AHX);
+    on_exit_nicely(unload_crypto_module, NULL);
 }
 
 /*
@@ -4729,8 +4739,8 @@ void encryptArchive(Archive* fout, const ArchiveFormat fmt)
     if (!fout->encryptfile)
         return;
 
-    /* for plain format, encrypted in previous process. */
-    if (fmt != archDirectory)
+    /* for plain format, encrypted in previous process. use crypto module encrypted in previous process. */
+    if (fmt != archDirectory || fout->crypto_modlue_params)
         return;
 
     fileSpec = gs_strdup(AH->fSpec);
