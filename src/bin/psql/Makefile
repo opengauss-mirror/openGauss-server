@@ -73,7 +73,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS=	command.o common.o help.o input.o stringutils.o mainloop.o copy.o \
+OBJS=	common_cipher.o command.o common.o help.o input.o stringutils.o mainloop.o copy.o \
 	startup.o prompt.o variables.o large_obj.o print.o describe.o \
 	mbprint.o dumputils.o keywords.o kwlookup.o tab-complete.o\
 	sql_help.o \

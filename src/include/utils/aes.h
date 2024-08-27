@@ -42,23 +42,34 @@
 #define AES_ENCRYPT_LEN(inputlen) \
     ((inputlen % AES_GROUP_LEN) ? ((inputlen / AES_GROUP_LEN) * AES_GROUP_LEN + AES_GROUP_LEN) : inputlen)
 
+typedef int (*kernel_crypto_encrypt_decrypt_type)(void *ctx, int enc, unsigned char *data, size_t data_size, unsigned char *iv, size_t iv_size, unsigned char *result, size_t *result_size, unsigned char *tag);
+
+#define CRYPTO_MODULE_PARAMS_MAX_LEN 1024
+#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 16
 typedef struct decrypt_struct {
     unsigned char* decryptBuff;
 
     char currLine[MAX_DECRYPT_BUFF_LEN];
     unsigned char Key[KEY_MAX_LEN];
+    int keyLen;
     bool isCurrLineProcess;
     bool encryptInclude;
+
+    kernel_crypto_encrypt_decrypt_type clientSymmCryptoFunc;
 
     /* Encrypt gs_dump file through OpenSSL function */
     bool randget;
     unsigned char rand[RANDOM_LEN + 1];
+    void* moduleSessionCtx;
+    void* moduleKeyCtx;
+    char crypto_modlue_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
+    char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
 } DecryptInfo;
 
 extern void initDecryptInfo(DecryptInfo* pDecryptInfo);
 extern char* getLineFromAesEncryptFile(FILE* source, DecryptInfo* pDecryptInfo);
 extern bool writeFileAfterEncryption(
-    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* rand);
+    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* rand, void* moduleKeyCtx = NULL, kernel_crypto_encrypt_decrypt_type encFunc = NULL);
 extern bool check_key(const char* key, int NUM);
 extern void aesEncrypt(char* inputstr, unsigned long inputstrlen, char* outputstr, unsigned char Key[]);
 extern void aesDecrypt(char* inputstr, unsigned long inputstrlen, char* outputstr, unsigned char Key[], bool isBinary);

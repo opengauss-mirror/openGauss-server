@@ -69,7 +69,7 @@ bool init_aes_vector_random(GS_UCHAR* aes_vector, size_t vector_len)
 
 /* inputstrlen must include the terminating '\0' character */
 bool writeFileAfterEncryption(
-    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* randvalue)
+    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* randvalue, void* moduleKeyCtx, kernel_crypto_encrypt_decrypt_type encFunc)
 {
     void* writeBuff = NULL;
     int64 writeBuffLen;
@@ -118,7 +118,7 @@ bool writeFileAfterEncryption(
     errorno = memset_s(outputstr, outputlen, '\0', outputlen);
     securec_check_c(errorno, "\0", "\0");
 
-    /* put the rand in file first */
+    /* put the rand in file first only for soft encryption*/
     if (0 == strncmp((char*)randvalue, inputstr, RANDOM_LEN)) {
         errorno = memcpy_s((char*)writeBuff, writeBuffLen, inputstr, RANDOM_LEN);
         securec_check_c(errorno, "\0", "\0");
@@ -139,19 +139,33 @@ bool writeFileAfterEncryption(
     }
 
     /* the real encrypt operation */
-    encryptstatus = aes128Encrypt((GS_UCHAR*)inputstr,
-        (GS_UINT32)inputstrlen,
-        Key,
-        (GS_UINT32)strlen((const char*)Key),
-        randvalue,
-        outputstr,
-        &cipherlen);
-    if (!encryptstatus) {
-        free(writeBuff);
-        writeBuff = NULL;
-        free(outputstr);
-        outputstr = NULL;
-        return false;
+    if (moduleKeyCtx && encFunc) {
+        int ret = 1;
+        cipherlen = outputlen;
+
+        ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
+        if (ret != 1) {
+            free(writeBuff);
+            writeBuff = NULL;
+            free(outputstr);
+            outputstr = NULL;
+            return false;
+        }
+    } else {
+        encryptstatus = aes128Encrypt((GS_UCHAR*)inputstr,
+            (GS_UINT32)inputstrlen,
+            Key,
+            (GS_UINT32)strlen((const char*)Key),
+            randvalue,
+            outputstr,
+            &cipherlen);
+        if (!encryptstatus) {
+            free(writeBuff);
+            writeBuff = NULL;
+            free(outputstr);
+            outputstr = NULL;
+            return false;
+        }
     }
 
     errorno = sprintf_s(encryptleninfo, sizeof(encryptleninfo), "%u", cipherlen);
@@ -197,6 +211,15 @@ void initDecryptInfo(DecryptInfo* pDecryptInfo)
     pDecryptInfo->randget = false;
     errorno = memset_s(pDecryptInfo->rand, RANDOM_LEN + 1, '\0', RANDOM_LEN + 1);
     securec_check_c(errorno, "\0", "\0");
+
+    errorno = memset_s(pDecryptInfo->crypto_modlue_params, CRYPTO_MODULE_PARAMS_MAX_LEN, '\0', CRYPTO_MODULE_PARAMS_MAX_LEN);
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = memset_s(pDecryptInfo->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, '\0', CRYPTO_MODULE_ENC_TYPE_MAX_LEN);
+    securec_check_c(errorno, "\0", "\0");
+
+    pDecryptInfo->moduleKeyCtx = NULL;
+    pDecryptInfo->moduleSessionCtx = NULL;
 }
 static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
 {
@@ -208,6 +231,7 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
     GS_UCHAR* outputstr = NULL;
     bool decryptstatus = false;
     errno_t errorno = EOK;
+    int moduleRet = 1;
 
     if (!feof(source) && (false == pDecryptInfo->isCurrLineProcess)) {
         nread = (int)fread((void*)cipherleninfo, 1, RANDOM_LEN, source);
@@ -219,7 +243,7 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
             return false;
         }
 
-        /* get the rand value from encryptfile first */
+        /* get the rand value from encryptfile first only for soft encryption */
         if (!pDecryptInfo->randget) {
             errorno = memcpy_s(pDecryptInfo->rand, RANDOM_LEN + 1, cipherleninfo, RANDOM_LEN);
             securec_check_c(errorno, "\0", "\0");
@@ -264,17 +288,22 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         /* read ciphertext from encrypt file. */
         nread = (int)fread((void*)ciphertext, 1, cipherlen, source);
         if (nread) {
-            /* the real decrypt operation */
-            decryptstatus = aes128Decrypt(ciphertext,
-                (GS_UINT32)cipherlen,
-                (GS_UCHAR*)pDecryptInfo->Key,
-                (GS_UINT32)strlen((const char*)pDecryptInfo->Key),
-                pDecryptInfo->rand,
-                outputstr,
-                &plainlen);
+            if (pDecryptInfo->moduleKeyCtx && pDecryptInfo->clientSymmCryptoFunc) {
+                plainlen = cipherlen;
+                moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext, cipherlen, pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
+            } else {
+                decryptstatus = aes128Decrypt(ciphertext,
+                    (GS_UINT32)cipherlen,
+                    (GS_UCHAR*)pDecryptInfo->Key,
+                    (GS_UINT32)strlen((const char*)pDecryptInfo->Key),
+                    pDecryptInfo->rand,
+                    outputstr,
+                    &plainlen);
+            }
         }
 
-        if (!nread || !decryptstatus) {
+        if (!nread || (!decryptstatus && (pDecryptInfo->moduleKeyCtx == NULL && pDecryptInfo->clientSymmCryptoFunc == NULL)) 
+            || (moduleRet != 1 && pDecryptInfo->moduleKeyCtx && pDecryptInfo->clientSymmCryptoFunc)) {
             errorno = memset_s(ciphertext, cipherlen, '\0', cipherlen);
             securec_check_c(errorno, "", "");
             free(ciphertext);
