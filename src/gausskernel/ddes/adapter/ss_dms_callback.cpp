@@ -2225,7 +2225,7 @@ int CBDoCheckpointImmediately(unsigned long long *ckpt_lsn)
     Assert(SS_PRIMARY_MODE);
 
     RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
-    *ckpt_lsn = (unsigned long long)t_thrd.shemem_ptr_cxt.ControlFile->checkPoint;
+    *ckpt_lsn = (unsigned long long)t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
     return GS_SUCCESS;
 }
 

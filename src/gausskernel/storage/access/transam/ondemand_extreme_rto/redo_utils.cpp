@@ -657,9 +657,19 @@ void OnDemandWaitRealtimeBuildShutDown()
     ondemand_extreme_rto::WaitRealtimeBuildShutdown();
 }
 
+// only used in ondemand realtime build, for update xlog redo loc in failover
 void OnDemandUpdateRealtimeBuildPrunePtr()
 {
-    ondemand_extreme_rto::UpdateCheckpointRedoPtrForPrune(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo);
+    XLogRecPtr primaryRedoLsn = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+#ifdef USE_ASSERT_CHECKING
+    if (XLByteLT(primaryRedoLsn, ondemand_extreme_rto::g_dispatcher->ckptRedoPtr)) {
+        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS][On-demand] redo loc %X/%X in primary node %d is less than "
+            "realtime build node %d, prune loc %X/%X", (uint32)(primaryRedoLsn >> 32), (uint32)primaryRedoLsn,
+            SS_PRIMARY_ID, SS_MY_INST_ID, (uint32)(ondemand_extreme_rto::g_dispatcher->ckptRedoPtr >> 32),
+            (uint32)ondemand_extreme_rto::g_dispatcher->ckptRedoPtr)));
+    }
+#endif
+    ondemand_extreme_rto::UpdateCheckpointRedoPtrForPrune(primaryRedoLsn);
 }
 
 void OnDemandBackupControlFile(ControlFileData* controlFile) {
