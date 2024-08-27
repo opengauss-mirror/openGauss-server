@@ -5874,9 +5874,6 @@ ErrorDataArea *initErrorDataArea()
 void cleanErrorDataArea(ErrorDataArea *errorDataArea)
 {
     Assert(errorDataArea != NULL);
-    MemoryContext oldcontext;
-
-    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
 
     ListCell *lc = NULL;
     foreach (lc, errorDataArea->sqlErrorDataList) {
@@ -5901,7 +5898,6 @@ void cleanErrorDataArea(ErrorDataArea *errorDataArea)
     for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
         errorDataArea->current_edata_count_by_level[i] = 0;
     }
-    MemoryContextSwitchTo(oldcontext);
 }
 
 void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
@@ -5943,8 +5939,6 @@ void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
 void resetErrorDataArea(bool stacked, bool handler_active)
 {
     /* reset all count to zero and list to null */
-    MemoryContext oldcontext;
-    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
     ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
     ErrorDataArea *lastErrorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
     if (stacked) {
@@ -5957,7 +5951,6 @@ void resetErrorDataArea(bool stacked, bool handler_active)
         }
     }
     cleanErrorDataArea(errorDataArea);
-    MemoryContextSwitchTo(oldcontext);
 }
 
 enum_dolphin_error_level errorLevelToDolphin(int elevel)
