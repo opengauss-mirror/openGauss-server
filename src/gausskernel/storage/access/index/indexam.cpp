@@ -224,6 +224,7 @@ void index_delete(Relation index_relation, Datum* values, const bool* isnull, It
                 accessMethodName = DEFAULT_HNSW_INDEX_TYPE;
                 break;
             default:
+                ereport(ERROR, (errmsg("the current index method is not supported, please check\n")));
                 Assert(false);
                 break;
         }
