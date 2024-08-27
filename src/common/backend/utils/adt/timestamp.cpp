@@ -234,8 +234,14 @@ bool TimestampTypeCheck(char* str, bool can_ignore, struct pg_tm* tm, Timestamp 
             if (tm2timestamp(tm, fsec, NULL, &result) != 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range: \"%s\"", str)));
-            break;
 
+            if (tm->tm_year < MIN_VALUE_YEAR || tm->tm_year > MAX_VALUE_YEAR || tm->tm_year == 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                            errmsg("invalid data for \"year =  %d\", value must be between -4712 and 9999,"  \
+                                " and not be 0", tm->tm_year)));
+            }
+            break;
         case DTK_EPOCH:
             result = SetEpochTimestamp();
             break;

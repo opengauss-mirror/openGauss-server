@@ -45,7 +45,7 @@ test: spm_adaptive_gplan
 test: smp smp_cursor parallel_enable_function
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
-test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix chr_gbk
+test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix chr_gbk insert_date_to_date
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views test_cursor_arg_defexpr
 
 # test multiple statistics
