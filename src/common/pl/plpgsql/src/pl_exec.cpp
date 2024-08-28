@@ -1221,7 +1221,7 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
     rc = memset_s(newnulls, new_natts * sizeof(bool), true, new_natts * sizeof(bool));
     securec_check(rc, "\0", "\0");
 
-    if (!HeapTupleIsValid(rec->tup)) {
+    if (!HeapTupleIsValid(rec->tup) || rec->freetup == false) {
         rec->tupdesc = new_tupdesc;
         rec->tup = (HeapTuple)tableam_tops_form_tuple(new_tupdesc, NULL, newnulls);
         rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
@@ -1285,10 +1285,17 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
     }
     newtup = (HeapTuple)tableam_tops_modify_tuple(new_tup, new_tupdesc, newvalues, newnulls, replaces);
 
-    heap_freetuple_ext(rec->tup);
-    FreeTupleDesc(rec->tupdesc);
+    if (rec->freetup) {
+        heap_freetuple_ext(rec->tup);
+    }
+    if (rec->freetupdesc) {
+        FreeTupleDesc(rec->tupdesc);
+    }
+
     rec->tup = newtup;
     rec->tupdesc = new_tupdesc;
+    rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
+    rec->freetup = (rec->tup != NULL) ? true : false;
     pfree_ext(replaces);
     pfree_ext(newvalues);
     pfree_ext(newnulls);
@@ -8789,7 +8796,6 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
         for (int i = 0; i < estate->ndatums; i++) {
             if (estate->datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
                 PLpgSQL_rec *rec = (PLpgSQL_rec*)estate->datums[i];
-                PLpgSQL_var *cursor = (PLpgSQL_var*)estate->datums[rec->cursorDno];
                 if (rec->cursorDno == curvar->dno) {
                     MemoryContext temp = NULL;
                     MemoryContext target_cxt = NULL;
@@ -9561,7 +9567,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
     }
 
     rec->tup = newtup;
-    rec->freetup = true;
+    rec->freetup = (rec->tup != NULL) ? true : false;
     pfree_ext(replaces);
     pfree_ext(newvalues);
     pfree_ext(newnulls);
