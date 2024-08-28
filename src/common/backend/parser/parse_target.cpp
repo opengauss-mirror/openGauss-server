@@ -449,6 +449,10 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         checkArrayTypeInsert(pstate, expr);
     }
 
+    if (IsA(expr, Param) && DISABLE_RECORD_TYPE_IN_DML && type_id == RECORDOID) {
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), 
+                           errmsg("The record type variable cannot be used as an insertion value.")));
+    }
     ELOG_FIELD_NAME_START(colname);
 
     /*

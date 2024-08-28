@@ -224,7 +224,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR (1LL << 31)
 #define OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE (1LL << 32)
 #define OPT_FLOAT_AS_NUMERIC (1LL << 33)
-#define OPT_MAX 34
+#define OPT_DISABLE_RECORD_TYPE_IN_DML (1LL << 34)
+#define OPT_MAX 35
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -272,6 +273,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR (u_sess->utils_cxt.behavior_compat_flags & OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR)
 #define UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE)
 #define FLOAT_AS_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_FLOAT_AS_NUMERIC)
+#define DISABLE_RECORD_TYPE_IN_DML (u_sess->utils_cxt.behavior_compat_flags & OPT_DISABLE_RECORD_TYPE_IN_DML)
 
 /* define database compatibility Attribute */
 typedef struct {

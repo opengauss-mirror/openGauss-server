@@ -68,7 +68,125 @@ END;
 
 drop table test_2 cascade;
 
-set behavior_compat_options='allow_procedure_compile_check';
+set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
+
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10),col varchar(10));
+create table t2(col1 varchar(10),col varchar(10));
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source.col1, source.col);
+  end loop; 
+end;
+/
+
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+select * from t2;
+drop table t1;
+drop table t2;
+
+create table t1 (a int);
+create table t2 (a t1);
+declare
+  source t2%rowtype;
+begin
+  insert into t2 values(source.a);
+end;
+/
+
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source;
+end;
+/
+
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source.a;
+end;
+/
+
+drop table t2;
+drop table t1;
+
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+insert into t1 values('one',5,'dsa','e');
+insert into t1 values('two',7,'daw','d');
+insert into t1 values('three',7,'dsaw','sw');
+insert into t1 values(NULL);
+
+create table t2(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source.col1);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source, source.col1);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+select * from t2;
+drop table t1;
+drop table t2;
 
 create table emp (empno int, ename varchar(10), job varchar(10));
 insert into emp values (1, 'zhangsan', 'job1');

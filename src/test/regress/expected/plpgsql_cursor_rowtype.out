@@ -64,7 +64,154 @@ END;
 /
 NOTICE:  Result: (,,,,,)
 drop table test_2 cascade;
-set behavior_compat_options='allow_procedure_compile_check';
+set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10),col varchar(10));
+create table t2(col1 varchar(10),col varchar(10));
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source.col1, source.col);
+  end loop; 
+end;
+/
+NOTICE:  (one,two)
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+NOTICE:  (one,two)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values(source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+select * from t2;
+ col1 | col 
+------+-----
+ one  | two
+(1 row)
+
+drop table t1;
+drop table t2;
+create table t1 (a int);
+create table t2 (a t1);
+declare
+  source t2%rowtype;
+begin
+  insert into t2 values(source.a);
+end;
+/
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source;
+end;
+/
+ERROR:  column "a" is of type t1 but expression is of type t2
+LINE 1: update t2 set a = source
+                          ^
+HINT:  You will need to rewrite or cast the expression.
+QUERY:  update t2 set a = source
+CONTEXT:  referenced column: a
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source.a;
+end;
+/
+drop table t2;
+drop table t1;
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+insert into t1 values('one',5,'dsa','e');
+insert into t1 values('two',7,'daw','d');
+insert into t1 values('three',7,'dsaw','sw');
+insert into t1 values(NULL);
+create table t2(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source.col1);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+NOTICE:  (two,7,daw,d)
+NOTICE:  (three,7,dsaw,sw)
+NOTICE:  (,,,)
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values('o', 5, source.col4, source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source, source.col1);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values('o', 5, source, source.col1)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values(source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+select * from t2;
+ col1 | col2 | col3 | col4  
+------+------+------+-------
+ o    |    5 | e    | one
+ o    |    5 | d    | two
+ o    |    5 | sw   | three
+ o    |    5 |      | 
+(4 rows)
+
+drop table t1;
+drop table t2;
 create table emp (empno int, ename varchar(10), job varchar(10));
 insert into emp values (1, 'zhangsan', 'job1');
 insert into emp values (2, 'lisi', 'job2');
@@ -1188,9 +1335,9 @@ drop procedure pro_cs_trans_1;
 drop table cs_trans_1; 
 -- test for rec in cursor loop
 show behavior_compat_options;
-    behavior_compat_options    
--------------------------------
- allow_procedure_compile_check
+                 behavior_compat_options                  
+----------------------------------------------------------
+ allow_procedure_compile_check,disable_record_type_in_dml
 (1 row)
 
 create table test_table(col1 varchar2(10));
@@ -2605,7 +2752,7 @@ BEGIN
 END;
 /
 ERROR:  "source.oid" is not a known variable
---?.*
+LINE 10:   source.oid := 5;
            ^
 QUERY:  DECLARE
   CURSOR c IS
