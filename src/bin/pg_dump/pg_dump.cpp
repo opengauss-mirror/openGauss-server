@@ -520,6 +520,7 @@ static void dumpColumnEncryptionKeys(Archive* fout, const Oid nspoid, const char
 static void dumpEncoding(Archive* AH);
 static void dumpStdStrings(Archive* AH);
 static void DumpBehaviorCompat(Archive* archive);
+static void DummpLengthSemantics(Archive* AH);
 static void binary_upgrade_set_type_oids_by_type_oid(
     Archive* Afout, PQExpBuffer upgrade_buffer, Oid pg_type_oid, bool error_table);
 static bool binary_upgrade_set_type_oids_by_rel_oid(
@@ -1134,6 +1135,9 @@ int main(int argc, char** argv)
 
     /* Set special option: behavior_compat_options */
     DumpBehaviorCompat(fout);
+
+    /* Dump nls_length_semantics parameter */
+    DummpLengthSemantics(fout);
 
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
@@ -4199,6 +4203,45 @@ static void DumpBehaviorCompat(Archive* archive)
         0,
         NULL,
         NULL);
+
+    destroyPQExpBuffer(qry);
+}
+
+/*
+ * DummpLengthSemantics: put the correct nls_length_semantics into the archive
+ */
+static void DummpLengthSemantics(Archive* archive)
+{
+    ddr_Assert(archive != NULL);
+    PGconn* conn = GetConnection(archive);
+    PGresult* res;
+    PQExpBuffer qry = createPQExpBuffer();
+
+    res = PQexec(conn, "show nls_length_semantics;");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        appendPQExpBuffer(qry, "SET nls_length_semantics = '%s';\n", PQgetvalue(res, 0, 0));
+    } else {
+        appendPQExpBuffer(qry, "SET nls_length_semantics = 'byte';\n");
+    }
+    PQclear(res);
+
+    ArchiveEntry(archive,
+                 nilCatalogId,
+                 createDumpId(),
+                 "LENGTHSEMANTICS",
+                 NULL,
+                 NULL,
+                 "",
+                 false,
+                 "LENGTHSEMANTICS",
+                 SECTION_PRE_DATA,
+                 qry->data,
+                 "",
+                 NULL,
+                 NULL,
+                 0,
+                 NULL,
+                 NULL);
 
     destroyPQExpBuffer(qry);
 }

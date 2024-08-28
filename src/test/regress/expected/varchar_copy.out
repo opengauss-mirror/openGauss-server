@@ -1,0 +1,52 @@
+-- test char semantic copy
+SET client_min_messages = warning;
+drop table if exists test_varchar_copy;
+create table test_varchar_copy (id int, city varchar (4 char));
+insert into test_varchar_copy values(1, 'abcd');
+insert into test_varchar_copy values(2, '中国天津');
+insert into test_varchar_copy values(3, 'abcde');
+ERROR:  value too long for type character varying(4 char)
+CONTEXT:  referenced column: city
+insert into test_varchar_copy values(4, '中国abc');
+ERROR:  value too long for type character varying(4 char)
+CONTEXT:  referenced column: city
+COPY test_varchar_copy to STDOUT;
+1	abcd
+2	中国天津
+truncate table test_varchar_copy;
+COPY test_varchar_copy from STDIN;
+select * from test_varchar_copy;
+ id |   city   
+----+----------
+  1 | abcd
+  2 | 中国天津
+  3 | 中a国b
+  4 | 中国ab
+(4 rows)
+
+drop table test_varchar_copy;
+-- test byte semantic copy
+drop table if exists test_varchar_byte_copy;
+create table test_varchar_byte_copy (id int, city varchar (4 byte));
+insert into test_varchar_byte_copy values(1, 'abcd');
+insert into test_varchar_byte_copy values(2, '中国天津');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+insert into test_varchar_byte_copy values(3, 'abcde');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+insert into test_varchar_byte_copy values(4, '中国abc');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+COPY test_varchar_byte_copy to STDOUT;
+1	abcd
+truncate table test_varchar_byte_copy;
+COPY test_varchar_byte_copy from STDIN;
+ERROR:  value too long for type character varying(4)
+CONTEXT:  COPY test_varchar_byte_copy, line 2, column city: "中国天津"
+select * from test_varchar_byte_copy;
+ id | city 
+----+------
+(0 rows)
+
+drop table test_varchar_byte_copy;

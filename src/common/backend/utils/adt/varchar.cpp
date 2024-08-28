@@ -40,6 +40,12 @@
         }                                                       \
     } while (0)
 
+const int CHAR_SEMANTIC_BIT = 0x40000000;
+
+#define TEST_CHAR_SEMANTIC_BIT(x)   ((x) & CHAR_SEMANTIC_BIT)
+#define SET_CHAR_SEMANTIC_BIT(x)    ((x) |= CHAR_SEMANTIC_BIT)
+#define CLEAR_CHAR_SEMANTIC_BIT(x)    ((x) &= ~CHAR_SEMANTIC_BIT)
+
 int bpcharcase(PG_FUNCTION_ARGS);
 
 /* common code for bpchartypmodin and varchartypmodin */
@@ -55,7 +61,7 @@ static int32 anychar_typmodin(ArrayType* ta, const char* typname)
      * we're not too tense about good error message here because grammar
      * shouldn't allow wrong number of modifiers for CHAR
      */
-    if (n != 1)
+    if (n < 1 || n > 2)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid type modifier")));
 
     if (*tl < 1)
@@ -65,6 +71,12 @@ static int32 anychar_typmodin(ArrayType* ta, const char* typname)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("length for type %s cannot exceed %d", typname, MaxAttrSize)));
+
+    /*
+     *  n == 2 means this type is char semantic
+     */
+    if (n == 2)
+        SET_CHAR_SEMANTIC_BIT(*tl);
 
     /*
      * For largely historical reasons, the typmod is VARHDRSZ plus the number
@@ -85,8 +97,20 @@ static char* anychar_typmodout(int32 typmod)
     errno_t ss_rc = 0;
 
     if (typmod > VARHDRSZ) {
-        ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d)", (int)(typmod - VARHDRSZ));
-        securec_check_ss(ss_rc, "\0", "\0");
+        if (TEST_CHAR_SEMANTIC_BIT(typmod))  {
+            CLEAR_CHAR_SEMANTIC_BIT(typmod);
+            if (u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE)
+                ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d char)", (int)(typmod - VARHDRSZ));
+            else
+                ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d)", (int)(typmod - VARHDRSZ));
+            securec_check_ss(ss_rc, "\0", "\0");
+        } else {
+            if (u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE)
+                ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d)", (int)(typmod - VARHDRSZ));
+            else
+                ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d byte)", (int)(typmod - VARHDRSZ));
+            securec_check_ss(ss_rc, "\0", "\0");
+        }
     } else
         *res = '\0';
 
@@ -138,22 +162,31 @@ static BpChar* bpchar_input(const char* s, size_t len, int32 atttypmod)
     char* r = NULL;
     size_t maxlen;
     errno_t ss_rc = 0;
+    bool charsemantic = false;
 
     /* If typmod is -1 (or invalid), use the actual string length */
     if (atttypmod < (int32)VARHDRSZ)
         maxlen = len;
     else {
+        if (TEST_CHAR_SEMANTIC_BIT(atttypmod)) {
+            CLEAR_CHAR_SEMANTIC_BIT(atttypmod);
+            charsemantic = true;
+        }
 
         maxlen = atttypmod - VARHDRSZ;
         if (len > maxlen) {
+            const char *errorsemantic =
+                (((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE) && charsemantic) ? " char" :
+                 ((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_CHAR) &&!charsemantic) ?
+                 " byte" : "");
 
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT && !charsemantic)
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character(%d)", (int)maxlen)));
+                            errmsg("value too long for type character(%d%s)", (int)maxlen, errorsemantic)));
 
             /* Verify that extra characters are spaces, and clip them off */
-            size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
+            size_t mbmaxlen = charsemantic ? pg_mbcharcliplen_orig(s, len, maxlen) : pg_mbcharcliplen(s, len, maxlen);
             size_t j;
 
             /*
@@ -165,7 +198,7 @@ static BpChar* bpchar_input(const char* s, size_t len, int32 atttypmod)
                 if (s[j] != ' ')
                     ereport(ERROR,
                         (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                            errmsg("value too long for type character(%d)", (int)maxlen)));
+                                errmsg("value too long for type character(%d%s)", (int)maxlen, errorsemantic)));
             }
 
             /*
@@ -275,9 +308,16 @@ Datum bpchar_launch(bool can_ignore, BpChar* source, int32 &maxlen, bool isExpli
     char* s = NULL;
     errno_t ss_rc = 0;
     int i;
+    bool charsemantic = false;
+
     /* No work if typmod is invalid */
     if (maxlen < (int32)VARHDRSZ)
         PG_RETURN_BPCHAR_P(source);
+
+    if (TEST_CHAR_SEMANTIC_BIT(maxlen)) {
+        CLEAR_CHAR_SEMANTIC_BIT(maxlen);
+        charsemantic = true;
+    }
 
     maxlen -= VARHDRSZ;
 
@@ -285,27 +325,29 @@ Datum bpchar_launch(bool can_ignore, BpChar* source, int32 &maxlen, bool isExpli
     s = VARDATA_ANY(source);
 
     /* No work if supplied data matches typmod already */
-    if (len == maxlen)
+    if (len == maxlen && !charsemantic)
         PG_RETURN_BPCHAR_P(source);
 
     if (len > maxlen) {
+        const char *errorsemantic =
+            (((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE) && charsemantic) ? " char" :
+             ((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_CHAR) &&!charsemantic) ?
+             " byte" : "");
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT && !charsemantic)
             ereport(ERROR,
-                (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                    errmsg("value too long for type character(%d)", maxlen)));
+                    (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                            errmsg("value too long for type character(%d%s)", (int)maxlen, errorsemantic)));
 
         /* Verify that extra characters are spaces, and clip them off */
-        size_t maxmblen;
-
-        maxmblen = pg_mbcharcliplen(s, len, maxlen);
+        size_t maxmblen = charsemantic ? pg_mbcharcliplen_orig(s, len, maxlen) : pg_mbcharcliplen(s, len, maxlen);
 
         if (!isExplicit) {
             for (i = maxmblen; i < len; i++)
                 if (s[i] != ' ') {
                     ereport(can_ignore ? WARNING : ERROR,
                         (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                             errmsg("value too long for type character(%d)", maxlen)));
+                                errmsg("value too long for type character(%d%s)", (int)maxlen, errorsemantic)));
                     break;
                 }
         }
@@ -476,24 +518,35 @@ static VarChar* varchar_input(const char* s, size_t len, int32 atttypmod)
 {
     VarChar* result = NULL;
     size_t maxlen;
+    bool charsemantic = false;
+
+    if (TEST_CHAR_SEMANTIC_BIT(atttypmod)) {
+        CLEAR_CHAR_SEMANTIC_BIT(atttypmod);
+        charsemantic = true;
+    }
 
     maxlen = atttypmod - VARHDRSZ;
+
+    const char *errorsemantic =
+        (((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE) && charsemantic) ? " char" :
+         ((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_CHAR) &&!charsemantic) ?
+         " byte" : "");
 
     if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
         ereport(ERROR,
             (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                errmsg("value too long for type character varying(%d)", (int)maxlen)));
+                    errmsg("value too long for type character varying(%d%s)", (int)maxlen, errorsemantic)));
 
     if (atttypmod >= (int32)VARHDRSZ && len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
-        size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
+        size_t mbmaxlen = charsemantic ? pg_mbcharcliplen_orig(s, len, maxlen) : pg_mbcharcliplen(s, len, maxlen);
         size_t j;
 
         for (j = mbmaxlen; j < len; j++) {
             if (s[j] != ' ')
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character varying(%d)", (int)maxlen)));
+                            errmsg("value too long for type character varying(%d%s)", (int)maxlen, errorsemantic)));
         }
 
         len = mbmaxlen;
@@ -624,28 +677,41 @@ Datum varchar_launch(bool can_ignore, VarChar* source, int32 &typmod, bool isExp
     size_t maxmblen;
     int i;
     char* s_data = NULL;
+    bool charsemantic = false;
+
     len = VARSIZE_ANY_EXHDR(source);
     s_data = VARDATA_ANY(source);
+
+    if (TEST_CHAR_SEMANTIC_BIT(typmod)) {
+        CLEAR_CHAR_SEMANTIC_BIT(typmod);
+        charsemantic = true;
+    }
+
     maxlen = typmod - VARHDRSZ;
     /* No work if typmod is invalid or supplied data fits it already */
     if (maxlen < 0 || len <= maxlen)
         PG_RETURN_VARCHAR_P(source);
 
+    const char *errorsemantic =
+        (((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_BYTE) && charsemantic) ? " char" :
+         ((u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_CHAR) &&!charsemantic) ?
+         " byte" : "");
+
     /* only reach here if string is too long... */
-    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT && !charsemantic)
         ereport(ERROR,
             (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                errmsg("value too long for type character varying(%d)", maxlen)));
+                    errmsg("value too long for type character varying(%d%s)", (int)maxlen, errorsemantic)));
 
     /* truncate multibyte string preserving multibyte boundary */
-    maxmblen = pg_mbcharcliplen(s_data, len, maxlen);
+    maxmblen = charsemantic ? pg_mbcharcliplen_orig(s_data, len, maxlen) : pg_mbcharcliplen(s_data, len, maxlen);
 
     if (!isExplicit) {
         for (i = maxmblen; i < len; i++)
             if (s_data[i] != ' ') {
                 ereport(can_ignore ? WARNING : ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character varying(%d)", maxlen)));
+                            errmsg("value too long for type character varying(%d%s)", (int)maxlen, errorsemantic)));
                 break;
             }
     }
@@ -1324,8 +1390,18 @@ Datum nvarchar2typmodin(PG_FUNCTION_ARGS)
 Datum nvarchar2typmodout(PG_FUNCTION_ARGS)
 {
     int32 typmod = PG_GETARG_INT32(0);
+    const size_t buffer_len = 64;
+    errno_t ss_rc = 0;
+    char* res = (char*)palloc(buffer_len);
 
-    PG_RETURN_CSTRING(anychar_typmodout(typmod));
+    if (typmod > VARHDRSZ) {
+        ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d)", (int)(typmod - VARHDRSZ));
+        securec_check_ss(ss_rc, "\0", "\0");
+    } else {
+        *res = '\0';
+    }
+
+    PG_RETURN_CSTRING(res);
 }
 
 /*

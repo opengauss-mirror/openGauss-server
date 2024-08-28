@@ -1,0 +1,53 @@
+drop database if exists dump_semantic_char_db;
+NOTICE:  database "dump_semantic_char_db" does not exist, skipping
+create database dump_semantic_char_db;
+\c dump_semantic_char_db
+create table test_charbyte_bpchar (id int, city char (4 char));
+insert into test_charbyte_bpchar values(1, 'abcd');
+insert into test_charbyte_bpchar values(2, '中国天津');
+create table test_charbyte_varchar (id int, city char (4 char));
+insert into test_charbyte_varchar values(1, 'abcd');
+insert into test_charbyte_varchar values(2, '中国天津');
+--?
+0
+drop database if exists restore_semantic_char_db;
+NOTICE:  database "restore_semantic_char_db" does not exist, skipping
+create database restore_semantic_char_db;
+--?
+0
+\c restore_semantic_char_db
+\d+ test_charbyte_bpchar
+                      Table "public.test_charbyte_bpchar"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ city   | character(4 char) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_charbyte_varchar
+                      Table "public.test_charbyte_varchar"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ city   | character(4 char) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from test_charbyte_bpchar;
+ id |   city   
+----+----------
+  1 | abcd
+  2 | 中国天津
+(2 rows)
+
+select * from test_charbyte_varchar;
+ id |   city   
+----+----------
+  1 | abcd
+  2 | 中国天津
+(2 rows)
+
+\c regression
+drop database if exists restore_semantic_char_db;
+drop database if exists dump_semantic_char_db;

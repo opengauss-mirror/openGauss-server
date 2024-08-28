@@ -861,6 +861,11 @@ static const struct config_enum_entry cluster_run_mode_options[] = {
     {"cluster_standby", RUN_MODE_STANDBY, false},
     {NULL, 0, false}};
 
+static const struct config_enum_entry nls_length_semantic_options[] = {
+    {"byte", LENGTH_SEMANTIC_BYTE, false},
+    {"char", LENGTH_SEMANTIC_CHAR, false},
+    {NULL, 0, false}};
+
 /*
  * GUC option variables that are exported from this module
  */
@@ -3620,7 +3625,6 @@ static void InitConfigureNamesString()
             NULL,
             NULL,
             NULL},
-
         {{"current_schema",
             PGC_USERSET,
             NODE_ALL,
@@ -4550,6 +4554,18 @@ static void InitConfigureNamesEnum()
             &g_instance.attr.attr_common.stream_cluster_run_mode,
             RUN_MODE_PRIMARY,
             cluster_run_mode_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"nls_length_semantics",
+            PGC_USERSET,
+            NODE_ALL,
+            COMPAT_OPTIONS,
+            gettext_noop("defines the default semantics of character string, this value must be BYTE or CHAR."),
+            NULL},
+            &u_sess->attr.attr_common.nls_length_semantics,
+            LENGTH_SEMANTIC_BYTE,
+            nls_length_semantic_options,
             NULL,
             NULL,
             NULL},
