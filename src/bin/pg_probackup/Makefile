@@ -10,7 +10,7 @@
 PROGRAM = gs_probackup
 
 # utils
-OBJS = configuration.o json.o logger.o \
+OBJS = common_cipher.o configuration.o json.o logger.o \
 	parray.o pgut.o thread.o remote.o file.o file_gz.o psprintf.o \
         atomics.o s_lock.o
 
