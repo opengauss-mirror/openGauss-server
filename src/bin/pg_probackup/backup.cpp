@@ -23,6 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "common_cipher.h"
 #include "tool_common.h"
 #include "thread.h"
 #include "file.h"
@@ -142,6 +143,8 @@ static bool IsPrimary(PGconn* conn);
 /* Progress report */
 static void *ProgressReportProbackup(void *arg);
 static void *ProgressReportSyncBackupFile(void *arg);
+
+static void compress_encrypt_directory();
 
 static void
 backup_stopbackup_callback(bool fatal, void *userdata)
@@ -1124,6 +1127,8 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
 
     if (!no_validate && current.media_type != MEDIA_TYPE_OSS)
         pgBackupValidate(&current, NULL);
+
+    compress_encrypt_directory();
 
     /* do something after backup */
     do_after_backup();
@@ -2901,6 +2906,166 @@ static bool PathContainPath(const char* path1, const char* path2)
         }
     }
     return false;
+}
+
+/* compress and then encrypt the directory */
+static void compress_encrypt_directory()
+{
+    error_t rc;
+    int ret = 0;
+    bool res = false;
+    uint key_len = 0;
+    uint enc_buffer_len = 0;
+    uint out_buffer_len = 0;
+    long int backup_tar_pos = 0;
+    long int backup_tar_length = 0;
+    char* key = NULL;
+    char sys_cmd[MAXPGPATH] = {0};
+    char tar_file[MAXPGPATH] = {0};
+    char enc_file[MAXPGPATH] = {0};
+    unsigned char enc_buffer[MAX_ENCRYPT_LEN + 1] = {0};
+    unsigned char out_buffer[MAX_ENCRYPT_LEN + 1] = {0};
+    char errmsg[MAX_ERRMSG_LEN] = {0};
+    int algo;
+
+    if (NULL == encrypt_dev_params) {
+        return;
+    }
+
+    rc = sprintf_s(sys_cmd, MAXPGPATH, "tar -cPf  %s.tar %s > /dev/null 2>&1", current.root_dir, current.root_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+    if (!is_valid_cmd(sys_cmd)) {
+        elog(ERROR, "cmd is rejected");
+        return;
+    }
+    system(sys_cmd);
+    rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
+    securec_check(rc, "\0", "\0");
+
+    rc = sprintf_s(tar_file, MAXPGPATH, "%s.tar", current.root_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = sprintf_s(enc_file, MAXPGPATH, "%s_enc", current.root_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+    FILE* enc_backup_fd = fopen(enc_file, "wb");
+    if(!enc_backup_fd) {
+        elog(ERROR, ("failed to create or open encrypt backup file."));
+        return;
+    }
+
+    FILE* backup_tar_fd = fopen(tar_file, "rb");
+    if (!backup_tar_fd) {
+        elog(ERROR, ("failed to open compressed backup file"));
+        return;
+    }
+
+    CryptoModuleParamsCheck(gen_key, encrypt_dev_params, encrypt_mode, encrypt_key, encrypt_salt);
+
+    initCryptoSession(&crypto_module_session);
+
+    algo = transform_type(encrypt_mode);
+
+    if (gen_key) {
+        ret = crypto_create_symm_key_use(crypto_module_session, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, (size_t*)&key_len);
+        if (ret != 1) {
+            crypto_get_errmsg_use(NULL, errmsg);
+            clearCrypto(crypto_module_session, crypto_module_keyctx);
+            elog(ERROR, "crypto module gen key error, errmsg:%s\n", errmsg);
+        }
+    } else {
+        key = SEC_decodeBase64(encrypt_key, &key_len);
+        if (NULL == key) {
+            clearCrypto(crypto_module_session, crypto_module_keyctx);
+            elog(ERROR, "crypto module decode key error, please check --with-key.");
+        }
+    }
+
+    ret = crypto_ctx_init_use(crypto_module_session, &crypto_module_keyctx, (ModuleSymmKeyAlgo)algo, 1, (unsigned char*)key, key_len);
+	if (ret != 1)
+	{
+		crypto_get_errmsg_use(NULL, errmsg);
+        clearCrypto(crypto_module_session, crypto_module_keyctx);
+		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+    }
+
+    fseek(backup_tar_fd,0,SEEK_END);
+    backup_tar_length = ftell(backup_tar_fd);
+    fseek(backup_tar_fd,0,SEEK_SET);
+
+    while(backup_tar_pos < backup_tar_length)
+    {
+        if ((backup_tar_length - backup_tar_pos) > MAX_ENCRYPT_LEN) {
+            ret = memset_s(enc_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
+            securec_check(ret, "\0", "\0");
+            fread(enc_buffer,MAX_ENCRYPT_LEN,1,backup_tar_fd);
+            backup_tar_pos += MAX_ENCRYPT_LEN;
+            enc_buffer_len = MAX_ENCRYPT_LEN;
+        } else {
+            ret = memset_s(enc_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
+            securec_check(ret, "\0", "\0");
+            fread(enc_buffer,(backup_tar_length - backup_tar_pos),1,backup_tar_fd);
+            enc_buffer_len = backup_tar_length - backup_tar_pos;
+            backup_tar_pos = backup_tar_length;
+        }
+
+        ret = memset_s(out_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
+        securec_check(ret, "\0", "\0");
+
+        ret = crypto_encrypt_decrypt_use(crypto_module_keyctx, 1, (unsigned char*)enc_buffer, enc_buffer_len,
+                           (unsigned char*)encrypt_salt, MAX_IV_LEN, out_buffer, (size_t*)&out_buffer_len, NULL);
+        if (ret != 1) {
+            clearCrypto(crypto_module_session, crypto_module_keyctx);
+            elog(ERROR, ("failed to encrypt backup file"));
+        }
+
+        fwrite(out_buffer, 1, out_buffer_len, enc_backup_fd);
+    }
+
+    fclose(backup_tar_fd);
+    fclose(enc_backup_fd);
+    clearCrypto(crypto_module_session, crypto_module_keyctx);
+
+    rc = sprintf_s(sys_cmd, MAXPGPATH, "rm %s %s.tar -rf", current.root_dir, current.root_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if (!is_valid_cmd(sys_cmd)) {
+        elog(ERROR, "cmd is rejected");
+    }
+    system(sys_cmd);
+    enc_flag = true;
+}
+
+/*
+ * Function: is_valid_cmd
+ * Description: check cmd
+ *
+ * Input:
+ *  char * cmd  exec
+ * Return:
+ *  bool true valid
+ */
+bool is_valid_cmd(char * cmd)
+{
+    if (NULL == cmd)
+    {
+        elog(ERROR, "cmd is NULL");
+        return false;
+    }
+
+    if (strstr(cmd, "rm"))
+    {
+        return true;
+    }
+    else if (strstr(cmd, "tar"))
+    {
+        return true;
+    }
+    else
+    {
+        elog(ERROR, "the cmd line is rejected:%s.",cmd);
+        return false;
+    }
+
 }
 
 static bool IsPrimary(PGconn* conn)
