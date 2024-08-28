@@ -33,16 +33,24 @@
 #include "ddes/dms/ss_init.h"
 #include "knl/knl_instance.h"
 
+#define DSS_LOG_DEBUG 255
+
 void DSSInitLogger()
 {
     knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
     logger_param_t log_param;
+    int ret = DSS_SUCCESS;
     log_param.log_level = (unsigned int)(dms_attr->sslog_level);
     log_param.log_backup_file_count = (unsigned int)(dms_attr->sslog_backup_file_count);
     log_param.log_max_file_size = ((uint64)(dms_attr->sslog_max_file_size)) * 1024;
 
     GetSSLogPath(log_param.log_home);
-    int ret = dss_call_init_logger(log_param.log_home, log_param.log_level, log_param.log_backup_file_count, log_param.log_max_file_size);
+    if (IsInitdb) {
+        ret = dss_call_init_logger(log_param.log_home, DSS_LOG_DEBUG, log_param.log_backup_file_count, log_param.log_max_file_size);
+    } else {
+        ret = dss_call_init_logger(log_param.log_home, log_param.log_level, log_param.log_backup_file_count, log_param.log_max_file_size);
+    }
+    
     if (ret != DSS_SUCCESS) {
         ereport(FATAL,(errmsg("failed to init dss looger")));
     }
