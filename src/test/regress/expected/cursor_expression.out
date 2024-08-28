@@ -701,15 +701,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 65>
-NOTICE:  lisi <unnamed portal 66>
-NOTICE:  wangwu <unnamed portal 67>
-NOTICE:  heliu <unnamed portal 68>
- test_cursor_2 
----------------
- 
-(1 row)
-
+ERROR:  execute failed when parse the query: SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1)abc FROM employees e
+DETAIL:  obtain rowtype form nested cursor is not supported
+CONTEXT:  PL/pgSQL function test_cursor_2() during initialization of execution state
 drop procedure test_cursor_2;
 create or replace procedure test_cursor_2 
 as 
@@ -725,15 +719,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 70>
-NOTICE:  lisi <unnamed portal 71>
-NOTICE:  wangwu <unnamed portal 72>
-NOTICE:  heliu <unnamed portal 73>
- test_cursor_2 
----------------
- 
-(1 row)
-
+ERROR:  execute failed when parse the query: SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1)abc FROM employees e
+DETAIL:  obtain rowtype form nested cursor is not supported
+CONTEXT:  PL/pgSQL function test_cursor_2() during initialization of execution state
 drop procedure test_cursor_2;
 create or replace procedure test_cursor_2 
 as 
@@ -751,15 +739,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  name : zhangsan  <unnamed portal 75>
-NOTICE:  name : lisi  <unnamed portal 76>
-NOTICE:  name : wangwu  <unnamed portal 77>
-NOTICE:  name : heliu  <unnamed portal 78>
- test_cursor_2 
----------------
- 
-(1 row)
-
+ERROR:  execute failed when parse the query: SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1)abc FROM employees e
+DETAIL:  obtain rowtype form nested cursor is not supported
+CONTEXT:  PL/pgSQL function test_cursor_2() during initialization of execution state
 drop procedure test_cursor_2;
 create or replace procedure test_cursor_2 
 as 
@@ -781,31 +763,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 80>
-NOTICE:       last_name : zhangsan
-NOTICE:       last_name : lisi
-NOTICE:       last_name : wangwu
-NOTICE:       last_name : heliu
-NOTICE:  lisi <unnamed portal 81>
-NOTICE:       last_name : zhangsan
-NOTICE:       last_name : lisi
-NOTICE:       last_name : wangwu
-NOTICE:       last_name : heliu
-NOTICE:  wangwu <unnamed portal 82>
-NOTICE:       last_name : zhangsan
-NOTICE:       last_name : lisi
-NOTICE:       last_name : wangwu
-NOTICE:       last_name : heliu
-NOTICE:  heliu <unnamed portal 83>
-NOTICE:       last_name : zhangsan
-NOTICE:       last_name : lisi
-NOTICE:       last_name : wangwu
-NOTICE:       last_name : heliu
- test_cursor_2 
----------------
- 
-(1 row)
-
+ERROR:  execute failed when parse the query: SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1)abc FROM employees e
+DETAIL:  obtain rowtype form nested cursor is not supported
+CONTEXT:  PL/pgSQL function test_cursor_2() during initialization of execution state
 drop procedure test_cursor_2;
 --
 create table t_cursor_0011_01(department_id int, department_name varchar(50));
@@ -845,59 +805,59 @@ begin
 end;
 /
 call pro_cursor_0011_02();
-NOTICE:  department_name : 3 <unnamed portal 87>
-NOTICE:   department employees info : pro <unnamed portal 91>
+NOTICE:  department_name : 3 <unnamed portal 67>
+NOTICE:   department employees info : pro <unnamed portal 71>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : pro <unnamed portal 92>
+NOTICE:   department employees info : pro <unnamed portal 72>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : pro <unnamed portal 93>
+NOTICE:   department employees info : pro <unnamed portal 73>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : pro <unnamed portal 94>
+NOTICE:   department employees info : pro <unnamed portal 74>
 NOTICE:   employees_id_var : 2
-NOTICE:  department_name : 3 <unnamed portal 90>
-NOTICE:   department employees info : pro <unnamed portal 95>
+NOTICE:  department_name : 3 <unnamed portal 70>
+NOTICE:   department employees info : pro <unnamed portal 75>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : pro <unnamed portal 96>
+NOTICE:   department employees info : pro <unnamed portal 76>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : pro <unnamed portal 97>
+NOTICE:   department employees info : pro <unnamed portal 77>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : pro <unnamed portal 98>
+NOTICE:   department employees info : pro <unnamed portal 78>
 NOTICE:   employees_id_var : 2
-NOTICE:  department_name : 2 <unnamed portal 86>
-NOTICE:   department employees info : rd <unnamed portal 99>
+NOTICE:  department_name : 2 <unnamed portal 66>
+NOTICE:   department employees info : rd <unnamed portal 79>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : rd <unnamed portal 100>
+NOTICE:   department employees info : rd <unnamed portal 80>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : rd <unnamed portal 101>
+NOTICE:   department employees info : rd <unnamed portal 81>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : rd <unnamed portal 102>
+NOTICE:   department employees info : rd <unnamed portal 82>
 NOTICE:   employees_id_var : 2
-NOTICE:  department_name : 2 <unnamed portal 89>
-NOTICE:   department employees info : rd <unnamed portal 103>
+NOTICE:  department_name : 2 <unnamed portal 69>
+NOTICE:   department employees info : rd <unnamed portal 83>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : rd <unnamed portal 104>
+NOTICE:   department employees info : rd <unnamed portal 84>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : rd <unnamed portal 105>
+NOTICE:   department employees info : rd <unnamed portal 85>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : rd <unnamed portal 106>
+NOTICE:   department employees info : rd <unnamed portal 86>
 NOTICE:   employees_id_var : 2
-NOTICE:  department_name : 1 <unnamed portal 85>
-NOTICE:   department employees info : sale <unnamed portal 107>
+NOTICE:  department_name : 1 <unnamed portal 65>
+NOTICE:   department employees info : sale <unnamed portal 87>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : sale <unnamed portal 108>
+NOTICE:   department employees info : sale <unnamed portal 88>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : sale <unnamed portal 109>
+NOTICE:   department employees info : sale <unnamed portal 89>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : sale <unnamed portal 110>
+NOTICE:   department employees info : sale <unnamed portal 90>
 NOTICE:   employees_id_var : 2
-NOTICE:  department_name : 1 <unnamed portal 88>
-NOTICE:   department employees info : sale <unnamed portal 111>
+NOTICE:  department_name : 1 <unnamed portal 68>
+NOTICE:   department employees info : sale <unnamed portal 91>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : sale <unnamed portal 112>
+NOTICE:   department employees info : sale <unnamed portal 92>
 NOTICE:   employees_id_var : 1
-NOTICE:   department employees info : sale <unnamed portal 113>
+NOTICE:   department employees info : sale <unnamed portal 93>
 NOTICE:   employees_id_var : 2
-NOTICE:   department employees info : sale <unnamed portal 114>
+NOTICE:   department employees info : sale <unnamed portal 94>
 NOTICE:   employees_id_var : 2
  pro_cursor_0011_02 
 --------------------
@@ -958,7 +918,7 @@ NOTICE:
 --?duration.*
 
 CONTEXT:  PL/pgSQL function inline_code_block line 8 at FETCH
-NOTICE:  company_name : zhangsan  <unnamed portal 116>
+NOTICE:  company_name : zhangsan  <unnamed portal 96>
 NOTICE:  
 QueryPlan
 
