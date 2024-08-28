@@ -8807,13 +8807,18 @@ read_sql_construct6(int until,
                 ds_changed = true;
                 break;
             case T_VARRAY_VAR:
+            {
                 idents = yylval.wdatum.idents;
+                PLpgSQL_var* var = (PLpgSQL_var*)(yylval.wdatum.datum);
                 if (idents == NIL) {
                     AddNamespaceIfPkgVar(yylval.wdatum.ident, save_IdentifierLookup);
                 }
                 tok = yylex();
                 if (tok == '(' || tok == '[') {
                     push_array_parse_stack(&context, parenlevel, ARRAY_ACCESS);
+                } else if (OidIsValid(var->datatype->tableOfIndexType) && 
+                    (',' == tok || ')' == tok || ';' == tok)) {
+                    is_have_tableof_index_var = true;
                 }
                 curloc = yylloc;
                 plpgsql_push_back_token(tok);
@@ -8826,6 +8831,7 @@ read_sql_construct6(int until,
                     ds_changed = true;
                     break;
                 }
+            }
             case T_ARRAY_FIRST:
             {
                 Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
