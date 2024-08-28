@@ -138,7 +138,6 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
         uzone->MarkDirty();
     }
     uzone->AdvanceInsertURecPtr(UNDO_PTR_GET_OFFSET(lastRecord), lastRecordSize);
-    UndoZoneVerifyPtr(uzone);
     if (uzone->GetForceDiscardURecPtr() > uzone->GetInsertURecPtr()) {
         ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d forceDiscardURecPtr %lu > insertURecPtr %lu."),
             uzone->GetZoneId(), uzone->GetForceDiscardURecPtr(), uzone->GetInsertURecPtr())));
@@ -160,9 +159,9 @@ void FinishUndoMeta(UndoPersistence upersistence)
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("FinishUndoMeta: uzone is NULL")));
     }
-    UndoZoneVerify(uzone);
     uzone->GetSlotBuffer().UnLock();
     uzone->UnlockUndoZone();
+    UndoZoneVerify(uzone);
     return;
 }
 
@@ -212,7 +211,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
         meta->SetInfo(XLOG_UNDOMETA_INFO_SLOT);
         Assert(meta->dbid != INVALID_DB_OID);
     }
-    UndoTranslotVerifyPtr(slot, INVALID_UNDO_SLOT_PTR);
+    TransactionSlotVerify(slot, t_thrd.undo_cxt.slotPtr[upersistence]);
     return;
 }
 
@@ -245,6 +244,7 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
         zone->MarkDirty();
         zone->SetLSN(lsn);
         zone->UnlockUndoZone();
+        UndoZoneVerify(zone);
     }
     UndoSlotPtr slotPtr = MAKE_UNDO_PTR(zone->GetZoneId(), meta->slotPtr);
     if (!IsSkipInsertSlot(slotPtr)) {
@@ -267,7 +267,6 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
         }
         UnlockReleaseBuffer(buf.Buf());
     }
-    UndoZoneVerify(zone);
     return;
 }
 
@@ -644,7 +643,7 @@ void AllocateUndoZone()
     if (!g_instance.attr.attr_storage.enable_ustore) {
         return;
     }
-    AllocateZonesBeforXid();
+    AllocateZonesBeforeXid();
 #endif
 }
 
@@ -660,7 +659,6 @@ void RedoRollbackFinish(UndoSlotPtr slotPtr, XLogRecPtr lsn)
             slot->UpdateRollbackProgress();
             PageSetLSN(page, lsn);
             MarkBufferDirty(buf.Buf());
-            UndoTranslotVerify(slot, slotPtr);
         }
         UnlockReleaseBuffer(buf.Buf());
     }
@@ -714,7 +712,6 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     }
     MarkBufferDirty(buf.Buf());
     END_CRIT_SECTION();
-    UndoTranslotVerify(slot, slotPtr);
     UnlockReleaseBuffer(buf.Buf());
     return;
 }

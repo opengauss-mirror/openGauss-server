@@ -455,7 +455,6 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
             segSize = USEG_SIZE(UNDO_DB_OID);
         }
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used(zoneId));
-        UndoZoneVerify(uzone);
         uint64 transUndoThresholdSize = GET_UNDO_LIMIT_SIZE_PER_XACT * BLCKSZ;
         const uint64 MAX_OFFSET = (UNDO_LOG_MAX_SIZE - transUndoThresholdSize) - segSize;
         if (usp->Tail() < usp->Head() || usp->Tail() > MAX_OFFSET) {
