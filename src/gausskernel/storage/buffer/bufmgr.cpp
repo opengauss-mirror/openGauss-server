@@ -2910,6 +2910,10 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
         return;
     }
 
+    if (IsSegmentFileNode(buf->tag.rnode) && buf->tag.forkNum != MAIN_FORKNUM) {
+        return;
+    }
+
     Block tmpBlock = BufHdrGetBlock(buf);
 
     if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) &&
@@ -2932,6 +2936,10 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
 void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags)
 {
     if (SS_REFORM_REFORMER || SS_DISASTER_STANDBY_CLUSTER) {
+        return;
+    }
+
+    if (IsSegmentFileNode(buf->tag.rnode) && buf->tag.forkNum != MAIN_FORKNUM) {
         return;
     }
 

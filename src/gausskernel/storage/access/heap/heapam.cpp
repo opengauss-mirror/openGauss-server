@@ -8803,13 +8803,14 @@ static void heap_xlog_clean(XLogReaderState* record)
     XLogRedoAction action;
     RelFileNode rnode;
     BlockNumber blkno;
+    XLogPhyBlock pblk;
     bool  repairFragmentation = true;
 
     if ((XLogRecGetInfo(record) & XLOG_HEAP2_NO_REPAIR_PAGE) != 0) {
         repairFragmentation = false;
     }
 
-    XLogRecGetBlockTag(record, HEAP_CLEAN_ORIG_BLOCK_NUM, &rnode, NULL, &blkno);
+    XLogRecGetBlockTag(record, HEAP_CLEAN_ORIG_BLOCK_NUM, &rnode, NULL, &blkno, &pblk);
 
     /*
      * We're about to remove tuples. In Hot Standby mode, ensure that there's
@@ -8851,7 +8852,7 @@ static void heap_xlog_clean(XLogReaderState* record)
      * totally accurate anyway.
      */
     if (action == BLK_NEEDS_REDO) {
-        XLogRecordPageWithFreeSpace(rnode, blkno, freespace);
+        XLogRecordPageWithFreeSpace(rnode, blkno, freespace, &pblk);
     }
 }
 
@@ -9159,13 +9160,14 @@ static void heap_xlog_insert(XLogReaderState* record)
     XLogRedoAction action;
     RelFileNode target_node;
     BlockNumber blkno;
+    XLogPhyBlock pblk;
 
     if (isinit) {
         rec_data += sizeof(TransactionId);
     }
     xlrec = (xl_heap_insert*)rec_data;
 
-    XLogRecGetBlockTag(record, HEAP_INSERT_ORIG_BLOCK_NUM, &target_node, NULL, &blkno);
+    XLogRecGetBlockTag(record, HEAP_INSERT_ORIG_BLOCK_NUM, &target_node, NULL, &blkno, &pblk);
 
     /*
      * The visibility map may need to be fixed even if the heap page is
@@ -9213,7 +9215,7 @@ static void heap_xlog_insert(XLogReaderState* record)
      * totally accurate anyway.
      */
     if (action == BLK_NEEDS_REDO && freespace < BLCKSZ / 5) {
-        XLogRecordPageWithFreeSpace(target_node, blkno, freespace);
+        XLogRecordPageWithFreeSpace(target_node, blkno, freespace, &pblk);
     }
 }
 
@@ -9231,6 +9233,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
     bool tde = XLogRecGetTdeInfo(record);
     XLogRedoAction action;
     Pointer rec_data;
+    XLogPhyBlock pblk;
 
     /*
      * Insertion doesn't overwrite MVCC data, so no conflict processing is
@@ -9242,7 +9245,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
     }
     xlrec = (xl_heap_multi_insert*)rec_data;
 
-    XLogRecGetBlockTag(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &rnode, NULL, &blkno);
+    XLogRecGetBlockTag(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &rnode, NULL, &blkno, &pblk);
 
     /*
      * The visibility map may need to be fixed even if the heap page is
@@ -9287,7 +9290,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
      * Skip segment-page relation, because FSM segment may have not been created yet.
      */
     if (action == BLK_NEEDS_REDO && freespace < BLCKSZ / 5) {
-        XLogRecordPageWithFreeSpace(rnode, blkno, freespace);
+        XLogRecordPageWithFreeSpace(rnode, blkno, freespace, &pblk);
     }
 }
 
@@ -9307,6 +9310,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
     XLogRedoAction newaction;
     bool isinit = (XLogRecGetInfo(record) & XLOG_HEAP_INIT_PAGE) != 0;
     Pointer rec_data;
+    XLogPhyBlock pblk;
 
     rec_data = (Pointer)XLogRecGetData(record);
     if (isinit) {
@@ -9315,7 +9319,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
 
     xlrec = (xl_heap_update*)rec_data;
 
-    XLogRecGetBlockTag(record, HEAP_UPDATE_NEW_BLOCK_NUM, &rnode, NULL, &newblk);
+    XLogRecGetBlockTag(record, HEAP_UPDATE_NEW_BLOCK_NUM, &rnode, NULL, &newblk, &pblk);
     if (XLogRecGetBlockTag(record, HEAP_UPDATE_OLD_BLOCK_NUM, NULL, NULL, &oldblk)) {
         /* HOT updates are never done across pages */
         Assert(!hot_update);
@@ -9417,7 +9421,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
      * totally accurate anyway.
      */
     if (newaction == BLK_NEEDS_REDO && !hot_update && freespace < BLCKSZ / 5) {
-        XLogRecordPageWithFreeSpace(rnode, newblk, freespace);
+        XLogRecordPageWithFreeSpace(rnode, newblk, freespace, &pblk);
     }
 }
 

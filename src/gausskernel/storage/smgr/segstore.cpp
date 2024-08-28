@@ -372,11 +372,6 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     /* Recovery thread should use physical location to read data directly. */
     if (SS_DISASTER_MAIN_STANDBY_NODE) {
         ereport(DEBUG1, (errmsg("can segment address translation when role is SS_DISASTER_MAIN_STANDBY_NODE")));
-    } else {
-        if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
-            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
-                            errhint("cannot do segment address translation during recovery")));
-        }
     }
 
     SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
@@ -1389,7 +1384,9 @@ void seg_extend_internal(SMgrRelation reln, ForkNumber forknum, BlockNumber bloc
      */
     while (head->total_blocks <= blocknum) {
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-        seg_extend_segment(reln->seg_space, forknum, buffer, reln->seg_desc[forknum]->head_blocknum);
+        if (head->total_blocks <= blocknum) {
+            seg_extend_segment(reln->seg_space, forknum, buffer, reln->seg_desc[forknum]->head_blocknum);
+        }
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
 
@@ -1847,14 +1844,15 @@ BlockNumber seg_totalblocks(SMgrRelation reln, ForkNumber forknum)
     return res;
 }
 
-bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk)
+bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk,
+                     XLogPhyBlock *fsm_pblk)
 {
     ASSERT_NORMAL_FORK(forknum);
 
     RelFileNode rnode = reln->smgr_rnode.node;
     BlockNumber lastblock = spc_size(spc, pblk->relNode, forknum);
 
-    if (pblk->block >= lastblock) {
+    if (pblk->block >= lastblock && fsm_pblk == NULL) {
         return false;
     }
 
@@ -1891,6 +1889,13 @@ bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const
     SegmentCheck(XLogRecPtrIsValid(seg_head->lsn));
     if (XLByteLT(seg_head->lsn, pblk->lsn)) {
         ret = (seg_head->total_blocks != 0);
+    }
+
+    if (ret && fsm_pblk != NULL) {
+        SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, fsm_pblk->block);
+        fsm_pblk->relNode = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
+        fsm_pblk->block = loc.blocknum;
+        fsm_pblk->lsn = seg_head->lsn;
     }
 
     SegUnlockReleaseBuffer(seg_buffer);
