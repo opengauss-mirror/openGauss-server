@@ -40,12 +40,6 @@
 #define USTORE_VERIFY_MOD_REDO 0x00080000
 #define USTORE_VERIFY_MOD_MASK (USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE | USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_MOD_REDO)
 
-/* Ustore urq verfication module list. */
-#define USTORE_VERIFY_URQ_SUB_HEADER 0x00020001
-#define USTORE_VERIFY_URQ_SUB_ITEM 0x00020002
-#define USTORE_VERIFY_URQ_SUB_METADATA 0x00020004
-#define USTORE_VERIFY_SUB_MOD_MASK 0x0000ffff
-
 /* Ustore verification level of each modules. */
 typedef enum VerifyLevel {
     USTORE_VERIFY_NONE = 0,
@@ -78,19 +72,4 @@ do { \
     } \
 } while(0)
 
-extern inline int ustore_verify_errlevel(void)
-{
-    return u_sess->attr.attr_storage.ustore_verify ? WARNING : ERROR;
-}
-
-#define BEGIN_SAVE_VERIFY(tmp) \
-{   \
-    temp = u_sess->attr.attr_storage.ustore_verify; \
-    u_sess->attr.attr_storage.ustore_verify = true; \
-}
-
-#define END_SAVE_VERIFY(tmp) \
-{   \
-    u_sess->attr.attr_storage.ustore_verify = tmp; \
-}
 #endif

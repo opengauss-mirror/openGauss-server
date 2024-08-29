@@ -60,6 +60,19 @@ typedef struct UndoZoneMetaInfo {
         upersistence = (UndoPersistence)(zid / (int)PERSIST_ZONE_COUNT);             \
     } while (0)
 
+#define LogUndoZoneInfo(uzone, level, msg)                                                                      \
+    do {                                                                                                        \
+        ereport(level, (errmodule(MOD_UNDO),                                                                    \
+            errmsg(UNDOFORMAT("%s. ZoneId %d, insertUrecPtr %lu, discardUrecPtr %lu, forceDiscardUrecPtr %lu, " \
+            "allocateTSlotPtr %lu, recycleTSlotPtr %lu, recycleXid %lu, frozenXid %lu, "                        \
+            "undoSpaceInfo: head %lu, tail %lu, slotSpaceInfo: head %lu, tail %lu."),                           \
+            msg, uzone->GetZoneId(),                                                                            \
+            uzone->GetInsertURecPtr(), uzone->GetDiscardURecPtr(), uzone->GetForceDiscardURecPtr(),             \
+            uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(), uzone->GetRecycleXid(),                  \
+            uzone->GetFrozenXid(), uzone->GetUndoSpace()->Head(), uzone->GetUndoSpace()->Tail(),                \
+            uzone->GetSlotSpace()->Head(), uzone->GetSlotSpace()->Tail())));                                    \
+    } while(0)
+
 class UndoZone : public BaseObject {
 public:
     UndoZone(void);
@@ -385,13 +398,10 @@ public:
     static bool UndoZoneInUse(int zid, UndoPersistence upersistence);
 }; // class UndoZoneGroup
 
-void AllocateZonesBeforXid();
+void AllocateZonesBeforeXid();
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
 void exrto_recycle_residual_undo_file(char *FuncName);
-
-void UndoZoneVerifyPtr(UndoZone *uzone);
-
 void UndoZoneVerify(UndoZone *uzone);
 
 } // namespace undo

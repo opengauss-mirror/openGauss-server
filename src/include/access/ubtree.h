@@ -673,12 +673,8 @@ extern void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNu
 extern void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
     void *state);
 
-// verify urq
-void UBTRecycleQueueVerifyPageOffline(Relation rel, Page page, BlockNumber blkno);
-
-// verify ubtree
-void UBTreeVerifyPage(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
-void UBTreeVerifyAll(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
+void UBTreeVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum = InvalidOffsetNumber,
+    bool fromInsert = false);
 
 void UBTreeRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start);
 #endif /* UBTREE_H */

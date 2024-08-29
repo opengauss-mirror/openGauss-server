@@ -124,7 +124,7 @@ CREATE INDEX range_list_sales1_idx4 ON range_list_sales1(time_id, type_id) LOCAL
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-            81920
+            73728
 (1 row)
 
 --delete & insert
@@ -139,7 +139,7 @@ INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           122880
+           114688
 (1 row)
 
 --vacuum full partition
@@ -150,7 +150,7 @@ VACUUM FULL range_list_sales1 PARTITION (customer3);
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-            81920
+            73728
 (1 row)
 
 --delete & insert
@@ -165,7 +165,7 @@ INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           122880
+           114688
 (1 row)
 
 --vacuum full subpartition
@@ -180,7 +180,7 @@ VACUUM FULL range_list_sales1 SUBPARTITION (customer3_channel1);
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-            81920
+            73728
 (1 row)
 
 --check index is ok
