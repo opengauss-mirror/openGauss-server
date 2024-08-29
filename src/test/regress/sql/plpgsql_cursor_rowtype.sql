@@ -613,6 +613,44 @@ End;
 
 drop table STORAGE_LARGE_TABLE_STORAGE_TABLE_000;
 drop table STORAGE_LARGE_CURSOR_TABLE_216;
+-- test none execute error sql
+set behavior_compat_options='';
+create table t_CurRowtype_Def_Case0001_1(
+col1 tinyint primary key,
+col2 smallint,
+col3 int,
+col4 bigint
+);
+
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+
+set behavior_compat_options='allow_procedure_compile_check';
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+drop table t_CurRowtype_Def_Case0001_1;
 
 --test: drop column
 create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
@@ -1276,6 +1314,7 @@ end;
 /
 
 call  check_compile_1();
+drop procedure check_compile_1;
 set behavior_compat_options='';
 
 drop procedure check_compile;
@@ -1344,6 +1383,7 @@ alter type foo alter attribute b type text;--success
 fetch c3;
 close c3;
 
+drop type if exists foo;
 ---- 不在 TRANSACTION Block里的游标声明导致 core的问题
 --游标依赖row type，后续alter type
 drop type if exists type_cursor_bugfix_0001;

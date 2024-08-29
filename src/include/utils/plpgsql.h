@@ -596,6 +596,7 @@ typedef struct { /* Record variable (non-fixed structure) */
     bool freetup;
     bool freetupdesc;
     List* pkg_name = NULL;
+    List* field_need_check = NULL;
     PLpgSQL_package* pkg = NULL;
     PLpgSQL_expr* default_val = NULL;
     PLpgSQL_expr* expr = NULL;

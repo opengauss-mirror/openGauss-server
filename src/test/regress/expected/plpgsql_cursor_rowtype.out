@@ -829,6 +829,47 @@ INFO:  str1 is 98
 INFO:  str1 is 99
 drop table STORAGE_LARGE_TABLE_STORAGE_TABLE_000;
 drop table STORAGE_LARGE_CURSOR_TABLE_216;
+-- test none execute error sql
+set behavior_compat_options='';
+create table t_CurRowtype_Def_Case0001_1(
+col1 tinyint primary key,
+col2 smallint,
+col3 int,
+col4 bigint
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_currowtype_def_case0001_1_pkey" for table "t_currowtype_def_case0001_1"
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+ERROR:  record "source" has no field "col5"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
+set behavior_compat_options='allow_procedure_compile_check';
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+ERROR:  record "source" has no field "col5"
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 8
+drop table t_CurRowtype_Def_Case0001_1;
 --test: drop column
 create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
 insert into int_4_2(a, d, b) values(3, 6,'johan');
@@ -1386,9 +1427,9 @@ drop procedure pro_cs_trans_1;
 drop table cs_trans_1; 
 -- test for rec in cursor loop
 show behavior_compat_options;
-                 behavior_compat_options                  
-----------------------------------------------------------
- allow_procedure_compile_check,disable_record_type_in_dml
+    behavior_compat_options    
+-------------------------------
+ allow_procedure_compile_check
 (1 row)
 
 create table test_table(col1 varchar2(10));
@@ -1635,6 +1676,7 @@ INFO:  aa
  
 (1 row)
 
+drop procedure check_compile_1;
 set behavior_compat_options='';
 drop procedure check_compile;
 --游标依赖row type，后续alter type
@@ -1751,6 +1793,7 @@ fetch c3;
 (1 row)
 
 close c3;
+drop type if exists foo;
 ---- 不在 TRANSACTION Block里的游标声明导致 core的问题
 --游标依赖row type，后续alter type
 drop type if exists type_cursor_bugfix_0001;
@@ -1839,7 +1882,7 @@ NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop package pckg_test2;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop schema plpgsql_cursor_rowtype cascade;
-NOTICE:  drop cascades to 26 other objects
+NOTICE:  drop cascades to 24 other objects
 DETAIL:  drop cascades to table emp
 drop cascades to function pro_cursor_no_args_1()
 drop cascades to function pro_cursor_no_args_2()
@@ -1864,8 +1907,6 @@ drop cascades to function plpgsql_cursor_rowtype.ppp1()
 --?.*
 drop cascades to function pro_close_cursor1()
 drop cascades to function pro_close_cursor2()
-drop cascades to function check_compile_1()
-drop cascades to type foo
 drop schema schema1 cascade;
 NOTICE:  drop cascades to table schema1.t11
 create schema cursor_rowtype;
@@ -2090,10 +2131,8 @@ BEGIN
   close c;
 END;
 /
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
 -- FUNC: normale
 create or replace function f1(b int) returns int
 as $$
@@ -2141,10 +2180,8 @@ BEGIN
 END;
 $$language plpgsql;
 call f1(2); -----error
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -2166,8 +2203,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *
@@ -2331,10 +2368,8 @@ BEGIN
   close c;
 END;
 /
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
 -- FUNC: normale
 create or replace function f1(b int) returns int
 as $$
@@ -2382,10 +2417,8 @@ BEGIN
 END;
 $$language plpgsql;
 call f1(2); -----error
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -2407,8 +2440,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *
@@ -2507,9 +2540,8 @@ BEGIN
   return b;
 END;
 $$language plpgsql;
-ERROR:  "source.oid" is not a known variable
-LINE 12:   source.oid := 5;
-           ^
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 10
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -2531,24 +2563,7 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  "source.first_name" is not a known variable
-LINE 10:   source.first_name := 'Jane';
-           ^
-QUERY:  
-DECLARE
-  CURSOR c IS
-    SELECT *
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-  return b;
-END;
-
+ERROR:  record "source" has no field "first_name"
 CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
 drop table employees;
 call f1(2); -----error
@@ -2622,9 +2637,8 @@ BEGIN
   return b;
 END;
 $$language plpgsql;
-ERROR:  "source.oid" is not a known variable
-LINE 12:   source.oid := 5;
-           ^
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 10
 call f1(2);
 NOTICE:  Jane
  f1 
@@ -2653,24 +2667,7 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  "source.first_name" is not a known variable
-LINE 10:   source.first_name := 'Jane';
-           ^
-QUERY:  
-DECLARE
-  CURSOR c IS
-    SELECT *
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-  return b;
-END;
-
+ERROR:  record "source" has no field "first_name"
 CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
 drop table employees;
 call f1(2); -----error
@@ -2802,26 +2799,8 @@ BEGIN
   close c;
 END;
 /
-ERROR:  "source.oid" is not a known variable
-LINE 10:   source.oid := 5;
-           ^
-QUERY:  DECLARE
-  CURSOR c IS
-    SELECT first_name,last_name
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  source.first_name := 'Jane'; source.last_name := 'Smith';
-  raise notice '%', source.last_name;
-  raise notice '%', source.first_name;
-  source.oid := 5;
-  raise notice '%', source.oid;
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-END
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "p1" near line 9
 call P1(2); -----error
 NOTICE:  Jane
  p1 
@@ -2864,8 +2843,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *
