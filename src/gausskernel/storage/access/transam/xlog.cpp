@@ -11944,7 +11944,9 @@ void ShutdownXLOG(int code, Datum arg)
 
     if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
         ereport(LOG, (errmsg("[SS failover/SS switchover] Standby promote: skipping shutdown checkpoint")));
-    } else {
+    } else if (SS_PRIMARY_NORMAL_REFORM && SS_CLUSTER_ONDEMAND_NOT_NORAML) {
+        ereport(LOG, (errmsg("[SS normal reform] Normal reform but ondemand recovery not finish in the last time: skipping shutdown checkpoint")));
+    }else {
         if (RecoveryInProgress()) {
             (void)CreateRestartPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
         } else {

@@ -400,6 +400,11 @@ void HandlePageRedoInterrupts()
     HandlePageRedoInterruptsImpl();
 }
 
+static void LastMarkReachedBeforePageRedoExit(int code, Datum arg)
+{
+    LastMarkReached();
+}
+
 void clean_smgr(uint64 &clear_redo_fd_count)
 {
     const uint64 clear_redo_fd_count_mask = 0x3FFFFF;
@@ -2649,6 +2654,7 @@ void ParallelRedoThreadMain()
     t_thrd.page_redo_cxt.redo_worker_ptr = g_redoWorker;
     // regitster default interrupt call back
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
+    on_shmem_exit(LastMarkReachedBeforePageRedoExit, 0);
     SetupSignalHandlers();
     InitGlobals();
     
@@ -2665,7 +2671,6 @@ void ParallelRedoThreadMain()
     ResourceManagerStop();
     ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, role:%u, slotId:%u, retcode %u.", g_redoWorker->id,
                          g_redoWorker->role, g_redoWorker->slotId, retCode)));
-    LastMarkReached();
 
     pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[g_redoWorker->id].threadState),
                         PAGE_REDO_WORKER_EXIT);
