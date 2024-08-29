@@ -284,6 +284,11 @@ void HandlePageRedoInterrupts()
     }
 }
 
+static void LastMarkReachedBeforePageRedoExit(int code, Datum arg)
+{
+    LastMarkReached();
+}
+
 /* HandleRedoPageRepair
  *           if the page crc verify failed, call the function record the bad block.
  */
@@ -315,6 +320,7 @@ void PageRedoWorkerMain()
 
     SetupSignalHandlers();
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
+    on_shmem_exit(LastMarkReachedBeforePageRedoExit, 0);
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         (void)RegisterRedoPageRepairCallBack(HandleRedoPageRepair);
     }
@@ -330,7 +336,6 @@ void PageRedoWorkerMain()
     StandbyReleaseAllLocks();
     ResourceManagerStop();
     ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
-    LastMarkReached();
     pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[g_redoWorker->originId].threadState),
                         PAGE_REDO_WORKER_EXIT);
     proc_exit(0);
