@@ -187,7 +187,7 @@ void do_retention(void)
     backup_merged = false;
 
     if (current.media_type == MEDIA_TYPE_OSS) {
-        elog(ERROR, "Not supported when specifying OSS options");
+        elog(ERROR, "Not supported when specifying S3 options");
     }
 
     /* Get a complete list of backups. */

@@ -262,7 +262,7 @@ char* getBucketName()
 {
     char* bucket_name = instance_config.oss.access_bucket;
     if (bucket_name == NULL) {
-        elog(ERROR, "Required parameter not specified: OSS(--bucket_name)");
+        elog(ERROR, "Required parameter not specified: S3(--bucket_name)");
     }
     return bucket_name;
 }
@@ -282,7 +282,7 @@ Oss::Oss* getOssClient()
         const char* access_bucket = instance_config.oss.access_bucket;
         if (!endpoint || !access_key || !secret_key || !access_bucket) {
             elog(ERROR,
-                 "Required parameter not specified: OSS(--endpoint, --access_bucket, --access_id or --access_key)");
+                 "Required parameter not specified: S3(--endpoint, --access_bucket, --access_id or --access_key)");
         }
         oss_client = new Oss::Oss(endpoint, access_key, secret_key, region);
     }
