@@ -3893,15 +3893,16 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
 
                     rec->tupdesc = getCursorTupleDesc(rec->expr, false, false);
 
-                    nulls = (bool *)palloc(rec->tupdesc->natts * sizeof(bool));
-                    rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
-                    securec_check(rc, "\0", "\0");
-
-                    rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
-                    /* compile_tmp_cx will automatically free, there is no need to set free mark. */
-                    rec->freetupdesc = false;
-                    rec->freetup = false;
-                    pfree_ext(nulls);
+                    if (rec->tupdesc) {
+                        nulls = (bool*)palloc(rec->tupdesc->natts * sizeof(bool));
+                        rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
+                        securec_check(rc, "\0", "\0");
+                        rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
+                        /* compile_tmp_cx will automatically free, there is no need to set free mark. */
+                        rec->freetupdesc = false;
+                        rec->freetup = false;
+                        pfree_ext(nulls);
+                    }
 
                     if (target_cxt) {
                         temp = MemoryContextSwitchTo(temp);
