@@ -290,7 +290,7 @@ Datum get_bit_and_initval(Oid aggtranstype, int typmod)
 
 bool is_binary_type_in_dolphin(Oid typeOid)
 {
-    if (u_sess->attr.attr_sql.dolphin) {
+    if (!u_sess->attr.attr_sql.dolphin) {
         return false;
     }
     return (typeOid == get_typeoid(PG_CATALOG_NAMESPACE, "binary")) ||
