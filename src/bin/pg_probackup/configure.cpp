@@ -43,7 +43,7 @@ static void show_configure_json(ConfigOption *opt);
 #define OPTION_COMPRESS_GROUP    "Compression parameters"
 #define OPTION_REMOTE_GROUP        "Remote access parameters"
 #define OPTION_DSS_GROUP          "DSS connect parameters"
-#define OPTION_OSS_GROUP          "OSS connect parameters"
+#define OPTION_OSS_GROUP          "S3 connect parameters"
 
 /*
  * Short name should be non-printable ASCII character.
@@ -602,7 +602,7 @@ readInstanceConfigFile(const char *instance_name)
             'i', 235, "instance-id", &instance->dss.instance_id, SOURCE_CMD, (OptionSource)0,
             OPTION_DSS_GROUP, 0, option_get_value
         },
-        /* OSS options */
+        /* S3 options */
         {
             's', 236, "access-id",
             &instance_config.oss.access_id, SOURCE_CMD, (OptionSource)0,

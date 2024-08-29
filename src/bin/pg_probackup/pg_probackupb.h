@@ -306,7 +306,7 @@ struct pgBackup
 
     /* media type */
     MediaType media_type;
-    /* local or oss */
+    /* local or s3 */
     oss_status_t oss_status;
     /* sender context */
     SenderCxt* sender_cxt;
