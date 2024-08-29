@@ -6455,6 +6455,12 @@ void UpdateControlFile(void)
         }
 
         if (fd < 0) {
+            if (ENABLE_DSS && g_instance.status == FastShutdown && errno == ERR_DSS_CONNECT_FAILED
+                    && !g_instance.dms_cxt.SSReformInfo.in_reform) {
+                ereport(WARNING, (errmsg("could not open control file due to lost connection to DSS,"
+                    " and CM may not have ability to control exit process, so shutdown directly.")));
+                exit(0);
+            }
             ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %s", fname[i], TRANSLATE_ERRNO)));
         }
         
