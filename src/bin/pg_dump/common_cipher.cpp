@@ -1,5 +1,6 @@
 #include "pg_backup_cipher.h"
 #include "port.h"
+#include "libpq/pqcomm.h"
 
 #define MAX_PROVIDER_NAME_LEN 128
 #define MAX_ERRMSG_LEN 256
@@ -78,9 +79,12 @@ bool load_crypto_module_lib()
     errno_t rc = 0;
     char libpath[1024] = {0};
     char* gaussHome = gs_getenv_r("GAUSSHOME");
-
-    rc = snprintf_s(libpath, sizeof(libpath), sizeof(libpath) - 1, "%s/lib/postgresql/common_cipher.so",gaussHome);
-    securec_check_ss_c(rc, "", "");
+    if (check_client_env(gaussHome)){
+        rc = snprintf_s(libpath, sizeof(libpath), sizeof(libpath) - 1, "%s/lib/postgresql/common_cipher.so",gaussHome);
+        securec_check_ss_c(rc, "", "");
+    } else {
+        exit_horribly(NULL, "$GAUSSHOME set error or net set\n");
+    }
 
     libhandle = dlopen(libpath, RTLD_LAZY);
     if (libhandle == NULL) {
