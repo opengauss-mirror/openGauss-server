@@ -7750,6 +7750,28 @@ static bool CheckApplyDelayReady(void)
     return true;
 }
 
+static void KeepWalrecvAliveWhenRecoveryDelay()
+{
+    static TimestampTz lastTestWalrecvTime = (TimestampTz)0;
+
+    TimestampTz now = GetCurrentTimestamp();
+    if (!TimestampDifferenceExceeds(lastTestWalrecvTime, now, 1000)) {  // 1s
+        return;
+    }
+    lastTestWalrecvTime = now;
+    
+    if (WalRcvInProgress()) {
+        return;
+    }
+    
+    if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
+        return;
+    }
+    
+    /* wake up walrecv by pre-parse thread */
+    g_instance.csn_barrier_cxt.pre_parse_started = false;
+}
+
 /*
  * When recovery_min_apply_delay is set, we wait long enough to make sure
  * certain record types are applied at least that interval behind the master.
@@ -7774,6 +7796,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     if (!CheckApplyDelayReady()) {
         return false;
     }
+
+    KeepWalrecvAliveWhenRecoveryDelay();
 
     /*
      * Is it a COMMIT record?
@@ -7809,6 +7833,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
 
         /* might change the trigger file's location */
         RedoInterruptCallBack();
+
+        KeepWalrecvAliveWhenRecoveryDelay();
 
         if (CheckForFailoverTrigger() || CheckForSwitchoverTrigger() || CheckForStandbyTrigger()) {
             break;
