@@ -60,6 +60,7 @@ static const uint32 ADVANCE_GLOBALLSN_INTERVAL = 1; /* unit second */
 
 extern uint32 g_ondemandXLogParseMemFullValue;
 extern uint32 g_ondemandXLogParseMemCancelPauseVaule;
+extern uint32 g_ondemandXLogParseMemCancelPauseVaulePerPipeline;
 extern uint32 g_ondemandRealtimeBuildQueueFullValue;
 
 typedef bool (*OndemandCheckPauseCB)(void);
