@@ -266,6 +266,37 @@ void initialize_phase(AggState* aggstate, int newphase)
     aggstate->phase = &aggstate->phases[newphase];
 }
 
+Datum get_bit_and_initval(Oid aggtranstype, int typmod)
+{
+    Oid typinput;
+    Oid typioparam;
+    char* strInitVal = NULL;
+    Datum initVal;
+    errno_t rc;
+    getTypeInputInfo(aggtranstype, &typinput, &typioparam);
+    int initValLen = typmod - (int)VARHDRSZ;
+    int charsPerByte = 2;
+    size_t strLen = (initValLen + 1) * charsPerByte + 1; // +2 for "\x" and +1 for '\0'
+    strInitVal = (char*)palloc(strLen * sizeof(char));
+    strInitVal[0] = '\\';
+    strInitVal[1] = 'x';
+    strInitVal[strLen - 1] = '\0';
+    rc = memset_s(strInitVal + charsPerByte, initValLen * charsPerByte, 'F', initValLen * charsPerByte);
+    securec_check(rc, "\0", "\0");
+    initVal = OidInputFunctionCall(typinput, strInitVal, typioparam, -1);
+    pfree_ext(strInitVal);
+    return initVal;
+}
+
+bool is_binary_type_in_dolphin(Oid typeOid)
+{
+    if (!u_sess->attr.attr_sql.dolphin) {
+        return false;
+    }
+    return (typeOid == get_typeoid(PG_CATALOG_NAMESPACE, "binary")) ||
+           (typeOid == get_typeoid(PG_CATALOG_NAMESPACE, "varbinary"));
+}
+
 /*
  * Fetch a tuple from either the outer plan (for phase 0) or from the sorter
  * populated by the previous phase.  Copy it to the sorter for the next phase
@@ -463,8 +494,19 @@ static void advance_transition_function(
         int i;
 
         for (i = 1; i <= numTransInputs; i++) {
-            if (fcinfo->argnull[i])
+            Oid aggtranstype = peraggstate->aggref->aggtrantype;
+            ListCell* arg = list_head(peraggstate->aggref->args);
+            TargetEntry *tle = (TargetEntry *)lfirst(arg);
+            if (fcinfo->argnull[i] && strcmp(get_func_name(peraggstate->aggref->aggfnoid), "bit_and") == 0 &&
+                is_binary_type_in_dolphin(aggtranstype) &&
+                pergroupstate->transValueIsNull && IsA(tle->expr, Var)) {
+                Var* var = (Var*)tle->expr;
+                pergroupstate->transValue = get_bit_and_initval(aggtranstype, var->vartypmod);
+                pergroupstate->transValueIsNull = false;
                 return;
+            } else if (fcinfo->argnull[i]) {
+                return;
+            }
         }
         if (pergroupstate->noTransValue) {
             /*
