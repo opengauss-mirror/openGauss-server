@@ -7727,7 +7727,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     gsplsql_report_query(expr);
 #ifndef ENABLE_MULTIPLE_NODES
     ListCell* l = NULL;
-    bool isforbid = true;
+    bool isforbid = false;
     bool savedisAllowCommitRollback = false;
     bool needResetErrMsg = false;
     foreach (l, SPI_plan_get_plan_sources(expr->plan)) {
