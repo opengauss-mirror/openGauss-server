@@ -9289,18 +9289,27 @@ read_sql_construct6(int until,
                 break;
             }
             case T_DATUM:
-                idents = yylval.wdatum.idents;
-                if(prev_tok != '.' && list_length(idents) >= 3) {
-                    plpgsql_cast_reference_list(idents, &ds, false);
-                    ds_changed = true;
-                    break;
-                } else {
-                    tok = yylex();
-                    curloc = yylloc;
-                    plpgsql_push_back_token(tok);
-                    plpgsql_append_source_text(&ds, loc, curloc);
-                    ds_changed = true;
-                    break;
+                {
+                    idents = yylval.wdatum.idents;
+                    int dno = yylval.wdatum.datum->dno;
+                    PLpgSQL_datum *datum = (PLpgSQL_datum *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                    if (datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
+                        PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
+                        PLpgSQL_rec *rec = (PLpgSQL_rec *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[rec_field->recparentno];
+                        rec->field_need_check = lappend_int(rec->field_need_check, dno);
+                    }
+                    if(prev_tok != '.' && list_length(idents) >= 3) {
+                        plpgsql_cast_reference_list(idents, &ds, false);
+                        ds_changed = true;
+                        break;
+                    } else {
+                        tok = yylex();
+                        curloc = yylloc;
+                        plpgsql_push_back_token(tok);
+                        plpgsql_append_source_text(&ds, loc, curloc);
+                        ds_changed = true;
+                        break;
+                    }
                 }
             case T_WORD:
                 AddNamespaceIfPkgVar(yylval.word.ident, save_IdentifierLookup);

@@ -1193,6 +1193,25 @@ static void rowtype_column_len_check(Form_pg_attribute tattr, HeapTuple var_tup,
     }
 }
 
+static void check_recfield_valid(PLpgSQL_recfield *rec_field, TupleDesc tupdesc, char* recname)
+{
+    int natts = tupdesc->natts;
+    bool found = false;
+    if (natts == 0) {
+        return;
+    }
+    for (int fnum = 0; fnum < natts; fnum++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, fnum);
+        if (strcmp(NameStr(attr->attname), rec_field->fieldname) == 0) {
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
+                        errmsg("record \"%s\" has no field \"%s\"", recname, rec_field->fieldname)));
+}
+
 static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *datum, PLpgSQL_function *func)
 {
     bool *replaces = NULL;
@@ -1309,6 +1328,25 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
 
 }
 
+static void check_if_recfield_exist(PLpgSQL_execstate estate, int i, PLpgSQL_function* func)
+{
+    PLpgSQL_rec *rec = (PLpgSQL_rec *)estate.datums[i];
+    TupleDesc tupdesc = rec->tupdesc;
+    if (HeapTupleIsValid(rec->tup) && rec->field_need_check != NIL) {
+        ListCell *lc = NULL;
+        foreach (lc, rec->field_need_check) {
+            int dno = (int)lfirst_int(lc);
+            PLpgSQL_datum *datum = NULL;
+            if (func->ndatums > dno)
+                datum = (PLpgSQL_datum *)func->datums[dno];
+            if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
+                PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
+                check_recfield_valid(rec_field, tupdesc, rec->refname);
+            }
+        }
+    }
+}
+
 /* ----------
  * plpgsql_exec_autonm_function	Called by the call handler for
  *				autonomous function execution.
@@ -1354,8 +1392,10 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -1701,8 +1741,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -2325,12 +2367,14 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
             estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         } else {
             estate.datums[i] = func->datums[i];
-	    }
+	}
 
-	    if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+	if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -3062,6 +3106,7 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
             newm->tupdesc = NULL;
             newm->freetup = false;
             newm->freetupdesc = false;
+            newm->field_need_check = list_copy(((PLpgSQL_rec*)datum)->field_need_check);
 
             result = (PLpgSQL_datum*)newm;
         } break;
@@ -14431,8 +14476,10 @@ plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata)
         estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
