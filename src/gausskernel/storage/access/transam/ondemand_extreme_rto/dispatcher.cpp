@@ -445,7 +445,8 @@ static void SetOndemandXLogParseFlagValue(uint32 maxParseBufNum)
 {
     g_ondemandXLogParseMemFullValue = maxParseBufNum * ONDEMAND_FORCE_PRUNE_RATIO;
     g_ondemandXLogParseMemCancelPauseVaule = maxParseBufNum * ONDEMAND_DISTRIBUTE_CANCEL_RATIO;
-
+    g_ondemandXLogParseMemCancelPauseVaulePerPipeline =
+        (maxParseBufNum - g_ondemandXLogParseMemFullValue) / get_batch_redo_num();
     g_ondemandRealtimeBuildQueueFullValue = REALTIME_BUILD_RECORD_QUEUE_SIZE * ONDEMAND_FORCE_PRUNE_RATIO;
 }
 
