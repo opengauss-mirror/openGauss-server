@@ -15082,9 +15082,6 @@ Datum disable_conn(PG_FUNCTION_ARGS)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("Invalid null pointer attribute for disable_conn()")));
         }
-        if (!WalRcvInProgress()) {
-            RequestXLogStreamForBarrier();
-        }
         if (g_instance.pid_cxt.BarrierPreParsePID == 0) {
             g_instance.csn_barrier_cxt.startBarrierPreParse = false;   
         }
