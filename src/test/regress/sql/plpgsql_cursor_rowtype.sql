@@ -1082,6 +1082,19 @@ end;
 
 call pro_cs_trans_1();
 
+create table numeric_test(col1 numeric(10,3));
+insert into numeric_test values(100.1111); 
+
+declare
+   cursor cur1 is select * from numeric_test;
+   source cur1%rowtype := (100.2345);    
+begin
+   raise info 'col1 : %',source.col1;
+   insert into numeric_test values (source.col1);
+end;
+/
+drop table numeric_test;
+
 create or replace procedure pro_cs_trans_1() as  
 cursor c1 is select * from cs_trans_1 order by 1; 
 rec_1 cs_trans_1%rowtype;
