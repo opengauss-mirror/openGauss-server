@@ -83,7 +83,7 @@ do_add_instance(InstanceConfig *instance)
 		Oss::Oss* oss = getOssClient();
 		char* bucket_name = getBucketName();
 		if (!oss->BucketExists(bucket_name)) {
-            elog(ERROR, "Bucket '%s' does not exist on OSS, please create it first.", bucket_name);
+            elog(ERROR, "Bucket '%s' does not exist on S3, please create it first.", bucket_name);
         }
 	}
 
