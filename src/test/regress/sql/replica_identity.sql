@@ -42,6 +42,13 @@ SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
 SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident;
 
 ----
+-- Make sure can't alter replica identity index alown NULL
+----
+CREATE UNIQUE INDEX uni_idx_keya ON test_replica_identity (keya);
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX uni_idx_keya;
+ALTER TABLE test_replica_identity MODIFY keya NULL;  -- fail
+
+----
 -- Make sure non index cases work
 ----
 ALTER TABLE test_replica_identity REPLICA IDENTITY DEFAULT;
