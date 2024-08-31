@@ -1960,6 +1960,9 @@ static void get_set_pwd(void)
             pwdbuf[--i] = '\0';
 
         pwd1 = xstrdup(pwdbuf);
+        if (!CheckInitialPasswd(username, pwd1)) {
+            exit_nicely();
+        }
 
     } else if (pwprompt) {
         /* else get password from readline */
