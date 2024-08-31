@@ -2186,7 +2186,7 @@ explain (verbose on, costs off) select a, sum(c)  from vec_t1 group by grouping 
 ---------------------------------------------------
  Row Adapter
    Output: a, (sum(c))
-   ->  Vector Sonic Hash Aggregate
+   ->  Vector Hash Aggregate
          Output: a, sum(c)
          Group By Key: vec_t1.a
          Filter: (GROUPING(vec_t1.a) = 0)
