@@ -13806,6 +13806,7 @@ static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMO
     List* indexoidlist = NIL;
     ListCell* indexoidscan = NULL;
     ObjectAddress address;
+    Oid replidindex;
 
     /*
      * lookup the attribute
@@ -13832,6 +13833,9 @@ static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMO
      */
     /* Loop over all indexes on the relation */
     indexoidlist = RelationGetIndexList(rel);
+
+    /* replica identity index */
+    replidindex = rel->rd_replidindex;
 
     foreach (indexoidscan, indexoidlist) {
         Oid indexoid = lfirst_oid(indexoidscan);
@@ -13860,6 +13864,16 @@ static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMO
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                             errmsg("column \"%s\" is in a primary key", colName)));
+            }
+        }
+
+        /* REPLICA IDENTIFY can't drop not null */
+        if (replidindex == indexoid) {
+            for (i = 0; i < indnkeyatts; i++) {
+                if (indexStruct->indkey.values[i] == attnum)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("column \"%s\" used as replica identity can't drop not null", colName)));
             }
         }
 
