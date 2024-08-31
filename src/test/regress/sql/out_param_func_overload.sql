@@ -238,6 +238,31 @@ END;
 
 drop package pkg_type;
 
+CREATE OR REPLACE PACKAGE pac_test_1 AS
+FUNCTION f_test_1(para1 in out int, para2 in out int, para3 in out int) RETURN int;
+END pac_test_1;
+/
+
+CREATE OR REPLACE PACKAGE BODY pac_test_1 AS
+FUNCTION f_test_1(para1 in out int, para2 in out int, para3 in out int)
+RETURN int IS
+BEGIN
+RETURN 1;
+END;
+END pac_test_1;
+/
+
+create table t1(c1 int,c2 text) with (ORIENTATION=COLUMN);;
+insert into t1 select a,a || 'test' from generate_series(1,10) as a;
+
+create view v1 as select c1,c2,pac_test_1.f_test_1(c1,c1,c1) from t1;
+select * from v1;
+
+drop view v1;
+drop package pac_test_1;
+drop table t1;
+
+
 --clean
 reset behavior_compat_options;
 
