@@ -34,4 +34,7 @@
 
 GenericArgExtract ChooseExtractFun(Oid Dtype, Oid fn_oid = 0);
 
+extern void set_result_for_plpgsql_language_function_with_outparam(Datum *result, bool *isNull);
+
+
 #endif /* VECEXPRESSION_H_ */
