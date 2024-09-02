@@ -52,6 +52,8 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 
+static void ReleaseResource();
+
 /*
  * Wake up startup process to replay WAL, or to notice that
  * failover has been requested.
@@ -495,41 +497,55 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
 {
     char* type_string = NULL;
     type_string = SSGetLogHeaderTypeStr();
+    int ret = DMS_SUCCESS;
 
-    for (int ntries = 0;; ntries++) {
-        SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
-        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
-            g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
-            ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("%s Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
-                    "confirm ntries=%d.", type_string, SS_MY_INST_ID, primary_id, list_stable, ntries)));
-            return DMS_SUCCESS;
-        } else {
-            if (dms_reform_failed()) {
-                ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                        "control file indicates primary is %d, list_stable%llu; dms reform failed.",
-                        type_string, (int)primary_id, list_stable,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
-                        g_instance.dms_cxt.SSReformerControl.list_stable)));
-                return DMS_ERROR;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    PG_TRY();
+    {
+        for (int ntries = 0;; ntries++) {
+            SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
+            if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
+                g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
+                ereport(LOG, (errmodule(MOD_DMS),
+                    errmsg("%s Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
+                        "confirm ntries=%d.", type_string, SS_MY_INST_ID, primary_id, list_stable, ntries)));
+                ret = DMS_SUCCESS;
+                break;
+            } else {
+                if (dms_reform_failed()) {
+                    ereport(ERROR,
+                        (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
+                            "control file indicates primary is %d, list_stable%llu; dms reform failed.",
+                            type_string, (int)primary_id, list_stable,
+                            g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                            g_instance.dms_cxt.SSReformerControl.list_stable)));
+                    ret = DMS_ERROR;
+                    break;
+                }
+                if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
+                    ereport(ERROR,
+                        (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
+                            " control file indicates primary is %d, list_stable%llu; wait timeout.",
+                            type_string, (int)primary_id, list_stable,
+                            g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                            g_instance.dms_cxt.SSReformerControl.list_stable)));
+                    ret = DMS_ERROR;
+                    break;
+                }
             }
-            if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
-                ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                        " control file indicates primary is %d, list_stable%llu; wait timeout.",
-                        type_string, (int)primary_id, list_stable,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
-                        g_instance.dms_cxt.SSReformerControl.list_stable)));
-                return DMS_ERROR;
-            }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(REFORM_WAIT_TIME); /* wait 0.01 sec, then retry */
         }
-
-        CHECK_FOR_INTERRUPTS();
-        pg_usleep(REFORM_WAIT_TIME); /* wait 0.01 sec, then retry */
     }
-
-    return DMS_ERROR;
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        ReleaseResource();
+        ret = DMS_ERROR;
+    }
+    PG_END_TRY();
+    return ret;
 }
 
 /* called on both new primary and all standby nodes to refresh status */
