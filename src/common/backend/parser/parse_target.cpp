@@ -1288,7 +1288,13 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
     if (IsA(expr, Var) && ((Var*)expr)->vartype == RECORDOID) {
         tupleDesc = expandRecordVariable(pstate, (Var*)expr, 0);
     } else if (get_expr_result_type(expr, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE) {
-        tupleDesc = lookup_rowtype_tupdesc_copy(exprType(expr), exprTypmod(expr));
+        if (IsA(expr, RowExpr) && ((RowExpr*)expr)->row_typeid == RECORDOID) {
+            RowExpr* rowexpr = (RowExpr*)expr;
+            tupleDesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames);
+            BlessTupleDesc(tupleDesc);
+        } else {
+            tupleDesc = lookup_rowtype_tupdesc_copy(exprType(expr), exprTypmod(expr));
+        }
 	}
 
     if (unlikely(tupleDesc == NULL)) {
