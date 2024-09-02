@@ -18779,18 +18779,24 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 newStrategy);
             for (i = 1; i <= partkeynum; i++) {
-                if (partkeyexprIsNull) {
-                    if (i == partkeynum)
+                
+                if (!partkeyexprIsNull) {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST,", i);
+                } else if (partStrategy == PART_STRATEGY_HASH) {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int ASC NULLS LAST", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int NULLS LAST", i);
+                } else {
+                    if (i == partkeynum) 
                         appendPQExpBuffer(
                             partitionq, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                     else
                         appendPQExpBuffer(
-                            partitionq, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-                } else {
-                    if (i == partkeynum)
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
-                    else
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST, ", i);
+                            partitionq, "p.boundaries[%d]::%s NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                 }
             }
         } else {
