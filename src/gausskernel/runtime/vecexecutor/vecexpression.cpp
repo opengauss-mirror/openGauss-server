@@ -1800,6 +1800,14 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
                 if (!fenced) {
                     rowcinfo->isnull = false;
                     result = RowFunction(rowcinfo);
+
+                    if (fcinfo->is_plpgsql_language_function_with_outparam) {
+                        bool is_null = false;
+                        set_result_for_plpgsql_language_function_with_outparam(&result, &is_null);
+                        if (is_null == true) {
+                            rowcinfo->isnull = true;
+                        }
+                    }
                     if (rowcinfo->isnull == false) {
                         presult[i] = ScalarVector::DatumToScalarT<retType>(result, false);
                         SET_NOTNULL(presultFlag[i]);
@@ -2089,6 +2097,10 @@ static ScalarVector* ExecMakeVecFunctionResult(
     fcinfo->arg[fcinfo->nargs + 2] = econtext->m_fUseSelection ? PointerGetDatum(pSelection) : (Datum)0;
     fcinfo->nargs += EXTRA_NARGS;
     fcinfo->isnull = false;
+
+    if (IsA(fcache->xprstate.expr, FuncExpr) && is_function_with_plpgsql_language_and_outparam(fcache->func.fn_oid)) {
+        fcinfo->is_plpgsql_language_function_with_outparam = true;
+    }
 
     result = VecFunctionCallInvoke(fcinfo);
     fcinfo->nargs -= EXTRA_NARGS;

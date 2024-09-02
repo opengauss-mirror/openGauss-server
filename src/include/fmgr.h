@@ -170,6 +170,7 @@ typedef struct FunctionCallInfoData {
     UDFInfoType udfInfo;
     StartWithFuncEvalInfo  swinfo;
     CoercionContext ccontext;
+    bool is_plpgsql_language_function_with_outparam;
 
     FunctionCallInfoData()
     {
@@ -185,6 +186,7 @@ typedef struct FunctionCallInfoData {
         isnull = false;
         can_ignore = false;
         ccontext = COERCION_UNKNOWN;
+        is_plpgsql_language_function_with_outparam = false;
     }
 } FunctionCallInfoData;
 
