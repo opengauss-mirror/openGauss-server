@@ -2302,6 +2302,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
 static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
 {
     if (pblk != NULL) {
+        Assert(PhyBlockIsValid(*pblk));
         buf->extra->seg_fileno = pblk->relNode;
         buf->extra->seg_blockno = pblk->block;
     }
@@ -3295,6 +3296,14 @@ retry_new_buffer:
                      */
                     *found = FALSE;
                 }
+            }
+
+            /* set Physical segment file. */
+            if (ENABLE_DMS && pblk != NULL) {
+                Assert(PhyBlockIsValid(*pblk));
+                buf->extra->seg_fileno = pblk->relNode;
+                buf->extra->seg_blockno = pblk->block;
+                MarkReadPblk(buf->buf_id, pblk);
             }
 
             return buf;
