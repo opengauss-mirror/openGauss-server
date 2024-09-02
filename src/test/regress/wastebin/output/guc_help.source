@@ -53,7 +53,7 @@ Options for set and reload with -h host-auth-policy:
 
 Options for encrypt: 
   -M, --keymode=MODE     the cipher files will be applies in server, client or source,default value is server mode
-  -K PASSWORD            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters
+  -K PASSWORD            the plain password you want to encrypt, which length should between 8~15 and at least 3 different types of characters
   -U, --keyuser=USER     if appointed, the cipher files will name with the user name
   -R RANDFILEDIR         set the dir that put the rand file
   -C CIPHERFILEDIR       set the dir that put the cipher file
@@ -61,4 +61,4 @@ Options for encrypt:
 
 Options for generate: 
   -o PREFIX               the cipher files prefix. default value is obsserver
-  -S CIPHERKEY            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters
+  -S CIPHERKEY            the plain password you want to encrypt, which length should between 8~15 and at least 3 different types of characters
