@@ -1441,21 +1441,27 @@ static bool WaitPrimaryDoCheckpointAndAllPRTrackEmpty(XLogRecParseState *preStat
     } while (!pg_atomic_compare_exchange_u64(&g_dispatcher->syncRecordPtr, &syncRecordPtr, ddlSyncPtr));
 
     do {
-        if (pg_atomic_read_u32(&g_redoWorker->currentHtabBlockNum) == 0) {
-            // exit if hashmap manager already clear all hashmap
+        XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
+        if (XLByteLE(ddlSyncPtr, ckptRedoPtr) && (pg_atomic_read_u32(&g_redoWorker->currentHtabBlockNum) == 0)) {
+            /*
+             * exit if primary redo loc is bigger than ddl loc and hashmap manager already clear all hashmap,
+             * do not wait seg queue empty because seg queue support concurrent modify
+             */
             waitDone = true;
             break;
         } else if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER) {
-            // exit if primary node crash
-            waitDone = false;
+            // exit if primary node crash, need refresh ckptRedoPtr
+            ckptRedoPtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
+            if (XLByteLE(ddlSyncPtr, ckptRedoPtr)) {
+                waitDone = true;
+            } else {
+                waitDone = false;
+            }
             break;
         }
         PageManagerProcHashmapPrune();
         pg_usleep(100000L); /* 100 ms */
     } while (true);
-
-    // clear all blocks in hashmap
-    g_redoWorker->nextPrunePtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
 
     return waitDone;
 }
@@ -1519,7 +1525,6 @@ static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState)
 
 void PageManagerRedoParseState(XLogRecParseState *preState)
 {
-    PageManagerPruneIfRealtimeBuildFailover();
     if (XLByteLT(preState->blockparse.blockhead.end_ptr, g_redoWorker->nextPrunePtr)) {
         ReleaseBlockParseStateIfNotReplay(preState);
         return;
@@ -1532,6 +1537,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
         return;
     }
 
+    PageManagerPruneIfRealtimeBuildFailover();
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_MAIN_DATA_TYPE:
         case BLOCK_DATA_UNDO_TYPE:
@@ -4064,9 +4070,9 @@ static XLogRecPtr RequestPrimaryCkptAndUpdateCkptRedoPtr()
     return ckptRedoPtr;
 }
 
-const char *PauseStatus2Str(ondemand_recovery_pause_status_t pauseState)
+const char *PauseStatus2Str(ondemand_recovery_pause_status_t status)
 {
-    switch (pauseState) {
+    switch (status) {
         case NOT_PAUSE:
             return "not_pause";
             break;
@@ -4084,6 +4090,30 @@ const char *PauseStatus2Str(ondemand_recovery_pause_status_t pauseState)
             break;
         default:
             return "unkown";
+            break;
+    }
+}
+
+const char *RealtimeBuildStatus2Str(ondemand_realtime_build_status_t status)
+{
+    switch (status) {
+        case DISABLED:
+            return "DISABLED";
+            break;
+        case BUILD_NORMAL:
+            return "BUILD_NORMAL";
+            break;
+        case READY_TO_BUILD:
+            return "READY_TO_BUILD";
+            break;
+        case BUILD_TO_DISABLED:
+            return "BUILD_TO_DISABLED";
+            break;
+        case BUILD_TO_REDO:
+            return "BUILD_TO_REDO";
+            break;
+        default:
+            return "UNKOWN";
             break;
     }
 }
@@ -4107,6 +4137,13 @@ static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activa
             // other redo workers will proc pause state directly if primary node crash
             if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
                 (void)RequestPrimaryCkptAndUpdateCkptRedoPtr();
+            } else if (unlikely(onlyInRealtimeBuild && !SS_ONDEMAND_REALTIME_BUILD_NORMAL)) {
+                ereport(LOG, (errcode(ERRCODE_LOG),
+                    errmsg("[On-demand] Ondemand realtime build status change to %s, give up request primary node do "
+                        "checkpoint for pause type %s",
+                        RealtimeBuildStatus2Str(g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status),
+                        PauseStatus2Str(pauseState))));
+                break;
             }
 
             if (refreshPauseStatusFunc != NULL) {

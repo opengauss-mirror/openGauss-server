@@ -732,24 +732,12 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             /* In ondemand realtime build mode, loop back to retry. Otherwise, give up. */
             if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
                 xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
-                /* No valid record available from this source */
-                streamFailCount++;
-                if (streamFailCount > SS_WAIT_TIME) {
-                    XLogRecPtr primaryRedoLsn = InvalidXLogRecPtr;
-                    primaryRedoLsn = SSOndemandRequestPrimaryCkptAndGetRedoLsn();
-                    streamFailCount = 0;
-                    if (XLByteLT(t_thrd.xlog_cxt.ReadRecPtr, primaryRedoLsn)) {
-                        ereport(WARNING,
-                                (errmsg("read xlog record for %uth times at %X/%X", streamFailCount,
-                                (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32), (uint32)t_thrd.xlog_cxt.ReadRecPtr)));    
-                    }
-                }
-                retry = 0;  
-            } else if (SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN){
-                // directly exit when ondemand_realtime_build_status = BUILD_TO_DISABLED, do not send endMark to dispatcher.
-                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
                 retry = 0;
+            } else if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER) {
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
+            } else if (unlikely(SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN)) {
                 RedoInterruptCallBack();
+                retry = 0;
             }
 
             if (retry <= 3) {
