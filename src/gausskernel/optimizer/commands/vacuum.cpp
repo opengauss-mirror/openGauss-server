@@ -1100,7 +1100,12 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
      * working on a particular table at any time, and that each vacuum is
      * always an independent transaction.
      */
-    *oldestXmin = GetOldestXmin(rel);
+    if (u_sess->attr.attr_storage.enableVacuumExtremeXmin) {
+        *oldestXmin = GetVacuumExtremeOldestXmin();
+    } else {
+        *oldestXmin = GetOldestXmin(rel);
+    }
+
     if (IsCatalogRelation(rel) || RelationIsAccessibleInLogicalDecoding(rel)) {
         TransactionId CatalogXmin = GetReplicationSlotCatalogXmin();
         if (TransactionIdIsNormal(CatalogXmin) && TransactionIdPrecedes(CatalogXmin, *oldestXmin)) {
