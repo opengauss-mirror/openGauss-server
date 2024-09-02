@@ -2157,10 +2157,6 @@ ExtentLocation StorageConvert(SMgrRelation sRel, ForkNumber forknum, BlockNumber
     }
     if (v != NULL) {
         fd = v->mdfd_vfd;
-    } else {
-        RelFileNode node = sRel->smgr_rnode.node;
-        ereport(ERROR, (errmsg("could not find valid location: [%u/%u/%u/%u]", node.spcNode, node.dbNode, node.relNode,
-                               logicBlockNumber)));
     }
     return {.fd = fd,
             .relFileNode = sRel->smgr_rnode.node,
