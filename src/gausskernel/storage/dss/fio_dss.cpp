@@ -236,22 +236,20 @@ int dss_fopen_file(const char *name, const char* mode, FILE **stream)
     DSS_STREAM *dss_fstream = NULL;
 
     // check open mode
-    if (strstr(mode, "r+")) {
+    if (strchr(mode, '+')) {
         openmode |= O_RDWR;
     } else if (strchr(mode, 'r')) {
         openmode |= O_RDONLY;
+    } else if (strchr(mode, 'w') || strchr(mode, 'a')) {
+        openmode |= O_WRONLY;
     }
 
-    if (strstr(mode, "w+")) {
-        openmode |= O_RDWR | O_CREAT | O_TRUNC;
-    } else if (strchr(mode, 'w')) {
-        openmode |= O_WRONLY | O_CREAT | O_TRUNC;
+    if (strchr(mode, 'w')) {
+        openmode |= O_CREAT | O_TRUNC;
     }
 
-    if (strstr(mode, "a+")) {
-        openmode |= O_RDWR | O_CREAT | O_APPEND;
-    } else if (strchr(mode, 'a')) {
-        openmode |= O_WRONLY | O_CREAT | O_APPEND;
+    if (strchr(mode, 'a')) {
+        openmode |= O_CREAT | O_APPEND;
     }
 
     // get handle and fsize of open file
@@ -265,6 +263,9 @@ int dss_fopen_file(const char *name, const char* mode, FILE **stream)
 
     // init dss stream handle
     dss_fstream = (DSS_STREAM*)malloc(sizeof(DSS_STREAM));
+    if (dss_fstream == NULL) {
+        return GS_ERROR;
+    }
     dss_fstream->fsize = fsize;
     dss_fstream->errcode = 0;
     dss_fstream->handle = handle;
