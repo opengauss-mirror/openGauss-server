@@ -440,6 +440,10 @@ set role priv_c password 'event_123';
 --fail Non-administrator users do not have the permission
 drop event if exists priv_e_a;
 
+create event if not exists ee11 on schedule at now() + interval 1 second do update t1 set a = 0 where a = 1;
+select pg_sleep(2);
+select job_name, enable, failure_msg from pg_job where job_name = 'ee11';
+
 \c event_b
 grant usage on schema priv_a to priv_c;
 set role priv_c password 'event_123';
