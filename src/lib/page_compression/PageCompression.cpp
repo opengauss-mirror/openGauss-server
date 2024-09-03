@@ -301,11 +301,6 @@ size_t CalRealWriteSize(char *buffer)
         return BLCKSZ;
     }
 
-    /* check the assignment made during backup */
-    if (phdr->pd_lower & COMP_ASIGNMENT) {
-        return BLCKSZ;
-    }
-
     size_t compressedBufferSize;
     uint8 pagetype = PageGetPageLayoutVersion(buffer);
     if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
