@@ -15482,7 +15482,7 @@ callfunc_args:   func_arg_expr
 					n->end_time_expr = NULL;
 					n->interval_time = NULL;
 					n->complete_preserve = $12;
-					n->event_status = (EventStatus)$12;
+					n->event_status = (EventStatus)$13;
 					n->event_comment_str = $14;
 					n->event_query_str = $16;
 					$$ = (Node *)n;
