@@ -95,5 +95,24 @@ select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left j
 explain (costs off) select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
 select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
 
+-- test rows estimation of samplescan
+set enable_hashjoin to on;
+create table ss_rows_t1 (a int);
+create table ss_rows_t2 (b int);
+create table ss_rows_t3 (c int);
+insert into ss_rows_t1 values (generate_series(1, 20000));
+insert into ss_rows_t2 values (generate_series(1, 20000));
+insert into ss_rows_t3 values (generate_series(1, 20000));
+
+explain select a from  ss_rows_t1 tablesample system (99.999999);
+explain select b from  ss_rows_t2 tablesample bernoulli (99.999999);
+explain select c from  ss_rows_t3 tablesample hybrid (99.999999,99.999999);
+
+explain select a, b, c from
+    ss_rows_t1 tablesample system (99.999999) repeatable (325),
+    ss_rows_t2 tablesample bernoulli (99.999999) repeatable (0),
+    ss_rows_t3 tablesample hybrid (99.999999,99.999999) repeatable (510)
+    where a = b and b = c;
+
 reset search_path;
 drop schema  tablesample_schema4 cascade;

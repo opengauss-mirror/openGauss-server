@@ -6230,14 +6230,14 @@ void finalize_dml_cost(ModifyTable* plan)
  * Parameters:
  *	@in pctnode: node of percent args.
  *
- * Return: float4
+ * Return: float8
  */
-static float4 get_samplefract(Node* pctnode)
+static float8 get_samplefract(Node* pctnode)
 {
-    float4 samplefract;
+    float8 samplefract;
 
     if (IsA(pctnode, Const) && !((Const*)pctnode)->constisnull) {
-        samplefract = DatumGetFloat4(((Const*)pctnode)->constvalue);
+        samplefract = DatumGetFloat8(((Const*)pctnode)->constvalue);
         if (samplefract >= 0.0 && samplefract <= 100.0 && !isnan(samplefract)) {
             samplefract /= 100.0f;
         } else {
@@ -6265,7 +6265,7 @@ static float4 get_samplefract(Node* pctnode)
 void system_samplescangetsamplesize(PlannerInfo* root, RelOptInfo* baserel, List* paramexprs)
 {
     Node* pctnode = NULL;
-    float4 samplefract;
+    float8 samplefract;
 
     /* Try to extract an estimate for the sample percentage */
     pctnode = (Node*)linitial(paramexprs);
@@ -6292,7 +6292,7 @@ void system_samplescangetsamplesize(PlannerInfo* root, RelOptInfo* baserel, List
 void bernoulli_samplescangetsamplesize(PlannerInfo* root, RelOptInfo* baserel, List* paramexprs)
 {
     Node* pctnode = NULL;
-    float4 samplefract;
+    float8 samplefract;
 
     /* Try to extract an estimate for the sample percentage */
     pctnode = (Node*)linitial(paramexprs);
@@ -6325,7 +6325,7 @@ void hybrid_samplescangetsamplesize(PlannerInfo* root, RelOptInfo* baserel, List
     foreach (lc, paramexprs) {
         Node* paramnode = (Node*)lfirst(lc);
         Node* pctnode = estimate_expression_value(root, paramnode);
-        float4 samplefract = 0.0;
+        float8 samplefract = 0.0;
         if (likely(pctnode)) {
             samplefract = get_samplefract(pctnode);
         } else {
