@@ -102,7 +102,7 @@ install:
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
-	@if test -d contrib/timescaledb; then export CC=${GCC_PATH}/gcc/bin/gcc; export CXX=${GCC_PATH}/gcc/bin/g++; (cd contrib/timescaledb && ./run_to_build.sh && cd build && $(MAKE) $@); fi
+	@if test -d contrib/timescaledb; then (./contrib/timescaledb/run_to_build.sh && $(MAKE) -C contrib/timescaledb/build $@); fi
 	+@echo "openGauss installation complete."
 endif
 endif
