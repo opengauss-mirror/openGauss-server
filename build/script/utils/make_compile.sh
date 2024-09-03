@@ -247,11 +247,6 @@ function install_gaussdb()
             fi
         fi
     fi
-
-#tsdb prepare
-    if [ -d "$CODE_BASE/contrib/timescaledb" ]; then
-    cp $CODE_BASE/contrib/timescaledb/og-timescaledb1.7.4.sql ${GAUSSHOME}/share/postgresql/extension/timescaledb--1.7.4.sql
-    fi
     
     cd "$ROOT_DIR/contrib/pg_upgrade_support"
     make clean >> "$LOG_FILE" 2>&1
