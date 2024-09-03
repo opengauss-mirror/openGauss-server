@@ -43,6 +43,7 @@
 
 #include "dumpmem.h"
 #include "dumputils.h"
+#include "pg_backup_cipher.h"
 
 #include <ctype.h>
 #include <sys/time.h>
@@ -92,6 +93,9 @@ static bool is_encrypt = false;
 static bool is_pipeline = false;
 static int no_subscriptions = 0;
 static int no_publications = 0;
+static char* decrypt_mode = NULL;
+static char* decrypt_salt = NULL;
+static char* module_params = NULL;
 
 typedef struct option optType;
 #ifdef GSDUMP_LLT
@@ -166,6 +170,9 @@ int main(int argc, char** argv)
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
         {"disable-progress", no_argument, NULL, 8},
 #endif
+        {"with-salt", required_argument, NULL, 9},
+        {"with-module-params", required_argument, NULL, 10},
+        {"with-decryption", required_argument, NULL, 11},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -263,10 +270,10 @@ int main(int argc, char** argv)
     init_audit(PROG_NAME, argc, argv);
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
-    if (is_encrypt) {
+    if (is_encrypt && module_params == NULL) {
         exit_horribly(NULL, "Encrypt mode is not supported yet.\n");
+        decryptfile = checkDecryptArchive(&inputFileSpec, (ArchiveFormat)opts->format, decrypt_key);
     }
-    decryptfile = checkDecryptArchive(&inputFileSpec, (ArchiveFormat)opts->format, decrypt_key);
 
     /* Take lock on the file itself on non-directory format and create a
      * lock file on the directory and take lock on that file
@@ -286,7 +293,22 @@ int main(int argc, char** argv)
         on_exit_nicely(catalog_unlock, NULL);
     }
 
-    AH = OpenArchive(inputFileSpec, (ArchiveFormat)opts->format);
+    if (module_params) {
+        CryptoModuleCheckParam cryptoModuleCheckParam;
+  
+        rc = memset_s(&cryptoModuleCheckParam, sizeof(CryptoModuleCheckParam), 0, sizeof(CryptoModuleCheckParam));
+        securec_check_c(rc, "\0", "\0");
+
+        cryptoModuleCheckParam.module_params = module_params;
+        cryptoModuleCheckParam.mode = decrypt_mode;
+        cryptoModuleCheckParam.key = decrypt_key;
+        cryptoModuleCheckParam.salt = decrypt_salt;
+        cryptoModuleCheckParam.genkey = false;
+
+        AH = OpenArchive(inputFileSpec, (ArchiveFormat)opts->format, &cryptoModuleCheckParam);
+    } else {
+        AH = OpenArchive(inputFileSpec, (ArchiveFormat)opts->format);
+    }
 
     /*
      * We don't have a connection yet but that doesn't matter. The connection
@@ -730,6 +752,21 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
                 opts->disable_progress = true;
                 break;
 #endif
+            case 9:
+                GS_FREE(decrypt_salt);
+                decrypt_salt = gs_strdup(optarg);
+                is_encrypt = true;
+                break;
+            case 10:
+                GS_FREE(module_params);
+                module_params = gs_strdup(optarg);
+                is_encrypt = true;
+                break;	
+            case 11:
+            GS_FREE(decrypt_mode);
+                decrypt_mode = gs_strdup(optarg);
+                is_encrypt = true;
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -808,6 +845,13 @@ void usage(const char* pchProgname)
     printf(_("  -W, --password=PASSWORD               the password of specified database user\n"));
     printf(_("  --role=ROLENAME                       do SET ROLE before restore\n"));
     printf(_("  --rolepassword=ROLEPASSWORD           the password for role\n"));
+    printf(_("  --with-decryption= type               common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"));
+    printf(_("  --with-key=KEY                        common cipher key is base64 encoded,max 44 bytes\n"));
+    printf(_("  --with-salt=RANDVALUES                 common cipher salt must be 16 bytes\n"));
+    printf(_("  --with-module-params=MODLUE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
+            "type:GDACCARD,JNTAKMS,SWXAKMS;MODULE_LIB_PATH:need include lib file absolute path;"
+            "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
+            "used by gs_dump, load device\n"));
 }
 
 /*

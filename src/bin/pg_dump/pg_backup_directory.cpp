@@ -35,10 +35,34 @@
 
 #include "compress_io.h"
 #include "dumpmem.h"
+#include "pg_backup_cipher.h"
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
 #endif
+
+typedef enum {
+    WRITE_CRYPTO_CACHE,
+    READ_CRYPTO_CACHE
+}cryptoCacheType;
+typedef struct {
+    int writeCacheLen;
+    char writeCache[MAX_WRITE_CACHE_LEN];
+}writeCryptoCache;
+
+typedef struct {
+    int readCacheLen;
+    int readPosition;
+    char readCache[MAX_CRYPTO_CACHE_LEN];
+}readCryptoCache;
+
+typedef struct {
+    cryptoCacheType	cacheType;
+    union {
+        writeCryptoCache wrCryptoCache;
+        readCryptoCache rCryptoCache;
+    }cryptoCache;
+}DFormatCryptoCache;
 
 typedef struct {
     /*
@@ -48,6 +72,7 @@ typedef struct {
     char* directory;
 
     cfp* dataFH; /* currently open data file */
+    DFormatCryptoCache* dataCryptoCache;
 
     cfp* blobsTocFH; /* file handle for blobs.toc */
 } lclContext;
@@ -82,6 +107,14 @@ static void _EndBlobs(ArchiveHandle* AH, TocEntry* te);
 static void _LoadBlobs(ArchiveHandle* AH, RestoreOptions* ropt);
 
 static char* prependDirectory(ArchiveHandle* AH, const char* relativeFilename);
+
+static void initCryptoCache(ArchiveMode archiveMode, DFormatCryptoCache** cryptoCache);
+static void releaseCryptoCache(DFormatCryptoCache* cryptoCache);
+static void resetCryptoCache(DFormatCryptoCache* cryptoCache);
+static void encryptAndFlushCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH);
+static void fillWriteCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, const void* buf, size_t len);
+static void fillReadCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH);
+static int readFromCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, void* buf, size_t len, bool *isempty);
 
 /*
  *	Init routine required by ALL formats. This is a global routine
@@ -156,6 +189,10 @@ void InitArchiveFmt_Directory(ArchiveHandle* AH)
 
         ctx->dataFH = tocFH;
 
+        if (AH->publicArc.encryptfile) {
+            initCryptoCache(archModeRead, &(ctx->dataCryptoCache));
+        }
+
         /*
          * The TOC of a directory format dump shares the format code of the
          * tar format.
@@ -164,6 +201,10 @@ void InitArchiveFmt_Directory(ArchiveHandle* AH)
         ReadHead(AH);
         AH->format = archDirectory;
         ReadToc(AH);
+
+        if (AH->publicArc.encryptfile) {
+            releaseCryptoCache(ctx->dataCryptoCache);
+        }
 
         /* Nothing else in the file, so close it again... */
         if (cfclose(tocFH) != 0)
@@ -299,6 +340,10 @@ static void _StartData(ArchiveHandle* AH, TocEntry* te)
     ctx->dataFH = cfopen_write(fname, PG_BINARY_W, AH->compression);
     if (ctx->dataFH == NULL)
         exit_horribly(modulename, "could not open output file \"%s\": %s\n", fname, strerror(errno));
+    
+    if (AH->publicArc.encryptfile) {
+        initCryptoCache(AH->mode, &(ctx->dataCryptoCache));
+    }
 }
 
 /*
@@ -317,7 +362,13 @@ static size_t _WriteData(ArchiveHandle* AH, const void* data, size_t dLen)
     if (dLen == 0)
         return 0;
 
-    return (size_t)cfwrite(data, (int)dLen, ctx->dataFH);
+    if (ctx->dataCryptoCache) {
+        fillWriteCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, data, dLen);
+    } else {
+        return (size_t)cfwrite(data, (int)dLen, ctx->dataFH);
+    }
+
+    return dLen;
 }
 
 /*
@@ -329,6 +380,11 @@ static size_t _WriteData(ArchiveHandle* AH, const void* data, size_t dLen)
 static void _EndData(ArchiveHandle* AH, TocEntry* te)
 {
     lclContext* ctx = (lclContext*)AH->formatData;
+
+    if (ctx->dataCryptoCache) {
+        encryptAndFlushCache(AH, ctx->dataCryptoCache, ctx->dataFH);
+        releaseCryptoCache(ctx->dataCryptoCache);
+    }
 
     /* Close the file */
     (void)cfclose(ctx->dataFH);
@@ -356,11 +412,24 @@ static void _PrintFileData(ArchiveHandle* AH, const char* filename, RestoreOptio
     buf = (char*)pg_malloc(ZLIB_OUT_SIZE);
     buflen = ZLIB_OUT_SIZE;
 
-    while ((cnt = cfread(buf, buflen, pstCfp)))
-        (void)ahwrite(buf, 1, cnt, AH);
+    if (AH->publicArc.encryptfile) {
+        DFormatCryptoCache* readCache = NULL;
+        bool isEmpty =false;
+        initCryptoCache(archModeRead, &readCache);
+        while ((cnt = readFromCryptoCache(AH, readCache, pstCfp, buf, buflen, &isEmpty))) {
+            (void)ahwrite(buf, 1, cnt, AH);
+        }
+
+        releaseCryptoCache(readCache);
+    } else {
+        while ((cnt = cfread(buf, buflen, pstCfp))) {
+            (void)ahwrite(buf, 1, cnt, AH);
+        }
+    }
 
     free(buf);
     buf = NULL;
+
     if (cfclose(pstCfp) != 0)
         exit_horribly(modulename, "could not close data file: %s\n", strerror(errno));
 }
@@ -436,8 +505,13 @@ static int _WriteByte(ArchiveHandle* AH, const int i)
     unsigned char c = (unsigned char)i;
     lclContext* ctx = (lclContext*)AH->formatData;
 
-    if (cfwrite(&c, 1, ctx->dataFH) != 1)
-        exit_horribly(modulename, "could not write byte\n");
+    if (ctx->dataCryptoCache) {
+        fillWriteCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, &c, 1);
+    } else {
+        if (cfwrite(&c, 1, ctx->dataFH) != 1) {
+            exit_horribly(modulename, "could not write byte\n");
+        }
+    }
 
     return 1;
 }
@@ -453,7 +527,15 @@ static int _ReadByte(ArchiveHandle* AH)
     lclContext* ctx = (lclContext*)AH->formatData;
     int res;
 
-    res = cfgetc(ctx->dataFH);
+    if (ctx->dataCryptoCache) {
+        bool isEmpty = false;
+        unsigned char c;
+        readFromCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, &c, 1, &isEmpty);
+        res = c;
+    } else {
+        res = cfgetc(ctx->dataFH);
+    }
+
     if (res == EOF)
         exit_horribly(modulename, "unexpected end of file\n");
 
@@ -467,13 +549,22 @@ static int _ReadByte(ArchiveHandle* AH)
 static size_t _WriteBuf(ArchiveHandle* AH, const void* buf, size_t len)
 {
     lclContext* ctx = (lclContext*)AH->formatData;
-    size_t res;
 
-    res = cfwrite(buf, len, ctx->dataFH);
-    if (res != len)
-        exit_horribly(modulename, "could not write to output file: %s\n", strerror(errno));
+    if (ctx->dataCryptoCache) {
+        fillWriteCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, buf, len);
+        return len;
+    } else {
+        size_t res;
 
-    return res;
+        res = cfwrite(buf, len, ctx->dataFH);
+        if (res != len) {
+            exit_horribly(modulename, "could not write to output file:%s\n", strerror(errno));
+        }
+
+        return res;
+    }
+
+    return 0;
 }
 
 /*
@@ -486,7 +577,12 @@ static size_t _ReadBuf(ArchiveHandle* AH, void* buf, size_t len)
     lclContext* ctx = (lclContext*)AH->formatData;
     size_t res;
 
-    res = cfread(buf, len, ctx->dataFH);
+    if (ctx->dataCryptoCache) {
+        bool isEmpty = false;
+        res = readFromCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, buf, len, &isEmpty);
+    } else {
+        res = cfread(buf, len, ctx->dataFH);
+    }
 
     return res;
 }
@@ -517,6 +613,10 @@ static void _CloseArchive(ArchiveHandle* AH)
             exit_horribly(modulename, "could not open output file \"%s\": %s\n", fname, strerror(errno));
         ctx->dataFH = tocFH;
 
+        if (AH->publicArc.encryptfile) {
+            initCryptoCache(archModeWrite, &(ctx->dataCryptoCache));
+        }
+
         /*
          * Write 'tar' in the format field of the toc.dat file. The directory
          * is compatible with 'tar', so there's no point having a different
@@ -526,6 +626,12 @@ static void _CloseArchive(ArchiveHandle* AH)
         WriteHead(AH);
         AH->format = archDirectory;
         WriteToc(AH);
+
+        if (AH->publicArc.encryptfile) {
+            encryptAndFlushCache(AH, ctx->dataCryptoCache, tocFH);
+            releaseCryptoCache(ctx->dataCryptoCache);
+        }
+
         if (cfclose(tocFH) != 0)
             exit_horribly(modulename, "could not close TOC file: %s\n", strerror(errno));
         WriteDataChunks(AH);
@@ -575,6 +681,10 @@ static void _StartBlob(ArchiveHandle* AH, TocEntry* te, Oid oid)
 
     if (ctx->dataFH == NULL)
         exit_horribly(modulename, "could not open output file \"%s\": %s\n", fname, strerror(errno));
+
+    if (AH->publicArc.encryptfile) {
+        initCryptoCache(AH->mode, &(ctx->dataCryptoCache));
+    }
 }
 
 /*
@@ -587,6 +697,11 @@ static void _EndBlob(ArchiveHandle* AH, TocEntry* te, Oid oid)
     lclContext* ctx = (lclContext*)AH->formatData;
     char buf[50] = {0};
     int len;
+
+    if (ctx->dataCryptoCache) {
+        encryptAndFlushCache(AH, ctx->dataCryptoCache, ctx->dataFH);
+        releaseCryptoCache(ctx->dataCryptoCache);
+    }
 
     /* Close the BLOB data file itself */
     (void)cfclose(ctx->dataFH);
@@ -639,4 +754,154 @@ static char* prependDirectory(ArchiveHandle* AH, const char* relativeFilename)
     buf[MAXPGPATH - 1] = '\0';
 
     return buf;
+}
+
+static void initCryptoCache(ArchiveMode archiveMode, DFormatCryptoCache** cryptoCache)
+{
+
+    errno_t rc = 0;
+    *cryptoCache = (DFormatCryptoCache*)pg_malloc(sizeof(DFormatCryptoCache));
+
+    if (archiveMode == archModeWrite) {
+        (*cryptoCache)->cacheType = WRITE_CRYPTO_CACHE;
+        (*cryptoCache)->cryptoCache.wrCryptoCache.writeCacheLen = 0;
+        rc = memset_s((*cryptoCache)->cryptoCache.wrCryptoCache.writeCache, MAX_WRITE_CACHE_LEN, 0, MAX_WRITE_CACHE_LEN);
+        securec_check_c(rc, "\0", "\0");
+    } else {
+        (*cryptoCache)->cacheType = READ_CRYPTO_CACHE;
+        (*cryptoCache)->cryptoCache.rCryptoCache.readCacheLen = 0;
+        (*cryptoCache)->cryptoCache.rCryptoCache.readPosition = 0;
+        rc = memset_s((*cryptoCache)->cryptoCache.rCryptoCache.readCache, MAX_CRYPTO_CACHE_LEN, 0, MAX_CRYPTO_CACHE_LEN);
+        securec_check_c(rc, "\0", "\0");
+    }
+}
+
+static void releaseCryptoCache(DFormatCryptoCache* cryptoCache)
+{
+    resetCryptoCache(cryptoCache);
+    GS_FREE(cryptoCache);
+}
+
+static void resetCryptoCache(DFormatCryptoCache* cryptoCache)
+{
+    errno_t rc = 0;
+
+    if (cryptoCache->cacheType == WRITE_CRYPTO_CACHE) {
+        cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen = 0;
+        rc = memset_s(cryptoCache->cryptoCache.wrCryptoCache.writeCache, MAX_WRITE_CACHE_LEN, 0, MAX_WRITE_CACHE_LEN);
+        securec_check_c(rc, "\0", "\0");
+    } else {
+        cryptoCache->cacheType = READ_CRYPTO_CACHE;
+        cryptoCache->cryptoCache.rCryptoCache.readCacheLen = 0;
+        cryptoCache->cryptoCache.rCryptoCache.readPosition = 0;
+        rc = memset_s(cryptoCache->cryptoCache.rCryptoCache.readCache, MAX_CRYPTO_CACHE_LEN, 0, MAX_CRYPTO_CACHE_LEN);
+        securec_check_c(rc, "\0", "\0");
+    }
+}
+
+static void encryptAndFlushCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH)
+{
+    char flushData[MAX_CRYPTO_CACHE_LEN] = {0};
+    int flushLen = MAX_CRYPTO_CACHE_LEN;
+    int hmacLen = 0;
+
+    /*计算明文hmac，填充到密文头*/
+    cryptoHmac(AH, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData, &hmacLen);
+
+    /*去掉填充hmac的长度作为输入*/
+    flushLen = MAX_CRYPTO_CACHE_LEN - hmacLen;
+
+    symmEncDec(AH, true, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData + hmacLen, &flushLen);
+
+    /*输出密文长度再加上hmac的长度作为最终刷盘长度*/
+    flushLen += hmacLen;
+
+    cfwrite(flushData, flushLen, FH);
+}
+
+static void fillWriteCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, const void* buf, size_t len)
+{
+    errno_t rc = 0;
+    /*缓存空间不足，则加密刷盘，清空缓存*/
+    if (cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen + len > MAX_WRITE_CACHE_LEN) {
+        encryptAndFlushCache(AH, cryptoCache, FH);
+        resetCryptoCache(cryptoCache);
+    }
+
+    rc = memcpy_s(cryptoCache->cryptoCache.wrCryptoCache.writeCache + cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, MAX_WRITE_CACHE_LEN - cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, (char*)buf, len);
+    securec_check_c(rc, "\0", "\0");
+    cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen += len;
+
+}
+
+static void fillReadCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH)
+{
+    char encData[MAX_CRYPTO_CACHE_LEN] = {0};
+    int encLen = 0;
+
+    /*先读取文件密文，然后解密写入缓存*/
+    encLen = cfread(encData, MAX_CRYPTO_CACHE_LEN, FH);
+
+    if (encLen >= (CRYPTO_BLOCK_SIZE + CRYPTO_HMAC_SIZE)) {
+        char hmac[CRYPTO_HMAC_SIZE + 1] = {0};
+        int hmacLen = 0;
+
+        cryptoCache->cryptoCache.rCryptoCache.readCacheLen = encLen - CRYPTO_HMAC_SIZE;
+        symmEncDec(AH, false, encData + CRYPTO_HMAC_SIZE, encLen - CRYPTO_HMAC_SIZE, cryptoCache->cryptoCache.rCryptoCache.readCache, &(cryptoCache->cryptoCache.rCryptoCache.readCacheLen));
+
+        /*对明文做hmac进行校验*/
+        cryptoHmac(AH, cryptoCache->cryptoCache.rCryptoCache.readCache, cryptoCache->cryptoCache.rCryptoCache.readCacheLen, hmac, &hmacLen);
+        
+        if (hmacLen != CRYPTO_HMAC_SIZE || strncmp(hmac, encData, CRYPTO_HMAC_SIZE) != 0) {
+            exit_horribly(modulename, "hmac verify failed\n");
+        }
+    } else if (encLen > 0) {
+        exit_horribly(modulename, "read encrypted data error\n");
+    }
+
+}
+
+static int readFromCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, void* buf, size_t len, bool *isempty)
+{
+    errno_t rc = 0;
+
+    if (len == 0) {
+        return 0;
+    }
+
+    /*如果缓存数据足够，则直接copy给返回*/
+    if (cryptoCache->cryptoCache.rCryptoCache.readCacheLen >= (int)len) {
+        rc = memcpy_s((unsigned char*)buf, len, cryptoCache->cryptoCache.rCryptoCache.readCache + cryptoCache->cryptoCache.rCryptoCache.readPosition, len);
+        securec_check_c(rc, "\0", "\0");
+        cryptoCache->cryptoCache.rCryptoCache.readPosition += len;
+        cryptoCache->cryptoCache.rCryptoCache.readCacheLen -= len;
+
+        return len;
+    } else {
+        /*如果缓存数据不够，则先将当前缓存的数据copy，清空缓存，再去读文件解密写缓存，再从缓存copy剩下需要的数据长度*/
+        int realLen = 0;
+        int needLen = len;
+        int nextGetLen = 0;
+        bool tmpEmpty = false;
+
+        rc = memcpy_s((char*)buf, len, cryptoCache->cryptoCache.rCryptoCache.readCache + cryptoCache->cryptoCache.rCryptoCache.readPosition, cryptoCache->cryptoCache.rCryptoCache.readCacheLen);
+        securec_check_c(rc, "\0", "\0");
+        realLen += cryptoCache->cryptoCache.rCryptoCache.readCacheLen;
+        needLen -= cryptoCache->cryptoCache.rCryptoCache.readCacheLen;
+
+        resetCryptoCache(cryptoCache);
+        fillReadCryptoCache(AH, cryptoCache, FH);
+
+        /*文件已读完*/
+        if (cryptoCache->cryptoCache.rCryptoCache.readCacheLen == 0) {
+            *isempty = true;
+            return realLen;
+        }
+
+        nextGetLen = readFromCryptoCache(AH, cryptoCache, FH, ((char*)buf + realLen), (size_t)needLen, &tmpEmpty);
+        if (nextGetLen == needLen || tmpEmpty == true) 
+            return nextGetLen + realLen;
+    }
+
+    return 0;
 }
