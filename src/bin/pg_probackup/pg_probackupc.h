@@ -88,6 +88,7 @@ extern char* encrypt_salt;
 extern char* encrypt_dev_params;
 extern void* crypto_module_session;
 extern void* crypto_module_keyctx;
+extern void* crypto_hmac_keyctx;
 
 extern bool  do_enc;
 extern bool  enc_flag;
