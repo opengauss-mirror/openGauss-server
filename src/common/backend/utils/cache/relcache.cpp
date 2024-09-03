@@ -5031,48 +5031,66 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
          * index, pg_class.relfilenode doesn't change; instead we have to send the
          * update to the relation mapper.
          */
-        if (RelationIsMapped(relation))
+        if (RelationIsMapped(relation)) {
+            /* This case is only supported for indexes */
+            Assert(relation->rd_rel->relkind == RELKIND_INDEX);
+
+            /* Since we're not updating pg_class, these had better not change */
+            Assert(classform->relfrozenxid == freezeXid);
+
+            /*
+             * In some code paths it's possible that the tuple update we'd
+             * otherwise do here is the only thing that would assign an XID for
+             * the current transaction.  However, we must have an XID to delete
+             * files, so make sure one is assigned.
+             */
+            (void) GetCurrentTransactionId();
+
+            /* Do the deed */ 
             RelationMapUpdateMap(RelationGetRelid(relation), newrelfilenode, relation->rd_rel->relisshared, false);
-        else
+
+            /* Since we're not updating pg_class, must trigger inval manually */
+            CacheInvalidateRelcache(relation);
+        } else {
             classform->relfilenode = newrelfilenode;
 
-        /* These changes are safe even for a mapped relation */
-        if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
-            classform->relpages = 0; /* it's empty until further notice */
-            classform->reltuples = 0;
-            classform->relallvisible = 0;
-        }
-        /* set classform's relfrozenxid and relfrozenxid64 */
-        classform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
+            /* These changes are safe even for a mapped relation */
+            if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
+                classform->relpages = 0; /* it's empty until further notice */
+                classform->reltuples = 0;
+                classform->relallvisible = 0;
+            }
+            /* set classform's relfrozenxid and relfrozenxid64 */
+            classform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-        securec_check(rc, "\0", "\0");
+            rc = memset_s(values, sizeof(values), 0, sizeof(values));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+            securec_check(rc, "\0", "\0");
 
-        replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
-        values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+            replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
+            values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
 
 #ifndef ENABLE_MULTIPLE_NODES
-        replaces[Anum_pg_class_relminmxid - 1] = true;
-        values[Anum_pg_class_relminmxid - 1] = TransactionIdGetDatum(minmulti);
+            replaces[Anum_pg_class_relminmxid - 1] = true;
+            values[Anum_pg_class_relminmxid - 1] = TransactionIdGetDatum(minmulti);
 #endif
 
-        nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
+            nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
 
-        simple_heap_update(pg_class, &nctup->t_self, nctup);
-        CatalogUpdateIndexes(pg_class, nctup);
-
-        heap_freetuple_ext(nctup);
+            simple_heap_update(pg_class, &nctup->t_self, nctup);
+            CatalogUpdateIndexes(pg_class, nctup);
+            heap_freetuple_ext(nctup);
+        }
         heap_freetuple_ext(tuple);
         heap_close(pg_class, RowExclusiveLock);
     }
 
     /*
-     * Make the pg_class row change visible, as well as the relation map
-     * change if any.  This will cause the relcache entry to get updated, too.
+     * Make the pg_class row change or relation map change visible.
+     * This will cause the relcache entry to get updated, too.
      */
     CommandCounterIncrement();
 
