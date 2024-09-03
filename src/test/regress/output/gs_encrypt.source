@@ -36,9 +36,9 @@
 --?.*
 \! @abs_bindir@/gs_encrypt -B MTIzNDU2Nzg5MGFiY2RlZg== -v 0123456789abcdef plaintext 
 Invalid password,it must contain at least three kinds of characters
-gs_encrypt: The input key must be 8~16 bytes and contain at least three kinds of characters!
+gs_encrypt: The input key must be 8~15 bytes and contain at least three kinds of characters!
 \! @abs_bindir@/gs_encrypt -B MTIzNDU2Nzg5MGFiY2RlZg== -D MTIzNDU2Nzg5MGFiY2RlZg== plaintext 
 Invalid password,it must contain at least three kinds of characters
-gs_encrypt: The input key must be 8~16 bytes and contain at least three kinds of characters!
+gs_encrypt: The input key must be 8~15 bytes and contain at least three kinds of characters!
 \! rm -f @abs_bindir@/tde.key.cipher
 \! rm -f @abs_bindir@/tde.key.rand
