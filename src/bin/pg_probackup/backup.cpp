@@ -2915,6 +2915,7 @@ static void compress_encrypt_directory()
     int ret = 0;
     bool res = false;
     uint key_len = 0;
+    uint hmac_len = MAX_HMAC_LEN;
     uint enc_buffer_len = 0;
     uint out_buffer_len = 0;
     long int backup_tar_pos = 0;
@@ -2923,6 +2924,7 @@ static void compress_encrypt_directory()
     char sys_cmd[MAXPGPATH] = {0};
     char tar_file[MAXPGPATH] = {0};
     char enc_file[MAXPGPATH] = {0};
+    unsigned char hmac_buffer[MAX_HMAC_LEN + 1] = {0};
     unsigned char enc_buffer[MAX_ENCRYPT_LEN + 1] = {0};
     unsigned char out_buffer[MAX_ENCRYPT_LEN + 1] = {0};
     char errmsg[MAX_ERRMSG_LEN] = {0};
@@ -2969,23 +2971,41 @@ static void compress_encrypt_directory()
         ret = crypto_create_symm_key_use(crypto_module_session, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, (size_t*)&key_len);
         if (ret != 1) {
             crypto_get_errmsg_use(NULL, errmsg);
-            clearCrypto(crypto_module_session, crypto_module_keyctx);
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
             elog(ERROR, "crypto module gen key error, errmsg:%s\n", errmsg);
         }
     } else {
         key = SEC_decodeBase64(encrypt_key, &key_len);
         if (NULL == key) {
-            clearCrypto(crypto_module_session, crypto_module_keyctx);
-            elog(ERROR, "crypto module decode key error, please check --with-key.");
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, "crypto module decode key error, please check --with-key.\n");
         }
     }
+
+    encrypt_key = SEC_encodeBase64(key, (GS_UINT32)key_len);
+    if (NULL == encrypt_key) {
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+        elog(ERROR, "crypto module encode key error.\n");
+    }
+    
+    elog(INFO, "crypto module encrypt with key: %s , salt: %s \n", encrypt_key, encrypt_salt);
 
     ret = crypto_ctx_init_use(crypto_module_session, &crypto_module_keyctx, (ModuleSymmKeyAlgo)algo, 1, (unsigned char*)key, key_len);
 	if (ret != 1)
 	{
 		crypto_get_errmsg_use(NULL, errmsg);
-        clearCrypto(crypto_module_session, crypto_module_keyctx);
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+    }
+
+    algo = getHmacType((ModuleSymmKeyAlgo)algo);
+
+    ret = crypto_hmac_init_use(crypto_module_session, &crypto_hmac_keyctx, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, key_len);
+    if (ret != 1)
+	{
+		crypto_get_errmsg_use(NULL, errmsg);
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+		elog(ERROR, "crypto hmac keyctx init error, errmsg:%s\n", errmsg);
     }
 
     fseek(backup_tar_fd,0,SEEK_END);
@@ -3011,25 +3031,35 @@ static void compress_encrypt_directory()
         ret = memset_s(out_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
         securec_check(ret, "\0", "\0");
 
+        ret = memset_s(hmac_buffer, MAX_HMAC_LEN + 1, '\0', MAX_HMAC_LEN + 1);
+        securec_check(ret, "\0", "\0");
+
+        ret = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)enc_buffer, enc_buffer_len, hmac_buffer, (size_t*)&hmac_len);
+        if (ret != 1) {
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, ("failed to calculate hmac\n"));
+        }
+
         ret = crypto_encrypt_decrypt_use(crypto_module_keyctx, 1, (unsigned char*)enc_buffer, enc_buffer_len,
                            (unsigned char*)encrypt_salt, MAX_IV_LEN, out_buffer, (size_t*)&out_buffer_len, NULL);
         if (ret != 1) {
-            clearCrypto(crypto_module_session, crypto_module_keyctx);
-            elog(ERROR, ("failed to encrypt backup file"));
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, ("failed to encrypt backup file\n"));
         }
 
         fwrite(out_buffer, 1, out_buffer_len, enc_backup_fd);
+        fwrite(hmac_buffer, 1, hmac_len, enc_backup_fd);
     }
 
     fclose(backup_tar_fd);
     fclose(enc_backup_fd);
-    clearCrypto(crypto_module_session, crypto_module_keyctx);
+    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
     rc = sprintf_s(sys_cmd, MAXPGPATH, "rm %s %s.tar -rf", current.root_dir, current.root_dir);
     securec_check_ss_c(rc, "\0", "\0");
 
     if (!is_valid_cmd(sys_cmd)) {
-        elog(ERROR, "cmd is rejected");
+        elog(ERROR, "cmd is rejected\n");
     }
     system(sys_cmd);
     enc_flag = true;
