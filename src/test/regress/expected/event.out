@@ -1015,6 +1015,19 @@ set role priv_c password 'event_123';
 --fail Non-administrator users do not have the permission
 drop event if exists priv_e_a;
 ERROR:  only event's owner have the permission to operate object "priv_e_a"
+create event if not exists ee11 on schedule at now() + interval 1 second do update t1 set a = 0 where a = 1;
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select job_name, enable, failure_msg from pg_job where job_name = 'ee11';
+ job_name | enable |                failure_msg                
+----------+--------+-------------------------------------------
+ ee11     | t      | relation "t1" does not exist on datanode1
+(1 row)
+
 \c event_b
 grant usage on schema priv_a to priv_c;
 set role priv_c password 'event_123';
