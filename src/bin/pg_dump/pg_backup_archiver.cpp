@@ -1733,7 +1733,9 @@ int ahwrite(const void* ptr, size_t size, size_t nmemb, ArchiveHandle* AH)
                     AH->publicArc.Key,
                     AH->publicArc.rand,
                     AH->publicArc.cryptoModlueCtx.key_ctx,
-                    crypto_encrypt_decrypt_use);
+                    crypto_encrypt_decrypt_use,
+                    AH->publicArc.cryptoModlueCtx.hmac_ctx,
+                    crypto_hmac_use);
                 if (!encrypt_result)
                     exit_horribly(modulename, "Encryption failed: %s\n", strerror(errno));
             } else {
@@ -3727,6 +3729,7 @@ void on_exit_close_archive(Archive* AHX)
 {
     shutdown_info.AHX = AHX;
     on_exit_nicely(archive_close_connection, &shutdown_info);
+    on_exit_nicely(releaseHmacCtx, AHX);
     on_exit_nicely(releaseCryptoCtx, AHX);
     on_exit_nicely(releaseCryptoSession, AHX);
     on_exit_nicely(unload_crypto_module, NULL);

@@ -54,7 +54,6 @@ typedef void (*crypto_ctx_clean_type)(void *ctx);
 typedef int (*crypto_digest_type)(void *sess, ModuleDigestAlgo algo, unsigned char * data, size_t data_size,unsigned char *result, size_t *result_size);
 typedef int (*crypto_hmac_init_type)(void *sess, void **ctx, ModuleSymmKeyAlgo algo, unsigned char *key_id, size_t key_id_size);
 typedef void (*crypto_hmac_clean_type)(void *ctx);
-typedef int (*crypto_hmac_type)(void *ctx, unsigned char * data, size_t data_size, unsigned char *result, size_t *result_size);
 typedef int (*crypto_gen_random_type)(void *sess, char *buffer, size_t size);
 typedef int (*crypto_deterministic_enc_dec_type)(void *sess, int enc, unsigned char *data, unsigned char *key_id,	 size_t key_id_size, size_t data_size, unsigned char *result, size_t *result_size);
 typedef int (*crypto_get_errmsg_type)(void *sess, char *errmsg);
@@ -73,7 +72,7 @@ crypto_encrypt_decrypt_type crypto_encrypt_decrypt_use = NULL;
 static crypto_digest_type crypto_digest_use = NULL;
 static crypto_hmac_init_type crypto_hmac_init_use = NULL;
 static crypto_hmac_clean_type crypto_hmac_clean_use = NULL;
-static crypto_hmac_type crypto_hmac_use = NULL;
+crypto_hmac_type crypto_hmac_use = NULL;
 static crypto_gen_random_type crypto_gen_random_use = NULL;
 static crypto_deterministic_enc_dec_type crypto_deterministic_enc_dec_use = NULL;
 static crypto_get_errmsg_type crypto_get_errmsg_use = NULL;
@@ -143,7 +142,7 @@ void unload_crypto_module(int code, void* args)
     }
 }
 
-static int transform_type(char* type)
+static ModuleSymmKeyAlgo transform_type(char* type)
 {
     if (strcmp(type, "AES128_CBC") == 0) {
         return MODULE_AES_128_CBC;
@@ -163,7 +162,7 @@ static int transform_type(char* type)
         return MODULE_SM4_CTR;
     }
 
-    return -1;
+    return MODULE_ALGO_MAX;
 
 }
 
@@ -251,6 +250,57 @@ void symmEncDec(DecryptInfo* pDecryptInfo, bool isEnc, char* indata, int inlen, 
     }
 }
 
+static ModuleSymmKeyAlgo getHmacType(ModuleSymmKeyAlgo symmAlgoType)
+{
+    if (symmAlgoType >= MODULE_AES_128_CBC && symmAlgoType <= MODULE_AES_256_GCM) {
+        return MODULE_HMAC_SHA256;
+    } else if (symmAlgoType == MODULE_SM4_CBC || symmAlgoType == MODULE_SM4_CTR){
+        return MODULE_HMAC_SM3;
+    }
+
+    return MODULE_ALGO_MAX;
+}
+
+void initHmacCtx(DecryptInfo* pDecryptInfo)
+{
+    int ret = 1;
+    char errmsg[MAX_ERRMSG_LEN] = {0};
+
+    ret = crypto_hmac_init_use(pDecryptInfo->moduleSessionCtx, &(pDecryptInfo->moduleHmacCtx), getHmacType(transform_type(pDecryptInfo->crypto_type)), pDecryptInfo->Key, pDecryptInfo->keyLen);
+    if (ret != 1) {
+        crypto_get_errmsg_use(NULL, errmsg);
+        crypto_module_sess_exit_use(pDecryptInfo->moduleSessionCtx);
+        fprintf(stderr, ("%s\n"), errmsg);
+        exit(1);
+    }
+
+}
+
+void releaseHmacCtx(int code, void* args)
+{
+    if (libhandle && ((DecryptInfo*)args)->moduleHmacCtx) {
+        crypto_hmac_clean_use(((DecryptInfo*)args)->moduleHmacCtx);
+        ((DecryptInfo*)args)->moduleHmacCtx = NULL;
+    }
+}
+
+void cryptoHmac(DecryptInfo* pDecryptInfo, char* indata, int inlen, char* outdata, int* outlen)
+{
+    int ret = 1;
+    char errmsg[MAX_ERRMSG_LEN] = {0};
+
+    ret = crypto_hmac_use(pDecryptInfo->moduleHmacCtx, (unsigned char*)indata, inlen, (unsigned char*)outdata, (size_t*)outlen);
+    if (ret != 1) {
+        crypto_get_errmsg_use(NULL, errmsg);
+        releaseHmacCtx(0, pDecryptInfo);
+        releaseCryptoCtx(0, pDecryptInfo);
+        releaseCryptoSession(0, pDecryptInfo);
+        unload_crypto_module(0, NULL);
+        fprintf(stderr, ("%s\n"), errmsg);
+        exit(1);
+    }
+}
+
 void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt)
 {
     errno_t rc = 0;
@@ -306,7 +356,9 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
     }
 
     initCryptoKeyCtx(pDecryptInfo);
+    initHmacCtx(pDecryptInfo);
 
     pDecryptInfo->encryptInclude = true;
     pDecryptInfo->clientSymmCryptoFunc = crypto_encrypt_decrypt_use;
+    pDecryptInfo->clientHmacFunc = crypto_hmac_use;
 }

@@ -65,6 +65,7 @@ typedef enum _teSection {
 typedef struct {
     void *moduleSession;
     void *key_ctx;
+    void *hmac_ctx;
 }CryptoModuleCtx;
 
 /*
