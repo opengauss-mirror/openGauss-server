@@ -80,6 +80,7 @@
 #include "openssl/rand.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
+#include "pg_backup_cipher.h"
 #ifdef HAVE_CE
 #include "client_logic_cache/types_to_oid.h"
 #include "client_logic_processor/values_processor.h"
@@ -93,7 +94,6 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "catalog/pg_constraint.h"
-
 #else
 
 typedef enum {
@@ -312,6 +312,9 @@ char* syslogpath = NULL;
 const char* encrypt_mode = NULL;
 const char* encrypt_key = NULL;
 extern const char* encrypt_salt;
+
+static const char* module_params = NULL;
+static bool gen_key = false;
 
 /* subquery used to convert user ID (eg, datdba) to user name */
 static const char* username_subquery;
@@ -671,7 +674,8 @@ int main(int argc, char** argv)
 #ifdef DUMPSYSLOG
         {"syslog", no_argument, &dump_syslog, 1},
 #endif
-        /* Database Security: Data importing/dumping support AES128. */
+        /* Database Security: enc mode , soft only AES128 is available,
+         * common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR. */
         {"with-encryption", required_argument, NULL, 6},
         {"with-key", required_argument, NULL, 7},
         {"rolepassword", required_argument, NULL, 9},
@@ -691,6 +695,8 @@ int main(int argc, char** argv)
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
         {"disable-progress", no_argument, NULL, 18},
 #endif
+        {"with-module-params", required_argument, NULL, 19},
+        {"gen-key", no_argument, NULL, 20},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -759,8 +765,8 @@ int main(int argc, char** argv)
     }
 
     if (!could_encrypt && is_encrypt) {
-        exit_horribly(NULL, "Encrypt mode is only supported for plain text, "
-            "You should assign -F p or -F plain.\n");
+        exit_horribly(NULL, "Encrypt mode is only supported for plain text and directory, "
+            "You should assign -F p/d or -F plain/directory.\n");
     }
 
     /* Custom and directory formats are compressed by default, others not */
@@ -840,32 +846,37 @@ int main(int argc, char** argv)
     /* Let the archiver know how noisy to be */
     fout->verbose = g_verbose;
 
-    if ((encrypt_mode != NULL) && (encrypt_key == NULL)) {
-        get_encrypt_key();
-    }
-    /* Database Security: Data importing/dumping support AES128. */
-    check_encrypt_parameters(fout, encrypt_mode, encrypt_key);
+    if (module_params != NULL) {
+        CryptoModuleParamsCheck((ArchiveHandle*)fout, module_params, encrypt_mode, encrypt_key, encrypt_salt, gen_key);
+    } else if (is_encrypt) {
 
-    if (true == fout->encryptfile) {
-        if (NULL == encrypt_salt) {
-            GS_UINT32 retval = 0;
-            GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
+        if ((encrypt_mode != NULL) && (encrypt_key == NULL)) {
+            get_encrypt_key();
+        }
+        /* Database Security: Data importing/dumping support AES128. */
+        check_encrypt_parameters(fout, encrypt_mode, encrypt_key);
 
-            /* get a random values as salt for encrypt */
-            retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
-            if (retval != 1) {
-                exit_horribly(NULL, "Generate random key failed\n");
+        if (true == fout->encryptfile) {
+            if (NULL == encrypt_salt) {
+                GS_UINT32 retval = 0;
+                GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
+
+                /* get a random values as salt for encrypt */
+                retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+                if (retval != 1) {
+                    exit_horribly(NULL, "Generate random key failed\n");
+                }
+
+                rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
+                securec_check_c(rc, "\0", "\0");
+                rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, init_rand, RANDOM_LEN);
+                securec_check_c(rc, "\0", "\0");
+            } else {
+                rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
+                securec_check_c(rc, "\0", "\0");
+                rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, encrypt_salt, RANDOM_LEN);
+                securec_check_c(rc, "\0", "\0");
             }
-
-            rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
-            securec_check_c(rc, "\0", "\0");
-            rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, init_rand, RANDOM_LEN);
-            securec_check_c(rc, "\0", "\0");
-        } else {
-            rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
-            securec_check_c(rc, "\0", "\0");
-            rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, encrypt_salt, RANDOM_LEN);
-            securec_check_c(rc, "\0", "\0");
         }
     }
 
@@ -1736,6 +1747,15 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 disable_progress = true;
                 break;
 #endif
+            case 19:
+                GS_FREE(module_params);
+                module_params = gs_strdup(optarg);
+                is_encrypt = true;
+                break;
+            case 20:
+                gen_key = true;
+                is_encrypt = true;
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -1933,9 +1953,15 @@ void help(const char* pchProgname)
              "                                              ALTER OWNER commands to set ownership\n"));
     printf(_("  --exclude-function                          do not dump function and procedure\n"));    
     /* Database Security: Data importing/dumping support AES128. */
-    printf(_("  --with-encryption=AES128                    dump data is encrypted using AES128\n"));
-    printf(_("  --with-key=KEY                              AES128 encryption key, must be 16 bytes in length\n"));
+    printf(_("  --with-encryption=AES128                    dump data is encrypted,soft only AES128 is available"
+            "common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"));
+    printf(_("  --with-key=KEY                              soft AES128 encryption key, must be 16 bytes in length,common cipher key is base64 encoded,max 44 bytes\n"));
     printf(_("  --with-salt=RANDVALUES                      used by gs_dumpall, pass rand value array\n"));
+    printf(_("  --with-module-params=MODLUE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
+            "type:GDACCARD,JNTAKMS,SWXAKMS;MODULE_LIB_PATH:need include lib file absolute path;"
+            "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
+            "used by gs_dump, load device\n"));
+    printf(_("  --gen-key                      if you have not key for using,you can set this option to generate key and encrypt dump data,store it to using again\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE "
              "and CREATE FOREIGN TABLE commands.\n"));
@@ -2121,8 +2147,10 @@ static ArchiveFormat parseArchiveFormat(ArchiveMode* mode)
         archiveFormat = archCustom;
     } else if (pg_strcasecmp(format, "d") == 0) {
         archiveFormat = archDirectory;
+        could_encrypt = true;
     } else if (pg_strcasecmp(format, "directory") == 0) {
         archiveFormat = archDirectory;
+        could_encrypt = true;
     } else if (pg_strcasecmp(format, "p") == 0) {
         archiveFormat = archNull;
         could_encrypt = true;

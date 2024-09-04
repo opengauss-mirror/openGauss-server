@@ -81,6 +81,19 @@ extern char *instance_name;
 extern bool specify_extdir;
 extern bool specify_tbsdir;
 
+extern bool gen_key;
+extern char* encrypt_mode ;
+extern char* encrypt_key ;
+extern char* encrypt_salt;
+extern char* encrypt_dev_params;
+extern void* crypto_module_session;
+extern void* crypto_module_keyctx;
+extern void* crypto_hmac_keyctx;
+
+extern bool  do_enc;
+extern bool  enc_flag;
+
+
 /* show options */
 extern ShowFormat show_format;
 
@@ -97,6 +110,9 @@ extern char** commands_args;
 /* in dir.c */
 /* exclude directory list for $PGDATA file listing */
 extern const char *pgdata_exclude_dir[];
+
+extern bool is_valid_cmd(char *cmd);
+extern void delete_backup_directory(char *instance_name);
 
 /* in backup.c */
 extern int do_backup(time_t start_time, pgSetBackupParams *set_backup_params,

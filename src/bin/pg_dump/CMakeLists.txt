@@ -21,6 +21,7 @@ set(TGT_dump_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_backup_tar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_backup_directory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compress_io.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_cipher.cpp
 )
 
 set(TGT_dumpall_SRC
@@ -47,6 +48,7 @@ set(TGT_restore_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_backup_tar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_backup_directory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compress_io.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_cipher.cpp
 )
 set(TGT_dump_INC
     ${PROJECT_SRC_DIR}/common/port

@@ -40,6 +40,9 @@
 #define oidge(x, y) ((x) >= (y))
 #define oidzero(x) ((x) == 0)
 
+#define CRYPTO_MODULE_PARAMS_MAX_LEN 1024
+#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 16
+
 enum trivalue { TRI_DEFAULT, TRI_NO, TRI_YES };
 
 typedef enum _archiveFormat {
@@ -58,6 +61,12 @@ typedef enum _teSection {
     SECTION_DATA,     /* TABLE DATA, BLOBS, BLOB COMMENTS */
     SECTION_POST_DATA /* stuff to be processed after data */
 } teSection;
+
+typedef struct {
+    void *moduleSession;
+    void *key_ctx;
+    void *hmac_ctx;
+}CryptoModuleCtx;
 
 /*
  *	We may want to have some more user-readable data, but in the mean
@@ -83,9 +92,14 @@ struct Archive {
     /* Database Security: Data importing/dumping support AES128. */
     bool encryptfile;
     unsigned char Key[KEY_MAX_LEN];
+    int keylen;
 
     /* Data importing/dumping support AES128 through OPENSSL */
     unsigned char rand[RANDOM_LEN + 1];
+
+    char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
+    char crypto_modlue_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
+    CryptoModuleCtx cryptoModlueCtx;
 
     /* get hash bucket info. */
     bool getHashbucketInfo;
@@ -153,6 +167,14 @@ typedef struct _restoreOptions {
     bool* idWanted; /* array showing which dump IDs to emit */
 } RestoreOptions;
 
+typedef struct {
+    char* module_params;
+    char* mode;
+    char* key;
+    char* salt;
+    bool genkey;
+}CryptoModuleCheckParam;
+
 /*
  * Main archiver interface.
  */
@@ -186,7 +208,7 @@ extern void SetArchiveRestoreOptions(Archive* AH, RestoreOptions* ropt);
 extern void RestoreArchive(Archive* AH);
 
 /* Open an existing archive */
-extern Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt);
+extern Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt, CryptoModuleCheckParam* cryptoModuleCheckParam = NULL);
 
 /* Create a new archive */
 extern Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
