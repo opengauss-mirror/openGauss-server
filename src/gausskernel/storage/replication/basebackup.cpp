@@ -1174,8 +1174,13 @@ int64 sendTablespace(const char *path, bool sizeonly)
         /* If the tablespace went away while scanning, it's no error. */
         return 0;
     }
-    if (!sizeonly)
-        _tarWriteHeader(relativedirname, NULL, &statbuf);
+    if (!sizeonly) {
+        if (ENABLE_DSS) {
+            _tarWriteHeader(pathbuf, NULL, &statbuf);
+        } else {
+            _tarWriteHeader(relativedirname, NULL, &statbuf);
+        }
+    }
     size = BUILD_PATH_LEN; /* Size of the header just added */
 
     /* Send all the files in the tablespace version directory */
@@ -1297,10 +1302,15 @@ bool IsSkipPath(const char * pathName)
 
     if (t_thrd.walsender_cxt.is_obsmode == true && strcmp(pathName, "./pg_replslot") == 0)
         return true;
-
     /* skip pg_control in dss */
-    if (ENABLE_DSS && strcmp(pathName, "+data/pg_control") == 0) {
-        return true;
+    if (ENABLE_DSS) {
+        char full_path[MAXPGPATH];
+        int rc = snprintf_s(full_path, sizeof(full_path), sizeof(full_path) - 1, "%s/pg_control", 
+                            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
+        securec_check_ss(rc, "\0", "\0");
+        if (strcmp(pathName, full_path) == 0) {
+            return true;
+        }
     }
 
     return false;
@@ -1397,7 +1407,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
     struct stat statbuf;
     int64 size = 0;
     int rc = 0;
-
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
     DIR *dir = AllocateDir(path);
     while ((de = ReadDir(dir, path)) != NULL) {
         /* Skip special stuff */
@@ -1533,9 +1543,11 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
          */
 
         /* when ss dorado replication enabled, "+data/pg_replication/" also need to copy when backup */
-        int pathNameLen = strlen("+data/pg_xlog");
-        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0 ||
-            strcmp(pathbuf, "+data/pg_replication") == 0 || strcmp(pathbuf, "+data/pg_tblspc") == 0) {
+        if (strcmp(pathbuf, "./pg_xlog") == 0 || 
+            (ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 && 
+            strstr(pathbuf + strlen(dssdir), "/pg_xlog") != NULL) ||
+            (ENABLE_DSS && strcmp(pathbuf, dssdir) == 0 && 
+            strstr(pathbuf + strlen(dssdir), "/pg_replication") != NULL)) {
             if (!sizeonly) {
                 /* If pg_xlog is a symlink, write it as a directory anyway */
 #ifndef WIN32
@@ -1635,7 +1647,9 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
         }
 
         /* Allow symbolic links in pg_tblspc only */
-        if (strcmp(path, "./pg_tblspc") == 0 &&
+        if ((strcmp(path, "./pg_tblspc") == 0 || 
+            (ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 &&
+            strstr(pathbuf + strlen(dssdir), "/pg_tblspc") != NULL)) &&
 #ifndef WIN32
             S_ISLNK(statbuf.st_mode)
 #else
@@ -1652,8 +1666,8 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 ereport(ERROR,
                         (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", pathbuf)));
             linkpath[rllen] = '\0';
-            if (!sizeonly){
-                if (ENABLE_DSS && is_dss_file(pathbuf)) {
+            if (!sizeonly || ENABLE_DSS){
+                if (is_dss_file(pathbuf)) {
                     _tarWriteHeader(pathbuf, linkpath, &statbuf);
                 } else {
                     _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
@@ -1710,8 +1724,12 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             /*
              * skip sending directories inside pg_tblspc, if not required.
              */
-            if (strcmp(pathbuf, "./pg_tblspc") == 0 && !sendtblspclinks)
+            if (strcmp(pathbuf, "./pg_tblspc") == 0 || 
+                (ENABLE_DSS && strcmp(pathbuf, dssdir) == 0 && 
+                strstr(pathbuf + strlen(dssdir), "/pg_tblspc") != NULL && 
+                !sendtblspclinks)) {
                 skip_this_dir = true;
+            }
             if (!skip_this_dir)
                 size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
