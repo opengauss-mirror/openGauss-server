@@ -327,6 +327,14 @@ drop view v1;
 drop package pac_test_1;
 NOTICE:  drop cascades to function out_param_func_overload.f_test_1(integer,integer,integer)
 drop table t1;
+create or replace procedure proc_test is
+begin
+perform count(1);
+end;
+/
+ERROR:  function "count" isn't exclusive 
+DETAIL:  The overload function must be package function or function with PACKAGE keyword.And do not mix overload functions of O style and PG style.
+CONTEXT:  compilation of PL/pgSQL function "proc_test" near line 1
 --clean
 reset behavior_compat_options;
 drop schema out_param_func_overload cascade;
