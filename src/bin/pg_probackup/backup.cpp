@@ -162,7 +162,8 @@ backup_stopbackup_callback(bool fatal, void *userdata)
         */
         PGNodeInfo  nodeInfo;
         auto backup_conn = pgdata_basic_setup(instance_config.conn_opt, &nodeInfo);
-        pg_stop_backup(NULL, backup_conn, NULL);	/* don't care about stop_lsn in case of error */
+        /* don't care about stop_lsn in case of error */
+        pg_stop_backup(NULL, backup_conn, NULL);
     }
 }
 
@@ -1230,7 +1231,6 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
     /*
      * Set flag that pg_start_backup() was called. If an error will happen it
      * is necessary to call pg_stop_backup() in backup_cleanup().
-     * 
      * Place this code before pg_start_backup() call to ensure that the callback
      * can be invoked in case pg_start_backup() fails.
      */
