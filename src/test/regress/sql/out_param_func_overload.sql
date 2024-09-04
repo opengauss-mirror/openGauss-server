@@ -262,6 +262,11 @@ drop view v1;
 drop package pac_test_1;
 drop table t1;
 
+create or replace procedure proc_test is
+begin
+perform count(1);
+end;
+/
 
 --clean
 reset behavior_compat_options;
