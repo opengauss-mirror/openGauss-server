@@ -1427,14 +1427,13 @@ void delete_datadir(const char* dirname)
 
             /*  */
             if (stat(linkpath, &st) == 0 && S_ISDIR(st.st_mode)) {
-
-                nRet = snprintf_s(nodepath,
-                    MAXPGPATH,
-                    sizeof(nodepath) - 1,
-                    "%s/%s_%s",
-                    linkpath,
-                    TABLESPACE_VERSION_DIRECTORY,
-                    pgxcnodename);
+                if (ss_instance_config.dss.enable_dss) {
+                    nRet = snprintf_s(nodepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                                      linkpath, TABLESPACE_VERSION_DIRECTORY);
+                } else {
+                    nRet = snprintf_s(nodepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
+                                      linkpath, TABLESPACE_VERSION_DIRECTORY, pgxcnodename);
+                }
                 securec_check_ss_c(nRet, "", "");
 
                 if (!rmtree(nodepath, true, true)) {
