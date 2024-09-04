@@ -61,6 +61,7 @@ fi
 function tear_down()
 {
 sleep 1
+start_primary
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists cstore_copy_t1;"
 }
 

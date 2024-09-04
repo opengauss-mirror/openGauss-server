@@ -261,9 +261,16 @@ class Pterodb():
 			print datanode_cmd
 			os.system(datanode_cmd)
 			
+			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
+			print datanode_cmd
+			os.system(datanode_cmd)
 			time.sleep(3)
 
 			datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M standby -R " + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_dummystandby"+ "/logdn" + str(i) + ".log 2>&1 &"
+			print datanode_cmd
+			os.system(datanode_cmd)
+
+			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build " + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_dummystandby"+ "/logdn" + str(i) + ".log 2>&1 &"
 			print datanode_cmd
 			os.system(datanode_cmd)
 		time.sleep(1)
