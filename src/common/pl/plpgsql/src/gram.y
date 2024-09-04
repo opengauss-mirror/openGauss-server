@@ -7249,7 +7249,9 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             InsertErrorMessage(message, plpgsql_yylloc);
             ereport(errstate,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
-             errmsg("function \"%s\" isn't exclusive ", sqlstart)));
+             errmsg("function \"%s\" isn't exclusive ", sqlstart),
+             errdetail("The overload function must be package function or function with PACKAGE keyword.And do not mix overload functions of O style and PG style."),
+             errcause("The overload function must be package function.")));
         }
     }
 
