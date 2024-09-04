@@ -32,8 +32,7 @@ gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test2; CREATE TABL
 															  , L_SHIPMODE     CHAR(10)
 															  , L_COMMENT      VARCHAR(44)
 															)
-															with (orientation = column)
-															distribute by hash(L_ORDERKEY);"
+															with (orientation = column);"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test3;"
 
 #data replication test for row store
