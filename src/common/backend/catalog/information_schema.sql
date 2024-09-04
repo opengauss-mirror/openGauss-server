@@ -182,7 +182,7 @@ CREATE FUNCTION _pg_interval_type(typid oid, mod int4) RETURNS text
     AS
 $$SELECT
   CASE WHEN $1 IN (1186) /* interval */
-           THEN pg_catalog.upper(substring(pg_catalog.format_type($1, $2) from 'interval[()0-9]* #"%#"' for '#'))
+           THEN pg_catalog.upper(pg_catalog.substring(pg_catalog.format_type($1, $2), 'interval[()0-9]* #"%#"', '#'))
        ELSE null::text
   END$$;
 
@@ -1561,7 +1561,7 @@ INSERT INTO sql_implementation_info VALUES ('10003', 'CATALOG NAME', NULL, 'Y', 
 INSERT INTO sql_implementation_info VALUES ('10004', 'COLLATING SEQUENCE', NULL, (SELECT default_collate_name FROM character_sets), NULL);
 INSERT INTO sql_implementation_info VALUES ('23',    'CURSOR COMMIT BEHAVIOR', 1, NULL, 'close cursors and retain prepared statements');
 INSERT INTO sql_implementation_info VALUES ('2',     'DATA SOURCE NAME', NULL, '', NULL);
-INSERT INTO sql_implementation_info VALUES ('17',    'DBMS NAME', NULL, (select trim(trailing ' ' from substring(pg_catalog.version() from '^[^0-9]*'))), NULL);
+INSERT INTO sql_implementation_info VALUES ('17',    'DBMS NAME', NULL, (select trim(trailing ' ' from pg_catalog.substring(pg_catalog.version(), '^[^0-9]*'))), NULL);
 INSERT INTO sql_implementation_info VALUES ('18',    'DBMS VERSION', NULL, '???', NULL); -- filled by initdb
 INSERT INTO sql_implementation_info VALUES ('26',    'DEFAULT TRANSACTION ISOLATION', 2, NULL, 'READ COMMITTED; user-settable');
 INSERT INTO sql_implementation_info VALUES ('28',    'IDENTIFIER CASE', 3, NULL, 'stored in mixed case - case sensitive');
