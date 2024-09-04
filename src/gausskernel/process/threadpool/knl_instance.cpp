@@ -184,6 +184,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
 {
     Assert(dms_cxt != NULL);
     dms_cxt->dmsProcSid = 0;
+    dms_cxt->xminAck = 0;
     dms_cxt->SSReformerControl.list_stable = 0;
     dms_cxt->SSReformerControl.primaryInstId = -1;
     dms_cxt->SSReformInfo.in_reform = false;

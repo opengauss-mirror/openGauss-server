@@ -110,6 +110,10 @@ void SSInitXminInfo()
         return;
     }
 
+    if (ENABLE_SS_BCAST_GETOLDESTXMIN) {
+        return;
+    }
+
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
     if (xmin_info->snap_cache != NULL) {
         return;

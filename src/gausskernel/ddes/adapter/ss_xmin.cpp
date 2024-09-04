@@ -218,6 +218,10 @@ void SSUpdateNodeOldestXmin(uint8 inst_id, unsigned long long oldest_xmin)
 
 void SSSyncOldestXminWhenReform(uint8 reformer_id)
 {
+    if (ENABLE_SS_BCAST_GETOLDESTXMIN) {
+        return;
+    }
+
     ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
 

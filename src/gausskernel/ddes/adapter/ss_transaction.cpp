@@ -151,11 +151,18 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     return snapshot;
 }
 
-int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len)
+int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
 {
     if (unlikely(len != sizeof(SSBroadcastSnapshot))) {
         ereport(DEBUG1, (errmsg("invalid broadcast set snapshot message")));
         return DMS_ERROR;
+    }
+
+    if (ENABLE_SS_BCAST_GETOLDESTXMIN && output_msg != NULL && output_msg_len != NULL) {
+        SSBroadcastXminAck* getXminReq = (SSBroadcastXminAck *)output_msg;
+        getXminReq->type = BCAST_GET_XMIN_ACK;
+        GetOldestGlobalProcXmin(&(getXminReq->xmin));
+        *output_msg_len = sizeof(SSBroadcastXminAck);
     }
 
     SSBroadcastSnapshot *received_data = (SSBroadcastSnapshot *)data;
@@ -1046,4 +1053,89 @@ bool SSCanFetchLocalSnapshotTxnRelatedInfo()
     }
     
     return false;
+}
+
+int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
+{
+    if (unlikely(len != sizeof(SSBroadcastXmin))) {
+        ereport(DEBUG1, (errmsg("invalid broadcast xmin message")));
+        return DMS_ERROR;
+    }
+
+    SSBroadcastXminAck* getXminReq = (SSBroadcastXminAck *)output_msg;
+    getXminReq->type = BCAST_GET_XMIN_ACK;
+    getXminReq->xmin = InvalidTransactionId;
+    GetOldestGlobalProcXmin(&(getXminReq->xmin));
+    *output_msg_len = sizeof(SSBroadcastXminAck);
+    return DMS_SUCCESS;
+}
+
+/* Calbulate the oldest xmin during broadcast xmin ack */
+int SSGetOldestXminAck(SSBroadcastXminAck *ack_data)
+{
+    TransactionId xmin_ack = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
+    if (TransactionIdIsValid(ack_data->xmin) && TransactionIdIsNormal(ack_data->xmin) &&
+        TransactionIdPrecedes(ack_data->xmin, xmin_ack)) {
+        pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, ack_data->xmin);
+    }
+    return DMS_SUCCESS;
+}
+
+bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn)
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    SSBroadcastXminAck xmin_bcast_ack;
+    unsigned int len_of_ack = sizeof(SSBroadcastXminAck);
+    SSBroadcastSnapshot latest_snapshot;
+    dms_broadcast_info_t dms_broad_info;
+    SSBroadcastXmin xmin_data;
+    int ret;
+    if (ENABLE_SS_BCAST_SNAPSHOT) {
+        latest_snapshot.xmin = xmin;
+        latest_snapshot.xmax = xmax;
+        latest_snapshot.csn = csn;
+        latest_snapshot.type = BCAST_SEND_SNAPSHOT;
+        dms_broad_info = {
+            .data = (char *)&latest_snapshot,
+            .len = sizeof(SSBroadcastSnapshot),
+            .output = (char *)&xmin_bcast_ack,
+            .output_len = &len_of_ack,
+            .scope = DMS_BROADCAST_ONLINE_LIST,
+            .inst_map = 0,
+            .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+            .handle_recv_msg = (unsigned char)true,
+            .check_session_kill = (unsigned char)true
+        };
+    } else {
+        xmin_data.type = BCAST_GET_XMIN;
+        xmin_data.xmin = InvalidTransactionId;
+        dms_broad_info = {
+            .data = (char *)&xmin_data,
+            .len = sizeof(SSBroadcastXmin),
+            .output = (char *)&xmin_bcast_ack,
+            .output_len = &len_of_ack,
+            .scope = DMS_BROADCAST_ONLINE_LIST,
+            .inst_map = 0,
+            .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+            .handle_recv_msg = (unsigned char)true,
+            .check_session_kill = (unsigned char)true
+        };
+    }
+
+    pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, MaxTransactionId);
+
+    bool bcast_snapshot = ENABLE_SS_BCAST_SNAPSHOT;
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+        if (ret == DMS_SUCCESS) {
+            return true;
+        }
+
+        if (bcast_snapshot) {
+            pg_usleep(5000L);
+        } else {
+            return false;
+        }
+    } while (ret != DMS_SUCCESS);
 }

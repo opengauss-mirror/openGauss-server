@@ -1306,6 +1306,17 @@ static void InitStorageConfigureNamesBool()
             NULL},
 #endif
 
+        {{"ss_enable_bcast_getoldestxmin",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable broadcast to get oldest xmin by primay."),
+            NULL},
+            &g_instance.attr.attr_storage.dms_attr.enable_bcast_getoldestxmin,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"ss_enable_bcast_snapshot",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
