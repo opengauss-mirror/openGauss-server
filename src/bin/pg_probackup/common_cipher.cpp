@@ -14,9 +14,7 @@ typedef void (*crypto_module_sess_exit_type)(void *sess);
 typedef int (*crypto_result_size_type)(void *ctx, int enc, size_t data_size);
 typedef void (*crypto_ctx_clean_type)(void *ctx);
 typedef int (*crypto_digest_type)(void *sess, ModuleDigestAlgo algo, unsigned char * data, size_t data_size,unsigned char *result, size_t *result_size);
-typedef int (*crypto_hmac_init_type)(void *sess, void **ctx, ModuleSymmKeyAlgo algo, unsigned char *key_id, size_t key_id_size);
 typedef void (*crypto_hmac_clean_type)(void *ctx);
-typedef int (*crypto_hmac_type)(void *ctx, unsigned char * data, size_t data_size, unsigned char *result, size_t *result_size);
 typedef int (*crypto_gen_random_type)(void *sess, char *buffer, size_t size);
 typedef int (*crypto_deterministic_enc_dec_type)(void *sess, int enc, unsigned char *data, unsigned char *key_id,	 size_t key_id_size, size_t data_size, unsigned char *result, size_t *result_size);
 
@@ -32,9 +30,9 @@ static crypto_result_size_type crypto_result_size_use = NULL;
 static crypto_ctx_clean_type crypto_ctx_clean_use = NULL;
 crypto_encrypt_decrypt_type crypto_encrypt_decrypt_use = NULL;
 static crypto_digest_type crypto_digest_use = NULL;
-static crypto_hmac_init_type crypto_hmac_init_use = NULL;
+crypto_hmac_init_type crypto_hmac_init_use = NULL;
 static crypto_hmac_clean_type crypto_hmac_clean_use = NULL;
-static crypto_hmac_type crypto_hmac_use = NULL;
+crypto_hmac_type crypto_hmac_use = NULL;
 static crypto_gen_random_type crypto_gen_random_use = NULL;
 static crypto_deterministic_enc_dec_type crypto_deterministic_enc_dec_use = NULL;
 crypto_get_errmsg_type crypto_get_errmsg_use = NULL;
@@ -127,6 +125,17 @@ int transform_type(const char* type)
 
 }
 
+int getHmacType(ModuleSymmKeyAlgo algo)
+{
+    if (algo >= MODULE_AES_128_CBC && algo <= MODULE_AES_256_GCM) {
+        return MODULE_HMAC_SHA256;
+    } else if (algo == MODULE_SM4_CBC || algo == MODULE_SM4_CTR) {
+        return MODULE_HMAC_SM3;
+    }
+
+    return MODULE_ALGO_MAX;
+}
+
 void initCryptoModule(char* crypto_module_params, const char* encrypt_mode)
 {
     int ret = 1;
@@ -184,8 +193,17 @@ void releaseCryptoCtx(void* crypto_module_keyctx)
     }
 }
 
-void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx)
+void releaseHmacCtx(void* crypto_hmac_keyctx)
 {
+    if (libhandle && crypto_hmac_keyctx) {
+        crypto_hmac_clean_use(crypto_hmac_keyctx);
+        crypto_hmac_keyctx = NULL;
+    }
+}
+
+void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx, void* crypto_hmac_keyctx)
+{
+    releaseHmacCtx(crypto_hmac_keyctx);
     releaseCryptoCtx(crypto_module_keyctx);
     releaseCryptoSession(crypto_module_session);
     unload_crypto_module();

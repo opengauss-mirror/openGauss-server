@@ -19,6 +19,7 @@ extern "C" {
 #define MAX_PROVIDER_NAME_LEN 128
 #define MAX_ERRMSG_LEN 256
 #define MAX_IV_LEN 16
+#define MAX_HMAC_LEN 32
 
 typedef enum {
     MODULE_AES_128_CBC = 0,
@@ -60,20 +61,25 @@ typedef int (*crypto_encrypt_decrypt_type)(void *ctx, int enc, unsigned char *da
 typedef int (*crypto_create_symm_key_type)(void *sess, ModuleSymmKeyAlgo algo, unsigned char *key_id, size_t *key_id_size);
 typedef int (*crypto_get_errmsg_type)(void *sess, char *errmsg);
 typedef int (*crypto_ctx_init_type)(void *sess, void **ctx, ModuleSymmKeyAlgo algo, int enc, unsigned char *key_id, size_t key_id_size);
+typedef int (*crypto_hmac_init_type)(void *sess, void **ctx, ModuleSymmKeyAlgo algo, unsigned char *key_id, size_t key_id_size);
+typedef int (*crypto_hmac_type)(void *ctx, unsigned char * data, size_t data_size, unsigned char *result, size_t *result_size);
 
 extern crypto_create_symm_key_type crypto_create_symm_key_use;
 extern crypto_encrypt_decrypt_type crypto_encrypt_decrypt_use;
 extern crypto_get_errmsg_type crypto_get_errmsg_use;
 extern crypto_ctx_init_type crypto_ctx_init_use;
+extern crypto_hmac_init_type crypto_hmac_init_use;
+extern crypto_hmac_type crypto_hmac_use;
 
 extern int transform_type(const char* type);
+extern int getHmacType(ModuleSymmKeyAlgo algo);
 extern bool load_crypto_module_lib();
 extern void unload_crypto_module();
 extern void initCryptoModule(char* crypto_module_params, const char* encrypt_mode);
 extern void initCryptoSession(void** crypto_module_session);
 extern void releaseCryptoSession(void* crypto_module_session);
 extern void releaseCryptoCtx(void* crypto_module_keyctx);
-extern void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx);
+extern void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx, void* crypto_hmac_keyctx);
 extern void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt);
 
 #ifdef __cplusplus

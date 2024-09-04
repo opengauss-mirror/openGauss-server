@@ -160,6 +160,7 @@ char* encrypt_salt = NULL;
 char* encrypt_dev_params = NULL;
 void* crypto_module_session = NULL;
 void* crypto_module_keyctx = NULL;
+void* crypto_hmac_keyctx = NULL;
 
 /* Mark whether encryption and decryption are performed */
 /* only when encryption and decryption are actually performed will it be marked as true */
@@ -640,7 +641,7 @@ static int do_actual_operate()
     delete_backup_directory(instance_name);
     on_cleanup();
     release_logfile();
-    clearCrypto(crypto_module_session, crypto_module_keyctx);
+    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
     return res;
 }
