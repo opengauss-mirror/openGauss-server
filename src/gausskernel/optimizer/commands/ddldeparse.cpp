@@ -927,7 +927,7 @@ static ObjTree* deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
  * If isgrant is true, then this function is called while deparsing GRANT
  * statement and some object names are replaced.
  */
-static const char* string_objtype(ObjectType objtype, bool isgrant)
+const char* string_objtype(ObjectType objtype, bool isgrant)
 {
     switch (objtype) {
         case OBJECT_COLUMN:
