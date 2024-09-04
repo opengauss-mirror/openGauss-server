@@ -228,6 +228,7 @@ static void checkFuncName(List* funcname);
 static void IsInPublicNamespace(char* varname);
 static void CheckDuplicateCondition (char* name);
 static void SetErrorState();
+static bool oid_is_function(Oid funcid, bool* isSystemObj);
 static void AddNamespaceIfNeed(int dno, char* ident);
 static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_IdentifierLookup);
 bool plpgsql_is_token_keyword(int tok);
@@ -7230,7 +7231,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         return NULL;
     }
 
-    if (clist->next)
+    bool isSystemObj = false;
+    if (clist->next || (clist->next && enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj)))
     {
         multi_func = true;
         char* schemaname = NULL;
@@ -7311,7 +7313,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         is_assign = false;
     }
     /* has any "out" parameters, user execsql stmt */
-    if (is_assign)
+    if (is_assign && !(clist->next && enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj)))
     {
         appendStringInfoString(&func_inparas, "SELECT ");
     }
@@ -7633,6 +7635,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 appendStringInfoString(&func_inparas, "=>");
                 (void)yylex();
                 yylex_outparam(fieldnames, varnos, nfields, &row, &rec, &tok, &varno, true, true);
+                if (varno != -1 && enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj)) {
+                    int dtype = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[varno]->dtype;
+                    if (dtype == PLPGSQL_DTYPE_ROW) {
+                        out_param_dno = yylval.wdatum.dno;
+                    }
+                }
                 plpgsql_push_back_token(tok);
                 expr = read_sql_construct(',', ')', 0, ",|)", "", true, false, false, NULL, &tok);
                 appendStringInfoString(&func_inparas, expr->query);
@@ -7645,6 +7653,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             else
             {
                 yylex_outparam(fieldnames, varnos, nfields, &row, &rec, &tok, &varno, true, true);
+                if (varno != -1 && enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj)) {
+                    int dtype = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[varno]->dtype;
+                    if (dtype == PLPGSQL_DTYPE_ROW) {
+                        out_param_dno = yylval.wdatum.dno;
+                    }
+                }
                 plpgsql_push_back_token(tok);
                 yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                 namedarg[nfields] = false;
@@ -7766,8 +7780,10 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             narg = procStruct->pronargs;
             ReleaseSysCache(proctup);
 
-            for (int k = 0; k < all_arg; k++)  {
-                check_tableofindex_args(varnos[k], p_argtypes[k]);
+            if (!(enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj))) {
+                for (int k = 0; k < all_arg; k++)  {
+                    check_tableofindex_args(varnos[k], p_argtypes[k]);
+               }
             }
 
             /* if there is no "out" parameters ,use perform stmt,others use exesql */
@@ -8166,14 +8182,15 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
             }
             return false;
         }
-        else if (clist->next)
+        bool isSystemObj = false;
+        if (clist->next && !(enable_out_param_override() && oid_is_function(clist->oid, & isSystemObj)))
         {
             if (is_assign)
                 return false;
             else
                 return true;
         }
-        else
+        while(clist)
         {
             proctup = SearchSysCache(PROCOID,
                              ObjectIdGetDatum(clist->oid),
@@ -8211,14 +8228,18 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
                     }
                 }
             }
+
             ReleaseSysCache(proctup);
+            if (have_inoutargs && is_function_with_plpgsql_language_and_outparam(clist->oid))
+                return true;
+
+            if (!have_outargs && is_assign &&
+                !(clist->next && enable_out_param_override() && oid_is_function(clist->oid, &isSystemObj)))
+                return false;
+
+            clist = clist->next;
         }
 
-        if (have_inoutargs && is_function_with_plpgsql_language_and_outparam(clist->oid))
-            return true;
-        if (!have_outargs && is_assign)
-            return false;
-        
         return true;/* passed all test */
     }
     return false;
@@ -8248,6 +8269,36 @@ static void checkFuncName(List* funcname)
         }
     }
     (void)MemoryContextSwitchTo(colCxt);
+}
+
+static bool oid_is_function(Oid funcid, bool* isSystemObj)
+{
+    HeapTuple proctup = NULL;
+    if (OidIsValid(funcid)) {
+        proctup = SearchSysCache(PROCOID, ObjectIdGetDatum(funcid), 0, 0, 0);
+        if (HeapTupleIsValid(proctup)) {
+            bool isNull;
+            Datum protypeDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isNull);
+            char protype;
+            if (!isNull) {
+                protype = DatumGetChar(protypeDatum);
+            } else {
+                protype = PROKIND_FUNCTION;
+            }
+            Datum pronamespaceDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_pronamespace, &isNull);
+            Oid pronamespace = DatumGetObjectId(pronamespaceDatum);
+            Assert(OidIsValid(pronamespace));
+            ReleaseSysCache(proctup);
+            if (IsPackageSchemaOid(pronamespace) || IsSystemNamespace(pronamespace)) {
+                *isSystemObj = true;
+                return false;
+            }
+            if (PROC_IS_FUNC(protype)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /*
@@ -8756,13 +8807,18 @@ read_sql_construct6(int until,
                 ds_changed = true;
                 break;
             case T_VARRAY_VAR:
+            {
                 idents = yylval.wdatum.idents;
+                PLpgSQL_var* var = (PLpgSQL_var*)(yylval.wdatum.datum);
                 if (idents == NIL) {
                     AddNamespaceIfPkgVar(yylval.wdatum.ident, save_IdentifierLookup);
                 }
                 tok = yylex();
                 if (tok == '(' || tok == '[') {
                     push_array_parse_stack(&context, parenlevel, ARRAY_ACCESS);
+                } else if (OidIsValid(var->datatype->tableOfIndexType) && 
+                    (',' == tok || ')' == tok || ';' == tok)) {
+                    is_have_tableof_index_var = true;
                 }
                 curloc = yylloc;
                 plpgsql_push_back_token(tok);
@@ -8775,6 +8831,7 @@ read_sql_construct6(int until,
                     ds_changed = true;
                     break;
                 }
+            }
             case T_ARRAY_FIRST:
             {
                 Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
@@ -9232,18 +9289,27 @@ read_sql_construct6(int until,
                 break;
             }
             case T_DATUM:
-                idents = yylval.wdatum.idents;
-                if(prev_tok != '.' && list_length(idents) >= 3) {
-                    plpgsql_cast_reference_list(idents, &ds, false);
-                    ds_changed = true;
-                    break;
-                } else {
-                    tok = yylex();
-                    curloc = yylloc;
-                    plpgsql_push_back_token(tok);
-                    plpgsql_append_source_text(&ds, loc, curloc);
-                    ds_changed = true;
-                    break;
+                {
+                    idents = yylval.wdatum.idents;
+                    int dno = yylval.wdatum.datum->dno;
+                    PLpgSQL_datum *datum = (PLpgSQL_datum *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                    if (datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
+                        PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
+                        PLpgSQL_rec *rec = (PLpgSQL_rec *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[rec_field->recparentno];
+                        rec->field_need_check = lappend_int(rec->field_need_check, dno);
+                    }
+                    if(prev_tok != '.' && list_length(idents) >= 3) {
+                        plpgsql_cast_reference_list(idents, &ds, false);
+                        ds_changed = true;
+                        break;
+                    } else {
+                        tok = yylex();
+                        curloc = yylloc;
+                        plpgsql_push_back_token(tok);
+                        plpgsql_append_source_text(&ds, loc, curloc);
+                        ds_changed = true;
+                        break;
+                    }
                 }
             case T_WORD:
                 AddNamespaceIfPkgVar(yylval.word.ident, save_IdentifierLookup);

@@ -30,6 +30,7 @@
 #include "lib/stringinfo.h"
 #include "libpq/libpq-be.h"
 #include "libpq/pqsignal.h"
+#include "libpq/sha2.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/pg_list.h"
@@ -56,6 +57,25 @@
 #include "gs_policy/policy_common.h"
 #include <string>
 #include <fstream>
+
+#include <sstream>
+#include <iostream>
+
+#ifdef HAVE_STDIO_H
+#include <stdio.h>
+#endif
+
+#ifdef HAVE_STDLIB_H
+#include <stdlib.h>
+#endif
+
+#ifdef HVE_STRING_H
+#include <string.h>
+#endif
+
+#ifdef HAVE_OPENSSL_SHA_H
+#include <openssl/sha.h>
+#endif
 
 #ifdef ENABLE_UT
 #define static
@@ -333,12 +353,18 @@ typedef struct AuditData {
 #define PGAUDIT_RESTART_INTERVAL 60
 
 #define PGAUDIT_QUERY_COLS 13
+#define PGAUDIT_QUERY_COLS_NEW 15
 
 #define MAXNUMLEN 16
 
 #define WRITE_TO_AUDITPIPE           (g_instance.audit_cxt.audit_init_done && t_thrd.role != AUDITOR)
 #define WRITE_TO_STDAUDITFILE(ctype) (t_thrd.role == AUDITOR && ctype == STD_AUDIT_TYPE)
 #define WRITE_TO_UNIAUDITFILE(ctype) (t_thrd.role == AUDITOR && ctype == UNIFIED_AUDIT_TYPE)
+
+#define MAX_DATA_LEN 1024 /*sha data len*/
+#define SHA256_LENTH 32 /*sha length*/
+#define SHA256_HEX_LENTH 512 /*sha hex length*/
+#define SHA_LOG_MAX_TIMELEN 80 /*sha date length*/
 
 struct AuditEventInfo {
     AuditEventInfo() : userid{0}, 
@@ -406,13 +432,15 @@ static void pgaudit_rewrite_indexfile(void);
 static void pgaudit_indextbl_init_new(void);
 static void pgaudit_reset_indexfile();
 static const char* pgaudit_string_field(AuditData* adata, int num);
-static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS], 
+static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
                                      AuditData *adata, 
-                                     const AuditMsgHdr &header);
+                                     const AuditMsgHdr &header,
+                                     bool nulls[PGAUDIT_QUERY_COLS_NEW],
+                                     bool newVersion);
 static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 fnum, TimestampTz begtime,
-                               TimestampTz endtime, const char *audit_directory);
+                               TimestampTz endtime, const char *audit_directory, bool newVersion);
 static TimestampTz pgaudit_headertime(uint32 fnum, const char *audit_directory);
-static void pgaudit_query_valid_check(const ReturnSetInfo *rsinfo, FunctionCallInfoData *fcinfo, TupleDesc &tupdesc);
+static void pgaudit_query_valid_check(const ReturnSetInfo *rsinfo, FunctionCallInfoData *fcinfo, TupleDesc &tupdesc, bool newVersion);
 
 static uint32 pgaudit_get_auditfile_num();
 static void   pgaudit_update_auditfile_time(pg_time_t timestamp, bool exist);
@@ -438,11 +466,15 @@ inline bool pgaudit_need_check_size_rotation()
 
 /********** toughness *********/
 static void CheckAuditFile(void);
-static bool pgaudit_invalid_header(const AuditMsgHdr* header);
+static bool pgaudit_invalid_header(const AuditMsgHdr* header, bool newVersion);
 static void pgaudit_mark_corrupt_info(uint32 fnum);
 static void audit_append_xid_info(const char *detail_info, char *detail_info_xid, uint32 len);
 static bool audit_status_check_ok();
-
+/*audit sha code*/
+static bool pgaudit_need_sha_code();
+static void generate_audit_sha_code(pg_time_t time, const char* type, const char* result, char *userid, const char* username, const char* dbname, char* client_info, \
+    const char *object_name, const char *detail_info, const char* nodename, char* threadid, char* localport, \
+    char* remoteport, unsigned char* shacode);
 static void init_audit_signal_handlers()
 {
     (void)gspqsignal(SIGHUP, sigHupHandler); /* set flag to read config file */
@@ -564,6 +596,53 @@ static void sig_thread_config_handler(int &currentAuditRotationAge, int &current
         t_thrd.audit.rotation_requested = true;
     }
 }
+
+/* audit sha code version: finished upgrade*/
+static bool pgaudit_need_sha_code()
+{
+    if (t_thrd.proc == NULL) {
+        return false;
+    }
+    return t_thrd.proc->workingVersionNum >= AUDIT_SHA_VERSION_NUM;
+}
+
+/*
+ * Brief          : audit sha code
+ * Description    : audit sha code
+ * the fileds are arraged as below sequence, Note it's not liable to modify them as to keep compatibility of version
+ * time|type|result|userid|username|dbname|client_info|object_name|detail_info|nodename|threadid|localport|remoteport
+ */
+static void generate_audit_sha_code(pg_time_t time, AuditType type, AuditResult result, char* userid, const char* username, const char* dbname, char* client_info,
+    const char* object_name, const char* detail_info, const char* nodename, char* threadid, char* localport,
+    char* remoteport, unsigned char* shacode)
+{
+    char timeTzLocaltime[SHA_LOG_MAX_TIMELEN] = {0};
+    struct tm* system;
+    system = localtime(&time);
+    if (system != nullptr) {
+        (void)strftime(timeTzLocaltime, SHA_LOG_MAX_TIMELEN, "%Y-%m-%d_%H%M%S", system);
+    }
+    userid = (userid != NULL && userid[0] != '\0') ? userid : NULL;
+    username = (username != NULL && username[0] != '\0') ? username : NULL;
+    dbname = (dbname != NULL && dbname[0] != '\0') ? dbname : NULL;
+    client_info = (client_info != NULL && client_info[0] != '\0') ? client_info : NULL;
+    object_name = (object_name != NULL && object_name[0] != '\0') ? object_name : NULL;
+    detail_info = (detail_info != NULL && detail_info[0] != '\0') ? detail_info : NULL;
+    nodename = (nodename != NULL && nodename[0] != '\0') ? nodename : NULL;
+    threadid = (threadid != NULL && threadid[0] != '\0') ? threadid : NULL;
+    localport = (localport != NULL && localport[0] != '\0') ? localport : NULL;
+    remoteport = (remoteport != NULL && remoteport[0] != '\0') ? remoteport : NULL;
+    // TimestampTz timeTz = time_t_to_timestamptz(time);
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%s | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s",
+         timeTzLocaltime, type, result, userid, username, dbname, client_info, object_name,
+         detail_info, nodename, threadid, localport, remoteport);
+    SHA256((const unsigned char*)str.data , str.len, shacode);
+    pfree_ext(str.data);
+    return;
+}
+
 /*
  * Main entry point for auditor process
  * argc/argv parameters are valid only in EXEC_BACKEND case.
@@ -1081,11 +1160,15 @@ static void pgaudit_write_file(char* buffer, int count)
     /* if record time is earlier than current file's create time,
      * create a new audit file to avoid the confusion caused by system clock change */
     FILE* fh = NULL;
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
+    bool haslock = true;
     if (g_instance.audit_cxt.audit_indextbl) {
         AuditIndexItem *cur_item =
         g_instance.audit_cxt.audit_indextbl->data +
         g_instance.audit_cxt.audit_indextbl->curidx[t_thrd.audit.cur_thread_idx];
         if (curtime < cur_item->ctime) {
+            LWLockRelease(AuditIndexFileLock);
+            haslock = false;
             auditfile_close(SYSAUDITFILE_TYPE);
             fh = auditfile_open((pg_time_t)time(NULL), "a", true);
             if (fh != NULL) {
@@ -1095,6 +1178,9 @@ static void pgaudit_write_file(char* buffer, int count)
     }
 
     uint32 retry_cnt = 0;
+    if (haslock) {
+        LWLockRelease(AuditIndexFileLock);
+    }
 retry1:
     rc = fwrite(buffer, 1, count, t_thrd.audit.sysauditFile);
 
@@ -1992,6 +2078,7 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     StringInfoData buf;
     AuditData adata;
     AuditEventInfo event_info;
+    unsigned char shacode[SHA256_HEX_LENTH] = {0};
     if (!audit_get_clientinfo(type, object_name, event_info)) {
         return; 
     }
@@ -2020,12 +2107,26 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     adata.header.signature[0] = 'A';
     adata.header.signature[1] = 'U';
     adata.header.version = 0;
-    adata.header.fields = PGAUDIT_QUERY_COLS;
+    if (pgaudit_need_sha_code()) {
+        adata.header.fields = PGAUDIT_QUERY_COLS_NEW;
+    } else {
+        adata.header.fields = PGAUDIT_QUERY_COLS;
+    }
     adata.header.flags = AUDIT_TUPLE_NORMAL;
     adata.header.time = current_timestamp();
     adata.header.size = 0;
     adata.type = type;
     adata.result = result;
+    char hexbuf[SHA256_HEX_LENTH]={0};
+    /*type result format*/
+    if (pgaudit_need_sha_code()) {
+        /*sha code for audit*/
+        generate_audit_sha_code(adata.header.time / 1000, type, result, userid, username, dbname, client_info, object_name,
+            detail_info, g_instance.attr.attr_common.PGXCNodeName, threadid, localport,
+            remoteport, shacode);
+        /*sha code convert to hex*/
+        sha_bytes_to_hex64((uint8*)shacode, hexbuf);
+    }
     initStringInfo(&buf);
     appendBinaryStringInfo(&buf, (char*)&adata, AUDIT_HEADER_SIZE);
 
@@ -2040,6 +2141,9 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     appendStringField(&buf, (threadid[0] != '\0') ? threadid : NULL);
     appendStringField(&buf, (localport[0] != '\0') ? localport : NULL);
     appendStringField(&buf, (remoteport[0] != '\0') ? remoteport : NULL);
+    if (pgaudit_need_sha_code()) {
+        appendStringField(&buf, (shacode[0] != '\0') ? (const char*)hexbuf : NULL);
+    }
 
     /*
      * Use the chunking protocol if we know the syslogger should be
@@ -2651,6 +2755,8 @@ static char* serialize_event_to_json(AuditData *adata, long long eventTime)
     WRITE_JSON_STRING(localPortInfo);
     event.remotePortInfo = pgaudit_string_field(adata, AUDIT_REMOTEPORT_INFO);
     WRITE_JSON_STRING(remotePortInfo);
+    event.shaCode = pgaudit_string_field(adata, AUDIT_SHACODE);
+    WRITE_JSON_STRING(shaCode);
     event.eventTime = eventTime;
     WRITE_JSON_INT(eventTime);
     WRITE_JSON_END();
@@ -2721,7 +2827,7 @@ static void pgaudit_query_file_for_elastic()
                 if (header.signature[0] != 'A' ||
                     header.signature[1] != 'U' ||
                     header.version != 0 ||
-                    header.fields != PGAUDIT_QUERY_COLS ||
+                    (header.fields != PGAUDIT_QUERY_COLS && header.fields != PGAUDIT_QUERY_COLS_NEW) ||
                     (header.size <= sizeof(AuditMsgHdr))) {
                     ereport(LOG,    (errmsg("invalid data in audit file \"%s\"", file_path)));
                     break;
@@ -2799,18 +2905,36 @@ static void pgaudit_query_file_for_elastic()
 /*
  * Brief          : scan the specified audit file into tuple
  * Description    : Note we use old/new version to differ whether there is user_id field in the file.
- *                  for expanding new field later, maybe we will depend on version id to implement 
+ *                  for expanding new field later, maybe we will depend on version id to implement
  *                  backward compatibility but not bool variable
  */
-static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS], 
-                                     AuditData *adata, 
-                                     const AuditMsgHdr &header)
+static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
+                                     AuditData *adata,
+                                     const AuditMsgHdr &header,
+                                     bool nulls[PGAUDIT_QUERY_COLS_NEW],
+                                     bool newVersion)
 {
+    /*sha param*/
+    char* userid = NULL;
+    const char* username =NULL;
+    const char* dbname = NULL;
+    char* client_info = NULL;
+    const char* object_name = NULL;
+    const char* detail_info =NULL;
+    const char* nodename = NULL;
+    char* threadid = NULL;
+    char* localport = NULL;
+    char* remoteport = NULL;
+    unsigned char shacode[SHA256_HEX_LENTH] = {0};
+    const char* saved_hexbuf = NULL;
+    char hexbuf[SHA256_HEX_LENTH]={0};
+
     /* append timestamp info to data tuple */
     int i = 0;
     values[i++] = TimestampTzGetDatum(time_t_to_timestamptz(adata->header.time));
     values[i++] = CStringGetTextDatum(AuditTypeDesc(adata->type));
     values[i++] = CStringGetTextDatum(AuditResultDesc(adata->result));
+    // values[i++] = CStringGetTextDatum((const char*)adata->shacode);
 
     /*
      * new format of the audit file under correct record
@@ -2818,33 +2942,89 @@ static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS],
      */
     int index_field = 0;
     const char* field = NULL;
-    bool new_version = (header.fields == PGAUDIT_QUERY_COLS);
+
+    bool new_version = (header.fields == PGAUDIT_QUERY_COLS || header.fields == PGAUDIT_QUERY_COLS_NEW);
     field = new_version ? pgaudit_string_field(adata, index_field++) : NULL;
+    userid = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user id */
+
     field = pgaudit_string_field(adata, index_field++);
+    username = (const char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user name */
+
     field = pgaudit_string_field(adata, index_field++);
+    dbname = (const char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* dbname */
+
     field = pgaudit_string_field(adata, index_field++);
+    client_info = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* client info */
+
     field = pgaudit_string_field(adata, index_field++);
+    if (field != NULL) {
+        object_name = (const char*)field;
+    }
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* object name */
+
     field = pgaudit_string_field(adata, index_field++);
+    detail_info = (const char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* detail info */
+
     field = pgaudit_string_field(adata, index_field++);
+    nodename = (const char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* node name */
+
     field = pgaudit_string_field(adata, index_field++);
+    threadid = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* thread id */
+
     field = pgaudit_string_field(adata, index_field++);
+    localport = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* local port */
+
     field = pgaudit_string_field(adata, index_field++);
+    remoteport = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* remote port */
 
-    Assert(i == PGAUDIT_QUERY_COLS);
+    if (header.fields == PGAUDIT_QUERY_COLS_NEW) {
+        field = pgaudit_string_field(adata, index_field++); /*old version audit data, not sha_code*/
+    } else {
+        field = NULL;
+    }
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* sha_code hex data*/
+    if (pgaudit_need_sha_code()) {
+        saved_hexbuf = field;
+        if (header.fields == PGAUDIT_QUERY_COLS_NEW) {
+            if (saved_hexbuf != NULL && saved_hexbuf[0] != '\0') {
+                bool verifyResult = false;
+                /*sha code for audit*/
+                generate_audit_sha_code(adata->header.time, adata->type, adata->result, userid, username, dbname, client_info, object_name,
+                    detail_info, nodename, threadid, localport, remoteport, shacode);
+                /*sha code convert to hex*/
+                sha_bytes_to_hex64((uint8*)shacode, hexbuf);
+                if (strcmp((const char*)hexbuf, (const char*)saved_hexbuf) == 0) {
+                    verifyResult = true;
+                }
+                values[i++] = BoolGetDatum(verifyResult); /* verify_result */
+            } else {
+                values[i] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result */
+                nulls[i++] = true;
+            }
+        } else {
+            values[i] = CStringGetTextDatum(FILED_NULLABLE(NULL)); /* verify_result */
+            nulls[i++] = true;
+        }
+    }
+    if (newVersion) {
+        Assert(i == PGAUDIT_QUERY_COLS_NEW);
+    } else {
+        Assert(i == PGAUDIT_QUERY_COLS);
+    }
 }
 
+
 static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 fnum, TimestampTz begtime,
-                               TimestampTz endtime, const char *audit_directory)
+                               TimestampTz endtime, const char *audit_directory, bool newVersion)
 {
     FILE* fp = NULL;
     size_t nread = 0;
@@ -2867,8 +3047,9 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
     }
 
     do {
-        Datum values[PGAUDIT_QUERY_COLS] = {0};
-        bool nulls[PGAUDIT_QUERY_COLS] = {0};
+        Datum values[PGAUDIT_QUERY_COLS_NEW] = {0};
+        bool nulls[PGAUDIT_QUERY_COLS_NEW] = {0};
+
         errno_t errorno = EOK;
         /* 
          * two scenarios tell that the audit file corrupt
@@ -2880,7 +3061,7 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
         }
         (void)fseek(fp, -1, SEEK_CUR);
         size_t header_available = fread(&header, sizeof(AuditMsgHdr), 1, fp);
-        if (header_available != 1 || pgaudit_invalid_header(&header)) {
+        if (header_available != 1 || pgaudit_invalid_header(&header, newVersion)) {
             ereport(LOG, (errmsg("invalid data in audit file \"%s\"", t_thrd.audit.pgaudit_filepath)));
             /* label the currupt file num, then it may be reinit in audit thread but not here. */
             pgaudit_mark_corrupt_info(fnum);
@@ -2905,7 +3086,7 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
         /* filt and assemble audit info into tuplestore */
         datetime = time_t_to_timestamptz(adata->header.time);
         if (datetime >= begtime && datetime < endtime && header.flags == AUDIT_TUPLE_NORMAL) {
-            deserialization_to_tuple(values, adata, header);
+            deserialization_to_tuple(values, adata, header, nulls, newVersion);
             tuplestore_putvalues(state, tdesc, values, nulls);
         }
 
@@ -2952,7 +3133,8 @@ static void pgaudit_delete_file(uint32 fnum, TimestampTz begtime, TimestampTz en
             header.signature[1] != 'U' ||
             header.version != 0 ||
             !(header.fields == (PGAUDIT_QUERY_COLS - 1) ||
-            header.fields == PGAUDIT_QUERY_COLS)) {
+            header.fields == PGAUDIT_QUERY_COLS ||
+            header.fields == PGAUDIT_QUERY_COLS_NEW)) {
             /* make sure we are compatible with the older version audit file */
             ereport(LOG, (errmsg("invalid data in audit file \"%s\"", t_thrd.audit.pgaudit_filepath)));
             break;
@@ -3066,7 +3248,7 @@ static TimestampTz pgaudit_headertime(uint32 fnum, const char *audit_directory)
  * Brief        : whether the invoke is allowed for query audit.
  * Description  :
  */
-static void pgaudit_query_valid_check(const ReturnSetInfo *rsinfo, FunctionCallInfoData *fcinfo, TupleDesc &tupdesc)
+static void pgaudit_query_valid_check(const ReturnSetInfo *rsinfo, FunctionCallInfoData *fcinfo, TupleDesc &tupdesc, bool newVersion)
 {
     Oid roleid = InvalidOid;
     /* Check some permissions first */
@@ -3090,8 +3272,14 @@ static void pgaudit_query_valid_check(const ReturnSetInfo *rsinfo, FunctionCallI
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("return type must be a row type")));
     }
 
-    if (tupdesc->natts != PGAUDIT_QUERY_COLS) {
-        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("attribute count of the return row type not matched")));
+    if (newVersion) {
+        if (tupdesc->natts != PGAUDIT_QUERY_COLS_NEW) {
+            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("attribute count of the return row type not matched")));
+        }
+    } else {
+        if (tupdesc->natts != PGAUDIT_QUERY_COLS) {
+            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("attribute count of the return row type not matched")));
+        }
     }
 }
 
@@ -3111,8 +3299,12 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
     TimestampTz endtime = PG_GETARG_TIMESTAMPTZ(1);
     char* audit_dir = NULL;
     char real_audit_dir[PATH_MAX] = {0};
+    bool newVersion = false;
+    if (pgaudit_need_sha_code()) {
+        newVersion = true;
+    }
 
-    pgaudit_query_valid_check(rsinfo, fcinfo, tupdesc);
+    pgaudit_query_valid_check(rsinfo, fcinfo, tupdesc, newVersion);
 
     /*
      * When g_instance.audit_cxt.audit_indextbl is not NULL,
@@ -3167,7 +3359,7 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
             satisfied = pgaudit_check_system(begtime, endtime, index, real_audit_dir);
             if (satisfied) {
                 oldcontext = MemoryContextSwitchTo(query_audit_ctx);
-                pgaudit_query_file(tupstore, tupdesc, fnum, begtime, endtime, real_audit_dir);
+                pgaudit_query_file(tupstore, tupdesc, fnum, begtime, endtime, real_audit_dir, newVersion);
                 MemoryContextSwitchTo(oldcontext);
                 MemoryContextReset(query_audit_ctx);
                 satisfied = false;
@@ -3333,13 +3525,21 @@ static void CheckAuditFile(void)
     auditfile_init(true);
 }
 
-static bool pgaudit_invalid_header(const AuditMsgHdr* header)
+static bool pgaudit_invalid_header(const AuditMsgHdr* header, bool newVersion)
 {
-    return ((header->signature[0]) != 'A' || header->signature[1] != 'U' || header->version != 0 ||
-        !(header->fields == (PGAUDIT_QUERY_COLS - 1) || header->fields == PGAUDIT_QUERY_COLS) ||
-        (header->size <= sizeof(AuditMsgHdr)) ||
-        (header->size >= (uint32)u_sess->attr.attr_security.Audit_RotationSize *  1024L));
+    if (newVersion) {
+        return ((header->signature[0]) != 'A' || header->signature[1] != 'U' || header->version != 0 ||
+            !(header->fields == (PGAUDIT_QUERY_COLS - 1) || header->fields == PGAUDIT_QUERY_COLS || header->fields == PGAUDIT_QUERY_COLS_NEW) ||
+            (header->size <= sizeof(AuditMsgHdr)) ||
+            (header->size >= (uint32)u_sess->attr.attr_security.Audit_RotationSize *  1024L));
+    } else {
+        return ((header->signature[0]) != 'A' || header->signature[1] != 'U' || header->version != 0 ||
+            !(header->fields == (PGAUDIT_QUERY_COLS - 1) || header->fields == PGAUDIT_QUERY_COLS) ||
+            (header->size <= sizeof(AuditMsgHdr)) ||
+            (header->size >= (uint32)u_sess->attr.attr_security.Audit_RotationSize *  1024L));
+    }
 }
+
 
 /*
  *  mark corrupt fnum by postgres thread

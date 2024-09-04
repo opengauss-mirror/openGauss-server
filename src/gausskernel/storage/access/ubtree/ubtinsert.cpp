@@ -279,7 +279,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, page, BufferGetBlockNumber(buf), InvalidOffsetNumber, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf));
+    
     return has_pruned;
 }
 
@@ -787,24 +788,17 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                 }
 
                 /*
-                 * If we are doing a recheck, we expect to find the tuple we
-                 * are rechecking.	It's not a duplicate, but we have to keep
-                 * scanning. For global partition index, part oid in index tuple
-                 * is supposed to be same as heapRel oid, add check in case
-                 * abnormal condition.
+                 * If we are doing an index recheck (UNIQUE_CHECK_EXISTING mode), we expect
+                 * to find tuple already in ubtree. Once the index tuple matched, it will be
+                 * marked found. Traverse all tuples, if no matching tuple is found, report
+                 * an error. For GPI, part oid should be the same as heapRel oid.
                  */
-                if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0) {
-                    if (RelationIsGlobalIndex(rel) && curPartOid != heapRel->rd_id) {
-                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("failed to re-find tuple within GPI \"%s\"",
-                                       RelationGetRelationName(rel))));
-                    }
+                if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0
+                    && !RelationIsGlobalIndex(rel)) {
                     found = true;
-                    /*
-                     * We check the whole HOT-chain to see if there is any tuple
-                     * that satisfies SnapshotDirty.  This is necessary because we
-                     * have just a single index entry for the entire chain.
-                     */
+                } else if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0
+                    && curPartOid == heapRel->rd_id && RelationIsGlobalIndex(rel)) {
+                    found = true;
                 } else {
                     TransactionId xmin, xmax;
                     bool isdead = false;
@@ -1318,7 +1312,8 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         }
 
         END_CRIT_SECTION();
-        UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+        UBTreeVerify(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+
         /* release buffers */
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
@@ -1379,15 +1374,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
      *            before we release the Exclusive lock.
      */
     UBTRecycleQueueAddress addr;
-    NewPageState *npstate = NULL;
-    if (module_logging_is_on(MOD_UBT_NEWPAGE)) {
-        npstate = (NewPageState *)palloc0(sizeof(NewPageState));
-    }
-    rbuf = UBTreeGetNewPage(rel, &addr, npstate);
-    if (npstate != NULL) {
-        UBTreePrintNewPageState(npstate);
-        pfree(npstate);
-    }
+    rbuf = UBTreeGetNewPage(rel, &addr);
 
     /*
      * origpage is the original page to be split.  leftpage is a temporary
@@ -1875,7 +1862,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
 
     END_CRIT_SECTION();
     Page page = BufferGetPage(actualInsertBuf);
-    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
 
     /* discard this page from the Recycle Queue */
     UBTreeRecordUsedPage(rel, addr);
@@ -2259,7 +2246,8 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bo
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyPage(rel, page, BufferGetBlockNumber(buf), offset, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf), offset);
+
     bool needRecordEmpty = (opaque->activeTupleCount == 0);
     if (needRecordEmpty) {
         /*
@@ -2453,15 +2441,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
      *            before we release the Exclusive lock.
      */
     UBTRecycleQueueAddress addr;
-    NewPageState *npstate = NULL;
-    if (module_logging_is_on(MOD_UBT_NEWPAGE)) {
-        npstate = (NewPageState *)palloc0(sizeof(NewPageState));
-    }
-    rootbuf = UBTreeGetNewPage(rel, &addr, npstate);
-    if (npstate != NULL) {
-        UBTreePrintNewPageState(npstate);
-        pfree(npstate);
-    }
+    rootbuf = UBTreeGetNewPage(rel, &addr);
     rootpage = BufferGetPage(rootbuf);
     rootblknum = BufferGetBlockNumber(rootbuf);
 
@@ -2576,7 +2556,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, rootpage, rootblknum, InvalidOffsetNumber, false);
+    UBTreeVerify(rel, rootpage, rootblknum);
 
     /* done with metapage */
     _bt_relbuf(rel, metabuf);

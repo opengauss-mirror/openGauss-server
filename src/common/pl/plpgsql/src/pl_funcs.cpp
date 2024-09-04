@@ -117,6 +117,9 @@ void plpgsql_add_pkg_ns(PLpgSQL_package* pkg)
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_CURSORROW, varno, objname, pkgname);
                     }
                     break;
+                case PLPGSQL_DTYPE_RECFIELD:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, objname, pkgname);
+                    break;
                 case PLPGSQL_DTYPE_COMPOSITE:
                     break;    
                 default:

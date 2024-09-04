@@ -577,7 +577,7 @@ static int32 IdentifyRemoteVersion()
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DORADO_MAIN_STANDBY_NODE) {
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DISASTER_MAIN_STANDBY_NODE) {
         if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm) &&
             !AM_HADR_WAL_RECEIVER) {
             PQclear(res);
@@ -1392,7 +1392,8 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
             retcode = MAKE_SQLSTATE(sqlstate[0], sqlstate[1], sqlstate[2], sqlstate[3], sqlstate[4]);
         }
         if (retcode == ERRCODE_UNDEFINED_FILE) {
-            if (t_thrd.role != APPLY_WORKER) {
+            /* in SS dorado standby cluster, the walreceiver not need to receive wal */
+            if (t_thrd.role != APPLY_WORKER && !SS_DORADO_STANDBY_CLUSTER) {
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
             }
             SpinLockAcquire(&walrcv->mutex);

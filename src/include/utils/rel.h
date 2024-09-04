@@ -416,11 +416,12 @@ typedef struct StdRdOptions {
     /* SPQ OPTIONS */
     int spq_bt_build_offset;
 #endif
+    Oid relrewrite;
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
 #define HEAP_DEFAULT_FILLFACTOR 100
-#define UHEAP_DEFAULT_FILLFACTOR 92
+#define UHEAP_DEFAULT_FILLFACTOR 100
 
 #define UHEAP_MIN_TD 2
 #define UHEAP_MAX_TD 128
@@ -543,6 +544,8 @@ typedef struct StdRdOptions {
     ((relation)->rd_options ? \
      ((StdRdOptions *) (relation)->rd_options)->parallel_workers : (defaultpw))
 
+#define RelationGetRelrewriteOption(relation)                            \
+    ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->relrewrite : InvalidOid)
 /*
  * RelationIsValid
  *		True iff relation descriptor is valid.

@@ -429,8 +429,8 @@ get_next_tuple:
             } else {
                 if (!scan->xs_continue_undo) {
                     ItemPointerSet(&scan->curTid, BufferGetBlockNumber(scan->rs_base.rs_cbuf), lineoff);
-                    errno_t rc = memset_s(scan->xc_undo_scan, sizeof(UstoreUndoScanDesc),
-                        0, sizeof(UstoreUndoScanDesc));
+                    errno_t rc = memset_s(scan->xc_undo_scan, sizeof(UstoreUndoScanDescData),
+                        0, sizeof(UstoreUndoScanDescData));
                     securec_check(rc, "\0", "\0");
                     undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(&scan->curTid, scan->rs_base.rs_rd,
                         scan->rs_base.rs_cbuf, scan->xc_undo_scan);
@@ -1637,8 +1637,8 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
     if (!scan->rs_base.rs_inited) {
         if (scan->rs_base.rs_nblocks == 0) {
             Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
-            tuple = NULL;
-            return tuple;
+            scan->rs_cutup = NULL;
+            return false;
         }
         page = scan->rs_base.rs_startblock;
         scan->rs_base.rs_cblock = page;
@@ -1672,6 +1672,7 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
         }
         PG_END_TRY();
         if (finished) {
+            scan->rs_cutup = NULL;
             return isValidPage;
         }
         lineOff = 0;
@@ -1695,7 +1696,7 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
             tuple = scan->rs_visutuples[lineOff];
             scan->rs_base.rs_cindex = lineOff;
             scan->rs_cutup = tuple;
-            return tuple;
+            return true;
         }
 
         /*

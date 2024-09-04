@@ -1699,6 +1699,22 @@ connect_errReturn:
     return 0;
 }
 
+static void PQgetDBCompatibility(PGconn* conn)
+{
+    PGresult* res = PQexec(conn, "show sql_compatibility");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        if (strcmp(PQgetvalue(res, 0, 0), "A") == 0) {
+            conn->cmpt = COMPATIBILITY_A;
+        } else if (strcmp(PQgetvalue(res, 0, 0), "B") == 0) {
+            conn->cmpt = COMPATIBILITY_B;
+        } else if (strcmp(PQgetvalue(res, 0, 0), "PG") == 0) {
+            conn->cmpt = COMPATIBILITY_PG;
+        }
+    }
+    PQclear(res);
+    res = NULL;
+}
+
 /*
  *		connectDBComplete
  *
@@ -1768,7 +1784,7 @@ static int connectDBComplete(PGconn* conn)
          * PQconnectStart) is to wait for the socket to select for writing.
          */
         switch (flag) {
-            case PGRES_POLLING_OK:
+            case PGRES_POLLING_OK: {
 
                 /*
                  * Reset stored error messages since we now have a working
@@ -1778,7 +1794,14 @@ static int connectDBComplete(PGconn* conn)
 #ifdef ENABLE_LITE_MODE
                 destroyPQExpBuffer(errMsgBuf);
 #endif
+                char* replication = conn->replication;
+                if (conn->status == CONNECTION_OK && (replication == NULL || strcasecmp(replication, "false") == 0 || 
+                    strcasecmp(replication, "off") == 0 || strcasecmp(replication, "no") == 0 || 
+                    strcasecmp(replication, "0") == 0)) {
+                    PQgetDBCompatibility(conn);
+                }
                 return 1; /* success! */
+            }
 
             case PGRES_POLLING_READING:
                 if (pqWaitTimed(1, 0, conn, finish_time)) {

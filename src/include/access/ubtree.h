@@ -103,8 +103,6 @@ typedef UBTRecycleQueueHeaderData* UBTRecycleQueueHeader;
 #define URQ_HEAD_PAGE (1 << 0)
 #define URQ_TAIL_PAGE (1 << 1)
 
-#define URQ_MAX_GET_PAGE_TIMES 5
-
 #define UBTRecycleMaxItems \
     ((BLCKSZ - sizeof(PageHeaderData) - offsetof(UBTRecycleQueueHeaderData, items)) / sizeof(UBTRecycleQueueItemData))
 
@@ -170,6 +168,7 @@ typedef UBTRecycleQueueHeaderData* UBTRecycleQueueHeader;
 #define UBTREE_VERIFY_OUTPUT_PARAM_CNT 3
 #define UBTREE_RECYCLE_OUTPUT_PARAM_CNT 6
 #define UBTREE_RECYCLE_OUTPUT_XID_STR_LEN 32
+#define URQ_GET_PAGE_MAX_RETRY_TIMES 5
 
 enum {
     UBTREE_MARK_DELETE_BLOCK_NUM,
@@ -478,32 +477,25 @@ typedef struct {
 } IndexPruneState;
 
 typedef struct {
-    TimestampTz firstGetAvailablePageTime;
-    TimestampTz secondGetAvailablePageTime;
-    TimestampTz extendBlocksTime;
+    TimestampTz getAvailablePageTime;
+    TimestampTz getAvailablePageTimeMax;
+    TimestampTz addExtraBlocksTime;
+    TimestampTz addExtraBlocksTimeMax;
     TimestampTz extendOneTime;
-    TimestampTz getHeadTime;
-    TimestampTz getAvailablePageOnPageTime;
-    TimestampTz getAvailablePageOnPageTimeMax;
-    uint32 firstGetAvailablePageCount;
-    uint32 secondGetAvailablePageCount;
-    uint32 bufferInvalidCount;
-    uint32 needLockCount;
-    uint32 extendBlocksCount;
-    uint32 extendBlocks;
+    TimestampTz extendOneTimeMax;
+    TimestampTz getOnUrqPageTime;
+    TimestampTz getOnUrqPageTimeMax;
+    uint32 getAvailablePageCount;
+    uint32 addExtraBlocksCount;
     uint32 extendOneCount;
-    uint32 queueCount;
-    uint32 itemsCount;
-    uint32 itemsValidCount;
-    uint32 itemsValidConditionalLockCount;
-    uint32 getAvailablePageOnPageCount;
-    uint32 firstGotoRestartCount;
-    uint32 secondGotoRestartCount;
-    uint32 checkNewCreatePagesCount;
-    uint32 getFromNewCreatePagesCount;
-    double avgTravelQueuePages;
-    double avgTravelQueueItems;
-} NewPageState;
+    uint32 getOnUrqPageCount;
+    uint32 urqItemsCount;
+    uint32 restartCount;
+    uint32 checkNonTrackedPagesCount;
+    Oid spcnode;
+    Oid dbnode;
+    Oid relnode;
+} UBTreeGetNewPageStats;
 
 typedef RpSort ItemIdSort;
 typedef RpSortData ItemIdSortData;
@@ -580,8 +572,7 @@ extern OffsetNumber UBTreeFindsplitloc(Relation rel, Buffer buf, OffsetNumber ne
 extern OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
     bool *newitemonleft, IndexTuple newitem);
 
-extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr, NewPageState* npState = NULL);
-extern void UBTreePrintNewPageState(NewPageState* npstate);
+extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr);
 /*
  * prototypes for functions in ubtxlog.cpp
  */
@@ -649,6 +640,13 @@ typedef enum IndexTraceLevel {
     TRACE_ALL
 } IndexTraceLevel;
 
+typedef enum NewPageCostType {
+    GET_PAGE,
+    ADD_BLOCKS,
+    EXTEND_ONE,
+    URQ_GET_PAGE
+} NewPageCostType;
+
 /*
  * prototypes for functions in ubtrecycle.cpp
  */
@@ -661,7 +659,7 @@ extern void UBTreeRecordFreePage(Relation rel, BlockNumber blkno, TransactionId 
 extern void UBTreeRecordEmptyPage(Relation rel, BlockNumber blkno, TransactionId xid);
 extern void UBTreeRecordUsedPage(Relation rel, UBTRecycleQueueAddress addr);
 extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress* addr,
-    NewPageState* npState = NULL);
+    UBTreeGetNewPageStats* stats = NULL);
 extern void UBTreeRecycleQueueInitPage(Relation rel, Page page, BlockNumber blkno, BlockNumber prevBlkno,
     BlockNumber nextBlkno);
 extern void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNext);
@@ -675,11 +673,8 @@ extern void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNu
 extern void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
     void *state);
 
-// verify urq
-void UBTRecycleQueueVerifyPageOffline(Relation rel, Page page, BlockNumber blkno);
+void UBTreeVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum = InvalidOffsetNumber,
+    bool fromInsert = false);
 
-// verify ubtree
-void UBTreeVerifyPage(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
-void UBTreeVerifyAll(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
-
+void UBTreeRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start);
 #endif /* UBTREE_H */

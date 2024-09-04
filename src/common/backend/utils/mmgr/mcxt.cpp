@@ -558,6 +558,114 @@ void MemoryContextAllowInCriticalSection(MemoryContext context, bool allow)
 }
 
 /*
+ * Find the memory allocated to blocks for this memory context. If recurse is
+ * true, also include children.
+ */
+Size GetMemoryTotalSpace(MemoryContext context, bool recurse)
+{
+    Size total = 0;
+    volatile bool isLocked = false;
+
+    AssertArg(MemoryContextIsValid(context));
+
+    PG_TRY();
+    {
+        check_stack_depth();
+
+        if (MemoryContextIsShared(context)) {
+            MemoryContextLock(context);
+            isLocked = true;
+        }
+
+#ifndef ENABLE_MEMORY_CHECK
+        StaticAssertStmt(
+            offsetof(AllocSetContext, totalSpace) == offsetof(StackSetContext, totalSpace),
+            "The totalSpace's offset of AllocSetContext and StackSetContext is different.");
+        total = ((AllocSet) context)->totalSpace;
+#else
+        total = ((AsanSet) context)->totalSpace;
+#endif
+
+        if (recurse) {
+            total += GetMemoryChildrenTotalSpace(context, true);
+        }
+    }
+    PG_CATCH();
+    {
+        if (isLocked) {
+            MemoryContextUnlock(context);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (isLocked) {
+        MemoryContextUnlock(context);
+    }
+
+    return total;
+}
+
+/*
+ * Find the memory allocated to blocks for this memory context's children.
+ * If recurse is true, also include their children.
+ *
+ * Before call this function, context should be locked first if it's shared context.
+ */
+Size GetMemoryChildrenTotalSpace(MemoryContext context, bool recurse)
+{
+
+    Size total = 0;
+    volatile bool isLocked = false;
+
+    AssertArg(MemoryContextIsValid(context));
+
+    for (MemoryContext child = context->firstchild; child != NULL; child = child->nextchild) {
+
+        AssertArg(MemoryContextIsValid(child));
+
+        PG_TRY();
+        {
+            check_stack_depth();
+
+            if (MemoryContextIsShared(child)) {
+                MemoryContextLock(child);
+                isLocked = true;
+            }
+
+            if (recurse) {
+                total += GetMemoryTotalSpace(child, true);
+            } else {
+#ifndef ENABLE_MEMORY_CHECK
+                StaticAssertStmt(
+                    offsetof(AllocSetContext, totalSpace) == offsetof(StackSetContext, totalSpace),
+                    "The totalSpace's offset of AllocSetContext and StackSetContext is different.");
+
+                total += ((AllocSet) child)->totalSpace;
+#else
+                total += ((AsanSet) child)->totalSpace;
+#endif
+            }
+        }
+        PG_CATCH();
+        {
+            if (isLocked) {
+                MemoryContextUnlock(child);
+            }
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+
+        if (isLocked) {
+            MemoryContextUnlock(child);
+            isLocked = false;
+        }
+    } // end for
+
+    return total;
+}
+
+/*
  * GetMemoryChunkSpace
  *		Given a currently-allocated chunk, determine the total space
  *		it occupies (including all memory-allocation overhead).

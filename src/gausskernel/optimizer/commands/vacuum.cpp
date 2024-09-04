@@ -117,7 +117,6 @@ typedef struct {
 } VacStates;
 
 extern void do_delta_merge(List* infos, VacuumStmt* stmt);
-extern void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy);
 /* release all memory in infos */
 static void free_merge_info(List* infos);
 
@@ -135,7 +134,6 @@ static void GPIVacuumMainPartition(
 static void CBIVacuumMainPartition(
     Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
 
-static void UstoreVacuum(Relation real, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacstrategy);
 
 #define TryOpenCStoreInternalRelation(r, lmode, r1, r2)                   \
     do {                                                                  \
@@ -1100,7 +1098,12 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
      * working on a particular table at any time, and that each vacuum is
      * always an independent transaction.
      */
-    *oldestXmin = GetOldestXmin(rel);
+    if (u_sess->attr.attr_storage.enableVacuumExtremeXmin) {
+        *oldestXmin = GetVacuumExtremeOldestXmin();
+    } else {
+        *oldestXmin = GetOldestXmin(rel);
+    }
+
     if (IsCatalogRelation(rel) || RelationIsAccessibleInLogicalDecoding(rel)) {
         TransactionId CatalogXmin = GetReplicationSlotCatalogXmin();
         if (TransactionIdIsNormal(CatalogXmin) && TransactionIdPrecedes(CatalogXmin, *oldestXmin)) {
@@ -1859,10 +1862,10 @@ static inline void proc_snapshot_and_transaction()
 }
 
 static inline void
-TableRelationVacuum(Relation rel, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacStrategy)
+TableRelationVacuum(Relation rel, VacuumStmt *vacstmt, BufferAccessStrategy vacStrategy)
 {
     if (RelationIsUstoreFormat(rel)) {
-        UstoreVacuum(rel, vacstmt, lockmode, vacStrategy);
+        LazyVacuumUHeapRel(rel, vacstmt, vacStrategy);
     } else {
         lazy_vacuum_rel(rel, vacstmt, vacStrategy);
     }
@@ -1999,12 +2002,12 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
     if (OidIsValid(relationid)) {
-        Relation parent_rel = try_relation_open(relationid, NoLock);
-        if (parent_rel != NULL) {
-            if (RelationIsUstoreFormat(parent_rel) && parent_rel->rd_rel->relhasindex) {
+        Relation parentRel = try_relation_open(relationid, NoLock);
+        if (parentRel != NULL) {
+            if (RelationIsUstoreFormat(parentRel) && parentRel->rd_rel->relhasindex) {
                 lmodePartTable = ExclusiveLock;
             }
-            relation_close(parent_rel, NoLock);
+            relation_close(parentRel, NoLock);
         }
     }
 
@@ -2766,7 +2769,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (vacuumMainPartition((uint32)(vacstmt->flags))) {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             if (RelationIsUstoreFormat(onerel)) {
-                UstoreVacuum(onerel, vacstmt, lmode, vac_strategy);
+                UstoreVacuumMainPartitionGPIs(onerel, vacstmt, lmode, vac_strategy);
             } else {
                 GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
                 CBIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
@@ -2774,7 +2777,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             pgstat_report_vacuum(relid, InvalidOid, false, 0);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
-            TableRelationVacuum(onerel, vacstmt, lmode, vac_strategy);
+            TableRelationVacuum(onerel, vacstmt, vac_strategy);
         }
     }
     (void)pgstat_report_waitstatus(oldStatus);
@@ -2969,6 +2972,32 @@ void vacuum_delay_point(void)
         /* Might have gotten an interrupt while sleeping */
         CHECK_FOR_INTERRUPTS();
     }
+}
+
+/*
+ * bypass_lazy_vacuum_index --- check if lazy_vacuum_index() can by bypassed.
+ *
+ * The following factors should be all satisfied when bypass is true:
+ * 1. non-aggresive mode.
+ * 2. relation has indexes.
+ * 3. don't support dead tuples belong to different relations or buckets.
+ * 4. no index scan has been done.
+ * 5. number of pages contain dead items is too small. (i.e. 2% of rel_pages)
+ * 6. memory usage of dead items is too small. (i.e. 32MB)
+ */
+bool bypass_lazy_vacuum_index(
+     const LVRelStats *vacrelstats, const bool aggresive, const int nindexes)
+{
+    bool bypass = false;
+    if (!aggresive
+        && nindexes > 0
+        && InvalidBktId == vacrelstats->currVacuumBktId
+        && 0 == vacrelstats->num_index_scans
+        && (double) vacrelstats->lpdead_item_pages < (double) vacrelstats->rel_pages * BYPASS_THRESHOLD_PAGES
+        && TidStoreMemoryUsage(vacrelstats->dead_items_info.dead_items) < BYPASS_THRESHOLD_MEMORY_USAGE) {
+        bypass = true;
+    }
+    return bypass;
 }
 
 void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tuples, BlockNumber num_all_visible_pages,
@@ -4339,25 +4368,3 @@ int GetVacuumLogLevel(void)
 #endif
 }
 
-static void UstoreVacuum(Relation rel, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacstrategy)
-{
-    bool partTable = RelationIsPartitioned(rel);
-
-    /* Only GPI cleanup is performed for partitioned tables regardless of autovacuum or vacuum*/
-    if (partTable) {
-        UstoreVacuumMainPartitionGPIs(rel, vacstmt, lockmode, vacstrategy);
-        return;
-    }
-
-    if (IsAutoVacuumWorkerProcess()) {
-        /* In the autovacuum process, build fsm tree for common tables, toast tables, or partitions. */
-        FreeSpaceMapVacuum(rel);
-        if (vacstmt->needFreeze) {
-            /* Force vacuum for recycle clog. */
-            ForceVacuumUHeapRelBypass(rel, vacstmt, vacstrategy);
-        }
-    } else {
-        /*In vacuum process, the Uheap page and indexes will be cleared for tables, toast, and partitions. */
-        LazyVacuumUHeapRel(rel, vacstmt, vacstrategy);
-    }
-}

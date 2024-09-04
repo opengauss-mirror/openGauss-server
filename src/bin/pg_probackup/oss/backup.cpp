@@ -263,7 +263,7 @@ void backupFiles(FileAppender* appender, backup_files_arg* arg)
     time(&end_time);
     pretty_time_interval(difftime(end_time, start_time),
                                         pretty_time, lengthof(pretty_time));
-    elog(INFO, "Backup files are backuped to oss, time elapsed: %s", pretty_time);
+    elog(INFO, "Backup files are backuped to s3, time elapsed: %s", pretty_time);
 }
 
 

@@ -173,6 +173,7 @@ typedef struct knl_session_attr_common {
     int pgstat_track_functions;
     int xmlbinary;
     int remoteConnType;
+    int nls_length_semantics;
 
     bool enable_bbox_dump;
     char* bbox_dump_path;
@@ -248,6 +249,7 @@ typedef struct knl_session_attr_common {
     char* delimiter_name;
     bool b_compatibility_user_host_auth;
     int time_record_level;
+    bool enable_record_nettime;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

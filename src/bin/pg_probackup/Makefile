@@ -10,7 +10,7 @@
 PROGRAM = gs_probackup
 
 # utils
-OBJS = configuration.o json.o logger.o \
+OBJS = common_cipher.o configuration.o json.o logger.o \
 	parray.o pgut.o thread.o remote.o file.o file_gz.o psprintf.o \
         atomics.o s_lock.o
 
@@ -44,6 +44,8 @@ LIBS += -llz4
 ifeq ($(enable_lite_mode), no)
     LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 endif
+COMMON_OBJS = $(top_builddir)/src/lib/elog/elog.a
+
 PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subdir) -I$(LZ4_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH)
 # add page_compression so .h
 LDFLAGS += -L../../lib/page_compression
@@ -60,8 +62,8 @@ LDFLAGS += -L$(AWS_SDK_LIB_PATH) -laws-cpp-sdk-core -laws-cpp-sdk-s3 -I$(AWS_SDK
 
 all: submake-pagecompression $(PROGRAM)
 
-gs_probackup: $(OBJS) | submake-libpq submake-libpgport
-	$(CC) $(CXXFLAGS) $(OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
+gs_probackup: $(OBJS) $(COMMON_OBJS) | submake-libpq submake-libpgport
+	$(CC) $(CXXFLAGS) $(OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
 
 configuration.o: datapagemap.h
 backup.o: receivelog.h streamutil.h
@@ -110,3 +112,7 @@ uninstall:
 .PHONY : clean
 clean distclean maintainer-clean:
 	rm -f gs_probackup $(OBJS) $(EXTRA_CLEAN)
+
+# Be sure that the necessary archives are compiled
+$(top_builddir)/src/lib/elog/elog.a:
+	$(MAKE) -C $(top_builddir)/src/lib/elog elog.a

@@ -46,6 +46,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "foreign/foreign.h"
+#include "parser/parse_type.h"
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #include "tcop/utility.h"
@@ -158,8 +159,9 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
                         (errcode(ERRCODE_INDETERMINATE_COLLATION),
                             errmsg("could not determine which collation to use for view column \"%s\"", def->colname),
                             errhint("Use the COLLATE clause to set the collation explicitly.")));
-            } else
+            } else if (!(DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType((Node*)tle->expr)))) {
                 Assert(!OidIsValid(def->collOid));
+            }
             def->constraints = NIL;
 
             attrList = lappend(attrList, def);

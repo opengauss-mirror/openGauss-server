@@ -72,16 +72,25 @@ bool will_shutdown = false;
  *       3.0.X  |  92424   |   92605    |   92655   
  *       3.1.X  |    -     |     -      |     -     
  *       5.0.X  |  92656   |   92848    |   92898   
- *       NEXT   |  92899   |     ?      |     ?     
+ *       6.0.X  |  92899   |   92950    |   92999
+ *       NEXT   |  93000   |     ?      |     ?
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92943;
+const uint32 GRAND_VERSION_NUM = 93001;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 CHARBYTE_SEMANTIC_VERSION_NUMBER = 93001;
+const uint32 FLUSH_LSN_FUN_VERSION_NUM = 92951;
+const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
+const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM = 92948;
+const uint32 PARTITION_NAME_VERSION_NUM = 92947;
+const uint32 AUDIT_SHA_VERSION_NUM = 92946;
+const uint32 NETTIME_TRACE_VERSION_NUM = 92945;
+const uint32 HBA_CONF_VERSION_NUM = 92944;
 const uint32 PARALLEL_ENABLE_VERSION_NUM = 92941;
 const uint32 NAN_INFINITE_TEST_EXPR = 92940;
 const uint32 STRAIGHT_JOIN_VERSION_NUMBER = 92939;

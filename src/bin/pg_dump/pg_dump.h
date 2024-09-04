@@ -517,6 +517,7 @@ typedef struct _PublicationInfo {
     bool pubinsert;
     bool pubupdate;
     bool pubdelete;
+    bool pubtruncate;
     int64 pubddl;
 } PublicationInfo;
 
@@ -643,6 +644,7 @@ extern void getSubscriptions(Archive *fout);
 extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
 bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName);
 bool TabExists(Archive* fout, const char* schemaName, const char* tabName);
+void RemoveQuotes(char *str);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

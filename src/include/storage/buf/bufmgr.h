@@ -410,6 +410,7 @@ extern void RangeForgetBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber 
 
 extern void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum);
 extern int GetThreadBufferLeakNum(void);
+extern bool CheckForBufferPin(void);
 extern void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl = NULL);
 /* in localbuf.c */
 extern void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum);
@@ -429,6 +430,8 @@ extern bool StartBufferIO(BufferDesc* buf, bool forInput);
 extern Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc *bufDesc, const XLogPhyBlock *pblk);
 extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf_desc,
     const XLogPhyBlock *pblk, Block bufBlock);
+extern long RedoRelationForOndemandExtremeRTO(Relation relation);
+extern long RedoDatabaseForOndemandExtremeRTO(Oid dbId);
 extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
 extern Buffer standby_read_buf(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,

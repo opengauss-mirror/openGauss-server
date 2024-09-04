@@ -842,6 +842,20 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+
+        {{"enable_vacuum_extreme_xmin",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            AUTOVACUUM,
+            gettext_noop("Use extreme xmin to vacuum."),
+            NULL,
+            },
+            &u_sess->attr.attr_storage.enableVacuumExtremeXmin,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_adio_debug",
             PGC_SUSET,
             NODE_ALL,
@@ -1292,6 +1306,17 @@ static void InitStorageConfigureNamesBool()
             NULL},
 #endif
 
+        {{"ss_enable_bcast_getoldestxmin",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable broadcast to get oldest xmin by primay."),
+            NULL},
+            &g_instance.attr.attr_storage.dms_attr.enable_bcast_getoldestxmin,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"ss_enable_bcast_snapshot",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -2558,6 +2583,21 @@ static void InitStorageConfigureNamesInt()
             10,
             0,
             1000000,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"wal_file_preinit_threshold",
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_SETTINGS,
+            gettext_noop("Threshold for pre-initializing xlogs, in percentages."),
+            NULL,
+            NULL},
+            &u_sess->attr.attr_storage.walFilePreinitThreshold,
+            100,
+            1,
+            100,
             NULL,
             NULL,
             NULL},
@@ -7132,6 +7172,7 @@ static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSourc
 }
 
 #ifdef USE_ASSERT_CHECKING
+extern ss_dms_func_t g_ss_dms_func;
 static bool parse_ss_fi_entry_list(char *value, uint32 *entry_list, uint32 *count)
 {
     char* value_tmp = strdup(value);
@@ -7139,19 +7180,19 @@ static bool parse_ss_fi_entry_list(char *value, uint32 *entry_list, uint32 *coun
     while (p != NULL) {
         for (uint32 i = 0; i < strlen(p); i++) {
             if (!isdigit(p[i])) {
-                ereport(ERROR, (errmsg("The para %s does not meet the environment(0 .. %d).", p, FI_ENTRY_END)));
+                ereport(ERROR, (errmsg("The para %s does not meet the environment(0 .. %d).", p, DDES_FI_ENTRY_END)));
                 return false;
             }
         }
         uint32 entry_point = atoi(p);
-        if (entry_point >= FI_ENTRY_END || entry_point < 0) {
+        if (entry_point >= DDES_FI_ENTRY_END || entry_point < 0) {
             ereport(ERROR, (errmsg("%d is outside the valid range for parameter"
-                "(0 .. %d).", entry_point, FI_ENTRY_END)));
+                "(0 .. %d).", entry_point, DDES_FI_ENTRY_END)));
             return false;
         }
 
-        if (*count >= MAX_FI_ENTRY_COUNT) {
-            ereport(ERROR, (errmsg("The number of fault points exceeds the maximum %d.", MAX_FI_ENTRY_COUNT)));
+        if (*count >= DDES_FI_ENTRY_COUNT) {
+            ereport(ERROR, (errmsg("The number of fault points exceeds the maximum %d.", DDES_FI_ENTRY_COUNT)));
             return false;
         }
 
@@ -7173,10 +7214,9 @@ static bool parse_ss_fi_entry_list(char *value, uint32 *entry_list, uint32 *coun
     return true;
 }
 
-extern ss_dms_func_t g_ss_dms_func;
 static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSource source)
 {
-    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
     if (!g_ss_dms_func.inited) {
@@ -7187,8 +7227,8 @@ static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSour
         return false;
     }
 
-    if (dms_fi_set_entries(DMS_FI_TYPE_PACKET_LOSS, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_packet_loss_entries fail")));
+    if (ss_fi_set_entries(DDES_FI_TYPE_PACKET_LOSS, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_packet_loss_entries fail")));
         return false;
     }
     return true;
@@ -7196,7 +7236,7 @@ static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSour
 
 static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSource source)
 {
-    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
     if (!g_ss_dms_func.inited) {
@@ -7207,8 +7247,8 @@ static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSour
         return false;
     }
 
-    if (dms_fi_set_entries(DMS_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_entries fail")));
+    if (ss_fi_set_entries(DDES_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
         return false;
     }
     return true;
@@ -7216,19 +7256,34 @@ static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSour
 
 static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSource source)
 {
-    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
     if (!g_ss_dms_func.inited) {
         return true;
     }
 
+    if (g_instance.shared_fi_ctx == NULL) {
+        int32 shared_fi_ctx_size = ss_fi_get_context_size();
+        if (shared_fi_ctx_size <= 0) {
+            ereport(FATAL, (errmsg("failed to get fi context size")));
+            return false;
+        }
+        g_instance.shared_fi_ctx = malloc(shared_fi_ctx_size);
+        if (g_instance.shared_fi_ctx == NULL) {
+            ereport(FATAL, (errmsg("failed to alloc fi context")));
+            return false;
+        }
+
+        ss_fi_set_and_init_context(g_instance.shared_fi_ctx);
+    }
+
     if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
         return false;
     }
 
-    if (dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_cpu_latency_entries fail")));
+    if (ss_fi_set_entries(DDES_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
         return false;
     }
     return true;
@@ -7236,7 +7291,7 @@ static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSour
 
 static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSource source)
 {
-    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
     if (!g_ss_dms_func.inited) {
@@ -7247,8 +7302,8 @@ static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSo
         return false;
     }
 
-    if (dms_fi_set_entries(DMS_FI_TYPE_PROCESS_FAULT, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_process_fault_entries fail")));
+    if (ss_fi_set_entries(DDES_FI_TYPE_PROCESS_FAULT, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_process_fault_entries fail")));
         return false;
     }
     return true;
@@ -7256,7 +7311,7 @@ static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSo
 
 static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSource source)
 {
-    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
     if (!g_ss_dms_func.inited) {
@@ -7267,8 +7322,8 @@ static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSou
         return false;
     }
 
-    if (dms_fi_set_entries(DMS_FI_TYPE_CUSTOM_FAULT, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_custom_fault_entries fail")));
+    if (ss_fi_set_entries(DDES_FI_TYPE_CUSTOM_FAULT, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_custom_fault_entries fail")));
         return false;
     }
     return true;
@@ -7283,8 +7338,8 @@ static bool check_ss_fi_packet_loss_prob(int* newval, void** extra, GucSource so
         return true;
     }
 
-    if (dms_fi_set_entry_value(DMS_FI_TYPE_PACKET_LOSS, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_packet_loss_prob fail")));
+    if (ss_fi_set_entry_value(DDES_FI_TYPE_PACKET_LOSS, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_packet_loss_prob fail")));
         return false;
     }
 
@@ -7300,8 +7355,8 @@ static bool check_ss_fi_net_latency_ms(int* newval, void** extra, GucSource sour
         return true;
     }
 
-    if (dms_fi_set_entry_value(DMS_FI_TYPE_NET_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_ms fail")));
+    if (ss_fi_set_entry_value(DDES_FI_TYPE_NET_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_ms fail")));
         return false;
     }
 
@@ -7317,8 +7372,8 @@ static bool check_ss_fi_cpu_latency_ms(int* newval, void** extra, GucSource sour
         return true;
     }
 
-    if (dms_fi_set_entry_value(DMS_FI_TYPE_CPU_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_cpu_latency_ms fail")));
+    if (ss_fi_set_entry_value(DDES_FI_TYPE_CPU_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_cpu_latency_ms fail")));
         return false;
     }
 
@@ -7334,8 +7389,8 @@ static bool check_ss_fi_process_fault_prob(int* newval, void** extra, GucSource 
         return true;
     }
 
-    if (dms_fi_set_entry_value(DMS_FI_TYPE_PROCESS_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_process_fault_prob fail")));
+    if (ss_fi_set_entry_value(DDES_FI_TYPE_PROCESS_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_process_fault_prob fail")));
         return false;
     }
 
@@ -7351,8 +7406,8 @@ static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource 
         return true;
     }
 
-    if (dms_fi_set_entry_value(DMS_FI_TYPE_CUSTOM_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("set parameter ss_fi_custom_fault_param fail")));
+    if (ss_fi_set_entry_value(DDES_FI_TYPE_CUSTOM_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_custom_fault_param fail")));
         return false;
     }
 

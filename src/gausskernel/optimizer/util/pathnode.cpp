@@ -2356,7 +2356,7 @@ bool is_pwj_path(Path* pwjpath)
  */
 IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
     List* indexorderbys, List* indexorderbycols, List* pathkeys, ScanDirection indexscandir, bool indexonly,
-    Relids required_outer, Bitmapset *upper_params, double loop_count)
+    Relids required_outer, Bitmapset *upper_params, double loop_count, int dop)
 {
     IndexPath* pathnode = makeNode(IndexPath);
     RelOptInfo* rel = index->rel;
@@ -2370,7 +2370,7 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->path.pathkeys = pathkeys;
-
+    pathnode->path.dop = dop;
     /* Convert clauses to indexquals the executor can handle */
     expand_indexqual_conditions(index, indexclauses, indexclausecols, &indexquals, &indexqualcols);
 

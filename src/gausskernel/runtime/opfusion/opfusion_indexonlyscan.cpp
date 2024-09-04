@@ -290,7 +290,6 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
         /*
          * Fill the scan tuple slot with data from the index.
          */
-        IndexTuple tmptup = NULL;
         index_deform_tuple(indexdesc->xs_itup, RelationGetDescr(rel), m_values, m_isnull);
         if (indexdesc->xs_recheck && EpqCheck(m_values, m_isnull)) {
             continue;
@@ -303,9 +302,12 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
             m_tmpisnull[i] = m_isnull[m_attrno[i] - 1];
         }
 
-        tmptup = index_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull);
-        Assert(tmptup != NULL);
-        StoreIndexTuple(m_reslot, tmptup, m_tupDesc);
+        (void)ExecClearTuple(m_reslot);
+        for (int i = 0; i < m_tupDesc->natts; i++) {
+            m_reslot->tts_values[i] = m_tmpvals[i];
+            m_reslot->tts_isnull[i] = m_tmpisnull[i];
+        }
+        (void)ExecStoreVirtualTuple(m_reslot);
 
         tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
         ExecDropSingleTupleTableSlot(tmpreslot);

@@ -554,10 +554,11 @@ extern bool enable_sig_alarm(int delayms, bool is_statement_timeout);
 extern bool enable_lockwait_sig_alarm(int delayms);
 extern bool enable_session_sig_alarm(int delayms);
 extern bool enable_idle_in_transaction_session_sig_alarm(int delayms);
+extern bool enable_query_plan_sig_alarm(int delayms);
 extern bool disable_session_sig_alarm(void);
 extern bool disable_idle_in_transaction_session_sig_alarm(void);
 
-extern bool disable_sig_alarm(bool is_statement_timeout);
+extern bool disable_sig_alarm(bool is_statement_timeout, int waitSec = 0);
 extern bool pause_sig_alarm(bool is_statement_timeout);
 extern bool resume_sig_alarm(bool is_statement_timeout);
 extern void handle_sig_alarm(SIGNAL_ARGS);

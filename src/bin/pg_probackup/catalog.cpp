@@ -22,6 +22,7 @@
 #include "common/fe_memutils.h"
 #include "oss/include/restore.h"
 #include "oss/include/oss_operator.h"
+#include "common_cipher.h"
 
 static pgBackup* get_closest_backup(timelineInfo *tlinfo);
 static pgBackup* get_oldest_backup(timelineInfo *tlinfo);
@@ -30,6 +31,8 @@ static pgBackup *readBackupControlFile(const char *path);
 
 static bool exit_hook_registered = false;
 static parray *lock_files = NULL;
+
+static void uncompress_decrypt_directory(const char *instance_name_str);
 
 static timelineInfo *
 timelineInfoNew(TimeLineID tli)
@@ -446,6 +449,8 @@ catalog_get_backup_list(const char *instance_name, time_t requested_backup_id)
     int     i;
     char backup_instance_path[MAXPGPATH];
     int nRet = 0;
+
+    uncompress_decrypt_directory(instance_name);
 
     nRet = snprintf_s(backup_instance_path,MAXPGPATH,MAXPGPATH - 1, "%s/%s/%s",
                             backup_path, BACKUPS_DIR, instance_name);
@@ -2868,5 +2873,260 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
     char* path = NULL;
 
     return path;
+}
+
+/* decrypt and then uncompress the directory */
+static void uncompress_decrypt_directory(const char *instance_name_str)
+{
+    errno_t rc;
+
+    bool res = false;
+    DIR *data_dir = NULL;
+    struct dirent *data_ent = NULL;
+    uint key_len = 0;
+    uint hmac_len = MAX_HMAC_LEN;
+    uint key_idx_uint = 0;
+    uint dec_buffer_len = 0;
+    uint out_buffer_len = MAX_CRYPTO_MODULE_LEN;
+    long int enc_file_pos = 0;
+    long int enc_file_len = 0;
+    char sys_cmd[MAXPGPATH] = {0};
+    char* key = NULL;
+    unsigned char hmac_read_buffer[MAX_HMAC_LEN +1] = {0};
+    unsigned char hmac_cal_buffer[MAX_HMAC_LEN +1] = {0};
+    unsigned char dec_buffer[MAX_CRYPTO_MODULE_LEN + 1] = {0};
+    unsigned char out_buffer[MAX_CRYPTO_MODULE_LEN + 1] = {0};
+    char enc_backup_file[MAXPGPATH] = {0};
+    char dec_backup_file[MAXPGPATH] = {0};
+    char backup_instance_path[MAXPGPATH] = {0};
+    int algo;
+    char errmsg[MAX_ERRMSG_LEN] = {0};
+
+    if (NULL == encrypt_dev_params) {
+        return;
+    }
+    
+    CryptoModuleParamsCheck(gen_key, encrypt_dev_params, encrypt_mode, encrypt_key, encrypt_salt);
+
+    initCryptoSession(&crypto_module_session);
+
+    algo = transform_type(encrypt_mode);
+    if (gen_key) {
+        rc = crypto_create_symm_key_use(crypto_module_session, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, (size_t*)&key_len);
+        if (rc != 1) {
+            crypto_get_errmsg_use(NULL, errmsg);
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, "crypto module gen key error, errmsg:%s\n", errmsg);
+        }
+    } else {
+        key = SEC_decodeBase64(encrypt_key, &key_len);
+        if (NULL == key) {
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, "crypto module decode key error, please check --with-key.");
+        }
+    }
+
+    rc = crypto_ctx_init_use(crypto_module_session, &crypto_module_keyctx, (ModuleSymmKeyAlgo)algo, 0, (unsigned char*)key, key_len);
+	if (rc != 1) {
+		crypto_get_errmsg_use(NULL, errmsg);
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+    }
+
+    algo = getHmacType((ModuleSymmKeyAlgo)algo);
+    rc = crypto_hmac_init_use(crypto_module_session, &crypto_hmac_keyctx, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, key_len);
+    if (rc != 1) {
+        crypto_get_errmsg_use(NULL, errmsg);
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+    }
+
+    rc = sprintf_s(backup_instance_path, MAXPGPATH, "%s/%s/%s",
+                                    backup_path, BACKUPS_DIR, instance_name_str);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    data_dir = fio_opendir(backup_instance_path, FIO_BACKUP_HOST);
+    if (data_dir == NULL) {
+        elog(ERROR, "cannot open directory \"%s\": %s", backup_instance_path, strerror(errno));
+        return;
+    }
+
+    for(;(data_ent = fio_readdir(data_dir)) != NULL; errno = 0)
+    {
+        if (strstr(data_ent->d_name,"_enc")) {
+            rc = sprintf_s(enc_backup_file, MAXPGPATH, "%s/%s", backup_instance_path, data_ent->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            FILE* enc_backup_fd = fopen(enc_backup_file,"rb");
+            if(NULL == enc_backup_fd) {
+                clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                elog(ERROR, ("failed to create or open encrypt backup file."));
+                return;
+            }
+
+            fseek(enc_backup_fd,0,SEEK_END);
+            enc_file_len = ftell(enc_backup_fd);
+
+            fseek(enc_backup_fd, 0, SEEK_SET);
+
+            enc_file_pos = ftell(enc_backup_fd);
+
+            rc = sprintf_s(dec_backup_file, MAXPGPATH, "%s/%s.tar", backup_instance_path, data_ent->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            FILE* dec_file_fd = fopen(dec_backup_file,"wb");
+
+            while(enc_file_pos < enc_file_len)
+            {
+                memset_s(dec_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
+                memset_s(out_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
+
+                if(enc_file_pos + MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN < enc_file_len) {
+                    fread(dec_buffer, 1, MAX_CRYPTO_MODULE_LEN, enc_backup_fd);
+                    fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
+                    dec_buffer_len = MAX_CRYPTO_MODULE_LEN;
+                    enc_file_pos += (MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN);
+                } else {
+                    fread(dec_buffer, 1, enc_file_len - (enc_file_pos + MAX_HMAC_LEN), enc_backup_fd);
+                    fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
+                    dec_buffer_len = enc_file_len - (enc_file_pos + MAX_HMAC_LEN);
+                    enc_file_pos = enc_file_len;
+                }
+
+                rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
+                            (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                if(rc != 1) {
+                    crypto_get_errmsg_use(NULL, errmsg);
+                    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                    elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
+                }
+
+                rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len, hmac_cal_buffer, (size_t*)&hmac_len);
+                if(rc != 1) {
+                    crypto_get_errmsg_use(NULL, errmsg);
+                    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                    elog(ERROR, ("failed to calculate hmac, errmsg: %s"), errmsg);
+                }
+
+                if (strncmp((char*)hmac_cal_buffer, (char*)hmac_read_buffer, (size_t)hmac_len) != 0) {
+                    elog(ERROR, ("hmac verify failed\n"));
+                }
+
+                fwrite(out_buffer, 1, out_buffer_len, dec_file_fd);
+            }
+            fclose(dec_file_fd);
+            fclose(enc_backup_fd);
+
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+
+            rc = sprintf_s(sys_cmd, MAXPGPATH, "tar -xPf %s/%s.tar", backup_instance_path, data_ent->d_name);
+
+            if (!is_valid_cmd(sys_cmd)) {
+                elog(ERROR, "cmd is rejected");
+                return;
+            }
+            system(sys_cmd);
+            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
+            securec_check(rc, "\0", "\0");
+
+            rc = sprintf_s(sys_cmd, MAXPGPATH, "rm -rf %s/%s.tar", backup_instance_path, data_ent->d_name);
+
+            if (!is_valid_cmd(sys_cmd)) {
+                elog(ERROR, "cmd is rejected");
+                return;
+            }
+            system(sys_cmd);
+            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
+            securec_check(rc, "\0", "\0");
+            enc_flag = true;
+        }
+    }
+
+    if (data_dir) {
+        fio_closedir(data_dir);
+        data_dir = NULL;
+    }
+}
+
+/*
+ * Function: delete_one_instance_backup_directory
+ *
+ * Return:
+ *  void
+ */
+static void delete_one_instance_backup_directory(char *instance_name_str)
+{
+    char backup_instance_path[MAXPGPATH];
+    DIR *data_dir = NULL;
+    struct dirent *data_ent = NULL;
+    char sys_cmd[MAXPGPATH] = {0};
+
+    errno_t rc = sprintf_s(backup_instance_path, MAXPGPATH, "%s/%s/%s",
+                                    backup_path, BACKUPS_DIR, instance_name_str);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    data_dir = fio_opendir(backup_instance_path, FIO_BACKUP_HOST);
+    if (data_dir == NULL)
+    {
+        elog(ERROR, "cannot open directory \"%s\": %s", backup_instance_path,
+                strerror(errno));
+        return;
+    }
+
+    for (;(data_ent = fio_readdir(data_dir)) != NULL; errno = 0)
+    {
+        if (IsDir(backup_instance_path, data_ent->d_name, FIO_BACKUP_HOST) && data_ent->d_name[0] != '.') {
+            error_t rc = sprintf_s(sys_cmd, MAXPGPATH, "rm %s/%s -rf", backup_instance_path,data_ent->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+            if (!is_valid_cmd(sys_cmd)) {
+                elog(ERROR, "cmd is rejected");
+                return;
+            }
+
+            system(sys_cmd);
+            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
+            securec_check(rc, "\0", "\0");
+        }
+    }
+
+    if (data_dir) {
+        fio_closedir(data_dir);
+        data_dir = NULL;
+    }
+
+}
+
+/*
+ * Function: delete_backup_directory
+ * Description:
+ *
+ * Input:
+ *  char *instance_name
+ * Return:
+ *  void
+ */
+void delete_backup_directory(char *instance_name_str)
+{
+    int i = 0;
+    if(NULL == encrypt_dev_params || !enc_flag) {
+        return;
+    }
+
+    if (instance_name_str == NULL) {
+        parray *instances = catalog_get_instance_list();
+
+        for (i = 0; i < parray_num(instances); i++)
+        {
+            InstanceConfig *instance = (InstanceConfig *)parray_get(instances, i);
+            delete_one_instance_backup_directory(instance->name);
+        }
+        parray_walk(instances, pfree);
+        parray_free(instances);
+
+        return;
+    }
+
+    delete_one_instance_backup_directory(instance_name_str);
+
 }
 

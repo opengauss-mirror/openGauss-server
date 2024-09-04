@@ -154,6 +154,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partitions of the snapshot xmin cache hashtable */
 #define NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS 32
 
+/* Number of xlog track hashmap, each ondemand extro pipline has one */
+#define NUM_SCANNING_XLOG_TRACK_PARTITIONS (g_instance.attr.attr_storage.recovery_parse_workers)
+
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
@@ -205,8 +208,11 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstTxnStatusCacheLock (FirstXlogTrackLock + NUM_XLOG_TRACK_PARTITIONS)
 /* shared-storage snapshot xmin cache*/
 #define FirstSSSnapshotXminCacheLock (FirstTxnStatusCacheLock + NUM_TXNSTATUS_CACHE_PARTITIONS)
+/* xlog track hashmap */
+#define FirstScanningXLOGTrackLock (FirstSSSnapshotXminCacheLock + NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
+
 /* must be last: */
-#define NumFixedLWLocks (FirstSSSnapshotXminCacheLock + NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
+#define NumFixedLWLocks (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -290,6 +296,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION,
     LWTRANCHE_DMS_BUF_CTRL,
     LWTRANCHE_SYNCREP_WAIT,
+    LWTRANCHE_SCANNING_XLOG_TRACK,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

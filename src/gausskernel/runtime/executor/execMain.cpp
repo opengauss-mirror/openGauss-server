@@ -466,11 +466,12 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     int instrument_option = 0;
     bool has_track_operator = false;
     char* old_stmt_name = u_sess->pcache_cxt.cur_stmt_name;
+    u_sess->statement_cxt.root_query_plan = queryDesc;
     u_sess->statement_cxt.executer_run_level++;
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
     }
-    instr_stmt_report_query_plan(queryDesc);
+    instr_stmt_exec_report_query_plan(queryDesc);
     exec_explain_plan(queryDesc);
     if (u_sess->attr.attr_resource.use_workload_manager &&
         u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && 
@@ -607,6 +608,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         } else {
             CodeGenThreadRuntimeCodeGenerate();
         }
+        estate->compileCodegen = true;
     }
 #endif
 
@@ -721,6 +723,7 @@ void ExecutorFinish(QueryDesc *queryDesc)
     } else {
         standard_ExecutorFinish(queryDesc);
     }
+
 }
 
 void standard_ExecutorFinish(QueryDesc *queryDesc)
@@ -772,6 +775,14 @@ void standard_ExecutorFinish(QueryDesc *queryDesc)
  */
 void ExecutorEnd(QueryDesc *queryDesc)
 {
+    /* 
+     * for a very few cases, query plan not be recorded during the execution phase, 
+     * we record again before executor end. 
+     */
+    if (unlikely(u_sess->statement_cxt.is_exceed_query_plan_threshold)) {
+        instr_stmt_report_query_plan(queryDesc);
+    }
+
     if (ExecutorEnd_hook) {
         (*ExecutorEnd_hook)(queryDesc);
     } else {
@@ -833,8 +844,11 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
 #ifdef ENABLE_LLVM_COMPILE
-   /* Do not release codegen in Fmgr and Procedure */
-    if (!t_thrd.codegen_cxt.g_runningInFmgr && u_sess->SPI_cxt._connected == -1) {
+   /*
+    * Do not release codegen in Fmgr and Procedure. And if codegen modulre
+    * is compiled, only estate which has compiled it can release.
+    */
+    if (u_sess->SPI_cxt._connected == -1 && (CodeGenThreadObjectReady() || estate->compileCodegen)) {
         CodeGenThreadTearDown();
     }
 #endif
@@ -1522,6 +1536,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
             (IS_SPQ_COORDINATOR && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
 #endif
             plannedstmt->planTree->plan_node_id == list_nth_int(plannedstmt->subplan_ids, i - 1))) {
+
             estate->es_under_subplan = true;
             subplanstate = ExecInitNode(subplan, estate, sp_eflags);
 
@@ -1552,6 +1567,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         plan->initPlan = plannedstmt->initPlan;
         estate->es_subplan_ids = plannedstmt->subplan_ids;
     }
+
     planstate = ExecInitNode(plan, estate, eflags);
 
     if (estate->pruningResult) {
@@ -1776,11 +1792,13 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
                 errmsg("cannot lock rows in contview \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_MATVIEW:
-            /* Should not get here */
-            ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                     errmsg("cannot lock rows in materialized view \"%s\"",
-                            RelationGetRelationName(rel))));
+            /* Allow referencing a matview, but not actual locking clauses */
+            if (markType != ROW_MARK_REFERENCE) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("cannot lock rows in materialized view \"%s\"",
+                                RelationGetRelationName(rel))));
+            }
             break;
         case RELKIND_FOREIGN_TABLE:
             /* Should not get here; planner should have used ROW_MARK_COPY */
@@ -3767,10 +3785,8 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                     Page page = BufferGetPage(buffer);
                     ItemPointer tid = &tuple.t_self;
                     OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
-                    if (offnum < FirstOffsetNumber || offnum > PageGetMaxOffsetNumber(page)) {
-                        ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
-                            errmsg("out of range items")));
-                    } else if (offnum < FirstOffsetNumber || offnum > UHeapPageGetMaxOffsetNumber(page)) {
+                    if (offnum < FirstOffsetNumber || offnum >
+                            tableam_tops_page_get_max_offsetnumber(fakeRelation, page)) {
                         ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
                             errmsg("out of range items")));
                     } else {

@@ -14,6 +14,7 @@
 #ifndef NODEINDEXSCAN_H
 #define NODEINDEXSCAN_H
 
+#include "executor/exec/execStream.h"
 #include "nodes/execnodes.h"
 
 extern IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags);

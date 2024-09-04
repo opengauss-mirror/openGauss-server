@@ -342,6 +342,18 @@ void appendStringInfoChar(StringInfo str, char ch)
 }
 
 /*
+ * popStringInfoChar
+ *
+ * Pop a single byte to str.
+ */
+void popStringInfoChar(StringInfo str)
+{
+    /* OK, pop the character */
+    str->len--;
+    str->data[str->len] = '\0';
+}
+
+/*
  * appendStringInfoSpaces
  *
  * Append the specified number of spaces to a buffer.

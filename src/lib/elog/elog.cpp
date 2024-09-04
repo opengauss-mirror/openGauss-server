@@ -80,6 +80,7 @@ typedef struct ToolLogInfo {
 #define LOG_MAX_COUNT    50
 #define GS_LOCKFILE_SIZE 1024
 #define curLogFileMark "-current.log"
+#define LOG_DIR_FMT "%s/bin/%s"
 // optimize,to suppose pirnt to file and screen
 static bool allow_log_store = false;
 void check_env_value_c(const char* input_env_value);
@@ -601,4 +602,218 @@ void GenerateProgressBar(int percent, char* progressBar)
 
     progressBar[barWidth + 1] = ']';
     progressBar[barWidth + 2] = '\0';
+}
+
+static FILE *create_audit_file(const char* prefix_name, const char* log_path) {
+#define LOG_MAX_SIZE (16 * 1024 * 1024)
+#define LOG_MAX_TIMELEN 80
+    DIR* dir = NULL;
+    struct dirent* de = NULL;
+    bool is_exist = false;
+    char log_file_name[MAXPGPATH] = {0};
+    char log_temp_name[MAXPGPATH] = {0};
+    char log_new_name[MAXPGPATH] = {0};
+    char log_create_time[LOG_MAX_TIMELEN] = {0};
+    char current_localtime[LOG_MAX_TIMELEN] = {0};
+    // check validity of current log file name
+    char* name_ptr = NULL;
+
+    FILE *fp;
+    int ret = 0;
+    struct stat statbuf;
+
+    pg_time_t current_time;
+    struct tm tmp;
+    struct tm* systm = &tmp;
+    int nRet = 0;
+    errno_t rc = 0;
+
+    rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
+    securec_check_c(rc, "\0", "\0");
+
+    current_time = time(NULL);
+    localtime_r((const time_t*)&current_time, systm);
+    if (NULL != systm) {
+        (void)strftime(current_localtime, LOG_MAX_TIMELEN, "%Y-%m-%d %H:%M:%S", systm);
+        (void)strftime(log_create_time, LOG_MAX_TIMELEN, "-%Y-%m-%d_%H%M%S", systm);
+    }
+
+    if (NULL == (dir = opendir(log_path))) {
+        printf(_("%s: opendir %s failed! %s\n"), prefix_name, log_path, gs_strerror(errno));
+
+        return NULL;
+    }
+
+    while (NULL != (de = readdir(dir))) {
+        // exist current log file
+        if (NULL != strstr(de->d_name, prefix_name)) {
+            name_ptr = strstr(de->d_name, "-current.log");
+            if (NULL != name_ptr) {
+                name_ptr += strlen("-current.log");
+                if ('\0' == (*name_ptr)) {
+                    nRet = snprintf_s(log_file_name, MAXPGPATH, MAXPGPATH - 1, "%s/%s", log_path, de->d_name);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                    is_exist = true;
+                    fp = fopen(log_file_name, "a");
+                    if (fp == NULL) {
+                        printf(_("%s: open audit file %s failed!\n"), prefix_name, log_file_name);
+                        (void)closedir(dir);
+                        return NULL;
+                    }
+
+                    (void)lstat(log_file_name, &statbuf);
+                    if (statbuf.st_size > LOG_MAX_SIZE) {
+                        set_log_filename(log_temp_name, de->d_name);
+                        nRet = snprintf_s(log_new_name, MAXPGPATH, MAXPGPATH - 1, "%s/%s", log_path, log_temp_name);
+                        securec_check_ss_c(nRet, "\0", "\0");
+                        ret = rename(log_file_name, log_new_name);
+                        if (0 != ret) {
+                            printf(_("%s: rename audit file %s failed!\n"), prefix_name, log_file_name);
+                            (void)closedir(dir);
+                            return NULL;
+                        }
+                    }
+                    (void)closedir(dir);
+                    return fp;
+                }
+            }
+        }
+    }
+    // current log file not exist
+    if (!is_exist) {
+        nRet = snprintf_s(log_file_name,
+            MAXPGPATH,
+            MAXPGPATH - 1,
+            "%s/%s%s%s",
+            log_path,
+            prefix_name,
+            log_create_time,
+            curLogFileMark);
+        securec_check_ss_c(nRet, "\0", "\0");
+
+        fp = fopen(log_file_name, "a");
+        if (fp == NULL) {
+            printf(_("%s: open audit file %s failed!\n"), prefix_name, log_file_name);
+            (void)closedir(dir);
+            return NULL;
+        }
+        rc = chmod(log_file_name, S_IRUSR | S_IWUSR);
+        if (rc != 0) {
+            printf(_("%s: chmod audit file %s failed!\n"), prefix_name, log_file_name);
+            (void)fclose(fp);
+            (void)closedir(dir);
+            return NULL;
+        }
+    }
+    (void)closedir(dir);
+    return fp;
+}
+
+static void get_cur_time(char * current_localtime) {
+    pg_time_t current_time = time(NULL);
+    struct tm tmp;
+    struct tm* systm = &tmp;
+    localtime_r((const time_t*)&current_time, systm);
+    if (NULL != systm) {
+        (void)strftime(current_localtime, LOG_MAX_TIMELEN, "%Y-%m-%d %H:%M:%S", systm);
+    }
+}
+
+static void report_command(FILE *fp, auditConfig *audit_cfg) {
+    const char* process_name = audit_cfg->process_name;
+    int argc = audit_cfg->argc;
+    char** argv = audit_cfg->argv;
+    bool is_success = audit_cfg->is_success;
+
+    errno_t rc;
+    char command[MAXPGPATH] = {0};
+
+    rc = strcat_s(command, MAXPGPATH, process_name);
+    securec_check_c(rc, "\0", "\0");
+    rc = strcat_s(command, MAXPGPATH, " ");
+    securec_check_c(rc, "\0", "\0");
+    for (int i = 1; i<argc; i++) {
+        if (!strcmp(argv[i], "-W")) {
+            i++;
+            continue;
+        }
+        rc = strcat_s(command, MAXPGPATH, argv[i]);
+        securec_check_c(rc, "\0", "\0");
+        if (i<argc - 1) {
+            rc = strcat_s(command, MAXPGPATH, " ");
+            securec_check_c(rc, "\0", "\0");
+        }
+    }
+
+    char current_localtime[LOG_MAX_TIMELEN] = {0};
+    get_cur_time(current_localtime);
+
+    struct passwd *pwd = getpwuid(getuid());  // Check for NULL!
+    if (pwd != NULL) {
+        (void)fprintf(fp, _("[%s] [%s] [%s] %s\n"), current_localtime, (is_success ? "SUCCESS" : "FAILURE"), pwd->pw_name, command);
+    } else {
+        (void)fprintf(fp, _("[%s] [%s] %s\n"), current_localtime, (is_success ? "SUCCESS" : "FAILURE"), command);
+    }
+}
+
+static void get_log_dir(const char *process_name, char *log_dir) {
+    char* gausslog_dir = NULL;
+    int nRet = 0;
+    gausslog_dir = gs_getenv_r("GAUSSLOG");
+    check_env_value_c(gausslog_dir);
+    if ((NULL == gausslog_dir) || ('\0' == gausslog_dir[0])) {
+        return;
+    } 
+    if (!is_absolute_path(gausslog_dir)) {
+        printf(_("current path is not absolute path ,can't find the exec path.\n"));
+        return;
+    }
+    nRet = snprintf_s(log_dir, MAXPGPATH, MAXPGPATH - 1, LOG_DIR_FMT, gausslog_dir, process_name);
+    securec_check_ss_c(nRet, "\0", "\0");
+}
+
+auditConfig audit_cfg;
+
+static void audit_report() {
+    if (!audit_cfg.has_init) {
+        return;
+    }
+    // init log
+    char log_dir[MAXPGPATH] = {0};
+    get_log_dir(audit_cfg.process_name, log_dir);
+    if ('\0' == log_dir[0]) {
+        return;
+    }
+
+    if (0 != pg_mkdir_p(log_dir, S_IRWXU)) {
+        if (EEXIST != errno) {
+            printf(_("could not create directory %s: %m\n"), log_dir);
+            return;
+        }
+    }   
+    // create audit file
+    FILE *fp = create_audit_file("audit", log_dir);
+    if (fp == NULL) {
+        printf(_("Warning: create_audit_file failed!\n"));
+        return;
+    }
+
+    // audit report
+    report_command(fp, &audit_cfg);
+
+    //close fd
+    fclose(fp);
+}
+
+void init_audit(const char* process_name, int argc, char** argv) {
+    audit_cfg.has_init = true;
+    audit_cfg.is_success = false;
+    audit_cfg.process_name = process_name;
+    audit_cfg.argc = argc;
+    audit_cfg.argv = argv;
+    atexit(audit_report);
+}
+
+void audit_success() {
+    audit_cfg.is_success = true;
 }

@@ -2980,7 +2980,6 @@ static double to_binary_float_internal(char* origin_num, bool *err)
         val += 0.0;
     }
 
-    // to_binary_float accept 'Nan', '[+-]Inf'
     if (endptr == num || errno != 0) {
         int save_errno = errno;
 
@@ -3002,7 +3001,8 @@ static double to_binary_float_internal(char* origin_num, bool *err)
         }  else if (save_errno == ERANGE) {
             // convert to infinite
             if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL)
-                val = (val == 0.0 ? 0 : (val >= HUGE_VAL ? get_float4_infinity() : -get_float4_infinity()));
+                val = (val == 0.0 ? 0 : (val >= HUGE_VAL ? 
+                                        get_float4_infinity() : -get_float4_infinity()));
         }
     }
 #ifdef HAVE_BUGGY_SOLARIS_STRTOD
@@ -3027,10 +3027,7 @@ static double to_binary_float_internal(char* origin_num, bool *err)
     }
 
     if (isinf((float4)val) && !isinf(val)) {
-        val = val < 0 ? -get_float4_infinity() : get_float4_infinity();
-    }
-    if (((float4)val) == 0.0 && val != 0) {
-        val = 0;
+        val = val > 0 ? get_float4_infinity() : -get_float4_infinity();
     }
 
     return val;
@@ -3038,6 +3035,11 @@ static double to_binary_float_internal(char* origin_num, bool *err)
 
 /*
  * to_binary_float_text()  -  convert to a single precision floating-point number.
+ *
+ *          arg[0]: input arg;
+ *          arg[1]: default arg;
+ *          arg[2]: has default arg;
+ *          arg[3]: default is column ref.
  */
 Datum to_binary_float_text(PG_FUNCTION_ARGS)
 {
@@ -3048,6 +3050,13 @@ Datum to_binary_float_text(PG_FUNCTION_ARGS)
     char *num1, *num2;
     double result, r1, r2;
     bool err1, err2;
+
+    // if default arg is col, report error
+    if (with_default && PG_GETARG_BOOL(3)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("default argument must be a literal or bind")));
+    }
 
     err1 = true;
     if (!str1_null) {
@@ -3095,35 +3104,50 @@ Datum to_binary_float_text(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT4((float4)result);
 }
 
+static double handle_float4_overflow(double val)
+{
+    double result = val;
+    if (result >= HUGE_VAL) {
+        result = get_float4_infinity();
+    } else if (result <= -HUGE_VAL) {
+        result = -get_float4_infinity();
+    }
+    if (isinf((float4)result) && !isinf(result)) {
+        result = result > 0 ? get_float4_infinity() : -get_float4_infinity();
+    }
+    return result;
+}
+
 /*
  * to_binary_float_number()
  */
 Datum to_binary_float_number(PG_FUNCTION_ARGS)
 {
-    if (PG_ARGISNULL(0))
+    if (PG_ARGISNULL(0)) {
         PG_RETURN_NULL();
-
-    float8 val = PG_GETARG_FLOAT8(0);
-
-    if (val > FLT_MAX) {
-        val = get_float4_infinity();
-    } else if (val < FLT_MIN) {
-        val = -get_float4_infinity();
     }
 
+    float8 val = handle_float4_overflow(PG_GETARG_FLOAT8(0));
+    
     PG_RETURN_FLOAT4((float4)val);
 }
 
 Datum to_binary_float_text_number(PG_FUNCTION_ARGS)
 {
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-
     bool with_default = PG_GETARG_BOOL(2);
-
     char *num;
     double result;
     bool err;
+
+    if (with_default && PG_GETARG_BOOL(3)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("default argument must be a literal or bind")));
+    }
+
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
 
     err = false;
     num = TextDatumGetCString(PG_GETARG_TEXT_P(0));
@@ -3133,13 +3157,8 @@ Datum to_binary_float_text_number(PG_FUNCTION_ARGS)
     // if str1 convert err, and with default, convert str2
     if (with_default && err && !PG_ARGISNULL(1)) {
         err = false;
-        result = PG_GETARG_FLOAT8(1);
-        if (result > FLT_MAX) {
-            result = get_float4_infinity();
-        } else if (result < FLT_MIN) {
-            result = -get_float4_infinity();
-        }
-    } 
+        result = handle_float4_overflow(PG_GETARG_FLOAT8(1));
+    }
 
     if (err) {
         ereport(ERROR, 

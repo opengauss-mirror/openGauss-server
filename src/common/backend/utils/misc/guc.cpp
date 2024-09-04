@@ -861,6 +861,11 @@ static const struct config_enum_entry cluster_run_mode_options[] = {
     {"cluster_standby", RUN_MODE_STANDBY, false},
     {NULL, 0, false}};
 
+static const struct config_enum_entry nls_length_semantic_options[] = {
+    {"byte", LENGTH_SEMANTIC_BYTE, false},
+    {"char", LENGTH_SEMANTIC_CHAR, false},
+    {NULL, 0, false}};
+
 /*
  * GUC option variables that are exported from this module
  */
@@ -2093,6 +2098,20 @@ static void InitConfigureNamesBool()
             NULL,
             },
             &u_sess->attr.attr_common.enable_proc_coverage,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_record_nettime",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            STATS_COLLECTOR,
+            gettext_noop("Enable record network time"),
+            NULL,
+            GUC_REPORT
+            },
+            &u_sess->attr.attr_common.enable_record_nettime,
             false,
             NULL,
             NULL,
@@ -3606,7 +3625,6 @@ static void InitConfigureNamesString()
             NULL,
             NULL,
             NULL},
-
         {{"current_schema",
             PGC_USERSET,
             NODE_ALL,
@@ -4536,6 +4554,18 @@ static void InitConfigureNamesEnum()
             &g_instance.attr.attr_common.stream_cluster_run_mode,
             RUN_MODE_PRIMARY,
             cluster_run_mode_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"nls_length_semantics",
+            PGC_USERSET,
+            NODE_ALL,
+            COMPAT_OPTIONS,
+            gettext_noop("defines the default semantics of character string, this value must be BYTE or CHAR."),
+            NULL},
+            &u_sess->attr.attr_common.nls_length_semantics,
+            LENGTH_SEMANTIC_BYTE,
+            nls_length_semantic_options,
             NULL,
             NULL,
             NULL},
@@ -6675,6 +6705,7 @@ void BeginReportingGUCOptions(void)
         if (conf->flags & GUC_REPORT)
             ReportGUCOption(conf);
     }
+    
 }
 
 /*
@@ -9076,6 +9107,11 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 process_set_names_collate(stmt, action);
                 break;
             } 
+            if (strcasecmp(stmt->name, "identity") == 0 ||
+                strcasecmp(stmt->name, "last_insert_id") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("identity and last_insert_id is not supported for setting")));
+            } 
             (void)set_config_option(stmt->name,
                 ExtractSetVariableArgs(stmt),
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
@@ -10617,6 +10653,10 @@ static char* _ShowOption(struct config_generic* record, bool use_units, bool is_
 
             if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
+            else if (strcasecmp(record->name, "identity") == 0 ||
+                     strcasecmp(record->name, "last_insert_id") == 0) {
+                val = (*conf->show_hook)();
+            }
             else if (*conf->variable && **conf->variable)
                 val = *conf->variable;
             else
@@ -14134,7 +14174,6 @@ static void analysis_options_guc_assign(const char* newval, void* extra)
 #define DEFAULT_SYNC_ROLLBACK true
 #define DEFAULT_ASYNC_ROLLBACK true
 #define DEFAULT_PAGE_ROLLBACK true
-#define DEFAULT_USTORE_VERIFY false
 
 static void InitUStoreAttr()
 {
@@ -14144,7 +14183,6 @@ static void InitUStoreAttr()
     u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
     u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
     u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
-    u_sess->attr.attr_storage.ustore_verify = DEFAULT_USTORE_VERIFY;
     u_sess->attr.attr_storage.enable_ustore_sync_rollback = DEFAULT_SYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_async_rollback = DEFAULT_ASYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_page_rollback = DEFAULT_PAGE_ROLLBACK;

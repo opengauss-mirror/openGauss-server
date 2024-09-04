@@ -33,7 +33,7 @@
 #include "utils/resowner.h"
 #include "pgstat.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
-
+#include "replication/ss_disaster_cluster.h"
 /* 
  * Segment buffer, used for segment meta data, e.g., segment head, space map head. We separate segment
  * meta data buffer and normal data buffer (in bufmgr.cpp) to avoid potential dead locks.
@@ -323,7 +323,8 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
                           BufferDesc *buf_desc, char *buf)
 {   
 #ifndef USE_ASSERT_CHECKING
-    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS) {
+    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && 
+        !SS_DISASTER_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
         XLogRecPtr lsn_on_mem = PageGetLSN(buf);
             /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
@@ -335,7 +336,8 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
         }
     }       
 #else
-    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION && 
+        !SS_DISASTER_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
         seg_physical_read(spc, rNode, forknum, blocknum, temp_buf);
@@ -420,8 +422,10 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
         securec_check(ret, "\0", "\0");
 
         struct iocb *iocb_ptr = DSSAioGetIOCB(aio_cxt);
+        PgwrAioExtraData* tempAioExtra = &(pgwr->aio_extra[aiobuf_id]);
         int32 io_ret = seg_physical_aio_prep_pwrite(spc, buf->tag.rnode, buf->tag.forkNum,
-            buf->tag.blockNum, tempBuf, (void *)iocb_ptr);
+            buf->tag.blockNum, tempBuf, (void *)iocb_ptr, (void *)tempAioExtra);
+        tempAioExtra->aio_bufdesc = (void *)buf;
         if (io_ret != DSS_SUCCESS) {
             ereport(PANIC, (errmsg("dss aio failed, buffer: %d/%d/%d/%d/%d %d-%u",
                 buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, (int)buf->tag.rnode.bucketNode,
@@ -437,7 +441,7 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
         buf->extra->aio_in_progress = true;
         t_thrd.dms_cxt.buf_in_aio = true;
         /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
-        iocb_ptr->data = (void *)buf;
+        iocb_ptr->data = (void *)tempAioExtra;
         DSSAioAppendIOCB(aio_cxt, iocb_ptr);
     } else {
         seg_physical_write(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, (char *)buf_to_write, false);

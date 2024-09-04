@@ -24,6 +24,7 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "foreign/fdwapi.h"
+#include "nodes/primnodes.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "nodes/nodeFuncs.h"
@@ -716,6 +717,10 @@ static void _outPlanInfo(StringInfo str, Plan* node)
         WRITE_BOOL_FIELD(spq_scan_partial);
     }
 #endif
+    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
+        WRITE_INT_FIELD(cursor_expr_level);
+        WRITE_INT_FIELD(cursor_owner_node_id);
+    }
 }
 
 static void _outPruningResult(StringInfo str, PruningResult* node)
@@ -1210,10 +1215,6 @@ static void _outStream(StringInfo str, Stream* node)
 #ifdef USE_SPQ
     WRITE_INT_FIELD(streamID);
 #endif
-    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
-        WRITE_INT_FIELD(cursor_expr_level);
-        WRITE_INT_FIELD(cursor_owner_node_id);
-    }
 }
 
 /*
@@ -3039,7 +3040,12 @@ static void _outMinMaxExpr(StringInfo str, MinMaxExpr* node)
     WRITE_ENUM_FIELD(op, MinMaxOp);
     WRITE_NODE_FIELD(args);
     WRITE_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        WRITE_OID_FIELD(cmptype);
+        WRITE_NODE_FIELD(cmpargs);
 
+        WRITE_TYPEINFO_FIELD(cmptype);
+    }
     WRITE_TYPEINFO_FIELD(minmaxtype);
 }
 
@@ -4352,6 +4358,9 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
         WRITE_NODE_FIELD(update_default);
     }
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        WRITE_STRING_FIELD(initdefval);
+    }
 }
 
 static void _outTypeName(StringInfo str, TypeName* node)
@@ -5236,6 +5245,23 @@ static void _outIndexHintDefinition(StringInfo str, IndexHintDefinition* node)
     WRITE_ENUM_FIELD(index_type, IndexHintType);
 }
 
+static void _outPartitionNameList(StringInfo str, List *list, const char *key)
+{
+    ListCell *lc = NULL;
+    List *names = NIL;
+    foreach(lc, list) {
+        Oid id = lfirst_oid(lc);
+        char *name = "";
+        if (OidIsValid(id)) {
+            name = getPartitionName(id, false);
+        }
+        Value *val = makeString(name);
+        names = lappend(names, val);
+    }
+    appendStringInfo(str, key);
+    _outList(str, names);
+}
+
 static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 {
     WRITE_NODE_TYPE("RTE");
@@ -5354,6 +5380,15 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_PARTITIONS_VERSION_NUM) {
         WRITE_NODE_FIELD(partitionOidList);
         WRITE_NODE_FIELD(subpartitionOidList);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= PARTITION_NAME_VERSION_NUM) {
+        if (node->partitionOidList != NIL) {
+            _outPartitionNameList(str, node->partitionOidList, " :partitionNameList ");
+        }
+        if (node->subpartitionOidList != NIL) {
+            _outPartitionNameList(str, node->subpartitionOidList, " :subpartitionNameList ");
+        }
     }
 }
 

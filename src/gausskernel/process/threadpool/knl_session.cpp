@@ -231,6 +231,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->query_dop_store = 1;
     opt_cxt->query_dop = 1;
     opt_cxt->smp_enabled = true;
+    opt_cxt->is_under_cursor = false;
     opt_cxt->max_query_dop = -1;
     opt_cxt->parallel_debug_mode = 0;
 
@@ -1167,6 +1168,16 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
     statement_cxt->wait_events_bms = NULL;
     statement_cxt->enable_wait_events_bitmap = false;
     statement_cxt->is_session_bms_active = false;
+
+    statement_cxt->root_query_plan = NULL;
+    statement_cxt->query_plan_threshold_active = false;
+    statement_cxt->is_exceed_query_plan_threshold = false;
+    statement_cxt->record_query_plan_fin_time = 0;
+
+    statement_cxt->remote_support_trace = false;
+    statement_cxt->previous_stmt_flushed = true;
+    statement_cxt->nettime_trace_is_working = false;
+    statement_cxt->total_db_time = 0;
 }
 
 void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)

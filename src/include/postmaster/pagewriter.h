@@ -87,6 +87,7 @@ typedef struct PageWriterProc {
     /* auxiluary structs for implementing AIO in DSS */
     DSSAioCxt aio_cxt;
     char *aio_buf;
+    PgwrAioExtraData* aio_extra;
 } PageWriterProc;
 
 typedef struct PageWriterProcs {

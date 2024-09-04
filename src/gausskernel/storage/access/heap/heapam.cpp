@@ -395,36 +395,40 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
      */
     all_visible = PageIsAllVisible(dp) && !snapshot->takenDuringRecovery;
 
-    for (line_off = FirstOffsetNumber, lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
-        if (ItemIdIsNormal(lpp)) {
-            HeapTupleData loctup;
-            bool valid = false;
+    bool isSerializableXact = IsSerializableXact();
 
-            if (likely(all_visible && (!IsSerializableXact()))) {
+    if (all_visible && !isSerializableXact) {
+        for (line_off = FirstOffsetNumber, lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
+            if (ItemIdIsNormal(lpp)) {
                 scan->rs_base.rs_vistuples[ntup++] = line_off;
-                continue;
             }
+        }
+    } else {
+        HeapTupleData loctup;
+        bool valid = false;
+        bool shouldLog = (log_min_messages <= DEBUG1);
+        for (line_off = FirstOffsetNumber, lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
+            if (ItemIdIsNormal(lpp)) {
+                loctup.t_tableOid = RelationGetRelid(scan->rs_base.rs_rd);
+                loctup.t_bucketId = RelationGetBktid(scan->rs_base.rs_rd);
+                loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
+                loctup.t_len = ItemIdGetLength(lpp);
+                HeapTupleCopyBaseFromPage(&loctup, dp);
+                ItemPointerSet(&(loctup.t_self), page, line_off);
 
-            loctup.t_tableOid = RelationGetRelid(scan->rs_base.rs_rd);
-            loctup.t_bucketId = RelationGetBktid(scan->rs_base.rs_rd);
-            loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
-            loctup.t_len = ItemIdGetLength(lpp);
-            HeapTupleCopyBaseFromPage(&loctup, dp);
-            ItemPointerSet(&(loctup.t_self), page, line_off);
-
-            if (all_visible)
-                valid = true;
-            else
                 valid = HeapTupleSatisfiesVisibility(&loctup, snapshot, buffer, has_cur_xact_write);
+                if (unlikely(isSerializableXact)) {
+                    CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void*)&loctup, buffer, snapshot);
+                }
+                if (valid) {
+                    scan->rs_base.rs_vistuples[ntup++] = line_off;
+                }
 
-            CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void*)&loctup, buffer, snapshot);
-
-            if (valid) {
-                scan->rs_base.rs_vistuples[ntup++] = line_off;
+                if (unlikely(shouldLog)) {
+                    ereport(DEBUG1, (errmsg("heapgetpage xid %lu ctid(%u,%d) valid %d",
+                                            GetCurrentTransactionIdIfAny(), page, line_off, valid)));
+                }
             }
-
-            ereport(DEBUG1, (errmsg("heapgetpage xid %lu ctid(%u,%d) valid %d", GetCurrentTransactionIdIfAny(), page,
-                line_off, valid)));
         }
     }
 
@@ -9549,6 +9553,13 @@ void heap3_redo(XLogReaderState* record)
             break;
         case XLOG_HEAP3_INVALID:
             heap_xlog_invalid(record);
+            break;
+        case XLOG_HEAP3_TRUNCATE:
+            /*
+             * TRUNCATE is a no-op because the actions are already logged as
+             * SMGR WAL records.  TRUNCATE WAL record only exists for logical
+             * decoding.
+             */
             break;
         default:
             ereport(PANIC, (errmsg("heap3_redo: unknown op code %hhu", info)));

@@ -221,11 +221,11 @@ typedef struct MiniSlot {
         nodeNo = 0;                                                                               \
     }
 
-#define UNDO_SPACE_THRESHOLD_PER_TRANS                                 \
+#define GET_UNDO_LIMIT_SIZE_PER_XACT                                   \
     (uint64)((u_sess->attr.attr_storage.undo_limit_size_transaction) > \
-                    (u_sess->attr.attr_storage.undo_space_limit_size)  \
-                ? (u_sess->attr.attr_storage.undo_space_limit_size)    \
-                : (u_sess->attr.attr_storage.undo_limit_size_transaction))
+        (u_sess->attr.attr_storage.undo_space_limit_size)              \
+        ? (u_sess->attr.attr_storage.undo_space_limit_size)            \
+        : (u_sess->attr.attr_storage.undo_limit_size_transaction))
 
 #define PERSIST_ZONE_COUNT (UNDO_ZONE_COUNT / UNDO_PERSISTENCE_LEVELS)
 #define ZONE_COUNT_PER_LEVEL_NODE(nodeCount) (UNDO_ZONE_COUNT / UNDO_PERSISTENCE_LEVELS / nodeCount)

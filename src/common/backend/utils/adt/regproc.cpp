@@ -426,7 +426,7 @@ format_procedure_internal(Oid procedure_oid, bool force_qualify)
          * Would this proc be found (given the right args) by regprocedurein?
          * If not, we need to qualify it.
          */
-        if (FunctionIsVisible(procedure_oid))
+        if (FunctionIsVisible(procedure_oid) && !force_qualify)
             nspname = NULL;
         else
             nspname = get_namespace_name(procform->pronamespace);

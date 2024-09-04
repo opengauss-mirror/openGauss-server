@@ -24,6 +24,7 @@
 /* Publication trigger events */
 #define PUB_TRIG_DDL_CMD_END "ddl_command_end"
 #define PUB_TRIG_DDL_CMD_START "ddl_command_start"
+#define PUB_TRIG_TBL_REWRITE "table_rewrite"
 
 /* Publication event trigger prefix */
 #define PUB_EVENT_TRIG_FORMAT "pg_deparse_trig_%s_%u"
@@ -62,6 +63,9 @@ CATALOG(pg_publication,6130) BKI_ROWTYPE_OID(6141) BKI_SCHEMA_MACRO
     bool pubdelete;
 
     int8 pubddl;
+    
+    /* true if truncates are published */
+    bool pubtruncate;
 }
 FormData_pg_publication;
 #undef int8
@@ -78,7 +82,7 @@ typedef FormData_pg_publication *Form_pg_publication;
  * ----------------
  */
 
-#define Natts_pg_publication 7
+#define Natts_pg_publication 8
 #define Anum_pg_publication_pubname 1
 #define Anum_pg_publication_pubowner 2
 #define Anum_pg_publication_puballtables 3
@@ -86,11 +90,13 @@ typedef FormData_pg_publication *Form_pg_publication;
 #define Anum_pg_publication_pubupdate 5
 #define Anum_pg_publication_pubdelete 6
 #define Anum_pg_publication_pubddl 7
+#define Anum_pg_publication_pubtruncate 8
 
 typedef struct PublicationActions {
     bool pubinsert;
     bool pubupdate;
     bool pubdelete;
+    bool pubtruncate;
     int64 pubddl;
 } PublicationActions;
 

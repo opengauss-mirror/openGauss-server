@@ -21,7 +21,7 @@ function gaussdb_pkg_pre_clean()
 function read_gaussdb_version()
 {
     cd ${SCRIPT_DIR}
-    echo "${product_name}-${version_number}" > version.cfg
+    echo "${product_name}-Server-${version_number}" > version.cfg
     #auto read the number from kernal globals.cpp, no need to change it here
 }
 
@@ -30,6 +30,7 @@ ROACH_DIR="${ROOT_DIR}/distribute/bin/roach"
 MPPDB_DECODING_DIR="${ROOT_DIR}/contrib/mppdb_decoding"
 XLOG_DUMP_DIR="${ROOT_DIR}/contrib/pg_xlogdump"
 PAGE_HACK_DIR="${ROOT_DIR}/contrib/pagehack"
+ARCH_CLEAN_DIR="${ROOT_DIR}/contrib/pg_archivecleanup"
 
 
 ###################################
@@ -46,16 +47,9 @@ function read_gaussdb_number()
     version_num=$(echo $version_num1 | tr -d ";")
     #remove the blank
     version_num=$(echo $version_num)
-
-    if echo $version_num | grep -qE '^92[0-9]+$'
-    then
-        # get the last three number
-        latter=${version_num:2}
-        echo "92.${latter}" >>${SCRIPT_DIR}/version.cfg
-    else
-        echo "Cannot get the version number from globals.cpp."
-        exit 1
-    fi
+    form=${version_num:0:2}
+    latter=${version_num:2}
+    echo "${form}.${latter}" >>${SCRIPT_DIR}/version.cfg
 }
 
 #######################################################################
@@ -246,11 +240,6 @@ function install_gaussdb()
             fi
         fi
     fi
-
-#tsdb prepare
-    if [ -d "$CODE_BASE/contrib/timescaledb" ]; then
-    cp $CODE_BASE/contrib/timescaledb/og-timescaledb1.7.4.sql ${GAUSSHOME}/share/postgresql/extension/timescaledb--1.7.4.sql
-    fi
     
     cd "$ROOT_DIR/contrib/pg_upgrade_support"
     make clean >> "$LOG_FILE" 2>&1
@@ -325,6 +314,12 @@ function install_gaussdb()
     make -sj >> "$LOG_FILE" 2>&1
     make install -sj >> "$LOG_FILE" 2>&1
     echo "End make install pagehack" >> "$LOG_FILE" 2>&1
+
+    cd "$ARCH_CLEAN_DIR"
+    make clean >> "$LOG_FILE" 2>&1
+    make -sj >> "$LOG_FILE" 2>&1
+    make install -sj >> "$LOG_FILE" 2>&1
+    echo "End make install archivecleanup" >> "$LOG_FILE" 2>&1
 
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1

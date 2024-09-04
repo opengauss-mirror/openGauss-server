@@ -1,0 +1,52 @@
+-- test char semantic copy
+SET client_min_messages = warning;
+drop table if exists test_copy_char;
+create table test_copy_char (id int, city char (4 char));
+insert into test_copy_char values(1, 'abcd');
+insert into test_copy_char values(2, '中国天津');
+insert into test_copy_char values(3, 'abcde');
+ERROR:  value too long for type character(4 char)
+CONTEXT:  referenced column: city
+insert into test_copy_char values(4, '中国abc');
+ERROR:  value too long for type character(4 char)
+CONTEXT:  referenced column: city
+COPY test_copy_char to STDOUT;
+1	abcd
+2	中国天津
+truncate table test_copy_char;
+COPY test_copy_char from STDIN;
+select * from test_copy_char;
+ id |   city   
+----+----------
+  1 | abcd
+  2 | 中国天津
+  3 | 中a国b
+  4 | 中国ab
+(4 rows)
+
+drop table test_copy_char;
+-- test byte semantic copy
+drop table if exists test_copy_byte;
+create table test_copy_byte (id int, city char (4 byte));
+insert into test_copy_byte values(1, 'abcd');
+insert into test_copy_byte values(2, '中国天津');
+ERROR:  value too long for type character(4)
+CONTEXT:  referenced column: city
+insert into test_copy_byte values(3, 'abcde');
+ERROR:  value too long for type character(4)
+CONTEXT:  referenced column: city
+insert into test_copy_byte values(4, '中国abc');
+ERROR:  value too long for type character(4)
+CONTEXT:  referenced column: city
+COPY test_copy_byte to STDOUT;
+1	abcd
+truncate table test_copy_byte;
+COPY test_copy_byte from STDIN;
+ERROR:  value too long for type character(4)
+CONTEXT:  COPY test_copy_byte, line 2, column city: "中国天津"
+select * from test_copy_byte;
+ id | city 
+----+------
+(0 rows)
+
+drop table test_copy_byte;

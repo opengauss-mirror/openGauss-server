@@ -134,6 +134,30 @@ select c1, c2, to_char(c3, 'yyyy-mm-dd') from t1 order by c1;
   4 | e  | 2023-09-19
 (2 rows)
 
+-- materialized view
+drop table if exists t_a;
+NOTICE:  table "t_a" does not exist, skipping
+drop table if exists t_b;
+NOTICE:  table "t_b" does not exist, skipping
+create table t_a(
+a_id int,
+a_name varchar2(100)
+);
+create table t_b(
+b_id int,
+b_name varchar2(100)
+);
+DROP materialized VIEW if exists v_t_b;
+NOTICE:  materialized view "v_t_b" does not exist, skipping
+create materialized view v_t_b as select * from t_b;
+MERGE INTO t_a a  
+USING v_t_b vb
+on (a.a_id=vb.b_id)
+WHEN MATCHED THEN
+update set a.a_name=vb.b_name;
+DROP materialized VIEW v_t_b;
+drop table t_a;
+drop table t_b;
 drop schema merge_into_updated cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table t1

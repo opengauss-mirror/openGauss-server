@@ -1930,7 +1930,8 @@ static void do_help_encrypt_options(void)
     (void)printf(_("\nOptions for encrypt: \n"));
     (void)printf(_("  -M, --keymode=MODE     the cipher files will be applies in server, client or source,default "
                    "value is server mode\n"));
-    (void)printf(_("  -K PASSWORD            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters\n"));
+    (void)printf(_("  -K PASSWORD            the plain password you want to encrypt, which length should between "
+                   "8~15 and at least 3 different types of characters\n"));
     (void)printf(_("  -U, --keyuser=USER     if appointed, the cipher files will name with the user name\n"));
     (void)printf(_("  -R RANDFILEDIR         set the dir that put the rand file\n"));
     (void)printf(_("  -C CIPHERFILEDIR       set the dir that put the cipher file\n"));
@@ -1942,7 +1943,8 @@ static void do_help_generate_options(void)
 
     (void)printf(_("\nOptions for generate: \n"));
     (void)printf(_("  -o PREFIX               the cipher files prefix. default value is obsserver\n"));
-    (void)printf(_("  -S CIPHERKEY            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters\n"));
+    (void)printf(_("  -S CIPHERKEY            the plain password you want to encrypt, which length should between "
+                   "8~15 and at least 3 different types of characters\n"));
 }
 
 /*
@@ -2312,11 +2314,11 @@ void checkDataDir(const char* datadir)
 void checkCipherkey()
 {
     if (g_cipherkey == NULL) {
-        g_cipherkey = simple_prompt("Password: ", MAX_KEY_LEN + 1, false);
-        if (!check_input_password(g_cipherkey)) {
+        g_cipherkey = simple_prompt("Password: ", MAX_GUC_PASS_LEN + 1, false);
+        if (!check_input_password(g_cipherkey, MAX_GUC_PASS_LEN)) {
             write_stderr(_("%s: The input key must be %d~%d bytes and "
                 "contain at least three kinds of characters!\n"),
-                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+                progname, MIN_KEY_LEN, MAX_GUC_PASS_LEN);
             do_advice();
             exit(1);
         }
@@ -2366,10 +2368,10 @@ void doGenerateOperation(const char* datadir, const char* loginfo)
         OPENSSL_free(g_cipherkey);
         g_cipherkey = NULL;
     } else {
-        if (!check_input_password(g_cipherkey)) {
+        if (!check_input_password(g_cipherkey, MAX_GUC_PASS_LEN)) {
             write_stderr(_("%s: The input key must be %d~%d bytes and "
                 "contain at least three kinds of characters!\n"),
-                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+                progname, MIN_KEY_LEN, MAX_GUC_PASS_LEN);
             GS_FREE(g_cipherkey);
             do_advice();
             exit(1);
@@ -2793,7 +2795,7 @@ int main(int argc, char** argv)
                 }
                 case 'K': {
                     char key_str[MAX_KEY_LEN] = {0};
-                    if (!check_input_password(optarg)) {
+                    if (!check_input_password(optarg, MAX_GUC_PASS_LEN)) {
                         do_advice();
                         exit(1);
                     }
@@ -3690,11 +3692,11 @@ static void check_encrypt_options(void)
         return;
     }
     if (g_plainkey == NULL) {
-        g_plainkey = simple_prompt("Password: ", MAX_KEY_LEN + 1, false);
-        if (!check_input_password(g_plainkey)) {
+        g_plainkey = simple_prompt("Password: ", MAX_GUC_PASS_LEN + 1, false);
+        if (!check_input_password(g_plainkey, MAX_GUC_PASS_LEN)) {
             write_stderr(_("%s: The input key must be %d~%d bytes and "
                 "contain at least three kinds of characters!\n"),
-                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+                progname, MIN_KEY_LEN, MAX_GUC_PASS_LEN);
             do_advice();
             exit(1);
         }

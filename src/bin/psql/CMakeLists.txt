@@ -29,6 +29,7 @@ add_custom_command(
 )
 
 set(TGT_gsql_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_cipher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/help.cpp

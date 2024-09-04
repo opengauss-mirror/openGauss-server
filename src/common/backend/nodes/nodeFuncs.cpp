@@ -34,12 +34,14 @@
 #endif /* FRONTEND_PARSER */
 #include "storage/tcap.h"
 #include "parser/parse_utilcmd.h"
+#include "parser/parse_type.h"
 
 static bool query_check_no_flt_walker(Node* node, void* context);
 static bool query_check_srf_walker(Node* node, void* context);
 static bool expression_returns_set_walker(Node* node, void* context);
 static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
+static void AssertExprCollation(const Node* expr, Oid collation);
 Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*));
 
 /*
@@ -257,7 +259,15 @@ Oid exprType(const Node* expr)
         case T_CursorExpression:
              type = REFCURSOROID;
              break;
-
+        case T_TypeCast:
+            {
+                TypeCast *tc = (TypeCast*)expr;
+                if (tc->typname == NULL || !OidIsValid(tc->typname->typeOid)) {
+                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid typecast node")));
+                }
+                type = tc->typname->typeOid;
+                break;
+            }
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1070,6 +1080,15 @@ Oid exprInputCollation(const Node* expr)
     return coll;
 }
 
+static void AssertExprCollation(const Node* expr, Oid collation)
+{
+    Oid expr_collation = exprCollation(expr);
+    if (DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) {
+        expr_collation = BINARY_COLLATION_OID;
+    }
+    Assert(collation == expr_collation);
+}
+
 /*
  *	exprSetCollation -
  *	  Assign collation information to an expression tree node.
@@ -1114,7 +1133,7 @@ void exprSetCollation(Node* expr, Oid collation)
             ((FuncExpr*)expr)->funccollid = collation;
             break;
         case T_NamedArgExpr:
-            Assert(collation == exprCollation((Node*)((NamedArgExpr*)expr)->arg));
+            AssertExprCollation((Node*)((NamedArgExpr*)expr)->arg, collation);
             break;
         case T_OpExpr:
             ((OpExpr*)expr)->opcollid = collation;
@@ -1148,7 +1167,7 @@ void exprSetCollation(Node* expr, Oid collation)
                 tent = (TargetEntry*)linitial(qtree->targetList);
                 Assert(IsA(tent, TargetEntry));
                 Assert(!tent->resjunk);
-                Assert(collation == exprCollation((Node*)tent->expr));
+                AssertExprCollation((Node*)tent->expr, collation);
             } else {
                 /* for all other sublink types, result is boolean */
                 Assert(!OidIsValid(collation));
@@ -1227,6 +1246,7 @@ void exprSetCollation(Node* expr, Oid collation)
         case T_PriorExpr:
             return exprSetCollation((Node*)((const PriorExpr*)expr)->node, collation);
         case T_CursorExpression:
+        case T_TypeCast:
             break;
         default:
             ereport(
@@ -1756,6 +1776,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Rownum:
         case T_UserVar:
         case T_SetVariableExpr:
+        case T_TypeCast:
 #ifdef USE_SPQ
         case T_DMLActionExpr:
 #endif
@@ -2087,8 +2108,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
         case T_UserSetElem: {
-            p2walker(((UserSetElem*)node)->val, context);
-            return true;
+            return p2walker(((UserSetElem*)node)->val, context);
         }
         case T_PriorExpr:
             return p2walker(((PriorExpr*)node)->node, context);

@@ -755,6 +755,7 @@ void ReleaseRecParseState(HTAB *redoItemHash, RedoItemHashEntry *redoItemEntry)
     unsigned int del_from_hash_item_num = 0;
     unsigned int new_hash;
     LWLock *xlog_partition_lock;
+    LWLock *scanningXLogTrackLock;
 
     /* Items that have been replayed(refcount == 0) can be released */
     while (cur_state != NULL) {
@@ -772,23 +773,36 @@ void ReleaseRecParseState(HTAB *redoItemHash, RedoItemHashEntry *redoItemEntry)
 
     new_hash = XlogTrackTableHashCode(&redoItemEntry->redoItemTag);
     xlog_partition_lock = XlogTrackMappingPartitionLock(new_hash);
+    scanningXLogTrackLock = XLogTrackMappingScanningLock(g_redoWorker->slotId);
 
     if (del_from_hash_item_num > 0) {
         Assert(releaseTailState != NULL);
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            LWLockAcquire(scanningXLogTrackLock, LW_EXCLUSIVE);
+        }
         (void)LWLockAcquire(xlog_partition_lock, LW_EXCLUSIVE);
         redoItemEntry->head = (XLogRecParseState *)releaseTailState->nextrecord;
         releaseTailState->nextrecord = NULL;
         XLogBlockParseStateRelease(releaseHeadState);
         redoItemEntry->redoItemNum -= del_from_hash_item_num;
         LWLockRelease(xlog_partition_lock);
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            LWLockRelease(scanningXLogTrackLock);
+        }
     }
 
     if (redoItemEntry->redoItemNum == 0) {
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            LWLockAcquire(scanningXLogTrackLock, LW_EXCLUSIVE);
+        }
         (void)LWLockAcquire(xlog_partition_lock, LW_EXCLUSIVE);
         if (hash_search(redoItemHash, (void *)&redoItemEntry->redoItemTag, HASH_REMOVE, NULL) == NULL) {
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("redo item hash table corrupted")));
         }
         LWLockRelease(xlog_partition_lock);
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            LWLockRelease(scanningXLogTrackLock);
+        }
     }
 
     return;
@@ -1770,6 +1784,10 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
         TrxnManagerProcHashMapPrune();
     } else {
         if (XLByteLT(item->record.EndRecPtr, g_redoWorker->nextPrunePtr)) {
+            if (XactHasSegpageRelFiles(&item->record)) {
+                uint32 expected = 1;
+                pg_atomic_compare_exchange_u32((volatile uint32 *)&(g_dispatcher->segpageXactDoneFlag), &expected, 0);
+            }
             DereferenceRedoItem(item);
             return exitFlag;
         }
@@ -4056,7 +4074,7 @@ static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activa
 static void OndemandLogHashMapUsedStatus()
 {
     ereport(LOG, (errcode(ERRCODE_LOG),
-        errmsg("[On-demand] hashmap usedblknum %lu, totalblknum %lu, pause value %lu, continue value %lu",
+        errmsg("[On-demand] hashmap usedblknum %u, totalblknum %u, pause value %u, continue value %u",
         pg_atomic_read_u32(&g_dispatcher->parseManager.memctl.usedblknum),
         g_dispatcher->parseManager.memctl.totalblknum, g_ondemandXLogParseMemFullValue,
         g_ondemandXLogParseMemCancelPauseVaule)));
@@ -4065,7 +4083,7 @@ static void OndemandLogHashMapUsedStatus()
 static void OndemandLogTrxnQueueUsedStatus()
 {
     ereport(LOG, (errcode(ERRCODE_LOG),
-        errmsg("[On-demand] trxn queue usedblknum %lu, totalblknum %lu, pause value %lu",
+        errmsg("[On-demand] trxn queue usedblknum %u, totalblknum %u, pause value %u",
         SPSCGetQueueCount(g_dispatcher->trxnQueue), REALTIME_BUILD_RECORD_QUEUE_SIZE,
         g_ondemandRealtimeBuildQueueFullValue)));
 }
@@ -4073,7 +4091,7 @@ static void OndemandLogTrxnQueueUsedStatus()
 static void OndemandLogSegQueueUsedStatus()
 {
     ereport(LOG, (errcode(ERRCODE_LOG),
-        errmsg("[On-demand] seg queue usedblknum %lu, totalblknum %lu, pause value %lu",
+        errmsg("[On-demand] seg queue usedblknum %u, totalblknum %u, pause value %u",
         SPSCGetQueueCount(g_dispatcher->segQueue), REALTIME_BUILD_RECORD_QUEUE_SIZE,
         g_ondemandRealtimeBuildQueueFullValue)));
 }

@@ -222,6 +222,74 @@ bool isAggrefSonicEnable(Oid aggfnoid)
     }
 }
 
+static bool check_sonic_hash_agg_walker(Node* node)
+{
+    switch (nodeTag(node)) {
+        case T_SubPlan: {
+            SubPlan* sub_plan = (SubPlan*)node;
+            if (sub_plan->testexpr != NULL && IsA(sub_plan->testexpr, OpExpr)) {
+                OpExpr* op_expr = (OpExpr*)sub_plan->testexpr;
+                List* op_list = op_expr->args;
+                ListCell* lop = NULL;
+                foreach (lop, op_list) {
+                    Expr* op_arg = (Expr*)lfirst(lop);
+                    if (IsA(op_arg, Aggref)) {
+                        Aggref* op_aggref = (Aggref*)op_arg;
+                        if (!isAggrefSonicEnable(op_aggref->aggfnoid)) {
+                            return true;
+                        }
+                    }
+                }
+            } else {
+                return true;
+            }
+            break;
+        }
+        case T_OpExpr: {
+            OpExpr* op_expr = (OpExpr*)node;
+            List* op_args = op_expr->args;
+            ListCell* lop = NULL;
+            foreach (lop, op_args) {
+                Expr* op_arg = (Expr*)lfirst(lop);
+                if (IsA(op_arg, Aggref)) {
+                    Aggref* op_aggref = (Aggref*)op_arg;
+                    if (!isAggrefSonicEnable(op_aggref->aggfnoid)) {
+                        return true;
+                    }
+                }
+            }
+            break;
+        }
+        case T_Aggref: {
+            Aggref* agg_ref = (Aggref*)node;
+
+            if (!isAggrefSonicEnable(agg_ref->aggfnoid)) {
+                return true;
+            }
+
+            /* count(*) has no args */
+            if (agg_ref->aggfnoid == COUNTOID || agg_ref->aggfnoid == ANYCOUNTOID) {
+                break;
+            }
+
+            Expr* ref_expr = (Expr*)linitial(agg_ref->args);
+            /* We only support simple expression cases */
+            if (!isExprSonicEnable(ref_expr)) {
+                return true;
+            }
+            break;
+        }
+        default: {
+            if (!isExprSonicEnable((Expr*) node)) {
+                return true;
+            }
+            return expression_tree_walker(node, (bool (*)())check_sonic_hash_agg_walker, (void*)NULL);
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_sonic_hash_agg_walker, (void*)NULL);
+}
+
 /*
  * @Description	: Decide use Sonic Hash Agg routine or not.
  * @in agg		: Vector Aggregation Node information.
@@ -298,44 +366,8 @@ bool isSonicHashAggEnable(VecAgg* node)
     List* qual_list = node->plan.qual;
     foreach (lc, qual_list) {
         Expr* qual_expr = (Expr*)lfirst(lc);
-        switch (nodeTag(qual_expr)) {
-            case T_SubPlan: {
-                SubPlan* sub_plan = (SubPlan*)qual_expr;
-                if (sub_plan->testexpr != NULL && IsA(sub_plan->testexpr, OpExpr)) {
-                    OpExpr* op_expr = (OpExpr*)sub_plan->testexpr;
-                    List* op_list = op_expr->args;
-                    ListCell* lop = NULL;
-                    foreach (lop, op_list) {
-                        Expr* op_arg = (Expr*)lfirst(lop);
-                        if (IsA(op_arg, Aggref)) {
-                            Aggref* op_aggref = (Aggref*)op_arg;
-                            if (!isAggrefSonicEnable(op_aggref->aggfnoid)) {
-                                return false;
-                            }
-                        }
-                    }
-                } else {
-                    return false;
-                }
-                break;
-            }
-            case T_OpExpr: {
-                OpExpr* op_expr = (OpExpr*)qual_expr;
-                List* op_args = op_expr->args;
-                ListCell* lop = NULL;
-                foreach (lop, op_args) {
-                    Expr* op_arg = (Expr*)lfirst(lop);
-                    if (IsA(op_arg, Aggref)) {
-                        Aggref* op_aggref = (Aggref*)op_arg;
-                        if (!isAggrefSonicEnable(op_aggref->aggfnoid)) {
-                            return false;
-                        }
-                    }
-                }
-                break;
-            }
-            default:
-                return false;
+        if (check_sonic_hash_agg_walker((Node*) qual_expr)) {
+            return false;
         }
     }
 

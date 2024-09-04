@@ -639,6 +639,7 @@ static void WalSndHandshake(void)
                 /* standby is closing the connection */
                 proc_exit(0);
                 /* fall-through */
+            case 'V': /* client conn driver support trace info*/
             case 'P':
                 /* standby is closing the connection */
                 break;

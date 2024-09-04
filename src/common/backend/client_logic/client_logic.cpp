@@ -289,7 +289,7 @@ void insert_gs_sec_encrypted_column_tuple(CeHeapInfo *ce_heap_info, Relation rel
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-    if (!u_sess->attr.attr_common.enable_full_encryption) {
+    if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
@@ -633,7 +633,7 @@ static bool process_column_settings_flush_args(Oid column_key_id, const char *co
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-    if (!u_sess->attr.attr_common.enable_full_encryption) {
+    if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
@@ -894,7 +894,7 @@ int drop_global_settings(DropStmt *stmt)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-    if (!u_sess->attr.attr_common.enable_full_encryption) {
+    if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
@@ -961,7 +961,7 @@ int drop_column_settings(DropStmt *stmt)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-    if (!u_sess->attr.attr_common.enable_full_encryption) {
+    if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
@@ -1065,7 +1065,7 @@ void remove_encrypted_col_by_id(Oid id)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
 #else
-    if (!u_sess->attr.attr_common.enable_full_encryption) {
+    if (!u_sess->attr.attr_common.enable_full_encryption && t_thrd.role != SW_SENDER) {
 #endif
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),

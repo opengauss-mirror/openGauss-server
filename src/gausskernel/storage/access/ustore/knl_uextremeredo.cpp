@@ -229,6 +229,19 @@ static XLogRecParseState *UHeapXlogCleanParseBlock(XLogReaderState *record, uint
     return recordstatehead;
 }
 
+static XLogRecParseState *UHeapXlogNewPageParseBlock(XLogReaderState *record, uint32 *blocknum)
+{
+    XLogRecParseState *recordstatehead = NULL;
+
+    *blocknum = 1;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    XLogRecSetBlockDataState(record, UHEAP_NEWPAGE_ORIG_BLOCK_NUM, recordstatehead);
+    return recordstatehead;
+}
+
 XLogRecParseState *UHeapRedoParseToBlock(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -261,6 +274,9 @@ XLogRecParseState *UHeapRedoParseToBlock(XLogReaderState *record, uint32 *blockn
             break;
         case XLOG_UHEAP_MULTI_INSERT:
             recordblockstate = UHeapXlogMultiInsertParseBlock(record, blocknum);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            recordblockstate = UHeapXlogNewPageParseBlock(record, blocknum);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedoParseToBlock: unknown op code %u", info)));
@@ -551,13 +567,15 @@ void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool 
     ItemPointerSetOffsetNumber(&targetTid, xlrec->offnum);
 
     OffsetNumber maxoff = UHeapPageGetMaxOffsetNumber(page);
-    if (maxoff + 1 < xlrec->offnum)
-        ereport(PANIC, (errmsg("UHeapXlogInsertOperatorPage: invalid max offset number")));
+    if (maxoff + 1 < xlrec->offnum) {
+        UPagePrintErrorInfo(page, "UHeapXlogInsertOperatorPage: invalid max offset number");
+    }
 
     bufpage.buffer = buffer->buf;
     bufpage.page = NULL;
-    if (UPageAddItem(NULL, &bufpage, (Item)utup, newlen, xlrec->offnum, true) == InvalidOffsetNumber)
-        ereport(PANIC, (errmsg("UHeapXlogInsertOperatorPage: failed to add tuple")));
+    if (UPageAddItem(NULL, &bufpage, (Item)utup, newlen, xlrec->offnum, true) == InvalidOffsetNumber) {
+        UPagePrintErrorInfo(page, "UHeapXlogInsertOperatorPage: failed to add tuple");
+    }
 
     UHeapRecordPotentialFreeSpace(buffer->buf, -1 * SHORTALIGN(newlen));
 
@@ -615,7 +633,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
     if (maxoff >= xlrec->offnum) {
         rp = UPageGetRowPtr(page, xlrec->offnum);
     } else {
-        elog(PANIC, "UHeapXlogDeleteOperatorPage: xlog delete offset is greater than the max offset on page");
+        UPagePrintErrorInfo(page, "UHeapXlogDeleteOperatorPage: xlog delete offset is greater than the max offset on page");
     }
 
     /* increment the potential freespace of this page */
@@ -648,7 +666,7 @@ void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata
     if (UHeapPageGetMaxOffsetNumber(oldpage) >= xlrec->old_offnum) {
         rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
     } else {
-        elog(PANIC, "invalid rp");
+        UPagePrintErrorInfo(oldpage, "UHeap Update Oldpage:The max offset number is invalid");
     }
 
     ItemPointerData oldtid, newtid;
@@ -748,15 +766,12 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
             affixLens->suffixlen = *suffixlenPtr;
         }
     } else {
-        Size initPageXtraInfo = 0;
         if (isinit) {
             /* has xidBase */
             xidBase = (TransactionId *)curxlogptr;
             curxlogptr += sizeof(TransactionId);
-            initPageXtraInfo += sizeof(TransactionId);
             tdCount = (uint16 *)curxlogptr;
             curxlogptr += sizeof(uint16);
-            initPageXtraInfo += sizeof(uint16);
 
             Page newpage = buffers->newbuffer.pageinfo.page;
             if (istoast) {
@@ -809,16 +824,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
      * old tuple, and the data stored in the WAL record.
      */
 
-    bool onlyCopyDelta = (inplaceUpdate && oldtup->disk_tuple->t_hoff == xlhdr.t_hoff &&
-        (newlen == oldtup->disk_tuple_size) && !blockInplaceUpdate);
-    uint32 bitmaplen = 0;
-    uint32 deltalen = 0;
-    char *bitmapData = NULL;
-    char *deltaData = NULL;
-    char *newp = NULL;
-    if (!onlyCopyDelta) {
-        newp = (char *)newtup + SizeOfUHeapDiskTupleData;
-    }
+    char *newp = (char *)newtup + SizeOfUHeapDiskTupleData;
 
     if (affixLens->prefixlen > 0) {
         int len;
@@ -826,36 +832,24 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
         /* copy bitmap [+ padding] [+ oid] from WAL record */
         len = xlhdr.t_hoff - SizeOfUHeapDiskTupleData;
         if (len > 0) {
-            if (onlyCopyDelta) {
-                bitmaplen = len;
-                bitmapData = recdata;
-            } else {
-                rc = memcpy_s(newp, tuplen, recdata, len);
-                securec_check(rc, "\0", "\0");
-                newp += len;
-            }
+            rc = memcpy_s(newp, tuplen, recdata, len);
+            securec_check(rc, "\0", "\0");
+            newp += len;
             recdata += len;
         }
 
         /* copy prefix from old tuple */
-        if (!onlyCopyDelta) {
-            rc = memcpy_s(newp, affixLens->prefixlen, (char *)oldtup->disk_tuple +
-                oldtup->disk_tuple->t_hoff, affixLens->prefixlen);
-            securec_check(rc, "\0", "\0");
-            newp += affixLens->prefixlen;
-        }
+        rc = memcpy_s(newp, affixLens->prefixlen, (char *)oldtup->disk_tuple +
+            oldtup->disk_tuple->t_hoff, affixLens->prefixlen);
+        securec_check(rc, "\0", "\0");
+        newp += affixLens->prefixlen;
 
         /* copy new tuple data from WAL record */
         len = tuplen - (xlhdr.t_hoff - SizeOfUHeapDiskTupleData);
         if (len > 0) {
-            if (onlyCopyDelta) {
-                deltalen = len;
-                deltaData = recdata;
-            } else {
-                rc = memcpy_s(newp, tuplen, recdata, len);
-                securec_check(rc, "\0", "\0");
-                newp += len;
-            }
+            rc = memcpy_s(newp, tuplen, recdata, len);
+            securec_check(rc, "\0", "\0");
+            newp += len;
             recdata += len;
         }
     } else {
@@ -863,37 +857,26 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
          * copy bitmap [+ padding] [+ oid] + data from record, all in one
          * go
          */
-        if (onlyCopyDelta) {
-            deltalen = tuplen;
-            deltaData = recdata;
-        } else {
-            rc = memcpy_s(newp, tuplen, recdata, tuplen);
-            securec_check(rc, "\0", "\0");
-            newp += tuplen;
-        }
+        rc = memcpy_s(newp, tuplen, recdata, tuplen);
+        securec_check(rc, "\0", "\0");
+        newp += tuplen;
         recdata += tuplen;
     }
 
     Assert(recdata == recdataEnd);
 
     /* copy suffix from old tuple */
-    if (affixLens->suffixlen > 0 && !onlyCopyDelta) {
+    if (affixLens->suffixlen > 0) {
         rc = memcpy_s(newp, affixLens->suffixlen, (char *)oldtup->disk_tuple + oldtup->disk_tuple_size -
             affixLens->suffixlen, affixLens->suffixlen);
         securec_check(rc, "\0", "\0");
     }
+    UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
+    newtup->xid = (ShortTransactionId) FrozenTransactionId;
+    newtup->flag2 = xlhdr.flag2;
+    newtup->flag = xlhdr.flag;
+    newtup->t_hoff = xlhdr.t_hoff;
 
-    if (onlyCopyDelta) {
-        UHeapTupleHeaderSetTDSlot(oldtup->disk_tuple, xlhdr.td_id);
-        oldtup->disk_tuple->flag2 = xlhdr.flag2;
-        oldtup->disk_tuple->flag = xlhdr.flag;
-        oldtup->disk_tuple->t_hoff = xlhdr.t_hoff;
-    } else {
-        UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
-        newtup->flag2 = xlhdr.flag2;
-        newtup->flag = xlhdr.flag;
-        newtup->t_hoff = xlhdr.t_hoff;
-    }
 
     Buffer oldbuf = buffers->oldbuffer.buf;
     Buffer newbuf = buffers->newbuffer.buf;
@@ -904,7 +887,6 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
     Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
 
     if (blockInplaceUpdate) {
-        Assert(!onlyCopyDelta);
         RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
         PutLinkUpdateTuple(oldpage, (Item)newtup, rp, newlen);
         /* update the potential freespace */
@@ -918,26 +900,14 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
          * the tuple header.
          */
         RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
-        RowPtrChangeLen(rp, newlen);
-        if (onlyCopyDelta) {
-            // only copy delta
-            if (affixLens->prefixlen > 0) {
-                if (bitmaplen > 0) {
-                    rc = memcpy_s((char *)oldtup->disk_tuple->data, bitmaplen, bitmapData, bitmaplen);
-                    securec_check(rc, "\0", "\0");
-                }
-            }
-
-            if (deltalen > 0) {
-                rc = memcpy_s((char *)oldtup->disk_tuple->data + bitmaplen + affixLens->prefixlen, deltalen, deltaData,
-                    deltalen);
-                securec_check(rc, "\0", "\0");
-            }
-        } else {
-            // use new constructed tuple
-            rc = memcpy_s((char *)oldtup->disk_tuple, newlen, (char *)newtup, newlen);
-            securec_check(rc, "\0", "\0");
+        if (newlen >= RowPtrGetLen(rp) || (xlrec->flags & XLZ_UPDATE_PREFIX_FROM_OLD) != 0 ||
+            (xlrec->flags & XLZ_UPDATE_SUFFIX_FROM_OLD) != 0) {
+            RowPtrChangeLen(rp, newlen);
         }
+
+        // use new constructed tuple
+        rc = memcpy_s((char *)oldtup->disk_tuple, newlen, (char *)newtup, newlen);
+        securec_check(rc, "\0", "\0");
 
         if (newlen < oldtup->disk_tuple_size) {
             /* new tuple is smaller, a prunable candidate */
@@ -949,7 +919,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
     } else {
         UHeapBufferPage bufpage = {newbuf, NULL};
         if (UPageAddItem(NULL, &bufpage, (Item)newtup, newlen, xlrec->new_offnum, true) == InvalidOffsetNumber) {
-            elog(PANIC, "failed to add tuple");
+            UPagePrintErrorInfo(newpage, "UPageAddItem failed");
         }
 
         /* Update the page potential freespace */
@@ -1110,13 +1080,16 @@ void UHeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, 
 
         /* max offset should be valid */
         Assert(UHeapPageGetMaxOffsetNumber(page) + 1 >= offnum);
+        if (UHeapPageGetMaxOffsetNumber(page) + 1 < offnum) {
+            UPagePrintErrorInfo(page, "The max offset number is invalid");
+        }
 
         UHeapDiskTuple uhtup = GetUHeapDiskTupleFromMultiInsertRedoData(&data, &newlen, tbuf);
 
         bufpage.buffer = buffer->buf;
         bufpage.page = NULL;
         if (UPageAddItem(NULL, &bufpage, (Item)uhtup, newlen, offnum, true) == InvalidOffsetNumber) {
-            elog(PANIC, "failed to add tuple");
+            UPagePrintErrorInfo(page, "UPageAddItem failed");
         }
 
         /* decrement the potential freespace of this page */
@@ -1486,6 +1459,16 @@ static void UHeapXlogCleanBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     }
 }
 
+static void UHeapXlogNewpageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+    RedoBufferInfo *bufferinfo)
+{
+    XLogBlockDataParse *datadecode = blockdatarec;
+    XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+    if (action != BLK_RESTORED)
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("UHeapXlogNewpageBlock unexpected result when restoring backup block")));
+}
+
 void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
 {
     uint8 info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
@@ -1511,6 +1494,9 @@ void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_UHEAP_CLEAN:
             UHeapXlogCleanBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            UHeapXlogNewpageBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedoDataBlock: unknown op code %u", info)));
@@ -1685,7 +1671,7 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     urecptr = UHeapPrepareUndoInsert(xlundohdr->relOid, xlundohdrextra->partitionOid, relNode, spcNode,
         UNDO_PERMANENT, recxid, 0, xlundohdrextra->blkprev, xlundohdrextra->prevurp,
         blockdatarec->insertUndoParse.blkno, xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
     undorec->SetOffset(blockdatarec->insertUndoParse.offnum);
     if (!skipInsert) {
         InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
@@ -1764,7 +1750,7 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         xlundohdrextra->hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0,
         xlundohdrextra->blkprev, xlundohdrextra->prevurp, &oldTD, &utup, blockdatarec->deleteUndoParse.blkno,
         xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
     undorec->SetOffset(blockdatarec->deleteUndoParse.offnum);
     if (!skipInsert) {
         /* Insert the Undo record into the undo store */
@@ -1851,7 +1837,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         inplaceUpdate ? xlundohdrextra->blkprev : xlnewundohdrextra->blkprev, xlundohdrextra->prevurp,
         &oldTD, &oldtup, inplaceUpdate, &newUrecptr, blockdatarec->updateUndoParse.undoXorDeltaSize,
         blockdatarec->updateUndoParse.oldblk, blockdatarec->updateUndoParse.newblk, xlundohdr, xlundometa);
-    Assert(urecptr == xlundohdr->urecptr);
+    Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
 
     if (!skipInsert) {
         if (!inplaceUpdate) {
@@ -1956,7 +1942,7 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
          * undo should be inserted at same location as it was during the
          * actual insert (DO operation).
          */
-        Assert((*urecvec)[0]->Urp() == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET((*urecvec)[0]->Urp()) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
         InsertPreparedUndo(urecvec, lsn);
     }
 

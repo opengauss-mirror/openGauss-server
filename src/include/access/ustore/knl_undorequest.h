@@ -57,11 +57,20 @@ typedef enum RollbackReturnType {
     ROLLBACK_OK_NOEXIST = -2
 } RollbackReturnType;
 
-typedef enum RollBackTypeForAlterTabl {
+typedef enum RollBackTypeForAlterTable {
     ROLLBACK_OP_FOR_MOVE_TBLSPC = 0,
     ROLLBACK_OP_FOR_MERGE_PARTITION = 1,
     ROLLBACK_OP_FOR_EXCHANGE_PARTITION = 2
-} RollBackTypeForAlterTabl;
+} RollBackTypeForAlterTable;
+
+typedef struct PartitionToastInfo {
+    Oid srcPartTupleOid;
+    Oid destPartTupleOid;
+    Oid srcToastRelOid;
+    Oid destToastRelOid;
+    TupleDesc tupDesc;
+    HTAB *chunkIdHashTable;
+} PartitionToastInfo;
 
 Size AsyncRollbackRequestsHashSize(void);
 Size AsyncRollbackHashShmemSize(void);
@@ -85,4 +94,7 @@ void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId
 bool UHeapUndoActionsOpenRelation(Oid reloid, Oid partitionoid, UndoRelationData *relationData);
 void UHeapUndoActionsCloseRelation(UndoRelationData *relationData);
 bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloid, Oid *partitionoid);
+bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
+    BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo = NULL);
+
 #endif

@@ -59,13 +59,14 @@ static void CloseTableList(List *rels);
 static void PublicationAddTables(Oid pubid, List *rels, bool if_not_exists, AlterPublicationStmt *stmt);
 static void PublicationDropTables(Oid pubid, List *rels, bool missing_ok);
 
-static void parse_publication_options(List *options, 
-                                    bool *publish_given, 
-                                    bool *publish_insert, 
-                                    bool *publish_update,
-                                    bool *publish_delete, 
-                                    bool *publish_ddl_given,
-                                    int64 *pubddl)
+static void parse_publication_options(List *options,
+                                      bool *publish_given,
+                                      bool *publish_insert,
+                                      bool *publish_update,
+                                      bool *publish_delete,
+                                      bool *publish_truncate,
+                                      bool *publish_ddl_given,
+                                      int64 *pubddl)
 {
     ListCell *lc;
 
@@ -76,6 +77,7 @@ static void parse_publication_options(List *options,
     *publish_insert = true;
     *publish_update = true;
     *publish_delete = true;
+    *publish_truncate = true;
     *pubddl = 0;
 
     /* Parse options */
@@ -97,6 +99,7 @@ static void parse_publication_options(List *options,
             *publish_insert = false;
             *publish_update = false;
             *publish_delete = false;
+            *publish_truncate = false;
 
             *publish_given = true;
             publish = defGetString(defel);
@@ -113,6 +116,8 @@ static void parse_publication_options(List *options,
                     *publish_update = true;
                 else if (strcmp(publish_opt, "delete") == 0)
                     *publish_delete = true;
+                else if (strcmp(publish_opt, "truncate") == 0)
+                    *publish_truncate = true;
                 else
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized \"publish\" value: \"%s\"", publish_opt)));
@@ -200,23 +205,51 @@ CreateDDLReplicaEventTrigger(char *eventname, List *commands, ObjectAddress puba
     recordDependencyOn(&referenced, &pubaddress, DEPENDENCY_INTERNAL);
 }
 
-static void
-AddAllDDLReplicaEventTriggers(List *end_commands)
+static void AddAllDDLReplicaEventTriggers(List *end_commands)
 {
     end_commands = lappend(end_commands, makeString("CREATE INDEX"));
     end_commands = lappend(end_commands, makeString("DROP INDEX"));
+    end_commands = lappend(end_commands, makeString("ALTER INDEX"));
+    end_commands = lappend(end_commands, makeString("CREATE SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("ALTER SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("DROP SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("CREATE SCHEMA"));
+    end_commands = lappend(end_commands, makeString("ALTER SCHEMA"));
+    end_commands = lappend(end_commands, makeString("DROP SCHEMA"));
+    end_commands = lappend(end_commands, makeString("COMMENT"));
+    end_commands = lappend(end_commands, makeString("CREATE VIEW"));
+    end_commands = lappend(end_commands, makeString("ALTER VIEW"));
+    end_commands = lappend(end_commands, makeString("DROP VIEW"));
+    end_commands = lappend(end_commands, makeString("CREATE FUNCTION"));
+    end_commands = lappend(end_commands, makeString("ALTER FUNCTION"));
+    end_commands = lappend(end_commands, makeString("DROP FUNCTION"));
+    end_commands = lappend(end_commands, makeString("CREATE TRIGGER"));
+    end_commands = lappend(end_commands, makeString("ALTER TRIGGER"));
+    end_commands = lappend(end_commands, makeString("DROP TRIGGER"));
+    end_commands = lappend(end_commands, makeString("CREATE TYPE"));
+    end_commands = lappend(end_commands, makeString("ALTER TYPE"));
+    end_commands = lappend(end_commands, makeString("DROP TYPE"));
+    if(DB_IS_CMPT(B_FORMAT)) {
+        end_commands = lappend(end_commands, makeString("CREATE EVENT"));
+        end_commands = lappend(end_commands, makeString("ALTER EVENT"));
+        end_commands = lappend(end_commands, makeString("DROP EVENT"));
+    }
 }
 
 /*
  * If DDL replication is enabled, create event triggers to capture and log any
  * relevant events.
  */
-static void
-CreateDDLReplicaEventTriggers(ObjectAddress pubaddress, Oid puboid)
+static void CreateDDLReplicaEventTriggers(ObjectAddress pubaddress, Oid puboid)
 {
     List *start_commands = list_make1(makeString("DROP TABLE"));
-    List *end_commands = NIL;
-    end_commands = lappend(end_commands, makeString("CREATE TABLE"));
+    start_commands = lappend(start_commands, makeString("DROP INDEX"));
+    start_commands = lappend(start_commands, makeString("DROP TYPE"));
+
+    List *rewrite_commands = list_make1(makeString("ALTER TABLE"));
+
+    List *end_commands = list_make1(makeString("CREATE TABLE"));
+    end_commands = lappend(end_commands, makeString("ALTER TABLE"));
     end_commands = lappend(end_commands, makeString("DROP TABLE"));
     AddAllDDLReplicaEventTriggers(end_commands);
 
@@ -225,13 +258,15 @@ CreateDDLReplicaEventTriggers(ObjectAddress pubaddress, Oid puboid)
 
     /* Create the ddl_command_start event trigger */
     CreateDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_START, start_commands, pubaddress, puboid);
+
+    /* Create the table_rewrite event trigger */
+    CreateDDLReplicaEventTrigger(PUB_TRIG_TBL_REWRITE, rewrite_commands, pubaddress, puboid);
 }
 
 /*
  * Helper function to drop an event trigger for DDL replication.
  */
-static void
-DropDDLReplicaEventTrigger(char *eventname, Oid puboid)
+static void DropDDLReplicaEventTrigger(char *eventname, Oid puboid)
 {
     char trigger_name[NAMEDATALEN];
     Oid evtoid;
@@ -260,11 +295,11 @@ DropDDLReplicaEventTrigger(char *eventname, Oid puboid)
 /*
  * Drop all the event triggers which are used for DDL replication.
  */
-static void
-DropDDLReplicaEventTriggers(Oid puboid)
+static void DropDDLReplicaEventTriggers(Oid puboid)
 {
     DropDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_START, puboid);
     DropDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_END, puboid);
+    DropDDLReplicaEventTrigger(PUB_TRIG_TBL_REWRITE, puboid);
 }
 
 /*
@@ -287,6 +322,7 @@ ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
     bool publish_insert;
     bool publish_update;
     bool publish_delete;
+    bool publish_truncate;
     bool publish_ddl_given;
     int64 pubddl;
     AclResult aclresult;
@@ -319,15 +355,15 @@ ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
     values[Anum_pg_publication_pubname - 1] = DirectFunctionCall1(namein, CStringGetDatum(stmt->pubname));
     values[Anum_pg_publication_pubowner - 1] = ObjectIdGetDatum(GetUserId());
 
-    parse_publication_options(stmt->options, &publish_given, 
-                            &publish_insert, &publish_update, &publish_delete,
-                            &publish_ddl_given, &pubddl);
+    parse_publication_options(stmt->options, &publish_given, &publish_insert, &publish_update, &publish_delete,
+                              &publish_truncate, &publish_ddl_given, &pubddl);
 
     values[Anum_pg_publication_puballtables - 1] = BoolGetDatum(stmt->for_all_tables);
     values[Anum_pg_publication_pubinsert - 1] = BoolGetDatum(publish_insert);
     values[Anum_pg_publication_pubupdate - 1] = BoolGetDatum(publish_update);
     values[Anum_pg_publication_pubdelete - 1] = BoolGetDatum(publish_delete);
     values[Anum_pg_publication_pubddl - 1] = Int64GetDatum(pubddl);
+    values[Anum_pg_publication_pubtruncate - 1] = BoolGetDatum(publish_truncate);
 
     tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -396,6 +432,7 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
     bool publish_insert;
     bool publish_update;
     bool publish_delete;
+    bool publish_truncate;
     bool publish_ddl_given;
     int64 pubddl;
     bool pubddl_change = false;
@@ -404,9 +441,8 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
     Form_pg_publication pubform;
     pubform = (Form_pg_publication)GETSTRUCT(tup);
 
-    parse_publication_options(stmt->options, &publish_given, 
-                        &publish_insert, &publish_update, &publish_delete,
-                        &publish_ddl_given, &pubddl);
+    parse_publication_options(stmt->options, &publish_given, &publish_insert, &publish_update, &publish_delete,
+                              &publish_truncate, &publish_ddl_given, &pubddl);
 
     /* Everything ok, form a new tuple. */
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -425,6 +461,9 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
 
         values[Anum_pg_publication_pubdelete - 1] = BoolGetDatum(publish_delete);
         replaces[Anum_pg_publication_pubdelete - 1] = true;
+
+        values[Anum_pg_publication_pubtruncate - 1] = BoolGetDatum(publish_truncate);
+        replaces[Anum_pg_publication_pubtruncate - 1] = true;
     }
 
     if (publish_ddl_given) {

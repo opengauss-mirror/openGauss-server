@@ -58,6 +58,7 @@
 #include "libpq/libpq-fe.h"
 #include "flock.h"
 #include "libpq/hba.h"
+#include "utils/builtins.h"
 #include "libpq/pqsignal.h"
 #include "getopt_long.h"
 #include "miscadmin.h"
@@ -115,15 +116,6 @@ char *g_hbaType = NULL;
 char *g_hbaDatabase = NULL;
 char *g_hbaUser = NULL;
 char *g_hbaAddr = NULL;
-
-/*
- * A single string token lexed from the HBA config file, together with whether
- * the token had been quoted.
- */
-typedef struct HbaToken {
-    char* string;
-    bool quoted;
-} HbaToken;
 
 /*
  * @@GaussDB@@

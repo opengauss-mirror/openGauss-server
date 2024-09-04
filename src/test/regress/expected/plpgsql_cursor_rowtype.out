@@ -64,7 +64,154 @@ END;
 /
 NOTICE:  Result: (,,,,,)
 drop table test_2 cascade;
-set behavior_compat_options='allow_procedure_compile_check';
+set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10),col varchar(10));
+create table t2(col1 varchar(10),col varchar(10));
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source.col1, source.col);
+  end loop; 
+end;
+/
+NOTICE:  (one,two)
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+NOTICE:  (one,two)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values(source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+select * from t2;
+ col1 | col 
+------+-----
+ one  | two
+(1 row)
+
+drop table t1;
+drop table t2;
+create table t1 (a int);
+create table t2 (a t1);
+declare
+  source t2%rowtype;
+begin
+  insert into t2 values(source.a);
+end;
+/
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source;
+end;
+/
+ERROR:  column "a" is of type t1 but expression is of type t2
+LINE 1: update t2 set a = source
+                          ^
+HINT:  You will need to rewrite or cast the expression.
+QUERY:  update t2 set a = source
+CONTEXT:  referenced column: a
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source.a;
+end;
+/
+drop table t2;
+drop table t1;
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+insert into t1 values('one',5,'dsa','e');
+insert into t1 values('two',7,'daw','d');
+insert into t1 values('three',7,'dsaw','sw');
+insert into t1 values(NULL);
+create table t2(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source.col1);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+NOTICE:  (two,7,daw,d)
+NOTICE:  (three,7,dsaw,sw)
+NOTICE:  (,,,)
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values('o', 5, source.col4, source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source, source.col1);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values('o', 5, source, source.col1)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+NOTICE:  (one,5,dsa,e)
+ERROR:  The record type variable cannot be used as an insertion value.
+CONTEXT:  SQL statement "insert into t2 values(source)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+select * from t2;
+ col1 | col2 | col3 | col4  
+------+------+------+-------
+ o    |    5 | e    | one
+ o    |    5 | d    | two
+ o    |    5 | sw   | three
+ o    |    5 |      | 
+(4 rows)
+
+drop table t1;
+drop table t2;
 create table emp (empno int, ename varchar(10), job varchar(10));
 insert into emp values (1, 'zhangsan', 'job1');
 insert into emp values (2, 'lisi', 'job2');
@@ -142,6 +289,57 @@ INFO:  2
  
 (1 row)
 
+-- test change cxt
+drop table if exists t_CurRowtype_Use_Case0007_1;
+NOTICE:  table "t_currowtype_use_case0007_1" does not exist, skipping
+create table t_CurRowtype_Use_Case0007_1(col1 varchar(30),col2 varchar(30));
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_a', 'col2_aa');
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_b', 'col2_bb');
+drop table if exists t_CurRowtype_Use_Case0007_2;
+NOTICE:  table "t_currowtype_use_case0007_2" does not exist, skipping
+create table t_CurRowtype_Use_Case0007_2(col1 varchar(30),col2 varchar(30));
+create or replace package pac_CurRowtype_Use_Case0007_5 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_5();
+end pac_CurRowtype_Use_Case0007_5;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_5 is
+procedure p_CurRowtype_Use_Case0007_5() is
+begin
+  var1.col1:='pack5_proc_col1';
+  var1.col2:='pack5_proc_col2';
+  insert into t_CurRowtype_Use_Case0007_2 values(var1.col1,var1.col2);
+end;
+end pac_CurRowtype_Use_Case0007_5;
+/
+create or replace package pac_CurRowtype_Use_Case0007_6 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_6;
+end pac_CurRowtype_Use_Case0007_6;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_6 is
+procedure p_CurRowtype_Use_Case0007_6 is
+begin
+  open cur1;
+  fetch cur1 into var1;
+  pac_CurRowtype_Use_Case0007_5.p_CurRowtype_Use_Case0007_5();
+end;
+end pac_CurRowtype_Use_Case0007_6;
+/
+call pac_CurRowtype_Use_Case0007_6.p_CurRowtype_Use_Case0007_6();
+ p_currowtype_use_case0007_6 
+-----------------------------
+ 
+(1 row)
+
+drop table if exists t_CurRowtype_Use_Case0007_1;
+drop table if exists t_CurRowtype_Use_Case0007_2;
+drop package pac_CurRowtype_Use_Case0007_5;
+--?.*
+drop package pac_CurRowtype_Use_Case0007_6;
+NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p_currowtype_use_case0007_6()
 -- test alias error 
 create or replace procedure pro_cursor_args
 is
@@ -187,6 +385,134 @@ INFO:  2
  
 (1 row)
 
+-- test: max len
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(col1 tinyint primary key,col2 varchar(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype:=(200,'abcdeabcedone');
+begin
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+ERROR:  value too long for type character varying(10)
+CONTEXT:  PL/pgSQL function inline_code_block line 3 during statement block local variable initialization
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype;
+begin
+  source:=(200,'abcdeabcedone');
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+ERROR:  value too long for type character varying(10)
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at assignment
+drop table if exists t1;
+-- test:pkg head max len
+create table test12(col1 varchar(10), col2 varchar(10));
+insert into test12 values ('a', 'aa');
+insert into test12 values ('a', 'aa');
+insert into test12 values ('b', 'bb');
+create table test22(col1 varchar2, col2 varchar2);
+insert into test22 values ('dsasdad6sad','d6sasdadsad');
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('dsasdad6sad','d6sasdadsad');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+ERROR:  value too long for type character varying(10)
+CONTEXT:  PL/pgSQL function inline_code_block line 2 during statement block local variable initialization
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdadsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+ERROR:  package spec not found
+call pck3p.ppp1();
+ERROR:  schema "pck3p" does not exist
+-- test:pkg body max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+call pck3p.ppp1();
+ERROR:  value too long for type character varying(10)
+--?.*
+SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+-- test:cursor fetch max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test22;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+call pck3p.ppp1();
+ERROR:  value too long for type character varying(10)
+CONTEXT:  PL/pgSQL function ppp1() line 5 at FETCH
+drop package pck3p;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function plpgsql_cursor_rowtype.ppp1()
+--?.*
+drop table test12;
+drop table test22;
 create table test12(col1 varchar2,col2 varchar2);
 insert into test12 values ('a', 'aa');
 insert into test12 values ('b', 'bb');
@@ -503,6 +829,47 @@ INFO:  str1 is 98
 INFO:  str1 is 99
 drop table STORAGE_LARGE_TABLE_STORAGE_TABLE_000;
 drop table STORAGE_LARGE_CURSOR_TABLE_216;
+-- test none execute error sql
+set behavior_compat_options='';
+create table t_CurRowtype_Def_Case0001_1(
+col1 tinyint primary key,
+col2 smallint,
+col3 int,
+col4 bigint
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_currowtype_def_case0001_1_pkey" for table "t_currowtype_def_case0001_1"
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+ERROR:  record "source" has no field "col5"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
+set behavior_compat_options='allow_procedure_compile_check';
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+ERROR:  record "source" has no field "col5"
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 8
+drop table t_CurRowtype_Def_Case0001_1;
 --test: drop column
 create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
 insert into int_4_2(a, d, b) values(3, 6,'johan');
@@ -1136,6 +1503,24 @@ INFO:  after loop: (,)
 
 drop package pck_for;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
+create table t_Compare_Case0013(id int,first_name varchar(100), last_name varchar(100));
+create table t_CurRowtype_PLObject_Case0013(first_name varchar(100), last_name varchar(100));
+insert into t_CurRowtype_PLObject_Case0013 values('Jason','Statham');
+create or replace function f_CurRowtype_PLObject_Case0013() returns trigger as
+$$
+declare
+  cursor cur_1 is select * from t_CurRowtype_PLObject_Case0013;
+  source cur_1%rowtype;
+begin
+   source.first_name:=new.first_name;
+   source.last_name:=new.last_name;      
+   insert into t_Compare_Case0013 values (source.first_name,source.last_name);
+   return new;
+end
+$$ language plpgsql;
+drop function f_CurRowtype_PLObject_Case0013;
+drop table t_CurRowtype_PLObject_Case0013;
+drop table t_Compare_Case0013;
 set behavior_compat_options='';
 set plsql_compile_check_options='for_loop';
 -- (b) definde as scarlar
@@ -1179,6 +1564,36 @@ INFO:  after loop: <NULL>
 
 drop package pck_for;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
+drop table test1;
+ERROR:  table "test1" does not exist
+drop table test2;
+ERROR:  table "test2" does not exist
+create table test1(id int, name varchar, job varchar);
+create table test2(id int, age int);
+insert into test1 values (1, 'zhang', 'worker'),(2, 'li', 'teacher'),(3, 'wang', 'engineer');
+insert into test2 values (1, 20),(2, 30),(3, 40);
+DECLARE 
+  CURSOR c1 IS SELECT t.age, CURSOR(SELECT name FROM test1 t1 where t1.id = t.id) abc FROM test2 t;-- 在匿名块中使用游标表达式样例
+  age_temp int;
+  name_temp varchar;
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  source c1%rowtype;
+BEGIN
+  OPEN c1;
+  loop
+    fetch c1 into source;
+    exit when c1%notfound;
+    raise notice '%',source;
+  end loop;
+  close c1;
+END;
+/
+ERROR:  execute failed when parse the query: SELECT t.age, CURSOR(SELECT name FROM test1 t1 where t1.id = t.id)abc FROM test2 t
+DETAIL:  obtain rowtype form nested cursor is not supported
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
+drop table test1;
+drop table test2;
 -- (c) select only one col
 create or replace package pck_for is
 temp_result int;
@@ -1261,6 +1676,7 @@ INFO:  aa
  
 (1 row)
 
+drop procedure check_compile_1;
 set behavior_compat_options='';
 drop procedure check_compile;
 --游标依赖row type，后续alter type
@@ -1377,6 +1793,7 @@ fetch c3;
 (1 row)
 
 close c3;
+drop type if exists foo;
 ---- 不在 TRANSACTION Block里的游标声明导致 core的问题
 --游标依赖row type，后续alter type
 drop type if exists type_cursor_bugfix_0001;
@@ -1465,7 +1882,7 @@ NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop package pckg_test2;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop schema plpgsql_cursor_rowtype cascade;
-NOTICE:  drop cascades to 26 other objects
+NOTICE:  drop cascades to 24 other objects
 DETAIL:  drop cascades to table emp
 drop cascades to function pro_cursor_no_args_1()
 drop cascades to function pro_cursor_no_args_2()
@@ -1490,8 +1907,6 @@ drop cascades to function plpgsql_cursor_rowtype.ppp1()
 --?.*
 drop cascades to function pro_close_cursor1()
 drop cascades to function pro_close_cursor2()
-drop cascades to function check_compile_1()
-drop cascades to type foo
 drop schema schema1 cascade;
 NOTICE:  drop cascades to table schema1.t11
 create schema cursor_rowtype;
@@ -1716,10 +2131,8 @@ BEGIN
   close c;
 END;
 /
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
 -- FUNC: normale
 create or replace function f1(b int) returns int
 as $$
@@ -1767,10 +2180,8 @@ BEGIN
 END;
 $$language plpgsql;
 call f1(2); -----error
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -1792,8 +2203,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *
@@ -1957,10 +2368,8 @@ BEGIN
   close c;
 END;
 /
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
 -- FUNC: normale
 create or replace function f1(b int) returns int
 as $$
@@ -2008,10 +2417,8 @@ BEGIN
 END;
 $$language plpgsql;
 call f1(2); -----error
-NOTICE:  Smith
-NOTICE:  Jane
-ERROR:  record "source" has no field "oid" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+ERROR:  record "source" has no field "oid"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -2033,8 +2440,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *
@@ -2133,9 +2540,8 @@ BEGIN
   return b;
 END;
 $$language plpgsql;
-ERROR:  "source.oid" is not a known variable
-LINE 12:   source.oid := 5;
-           ^
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 10
 -- FUNC: If change table struct
 create or replace function f1(b int) returns int
 as $$
@@ -2157,24 +2563,7 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  "source.first_name" is not a known variable
-LINE 10:   source.first_name := 'Jane';
-           ^
-QUERY:  
-DECLARE
-  CURSOR c IS
-    SELECT *
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-  return b;
-END;
-
+ERROR:  record "source" has no field "first_name"
 CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
 drop table employees;
 call f1(2); -----error
@@ -2248,9 +2637,8 @@ BEGIN
   return b;
 END;
 $$language plpgsql;
-ERROR:  "source.oid" is not a known variable
-LINE 12:   source.oid := 5;
-           ^
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 10
 call f1(2);
 NOTICE:  Jane
  f1 
@@ -2279,24 +2667,7 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  "source.first_name" is not a known variable
-LINE 10:   source.first_name := 'Jane';
-           ^
-QUERY:  
-DECLARE
-  CURSOR c IS
-    SELECT *
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-  return b;
-END;
-
+ERROR:  record "source" has no field "first_name"
 CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
 drop table employees;
 call f1(2); -----error
@@ -2428,26 +2799,8 @@ BEGIN
   close c;
 END;
 /
-ERROR:  "source.oid" is not a known variable
---?.*
-           ^
-QUERY:  DECLARE
-  CURSOR c IS
-    SELECT first_name,last_name
-    FROM employees;
-  source c%ROWTYPE;
-BEGIN
-  source.first_name := 'Jane'; source.last_name := 'Smith';
-  raise notice '%', source.last_name;
-  raise notice '%', source.first_name;
-  source.oid := 5;
-  raise notice '%', source.oid;
-  open c;
-  fetch c into source;
-  source.first_name := 'Jane';
-  raise notice '%', source.first_name;
-  close c;
-END
+ERROR:  record "source" has no field "oid"
+CONTEXT:  compilation of PL/pgSQL function "p1" near line 9
 call P1(2); -----error
 NOTICE:  Jane
  p1 
@@ -2490,8 +2843,8 @@ drop table employees;
 create table employees(a varchar(20),b int);
 insert into employees(a,b) values ('johan',22);
 call f1(2); -----error
-ERROR:  record "source" has no field "first_name" in assignment.
-CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+ERROR:  record "source" has no field "first_name"
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
 drop table employees;
 call f1(2); -----error
 ERROR:  execute failed when parse the query: SELECT *

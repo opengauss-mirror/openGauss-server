@@ -100,7 +100,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
 void SSTransactionIdDidCommit(TransactionId transactionId, bool *ret_did_commit);
 void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress);
 TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
-bool SSGetOldestXminFromAllStandby();
+bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
@@ -121,7 +121,7 @@ int SSCheckDbBackendsAck(char *data, unsigned int len);
 bool SSCheckDbBackendsFromAllStandby(Oid dbid);
 void SSStandbyUpdateRedirectInfo();
 void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
-int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len);
+int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSReloadReformCtrlPage(uint32 len);
 void SSRequestAllStandbyReloadReformCtrlPage();
 bool SSCanFetchLocalSnapshotTxnRelatedInfo();

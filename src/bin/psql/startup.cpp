@@ -38,6 +38,7 @@
 #include "libpq/libpq-int.h"
 #endif
 #include "nodes/pg_list.h"
+#include "common_cipher.h"
 
 /*
  * Global psql options
@@ -701,6 +702,8 @@ int main(int argc, char* argv[])
 
     SyncVariables();
 
+    pset.dbType = GetDatabaseType();
+
     if (options.action == ACT_LIST_DB && !isparseonly) {
         int success;
 
@@ -1046,6 +1049,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"help", no_argument, NULL, '?'},
         /* Database Security: Data importing/dumping support AES128. */
         {"with-key", required_argument, NULL, 'k'},
+        {"with-decryption", required_argument, NULL, 'D'},
+        {"with-module-params", required_argument, NULL, 'u'},
+        {"with-salt", required_argument, NULL, 1},
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
         {"sql-parse", no_argument, NULL, 'g'},
 #endif
@@ -1059,6 +1065,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     bool action_string_need_free = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
+    char* decrypt_salt = NULL;
+    char* module_params = NULL;
+    char* decrypt_type = NULL;
     char* dbname = NULL;
     errno_t rc = EOK;
 #ifdef USE_READLINE
@@ -1071,7 +1080,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     check_short_optOfVoid("aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", argc, argv);
 
     while ((c = getopt_long(
-                argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", long_options, &optindex)) != -1) {
+                argc, argv, "aAc:d:D:eEf:F:gh:Hlk:u:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", long_options, &optindex)) != -1) {
         switch (c) {
             case 'a':
                 if (!SetVariable(pset.vars, "ECHO", "all")) {
@@ -1156,10 +1165,17 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 dencrypt_key = pg_strdup(optarg);
                 rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
                 check_memset_s(rc);
-                set_aes_key(dencrypt_key);
-                free(dencrypt_key);
                 break;
             }
+            case 'D': 
+                decrypt_type = pg_strdup(optarg);
+                break;
+            case 'u':
+                module_params = pg_strdup(optarg);
+                break;
+            case 1: 
+                decrypt_salt = pg_strdup(optarg);
+                break;
             case 'L':
                 options->logfilename = optarg;
                 break;
@@ -1317,6 +1333,17 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 exit(EXIT_FAILURE);
                 break;
         }
+    }
+
+    if (module_params) {
+        CryptoModuleParamsCheck(&(pset.decryptInfo), module_params, decrypt_type, dencrypt_key, decrypt_salt);
+        free(module_params);
+        free(decrypt_type);
+        free(dencrypt_key);
+        free(decrypt_salt);
+    } else if (dencrypt_key){
+        set_aes_key(dencrypt_key);
+        free(dencrypt_key);
     }
 
     /*

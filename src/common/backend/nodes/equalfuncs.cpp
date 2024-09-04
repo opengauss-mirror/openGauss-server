@@ -591,6 +591,10 @@ static bool _equalMinMaxExpr(const MinMaxExpr* a, const MinMaxExpr* b)
     COMPARE_SCALAR_FIELD(op);
     COMPARE_NODE_FIELD(args);
     COMPARE_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(cmptype);
+        COMPARE_NODE_FIELD(cmpargs);
+    }
 
     return true;
 }
@@ -1163,6 +1167,9 @@ static bool _equalAlterTableCmd(const AlterTableCmd* a, const AlterTableCmd* b)
     COMPARE_SCALAR_FIELD(alterGPI);
     COMPARE_SCALAR_FIELD(is_first);
     COMPARE_STRING_FIELD(after_name);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(recursing);
+    }
 
     return true;
 }
@@ -1613,6 +1620,9 @@ static bool _equalAlterFunctionStmt(const AlterFunctionStmt* a, const AlterFunct
 {
     COMPARE_NODE_FIELD(func);
     COMPARE_NODE_FIELD(actions);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(isProcedure);
+    }
 
     return true;
 }
@@ -1655,6 +1665,9 @@ static bool _equalRenameStmt(const RenameStmt* a, const RenameStmt* b)
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_NODE_FIELD(renameTargetList);
     COMPARE_SCALAR_FIELD(renameTableflag);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(is_modifycolumn);
+    }
 
     return true;
 }
@@ -2909,6 +2922,9 @@ static bool _equalColumnDef(const ColumnDef* a, const ColumnDef* b)
     COMPARE_NODE_FIELD(fdwoptions);
     COMPARE_NODE_FIELD(columnOptions);
     COMPARE_NODE_FIELD(update_default);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COMPARE_STRING_FIELD(initdefval);
+    }
     return true;
 }
 

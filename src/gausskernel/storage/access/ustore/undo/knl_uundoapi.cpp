@@ -65,13 +65,13 @@ bool CheckNeedSwitch(UndoPersistence upersistence)
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
 {
     t_thrd.undo_cxt.transUndoSize += size;
-    uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
+    uint64 transUndoThresholdSize = GET_UNDO_LIMIT_SIZE_PER_XACT * BLCKSZ;
     if ((!t_thrd.xlog_cxt.InRecovery) && (t_thrd.undo_cxt.transUndoSize > transUndoThresholdSize)) {
-        ereport(ERROR, (errmsg(UNDOFORMAT("xid %lu, the undo size %lu of the transaction exceeds the threshold %lu."
-            "trans_undo_threshold_size %lu, undo_space_limit_size %lu."),
-            xid, t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize,
+        ereport(ERROR, (errmsg(UNDOFORMAT("The undo size %lu of the transaction exceeds the threshold %lu."
+            "undo_limit_size_trans = %lu, undo_space_limit_size = %lu. Current xid = %lu."),
+            t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize,
             (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction,
-            (uint64)u_sess->attr.attr_storage.undo_space_limit_size)));
+            (uint64)u_sess->attr.attr_storage.undo_space_limit_size, xid)));
     }
     return;
 }
@@ -138,7 +138,6 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
         uzone->MarkDirty();
     }
     uzone->AdvanceInsertURecPtr(UNDO_PTR_GET_OFFSET(lastRecord), lastRecordSize);
-    UndoZoneVerifyPtr(uzone);
     if (uzone->GetForceDiscardURecPtr() > uzone->GetInsertURecPtr()) {
         ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d forceDiscardURecPtr %lu > insertURecPtr %lu."),
             uzone->GetZoneId(), uzone->GetForceDiscardURecPtr(), uzone->GetInsertURecPtr())));
@@ -160,9 +159,9 @@ void FinishUndoMeta(UndoPersistence upersistence)
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("FinishUndoMeta: uzone is NULL")));
     }
-    UndoZoneVerify(uzone);
     uzone->GetSlotBuffer().UnLock();
     uzone->UnlockUndoZone();
+    UndoZoneVerify(uzone);
     return;
 }
 
@@ -212,7 +211,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
         meta->SetInfo(XLOG_UNDOMETA_INFO_SLOT);
         Assert(meta->dbid != INVALID_DB_OID);
     }
-    UndoTranslotVerifyPtr(slot, INVALID_UNDO_SLOT_PTR);
+    TransactionSlotVerify(slot, t_thrd.undo_cxt.slotPtr[upersistence]);
     return;
 }
 
@@ -245,6 +244,7 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
         zone->MarkDirty();
         zone->SetLSN(lsn);
         zone->UnlockUndoZone();
+        UndoZoneVerify(zone);
     }
     UndoSlotPtr slotPtr = MAKE_UNDO_PTR(zone->GetZoneId(), meta->slotPtr);
     if (!IsSkipInsertSlot(slotPtr)) {
@@ -267,7 +267,6 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
         }
         UnlockReleaseBuffer(buf.Buf());
     }
-    UndoZoneVerify(zone);
     return;
 }
 
@@ -644,7 +643,7 @@ void AllocateUndoZone()
     if (!g_instance.attr.attr_storage.enable_ustore) {
         return;
     }
-    AllocateZonesBeforXid();
+    AllocateZonesBeforeXid();
 #endif
 }
 
@@ -660,7 +659,6 @@ void RedoRollbackFinish(UndoSlotPtr slotPtr, XLogRecPtr lsn)
             slot->UpdateRollbackProgress();
             PageSetLSN(page, lsn);
             MarkBufferDirty(buf.Buf());
-            UndoTranslotVerify(slot, slotPtr);
         }
         UnlockReleaseBuffer(buf.Buf());
     }
@@ -714,7 +712,6 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     }
     MarkBufferDirty(buf.Buf());
     END_CRIT_SECTION();
-    UndoTranslotVerify(slot, slotPtr);
     UnlockReleaseBuffer(buf.Buf());
     return;
 }
@@ -724,7 +721,7 @@ void OnUndoProcExit(int code, Datum arg)
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("on undo exit, thrd: %d"), t_thrd.myLogicTid)));
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
-        if (upersistence == UNDO_TEMP || upersistence == UNDO_UNLOGGED) {
+        if (upersistence == UNDO_TEMP) {
             TransactionId topXid = GetTopTransactionIdIfAny();
             undo::TransactionSlot *slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[upersistence]);
             UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[upersistence];
@@ -786,7 +783,7 @@ void ReleaseSlotBuffer()
     }
 }
 
-void initUndoZoneLock()
+void InitUndoZoneLock()
 {
     if (g_instance.undo_cxt.uZones != NULL) {
         int persistZoneCount = PERSIST_ZONE_COUNT;
@@ -797,13 +794,41 @@ void initUndoZoneLock()
                 int zoneId = (int)(idx + persist * PERSIST_ZONE_COUNT);
                 UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
                 if (uzone == NULL) {
-                    break;
+                    continue;
                 }
-                uzone->InitLock();
-                uzone->GetUndoSpace()->LockInit();
-                uzone->GetSlotSpace()->LockInit();
+                if (!(uzone->GetLock())) {
+                    uzone->InitLock();
+                }
+                if (!(uzone->GetUndoSpace()->GetLock())) {
+                    uzone->GetUndoSpace()->LockInit();
+                }
+                if (!(uzone->GetSlotSpace()->GetLock())) {
+                    uzone->GetSlotSpace()->LockInit();
+                }
             }
         }
     }
 }
+
+void ResetUndoZoneLock()
+{
+    if (g_instance.undo_cxt.uZones != NULL) {
+        int persistZoneCount = PERSIST_ZONE_COUNT;
+        for (int persist = (int)UNDO_PERMANENT; persist <= (int)UNDO_TEMP; persist++) {
+            CHECK_FOR_INTERRUPTS();
+            for (auto idx = 0; idx < persistZoneCount; idx++) {
+                CHECK_FOR_INTERRUPTS();
+                int zoneId = (int)(idx + persist * PERSIST_ZONE_COUNT);
+                UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
+                if (uzone == NULL) {
+                    continue;
+                }
+                uzone->SetLock(NULL);
+                uzone->GetUndoSpace()->SetLock(NULL);
+                uzone->GetSlotSpace()->SetLock(NULL);
+            }
+        }
+    }
+}
+
 } // namespace undo

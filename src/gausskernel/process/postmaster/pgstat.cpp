@@ -8373,6 +8373,11 @@ void ResetMemory(void* dest, size_t size)
     securec_check(rc, "\0", "\0");
 }
 
+bool nettime_trace_is_working()
+{
+    return u_sess->statement_cxt.remote_support_trace && u_sess->attr.attr_common.enable_record_nettime;
+}
+
 void timeInfoRecordStart(void)
 {
     if (!og_time_record_start()) {
@@ -8382,12 +8387,11 @@ void timeInfoRecordStart(void)
         u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
 }
 
-void timeInfoRecordEnd(void)
+void timeInfoRecordEnd(bool update_delay)
 {
     if (!og_time_record_is_started()) {
         return;
     }
-    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
 
     if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
         int64 cur = getCpuTime();
@@ -8396,7 +8400,17 @@ void timeInfoRecordEnd(void)
     }
     og_time_record_end();
     og_get_record_stat()->print_self();
+    if (u_sess->statement_cxt.nettime_trace_is_working && CURRENT_STMT_METRIC_HANDLE) {
+        u_sess->statement_cxt.total_db_time += u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
+    }
+    if (!update_delay) {
+        update_sql_state();
+    }
 
+}
+
+void update_sql_state(void) {
+    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
     addThreadTimeEntry();
     t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
     Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);

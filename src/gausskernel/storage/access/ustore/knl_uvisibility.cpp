@@ -384,7 +384,7 @@ static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid
          * snapshot belongs to an older CID, then we need the CID for this
          * tuple to make a final visibility decision.
          */
-        if (GetCurrentCommandIdUsed() || GetCurrentCommandId(false) >= snapshot->curcid)
+        if (GetCurrentCommandIdUsed() || GetCurrentCommandId(false) != snapshot->curcid)
             return UVERSION_CHECK_CID;
         if (op == UTUPLETID_GONE) {
             return UVERSION_NONE;
@@ -394,8 +394,6 @@ static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid
             }
             return UVERSION_CURRENT;
         }
-        /* Nothing has changed since our scan started. */
-        return ((op == UTUPLETID_GONE) ? UVERSION_NONE : UVERSION_CURRENT);
     }
     if (!XidVisibleInSnapshot(xid, snapshot, &hintstatus, (RecoveryInProgress() ? buffer : InvalidBuffer), NULL)) {
         /*
@@ -949,7 +947,7 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
             savedTdSlot = tdinfo.td_slot;
         }
         if (tdinfo.cid == InvalidCommandId) {
-            ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
+            ereport(ERROR, (errmodule(MOD_USTORE), errmsg(
                 "invalid cid! "
                 "LogInfo: undo state %d, tuple flag %u, tupXid %lu. "
                 "OldTd: tdxid %lu, tdid %d, undoptr %lu. NewTd: tdxid %lu, tdid %d, undoptr %lu. "
@@ -1176,7 +1174,6 @@ TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer
 
     utuple->table_oid = RelationGetRelid(rel);
     utuple->ctid = *tid;
-    utuple->xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 
     *inplaceUpdated = false;
     if (ctid != NULL) {

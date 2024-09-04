@@ -92,3 +92,9 @@ CREATE TABLE tab_on_update12 (
     upd_time TIME DEFAULT LOCALTIMESTAMP(2) ON UPDATE LOCALTIMESTAMP(2)  COMMENT 'update record local timestamp(2)',
     PRIMARY KEY (col_id)
 );
+
+alter table tab_on_update12 MODIFY COLUMN col_name text CHARSET 'utf8' COLLATE utf8mb4_bin;
+alter table tab_on_update12 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+alter table tab_on_update12 CONVERT TO CHARACTER SET 'utf8'  COLLATE utf8mb4_bin;
+
+alter table tab_on_update12 CHANGE COLUMN col_name col_name2 text CHARSET 'utf8' COLLATE utf8mb4_bin FIRST;

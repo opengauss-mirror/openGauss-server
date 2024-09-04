@@ -2786,7 +2786,8 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                             }
                         }
                         if (!exist) {
-                            break;
+                            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
+                                            errmsg("record \"%s\" has no field \"%s\"", rec->refname, word2)));
                         }
                     }
                 }
@@ -3872,6 +3873,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
         }
         case PLPGSQL_TTYPE_CURSORROW: {
             PLpgSQL_rec* rec = (PLpgSQL_rec*)palloc0(sizeof(PLpgSQL_rec));
+            rec->field_need_check = NIL;
             rec->dtype = PLPGSQL_DTYPE_CURSORROW;
             rec->refname = pstrdup(refname);
             rec->lineno = lineno;
@@ -3892,15 +3894,16 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                     }
 
                     rec->tupdesc = getCursorTupleDesc(rec->expr, false, false);
-
-                    nulls = (bool *)palloc(rec->tupdesc->natts * sizeof(bool));
-                    rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
-                    securec_check(rc, "\0", "\0");
-
-                    rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
-                    rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
-                    rec->freetup = (rec->tup != NULL) ? true : false;
-                    pfree_ext(nulls);
+                    if (rec->tupdesc) {
+                        nulls = (bool*)palloc(rec->tupdesc->natts * sizeof(bool));
+                        rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
+                        securec_check(rc, "\0", "\0");
+                        rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
+                        /* compile_tmp_cx will automatically free, there is no need to set free mark. */
+                        rec->freetupdesc = false;
+                        rec->freetup = false;
+                        pfree_ext(nulls);
+                    }
 
                     if (target_cxt) {
                         temp = MemoryContextSwitchTo(temp);
@@ -5685,4 +5688,30 @@ Oid searchsubtypebytypeId(Oid typeOid, int32 *typmod)
                         errmsg("unsupported search subtype by type %u", typeOid)));
     }
     return type == TYPTYPE_TABLEOF ? searchsubtypebytypeId(resultType, typmod) : resultType;
+}
+
+void checkArrayTypeInsert(ParseState* pstate, Expr* expr)
+{
+    Param* param = NULL;
+    if (IsA(expr, Param)) {
+        param = (Param*)expr;
+    } else if (IsA(expr, ArrayRef) && IsA(((ArrayRef*)expr)->refexpr, Param)) {
+        param = (Param*)((ArrayRef*)expr)->refexpr;
+    } else {
+        return;
+    }
+
+    if (pstate->p_pre_columnref_hook == plpgsql_pre_column_ref && pstate->p_ref_hook_state != NULL) {
+        PLpgSQL_expr* pl_expr = (PLpgSQL_expr*)pstate->p_ref_hook_state;
+
+        if (pl_expr->func != NULL && param->paramid <= pl_expr->func->ndatums &&
+            pl_expr->func->datums[param->paramid - 1]->dtype == PLPGSQL_DTYPE_VAR) {
+            PLpgSQL_var* var = (PLpgSQL_var*)pl_expr->func->datums[param->paramid - 1];
+
+            if (var->nest_table != NULL && (IsA(expr, Param) ||
+                var->nest_layers != list_length(((ArrayRef*)expr)->refupperindexpr))) {
+                ereport(ERROR, (errmsg("The tableof type variable cannot be used as an insertion value. ")));
+            }
+        }
+    }
 }

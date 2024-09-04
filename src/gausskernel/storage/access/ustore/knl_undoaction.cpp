@@ -17,6 +17,9 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
+#include "access/transam.h"
+#include "access/xact.h"
 #include "access/ustore/knl_uheap.h"
 #include "access/ustore/knl_undorequest.h"
 #include "access/ustore/knl_uredo.h"
@@ -35,6 +38,18 @@
 static UHeapDiskTuple CopyTupleFromUndoRecord(UndoRecord *undorecord, Buffer buffer);
 static void RestoreXactFromUndoRecord(UndoRecord *undorecord, Buffer buffer, UHeapDiskTuple tuple);
 static void LogUHeapUndoActions(UHeapUndoActionWALInfo *walInfo, Relation rel);
+
+struct ChunkIdHashKey {
+    Oid toastTableOid;
+    Oid oldChunkId;
+};
+
+struct OldToNewChunkIdMappingData {
+    ChunkIdHashKey key;
+    Oid newChunkId;
+};
+
+typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
 
 static int GetUndoApplySize()
 {
@@ -72,17 +87,17 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         urec->SetUrp(toUrecptr);
         UndoTraversalState rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId, false, NULL);
-         DELETE_EX(urec);
+        DELETE_EX(urec);
         /* already processed. */
         if (rc != UNDO_TRAVERSAL_COMPLETE) {
             ereport(ERROR, (errmodule(MOD_USTORE),
-                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu), rc(%d)",
+                errmsg("[Rollback Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu), rc(%d)",
                     fullXid, toUrecptr, fromUrecptr, rc)));
             return false;
         }
     }
 
-/*
+    /*
      * Fetch the multiple undo records which can fit into uur_segment; sort
      * them in order of reloid and block number then apply them together
      * page-wise. Repeat this until we get invalid undo record pointer.
@@ -105,7 +120,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
          * for this transaction, otherwise we need to fetch the next batch of
          * the undo records.
          */
-        if (!IS_VALID_UNDO_REC_PTR(urecPtr)){
+        if (!IS_VALID_UNDO_REC_PTR(urecPtr)) {
             break;
         }
             
@@ -117,7 +132,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         URecVector *urecvec = FetchUndoRecordRange(&urecPtr, toUrecptr, undoApplySize, false);
         if (urecvec->Size() == 0){
             ereport(ERROR, (errmodule(MOD_USTORE),
-                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu)",
+                errmsg("[Rollback Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu)",
                     fullXid, toUrecptr, fromUrecptr)));
             break;
         }
@@ -159,14 +174,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
     
     return true;
 }
-/*
- * execute_undo_actions - Execute the undo actions
- *
- * xid - Transaction id that is getting rolled back.
- * fromUrecptr - undo record pointer from where to start applying undo action.
- * toUrecptr   - undo record pointer upto which point apply undo action.
- * isTopTxn    - true if rollback is for top transaction.
- */
+
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
     UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel)
 {
@@ -282,7 +290,7 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
         END_CRIT_SECTION();
     }
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, BufferGetBlockNumber(buffer));
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
@@ -402,7 +410,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
         uint8 undotype = undorecord->Utype();
         if (undorecord->Blkno() != blkno) {
             ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("Blkno %u of undorecord is different from buffer %u.", undorecord->Blkno(), blkno)));
+                            errmsg("UHeapUndoActions error: UndoRecord's blkno %u is not same with buffer %u.",
+                            undorecord->Blkno(), blkno)));
         }
         /*
          * If the current UndoRecPtr on the slot is less than the
@@ -597,7 +606,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     }
 
     END_CRIT_SECTION();
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relationData.relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relationData.relation, NULL,
+        BufferGetBlockNumber(buffer));
 
     UnlockReleaseBuffer(buffer);
 
@@ -1058,4 +1068,149 @@ bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloi
     *reloid = realRelid;
     *partitionoid = partitionId;
     return true;
+}
+
+bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
+    BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo)
+{
+    RelationOpenSmgr(src);
+    if (src == NULL || dest == NULL || srcBlkno == InvalidBlockNumber || destBlkno == InvalidBlockNumber
+        || src->rd_smgr == NULL) {
+        ereport(LOG, (errmodule(MOD_USTORE), errmsg("Do not need to rollback for partition.")));
+        return false;
+    }
+
+    errno_t rc = EOK;
+    char *bufToWrite = NULL;
+    RelFileNode srcNode = src->rd_smgr->smgr_rnode.node;
+    RelFileNode destNode = dest->smgr_rnode.node;
+    BackendId destBackEnd = dest->smgr_rnode.backend;
+    bool sameRel = (dest == src->rd_smgr);
+    bool rollBacked = false;
+    Buffer buffer = ReadBufferWithoutRelcache(src->rd_smgr->smgr_rnode.node, forkNum, srcBlkno,
+        RBM_NORMAL, NULL, NULL);
+    Page mPage = BufferGetPage(buffer);
+    int numSlots = GetTDCount((UHeapPageHeaderData *)mPage);
+    TD *tdSlots = (TD *)PageGetTDPointer(mPage);
+    UndoRecPtr *urecptr = (UndoRecPtr *)palloc0(numSlots * sizeof(UndoRecPtr));
+    TransactionId *fxid = (TransactionId *)palloc0(numSlots * sizeof(TransactionId));
+    int nAborted = 0;
+
+    for (int slotNo = 0; slotNo < numSlots; slotNo++) {
+        TransactionId xid = tdSlots[slotNo].xactid;
+        if (!TransactionIdIsValid(xid) || TransactionIdIsCurrentTransactionId(xid) ||
+            UHeapTransactionIdDidCommit(xid)) {
+            continue;
+        }
+        urecptr[nAborted] = tdSlots[slotNo].undo_record_ptr;
+        fxid[nAborted] = xid;
+        nAborted++;
+    }
+    if (nAborted > 0) {
+        for (int i = 0; i < nAborted; i++) {
+            ExecuteUndoActionsPage(urecptr[i], src, buffer, fxid[i]);
+        }
+        rollBacked = true;
+        RelationOpenSmgr(src);
+        if (sameRel) {
+            dest = src->rd_smgr;
+        } else {
+            dest = smgropen(destNode, destBackEnd);
+        }
+        if (!RelFileNodeEquals(srcNode, src->rd_smgr->smgr_rnode.node) ||
+            !RelFileNodeEquals(destNode, dest->smgr_rnode.node)) {
+            ereport(ERROR, (errmodule(MOD_USTORE),
+                errmsg("Relfilenode not equal, skip rokkback.")));
+        }
+    }
+
+    if (opType == ROLLBACK_OP_FOR_EXCHANGE_PARTITION && !rollBacked) {
+        ReleaseBuffer(buffer);
+        pfree_ext(urecptr);
+        pfree_ext(fxid);
+        return rollBacked;
+    }
+
+    Page page = (Page)palloc0(BLCKSZ);
+    rc = memcpy_s(page, BLCKSZ, mPage, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+
+    if (toastInfo != NULL) {
+        HeapTupleData tuple;
+        OffsetNumber tupleNo = 0;
+        OffsetNumber tupleNum = tableam_tops_page_get_max_offsetnumber(src, page);
+        for (tupleNo = FirstOffsetNumber; tupleNo <= tupleNum; tupleNo++) {
+            if (!tableam_tops_page_get_item(src, &tuple, page, tupleNo, InvalidBlockNumber)) {
+                continue;
+            }
+            ChunkIdHashKey hashkey;
+            OldToNewChunkIdMapping mapping = NULL;
+
+            if (OidIsValid(toastInfo->destPartTupleOid)) {
+                Assert(toastInfo->tupDesc != NULL);
+                int numAttrs = toastInfo->tupDesc->natts;
+                Datum values[numAttrs];
+                bool isNull[numAttrs];
+                tableam_tops_deform_tuple(&tuple, toastInfo->tupDesc, values, isNull);
+                for (int i = 0; i < numAttrs; i++) {
+                    struct varlena* value = (struct varlena*)DatumGetPointer(values[i]);
+                    if (toastInfo->tupDesc->attrs[i].attlen == -1 && !isNull[i] && VARATT_IS_EXTERNAL(value)) {
+                        struct varatt_external* toastPointer = NULL;
+                        toastPointer = (varatt_external*)(VARDATA_EXTERNAL((varattrib_1b_e*)(value)));
+                        toastPointer->va_toastrelid = toastInfo->destPartTupleOid;
+                        rc = memset_s(&hashkey, sizeof(hashkey), 0, sizeof(hashkey));
+                        securec_check(rc, "\0", "\0");
+                        hashkey.toastTableOid = toastInfo->srcPartTupleOid;
+                        hashkey.oldChunkId = toastPointer->va_valueid;
+                        mapping = (OldToNewChunkIdMapping)hash_search(toastInfo->chunkIdHashTable,
+                            &hashkey, HASH_FIND, NULL);
+                        if (PointerIsValid(mapping)) {
+                            toastPointer->va_valueid = mapping->newChunkId;
+                        }
+                    }
+                }
+            } else if (OidIsValid(toastInfo->destToastRelOid)) {
+                /* for toast, more than 1GB CLOB/BLOB the first chunk chunk_data */
+                Datum values[3];
+                bool isNull[3];
+                tableam_tops_deform_tuple(&tuple, toastInfo->tupDesc, values, isNull);
+                struct varlena* value = (struct varlena*)DatumGetPointer(values[2]);
+                if (!isNull[2] && VARATT_IS_EXTERNAL_ONDISK_B(value)) {
+                    struct varatt_external* toastPointer = NULL;
+                    toastPointer = (varatt_external*)(VARDATA_EXTERNAL((varattrib_1b_e*)(value)));
+                    Assert(toastPointer->va_toastrelid == toastInfo->srcToastRelOid);
+                    toastPointer->va_toastrelid = toastInfo->destToastRelOid;
+                    rc = memset_s(&hashkey, sizeof(hashkey), 0, sizeof(hashkey));
+                    securec_check(rc, "\0", "\0");
+                    hashkey.toastTableOid = toastInfo->srcToastRelOid;
+                    hashkey.oldChunkId = toastPointer->va_valueid;
+                    mapping = (OldToNewChunkIdMapping)hash_search(toastInfo->chunkIdHashTable,
+                        &hashkey, HASH_FIND, NULL);
+                    if (PointerIsValid(mapping)) {
+                        toastPointer->va_valueid = mapping->newChunkId;
+                    }
+                }
+            }
+        }
+    }
+
+    bufToWrite = (char *) palloc0(BLCKSZ);
+    rc = memcpy_s(bufToWrite, BLCKSZ, page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+    if (XLogIsNeeded() && RelationNeedsWAL(src)) {
+        (void) LogUHeapNewPage(&dest->smgr_rnode.node, forkNum, destBlkno, bufToWrite, false, NULL);
+    }
+    PageSetChecksumInplace((Page)bufToWrite, destBlkno);
+    if (opType != ROLLBACK_OP_FOR_EXCHANGE_PARTITION) {
+        smgrextend(dest, forkNum, destBlkno, bufToWrite, false);
+    } else {
+        smgrwrite(dest, forkNum, destBlkno, bufToWrite, false);
+    }
+
+    ReleaseBuffer(buffer);
+    pfree_ext(urecptr);
+    pfree_ext(fxid);
+    pfree_ext(page);
+    pfree_ext(bufToWrite);
+    return rollBacked;
 }

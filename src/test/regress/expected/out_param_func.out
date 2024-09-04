@@ -1042,8 +1042,6 @@ DECLARE
         return c;
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-ERROR:  "func8_1" functions with plpgsql language and out params are not supported Overloaded.
-DETAIL:  N/A.
 --8.2 同一schema、package下，不允许存在同名的plpgsql语言的out出参函数，但可以replace
 CREATE or replace FUNCTION func8_2(in a integer, out b integer)
 RETURNS int
@@ -1068,8 +1066,6 @@ DECLARE
         return c;
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-ERROR:  "func8_2" functions with plpgsql language and out params are not supported Overloaded.
-DETAIL:  N/A.
 CREATE or replace FUNCTION func8_2(in a integer, out b integer)
 RETURNS int
 AS $$
@@ -1089,8 +1085,6 @@ function func8_2(in a int, out b int, out d integer)
 return int;
 end pck8_2;
 / 
-ERROR:  "func8_2" functions with plpgsql language and out params are not supported Overloaded.
-DETAIL:  N/A.
 --8.3 同一schema、package下，允许存在同名的psql语言的不带out出参函数
 CREATE or replace FUNCTION func8_3(in a integer)
 RETURNS int
@@ -1222,7 +1216,7 @@ drop function v_func1;
 --clean
 reset behavior_compat_options;
 drop schema out_param_schema cascade;
-NOTICE:  drop cascades to 24 other objects
+NOTICE:  drop cascades to 29 other objects
 DETAIL:  drop cascades to function func1(integer)
 drop cascades to function func1_1(integer,integer)
 drop cascades to function func2(integer)
@@ -1239,7 +1233,12 @@ drop cascades to function out_param_schema.func7_1(integer)
 drop cascades to function out_param_schema.func7_2(integer)
 drop cascades to function out_param_schema.func8_1(integer)
 drop cascades to function out_param_schema.func8_1(integer)
-drop cascades to function func8_2(integer)
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
 drop cascades to function func8_3(integer)
 drop cascades to function func8_3(integer,integer)
 --?.*

@@ -4764,6 +4764,29 @@ int GetThreadBufferLeakNum(void)
     return refCountErrors;
 }
 
+bool CheckForBufferPin(void)
+{
+    PrivateRefCountEntry *res = NULL;
+
+    for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
+        res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
+
+        if (res->buffer != InvalidBuffer) {
+            return true;
+        }
+    }
+
+    if (t_thrd.storage_cxt.PrivateRefCountOverflowed) {
+        HASH_SEQ_STATUS hstat;
+        hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
+        while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            hash_seq_term(&hstat);
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  *		CheckForBufferLeaks - ensure this backend holds no buffer pins
  *
@@ -5147,8 +5170,10 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             securec_check(ret, "\0", "\0");
 
             struct iocb *iocb_ptr = DSSAioGetIOCB(aio_cxt);
+            PgwrAioExtraData* tempAioExtra = &(pgwr->aio_extra[aiobuf_id]);
             int32 io_ret = seg_physical_aio_prep_pwrite(spc, fakenode, bufferinfo.blockinfo.forknum,
-                bufdesc->extra->seg_blockno, tempBuf, (void *)iocb_ptr);
+                bufdesc->extra->seg_blockno, tempBuf, (void *)iocb_ptr, (void *)tempAioExtra);
+            tempAioExtra->aio_bufdesc = (void *)bufdesc;
             if (io_ret != DSS_SUCCESS) {
                 ereport(PANIC, (errmsg("dss aio failed, buffer: %d/%d/%d/%d/%d %d-%u",
                     fakenode.spcNode, fakenode.dbNode, fakenode.relNode, (int)fakenode.bucketNode,
@@ -5164,7 +5189,7 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             t_thrd.dms_cxt.buf_in_aio = true;
             bufdesc->extra->aio_in_progress = true;
             /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
-            iocb_ptr->data = (void *)bufdesc;
+            iocb_ptr->data = (void *)tempAioExtra;
             DSSAioAppendIOCB(aio_cxt, iocb_ptr);
         } else {
             seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite,

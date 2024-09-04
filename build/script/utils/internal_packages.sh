@@ -71,7 +71,6 @@ function target_file_copy()
     echo "End generate ${kernel_package_name}  tar file"  >> "$LOG_FILE" 2>&1
 
     #generate sha256 file
-    sha256_name="${package_pre_name}.sha256"
     echo  "Begin generate ${sha256_name} sha256 file..."  >> "$LOG_FILE" 2>&1
     sha256sum "${kernel_package_name}" | awk -F" " '{print $1}' > "$sha256_name"
     if [ $? -ne 0 ]; then

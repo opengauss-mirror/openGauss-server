@@ -26,8 +26,10 @@
 #include "storage/dss/dss_adaptor.h"
 #include <sys/resource.h>
 #include "oss/include/restore.h"
+#include "common_cipher.h"
 
 #define MIN_ULIMIT_STACK_SIZE 8388608     // 1024 * 1024 * 8
+#define PROG_NAME "gs_probackup"
 
 const char  *PROGRAM_NAME = NULL;        /* PROGRAM_NAME_FULL without .exe suffix
                                          * if any */
@@ -150,6 +152,21 @@ static pgSetBackupParams *set_backup_params = NULL;
 pgBackup    current;
 static ProbackupSubcmd backup_subcmd = NO_CMD;
 
+/* encrypt options */
+bool gen_key = false;
+char* encrypt_mode = NULL;
+char* encrypt_key = NULL;
+char* encrypt_salt = NULL;
+char* encrypt_dev_params = NULL;
+void* crypto_module_session = NULL;
+void* crypto_module_keyctx = NULL;
+void* crypto_hmac_keyctx = NULL;
+
+/* Mark whether encryption and decryption are performed */
+/* only when encryption and decryption are actually performed will it be marked as true */
+/* Avoid specifying encryption in non-encrypted mode to cause accidental deletion of directories */
+bool enc_flag = false;
+
 /* Oss Client*/
 void* oss_client = NULL;
 
@@ -199,6 +216,11 @@ static ConfigOption cmd_options[] =
     { 'b', 154, "skip-block-validation", &skip_block_validation,    SOURCE_CMD_STRICT },
     { 'b', 156, "skip-external-dirs", &skip_external_dirs,    SOURCE_CMD_STRICT },
     { 'f', 'I', "incremental-mode", (void *)opt_incr_restore_mode,    SOURCE_CMD_STRICT },
+    { 's', 187, "with-encryption",    &encrypt_mode,       SOURCE_CMD_STRICT},
+    { 's', 188, "with-key",           &encrypt_key,        SOURCE_CMD_STRICT},
+    { 's', 189, "with-salt",           &encrypt_salt,        SOURCE_CMD_STRICT},
+    { 's', 190, "with-device-params", &encrypt_dev_params, SOURCE_CMD_STRICT},
+    { 'b', 191, "gen-key",            &gen_key,            SOURCE_CMD_STRICT},
     { 'b', 145, "wal",                &delete_wal,        SOURCE_CMD_STRICT },
     { 'b', 146, "expired",            &delete_expired,    SOURCE_CMD_STRICT },
     { 's', 172, "status",            &delete_status,        SOURCE_CMD_STRICT },
@@ -518,7 +540,7 @@ static void parse_cmdline_args(int argc, char *argv[], const char *command_name)
     if (backup_path && !is_absolute_path(backup_path))
         elog(ERROR, "-B, --backup-path must be an absolute path");
 
-   parse_instance_name();
+    parse_instance_name();
 
 }
 
@@ -616,9 +638,10 @@ static int do_actual_operate()
             /* Should not happen */
             elog(ERROR, "Unknown subcommand");
     }
-
+    delete_backup_directory(instance_name);
     on_cleanup();
     release_logfile();
+    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
     return res;
 }
@@ -824,6 +847,7 @@ int main(int argc, char *argv[])
      * Make command string before getopt_long() will call. It permutes the
      * content of argv.
      */
+    init_audit(PROG_NAME, argc, argv);
     /* TODO why do we do that only for some commands? */
     command_name = gs_pstrdup(argv[1]);
     command = make_command_string(argc, argv);
@@ -911,7 +935,11 @@ int main(int argc, char *argv[])
     initDataPathStruct(IsDssMode());
 
     /* do actual operation */
-    return do_actual_operate();
+    errno_t rc = do_actual_operate();
+    if (rc == 0) {
+        audit_success();
+    }
+    return rc;
 }
 
 static void

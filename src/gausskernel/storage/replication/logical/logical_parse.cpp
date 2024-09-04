@@ -487,6 +487,8 @@ void ParseHeap3Op(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
             break;
         case XLOG_HEAP3_INVALID:
             break;
+        case XLOG_HEAP3_TRUNCATE:
+            break;
         default:
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("unexpected RM_HEAP3_ID record type: %u", info)));
@@ -513,6 +515,7 @@ void ParseUheapOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
         case XLOG_UHEAP_CLEAN:
+        case XLOG_UHEAP_NEW_PAGE:
             break;
 
         case XLOG_UHEAP_MULTI_INSERT:

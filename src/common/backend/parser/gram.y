@@ -558,6 +558,8 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <node>    part_option
 /* b compatibility: comment end */
 
+%type <boolean>		opt_charbyte
+
 %type <list>	key_usage_list index_hint_list opt_index_hint_list
 %type <node>	index_hint_definition
 %type <list>	group_by_list
@@ -687,6 +689,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 				Bit ConstBit BitWithLength BitWithoutLength client_logic_type
 				datatypecl OptCopyColTypename
 %type <str>		character
+%type <str>		character_national
 %type <str>		extract_arg
 %type <str>		timestamp_units
 
@@ -888,7 +891,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
         ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS
-	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
+	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTE_P BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
@@ -8075,6 +8078,24 @@ ColConstraintElem:
 					n->contype = CONSTR_DEFAULT;
 					n->location = @1;
 					n->raw_expr = $2;
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
+			| DEFAULT FCONST_F
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_DEFAULT;
+					n->location = @1;
+					n->raw_expr = makeFloatConst($2, @2);
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
+			| DEFAULT FCONST_D
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_DEFAULT;
+					n->location = @1;
+					n->raw_expr = makeFloatConst($2, @2);;
 					n->cooked_expr = NULL;
 					$$ = (Node *)n;
 				}
@@ -15461,7 +15482,7 @@ callfunc_args:   func_arg_expr
 					n->end_time_expr = NULL;
 					n->interval_time = NULL;
 					n->complete_preserve = $12;
-					n->event_status = (EventStatus)$12;
+					n->event_status = (EventStatus)$13;
 					n->event_comment_str = $14;
 					n->event_query_str = $16;
 					$$ = (Node *)n;
@@ -17439,6 +17460,7 @@ AlterProcedureStmt:
 			ALTER PROCEDURE function_with_argtypes alterfunc_opt_list opt_restrict
 				{
 					AlterFunctionStmt *n = makeNode(AlterFunctionStmt);
+					n->isProcedure = true;
 					n->func = $3;
 					n->actions = $4;
 					$$ = (Node *) n;
@@ -25925,6 +25947,21 @@ GenericType:
 		;
 
 opt_type_modifiers: '(' expr_list ')'				{ $$ = $2; }
+                    | '(' Iconst BYTE_P ')'         { $$ = list_make1(makeIntConst($2, @2)); }
+                    | '(' Iconst CHAR_P ')'
+                        {
+                            if (t_thrd.proc->workingVersionNum >= CHARBYTE_SEMANTIC_VERSION_NUMBER)
+                                $$ = list_make2(makeIntConst($2, @2), makeIntConst(1, -1));
+                            else
+                                $$ = list_make1(makeIntConst($2, @2));
+                        }
+                    | '(' Iconst CHARACTER ')'
+                        {
+                            if (t_thrd.proc->workingVersionNum >= CHARBYTE_SEMANTIC_VERSION_NUMBER)
+                                $$ = list_make2(makeIntConst($2, @2), makeIntConst(1, -1));
+                            else
+                                $$ = list_make1(makeIntConst($2, @2));
+                        }
 					| /* EMPTY */					{ $$ = NIL; }
 		;
 
@@ -26159,13 +26196,42 @@ ConstCharacter:  CharacterWithLength
 				}
 		;
 
-CharacterWithLength:  character '(' Iconst ')'
+CharacterWithLength:  character '(' Iconst opt_charbyte ')'
 				{
 					$$ = SystemTypeName($1);
-					$$->typmods = list_make1(makeIntConst($3, @3));
-					$$->location = @1;
+					if ((t_thrd.proc->workingVersionNum >= CHARBYTE_SEMANTIC_VERSION_NUMBER) && $4)
+					{
+					    $$->typmods = list_make2(makeIntConst($3, @3), makeIntConst(1, -1));
+					}
+					else
+					{
+					    $$->typmods = list_make1(makeIntConst($3, @3));
+					}
+                    $$->location = @1;
+				}
+				| character_national '(' Iconst ')'
+				{
+				    $$ = SystemTypeName($1);
+                    $$->typmods = list_make1(makeIntConst($3, @3));
+                    $$->location = @1;
 				}
 		;
+
+opt_charbyte: CHAR_P	{ $$ = TRUE; }
+             | CHARACTER { $$ = TRUE; }
+             | BYTE_P    { $$ = FALSE; }
+             | /* EMPTY */
+             {
+                 if (u_sess->attr.attr_common.nls_length_semantics == LENGTH_SEMANTIC_CHAR )
+                 {
+                     $$ = TRUE;
+                 }
+                 else
+                 {
+                     $$ = FALSE;
+                 }
+             }
+         ;
 
 CharacterWithoutLength:	 character
 				{
@@ -26177,20 +26243,32 @@ CharacterWithoutLength:	 character
 
 					$$->location = @1;
 				}
+				| character_national
+				{
+				    $$ = SystemTypeName($1);
+
+                    /* char defaults to char(1), varchar to no limit */
+                    if (strcmp($1, "bpchar") == 0)
+                    {
+                        $$->typmods = list_make1(makeIntConst(1, -1));
+                    }
+				}
 		;
 
 character:	CHARACTER opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
 			| CHAR_P opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
-			| NVARCHAR
-										{ $$ = "nvarchar2"; }
-			| NVARCHAR2
-										{ $$ = "nvarchar2"; }
 			| VARCHAR
 										{ $$ = "varchar"; }
 			| VARCHAR2
 										{ $$ = "varchar"; }
+		;
+
+character_national:	 NVARCHAR
+										{ $$ = "nvarchar2"; }
+			| NVARCHAR2
+										{ $$ = "nvarchar2"; }
 			| NATIONAL CHARACTER opt_varying
 										{ $$ = (char *)($3 ? "varchar": "bpchar"); }
 			| NATIONAL CHAR_P opt_varying
@@ -27770,16 +27848,12 @@ func_application_special:	func_name '(' ')'
 						       (errcode(ERRCODE_SYNTAX_ERROR),
 							   errmsg("The syntax or function is not supported. \"%s\"", $4)));
 					}
-					if (IsA($5, ColumnRef)) {
-						ereport(ERROR,
-							   (errcode(ERRCODE_SYNTAX_ERROR),
-							   errmsg("Default param can't be ColumnRef")));
-					}
 
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = $1;
 					n->args = lappend($3, $5);
 					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
 					n->agg_order = $9;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
@@ -29934,6 +30008,7 @@ unreserved_keyword:
 			| BLOCKCHAIN
 			| BODY_P
 			| BY
+			| BYTE_P
 			| CACHE
 			| CALL
 			| CALLED

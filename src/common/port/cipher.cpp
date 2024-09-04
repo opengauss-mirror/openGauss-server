@@ -102,7 +102,7 @@ bool init_vector_random(GS_UCHAR* init_vector, size_t vector_len)
 }
 
 /* check whether the input password(for key derivation) meet the requirements of the length and complexity */
-bool check_input_password(const char* password)
+bool check_input_password(const char* password, int maxlen)
 {
 #define PASSWD_KINDS 4
     int key_input_len = 0;
@@ -119,8 +119,8 @@ bool check_input_password(const char* password)
         (void)fprintf(stderr, _("Invalid password,it must contain at least eight characters\n"));
         return false;
     }
-    if (key_input_len > MAX_KEY_LEN) {
-        (void)fprintf(stderr, _("Invalid password,the length exceed %d\n"), MAX_KEY_LEN);
+    if (key_input_len > maxlen) {
+        (void)fprintf(stderr, _("Invalid password,the length exceed %d\n"), maxlen);
         return false;
     }
     ptr = password;

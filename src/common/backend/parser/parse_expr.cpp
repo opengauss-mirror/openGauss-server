@@ -2216,7 +2216,33 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     /* casecollid will be set by parse_collate.c */
 
     /* Convert default result clause, if necessary */
-    newc->defresult = (Expr*)coerce_to_common_type(pstate, (Node*)newc->defresult, ptype, "CASE/ELSE");
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && c->fromDecode) {
+        Node *defResNode = (Node*)newc->defresult;
+        Oid sourceTypeId = exprType(defResNode);
+        if (sourceTypeId != ptype) {
+            /*
+            * only check if type can be coerced, return TypeCast node
+            * the TypeCast node will be executed when truly needed
+            */
+            if (can_coerce_type(1, &sourceTypeId, &ptype, COERCION_IMPLICIT)) {
+                TypeCast *n = makeNode(TypeCast);
+                n->arg = defResNode;
+                n->typname = makeTypeNameFromOid(ptype, -1);
+                n->location = -1;
+                newc->defresult = (Expr*)n;
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CANNOT_COERCE),
+                        errmsg("%s could not convert type %s to %s",
+                            "CASE/ELSE",
+                            format_type_be(sourceTypeId),
+                            format_type_be(ptype)),
+                            parser_errposition(pstate, exprLocation(defResNode))));
+            }
+        }
+    } else {
+        newc->defresult = (Expr*)coerce_to_common_type(pstate, (Node*)newc->defresult, ptype, "CASE/ELSE");
+    }
 
     /* Convert when-clause results, if necessary */
     foreach (l, newc->args) {
@@ -3894,6 +3920,7 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
     CursorExpression* newm = makeNode(CursorExpression);
     char* queryString;
     List* raw_parsetree_list = NIL;
+    List* plantree_list = NIL;
     PlannedStmt* plan_tree;
     ListCell* raw_parsetree_cell = NULL;
     List* stmt_list = NIL;
@@ -3903,6 +3930,7 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
 
     if (!smp) {
         dopControl.CloseSmp();
+        dopControl.UnderCursor();
     }
 
     ParseState* parse_state_parent = pstate;
@@ -3915,48 +3943,57 @@ static Node* transformCursorExpression(ParseState* pstate, CursorExpression* cur
         parse_state_temp = parse_state_temp->parentParseState;
     }
 
-    queryString = pstrdup(cursor_expression->raw_query_str);
-    raw_parsetree_list = pg_parse_query(queryString);
-    foreach (raw_parsetree_cell, raw_parsetree_list) {
-        Node* parsetree = (Node*)lfirst(raw_parsetree_cell);
-        List* querytree_list = pg_analyze_and_rewrite(parsetree, queryString, NULL, 0, parse_state_parent);
-        stmt_list = list_concat(stmt_list, querytree_list);
-    }
+    PG_TRY();
+    {
+        queryString = pstrdup(cursor_expression->raw_query_str);
+        raw_parsetree_list = pg_parse_query(queryString);
+        foreach (raw_parsetree_cell, raw_parsetree_list) {
+            Node* parsetree = (Node*)lfirst(raw_parsetree_cell);
+            List* querytree_list = pg_analyze_and_rewrite(parsetree, queryString, NULL, 0, parse_state_parent);
+            stmt_list = list_concat(stmt_list, querytree_list);
+        }
 
-    Query* query = castNode(Query, linitial(stmt_list));
+        plantree_list = pg_plan_queries(stmt_list, 0, NULL);
 
-    plan_tree = pg_plan_query(query, 0, NULL);
+        plan_tree = castNode(PlannedStmt, linitial(plantree_list));
 
-    if (IsA(plan_tree->planTree, Stream)) {
-        ((Stream*)plan_tree->planTree)->cursor_expr_level = level;
-
+        plan_tree->planTree->cursor_expr_level = level;
         /* reset cursor_expr_level */
         if (level == 1) {
             u_sess->parser_cxt.cursor_expr_level = 0;
         }
-    }
 
-    int nParamExec = 0;
-    parse_state_temp = parse_state_parent;
-    if (parse_state_temp != NULL) {
-        nParamExec = list_length(parse_state_temp->cursor_expression_para_var);
-    }
-    
-    plan_tree->nParamExec = nParamExec;
-    newm->plan = (Node*)plan_tree;
-    newm->options = cursor_expression->options;
-    newm->raw_query_str = queryString;
-    newm->param = (List*)copyObject(parse_state_parent->cursor_expression_para_var);
+        int nParamExec = 0;
+        parse_state_temp = parse_state_parent;
+        if (parse_state_temp != NULL) {
+            nParamExec = list_length(parse_state_temp->cursor_expression_para_var);
+        }
+        
+        plan_tree->nParamExec = nParamExec;
+        newm->plan = (Node*)plan_tree;
+        newm->options = cursor_expression->options;
+        newm->raw_query_str = queryString;
+        newm->param = (List*)copyObject(parse_state_parent->cursor_expression_para_var);
 
-    if (pstate->p_pre_columnref_hook == NULL && pstate->p_post_columnref_hook == NULL &&
-        pstate->p_expr_kind == EXPR_KIND_SELECT_TARGET && pstate->p_expr_transform_level == 1) {
-        newm->is_simple_select_target = true;
-    } else {
-        newm->is_simple_select_target =  false;
-    }
+        if (pstate->p_pre_columnref_hook == NULL && pstate->p_post_columnref_hook == NULL &&
+            pstate->p_expr_kind == EXPR_KIND_SELECT_TARGET && pstate->p_expr_transform_level == 1) {
+            newm->is_simple_select_target = true;
+        } else {
+            newm->is_simple_select_target =  false;
+        }
 
-    list_free_ext(stmt_list);
-    list_free_ext(raw_parsetree_list);
+        list_free_ext(stmt_list);
+        list_free_ext(raw_parsetree_list);
+    }
+    PG_CATCH();
+    {
+        u_sess->parser_cxt.cursor_expr_level = 0;
+        /* restore smp */
+        dopControl.ResetSmp();
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     /* restore parent state */
     parse_state_parent->transform_outer_columnref_as_param_hook = NULL;
@@ -4145,15 +4182,23 @@ static Node *transformStartWithWhereClauseColumnRef(ParseState *pstate, ColumnRe
     return NULL;
 }
 
-PlannedStmt* getCursorStreamFromFuncArg(FuncExpr* funcexpr)
+PlannedStmt* getCursorStreamFromFuncArg(Node* node, CursorExpression** ce)
 {
+    if (!IsA(node, FuncExpr)) {
+        return NULL;
+    }
+
+    FuncExpr* funcexpr = (FuncExpr*)node;
     ListCell* lc = NULL;
     foreach (lc, funcexpr->args) {
         Node* arg = (Node*)lfirst(lc);
         if (IsA(arg, CursorExpression)) {
             CursorExpression* cursorExpr = (CursorExpression*)arg;
             PlannedStmt* cursorPlan = (PlannedStmt*)cursorExpr->plan;
-            if (IsA(cursorPlan->planTree, Stream)) {
+            if (cursorPlan->num_streams > 0) {
+                if (ce != NULL) {
+                    *ce = cursorExpr;
+                }
                 return cursorPlan;
             }
         }

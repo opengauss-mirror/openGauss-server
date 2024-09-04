@@ -31,6 +31,9 @@
 #include "storage/lock/lwlock.h"
 #include "catalog/storage_xlog.h"
 
+
+void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState);
+
 /*
  * Add xlog reader private structure for page read.
  */
@@ -279,6 +282,93 @@ void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate)
     OndemandXLogMemRelease(memctl, descstate->buff_id);
 }
 
+/**
+ * @brief scanning the hashmap by relationTag, to find out all the
+ * redoItem of target relation and read the buffer of each redoItem.
+ * The blockStates will be redone at RedoForOndemandExtremeRTOQuery if need.
+ * 
+ * @param relation the relation need to be redone
+ * @return the redoEntry num of target relation
+ */
+long RedoRelationForOndemandExtremeRTO(Relation relation) {
+    long entryNum = 0;
+    Assert(RelationIsValid(relation));
+
+    RelFileNode relfilenode = relation->rd_node;
+    ondemand_extreme_rto::RedoItemTag relationTag;
+    INIT_REDO_ITEM_TAG(relationTag, relfilenode, 0, 0);
+    uint32 slotId = ondemand_extreme_rto::GetSlotId(relationTag.rNode, 0, 0, ondemand_extreme_rto::GetBatchCount());
+    ondemand_extreme_rto::RedoItemHashEntry *redoItemEntry = NULL;
+    HASH_SEQ_STATUS status;
+
+    HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[slotId]->hTab;
+    if (hashMap == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
+    }
+
+    hash_seq_init(&status, hashMap);
+    LWLock* scanningXLogTrackLock = XLogTrackMappingScanningLock(slotId);
+    LWLockAcquire(scanningXLogTrackLock, LW_SHARED);
+
+    while ((redoItemEntry = (ondemand_extreme_rto::RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
+        ondemand_extreme_rto::RedoItemTag redoItemTag = redoItemEntry->redoItemTag;
+        // Check if this redoItemEntry belong to the target relation.
+        if (!RelFileNodeRelEquals(redoItemTag.rNode, relationTag.rNode)) {
+            continue;
+        }
+
+        Buffer buf = ReadBufferExtended(relation, redoItemTag.forkNum, redoItemTag.blockNum, RBM_NORMAL, NULL);
+        
+        ReleaseBuffer(buf);
+        entryNum++;
+    }
+    LWLockRelease(scanningXLogTrackLock);
+    return entryNum;
+}
+
+/**
+ * @brief scanning all the hashmap of each pipline, to find out all the
+ * redoItem of target database and read the buffer of each redoItem.
+ * The blockState will be redone at RedoForOndemandExtremeRTOQuery if need.
+ * 
+ * @param dbId the dbNode of database
+ * @return the redoEntry num of target database
+ */
+long RedoDatabaseForOndemandExtremeRTO(Oid dbNode) {
+    long entryNum = 0;
+    Assert(OidIsValid(dbNode));
+
+    // Search the hashmap of each piplines.
+    uint32 batchCount = ondemand_extreme_rto::GetBatchCount();
+    ondemand_extreme_rto::RedoItemHashEntry *redoItemEntry = NULL;
+    for (uint32 slotId = 0; slotId < batchCount; slotId++) {
+        HASH_SEQ_STATUS status;
+        HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[slotId]->hTab;
+        if (hashMap == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
+        }
+
+        hash_seq_init(&status, hashMap);
+        LWLock* scanningXLogTrackLock = XLogTrackMappingScanningLock(slotId);
+        LWLockAcquire(scanningXLogTrackLock, LW_SHARED);
+
+        while ((redoItemEntry = (ondemand_extreme_rto::RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
+            ondemand_extreme_rto::RedoItemTag redoItemTag = redoItemEntry->redoItemTag;
+            // Check if this redoItemEntry belong to the target namespace.
+            if (redoItemEntry->redoDone || redoItemTag.rNode.dbNode != dbNode) {
+                continue;
+            }
+            Buffer buffer = ReadBufferWithoutRelcache(redoItemTag.rNode, redoItemTag.forkNum, redoItemTag.blockNum, RBM_NORMAL, NULL, NULL);
+            ReleaseBuffer(buffer);
+            entryNum++;
+        }
+        LWLockRelease(scanningXLogTrackLock);
+    }
+    return entryNum;
+}
+
 BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
@@ -446,6 +536,10 @@ bool IsRecParseStateHaveChildState(XLogRecParseState *checkState)
     return false;
 }
 
+/**
+ * Find out target blockState from checkState and its nextrecords, by checking if any blockState
+ * has the same blockhead with the target blockState, and release others. Used in ondemand-recovery redo phase.
+ */
 static XLogRecParseState *OndemandFindTargetBlockStateInOndemandRedo(XLogRecParseState *checkState,
     XLogRecParseState *srcState)
 {
@@ -467,8 +561,14 @@ static XLogRecParseState *OndemandFindTargetBlockStateInOndemandRedo(XLogRecPars
     return targetState;
 }
 
-// only used in ondemand redo stage
-XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstate)
+/**
+ * @brief Reload redoItem according to XLogRecParseState, the redoItem has been released before
+ * push into hashmap, so reload it before redo.
+ * 
+ * @param hashmapBlockState the blockState got from hashmap
+ * @return XLogRecParseState* blockState reload from disk
+ */
+XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *hashmapBlockState)
 {
     uint32 blockNum = 0;
     char *errormsg = NULL;
@@ -481,18 +581,18 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstat
     XLogReaderState *xlogreader = XLogReaderAllocate(&SimpleXLogPageReadInFdCache, &readPrivate);  // do not use pre-read
 
     // step1: read record
-    XLogRecord *record = XLogReadRecord(xlogreader, redoblockstate->blockparse.blockhead.start_ptr, &errormsg,
+    XLogRecord *record = XLogReadRecord(xlogreader, hashmapBlockState->blockparse.blockhead.start_ptr, &errormsg,
         true, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir);
     if (record == NULL) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("[On-demand] reload xlog record failed at %X/%X, spc/db/rel/bucket "
                         "fork-block: %u/%u/%u/%d %d-%u, errormsg: %s",
-                        (uint32)(recordBlockState->blockparse.blockhead.start_ptr >> 32),
-                        (uint32)recordBlockState->blockparse.blockhead.start_ptr,
-                        recordBlockState->blockparse.blockhead.spcNode, recordBlockState->blockparse.blockhead.dbNode,
-                        recordBlockState->blockparse.blockhead.relNode,
-                        recordBlockState->blockparse.blockhead.bucketNode,
-                        recordBlockState->blockparse.blockhead.forknum, recordBlockState->blockparse.blockhead.blkno,
+                        (uint32)(hashmapBlockState->blockparse.blockhead.start_ptr >> 32),
+                        (uint32)hashmapBlockState->blockparse.blockhead.start_ptr,
+                        hashmapBlockState->blockparse.blockhead.spcNode, hashmapBlockState->blockparse.blockhead.dbNode,
+                        hashmapBlockState->blockparse.blockhead.relNode,
+                        hashmapBlockState->blockparse.blockhead.bucketNode,
+                        hashmapBlockState->blockparse.blockhead.forknum, hashmapBlockState->blockparse.blockhead.blkno,
                         errormsg)));
     }
 
@@ -506,8 +606,9 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstat
     } while (true);
 
     // step3: find target parse state
-    XLogRecParseState *targetState = OndemandFindTargetBlockStateInOndemandRedo(recordBlockState, redoblockstate);
+    XLogRecParseState *targetState = OndemandFindTargetBlockStateInOndemandRedo(recordBlockState, hashmapBlockState);
     if (targetState == NULL) {
+        PrintXLogRecParseStateBlockHead(hashmapBlockState);
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("[On-demand] reload xlog record failed at %X/%X, spc/db/rel/bucket "
                         "fork-block: %u/%u/%u/%d %d-%u, errormsg: can not find target block-record",
@@ -589,4 +690,28 @@ void OnDemandNotifyHashMapPruneIfNeed()
     if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
         ondemand_extreme_rto::StartupSendMarkToBatchRedo(&ondemand_extreme_rto::g_hashmapPruneMark);
     }
+}
+
+void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState) {
+    StringInfoData res;
+    initStringInfo(&res);
+    appendStringInfo(&res, "{start_ptr: %X/%X, ",  (uint32)(blockState->blockparse.blockhead.start_ptr>> 32), (uint32)blockState->blockparse.blockhead.start_ptr);
+    appendStringInfo(&res, "end_ptr: %X/%X, ", (uint32)(blockState->blockparse.blockhead.end_ptr>> 32), (uint32)blockState->blockparse.blockhead.end_ptr);
+    appendStringInfo(&res, "blkno: %u, ", blockState->blockparse.blockhead.blkno);
+    appendStringInfo(&res, "relNode: %u, ", blockState->blockparse.blockhead.relNode);
+    appendStringInfo(&res, "block_valid: %u, ", (uint32)(blockState->blockparse.blockhead.block_valid));
+    appendStringInfo(&res, "xl_info: %u, ", (uint32)(blockState->blockparse.blockhead.xl_info));
+    appendStringInfo(&res, "block_valid: %u, ", (uint32)(blockState->blockparse.blockhead.xl_info));
+    appendStringInfo(&res, "xl_rmid: %u, ", (uint32)(blockState->blockparse.blockhead.xl_rmid));
+    appendStringInfo(&res, "forknum: %d, ", blockState->blockparse.blockhead.forknum);
+    appendStringInfo(&res, "xl_xid: %lu, ", blockState->blockparse.blockhead.xl_xid);
+    appendStringInfo(&res, "spcNode: %u, ", (uint32)(blockState->blockparse.blockhead.spcNode));
+    appendStringInfo(&res, "dbNode: %u, ", (uint32)(blockState->blockparse.blockhead.dbNode));
+    appendStringInfo(&res, "bucketNode: %d, ", (int)(blockState->blockparse.blockhead.bucketNode));
+    appendStringInfo(&res, "opt: %u, ", (uint32)(blockState->blockparse.blockhead.opt));
+    appendStringInfo(&res, "is_conflict_type: %u, ", (uint32)(blockState->blockparse.blockhead.is_conflict_type));
+    appendStringInfo(&res, "hasCSN: %u}; ", (uint32)(blockState->blockparse.blockhead.hasCSN));
+    ereport(LOG,
+        (errmsg("[On-demand][redo] blockState->blockparse.blockhead: %s.",
+        res.data)));
 }

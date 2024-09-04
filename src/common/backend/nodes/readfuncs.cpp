@@ -33,7 +33,7 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "catalog/gs_opt_model.h"
-#include "nodes/parsenodes.h"
+#include "nodes/primnodes.h"
 #include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
 #include "optimizer/dataskew.h"
@@ -767,12 +767,6 @@ THR_LOCAL bool skip_read_extern_fields = false;
         READ_INT_FIELD(stream_level);                       \
         READ_NODE_FIELD(origin_consumer_nodes);             \
         READ_BOOL_FIELD(is_recursive_local);                \
-        IF_EXIST(cursor_expr_level) {                       \
-            READ_INT_FIELD(cursor_expr_level);              \
-        }                                                   \
-        IF_EXIST(cursor_owner_node_id) {                    \
-            READ_INT_FIELD(cursor_owner_node_id);           \
-        }                                                   \
         READ_STREAM_ID();                                   \
                                                             \
         READ_DONE();                                        \
@@ -2910,7 +2904,12 @@ static MinMaxExpr* _readMinMaxExpr(void)
     READ_ENUM_FIELD(op, MinMaxOp);
     READ_NODE_FIELD(args);
     READ_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        READ_OID_FIELD(cmptype);
+        READ_NODE_FIELD(cmpargs);
 
+        READ_TYPEINFO_FIELD(cmptype);
+    }
     READ_TYPEINFO_FIELD(minmaxtype);
 
     READ_DONE();
@@ -3469,6 +3468,14 @@ static RangeTblEntry* _readRangeTblEntry(void)
         local_node->subpartitionOidList = lappend_oid(local_node->subpartitionOidList, local_node->subpartitionOid);
     }
 
+    IF_EXIST(partitionNameList) {
+        READ_NODE_FIELD(partitionNameList);
+    }
+
+    IF_EXIST(subpartitionNameList) {
+        READ_NODE_FIELD(subpartitionNameList);
+    }
+
     READ_DONE();
 }
 
@@ -3530,6 +3537,12 @@ static Plan* _readPlan(Plan* local_node)
         READ_BOOL_FIELD(spq_scan_partial);
     }
 #endif
+    IF_EXIST(cursor_expr_level) {
+        READ_INT_FIELD(cursor_expr_level);
+    }
+    IF_EXIST(cursor_owner_node_id) {
+        READ_INT_FIELD(cursor_owner_node_id);
+    }
     READ_DONE();
 }
 
@@ -4173,6 +4186,34 @@ static SortGroup* _readSortGroup(SortGroup* local_node)
     READ_OID_ARRAY_BYCONVERT(collations, numCols);
 
     READ_BOOL_ARRAY(nullsFirst, numCols);
+    READ_DONE();
+}
+
+static SortBy* _readSortBy(SortBy* local_node)
+{
+    READ_LOCALS_NULL(SortBy);
+    READ_TEMP_LOCALS();
+
+    READ_NODE_FIELD(node);
+    READ_ENUM_FIELD(sortby_dir, SortByDir);
+    READ_ENUM_FIELD(sortby_nulls, SortByNulls);
+    READ_NODE_FIELD(useOp);
+    READ_INT_FIELD(location);
+
+    READ_DONE();
+}
+
+static A_Const* _readAConst(A_Const* local_node)
+{
+    READ_LOCALS_NULL(A_Const);
+    READ_TEMP_LOCALS();
+
+    token = pg_strtok(&length);
+    Value *ptr = (Value*)nodeRead(NULL, 0);
+    errno_t err = memcpy_s(&local_node->val, sizeof(Value), ptr, sizeof(Value));
+    securec_check(err, "\0", "\0");
+    READ_INT_FIELD(location);
+
     READ_DONE();
 }
 
@@ -5876,6 +5917,9 @@ static ColumnDef* _readColumnDef()
     IF_EXIST(update_default) {
         READ_NODE_FIELD(update_default);
     }
+    IF_EXIST(initdefval) {
+        READ_STRING_FIELD(initdefval);
+    }
     READ_DONE();
 }
 
@@ -6749,6 +6793,10 @@ Node* parseNodeString(void)
         return_value = _readSort(NULL);
     }  else if (MATCH("SORTGROUP", 9)) {
         return_value = _readSortGroup(NULL);
+    } else if (MATCH("SORTBY", 6)) {
+        return_value = _readSortBy(NULL);  
+    } else if (MATCH("A_CONST", 7)) {
+        return_value = _readAConst(NULL);
     } else if (MATCH("UNIQUE", 6)) {
         return_value = _readUnique(NULL);
     } else if (MATCH("PLANNEDSTMT", 11)) {

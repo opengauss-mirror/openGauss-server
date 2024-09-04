@@ -2120,6 +2120,8 @@ RETRY:
     bool retry_get = false;
     uint64 retry_count = 0;
     const static uint64 WAIT_COUNT = 0x7FFFF;
+    bool get_snapshot_by_self = CheckForBufferPin() || forHSFeedBack;
+
     /* reset xmin before acquiring lwlock, in case blocking redo */
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
@@ -2184,7 +2186,7 @@ RETRY_GET:
                 goto RETRY_GET;
             }
 #ifndef ENABLE_MULTIPLE_NODES
-        } else if (forHSFeedBack) {
+        } else if (get_snapshot_by_self) {
             LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
             if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin
                 <= t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin)
@@ -5144,9 +5146,22 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             globalxmin = xmin;
 
         if (ENABLE_DMS && SS_PRIMARY_MODE) {
-            SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
-            globalxmin = SSGetGlobalOldestXmin(globalxmin);
-            if (ENABLE_SS_BCAST_SNAPSHOT) {
+            if (ENABLE_SS_BCAST_GETOLDESTXMIN) {
+                if (SSGetOldestXminFromAllStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo)) {
+                    TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
+                    if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
+                        TransactionIdPrecedes(ss_oldest_xmin, globalxmin)) {
+                        globalxmin = ss_oldest_xmin;
+                    }
+                } else {
+                    globalxmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
+                }
+            } else {
+                SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
+                globalxmin = SSGetGlobalOldestXmin(globalxmin);
+            }
+
+            if (ENABLE_SS_BCAST_SNAPSHOT && !ENABLE_SS_BCAST_GETOLDESTXMIN) {
                 SSSendLatestSnapshotToStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             }
         }
@@ -5537,4 +5552,59 @@ void GetOldestGlobalProcXmin(TransactionId *globalProcXmin)
         }
     }
     LWLockRelease(ProcArrayLock);
+}
+
+TransactionId GetVacuumExtremeOldestXmin()
+{
+    pg_read_barrier();
+    (void)LWLockAcquire(ProcArrayLock, LW_SHARED);
+
+    /* initialize minXmin calculation with xmax: latestCompletedXid + 1 */
+    TransactionId minXmin = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
+    Assert(TransactionIdIsNormal(minXmin));
+    TransactionIdAdvance(minXmin);
+
+    /*
+     * Spin over procArray checking xid, xmin, and subxids. The goal is
+     * to gather all active xids, find the lowest xmin, and try to record subxids.
+     */
+    ProcArrayStruct* arrayP = g_instance.proc_array_idx;
+    int* pgprocnos = arrayP->pgprocnos;
+    int numProcs = arrayP->numProcs;
+    TransactionId xid = InvalidTransactionId;
+    for (int i = 0; i < numProcs; i++) {
+        int procNo = pgprocnos[i];
+        volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[procNo];
+
+        /*
+        * Ignore procs doing logical decoding which manages xmin
+        * separately or running LAZY VACUUM
+        */
+        if ((pgxact->vacuumFlags & PROC_IN_LOGICAL_DECODING) ||
+            (pgxact->vacuumFlags & PROC_IN_VACUUM)) {
+            continue;
+        }
+
+        /* Fetch xid just once - see GetNewTransactionId */
+        xid = pgxact->xid;
+        /* If no XID assigned, use xid passed down from CN */
+        if (!TransactionIdIsNormal(xid)) {
+            xid = pgxact->next_xid;
+        }
+        if (TransactionIdIsNormal(xid) &&
+            TransactionIdPrecedes(xid, minXmin)) {
+            minXmin = xid;
+        }
+    }
+
+    uint64 deferAge = (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
+    if (TransactionIdPrecedes(minXmin, deferAge)) {
+        minXmin = FirstNormalTransactionId;
+    } else {
+        minXmin -= deferAge;
+    }
+
+    LWLockRelease(ProcArrayLock);
+
+    return minXmin;
 }

@@ -1,0 +1,12 @@
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from skiplocked_inherits_1 order by 1 desc limit 1 FOR UPDATE SKIP LOCKED;
+ id |        a1         
+----+-------------------
+  3 | {"name": "test3"}
+(1 row)
+

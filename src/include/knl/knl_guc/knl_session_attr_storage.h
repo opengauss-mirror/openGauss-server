@@ -59,13 +59,13 @@ typedef struct knl_session_attr_dcf {
     int dcf_truncate_threshold;
 } knl_session_attr_dcf;
 
+#ifdef USE_ASSERT_CHECKING
 typedef struct knl_sess_attr_dms_fi_cfg {
     unsigned int entries[MAX_DMS_FI_ENTRY_COUNT];
     unsigned int count;
     unsigned int fault_value;
 } knl_sess_attr_dms_fi_cfg;
 
-#ifdef USE_ASSERT_CHECKING
 typedef struct knl_session_attr_dms_fi {
     char* fi_entries;
     int32 fi_value;
@@ -112,6 +112,7 @@ typedef struct knl_session_attr_storage {
     bool guc_most_available_sync;
     bool enable_show_any_tuples;
     bool enable_debug_vacuum;
+    bool enableVacuumExtremeXmin;
     bool enable_adio_debug;
     bool gds_debug_mod;
     bool log_pagewriter;
@@ -241,7 +242,6 @@ typedef struct knl_session_attr_storage {
     int umax_search_length_for_prune;
     int ustore_verify_level;
     int ustore_verify_module;
-    bool ustore_verify;
     int index_trace_level;
     int archive_interval;
     bool enable_ustore_sync_rollback;
@@ -306,6 +306,7 @@ typedef struct knl_session_attr_storage {
     char* uwal_path;
     bool handle_toast_in_autovac;
     bool enable_xlog_insert_record_group;
+    int walFilePreinitThreshold;
 
     /* pre-read parms */
     int heap_bulk_read_size;

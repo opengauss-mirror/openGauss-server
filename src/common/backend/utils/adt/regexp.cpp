@@ -1222,6 +1222,7 @@ static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
     /* search for the pattern, perhaps repeatedly */
     prev_match_end = 0;
     while (RE_wchar_execute(cpattern, wide_str, wide_len, start_search, pmatch_len, pmatch)) {
+        CHECK_FOR_INTERRUPTS();
         /*
          * If requested, ignore degenerate matches, which are zero-length
          * matches occurring at the start or end of a string or just after a

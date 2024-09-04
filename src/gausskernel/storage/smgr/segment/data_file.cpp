@@ -503,7 +503,11 @@ void df_extend_internal(SegLogicFile *sf)
             df_extend_file_vector(sf);
         }
         int new_fd; 
-        new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        if (ENABLE_DSS) {
+            new_fd = dv_open_file(filename, O_RDWR | O_CREAT | DSS_FT_NODE_FLAG_INNER_INITED, SEGMENT_FILE_MODE);
+        } else {
+            new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        }
         if (new_fd < 0) {
             ereport(ERROR, (errcode_for_file_access(), errmsg("[segpage] could not create file \"%s\": %m", filename)));
         }

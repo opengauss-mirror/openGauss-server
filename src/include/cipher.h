@@ -65,6 +65,7 @@ typedef unsigned char GS_UCHAR;
 #define MAC_LEN 20
 #define MIN_KEY_LEN 8
 #define MAX_KEY_LEN 16
+#define MAX_GUC_PASS_LEN 15
 #define AK_LEN 512
 #define SK_LEN 512
 #define AK_VALID_CHRS "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -119,7 +120,7 @@ extern void gen_cipher_rand_files(
     KeyMode mode, const char* plain_key, const char* user_name, const char* datadir, const char* preStr);
 extern void decode_cipher_files(
     KeyMode mode, const char* user_name, const char* datadir, GS_UCHAR* plainpwd, bool obs_server_mode = false);
-extern bool check_input_password(const char* password);
+extern bool check_input_password(const char* password, int maxlen = MAX_KEY_LEN);
 extern bool EncryptInputKey(GS_UCHAR* pucPlainText, GS_UCHAR* initrand, GS_UCHAR* keySaltVector,
     GS_UCHAR* encryptVector, GS_UCHAR* pucCipherText, GS_UINT32* pulCLen);
 extern bool ReadContentFromFile(const char* filename, void* content, size_t csize);

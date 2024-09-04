@@ -1,0 +1,140 @@
+-- test char semantic limit size
+SET client_min_messages = warning;
+drop table if exists test_varchar_char;
+create table test_varchar_char (id int, city varchar (4 char));
+insert into test_varchar_char values(1, 'abcd');
+insert into test_varchar_char values(2, '中国天津');
+insert into test_varchar_char values(3, 'abcde');
+ERROR:  value too long for type character varying(4 char)
+CONTEXT:  referenced column: city
+insert into test_varchar_char values(5, '中国abc');
+ERROR:  value too long for type character varying(4 char)
+CONTEXT:  referenced column: city
+select table_name, column_name, data_type, character_maximum_length, character_octet_length  from information_schema.columns where table_name = 'test_varchar_char';
+    table_name     | column_name |     data_type     | character_maximum_length | character_octet_length 
+-------------------+-------------+-------------------+--------------------------+------------------------
+ test_varchar_char | id          | integer           |                          |                       
+ test_varchar_char | city        | character varying |                        4 |                     16
+(2 rows)
+
+drop table test_varchar_char;
+-- test byte semantic limit size
+drop table if exists test_varchar_byte;
+create table test_varchar_byte (id int, city varchar (4 byte));
+insert into test_varchar_byte values(1, 'abcd');
+insert into test_varchar_byte values(2, '中国天津');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+insert into test_varchar_byte values(3, 'abcde');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+insert into test_varchar_byte values(5, '中国abc');
+ERROR:  value too long for type character varying(4)
+CONTEXT:  referenced column: city
+select table_name, column_name, data_type, character_maximum_length, character_octet_length  from information_schema.columns where table_name = 'test_varchar_byte';
+    table_name     | column_name |     data_type     | character_maximum_length | character_octet_length 
+-------------------+-------------+-------------------+--------------------------+------------------------
+ test_varchar_byte | id          | integer           |                          |                       
+ test_varchar_byte | city        | character varying |                        4 |                     16
+(2 rows)
+
+drop table test_varchar_byte;
+-- test char semantic operator
+drop table if exists test_varchar_operator;
+create table test_varchar_operator (id int, city varchar (10 char));
+insert into test_varchar_operator values(1, '北京');
+insert into test_varchar_operator values(2, '上海');
+insert into test_varchar_operator values(3, '天津');
+insert into test_varchar_operator values(4, '广州');
+select * from test_varchar_operator where city = '北京' order by id;
+ id | city 
+----+------
+  1 | 北京
+(1 row)
+
+select * from test_varchar_operator where city <> '北京' order by id;
+ id | city 
+----+------
+  2 | 上海
+  3 | 天津
+  4 | 广州
+(3 rows)
+
+select * from test_varchar_operator where city > '上海' order by id;
+ id | city 
+----+------
+  1 | 北京
+  3 | 天津
+  4 | 广州
+(3 rows)
+
+select * from test_varchar_operator where city >= '上海' order by id;
+ id | city 
+----+------
+  1 | 北京
+  2 | 上海
+  3 | 天津
+  4 | 广州
+(4 rows)
+
+select * from test_varchar_operator where city < '上海' order by id;
+ id | city 
+----+------
+(0 rows)
+
+select * from test_varchar_operator where city <= '上海' order by id;
+ id | city 
+----+------
+  2 | 上海
+(1 row)
+
+drop table test_varchar_operator;
+-- test byte semanmtic operator
+drop table if exists test_varchar_byte_operator;
+create table test_varchar_byte_operator (id int, city varchar (10 char));
+insert into test_varchar_byte_operator values(1, 'beijing');
+insert into test_varchar_byte_operator values(2, 'shanghai');
+insert into test_varchar_byte_operator values(3, 'tianjin');
+insert into test_varchar_byte_operator values(4, 'guangzhou');
+select * from test_varchar_byte_operator where city = 'beijing' order by id;
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_byte_operator where city <> 'beijing' order by id;
+ id |   city    
+----+-----------
+  2 | shanghai
+  3 | tianjin
+  4 | guangzhou
+(3 rows)
+
+select * from test_varchar_byte_operator where city > 'shanghai' order by id;
+ id |  city   
+----+---------
+  3 | tianjin
+(1 row)
+
+select * from test_varchar_byte_operator where city >= 'shanghai' order by id;
+ id |   city   
+----+----------
+  2 | shanghai
+  3 | tianjin
+(2 rows)
+
+select * from test_varchar_byte_operator where city < 'shanghai' order by id;
+ id |   city    
+----+-----------
+  1 | beijing
+  4 | guangzhou
+(2 rows)
+
+select * from test_varchar_byte_operator where city <= 'shanghai' order by id;
+ id |   city    
+----+-----------
+  1 | beijing
+  2 | shanghai
+  4 | guangzhou
+(3 rows)
+

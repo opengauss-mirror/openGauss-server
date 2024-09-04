@@ -363,11 +363,11 @@ function fn_install_demoDB()
     then
         read -p "Would you like to create a demo database (yes/no)? " input
     fi
-    if [ $input == "yes" ]
+    if [ "$input"X == "yes"X ]
     then
         fn_load_demoDB 1>load.log 2>&1
         fn_check_demoDB
-    elif [ $input == "no" ]
+    elif [ "$input"X == "no"X ]
     then
         return 2
     else

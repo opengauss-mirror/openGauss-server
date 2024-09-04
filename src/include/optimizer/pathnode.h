@@ -61,7 +61,7 @@ extern Path *create_tsstorescan_path(PlannerInfo * root,RelOptInfo * rel, int do
 #endif   /* ENABLE_MULTIPLE_NODES */
 extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
     List* indexorderbys, List* indexorderbycols, List* pathkeys, ScanDirection indexscandir, bool indexonly,
-    Relids required_outer, Bitmapset *upper_params, double loop_count);
+    Relids required_outer, Bitmapset *upper_params, double loop_count, int dop = 1);
 extern Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path);
 extern bool CheckBitmapQualIsGlobalIndex(Path* bitmapqual);
 extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);

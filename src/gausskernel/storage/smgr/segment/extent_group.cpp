@@ -109,7 +109,7 @@ void eg_init_df_ctrl(SegExtentGroup *seg)
     SegLogicFile *sf = (SegLogicFile *)palloc(sizeof(SegLogicFile));
     MemoryContextSwitchTo(oldcnxt);
     df_ctrl_init(sf, seg->rnode, seg->forknum);
-    if (!ENABLE_DMS) {
+    if (!SS_STANDBY_MODE) {
         df_open_files(sf);
     }
     seg->segfile = sf;

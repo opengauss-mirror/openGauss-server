@@ -1,0 +1,55 @@
+-- test char semantic limit size
+SET client_min_messages = warning;
+show nls_length_semantics;
+ nls_length_semantics 
+----------------------
+ byte
+(1 row)
+
+drop table if exists test_semantic_char;
+set nls_length_semantics='char';
+create table test_semantic_char (id int, city char (4));
+set nls_length_semantics='byte';
+\d+ test_semantic_char;
+                       Table "public.test_semantic_char"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ city   | character(4 char) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+insert into test_semantic_char values(1, 'abcd');
+insert into test_semantic_char values(2, '中国天津');
+insert into test_semantic_char values(3, 'abcde');
+ERROR:  value too long for type character(4 char)
+CONTEXT:  referenced column: city
+insert into test_semantic_char values(5, '中国abc');
+ERROR:  value too long for type character(4 char)
+CONTEXT:  referenced column: city
+drop table test_semantic_char;
+drop table if exists test_semantic_byte;
+set nls_length_semantics='byte';
+create table test_semantic_byte (id int, city char (4));
+set nls_length_semantics='char';
+\d+ test_semantic_byte;
+                       Table "public.test_semantic_byte"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ city   | character(4 byte) |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+insert into test_semantic_byte values(1, 'abcd');
+insert into test_semantic_byte values(2, '中国天津');
+ERROR:  value too long for type character(4 byte)
+CONTEXT:  referenced column: city
+insert into test_semantic_byte values(3, 'abcde');
+ERROR:  value too long for type character(4 byte)
+CONTEXT:  referenced column: city
+insert into test_semantic_byte values(5, '中国abc');
+ERROR:  value too long for type character(4 byte)
+CONTEXT:  referenced column: city
+drop table test_semantic_byte;
+reset nls_length_semantics;

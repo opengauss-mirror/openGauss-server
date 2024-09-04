@@ -81,6 +81,13 @@ SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass
 (1 row)
 
 ----
+-- Make sure can't alter replica identity index alown NULL
+----
+CREATE UNIQUE INDEX uni_idx_keya ON test_replica_identity (keya);
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX uni_idx_keya;
+ALTER TABLE test_replica_identity MODIFY keya NULL;  -- fail
+ERROR:  column "keya" used as replica identity can't drop not null
+----
 -- Make sure non index cases work
 ----
 ALTER TABLE test_replica_identity REPLICA IDENTITY DEFAULT;
@@ -113,6 +120,7 @@ SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
  nonkey | text    | 
 Indexes:
     "test_replica_identity_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default
+    "uni_idx_keya" UNIQUE, btree (keya) TABLESPACE pg_default
     "test_replica_identity_hash" hash (nonkey) TABLESPACE pg_default
     "test_replica_identity_keyab" btree (keya, keyb) TABLESPACE pg_default
 Replica Identity: FULL

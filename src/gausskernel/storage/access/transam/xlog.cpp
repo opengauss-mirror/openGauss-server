@@ -2718,15 +2718,19 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             t_thrd.xlog_cxt.openLogOff = 0;
 
             segs_enough = true;
-            if (g_instance.attr.attr_storage.wal_file_init_num > 0 && g_instance.wal_cxt.globalEndPosSegNo != InvalidXLogSegPtr &&
+            const int fullThreshold = 100;
+            int threshold = u_sess->attr.attr_storage.walFilePreinitThreshold;
+            int initNum = g_instance.attr.attr_storage.wal_file_init_num;
+            if (threshold < fullThreshold && initNum > 0 &&
+                g_instance.wal_cxt.globalEndPosSegNo != InvalidXLogSegPtr &&
                 g_instance.wal_cxt.globalEndPosSegNo >= t_thrd.xlog_cxt.openLogSegNo) {
-                segs_enough = (g_instance.wal_cxt.globalEndPosSegNo - t_thrd.xlog_cxt.openLogSegNo)
-                    > (g_instance.attr.attr_storage.wal_file_init_num * 0.2);
+                segs_enough = (g_instance.wal_cxt.globalEndPosSegNo - t_thrd.xlog_cxt.openLogSegNo) >
+                              (1.0 * initNum * (fullThreshold - threshold) / fullThreshold);
             }
 
             /*
              * Unlock WalAuxiliary thread to init new xlog segment if we are running out
-             * of xlog segments, or available segments is less than wal_file_init_num * 0.2.
+             * of xlog segments, or used segments is more than wal_file_preinit_threshold.
              */
             if (!segs_enough) {
                 g_instance.wal_cxt.globalEndPosSegNo = Max(g_instance.wal_cxt.globalEndPosSegNo, t_thrd.xlog_cxt.openLogSegNo);
@@ -8167,14 +8171,29 @@ static bool CheckApplyDelayReady(void)
         return false;
     }
 
-    /* the walreceiver process is started behind here,
-     * ensure that the walreceiver process has been started,
-     * otherwise, the stream replication will be disconnected */
-    if (g_instance.pid_cxt.WalReceiverPID == 0) {
-        return false;
-    }
-
     return true;
+}
+
+static void KeepWalrecvAliveWhenRecoveryDelay()
+{
+    static TimestampTz lastTestWalrecvTime = (TimestampTz)0;
+
+    TimestampTz now = GetCurrentTimestamp();
+    if (!TimestampDifferenceExceeds(lastTestWalrecvTime, now, 1000)) {  // 1s
+        return;
+    }
+    lastTestWalrecvTime = now;
+    
+    if (WalRcvInProgress()) {
+        return;
+    }
+    
+    if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
+        return;
+    }
+    
+    /* wake up walrecv by pre-parse thread */
+    g_instance.csn_barrier_cxt.pre_parse_started = false;
 }
 
 /*
@@ -8201,6 +8220,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     if (!CheckApplyDelayReady()) {
         return false;
     }
+
+    KeepWalrecvAliveWhenRecoveryDelay();
 
     /*
      * Is it a COMMIT record?
@@ -8236,6 +8257,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
 
         /* might change the trigger file's location */
         RedoInterruptCallBack();
+
+        KeepWalrecvAliveWhenRecoveryDelay();
 
         if (CheckForFailoverTrigger() || CheckForSwitchoverTrigger() || CheckForStandbyTrigger()) {
             break;
@@ -8576,7 +8599,7 @@ inline void PrintCkpXctlControlFile(XLogRecPtr oldCkpLoc, CheckPoint *oldCkp, XL
 
 void CheckForRestartPoint()
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (SS_IN_ONDEMAND_RECOVERY || SS_DISASTER_CLUSTER) {
         return;
     }
 
@@ -10152,7 +10175,15 @@ void StartupXLOG(void)
         }
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
         /* No need to hold ControlFileLock yet, we aren't up far enough */
-        if (!SS_STANDBY_FAILOVER && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
+        /**
+         * When enable_dms, the following conditions shouldn't update control file here,
+         * because standby node has read the control file from primary node.
+         * 1. standby node failover promoting.
+         * 2. standby node switchover promoting.
+         * 3. standby node start ondemand realtime build.
+         * 4. last ondemand-recovery redo phase failed, so read control file from origin primary during normal reform.
+         */
+        if (!(ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id != SS_MY_INST_ID)) {
             UpdateControlFile();
         }
 
@@ -11402,15 +11433,6 @@ static void sendPMBeginHotStby()
             pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.hotStdby), ATOMIC_TRUE);
             ereport(LOG, (errmsg("send signal to be hot standby at %X/%X", (uint32)(lastReplayedEndRecPtr >> 32),
                                  (uint32)lastReplayedEndRecPtr)));
-#ifdef ENABLE_MULTIPLE_NODES
-            /*
-             * If we are in cluster-standby-mode, we need launch barreir preparse
-             * thread from the minrecoverypoint point.
-             */
-            if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
-                SetBarrierPreParseLsn(t_thrd.xlog_cxt.minRecoveryPoint);
-            }
-#endif
             SendPostmasterSignal(PMSIGNAL_BEGIN_HOT_STANDBY);
         }
     }
@@ -11958,6 +11980,7 @@ void ShutdownXLOG(int code, Datum arg)
     g_instance.ckpt_cxt_ctl->snapshotBlockLock = NULL;
     g_instance.bgwriter_cxt.rel_hashtbl_lock = NULL;
     g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = NULL;
+    undo::ResetUndoZoneLock();
 
     if (ENABLE_DSS && IsInitdb && 
         g_instance.dms_cxt.SSReformerControl.primaryInstId == INVALID_INSTANCEID) {
@@ -17025,8 +17048,8 @@ void rm_redo_error_callback(void *arg)
     initStringInfo(&buf);
     RmgrTable[XLogRecGetRmid(record)].rm_desc(&buf, record);
 
-    errcontext("xlog redo at lsn %X/%X, %s", (uint32)(record->EndRecPtr >> XLOG_LSN_SWAP),
-        (uint32)record->EndRecPtr, buf.data);
+    errcontext("xlog redo lsn %X/%X, %s",
+        (uint32)(record->EndRecPtr >> XLOG_LSN_SWAP), (uint32)record->EndRecPtr, buf.data);
 
     pfree_ext(buf.data);
 }
@@ -20016,7 +20039,6 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-
     if (xlogreader->preReadBuf == NULL) {
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     } else {
@@ -20430,7 +20452,7 @@ retry:
     /* In ss dorado replication, we don't start walrecwrite thread, so t_thrd.xlog_cxt.receivedUpto = 0 */
     if (t_thrd.xlog_cxt.readFile < 0 || 
         (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM && XLByteLT(t_thrd.xlog_cxt.receivedUpto, RecPtr))) {
-        if (t_thrd.xlog_cxt.StandbyMode && t_thrd.xlog_cxt.startup_processing) {
+        if (t_thrd.xlog_cxt.startup_processing) {
             for (;;) {
                 /*
                  * Need to check here also for the case where consistency level is

@@ -204,7 +204,8 @@ static const char *BuiltinTrancheNames[] = {
     "SSTxnStatusCachePartLock",
     "SSSnapshotXminCachePartLock",
     "DmsBufCtrlLock",
-    "WalSyncRepWaitLock"
+    "WalSyncRepWaitLock",
+    "ScaningXLogTrackLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -454,6 +455,9 @@ int NumLWLocks(void)
     /* for ss txnstatus hash table */
     numLocks += NUM_TXNSTATUS_CACHE_PARTITIONS;
 
+    /* for scanning xlog track hash table */
+    numLocks += NUM_SCANNING_XLOG_TRACK_PARTITIONS;
+
     /*
      * Add any requested by loadable modules; for backwards-compatibility
      * reasons, allocate at least NUM_USER_DEFINED_LWLOCKS of them even if
@@ -676,12 +680,15 @@ static void InitializeLWLocks(int numLocks)
         LWLockInitialize(&lock->lock, LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION);
     }
 
+    for (id = 0; id < NUM_SCANNING_XLOG_TRACK_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_SCANNING_XLOG_TRACK);
+    }
+
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);
 
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_UNKNOWN);
     }
-    undo::initUndoZoneLock();
 }
 
 const char *GetBuiltInTrancheName(int trancheId)
@@ -846,7 +853,7 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
     }
     instr_stmt_report_lock(LWLOCK_WAIT_END);
     LWLockReportWaitFailed(lock);
-    /* reset victim flag, we may acquire lock again at fatal process */
+    /* Reset victim flag, we may acquire lock again at fatal process */
     proc->lwIsVictim = false;
     ereport(FATAL, (errmsg("force thread %lu to exit because of lwlock deadlock", proc->pid),
                     errdetail("Lock Info: (%s), mode %d", T_NAME(lock), mode)));

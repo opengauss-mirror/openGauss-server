@@ -1628,6 +1628,8 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
     SyncVariables();
     connection_warnings(false); /* Must be after SyncVariables */
 
+    pset.dbType = GetDatabaseType();
+
     /* Tell the user about the new connection */
     if (!pset.quiet) {
         if (param_is_newly_set(PQhost(o_conn), PQhost(pset.db)) ||

@@ -24,6 +24,7 @@
 #include "storage/lmgr.h"
 #include "storage/lock/lock.h"
 #include "storage/freespace.h"
+#include "storage/smgr/segment_internal.h"
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
@@ -721,7 +722,7 @@ reacquire_buffer:
     /* Clean up */
     Assert(UHEAP_XID_IS_TRANS(tuple->disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, false, 
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, blkno, false,
             (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), 
             ItemPointerGetOffsetNumber(&(tuple->ctid)));
         UndoRecordVerify(undorec);
@@ -2315,7 +2316,7 @@ check_tup_satisfies_update:
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(utuple.disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, blkno, false,
             (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), offnum);
 
         UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
@@ -2773,9 +2774,9 @@ check_tup_satisfies_update:
         useInplaceUpdate = false;
         useLinkUpdate = false;
     } else if (!useInplaceUpdate) {
-        bool pruned = UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize);
         lp = UPageGetRowPtr(page, oldOffnum);
-        if (pruned && (RowPtrGetOffset(lp) + newtupsize <= BLCKSZ)) {
+        if (UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize)
+            && (RowPtrGetOffset(lp) + newtupsize <= BLCKSZ)) {
             useInplaceUpdate = true;
         }
         /* The page might have been modified, so refresh disk_tuple */
@@ -3063,7 +3064,8 @@ check_tup_satisfies_update:
             undoXorDeltaSize += sizeof(uint16);
     }
 
-    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag */
+    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag
+     */
     undoXorDeltaSize += sizeof(uint8) + oldtup.disk_tuple->t_hoff - OffsetTdId + sizeof(uint8);
     undoXorDeltaSize += oldlen - prefixlen - suffixlen;
 
@@ -3314,13 +3316,16 @@ check_tup_satisfies_update:
     Assert(UHEAP_XID_IS_TRANS(uheaptup->disk_tuple->flag));
     if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
 
-        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
-            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&oldtup.ctid));
+        UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(buffer),
+            false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),
+            ItemPointerGetOffsetNumber(&oldtup.ctid));
 
         if (!useInplaceUpdate) {
             Page newPage = BufferGetPage(newbuf);
-            UpageVerify((UHeapPageHeader)newPage, InvalidXLogRecPtr, NULL, relation, false, 
-            (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW), ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
+            UpageVerify((UHeapPageHeader)newPage, InvalidXLogRecPtr, NULL, relation, NULL,
+                BufferGetBlockNumber(newbuf), false,
+                (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),
+                ItemPointerGetOffsetNumber(&(uheaptup->ctid)));
         }
     }
 
@@ -3652,9 +3657,10 @@ reacquire_buffer:
         END_CRIT_SECTION();
 
         if (u_sess->attr.attr_storage.ustore_verify_level >= USTORE_VERIFY_FAST) {
-            UpageVerifyHeader((UHeapPageHeader)page, InvalidXLogRecPtr, relation);
+            BlockNumber blkno = BufferGetBlockNumber(buffer);
+            UpageVerifyHeader((UHeapPageHeader)page, InvalidXLogRecPtr, &relation->rd_node, blkno);
             for (int k = 0; k < nthispage; k++) {
-                UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, 
+                UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, false,
                     (USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),  verifyOffnum[k]);
             }
         }
@@ -3879,7 +3885,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
         Assert(false);
     }
 
-    if ((!aggressiveSearch && tdCount >= TD_THRESHOLD_FOR_PAGE_SWITCH) || RelationIsToast(relation)) {
+    if (!aggressiveSearch && tdCount >= TD_THRESHOLD_FOR_PAGE_SWITCH) {
         /*
          * Do not extend TD array if the TD allocation request is
          * for an insert statement and the page already has
@@ -3897,7 +3903,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
      * Try to extend the ITL array now.
      */
     if (urecPtr != NULL) {
-        urecPtr = INVALID_UNDO_REC_PTR;
+        *urecPtr = INVALID_UNDO_REC_PTR;
     }
 
     nExtended = UPageExtendTDSlots(relation, buf);
@@ -4198,7 +4204,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
     }
 
 cleanup:
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(buf));
 
     if (frozenSlots != NULL)
         pfree(frozenSlots);
@@ -5264,6 +5270,42 @@ XLogRecPtr LogUHeapClean(Relation reln, Buffer buffer, OffsetNumber target_offnu
     return recptr;
 }
 
+XLogRecPtr LogUHeapNewPage(RelFileNode* rnode, ForkNumber forkNum, BlockNumber blkno, Page page, bool page_std,
+                       TdeInfo* tdeinfo)
+{
+    int flags;
+    XLogRecPtr recptr;
+    if (IsSegmentFileNode(*rnode)) {
+        /*
+         * Make sure extents in the segment are created before this xlog, otherwise Standby does not know where to
+         * read the new page when replaying this xlog.
+         */
+        seg_preextend(*rnode, forkNum, blkno);
+    }
+
+    /* NO ELOG(ERROR) from here till newpage op is logged */
+    START_CRIT_SECTION();
+    flags = REGBUF_FORCE_IMAGE;
+    if (page_std) {
+        flags |= REGBUF_STANDARD;
+    }
+
+    XLogBeginInsert();
+    XLogRegisterBlock(0, rnode, forkNum, blkno, page, flags, NULL, tdeinfo);
+    recptr = XLogInsert(RM_UHEAP_ID, XLOG_UHEAP_NEW_PAGE);
+
+    /*
+     * The page may be uninitialized. If so, we can't set the LSN and TLI
+     * because that would corrupt the page.
+     */
+    if (!PageIsNew(page)) {
+        PageSetLSN(page, recptr);
+    }
+
+    END_CRIT_SECTION();
+    return recptr;
+}
+
 /*
  * UHeapExecPendingUndoActions - apply any pending rollback on the input buffer
  *
@@ -5640,7 +5682,8 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     /* Apply undo action for an INSERT */
     if (urec->Blkno() != blkno) {
         ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("Blkno %u of undorecord is different from buffer %u.", urec->Blkno(), blkno)));
+                        errmsg("UHeapAbortSpeculative error: UndoRecord's blkno %u is not same with buffer %u.",
+                        urec->Blkno(), blkno)));
     }
     ExecuteUndoForInsert(relation, buffer, urec->Offset(), urec->Xid());
 
@@ -5751,7 +5794,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
 
     END_CRIT_SECTION();
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation);
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, blkno);
 
     UnlockReleaseBuffer(buffer);
 

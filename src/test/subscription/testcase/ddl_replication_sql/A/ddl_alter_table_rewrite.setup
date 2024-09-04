@@ -1,0 +1,9 @@
+#!/bin/sh
+
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+exec_sql $case_use_db $pub_node1_port "create schema rewrite; set search_path=rewrite;create table t1_full (a int, b text);insert into t1_full values (1, 'a'), (2, 'b'), (3, 'c');alter table t1_full replica identity full;"
+
+exec_sql $case_use_db $sub_node1_port "create schema rewrite; set search_path=rewrite;create table t1_full (a int, b text, myc int); insert into t1_full values (101, 'a', 1), (102, 'b', 2);"

@@ -63,8 +63,8 @@ test: set_transaction_test
 test: select_into_user_defined_variables
 test: select_into_file
 
-test: gs_dump_package trigger_dump
-test: out_param_func
+test: gs_dump_package trigger_dump gs_dump_synonym
+test: out_param_func out_param_func_overload
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
 
@@ -472,7 +472,7 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor cursor_expression cursor_expression_dump
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: test_float test_numeric_with_neg_scale
+test: test_float test_numeric_with_neg_scale test_float_dump
 
 test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
 #test: alter_table_001 alter_table_modify_ustore
@@ -488,3 +488,11 @@ test: gin_select
 
 # test for binary_double suffix and Constant values
 test: test_binary_suffix
+
+# test for rotate and unrotate function
+test: gb_ora_rotate_unrotate
+
+# test for string type char byte semantic
+test: bpchar_charbyte bpchar_cast bpchar_copy bpchar_index bpchar_regexmatch varchar_charbyte varchar_cast varchar_copy varchar_index varchar_regexmatch char_length_semantic
+test: gs_dump_char_semantic
+test: gs_dump_2hash

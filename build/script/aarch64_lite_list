@@ -34,7 +34,7 @@
 ./share/postgresql/extension/security_plugin.control
 ./share/postgresql/extension/security_plugin--1.0.sql
 ./share/postgresql/extension/dolphin.control
-./share/postgresql/extension/dolphin--4.0.sql
+./share/postgresql/extension/dolphin--5.0.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
 ./share/postgresql/extension/dolphin--1.1--1.0.sql
 ./share/postgresql/extension/dolphin--1.1--2.0.sql
@@ -43,8 +43,12 @@
 ./share/postgresql/extension/dolphin--3.0--2.0.sql
 ./share/postgresql/extension/dolphin--3.0--4.0.sql
 ./share/postgresql/extension/dolphin--4.0--3.0.sql
+./share/postgresql/extension/dolphin--4.0--5.0.sql
+./share/postgresql/extension/dolphin--5.0--4.0.sql
 ./share/postgresql/extension/dolphin--2.0--2.0.1.sql
 ./share/postgresql/extension/dolphin--2.0.1--2.0.sql
+./share/postgresql/extension/dolphin--4.0--4.0.1.sql
+./share/postgresql/extension/dolphin--4.0.1--4.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control

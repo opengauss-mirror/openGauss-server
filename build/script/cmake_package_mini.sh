@@ -43,7 +43,7 @@ else
 fi
 
 if [ X"$kernel" == X"euleros" ]; then
-    dist_version="EULER"
+    dist_version="EulerOS"
 elif [ X"$kernel" == X"centos" ]; then
     dist_version="CentOS"
 elif [ X"$kernel" == X"openeuler" ]; then
@@ -53,6 +53,8 @@ elif [ X"$kernel" == X"kylin" ]; then
 else
     dist_version="Platform"
 fi
+
+os_version=$(cat /etc/os-release | grep -w VERSION_ID | awk -F '"' '{print $2}')
 
 show_package=false
 gcc_version="10.3.1"
@@ -290,12 +292,11 @@ fi
 #######################################################################
 ## declare all package name
 #######################################################################
-declare version_string="${mppdb_name_for_package}-${version_number}"
-declare package_pre_name="${version_string}-${dist_version}-${PLATFORM_ARCH}"
-declare server_package_name="${package_pre_name}.${install_package_format}.gz"
+declare package_version_name="${version_number}-${dist_version}${os_version}-${PLATFORM_ARCH}"
+declare server_package_name="${mppdb_name_for_package}-${package_version_name}.${install_package_format}.gz"
 
-declare libpq_package_name="${package_pre_name}-Libpq.${install_package_format}.gz"
-declare symbol_package_name="${package_pre_name}-symbol.${install_package_format}.gz"
+declare libpq_package_name="${mppdb_name_for_package}-Libpq-${package_version_name}.${install_package_format}.gz"
+declare symbol_package_name="${mppdb_name_for_package}-symbol-${package_version_name}.${install_package_format}.gz"
 
 echo "[makemppdb] $(date +%y-%m-%d' '%T): script dir : ${SCRIPT_DIR}"
 ROOT_DIR=$(dirname "$SCRIPT_DIR")
@@ -349,16 +350,9 @@ function read_mpp_number()
     version_num=$(echo $version_num1 | tr -d ";")
     #remove the blank
     version_num=$(echo $version_num)
-
-    if echo $version_num | grep -qE '^92[0-9]+$'
-    then
-        # get the last three number
-        latter=${version_num:2}
-        echo "92.${latter}" >>${SCRIPT_DIR}/version.cfg
-    else
-        echo "Cannot get the version number from globals.cpp."
-        exit 1
-    fi
+    form=${version_num:0:2}
+    latter=${version_num:2}
+    echo "${form}.${latter}" >>${SCRIPT_DIR}/version.cfg
 }
 read_mpp_number
 
@@ -591,7 +585,7 @@ function target_file_copy_for_non_server()
     done
 }
 
-declare bin_name="${package_pre_name}.bin"
+declare bin_name="${mppdb_name_for_package}-${package_version_name}.bin"
 declare sha256_name=''
 declare script_dir="${ROOT_DIR}/script"
 
@@ -643,7 +637,7 @@ function target_file_copy()
     echo "End generate ${bin_name}  bin file"  >> "$LOG_FILE" 2>&1
 
     #generate sha256 file
-    sha256_name="${package_pre_name}.sha256"
+    sha256_name="${mppdb_name_for_package}-${package_version_name}.sha256"
     echo  "Begin generate ${sha256_name} sha256 file..."  >> "$LOG_FILE" 2>&1
     sha256sum "${bin_name}" | awk -F" " '{print $1}' > "$sha256_name"
     if [ $? -ne 0 ]; then

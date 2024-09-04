@@ -23,6 +23,9 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#ifdef HAVE_NETINET_TCP_H
+#include <netinet/tcp.h>
+#endif
 #include <arpa/inet.h>
 #include <unistd.h>
 
@@ -30,12 +33,14 @@
 #include "libpq/ip.h"
 #include "libpq/libpq.h"
 #include "libpq/auth.h"
+#include "libpq/hba.h"
 #include "pgxc/pgxc.h"
 #include "postmaster/postmaster.h"
 #include "regex/regex.h"
 #include "replication/walsender.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
+#include "funcapi.h"
 #include "utils/acl.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
@@ -62,15 +67,6 @@ typedef struct check_network_data {
     SockAddr* raddr;        /* client's actual address */
     bool result;            /* set to true if match */
 } check_network_data;
-
-/*
- * A single string token lexed from the HBA config file, together with whether
- * the token had been quoted.
- */
-typedef struct HbaToken {
-    char* string;
-    bool quoted;
-} HbaToken;
 
 static MemoryContext tokenize_file(const char* filename, FILE* file, List** lines, List** line_nums);
 static List* tokenize_inc_file(List* tokens, const char* outer_filename, const char* inc_filename);
@@ -2473,4 +2469,325 @@ HeapTuple SearchUserHostName(const char* userName, Oid* oid)
     if (roleTup && oid)
         *oid = HeapTupleGetOid(roleTup);
     return roleTup;
+}
+
+static void get_ip_str(const struct sockaddr* addr, char *ip_str)
+{
+    const int  MAX_IP_LEN = 64;  /* default ip len */
+    /* parse the  ip address */
+    if (AF_INET6 == addr->sa_family) {
+        (void)inet_ntop(AF_INET6, &((struct sockaddr_in6*)addr)->sin6_addr, ip_str, MAX_IP_LEN - 1);
+    } else if (AF_INET == addr->sa_family) {
+        (void)inet_ntop(AF_INET, &((struct sockaddr_in*)addr)->sin_addr, ip_str, MAX_IP_LEN - 1);
+    }
+}
+
+static int32_t pg_sockaddr_mask_cidr(struct sockaddr_storage* mask)
+{
+    int32_t mask_bits = 0;
+
+    switch (mask->ss_family) {
+        case AF_INET: {
+
+            struct sockaddr_in* mask4 = (struct sockaddr_in*) mask;
+            uint32_t mask = ntohl(mask4->sin_addr.s_addr);
+            while (mask) {
+                mask_bits += mask & 1;
+                mask >>= 1;
+            }
+            break;
+        }
+
+#ifdef HAVE_IPV6
+        case AF_INET6: {
+
+            struct sockaddr_in6* mask6 = (struct sockaddr_in6*) mask;
+            for (int i = 0; i < 16; i++) {
+                uint8_t byte = mask6->sin6_addr.s6_addr[i];
+                while (byte) {
+                    mask_bits += byte & 1;
+                    byte >>= 1;
+                }
+            }
+            break;
+        }
+#endif
+        default:
+            return -1;
+    }
+    return mask_bits;
+}
+/*
+ * Read the whole of pg_hba conf returning it as record
+ */
+Datum gs_get_hba_conf(PG_FUNCTION_ARGS)
+{
+    #define GS_STAT_GET_HBA_CONF_COLS 5
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    TupleDesc tupdesc = NULL;
+    Tuplestorestate *tupstore = NULL;
+    HbaLine* hba = NULL;
+    StringInfo item = NULL;
+    MemoryContext per_query_ctx;
+    MemoryContext oldcontext;
+
+    Datum values[GS_STAT_GET_HBA_CONF_COLS];
+    bool nulls[GS_STAT_GET_HBA_CONF_COLS];
+
+    errno_t rc = EOK;
+     /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
+        return (Datum)0;
+    }
+    if (!(rsinfo->allowedModes & SFRM_Materialize)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialize mode required, but it is not allowed in this context")));
+    }
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE){
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
+    }
+    // only superusers can see details
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("only superusers can see details")));
+    }
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+    hba = (HbaLine*)palloc0(sizeof(HbaLine));
+    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+    item = makeStringInfo();
+
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+        /* hba_rwlock will be released when ereport ERROR or FATAL. */
+    PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    ListCell* line = NULL;
+    (void)pthread_rwlock_rdlock(&hba_rwlock);
+    foreach (line, g_instance.libpq_cxt.comm_parsed_hba_lines) {
+        /* 
+        * memory copy here will not copy pointer types like List* and char*, 
+        * the char* type in HbaLine will copy to session memctx by copy_hba_line()
+        */
+        errno_t rc = memcpy_s(hba, sizeof(HbaLine), lfirst(line), sizeof(HbaLine));
+        securec_check(rc, "\0", "\0");
+        // reset buf
+        resetStringInfo(item);
+        /* parse the record type. */
+        if(hba->conntype == ctLocal) {
+            appendStringInfoString(item, "local");
+        } else if (hba->conntype == ctHostSSL) {
+        appendStringInfoString(item, "hostssl");
+        } else if (hba->conntype == ctHostNoSSL) {
+        appendStringInfoString(item, "hostnossl");
+        } else {
+            appendStringInfoString(item, "host");
+        }
+        values[0] = CStringGetTextDatum(item->data);
+        /* parse the database. */
+        resetStringInfo(item);
+        ListCell* cell = NULL;
+        foreach (cell, hba->databases) {
+            HbaToken* database = NULL;
+            database = (HbaToken*)lfirst(cell);
+            if(database->quoted) {
+                appendStringInfoChar(item, '"');
+                appendStringInfoString(item, database->string);
+                appendStringInfoChar(item, '"');
+            } else {
+                appendStringInfoString(item, database->string);
+            }
+            appendStringInfoChar(item, ',');
+        }
+        if(item->len > 0) {
+            popStringInfoChar(item);
+        }
+        values[1] = CStringGetTextDatum(item->data);
+        /* parse the role. */
+        resetStringInfo(item);
+        cell = NULL;
+        foreach (cell, hba->roles) {
+            HbaToken* role = NULL;
+            role = (HbaToken*)lfirst(cell);
+            if(role->quoted) {
+                appendStringInfoChar(item, '"');
+                appendStringInfoString(item, role->string);
+                appendStringInfoChar(item, '"');
+            } else {
+                appendStringInfoString(item, role->string);
+            }
+            appendStringInfoChar(item, ',');
+        }
+        if(item->len > 0) {
+            popStringInfoChar(item);
+        }
+        values[2] = CStringGetTextDatum(item->data);
+        /* parse the IP address field */
+        resetStringInfo(item);
+        const int MAX_IP_ADDRESS_LEN = 64;
+        char ipstr[MAX_IP_ADDRESS_LEN] = {'\0'};
+        char maskstr[MAX_IP_ADDRESS_LEN] = {'\0'};
+        char portstr[MAX_IP_ADDRESS_LEN] = {'\0'};
+        if(hba->conntype == ctLocal) {
+            appendStringInfoString(item, " ");
+        } else if (hba->ip_cmp_method == ipCmpAll) {
+        appendStringInfoString(item, "all");
+        } else if (hba->ip_cmp_method == ipCmpSameHost) {
+        appendStringInfoString(item, "samehost");
+        } else if (hba->ip_cmp_method == ipCmpSameNet) {
+            appendStringInfoString(item, "samenet");
+        } else {
+            if(hba->hostname != NULL) {
+                appendStringInfoString(item, hba->hostname);
+            } else {
+                get_ip_str((struct sockaddr*)&hba->addr, ipstr);
+                appendStringInfoString(item, ipstr);
+            }
+            int32_t mask =  pg_sockaddr_mask_cidr(&hba->mask);
+            if(mask != -1) {
+                int rc = sprintf_s(maskstr, sizeof(maskstr), "%d", mask);
+                securec_check_ss(rc, "\0", "\0");
+                appendStringInfoChar(item, '/');
+                appendStringInfoString(item, maskstr);
+            }
+        }
+        values[3] = CStringGetTextDatum(item->data);
+        /* parse the method field */
+        resetStringInfo(item);
+        if(hba->auth_method == uaTrust) {
+            appendStringInfoString(item, "trust");
+        } else if (hba->auth_method == uaIdent) {
+            appendStringInfoString(item, "ident");
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }
+        } else if (hba->auth_method == uaPeer) {
+            appendStringInfoString(item, "peer");
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }
+        } else if (hba->auth_method == uaKrb5) {
+            appendStringInfoString(item, "krb5");
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }
+            if(hba->include_realm) {
+                appendStringInfoString(item, " include_realm=1");
+            }
+            if(hba->krb_realm != NULL) {
+                appendStringInfoString(item, " krb_realm=");
+                appendStringInfoString(item, hba->krb_realm);
+            }
+        } else if (hba->auth_method == uaGSS) {
+            appendStringInfoString(item, "gss");
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }
+            if(hba->include_realm) {
+                appendStringInfoString(item, " include_realm=1");
+            }
+            if(hba->krb_realm != NULL) {
+                appendStringInfoString(item, " krb_realm=");
+                appendStringInfoString(item, hba->krb_realm);
+            }
+        } else if (hba->auth_method == uaSSPI) {
+            appendStringInfoString(item, "sspi");
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }
+            if(hba->include_realm) {
+                appendStringInfoString(item, " include_realm=1");
+            }
+            if(hba->krb_realm != NULL) {
+                appendStringInfoString(item, " krb_realm=");
+                appendStringInfoString(item, hba->krb_realm);
+            }
+        } else if (hba->auth_method == uaReject) {
+            appendStringInfoString(item, "reject");    
+        } else if (hba->auth_method == uaMD5) {
+            appendStringInfoString(item, "md5");  
+        } else if (hba->auth_method == uaSHA256) {
+            appendStringInfoString(item, "sha256");  
+        } else if (hba->auth_method == uaSM3) {
+            appendStringInfoString(item, "sm3");
+        } else if (hba->auth_method == uaPAM) {
+            appendStringInfoString(item, "pam"); 
+                if(hba->pamservice != NULL) {
+                appendStringInfoString(item, " pamservice=");
+                appendStringInfoString(item, hba->pamservice);
+            }       
+        } else if (hba->auth_method == uaLDAP) {
+            appendStringInfoString(item, "ldap");
+            if(hba->ldaptls) {
+                appendStringInfoString(item, " ldaptls=1");
+            }  
+            if(hba->ldapserver != NULL) {
+                appendStringInfoString(item, " ldapserver=");
+                appendStringInfoString(item, hba->ldapserver);
+            }
+            if(hba->ldapbinddn != NULL) {
+                appendStringInfoString(item, " ldapbinddn=");
+                appendStringInfoString(item, hba->ldapbinddn);
+            }
+            if(hba->ldapbindpasswd != NULL) {
+                appendStringInfoString(item, " ldapbindpasswd=");
+                appendStringInfoString(item, hba->ldapbindpasswd);
+            }
+            if(hba->ldapsearchattribute != NULL) {
+                appendStringInfoString(item, " ldapsearchattribute=");
+                appendStringInfoString(item, hba->ldapsearchattribute);
+            }
+            if(hba->ldapbasedn != NULL) {
+                appendStringInfoString(item, " ldapbasedn=");
+                appendStringInfoString(item, hba->ldapbasedn);
+            }
+            if(hba->ldapprefix != NULL) {
+                appendStringInfoString(item, " ldapprefix=");
+                appendStringInfoString(item, hba->ldapprefix);
+            }
+            if(hba->ldapsuffix != NULL) {
+                appendStringInfoString(item, " ldapsuffix=");
+                appendStringInfoString(item, hba->ldapsuffix);
+            }
+            if(hba->krb_server_hostname != NULL) {
+                appendStringInfoString(item, " krb_server_hostname=");
+                appendStringInfoString(item, hba->krb_server_hostname);
+            }
+            if(hba->ldapport > 0) {
+                int rc = sprintf_s(portstr, sizeof(portstr), "%d", hba->ldapport);
+                securec_check_ss(rc, "\0", "\0");
+                appendStringInfoString(item, " ldapport=");
+                appendStringInfoString(item, portstr);
+            } 
+        } else if (hba->auth_method == uaCert) {
+            appendStringInfoString(item, "cert"); 
+            if(hba->usermap != NULL) {
+                appendStringInfoString(item, " map=");
+                appendStringInfoString(item, hba->usermap);
+            }  
+        }
+        values[4] = CStringGetTextDatum(item->data);        
+        tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+
+    (void)pthread_rwlock_unlock(&hba_rwlock);
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+
+     /* clean up and return the tuplestore */
+    tuplestore_donestoring(tupstore);
+    DestroyStringInfo(item);
+    (void)MemoryContextSwitchTo(oldcontext);
+    return (Datum)0;
 }

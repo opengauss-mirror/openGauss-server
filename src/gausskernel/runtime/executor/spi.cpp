@@ -1667,6 +1667,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 #ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
     dopControl.CloseSmp();
+    dopControl.UnderCursor();
 #endif
     NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 

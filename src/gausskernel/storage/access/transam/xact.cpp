@@ -8312,7 +8312,7 @@ UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence)
 void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
 {
     if (!u_sess->attr.attr_storage.enable_ustore_sync_rollback &&
-        !(IsSubTransaction() || pLevel == UNDO_TEMP || pLevel == UNDO_UNLOGGED)) {
+        !(IsSubTransaction() || pLevel == UNDO_TEMP)) {
         return;
     }
 
@@ -8384,7 +8384,12 @@ void ApplyUndoActions()
             Assert(slot != NULL && topXid == slot->XactId());
             if (slot != NULL && topXid == slot->XactId()) {
                 needRollback = true;
-                break;
+                continue;
+            } else if (!IsSubTransaction()) {
+                t_thrd.undo_cxt.transUndoSize = 0;
+                t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
+                t_thrd.undo_cxt.slots[i] = NULL;
+                t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
             }
         }
     }
@@ -8403,6 +8408,7 @@ void ApplyUndoActions()
                 s->first_urp[0], s->first_urp[1], s->first_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp[0], s->latest_urp[1], s->latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp_xact[0], s->latest_urp_xact[1], s->latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
+        ResetUndoActionsInfo();
         return;
     }
 

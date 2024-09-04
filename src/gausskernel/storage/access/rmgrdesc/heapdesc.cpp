@@ -167,6 +167,17 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
         xl_heap_base_shift *xlrec = (xl_heap_base_shift *)rec;
 
         appendStringInfo(buf, "base_shift delta %ld multi %d", xlrec->delta, xlrec->multi);
+    } else if (info == XLOG_HEAP3_TRUNCATE) {
+        xl_heap_truncate *xlrec = (xl_heap_truncate *) rec;
+        int i;
+
+        if (xlrec->flags & XLH_TRUNCATE_CASCADE)
+            appendStringInfo(buf, "cascade ");
+        if (xlrec->flags & XLH_TRUNCATE_RESTART_SEQS)
+            appendStringInfo(buf, "restart_seqs ");
+        appendStringInfo(buf, "nrelids %u relids", xlrec->nrelids);
+        for (i = 0; i < (int)xlrec->nrelids; i++)
+            appendStringInfo(buf, " %u", xlrec->relids[i]);
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
@@ -339,6 +350,8 @@ const char* heap3_type_name(uint8 subtype)
         return "heap3_rewrite";
     } else if (info == XLOG_HEAP3_INVALID) {
         return "heap3_invalid";
+    } else if (info == XLOG_HEAP3_TRUNCATE) {
+        return "heap3_truncate";
     } else {
         return "unkown_type";
     }
@@ -371,6 +384,8 @@ void heap3_desc(StringInfo buf, XLogReaderState *record)
                 appendStringInfo(buf, "]");
             }
         }
+    } else if (info == XLOG_HEAP3_TRUNCATE) {
+        appendStringInfo(buf, "XLOG_HEAP_TRUNCATE");
     } else {
         appendStringInfo(buf, "UNKNOWN");
     }

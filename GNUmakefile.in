@@ -63,6 +63,7 @@ install:
 	$(MAKE) -C $(root_builddir)/distribute/kernel/extension/dimsearch $@
 	$(MAKE) -C contrib/security_plugin $@
 	$(MAKE) -C $(root_builddir)/distribute/kernel/extension/tsdb $@
+	$(MAKE) -C contrib/common_cipher $@
 	+@echo "openGauss installation complete."
 else
 ifeq ($(enable_privategauss), yes)
@@ -75,6 +76,7 @@ install:
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C $(root_builddir)/privategauss/kernel/extension/packages $@
 	$(MAKE) -C $(root_builddir)/contrib/gsredistribute $@
+	$(MAKE) -C contrib/common_cipher $@
 	+@echo "openGauss installation complete."
 else
 install:
@@ -84,6 +86,7 @@ install:
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C $(root_builddir)/privategauss/kernel/extension/packages $@
+	$(MAKE) -C contrib/common_cipher $@
 	+@echo "openGauss installation complete."
 endif
 else
@@ -95,6 +98,7 @@ install:
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C contrib/dblink $@
 	$(MAKE) -C contrib/ndpplugin $@
+	$(MAKE) -C contrib/common_cipher $@
 	@if test -d contrib/spq_plugin; then $(MAKE) -C contrib/spq_plugin $@; fi
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	@if test -d contrib/age; then $(MAKE) -C contrib/age $@; fi
@@ -102,7 +106,7 @@ install:
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
-	@if test -d contrib/timescaledb; then export CC=${GCC_PATH}/gcc/bin/gcc; export CXX=${GCC_PATH}/gcc/bin/g++; (cd contrib/timescaledb && ./run_to_build.sh && cd build && $(MAKE) $@); fi
+	@if test -d contrib/timescaledb; then (./contrib/timescaledb/run_to_build.sh && $(MAKE) -C contrib/timescaledb/build $@); fi
 	+@echo "openGauss installation complete."
 endif
 endif

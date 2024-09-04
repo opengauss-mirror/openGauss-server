@@ -1678,7 +1678,8 @@ static int PQsendQueryGuts(PGconn* conn, const char* command, const char* stmtNa
 
     /* Send parameters */
     for (i = 0; i < nParams; i++) {
-        if ((paramValues != NULL) && (paramValues[i] != NULL)) {
+        if ((paramValues != NULL) && (paramValues[i] != NULL) &&
+            (strlen(paramValues[i]) > 0 || conn->cmpt != COMPATIBILITY_A)) {
             int nbytes;
 
             if ((paramFormats != NULL) && paramFormats[i] != 0) {

@@ -353,6 +353,8 @@ static Size ReorderBufferChangeSize(ReorderBufferChange *change)
 
             break;
         }
+        case REORDER_BUFFER_CHANGE_TRUNCATE:
+            break;
     }
     return sz;
 }
@@ -433,6 +435,8 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
                 ReorderBufferReturnTupleBuf(rb, (ReorderBufferTupleBuf*)change->data.utp.oldtuple);
                 change->data.utp.oldtuple = NULL;
             }
+            break;
+        case REORDER_BUFFER_CHANGE_TRUNCATE:
             break;
     }
 
@@ -1453,6 +1457,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
             Oid reloid;
             Oid partitionReltoastrelid = InvalidOid;
             bool isSegment = false;
+            Oid relrewrite = InvalidOid;
 
             switch (change->action) {
                 case REORDER_BUFFER_CHANGE_INSERT:
@@ -1503,8 +1508,10 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                         RelationClose(relation);
                         continue;
                     }
-
-                    if (RelationIsLogicallyLogged(relation)) {
+                    
+                    relrewrite = RelationGetRelrewriteOption(relation);
+                    if (RelationIsLogicallyLogged(relation) &&
+                        (!OidIsValid(relrewrite) || rb->output_rewrites)) {
                         /*
                          * For now ignore sequence changes entirely. Most of
                          * the time they don't log changes using records we
@@ -1593,6 +1600,35 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_DDL:
                     ReorderBufferApplyDDLMessage(rb, txn, change);
                     break;
+                case REORDER_BUFFER_CHANGE_TRUNCATE: {
+                    int i;
+                    int nrelids = change->data.truncate.nrelids;
+                    int nrelations = 0;
+                    Relation *relations;
+
+                    relations = (Relation *)palloc0(nrelids * sizeof(Relation));
+                    for (i = 0; i < nrelids; i++) {
+                        Oid relid = change->data.truncate.relids[i];
+                        Relation relation;
+
+                        relation = RelationIdGetRelation(relid);
+                        if (relation == NULL) {
+                            elog(ERROR, "could not open relation with OID %u", relid);
+                        }
+
+                        if (!RelationIsLogicallyLogged(relation)) {
+                            continue;
+                        }
+
+                        relations[nrelations++] = relation;
+                    }
+
+                    rb->apply_truncate(rb, txn, nrelations, relations, change);
+
+                    for (i = 0; i < nrelations; i++)
+                        RelationClose(relations[i]);
+
+                } break;
                 case REORDER_BUFFER_CHANGE_UINSERT:
                 case REORDER_BUFFER_CHANGE_UDELETE:
                 case REORDER_BUFFER_CHANGE_UUPDATE:
@@ -2322,6 +2358,7 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
 
             break;
         }
+        case REORDER_BUFFER_CHANGE_TRUNCATE:
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
             /* ReorderBufferChange contains everything important */
             break;
@@ -2539,6 +2576,7 @@ static void ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
             break;
         }
         /* the base struct contains all the data, easy peasy */
+        case REORDER_BUFFER_CHANGE_TRUNCATE:
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
         case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
             break;

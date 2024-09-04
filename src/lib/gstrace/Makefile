@@ -45,7 +45,7 @@ all: $(HEADERFILE)
 install: all 
 
 $(HEADERFILE): $(CONFIGFILE)
-	python ./script/trc_gen.py -s ./config/ -o ./../../include/gstrace
+	python3 ./script/trc_gen.py -s ./config/ -o ./../../include/gstrace
 
 clean:
 	rm -f ./../../include/gstrace/*_gstrace.h

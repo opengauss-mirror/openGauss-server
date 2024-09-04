@@ -303,6 +303,10 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(spq_scan_partial);
 #endif
+    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(cursor_expr_level);
+        COPY_SCALAR_FIELD(cursor_owner_node_id);
+    }
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
 
@@ -2281,10 +2285,6 @@ static Stream* _copyStream(const Stream* from)
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif
-    if (t_thrd.proc->workingVersionNum >= PARALLEL_ENABLE_VERSION_NUM) {
-        COPY_SCALAR_FIELD(cursor_expr_level);
-        COPY_SCALAR_FIELD(cursor_owner_node_id);
-    }
     return newnode;
 }
 
@@ -2576,7 +2576,7 @@ static Const* _copyConst(const Const* from)
     COPY_SCALAR_FIELD(constcollid);
     COPY_SCALAR_FIELD(constlen);
 
-    if (from->constbyval || from->constisnull) {
+    if (from->constbyval || from->constisnull || from->constlen == 0) {
         /*
          * passed by value so just copy the datum. Also, don't try to copy
          * struct when value is null!
@@ -3178,6 +3178,10 @@ static MinMaxExpr* _copyMinMaxExpr(const MinMaxExpr* from)
     COPY_SCALAR_FIELD(op);
     COPY_NODE_FIELD(args);
     COPY_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(cmptype);
+        COPY_NODE_FIELD(cmpargs);
+    }
 
     return newnode;
 }
@@ -4452,6 +4456,10 @@ static ColumnDef* _copyColumnDef(const ColumnDef* from)
     COPY_NODE_FIELD(clientLogicColumnRef);
     COPY_NODE_FIELD(position);
     COPY_NODE_FIELD(update_default);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_STRING_FIELD(initdefval);
+    }
+
     return newnode;
 }
 
@@ -5210,6 +5218,9 @@ static AlterTableCmd* _copyAlterTableCmd(const AlterTableCmd* from)
     COPY_SCALAR_FIELD(alterGPI);
     COPY_SCALAR_FIELD(is_first);
     COPY_STRING_FIELD(after_name);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(recursing);
+    }
 
     return newnode;
 }
@@ -5679,6 +5690,9 @@ static AlterFunctionStmt* _copyAlterFunctionStmt(const AlterFunctionStmt* from)
 
     COPY_NODE_FIELD(func);
     COPY_NODE_FIELD(actions);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isProcedure);
+    }
 
     return newnode;
 }
@@ -5729,6 +5743,9 @@ static RenameStmt* _copyRenameStmt(const RenameStmt* from)
     COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(renameTargetList);
     COPY_SCALAR_FIELD(renameTableflag);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        COPY_SCALAR_FIELD(is_modifycolumn);
+    }
 
     return newnode;
 }

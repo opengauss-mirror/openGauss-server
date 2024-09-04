@@ -139,6 +139,10 @@ static void init_debug_server(PLpgSQL_function* func, int socketId, int debugSta
 
 void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
 {
+    if (func->fn_oid == InvalidOid) {
+        return;
+    }
+
     bool found = false;
     bool need_continue_into = u_sess->plsql_cxt.cur_debug_server != NULL &&
         ActiveBPInFunction(u_sess->plsql_cxt.cur_debug_server, func->fn_oid);
@@ -220,9 +224,13 @@ static void set_debugger_procedure_state(int commIdx, bool state)
 void server_debug_main(PLpgSQL_function* func, PLpgSQL_execstate* estate)
 {
     DebugInfo* debug_ptr = func->debug;
+    if (unlikely(debug_ptr == NULL || debug_ptr->comm == NULL)) {
+        ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
+                            errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                            errmsg("Invalid debug info from func %s", func->fn_signature)));
+    }
     debug_ptr->cur_stmt = estate->err_stmt;
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[debug_ptr->comm->comm_idx];
-    Assert(debug_ptr != NULL);
     /* stop to wait client conn if need */
     debug_ptr->stop_next_stmt = debug_ptr->stop_next_stmt ||
         IsBreakPointExisted(debug_ptr, func->fn_oid, estate->err_stmt->lineno, true);

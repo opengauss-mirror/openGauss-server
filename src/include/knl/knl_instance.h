@@ -787,12 +787,16 @@ typedef struct knl_g_csn_barrier_context {
     struct HTAB* barrier_hash_table;
     LWLock* barrier_hashtbl_lock;
     char stopBarrierId[MAX_BARRIER_ID_LENGTH];
+    bool pre_parse_started;
+    int max_run_time;
     MemoryContext barrier_context;
 
     bool startBarrierPreParse;
     XLogRecPtr preparseStartLocation;
     XLogRecPtr preparseEndLocation;
-    XLogRecPtr lastValidRecord;
+    XLogRecPtr latest_valid_record;
+    pg_crc32 latest_record_crc;
+    uint32 latest_record_len;
 } knl_g_csn_barrier_context;
 
 typedef struct knl_g_comm_context {
@@ -1275,6 +1279,7 @@ typedef struct knl_g_datadir_context {
 
 typedef struct knl_g_dms_context {
     uint32 dmsProcSid;
+    uint64 xminAck;
     dms_status_t dms_status;
     ClusterNodeState SSClusterState;
     ss_reformer_ctrl_t SSReformerControl;  // saved in disk; saved by primary
@@ -1448,6 +1453,9 @@ typedef struct knl_instance_context {
     knl_g_dms_context dms_cxt;
 #ifdef USE_SPQ
     knl_g_spq_context spq_cxt;
+#endif
+#ifdef USE_ASSERT_CHECKING
+    void *shared_fi_ctx;
 #endif
 } knl_instance_context;
 

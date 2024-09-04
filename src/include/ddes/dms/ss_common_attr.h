@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
@@ -13,9 +12,9 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * ss_common_attr.h
- * 
+ *
  * IDENTIFICATION
  *        src/include/ddes/dms/ss_common_attr.h
  *
@@ -36,12 +35,18 @@
 #define ENABLE_VERIFY_PAGE_VERSION false
 #define ENABLE_SS_TXNSTATUS_CACHE false
 #define ENABLE_SS_BCAST_SNAPSHOT false
+#define ENABLE_SS_BCAST_GETOLDESTXMIN false
 #define SS_SINGLE_CLUSTER false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
 #define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
-#define ENABLE_SS_BCAST_SNAPSHOT (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot)
+#define ENABLE_SS_BCAST_SNAPSHOT                                                  \
+    (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot && \
+        !g_instance.attr.attr_storage.ss_enable_dorado)
+#define ENABLE_SS_BCAST_GETOLDESTXMIN                                    \
+    (g_instance.attr.attr_storage.dms_attr.enable_bcast_getoldestxmin && \
+        !g_instance.attr.attr_storage.ss_enable_dorado)
 #define SS_SINGLE_CLUSTER (ENABLE_DMS && !g_instance.attr.attr_storage.ss_enable_dorado)
 #endif
 
@@ -161,7 +166,8 @@
 #define SS_AM_WORKER  (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)
 
 typedef enum SSBroadcastOp {
-    BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
+    BCAST_GET_XMIN = 0,
+    BCAST_CANCEL_TRX_FOR_SWITCHOVER,
     BCAST_SI,
     BCAST_SEGDROPTL,
     BCAST_DROP_REL_ALL_BUFFER,
@@ -179,7 +185,8 @@ typedef enum SSBroadcastOp {
 } SSBroadcastOp;
 
 typedef enum SSBroadcastOpAck {
-    BCAST_CANCEL_TRX_ACK = 0,
+    BCAST_GET_XMIN_ACK = 0,
+    BCAST_CANCEL_TRX_ACK,
     BCAST_CHECK_DB_BACKENDS_ACK,
     BCAST_ACK_END
 } SSBroadcastOpAck;

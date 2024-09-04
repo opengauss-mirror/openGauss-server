@@ -137,10 +137,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -161,15 +161,15 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
 ERROR:  the size of init_vector must be greater than or equal to 16.
 CONTEXT:  referenced column: aes_encrypt
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
-       aes_encrypt       
--------------------------
- 8\x01MP\x1Fe3\x0F \x08`
+    aes_encrypt     
+--------------------
+ 8\x01MP\x1Fe3\x0F`
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
-       aes_encrypt       
--------------------------
- 8\x01MP\x1Fe3\x0F \x08`
+    aes_encrypt     
+--------------------
+ 8\x01MP\x1Fe3\x0F`
 (1 row)
 
 select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
@@ -277,10 +277,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -417,10 +417,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -557,10 +557,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -611,9 +611,9 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = 
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
-        aes_encrypt        
----------------------------
-  $+&+\x074uC\x08\x1CK\x1E
+     aes_encrypt      
+----------------------
+  $+&+\x074u\x1CK\x1E
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
@@ -697,10 +697,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -837,10 +837,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -977,10 +977,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1117,10 +1117,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1257,10 +1257,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1281,15 +1281,15 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
 ERROR:  the size of init_vector must be greater than or equal to 16.
 CONTEXT:  referenced column: aes_encrypt
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
-      aes_encrypt      
------------------------
- hJ#\x0E\x1A\x01跟uGfG
+    aes_encrypt    
+-------------------
+ hJ#\x0E\x01跟uGfG
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
-      aes_encrypt      
------------------------
- hJ#\x0E\x1A\x01跟uGfG
+    aes_encrypt    
+-------------------
+ hJ#\x0E\x01跟uGfG
 (1 row)
 
 select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
@@ -1397,10 +1397,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1537,10 +1537,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1561,15 +1561,15 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
 ERROR:  the size of init_vector must be greater than or equal to 16.
 CONTEXT:  referenced column: aes_encrypt
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
-    aes_encrypt    
--------------------
- p\x1A\x05pg\x17R®
+  aes_encrypt  
+---------------
+ p\x05pg\x17R®
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
-    aes_encrypt    
--------------------
- p\x1A\x05pg\x17R®
+  aes_encrypt  
+---------------
+ p\x05pg\x17R®
 (1 row)
 
 select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
@@ -1677,10 +1677,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1701,15 +1701,15 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
 ERROR:  the size of init_vector must be greater than or equal to 16.
 CONTEXT:  referenced column: aes_encrypt
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
-      aes_encrypt      
------------------------
- hJ#\x0E\x1A\x01跟uGfG
+    aes_encrypt    
+-------------------
+ hJ#\x0E\x01跟uGfG
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
-      aes_encrypt      
------------------------
- hJ#\x0E\x1A\x01跟uGfG
+    aes_encrypt    
+-------------------
+ hJ#\x0E\x01跟uGfG
 (1 row)
 
 select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
@@ -1817,10 +1817,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1957,10 +1957,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
@@ -1981,15 +1981,15 @@ select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
 ERROR:  the size of init_vector must be greater than or equal to 16.
 CONTEXT:  referenced column: aes_encrypt
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
-    aes_encrypt    
--------------------
- p\x1A\x05pg\x17R®
+  aes_encrypt  
+---------------
+ p\x05pg\x17R®
 (1 row)
 
 select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
-    aes_encrypt    
--------------------
- p\x1A\x05pg\x17R®
+  aes_encrypt  
+---------------
+ p\x05pg\x17R®
 (1 row)
 
 select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
@@ -2097,10 +2097,10 @@ select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef
 (1 row)
 
 select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
-         aes_decrypt          
-------------------------------
- d                           +
- sa      dj\x08safZ\dssaca\rs
+       aes_decrypt       
+-------------------------
+ d                      +
+ sa      dsafZ\dssaca\rs
 (1 row)
 
 select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');

@@ -1136,7 +1136,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     bits8 *bp = tup->data;  /* ptr to null bitmap in tuple */
     bool slow = false;      /* do we have to walk attrs? */
     int hoff = tup->t_hoff; /* header length on tuple data */
-    int off = hoff;                /* current offset within data */
+    int off = hoff;         /* current offset within data */
     bool hasnulls = UHeapDiskTupHasNulls(tup);
 
     /* ----------------

@@ -94,6 +94,8 @@ static void ValidateReplicationSlot(char *slotname, List *publications);
 static List *fetch_table_list(List *publications);
 static void ReportSlotConnectionError(List *rstates, Oid subid, char *slotname);
 static bool CheckPublicationsExistOnPublisher(List *publications);
+static bool CheckCompatibilityForDDLPublications(const char* conninfo, List *publications);
+static bool CheckDDLPublicationsExists(List *publications);
 
 /*
  * Common option parsing function for CREATE and ALTER SUBSCRIPTION commands.
@@ -617,6 +619,14 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
 
+        if (!CheckCompatibilityForDDLPublications(encryptConninfo, publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+            ereport(
+                ERROR,
+                (errmsg(
+                    "There are some publications replicate ddl but dbcompatibility is different with subscriptor")));
+        }
+
         /*
          * If requested, create the replication slot on remote side for our
          * newly created subscription.
@@ -1007,6 +1017,15 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
+
+        if (!CheckCompatibilityForDDLPublications(encryptConninfo, opts.publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+            ereport(
+                ERROR,
+                (errmsg(
+                    "There are some publications replicate ddl but dbcompatibility is different with subscriptor")));
+        }
+
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     }
 
@@ -1027,6 +1046,14 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
         if (!CheckPublicationsExistOnPublisher(opts.publications)) {
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
             ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
+        }
+
+        if (!CheckCompatibilityForDDLPublications(encryptConninfo, opts.publications)) {
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+            ereport(
+                ERROR,
+                (errmsg(
+                    "There are some publications replicate ddl but dbcompatibility is different with subscriptor")));
         }
 
         if (createSlot) {
@@ -1711,6 +1738,139 @@ static bool CheckPublicationsExistOnPublisher(List *publications)
     }
     bool exists = false;
     if (tuplestore_get_memtupcount(res->tuplestore) == list_length(publications)) {
+        exists = true;
+    }
+
+    walrcv_clear_result(res);
+
+    return exists;
+}
+
+
+static bool CheckCompatibilityForDDLPublications(const char* conninfo, List *publications)
+{
+    Assert(list_length(publications) > 0);
+    bool checkres = false;
+    char *datname = NULL;
+    List* conninfoList = ConninfoToDefList(conninfo);
+    ListCell* l = NULL;
+    foreach (l, conninfoList) {
+        DefElem* defel = (DefElem*)lfirst(l);
+        if (pg_strcasecmp(defel->defname, "dbname") == 0) {
+            datname = defGetString(defel);
+        }
+    }
+
+    if (!datname) {
+        ereport(ERROR, (errmsg("Failed to get dbname from the conninfo.")));
+    }
+
+    StringInfoData cmd;
+    initStringInfo(&cmd);
+    appendStringInfo(&cmd,
+        "SELECT d.datcompatibility FROM pg_catalog.pg_attribute a JOIN pg_database d "
+        "ON a.attrelid=pg_catalog.regclass('pg_publication') AND a.attname='pubddl' "
+        "AND d.datname='%s'",
+        datname);
+
+    WalRcvExecResult *res;
+    Oid tableRow[1] = {NAMEOID};
+    res = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_exec(cmd.data, 1, tableRow);
+
+    FreeStringInfo(&cmd);
+    ClearListContent(conninfoList);
+    list_free_ext(conninfoList);
+
+    if (res->status != WALRCV_OK_TUPLES) {
+        ereport(ERROR, (errmsg("Failed to get publication datcompatibility from the publisher.")));
+    }
+
+    if (tuplestore_get_memtupcount(res->tuplestore) > 0) {
+        checkres = true;
+        char *datcompatibility = NULL;
+        bool isnull = false;
+        int expected_db_cmpt = u_sess->attr.attr_sql.sql_compatibility;
+        TupleTableSlot *slot = MakeSingleTupleTableSlot(res->tupledesc);
+        if (tuplestore_gettupleslot(res->tuplestore, true, false, slot)) {
+            Datum datum = tableam_tslot_getattr(slot, 1, &isnull);
+            Assert(!isnull);
+
+            datcompatibility = pstrdup(NameStr(*(DatumGetName(datum))));
+
+            switch (expected_db_cmpt) {
+                case A_FORMAT:
+                    checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_A].name);
+                    break;
+                case B_FORMAT:
+                    checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_B].name);
+                    break;
+                case C_FORMAT:
+                    checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_C].name);
+                    break;
+                case PG_FORMAT:
+                    checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_PG].name);
+                    break;
+                default:
+                    checkres = false;
+            }
+
+            ExecClearTuple(slot);
+            walrcv_clear_result(res);
+            pfree(datcompatibility);
+
+            /* now check if the publications have ddl publications
+             * if there is no ddl replication, the different dbcompatibility
+             * is acceptable
+             */
+            if (!checkres) {
+                if (!CheckDDLPublicationsExists(publications)) {
+                    checkres = true;
+                }
+            }
+        } else {
+            /* can not get tupleslot */
+            checkres = false;
+        }
+    } else {
+        /* there is no pubddl column in pg_publication,
+         * maybe publisher have not support ddl replication yet
+         */
+        walrcv_clear_result(res);
+        checkres = true;
+    }
+
+    return checkres;
+}
+
+static bool CheckDDLPublicationsExists(List *publications)
+{
+    StringInfoData cmd;
+    initStringInfo(&cmd);
+    appendStringInfo(&cmd, "SELECT 1 FROM pg_catalog.pg_publication t"
+                        " WHERE t.pubddl != 0 AND t.pubname IN (");
+    ListCell *lc;
+    bool first  = true;
+    foreach (lc, publications) {
+        char *pubname = strVal(lfirst(lc));
+        if (first) {
+            first = false;
+        } else {
+            appendStringInfoString(&cmd, ", ");
+        }
+        appendStringInfo(&cmd, "%s", quote_literal_cstr(pubname));
+    }
+    appendStringInfoString(&cmd, ")");
+
+    WalRcvExecResult *res;
+    Oid tableRow[1] = {INT4OID};
+    res = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_exec(cmd.data, 1, tableRow);
+    FreeStringInfo(&cmd);
+
+    if (res->status != WALRCV_OK_TUPLES) {
+        ereport(ERROR, (errmsg("Failed to get DDL publication list from the publisher.")));
+    }
+    bool exists = false;
+    if (tuplestore_get_memtupcount(res->tuplestore) > 0) {
         exists = true;
     }
 

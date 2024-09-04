@@ -281,10 +281,13 @@ void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Transa
     ItemPointerSetOffsetNumber(&target_tid, xlrec->offnum);
 
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-    if (maxoff >= xlrec->offnum)
+    if (maxoff >= xlrec->offnum) {
         lp = PageGetItemId(page, xlrec->offnum);
+    } else {
+        PagePrintErrorInfo(page, "The max offset number is invalid");
+    }
 
-    if (maxoff < xlrec->offnum || !ItemIdIsNormal(lp))
+    if (!ItemIdIsNormal(lp))
         ereport(PANIC, (errmsg("heap_delete_redo: invalid lp")));
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
@@ -371,8 +374,9 @@ void HeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool i
 
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
 
-    if (maxoff + 1 < xlrec->offnum)
-        ereport(PANIC, (errmsg("heap_insert_redo: invalid max offset number")));
+    if (maxoff + 1 < xlrec->offnum) {
+        PagePrintErrorInfo(page, "The max offset number is invalid");
+    }
 
     newlen = datalen - SizeOfHeapHeader;
     Assert(datalen > SizeOfHeapHeader && newlen <= MaxHeapTupleSize);
@@ -394,8 +398,9 @@ void HeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool i
     HeapTupleHeaderSetCmin(htup, FirstCommandId);
     htup->t_ctid = target_tid;
 
-    if (PageAddItem(page, (Item)htup, newlen, xlrec->offnum, true, true) == InvalidOffsetNumber)
-        ereport(PANIC, (errmsg("heap_insert_redo: failed to add tuple")));
+    if (PageAddItem(page, (Item)htup, newlen, xlrec->offnum, true, true) == InvalidOffsetNumber) {
+        PagePrintErrorInfo(page, "heap_insert_redo: failed to add tuple");
+    }
 
     if (freespace != NULL) {
         *freespace = PageGetHeapFreeSpace(page);
@@ -473,8 +478,9 @@ void HeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, const void *recored
             offnum = xlrec->offsets[i];
 
         maxoff = PageGetMaxOffsetNumber(page);
-        if (maxoff + 1 < offnum)
-            ereport(PANIC, (errmsg("heap_multi_insert_redo: invalid max offset number")));
+        if (maxoff + 1 < offnum) {
+            PagePrintErrorInfo(page, "heap_multi_insert_redo: The max offset number is invalid");
+        }
 
         xlhdr = (xl_multi_insert_tuple *)SHORTALIGN(tupdata);
         tupdata = ((char *)xlhdr) + SizeOfMultiInsertTuple;
@@ -499,11 +505,13 @@ void HeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, const void *recored
         ItemPointerSetOffsetNumber(&htup->t_ctid, offnum);
 
         offnum = PageAddItem(page, (Item)htup, newlen, offnum, true, true);
-        if (offnum == InvalidOffsetNumber)
-            ereport(PANIC, (errmsg("heap_multi_insert_redo: failed to add tuple")));
+        if (offnum == InvalidOffsetNumber) {
+            PagePrintErrorInfo(page, "heap_multi_insert_redo: failed to add tuple");
+        }
     }
-    if (tupdata != endptr)
-        ereport(PANIC, (errmsg("heap_multi_insert_redo: total tuple length mismatch")));
+    if (tupdata != endptr) {
+        PagePrintErrorInfo(page, "heap_multi_insert_redo: total tuple length mismatch");
+    }
     if (freespace != NULL) {
         *freespace = PageGetHeapFreeSpace(page); /* needed to update FSM below */
     }
@@ -537,11 +545,15 @@ void HeapXlogUpdateOperatorOldpage(RedoBufferInfo *buffer, void *recoreddata, bo
     ItemPointerSet(&newtid, newblk, xlrec->new_offnum);
 
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-    if (maxoff >= xlrec->old_offnum)
+    if (maxoff >= xlrec->old_offnum) {
         lp = PageGetItemId(page, xlrec->old_offnum);
+    } else {
+        PagePrintErrorInfo(page, "The max offset number is invalid");
+    }
 
-    if (maxoff < xlrec->old_offnum || !ItemIdIsNormal(lp))
-        ereport(PANIC, (errmsg("heap_update_redo: invalid lp")));
+    if (!ItemIdIsNormal(lp)) {
+        PagePrintErrorInfo(page, "heap_update_redo: invalid lp");
+    }
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
@@ -653,8 +665,9 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
                                 newphdr->pd_special, xlrec->new_offnum, PageGetMaxOffsetNumber(page))));
     }
 
-    if (maxoff + 1 < xlrec->new_offnum)
-        ereport(PANIC, (errmsg("heap_update_redo: invalid max offset number")));
+    if (maxoff + 1 < xlrec->new_offnum) {
+        PagePrintErrorInfo(page, "heap_update_redo: invalid max offset number");
+    }
 
     Assert(tuplen <= MaxHeapTupleSize);
 
@@ -677,8 +690,9 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
     /* Make sure there is no forward chain link in t_ctid */
     htup->t_ctid = newtid;
 
-    if (PageAddItem(page, (Item)htup, newlen, xlrec->new_offnum, true, true) == InvalidOffsetNumber)
-        ereport(PANIC, (errmsg("heap_update_redo: failed to add tuple")));
+    if (PageAddItem(page, (Item)htup, newlen, xlrec->new_offnum, true, true) == InvalidOffsetNumber) {
+        PagePrintErrorInfo(page, "heap_update_redo: failed to add tuple");
+    }
 
     if (xlrec->flags & XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
@@ -755,11 +769,15 @@ void HeapXlogInplaceOperatorPage(RedoBufferInfo *buffer, void *recorddata, void 
         ereport(PANIC, (errmsg("heap_inplace_redo: no tuple data")));
     maxoff = PageGetMaxOffsetNumber(page);
 
-    if (maxoff >= xlrec->offnum)
+    if (maxoff >= xlrec->offnum) {
         lp = PageGetItemId(page, xlrec->offnum);
+    } else {
+        PagePrintErrorInfo(page, "The max offset number is invalid");
+    }
 
-    if (maxoff < xlrec->offnum || !ItemIdIsNormal(lp))
-        ereport(PANIC, (errmsg("heap_inplace_redo: invalid lp")));
+    if (!ItemIdIsNormal(lp)) {
+        PagePrintErrorInfo(page, "heap_inplace_redo: invalid lp");
+    }
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
@@ -1631,6 +1649,8 @@ XLogRecParseState *Heap3RedoParseToBlock(XLogReaderState *record, uint32 *blockn
         case XLOG_HEAP3_INVALID:
             recordblockstate = HeapXlogInvalidParseBlock(record, blocknum);
             break;
+        case XLOG_HEAP3_TRUNCATE:
+            break;
         default:
             ereport(PANIC, (errmsg("Heap3RedoParseToBlock: unknown op code %u", info)));
     }
@@ -1649,6 +1669,8 @@ void Heap3RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_HEAP3_INVALID:
             HeapXlogInvalidBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_HEAP3_TRUNCATE:
             break;
         default:
             ereport(PANIC, (errmsg("heap3_redo_block: unknown op code %u", info)));

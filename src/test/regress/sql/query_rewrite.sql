@@ -194,5 +194,47 @@ insert into table1 values(4,4);
 SELECT 1 FROM ( SELECT 1 FROM table1 WHERE NOT EXISTS ( SELECT 1 WHERE column63 = column44 ) ) AS alias1 ;
 drop table table1;
 
+--test for update + inlist to join bug
+reset all;
+set current_schema = query_rewrite;
+set qrw_inlist2join_optmode = 'rule_base';
+
+
+create table test_forupdate(a int,b int,c text);
+create table test_helper(a int, b int, c text);
+insert into test_forupdate values(1,1,'test');
+insert into test_helper values(1,1,'bbbtest');
+
+explain (costs off) select * from test_forupdate where a in (1,2,3,4, 5,6,7,8,9,10,11,12);
+select * from test_forupdate where a in(1,2,3,4,5,6,7,8,9,10,11,12);
+--can not inlist to join
+explain (costs off) select * from test_forupdate where a in (1,2,3,4,5,6,7,8,9,10,11,12) for update;
+select * from test_forupdate where a in (1,2,3,4,5,6,7,8,9,10,11,12) for update;
+--not target table,ok
+explain (costs off) select * from test_forupdate,test_helper where test_forupdate.a in (1,2,3,4,5,6,7,8,9,10,11,12) for update of test_helper;
+select * from test_forupdate,test_helper where test_forupdate.a in (1,2,3,4,5,6,7,8,9,10,11,12) for update of test_helper;
+--subquery,target table,ok
+explain (costs off) select * from (select * from test_forupdate limit 1) where a in (1,2,3,4,5,6,7,8,9,10,11,12) for update;
+select * from (select * from test_forupdate limit 1) where a in (1,2,3,4,5,6,7,8,9,10,11,12) for update;
+
+--test bug scene,concurrent update
+\parallel on 2
+begin
+	set qrw_inlist2join_optmode = 'rule_base';
+	perform pg_sleep(3);
+	perform c,a from test_forupdate where a in (1,2,3,4,5,6,7,8,9,10,11,12) for update;
+end;
+/
+
+begin
+	update test_forupdate set b=10 where a=1;
+	perform pg_sleep(3);
+end;
+/
+\parallel off
+drop table test_forupdate;
+drop table test_helper;
+reset qrw_inlist2join_optmode;
+
 drop schema query_rewrite cascade;
 reset current_schema;

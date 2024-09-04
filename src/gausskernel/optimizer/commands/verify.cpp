@@ -62,17 +62,17 @@ static void VerifyPartIndexRel(VacuumStmt* stmt, Relation rel, Relation partitio
 static void VerifyIndexRels(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
 static void VerifyIndexRel(VacuumStmt* stmt, Relation indexRel, VerifyDesc* checkCudesc = NULL);
 static void VerifyRowRels(VacuumStmt* stmt, Relation parentRel, Relation rel);
-static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL, ForkNumber forkNum = MAIN_FORKNUM);
-static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL, ForkNumber forkNum = MAIN_FORKNUM);
-static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc = NULL, ForkNumber forkNum = MAIN_FORKNUM);
-static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc = NULL, ForkNumber forkNum = MAIN_FORKNUM);
+static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
+static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
+static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc = NULL);
+static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc = NULL);
 static void VerifyColRels(VacuumStmt* stmt, Relation parentRel, Relation rel);
 static void VerifyColRel(VacuumStmt* stmt, Relation rel);
 static void VerifyColRelFast(Relation rel);
 static void VerifyColRelComplete(Relation rel);
 static void reportColVerifyFailed(
     Relation rel, bool isdesc = false, bool iscomplete = false, BlockNumber cuId = 0, int col = 0);
-static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, ForkNumber forkNum);
+static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, VerifyLevel level);
 /*
  * MainCatalogRelid is used to analyse verify the main system tables.
  */
@@ -1139,9 +1139,6 @@ static void VerifyIndexRel(VacuumStmt* stmt, Relation indexRel, VerifyDesc* chec
             relation_close(psortColRel, AccessShareLock);
         } else {
             VerifyRowRel(stmt, indexRel, checkCudesc);
-            if (RelationIsUstoreIndex(indexRel)) {
-                VerifyRowRel(stmt, indexRel, checkCudesc, FSM_FORKNUM);
-            }
         }
     }
     PG_CATCH();
@@ -1221,23 +1218,23 @@ static void VerifyRowRels(VacuumStmt* stmt, Relation parentRel, Relation rel)
  * @in&out checkCudesc - checkCudesc is a struct to judge whether cudesc tables is damaged.
  * @return: void
  */
-static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc, ForkNumber forkNum)
+static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc)
 {
     /* turn off the remote read and keep the old mode */
     int oldRemoteReadMode = SetRemoteReadModeOffAndGetOldMode();
     bool isValidRelationPage = true;
     Oid relid = RelationGetRelid(rel);
 
-    isValidRelationPage = VerifyRowRelFull(stmt, rel, checkCudesc, forkNum);
+    isValidRelationPage = VerifyRowRelFull(stmt, rel, checkCudesc);
     SetRemoteReadMode(oldRemoteReadMode);
 
     if (!isValidRelationPage && IsMainCatalogObjectForVerify(relid)) {
         ereport(FATAL,
             (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("The important catalog table %s.%s corrupts, the node is %s, forknum %d please fix it.",
+                errmsg("The important catalog table %s.%s corrupts, the node is %s, please fix it.",
                     get_namespace_name(RelationGetNamespace(rel)),
                     RelationGetRelationName(rel),
-                    g_instance.attr.attr_common.PGXCNodeName, forkNum),
+                    g_instance.attr.attr_common.PGXCNodeName),
                 handle_in_client(true)));
     }
 
@@ -1253,7 +1250,7 @@ static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc
  * @in&out checkCudesc - checkCudesc is a struct to judge whether cudesc tables is damaged.
  * @return: bool
  */
-static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber forkNum)
+static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
 {
     if (unlikely(rel == NULL)) {
         ereport(ERROR,
@@ -1267,9 +1264,8 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber f
     char* buf = (char*)palloc(BLCKSZ);
     BlockNumber nblocks;
     BlockNumber blkno;
-    
+    ForkNumber forkNum = MAIN_FORKNUM;
     bool isValidRelationPage = true;
-
     char* namespace_name = get_namespace_name(RelationGetNamespace(rel));
 
     RelationOpenSmgr(rel);
@@ -1302,7 +1298,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber f
                 /* Ustrore white-box verification adapt to analyze verify. */
                 if (rdStatus == SMGR_RD_OK) {
                     Page page = (char *) buf;
-                    VerifyUstorePage(rel, page, blkno, forkNum);
+                    VerifyUstorePage(rel, page, blkno, USTORE_VERIFY_FAST);
                 }
                 continue;
             }
@@ -1331,7 +1327,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber f
         } else if (rdStatus == SMGR_RD_OK) {
             /* Ustrore white-box verification adapt to analyze verify. */
             Page page = (char *) buf;
-            VerifyUstorePage(rel, page, blkno, forkNum);
+            VerifyUstorePage(rel, page, blkno, USTORE_VERIFY_FAST);
         }
     }
 
@@ -1348,7 +1344,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, ForkNumber f
  * @in&out checkCudesc - checkCudesc is a struct to judge whether cudesc tables is damaged.
  * @return: bool
  */
-static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc, ForkNumber forkNum)
+static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
 {
     if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
         return true;
@@ -1360,6 +1356,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc, ForkNumb
     Datum* values = NULL;
     bool* nulls = NULL;
     int numberOfAttributes = 0;
+    ForkNumber forkNum = MAIN_FORKNUM;
     bool isValidRelationPageFast = true;
     bool isValidRelationPageComplete = true;
     SMgrRelation smgrRel = NULL;
@@ -1376,23 +1373,25 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc, ForkNumb
     MemoryContext oldMemContext = MemoryContextSwitchTo(verifyRowMemContext);
 
     /* check page header and crc first */
-    isValidRelationPageFast = VerifyRowRelFast(rel, checkCudesc, forkNum);
+    isValidRelationPageFast = VerifyRowRelFast(rel, checkCudesc);
 
-    /* check all tuples of ustore relation. */
-    buf = (char*)palloc(BLCKSZ);
-    RelationOpenSmgr(rel);
-    smgrRel = rel->rd_smgr;
-    nblocks = smgrnblocks(smgrRel, forkNum);
-    for (BlockNumber blkno = 0; blkno < nblocks; blkno++) {
-        CHECK_FOR_INTERRUPTS();
-        SMGR_READ_STATUS rdStatus = smgrread(smgrRel, forkNum, blkno, buf);
-        if (rdStatus == SMGR_RD_OK) {
-            Page page = (char *) buf;
-            VerifyUstorePage(rel, page, blkno, forkNum);
+    if (RelationIsUstoreIndex(rel) || RelationIsUstoreFormat(rel)) {
+        /* check all tuples of ustore relation. */
+        buf = (char*)palloc(BLCKSZ);
+        RelationOpenSmgr(rel);
+        smgrRel = rel->rd_smgr;
+        nblocks = smgrnblocks(smgrRel, forkNum);
+        for (BlockNumber blkno = 0; blkno < nblocks; blkno++) {
+            CHECK_FOR_INTERRUPTS();
+            SMGR_READ_STATUS rdStatus = smgrread(smgrRel, forkNum, blkno, buf);
+            if (rdStatus == SMGR_RD_OK) {
+                Page page = (char *) buf;
+                VerifyUstorePage(rel, page, blkno, USTORE_VERIFY_COMPLETE);
+            }
         }
+        pfree_ext(buf);
     }
-    pfree_ext(buf);
-
+    
     if (rel->rd_rel->relkind == RELKIND_RELATION || rel->rd_rel->relkind == RELKIND_TOASTVALUE) {
         /* check the tuple */
         tupleDesc = RelationGetDescr(rel);
@@ -1484,9 +1483,9 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc, ForkNumb
     return (isValidRelationPageFast && isValidRelationPageComplete);
 }
 
-static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc, ForkNumber forkNum)
+static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc)
 {
-    bool (*verifyfunc)(Relation, VerifyDesc*, ForkNumber);
+    bool (*verifyfunc)(Relation, VerifyDesc*);
     Relation bucketRel = NULL;
 
     if ((unsigned int)stmt->options & VACOPT_FAST) {
@@ -1503,7 +1502,7 @@ static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCu
         Assert(checkCudesc == NULL);
         for (int i = 0; i < bucketlist->dim1; i++) {
             bucketRel = bucketGetRelation(rel, NULL, bucketlist->values[i]);
-            if (verifyfunc(bucketRel, NULL, forkNum) == false) {
+            if (verifyfunc(bucketRel, NULL) == false) {
                 bucketCloseRelation(bucketRel);
                 return false;
             }
@@ -1511,7 +1510,7 @@ static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCu
         }
         return true;
     } else
-        return verifyfunc(rel, checkCudesc, forkNum);
+        return verifyfunc(rel, checkCudesc);
 }
 
 
@@ -1882,31 +1881,25 @@ void VerifyAbortBufferIO(void)
     }
 }
 
-static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, ForkNumber forkNum)
+static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, VerifyLevel level)
 {
     if (!RelationIsUstoreIndex(rel) && !RelationIsUstoreFormat(rel)) {
         return;
     }
-    bool temp = false;
-    BEGIN_SAVE_VERIFY(temp);
-    PG_TRY(); 
+    int prevLevel = u_sess->attr.attr_storage.ustore_verify_level;
+    u_sess->attr.attr_storage.ustore_verify_level = level;    
+    PG_TRY();
     {
         if (RelationIsUstoreIndex(rel)) {
-            if (forkNum == MAIN_FORKNUM && blkno != 0) {
-                UBTreeVerifyAll(rel, page, blkno, InvalidOffsetNumber, false);
-            } else if (forkNum == FSM_FORKNUM) {
-                UBTRecycleQueueVerifyPageOffline(rel, page, blkno);
-            }
+            UBTreeVerify(rel, page, blkno);
         } else {
-            UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel);
+            UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, rel, NULL, blkno);
         }
-        
     }
     PG_CATCH();
     {
-        END_SAVE_VERIFY(temp)
-        PG_RE_THROW();
+        u_sess->attr.attr_storage.ustore_verify_level = prevLevel;
     }
     PG_END_TRY();
-    END_SAVE_VERIFY(temp);
+    u_sess->attr.attr_storage.ustore_verify_level = prevLevel;
 }

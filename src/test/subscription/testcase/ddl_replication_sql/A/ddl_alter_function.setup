@@ -1,0 +1,9 @@
+#!/bin/sh
+
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+exec_sql_with_user $case_use_db $pub_node1_port "CREATE USER regtest_unpriv_user PASSWORD 'gauss@123'"
+
+exec_sql_with_user $case_use_db $sub_node1_port "CREATE USER regtest_unpriv_user PASSWORD 'gauss@123'"

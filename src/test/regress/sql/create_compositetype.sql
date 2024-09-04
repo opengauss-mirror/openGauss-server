@@ -114,6 +114,19 @@ select * from t_type1;
 drop table t_type1;
 drop type comp1;
 
+create type comp1 as(c1 char(10), c2 varchar(100), c3 text, c4 clob);
+create table t_type1(a serial, b comp1);
+set behavior_compat_options='';
+insert into t_type1(b) values(('','','',''));
+select * from t_type1;
+delete from t_type1;
+set behavior_compat_options='accept_empty_str';
+insert into t_type1(b) values(('','','',''));
+select * from t_type1;
+reset behavior_compat_options;
+drop table t_type1;
+drop type comp1;
+
 --date/time type
 create type comp1 as(c1 date, c2 timestamp with time zone, c3 INTERVAL DAY(3) TO SECOND (4));
 create table t_type1(a serial, b comp1) ;

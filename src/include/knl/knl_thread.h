@@ -2800,6 +2800,7 @@ typedef struct knl_t_storage_context {
     volatile bool lockwait_timeout_active;
     volatile int deadlock_state;
     volatile bool cancel_from_timeout;
+    struct timeval timer_continued;
     /* timeout_start_time is set when log_lock_waits is true */
     TimestampTz timeout_start_time;
     /* statement_fin_time is valid only if statement_timeout_active is true */
@@ -3640,6 +3641,11 @@ inline void StreamTopConsumerIam()
 inline bool StreamTopConsumerAmI()
 {
     return (t_thrd.subrole == TOP_CONSUMER);
+}
+
+inline bool WorkerThreadAmI()
+{
+    return (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER);
 }
 
 inline bool WLMThreadAmI()

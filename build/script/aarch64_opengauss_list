@@ -48,6 +48,7 @@
 ./bin/gs_plan_simulator.sh
 ./bin/pg_xlogdump
 ./bin/pagehack
+./bin/pg_archivecleanup
 ./bin/gs_assessment
 ./bin/gs_retrieve
 ./etc/kerberos/kadm5.acl  
@@ -78,7 +79,7 @@
 ./share/postgresql/extension/timescaledb.control
 ./share/postgresql/extension/timescaledb--1.7.4.sql
 ./share/postgresql/extension/dolphin.control
-./share/postgresql/extension/dolphin--4.0.sql
+./share/postgresql/extension/dolphin--5.0.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
 ./share/postgresql/extension/dolphin--1.1--1.0.sql
 ./share/postgresql/extension/dolphin--1.1--2.0.sql
@@ -87,8 +88,12 @@
 ./share/postgresql/extension/dolphin--3.0--2.0.sql
 ./share/postgresql/extension/dolphin--3.0--4.0.sql
 ./share/postgresql/extension/dolphin--4.0--3.0.sql
+./share/postgresql/extension/dolphin--4.0--5.0.sql
+./share/postgresql/extension/dolphin--5.0--4.0.sql
 ./share/postgresql/extension/dolphin--2.0--2.0.1.sql
 ./share/postgresql/extension/dolphin--2.0.1--2.0.sql
+./share/postgresql/extension/dolphin--4.0--4.0.1.sql
+./share/postgresql/extension/dolphin--4.0.1--4.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/age--1.0.0.sql
 ./share/postgresql/extension/age.control

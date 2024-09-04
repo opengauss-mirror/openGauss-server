@@ -84,4 +84,23 @@ set enable_auto_explain = off;
 explain (costs off) select a, cursor(select * from t1) from t1 limit 10;
 select a, cursor(select * from t1) from t1 limit 10;
 
+-- smp hint in cursor expr among plpgsql does not work
+set enable_auto_explain = on;
+set auto_explain_level = notice;
+-- test plan hint in cursor expression
+DECLARE CURSOR c1 IS SELECT a, CURSOR(SELECT /*+ set(query_dop 1002) */ * FROM t1) abc FROM t1;
+  id int;	
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  tmp t1%rowtype;
+BEGIN
+  OPEN c1;
+  fetch c1 into id,c2;
+  fetch c2 into tmp;
+  close c2;
+  CLOSE c1;
+END;
+/
+set enable_auto_explain = off;
+
 drop schema smp_cursor cascade;

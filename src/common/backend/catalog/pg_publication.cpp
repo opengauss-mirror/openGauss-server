@@ -144,6 +144,7 @@ static Publication *GetPublication(Oid pubid)
     pub->pubactions.pubinsert = pubform->pubinsert;
     pub->pubactions.pubupdate = pubform->pubupdate;
     pub->pubactions.pubdelete = pubform->pubdelete;
+    pub->pubactions.pubtruncate = pubform->pubtruncate;
     pub->pubactions.pubddl = pubform->pubddl;
     ReleaseSysCache(tup);
 

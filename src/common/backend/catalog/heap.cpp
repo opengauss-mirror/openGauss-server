@@ -1284,6 +1284,10 @@ void InsertPgClassTuple(
     else
         values[Anum_pg_class_relreplident - 1] = REPLICA_IDENTITY_NOTHING;
 
+    if (new_rel_desc->relreplident && new_rel_desc->relreplident != REPLICA_IDENTITY_NOTHING) {
+        values[Anum_pg_class_relreplident - 1] = new_rel_desc->relreplident;
+    }
+
     if (OidIsValid(new_rel_desc->rd_bucketoid)) {
         Assert(new_rel_desc->storage_type == SEGMENT_PAGE);
         values[Anum_pg_class_relbucket - 1] = ObjectIdGetDatum(new_rel_desc->rd_bucketoid);
@@ -2590,6 +2594,15 @@ static Datum AddSegmentOption(Datum relOptions)
     return transformRelOptions((Datum)0, optsList, NULL, NULL, false, false);
 }
 
+static Datum AddRelrewriteOption(Datum relOptions, Oid relrewrite)
+{
+    DefElem *def = makeDefElem(pstrdup("relrewrite"), (Node *)makeInteger(relrewrite));
+    List* optsList = untransformRelOptions(relOptions);
+    optsList = lappend(optsList, def);
+
+    return transformRelOptions((Datum)0, optsList, NULL, NULL, false, false);
+}
+
 Node* GetColumnRef(Node* key, bool* isExpr, bool* isFunc)
 {
     Node* result = NULL;
@@ -2680,7 +2693,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
                              int oidinhcount, OnCommitAction oncommit, Datum reloptions, bool use_user_acl,
                              bool allow_system_table_mods, PartitionState *partTableState, int8 row_compress,
                              HashBucketInfo *bucketinfo, bool record_dependce, List *ceLst, StorageType storage_type,
-                             LOCKMODE partLockMode, ObjectAddress *typaddress, List* depend_extend)
+                             LOCKMODE partLockMode, ObjectAddress *typaddress, List* depend_extend, Oid relrewrite)
 {
     Relation pg_class_desc;
     Relation new_rel_desc;
@@ -2879,6 +2892,10 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         relhasbucket = true;
     }
 
+    if (OidIsValid(relrewrite)) {
+        reloptions = AddRelrewriteOption(reloptions, relrewrite);
+    }
+
     /* Get tableAmType from reloptions and relkind */
     bytea* hreloptions = heap_reloptions(relkind, reloptions, false);
     TableAmType tam = get_tableam_from_reloptions(hreloptions, relkind, InvalidOid);
@@ -2923,6 +2940,12 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         indexsplit,
         storage_type
     );
+
+    if (OidIsValid(relrewrite)) {
+        Relation OldHeap = heap_open(relrewrite, AccessExclusiveLock);
+        new_rel_desc->relreplident = OldHeap->relreplident;
+        heap_close(OldHeap, AccessExclusiveLock);
+    }
 
     /* Recode the table or other object in pg_class create time. */
     PgObjectType objectType = GetPgObjectTypePgClass(relkind);

@@ -207,6 +207,7 @@ EState* CreateExecutorState()
     estate->cur_insert_autoinc = 0;
     estate->next_autoinc = 0;
     estate->es_is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
+    estate->compileCodegen = false;
     /*
      * Return the executor state structure
      */
@@ -2150,16 +2151,6 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 continue;
             }
         }
-
-#ifdef USE_ASSERT_CHECKING
-        if (ispartitionedtable && RelationIsGlobalIndex(indexRelation)) {
-            if (RelationIsUstoreFormat(heapRelation)) {
-                Assert(((UHeapTuple)slot->tts_tuple)->table_oid != InvalidOid);
-            } else {
-                Assert(((HeapTuple)slot->tts_tuple)->t_tableOid != InvalidOid);
-            }
-        }        
-#endif
 
         /*
          * FormIndexDatum fills in its values and isnull parameters with the

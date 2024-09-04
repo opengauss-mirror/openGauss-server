@@ -23,3 +23,38 @@ create table IF NOT EXISTS skiplocked_t3(
 )with (ORIENTATION=COLUMN);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "skiplocked_t3_pkey" for table "skiplocked_t3"
 insert into skiplocked_t3 values (1, 'one');
+-- test skiplocked with inherited table
+drop table if exists skiplocked_inherits_1,skiplocked_inherits_2;
+NOTICE:  table "skiplocked_inherits_1" does not exist, skipping
+NOTICE:  table "skiplocked_inherits_2" does not exist, skipping
+create table skiplocked_inherits_1(
+    id int unique,
+    a1 jsonb check(a1!='{}')
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "skiplocked_inherits_1_id_key" for table "skiplocked_inherits_1"
+CREATE TABLE skiplocked_inherits_2 (
+    a2 jsonb default '{"name": "John", "age": 30}',
+    a3 jsonb not null
+) INHERITS (skiplocked_inherits_1);
+insert into skiplocked_inherits_2 values(1,'{"name":"test1"}','{"id":1001}','[null,"aaa"]');
+insert into skiplocked_inherits_2 values(2,'{"name":"test2"}',default,'["true"]');
+insert into skiplocked_inherits_2 values(3,'{"name":"test3"}','{"id":1003}','["a", {"b":1,"name": "John", "age": 30}]');
+insert into skiplocked_inherits_2 values(4,'{"name":"test"}',default,'["null","T"]');
+select * from skiplocked_inherits_1 order by id;
+ id |        a1         
+----+-------------------
+  1 | {"name": "test1"}
+  2 | {"name": "test2"}
+  3 | {"name": "test3"}
+  4 | {"name": "test"}
+(4 rows)
+
+select * from skiplocked_inherits_2 order by id;
+ id |        a1         |             a2              |                     a3                     
+----+-------------------+-----------------------------+--------------------------------------------
+  1 | {"name": "test1"} | {"id": 1001}                | [null, "aaa"]
+  2 | {"name": "test2"} | {"age": 30, "name": "John"} | ["true"]
+  3 | {"name": "test3"} | {"id": 1003}                | ["a", {"b": 1, "age": 30, "name": "John"}]
+  4 | {"name": "test"}  | {"age": 30, "name": "John"} | ["null", "T"]
+(4 rows)
+

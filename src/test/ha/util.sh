@@ -556,3 +556,8 @@ function stop_streaming_cluster(){
   stop_standby3
   stop_standby4
 }
+
+function startwalrcv_standby() {
+    echo "start walrcv"
+    gs_ctl startwalrcv -D $data_dir/datanode1_standby
+}

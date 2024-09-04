@@ -26,6 +26,7 @@
 
 #include <stdlib.h>
 #include <stdarg.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,7 +35,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           162
+#define DMS_LOCAL_VERSION           167
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -60,15 +61,11 @@ extern "C" {
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
 #define DMS_LOG_PATH_LEN        (256)
+#define DMS_CMD_DESC_LEN        64
 
 // The values of the following two macros must be same with (GS_MAX_XA_BASE16_GTRID_LEN GS_MAX_XA_BASE16_BQUAL_LEN)
 #define DMS_MAX_XA_BASE16_GTRID_LEN    (128)
 #define DMS_MAX_XA_BASE16_BQUAL_LEN    (128)
-
-#define DB_FI_ENTRY_BEGIN        10000
-#define DB_FI_ENTRY_COUNT        1024
-#define FI_ENTRY_END (DB_FI_ENTRY_BEGIN + DB_FI_ENTRY_COUNT)
-#define MAX_FI_ENTRY_COUNT       2000
 
 #define MAX_DMS_THREAD_NUM       512
 
@@ -617,6 +614,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_REQ_CKPT,
     DMS_EVT_PROC_GENERIC_REQ,
     DMS_EVT_PROC_REFORM_REQ,
+    DMS_EVT_DCS_TRANSTER_PAGE_LSNDWAIT,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -805,8 +803,6 @@ typedef struct st_dms_msg_stats {
     dms_stat_by_cmd_t stat_cmd[DMS_STAT_CMD_COUNT];
 } dms_msg_stats_t;
 
-typedef struct dms_fi_entry dms_fi_entry;
-typedef int(*dms_fi_callback_func)(const dms_fi_entry *entry, va_list args);
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
     unsigned long long list_in, unsigned int save_ctrl);
@@ -840,14 +836,16 @@ typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *buf_ctrl, dms_buf_
 typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
-typedef void(*dms_update_node_lfn)(void *db_handle, unsigned long long lfn, char node_id);
+typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn,
+    unsigned long long *node_data, unsigned int len);
 typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *buf_ctrl, unsigned long long lastest_lfn);
 typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *buf_ctrl);
 typedef unsigned long long (*dms_get_page_scn)(dms_buf_ctrl_t *buf_ctrl);
 typedef unsigned long long(*dms_get_global_lfn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
-typedef unsigned long long(*dms_get_global_flushed_lfn)(void *db_handle);
+typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn,
+    unsigned long long *node_data, unsigned int len);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
     dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
@@ -896,6 +894,7 @@ typedef void (*dms_log_output)(dms_log_id_t log_type, dms_log_level_t log_level,
     unsigned int code_line_num, const char *module_name, const char *format, ...);
 typedef int (*dms_log_flush)(void *db_handle, unsigned long long *lsn);
 typedef int (*dms_log_conditional_flush)(void *db_handle, unsigned long long lfn, unsigned long long *lsn);
+typedef void (*dms_lsnd_wait)(void *db_handle,  unsigned long long lfn);
 typedef int(*dms_process_edp)(void *db_handle, dms_edp_info_t *pages, unsigned int count);
 typedef void (*dms_clean_ctrl_edp)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
 typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char *pageid);
@@ -979,6 +978,8 @@ typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_l
 typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
 typedef int (*dms_standby_stop_thread)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
 typedef int (*dms_standby_reload_node_ctrl)(void *db_handle);
+typedef int (*dms_standby_stop_server)(void *db_handle);
+typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
@@ -1100,6 +1101,7 @@ typedef struct st_dms_callback {
     dms_log_output log_output;
     dms_log_flush log_flush;
     dms_log_conditional_flush log_conditional_flush;
+    dms_lsnd_wait lsnd_wait;
     dms_process_edp ckpt_edp;
     dms_process_edp clean_edp;
     dms_ckpt_session ckpt_session;
@@ -1168,6 +1170,8 @@ typedef struct st_dms_callback {
     dms_standby_update_remove_node_ctrl standby_update_remove_node_ctrl;
     dms_standby_stop_thread standby_stop_thread;
     dms_standby_reload_node_ctrl standby_reload_node_ctrl;
+    dms_standby_stop_server standby_stop_server;
+    dms_standby_resume_server standby_resume_server;
     dms_start_lrpl start_lrpl;
     dms_stop_lrpl stop_lrpl;
 
@@ -1196,12 +1200,6 @@ typedef struct st_dms_instance_net_addr {
     unsigned char need_connect;
     unsigned char reserved[1];
 } dms_instance_net_addr_t;
-
-typedef struct dms_fi_config {
-    unsigned int entries[MAX_FI_ENTRY_COUNT];
-    unsigned int count;
-    unsigned int fault_value;
-} dms_fi_config_t;
 
 typedef struct st_dms_profile {
     unsigned int inst_id;
@@ -1310,23 +1308,17 @@ typedef enum en_reform_callback_stat {
     REFORM_CALLBACK_STAT_GET_DATAFILE_SIZE,
     REFORM_CALLBACK_STAT_OPEN_CTRLFILE,
     REFORM_CALLBACK_STAT_GET_CTRLFILE_SIZE,
+    REFORM_CALLBACK_STAT_OPEN_DW_FILE,
+    REFORM_CALLBACK_STAT_READ_DW_FILE,
+    REFORM_CALLBACK_STAT_CHECK_REDO,
+    REFORM_CALLBACK_STAT_SPC_DW_FLUSH,
     REFORM_CALLBACK_STAT_COUNT
 } reform_callback_stat_e;
 
-typedef enum e_dms_fi_type {
-    DMS_FI_TYPE_BEGIN = 0,
-    DMS_FI_TYPE_PACKET_LOSS = DMS_FI_TYPE_BEGIN,
-    DMS_FI_TYPE_NET_LATENCY,
-    DMS_FI_TYPE_CPU_LATENCY,
-    DMS_FI_TYPE_PROCESS_FAULT,
-    DMS_FI_TYPE_CUSTOM_FAULT,
-    DMS_FI_TYPE_END,
-} dms_fi_type_e;
-
 typedef enum en_db_call_dms_trigger_fi_point_name {
-    // call in db, trigger in dms, point range[10800, DB_FI_ENTRY_END]
+    // call in db, trigger in dms, point range[10800, 11024]
     DB_FI_CHANGE_STATUS_AFTER_TRANSFER_PAGE = 10800,
-    DB_FI_ENTRY_END = FI_ENTRY_END
+    DB_FI_ENTRY_END = 11024, // which should be <= DDES_FI_ENTRY_COUNT
 } db_call_dms_trigger_fi_point_name;
 
 typedef enum en_dms_call_db_trigger_fi_point_name {
@@ -1334,13 +1326,6 @@ typedef enum en_dms_call_db_trigger_fi_point_name {
     DMS_FI_TRIGGER_IN_DB_ENTRY_BEGIN = 800,
     DMS_FI_ENTRY_END
 } dms_call_db_trigger_fi_point_name;
-
-struct dms_fi_entry {
-    int pointId;
-    unsigned int faultFlags;
-    int calledCount;
-    dms_fi_callback_func func;
-};
 
 typedef struct st_dms_tlock_info {
     dms_drid_t resid;
@@ -1370,6 +1355,37 @@ typedef struct st_driver_ping_info {
     unsigned long long major_version;
     unsigned long long minor_version;
 } driver_ping_info_t;
+
+typedef struct st_mes_msg_info {
+    unsigned int cmd;
+    unsigned short sid;
+} mes_msg_info_t;
+
+typedef struct st_mes_worker_msg_stats_info {
+    unsigned char is_active;
+    unsigned int tid;
+    int priority;
+    unsigned long long get_msgitem_time;
+    unsigned long long msg_ruid;
+    unsigned int msg_src_inst;
+    mes_msg_info_t msg_info;
+    char msg_cmd_desc[DMS_CMD_DESC_LEN];
+} mes_worker_msg_stats_info_t;
+
+typedef struct st_mes_task_priority_stats_info {
+    int priority;
+    unsigned int worker_num;
+    unsigned long long inqueue_msgitem_num;
+    unsigned long long finished_msgitem_num;
+    unsigned long long msgitem_free_num;
+} mes_task_priority_stats_info_t;
+
+typedef struct st_mem_info_stat {
+    const char *area;
+    unsigned long long total;
+    unsigned long long used;
+    double used_percentage;
+} mem_info_stat_t;
 
 #ifdef __cplusplus
 }

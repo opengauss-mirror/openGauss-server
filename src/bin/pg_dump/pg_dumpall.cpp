@@ -310,6 +310,7 @@ int main(int argc, char* argv[])
         get_password_pipeline();
     }
 
+    init_audit(PROG_NAME, argc, argv);
     /* validate the optons values */
     validate_dumpall_options(argv);
 
@@ -571,6 +572,7 @@ int main(int argc, char* argv[])
     }
 
     write_msg(NULL, "dumpall operation successful\n");
+    audit_success();
 
     gettimeofday(&aes_end_time, NULL);
     total_time =

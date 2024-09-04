@@ -82,6 +82,7 @@ Datum lo_open(PG_FUNCTION_ARGS)
     CreateFSContext();
     lobjDesc = inv_open(lobjId, mode, u_sess->libpq_cxt.fscxt);
     if (lobjDesc == NULL) { /* lookup failed */
+        elog(DEBUG4, "could not open large object %u", lobjId);
         PG_RETURN_INT32(-1);
     }
 

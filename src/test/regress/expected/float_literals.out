@@ -1,0 +1,268 @@
+-- test float literals overflow in dbcompatibility A
+create database float_literals dbcompatibility 'A';
+\c float_literals
+SELECT 0.0;
+ ?column? 
+----------
+      0.0
+(1 row)
+
+SELECT -0.0;
+ ?column? 
+----------
+      0.0
+(1 row)
+
+SELECT 3.142596;
+ ?column? 
+----------
+ 3.142596
+(1 row)
+
+SELECT -3.142596;
+ ?column?  
+-----------
+ -3.142596
+(1 row)
+
+SELECT 1.79E+400;
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT 1.79E+400;
+               ^
+SELECT 1.79E-400;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT -1.79E+400;
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT -1.79E+400;
+                ^
+SELECT '0.0';
+ ?column? 
+----------
+ 0.0
+(1 row)
+
+SELECT '-0.0';
+ ?column? 
+----------
+ -0.0
+(1 row)
+
+SELECT '3.142596';
+ ?column? 
+----------
+ 3.142596
+(1 row)
+
+SELECT '-3.142596';
+ ?column?  
+-----------
+ -3.142596
+(1 row)
+
+SELECT '1.79E+400';
+ ?column?  
+-----------
+ 1.79E+400
+(1 row)
+
+SELECT '1.79E-400';
+ ?column?  
+-----------
+ 1.79E-400
+(1 row)
+
+SELECT '-1.79E+400';
+  ?column?  
+------------
+ -1.79E+400
+(1 row)
+
+SELECT '0.0'::float8;
+ float8 
+--------
+      0
+(1 row)
+
+SELECT '-0.0'::float8;
+ float8 
+--------
+      0
+(1 row)
+
+SELECT '3.142596'::float8;
+  float8  
+----------
+ 3.142596
+(1 row)
+
+SELECT '-3.142596'::float8;
+  float8   
+-----------
+ -3.142596
+(1 row)
+
+SELECT '1.79E+400'::float8;
+ERROR:  "1.79E+400" is out of range for type double precision
+LINE 1: SELECT '1.79E+400'::float8;
+               ^
+CONTEXT:  referenced column: float8
+SELECT '1.79E-400'::float8;
+ERROR:  "1.79E-400" is out of range for type double precision
+LINE 1: SELECT '1.79E-400'::float8;
+               ^
+CONTEXT:  referenced column: float8
+SELECT '-1.79E+400'::float8;
+ERROR:  "-1.79E+400" is out of range for type double precision
+LINE 1: SELECT '-1.79E+400'::float8;
+               ^
+CONTEXT:  referenced column: float8
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT y ON CONVERSION ERROR);
+ERROR:  column "y" does not exist
+LINE 1: SELECT TO_BINARY_FLOAT(3.14 DEFAULT y ON CONVERSION ERROR);
+                                            ^
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT(-3.14 DEFAULT + ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT(-3.14 DEFAULT + ON CONVERSION ERROR);
+                                               ^
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT - ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14 DEFAULT - ON CONVERSION ERROR);
+                                              ^
+SELECT TO_BINARY_FLOAT(-3.14 DEFAULT * ON CONVERSION ERROR);
+ERROR:  syntax error at or near "*"
+LINE 1: SELECT TO_BINARY_FLOAT(-3.14 DEFAULT * ON CONVERSION ERROR);
+                                             ^
+SELECT TO_BINARY_FLOAT(3.14 DEFAULT / ON CONVERSION ERROR);
+ERROR:  syntax error at or near "/"
+LINE 1: SELECT TO_BINARY_FLOAT(3.14 DEFAULT / ON CONVERSION ERROR);
+                                            ^
+SELECT TO_BINARY_FLOAT('3.14' DEFAULT y ON CONVERSION ERROR);
+ERROR:  column "y" does not exist
+LINE 1: SELECT TO_BINARY_FLOAT('3.14' DEFAULT y ON CONVERSION ERROR)...
+                                              ^
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('-3.14' DEFAULT + ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT('-3.14' DEFAULT + ON CONVERSION ERROR...
+                                                 ^
+SELECT TO_BINARY_FLOAT('3.14' DEFAULT - ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT('3.14' DEFAULT - ON CONVERSION ERROR)...
+                                                ^
+SELECT TO_BINARY_FLOAT('-3.14' DEFAULT * ON CONVERSION ERROR);
+ERROR:  syntax error at or near "*"
+LINE 1: SELECT TO_BINARY_FLOAT('-3.14' DEFAULT * ON CONVERSION ERROR...
+                                               ^
+SELECT TO_BINARY_FLOAT('3.14' DEFAULT / ON CONVERSION ERROR);
+ERROR:  syntax error at or near "/"
+LINE 1: SELECT TO_BINARY_FLOAT('3.14' DEFAULT / ON CONVERSION ERROR)...
+                                              ^
+SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT y ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT y ON CONVERSION ERR...
+                               ^
+SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT + ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT + ON CONVERSION ERR...
+                               ^
+SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT - ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT - ON CONVERSION ERR...
+                               ^
+SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT * ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT * ON CONVERSION ERR...
+                               ^
+SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT / ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: SELECT TO_BINARY_FLOAT(1.79E+400 DEFAULT / ON CONVERSION ERR...
+                               ^
+SELECT TO_BINARY_FLOAT('1.79E+400' DEFAULT y ON CONVERSION ERROR);
+ERROR:  column "y" does not exist
+LINE 1: SELECT TO_BINARY_FLOAT('1.79E+400' DEFAULT y ON CONVERSION E...
+                                                   ^
+CONTEXT:  referenced column: to_binary_float
+SELECT TO_BINARY_FLOAT('1.79E-400' DEFAULT + ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT('1.79E-400' DEFAULT + ON CONVERSION E...
+                                                     ^
+SELECT TO_BINARY_FLOAT('-1.79E+400' DEFAULT - ON CONVERSION ERROR);
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT TO_BINARY_FLOAT('-1.79E+400' DEFAULT - ON CONVERSION ...
+                                                      ^
+SELECT TO_BINARY_FLOAT('-1.79E-400' DEFAULT * ON CONVERSION ERROR);
+ERROR:  syntax error at or near "*"
+LINE 1: SELECT TO_BINARY_FLOAT('-1.79E-400' DEFAULT * ON CONVERSION ...
+                                                    ^
+SELECT TO_BINARY_FLOAT('1.79E+400' DEFAULT / ON CONVERSION ERROR);
+ERROR:  syntax error at or near "/"
+LINE 1: SELECT TO_BINARY_FLOAT('1.79E+400' DEFAULT / ON CONVERSION E...
+                                                   ^
+CREATE TABLE t_float_literals (id int, c1 float8);
+INSERT INTO t_float_literals VALUES (1, 0.0);
+INSERT INTO t_float_literals VALUES (2, 3.14);
+INSERT INTO t_float_literals VALUES (3, 3.14E+40);
+INSERT INTO t_float_literals VALUES (4, -3.14E+40);
+INSERT INTO t_float_literals VALUES (5, '3.14E+40'::float8);
+INSERT INTO t_float_literals VALUES (6, '-3.14E+40'::float8);
+INSERT INTO t_float_literals VALUES (7, 3.14E+400);
+ERROR:  number overflow at or near "3.14E+400"
+LINE 1: INSERT INTO t_float_literals VALUES (7, 3.14E+400);
+                                                ^
+INSERT INTO t_float_literals VALUES (8, 3.14E-400);
+INSERT INTO t_float_literals VALUES (9, -3.14E+400);
+ERROR:  number overflow at or near "3.14E+400"
+LINE 1: INSERT INTO t_float_literals VALUES (9, -3.14E+400);
+                                                 ^
+INSERT INTO t_float_literals VALUES (10, '3.14E+400'::float8);
+ERROR:  "3.14E+400" is out of range for type double precision
+LINE 1: INSERT INTO t_float_literals VALUES (10, '3.14E+400'::float8...
+                                                 ^
+INSERT INTO t_float_literals VALUES (11, '3.14E-400'::float8);
+ERROR:  "3.14E-400" is out of range for type double precision
+LINE 1: INSERT INTO t_float_literals VALUES (11, '3.14E-400'::float8...
+                                                 ^
+INSERT INTO t_float_literals VALUES (12, '-3.14E+400'::float8);
+ERROR:  "-3.14E+400" is out of range for type double precision
+LINE 1: INSERT INTO t_float_literals VALUES (12, '-3.14E+400'::float...
+                                                 ^
+SELECT * FROM t_float_literals ORDER bY id;
+ id |    c1     
+----+-----------
+  1 |         0
+  2 |      3.14
+  3 |  3.14e+40
+  4 | -3.14e+40
+  5 |  3.14e+40
+  6 | -3.14e+40
+  8 |         0
+(7 rows)
+
+UPDATE t_float_iterals SET c1 = 1.79E+400 WHERE id = 1;
+ERROR:  number overflow at or near "1.79E+400"
+LINE 1: UPDATE t_float_iterals SET c1 = 1.79E+400 WHERE id = 1;
+                                        ^
+UPDATE t_float_iterals SET c1 = '1.79E+400'::float8 WHERE id = 2;
+ERROR:  relation "t_float_iterals" does not exist on datanode1
+LINE 1: UPDATE t_float_iterals SET c1 = '1.79E+400'::float8 WHERE id...
+               ^
+UPDATE t_float_iterals SET c1 = 1.79E+40 WHERE id = 3;
+ERROR:  relation "t_float_iterals" does not exist on datanode1
+LINE 1: UPDATE t_float_iterals SET c1 = 1.79E+40 WHERE id = 3;
+               ^
+UPDATE t_float_iterals SET c1 = '1.79E+40'::float8 WHERE id = 4;
+ERROR:  relation "t_float_iterals" does not exist on datanode1
+LINE 1: UPDATE t_float_iterals SET c1 = '1.79E+40'::float8 WHERE id ...
+               ^
+SELECT * FROM t_float_iterals ORDER BY c1;
+ERROR:  relation "t_float_iterals" does not exist on datanode1
+LINE 1: SELECT * FROM t_float_iterals ORDER BY c1;
+                      ^
+drop table t_float_literals;
+\c regression
+drop database float_literals;

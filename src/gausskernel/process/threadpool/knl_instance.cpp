@@ -184,6 +184,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
 {
     Assert(dms_cxt != NULL);
     dms_cxt->dmsProcSid = 0;
+    dms_cxt->xminAck = 0;
     dms_cxt->SSReformerControl.list_stable = 0;
     dms_cxt->SSReformerControl.primaryInstId = -1;
     dms_cxt->SSReformInfo.in_reform = false;
@@ -926,6 +927,8 @@ static void knl_g_csn_barrier_init(knl_g_csn_barrier_context* csn_barrier_cxt)
 {
     csn_barrier_cxt->barrier_hash_table = NULL;
     csn_barrier_cxt->barrier_hashtbl_lock = NULL;
+    csn_barrier_cxt->pre_parse_started = false;
+    csn_barrier_cxt->max_run_time = 0;
     csn_barrier_cxt->barrier_context = NULL;
     errno_t rc = memset_s(csn_barrier_cxt->stopBarrierId, MAX_BARRIER_ID_LENGTH, 0,
                           sizeof(csn_barrier_cxt->stopBarrierId));
@@ -933,6 +936,9 @@ static void knl_g_csn_barrier_init(knl_g_csn_barrier_context* csn_barrier_cxt)
     csn_barrier_cxt->startBarrierPreParse = false;
     csn_barrier_cxt->preparseStartLocation = InvalidXLogRecPtr;
     csn_barrier_cxt->preparseEndLocation = InvalidXLogRecPtr;
+    csn_barrier_cxt->latest_valid_record = 0;
+    csn_barrier_cxt->latest_record_crc = 0;
+    csn_barrier_cxt->latest_record_len = 0;
 }
 
 static void knl_g_audit_init(knl_g_audit_context *audit_cxt)

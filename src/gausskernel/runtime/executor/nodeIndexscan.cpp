@@ -168,7 +168,7 @@ static TupleTableSlot* ExecIndexScan(PlanState* state)
     /*
      * If we have runtime keys and they've not already been set up, do it now.
      */
-    if (node->iss_NumRuntimeKeys != 0 && (!node->iss_RuntimeKeysReady || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)))) {
+    if (node->iss_NumRuntimeKeys != 0 && !node->iss_RuntimeKeysReady) {
         /*
          * set a flag for partitioned table, so we can deal with it specially
          * when we rescan the partitioned table
@@ -181,6 +181,10 @@ static TupleTableSlot* ExecIndexScan(PlanState* state)
         } else {
             ExecReScan((PlanState*)node);
         }
+    } else if (DB_IS_CMPT(B_FORMAT) && node->iss_NumRuntimeKeys != 0 && u_sess->parser_cxt.has_set_uservar) {
+        ExprContext* econtext = node->iss_RuntimeContext;
+        ResetExprContext(econtext);
+        ExecIndexEvalRuntimeKeys(econtext, node->iss_RuntimeKeys, node->iss_NumRuntimeKeys);
     }
 
     return ExecScan(&node->ss, (ExecScanAccessMtd)IndexNext, (ExecScanRecheckMtd)IndexRecheck);
@@ -258,6 +262,8 @@ void ExecReScanIndexScan(IndexScanState* node)
     /* reset index scan */
     scan_handler_idx_rescan(
         node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys, node->iss_NumOrderByKeys);
+
+    scan_handler_idx_rescan_parallel(node->iss_ScanDesc);
 
     ExecScanReScan(&node->ss);
 }
@@ -463,8 +469,13 @@ void ExecEndIndexScan(IndexScanState* node)
     /*
      * close the index relation (no-op if we didn't open it)
      */
-    if (index_scan_desc)
+    if (index_scan_desc) {
         scan_handler_idx_endscan(index_scan_desc);
+        if (WorkerThreadAmI() && node->ss.ps.plan->dop > 1) {
+            u_sess->stream_cxt.global_obj->DestroyStreamDesc(
+                node->ss.ps.state->es_plannedstmt->queryId, node->ss.ps.plan);
+        }
+    }
 
     /*
      * close the index relation (no-op if we didn't open it)
@@ -627,6 +638,18 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
             }
         }
 
+        ParallelIndexScanDescData *paralleDesc = NULL;
+        if (u_sess->stream_cxt.global_obj && node->ss.ps.plan->dop > 1) {
+            if (WorkerThreadAmI()) {
+                u_sess->stream_cxt.global_obj->BuildStreamDesc(
+                    estate->es_plannedstmt->queryId, index_state->ss.ps.plan);
+            }
+            paralleDesc = (ParallelIndexScanDescData*)u_sess->stream_cxt.global_obj->GetParalleDesc(
+                estate->es_plannedstmt->queryId, index_state->ss.ps.plan->plan_node_id);
+            if (WorkerThreadAmI())
+                scan_handler_idx_parallelscan_initialize(current_relation, index_state->iss_RelationDesc, paralleDesc);
+        }
+
         /*
          * Initialize scan descriptor.
          */
@@ -635,7 +658,8 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
             scanSnap,
             index_state->iss_NumScanKeys,
             index_state->iss_NumOrderByKeys,
-            (ScanState*)index_state);
+            (ScanState*)index_state,
+            paralleDesc);
     }
 
     return;

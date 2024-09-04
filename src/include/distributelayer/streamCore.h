@@ -58,6 +58,8 @@
 
 #define TupleVectorMaxSize 100
 
+#define STREAM_DESC_HASH_NUMBER 256
+
 #define IS_STREAM_PORTAL (!StreamThreadAmI() && portal->streamInfo.streamGroup != NULL)
 
 struct StreamState;
@@ -102,6 +104,11 @@ typedef struct {
 typedef struct {
     uint64 key;
 } StreamConnectSyncElement;
+
+typedef struct {
+    StreamKey key;
+    ParallelIndexScanDescData* parallelDesc;
+} StreamDescElement;
 
 enum StreamObjType {
     STREAM_PRODUCER,
@@ -442,6 +449,12 @@ public:
     /* Send stop signal to all stream threads in node group. */
     void SigStreamThreadClose();
 
+    void BuildStreamDesc(const uint64& queryId, Plan* node);
+
+    void* GetParalleDesc(const uint64& queryId, const uint64& planNodeId);
+
+    void DestroyStreamDesc(const uint64& queryId, Plan* node);
+
     struct PortalData *m_portal;
 #endif
     /* Mark recursive vfd is invalid before aborting transaction. */
@@ -519,6 +532,7 @@ private:
     /* Mark Stream query quit status. */
     StreamObjStatus m_quitStatus;
 #endif
+    static HTAB* m_streamDescHashTbl;
 };
 
 extern bool IsThreadProcessStreamRecursive();

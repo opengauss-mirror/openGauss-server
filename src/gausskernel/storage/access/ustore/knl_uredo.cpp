@@ -40,7 +40,6 @@
 using namespace undo;
 
 static const int FREESPACE_FRACTION = 5;
-static const int HIGH_BITS_LEN_OF_LSN = 32;
 
 union TupleBuffer {
     UHeapDiskTupleData hdr;
@@ -227,7 +226,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
     Size newlen = datalen - SizeOfUHeapHeader;
     Page page = BufferGetPage(buf);
     if (UHeapPageGetMaxOffsetNumber(page) + 1 < xlrec->offnum) {
-        elog(PANIC, "Invalid max offset number");
+        UPagePrintErrorInfo(page, "The max offset number is invalid");
     }
 
     /*
@@ -243,7 +242,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
     bufpage.page = NULL;
     FastVerifyUTuple(utup, InvalidBuffer);
     if (UPageAddItem(NULL, &bufpage, (Item)utup, newlen, xlrec->offnum, true) == InvalidOffsetNumber) {
-        elog(PANIC, "Failed to add tuple");
+        UPagePrintErrorInfo(page, "UPageAddItem failed");
     }
 
     /* decrement the potential freespace of this page */
@@ -281,7 +280,7 @@ void UHeapXlogInsert(XLogReaderState *record)
             
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &targetNode, blkno, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -393,7 +392,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
             InvalidBuffer, xlrec->offnum, xid, 
             *hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0,
             *blkprev, *prevurp, &oldTD, utup, blkno, xlundohdr, &undometa);
-        Assert(urecptr == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
         undorec->SetOffset(xlrec->offnum);
         if (!skipInsert) {
             /* Insert the Undo record into the undo store */
@@ -421,7 +420,7 @@ static void PerformDeleteRedoAction(XLogReaderState *record, UHeapTupleData *utu
     if (UHeapPageGetMaxOffsetNumber(page) >= xlrec->offnum) {
         rp = UPageGetRowPtr(page, xlrec->offnum);
     } else {
-        elog(PANIC, "invalid rp");
+        UPagePrintErrorInfo(page, "The max offset number is invalid");
     }
 
     /* increment the potential freespace of this page */
@@ -476,7 +475,7 @@ static void UHeapXlogDelete(XLogReaderState *record)
             
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &targetNode, blkno, true);
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -537,7 +536,7 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -582,7 +581,7 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -731,7 +730,7 @@ static void UHeapXlogClean(XLogReaderState *record)
         
         Page page = BufferGetPage(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -968,7 +967,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
             *hasSubXact ? TopSubTransactionId : InvalidSubTransactionId, 0, *blkprev,
             inplaceUpdate ? *blkprev : *newblkprev, *prevurp, &oldTD, oldtup,
             inplaceUpdate, &newUrecptr, undoXorDeltaSize, oldblk, newblk, xlundohdr, &undometa);
-        Assert(urecptr == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
 
         if (!skipInsert) {
             if (!inplaceUpdate) {
@@ -1019,7 +1018,7 @@ static void PerformUpdateOldRedoAction(XLogReaderState *record, UHeapTupleData *
     if (UHeapPageGetMaxOffsetNumber(oldpage) >= xlrec->old_offnum) {
         rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
     } else {
-        elog(PANIC, "Invalid max offset number");
+        UPagePrintErrorInfo(oldpage, "The max offset number is invalid");
     }
 
     /* Ensure old tuple points to the tuple in page. */
@@ -1193,14 +1192,16 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
     Page newpage = buffers->newbuffer.pageinfo.page;
 
     /* max offset number should be valid */
-    Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
+    if (UHeapPageGetMaxOffsetNumber(newpage) + 1 < xlrec->new_offnum) {
+        UPagePrintErrorInfo(newpage, "The max offset number is invalid");
+    }
 
     if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
         UHeapBufferPage bufpage = {newbuf, NULL};
 
         if (UPageAddItem(NULL, &bufpage, (Item)tuples->newtup, newlen, xlrec->new_offnum, true) ==
             InvalidOffsetNumber) {
-            elog(PANIC, "Failed to add tuple");
+            UPagePrintErrorInfo(newpage, "UPageAddItem failed");
         }
 
         /* Update the page potential freespace */
@@ -1258,8 +1259,10 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
 static void UHeapXlogUpdate(XLogReaderState *record)
 {
     XlUndoHeader *xlnewundohdr = NULL;
-    UpdateRedoBuffers buffers = { 0 };
-    RelFileNode rnode = {0};
+    UpdateRedoBuffers buffers;
+    buffers.oldbuffer = { 0 };
+    buffers.newbuffer = { 0 };
+    RelFileNode rnode = { 0 };
     BlockNumber oldblk = InvalidBlockNumber;
     BlockNumber newblk = InvalidBlockNumber;
     UHeapTupleData oldtup;
@@ -1316,7 +1319,7 @@ static void UHeapXlogUpdate(XLogReaderState *record)
             
             Page page = BufferGetPage(buffers.newbuffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-                NULL, true);
+                NULL, &rnode, BufferGetBlockNumber(buffers.newbuffer.buf), true);
         }
 
         if (BufferIsValid(buffers.newbuffer.buf) && buffers.newbuffer.buf != buffers.oldbuffer.buf) {
@@ -1574,7 +1577,7 @@ static void PerformMultiInsertRedoAction(XLogReaderState *record, XlUHeapMultiIn
 
         /* max offset should be valid */
         if (UHeapPageGetMaxOffsetNumber(page) + 1 < offnum) {
-            elog(PANIC, "Invalid max offset number");
+            UPagePrintErrorInfo(page, "The max offset number is invalid");
         }
 
         UHeapDiskTuple uhtup = GetUHeapDiskTupleFromMultiInsertRedoData(&tupdata, &newlen, tbuf);
@@ -1582,7 +1585,7 @@ static void PerformMultiInsertRedoAction(XLogReaderState *record, XlUHeapMultiIn
         bufpage.buffer = buffer->buf;
         bufpage.page = NULL;
         if (UPageAddItem(NULL, &bufpage, (Item)uhtup, newlen, offnum, true) == InvalidOffsetNumber) {
-            elog(PANIC, "Failed to add tuple");
+            UPagePrintErrorInfo(page, "UPageAddItem failed,");
         }
 
         /* decrement the potential freespace of this page */
@@ -1643,7 +1646,7 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
         
         Page page = BufferGetPage(buffer.buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
 
     pfree(ufreeOffsetRanges);
@@ -1672,7 +1675,7 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1742,7 +1745,7 @@ static void UHeapXlogExtendTDSlot(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buffer.buf)) {
@@ -1761,7 +1764,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapFreeze *xlrec = (XlUHeapFreeze *)XLogRecGetData(record);
     TransactionId cutoffXid = xlrec->cutoff_xid;
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     UHeapTupleData utuple;
     RelFileNode rnode;
     BlockNumber blkno = InvalidBlockNumber;
@@ -1819,11 +1822,19 @@ static void UHeapXlogFreeze(XLogReaderState *record)
         MarkBufferDirty(buffer.buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, &rnode, blkno, true);
     }
     if (BufferIsValid(buffer.buf)) {
         UnlockReleaseBuffer(buffer.buf);
     }
+}
+void UHeapXlogNewPage(XLogReaderState *record)
+{
+    RedoBufferInfo buffer = { 0 };
+    if (XLogReadBufferForRedo(record, UHEAP_NEWPAGE_ORIG_BLOCK_NUM, &buffer) != BLK_RESTORED) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unexpected result when restoring backup block")));
+    }
+    UnlockReleaseBuffer(buffer.buf);
 }
 
 void UHeapRedo(XLogReaderState *record)
@@ -1855,6 +1866,9 @@ void UHeapRedo(XLogReaderState *record)
             break;
         case XLOG_UHEAP_MULTI_INSERT:
             UHeapXlogMultiInsert(record);
+            break;
+        case XLOG_UHEAP_NEW_PAGE:
+            UHeapXlogNewPage(record);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapRedo: unknown op code %u", (uint8)info)));
@@ -1949,7 +1963,7 @@ static void UHeapUndoXlogPageRestore(char *curxlogptr, Buffer buffer, Page page)
  */
 static void UHeapUndoXlogPage(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     uint8 *flags = (uint8 *)XLogRecGetData(record);
     char *curxlogptr = (char *)((char *)flags + sizeof(uint8));
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
@@ -1984,7 +1998,7 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
         MarkBufferDirty(buf);
         
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))
@@ -1993,7 +2007,7 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
 
 static void UHeapUndoXlogResetXid(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapUndoResetSlot *xlrec = (XlUHeapUndoResetSlot *)XLogRecGetData(record);
     XLogRedoAction action = XLogReadBufferForRedo(record, 0, &redoBuffInfo);
@@ -2009,7 +2023,7 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
         
         Page page = BufferGetPage(buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))
@@ -2018,7 +2032,7 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
 
 static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
 {
-    RedoBufferInfo redoBuffInfo;
+    RedoBufferInfo redoBuffInfo = { 0 };
     uint8 *flags = (uint8 *)XLogRecGetData(record);
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapUndoAbortSpecInsert *xlrec = (XlUHeapUndoAbortSpecInsert *)((char *)flags + sizeof(uint8));
@@ -2074,7 +2088,7 @@ static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
 
         Page page = BufferGetPage(buf);
         UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
-            NULL, true);
+            NULL, NULL, blkno, true);
     }
 
     if (BufferIsValid(buf))

@@ -318,6 +318,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_partitionwise                             | bool    |      |           | 
  enable_pbe_optimization                          | bool    |      |           | 
  enable_prevent_job_task_startup                  | bool    |      |           | 
+ enable_proc_coverage                             | bool    |      |           | 
+ enable_record_nettime                            | bool    |      |           | 
  enable_recyclebin                                | bool    |      |           | 
  enable_remote_excute                             | bool    |      |           | 
  enable_resource_record                           | bool    |      |           | 
@@ -648,6 +650,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_dss_data_vg_name                              | string  |      |           | 
  ss_dss_xlog_vg_name                              | string  |      |           | 
  ss_enable_aio                                    | bool    |      |           | 
+ ss_enable_bcast_getoldestxmin                    | bool    |      |           | 
  ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dynamic_trace                          | bool    |      |           | 

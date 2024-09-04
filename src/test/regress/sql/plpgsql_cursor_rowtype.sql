@@ -68,7 +68,125 @@ END;
 
 drop table test_2 cascade;
 
-set behavior_compat_options='allow_procedure_compile_check';
+set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
+
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10),col varchar(10));
+create table t2(col1 varchar(10),col varchar(10));
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source.col1, source.col);
+  end loop; 
+end;
+/
+
+insert into t1 values('one','two');
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype:=('ten','wtu');
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+select * from t2;
+drop table t1;
+drop table t2;
+
+create table t1 (a int);
+create table t2 (a t1);
+declare
+  source t2%rowtype;
+begin
+  insert into t2 values(source.a);
+end;
+/
+
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source;
+end;
+/
+
+declare
+  source t2%rowtype;
+begin
+  update t2 set a = source.a;
+end;
+/
+
+drop table t2;
+drop table t1;
+
+-- Prohibit virtual column insertion
+create table t1(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+insert into t1 values('one',5,'dsa','e');
+insert into t1 values('two',7,'daw','d');
+insert into t1 values('three',7,'dsaw','sw');
+insert into t1 values(NULL);
+
+create table t2(col1 varchar(10), col2 int, col3 varchar(10), col4 varchar(10));
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source.col1);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source.col4, source);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values('o', 5, source, source.col1);
+  end loop; 
+end;
+/
+
+declare
+  cursor cur1 is select * from t1;
+  source cur1%rowtype;
+begin
+  for source in cur1
+  loop
+    raise notice '%',source;
+    insert into t2 values(source);
+  end loop; 
+end;
+/
+select * from t2;
+drop table t1;
+drop table t2;
 
 create table emp (empno int, ename varchar(10), job varchar(10));
 insert into emp values (1, 'zhangsan', 'job1');
@@ -135,6 +253,53 @@ end;
 
 call pro_cursor_no_args_1();
 
+-- test change cxt
+drop table if exists t_CurRowtype_Use_Case0007_1;
+create table t_CurRowtype_Use_Case0007_1(col1 varchar(30),col2 varchar(30));
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_a', 'col2_aa');
+insert into t_CurRowtype_Use_Case0007_1 values ('col1_b', 'col2_bb');
+
+drop table if exists t_CurRowtype_Use_Case0007_2;
+create table t_CurRowtype_Use_Case0007_2(col1 varchar(30),col2 varchar(30));
+
+create or replace package pac_CurRowtype_Use_Case0007_5 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_5();
+end pac_CurRowtype_Use_Case0007_5;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_5 is
+procedure p_CurRowtype_Use_Case0007_5() is
+begin
+  var1.col1:='pack5_proc_col1';
+  var1.col2:='pack5_proc_col2';
+  insert into t_CurRowtype_Use_Case0007_2 values(var1.col1,var1.col2);
+end;
+end pac_CurRowtype_Use_Case0007_5;
+/
+
+create or replace package pac_CurRowtype_Use_Case0007_6 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_1;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_6;
+end pac_CurRowtype_Use_Case0007_6;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_6 is
+procedure p_CurRowtype_Use_Case0007_6 is
+begin
+  open cur1;
+  fetch cur1 into var1;
+  pac_CurRowtype_Use_Case0007_5.p_CurRowtype_Use_Case0007_5();
+end;
+end pac_CurRowtype_Use_Case0007_6;
+/
+
+call pac_CurRowtype_Use_Case0007_6.p_CurRowtype_Use_Case0007_6();
+drop table if exists t_CurRowtype_Use_Case0007_1;
+drop table if exists t_CurRowtype_Use_Case0007_2;
+drop package pac_CurRowtype_Use_Case0007_5;
+drop package pac_CurRowtype_Use_Case0007_6;
+
 -- test alias error 
 create or replace procedure pro_cursor_args
 is
@@ -172,6 +337,127 @@ end;
 /
 
 call pro_cursor_no_args_2();
+
+-- test: max len
+drop table if exists t1;
+create table t1(col1 tinyint primary key,col2 varchar(10));
+
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype:=(200,'abcdeabcedone');
+begin
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype;
+begin
+  source:=(200,'abcdeabcedone');
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+drop table if exists t1;
+-- test:pkg head max len
+create table test12(col1 varchar(10), col2 varchar(10));
+insert into test12 values ('a', 'aa');
+insert into test12 values ('a', 'aa');
+insert into test12 values ('b', 'bb');
+create table test22(col1 varchar2, col2 varchar2);
+insert into test22 values ('dsasdad6sad','d6sasdadsad');
+
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('dsasdad6sad','d6sasdadsad');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdadsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+
+-- test:pkg body max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+
+-- test:cursor fetch max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test22;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+drop package pck3p;
+drop table test12;
+drop table test22;
 
 create table test12(col1 varchar2,col2 varchar2);
 insert into test12 values ('a', 'aa');
@@ -327,6 +613,44 @@ End;
 
 drop table STORAGE_LARGE_TABLE_STORAGE_TABLE_000;
 drop table STORAGE_LARGE_CURSOR_TABLE_216;
+-- test none execute error sql
+set behavior_compat_options='';
+create table t_CurRowtype_Def_Case0001_1(
+col1 tinyint primary key,
+col2 smallint,
+col3 int,
+col4 bigint
+);
+
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+
+set behavior_compat_options='allow_procedure_compile_check';
+declare
+   cursor cur_CurRowtype_Def_Case0003_1 is select * from t_CurRowtype_Def_Case0001_1;
+   source cur_CurRowtype_Def_Case0003_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0003_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0003_1 into source;
+   exit when cur_CurRowtype_Def_Case0003_1%notfound;
+       raise notice '% , %',source.col1,source.col5;  
+   end loop;
+   close cur_CurRowtype_Def_Case0003_1; 
+end;
+/
+drop table t_CurRowtype_Def_Case0001_1;
 
 --test: drop column
 create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
@@ -856,6 +1180,27 @@ end pck_for;
 call pck_for.p1();
 drop package pck_for;
 
+create table t_Compare_Case0013(id int,first_name varchar(100), last_name varchar(100));
+create table t_CurRowtype_PLObject_Case0013(first_name varchar(100), last_name varchar(100));
+insert into t_CurRowtype_PLObject_Case0013 values('Jason','Statham');
+
+create or replace function f_CurRowtype_PLObject_Case0013() returns trigger as
+$$
+declare
+  cursor cur_1 is select * from t_CurRowtype_PLObject_Case0013;
+  source cur_1%rowtype;
+begin
+   source.first_name:=new.first_name;
+   source.last_name:=new.last_name;      
+   insert into t_Compare_Case0013 values (source.first_name,source.last_name);
+   return new;
+end
+$$ language plpgsql;
+
+drop function f_CurRowtype_PLObject_Case0013;
+drop table t_CurRowtype_PLObject_Case0013;
+drop table t_Compare_Case0013;
+
 set behavior_compat_options='';
 set plsql_compile_check_options='for_loop';
 
@@ -882,6 +1227,35 @@ end pck_for;
 
 call pck_for.p1();
 drop package pck_for;
+
+drop table test1;
+drop table test2;
+
+create table test1(id int, name varchar, job varchar);
+create table test2(id int, age int);
+insert into test1 values (1, 'zhang', 'worker'),(2, 'li', 'teacher'),(3, 'wang', 'engineer');
+insert into test2 values (1, 20),(2, 30),(3, 40);
+
+DECLARE 
+  CURSOR c1 IS SELECT t.age, CURSOR(SELECT name FROM test1 t1 where t1.id = t.id) abc FROM test2 t;-- 在匿名块中使用游标表达式样例
+  age_temp int;
+  name_temp varchar;
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  source c1%rowtype;
+BEGIN
+  OPEN c1;
+  loop
+    fetch c1 into source;
+    exit when c1%notfound;
+    raise notice '%',source;
+  end loop;
+  close c1;
+END;
+/
+
+drop table test1;
+drop table test2;
 
 -- (c) select only one col
 create or replace package pck_for is
@@ -940,6 +1314,7 @@ end;
 /
 
 call  check_compile_1();
+drop procedure check_compile_1;
 set behavior_compat_options='';
 
 drop procedure check_compile;
@@ -1008,6 +1383,7 @@ alter type foo alter attribute b type text;--success
 fetch c3;
 close c3;
 
+drop type if exists foo;
 ---- 不在 TRANSACTION Block里的游标声明导致 core的问题
 --游标依赖row type，后续alter type
 drop type if exists type_cursor_bugfix_0001;

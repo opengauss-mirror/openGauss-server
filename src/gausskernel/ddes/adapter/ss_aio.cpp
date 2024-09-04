@@ -49,6 +49,7 @@ static void WaitDSSAioComplete(DSSAioCxt *aio_cxt, int index)
         for (int i = 0; i < num; i++) {
             aio_cxt->aiocb(&aio->events[i]);
         }
+
         event_num -= num;
     }
 

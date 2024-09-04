@@ -1474,7 +1474,11 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
         RELATION_CREATE_BUCKET(OldHeap) ? &bucketinfo : NULL,
         true,
         NULL,
-        RelationGetStorageType(OldHeap));
+        RelationGetStorageType(OldHeap),
+        AccessExclusiveLock,
+        NULL,
+        NIL,
+        OIDOldHeap);
     Assert(OIDNewHeap != InvalidOid);
 
     ReleaseSysCache(tuple);
@@ -3545,6 +3549,14 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
             rc = snprintf_s(NewToastName, NAMEDATALEN, NAMEDATALEN - 1, "pg_toast_%u_index", OIDOldHeap);
             securec_check_ss(rc, "\0", "\0");
             RenameRelationInternal(toastidx, NewToastName);
+
+            /*
+             * Reset the relrewrite for the toast. The command-counter
+             * increment is required here as we are about to update the tuple
+             * that is updated as part of RenameRelationInternal.
+             */
+            CommandCounterIncrement();
+            ResetRelRewrite(newrel->rd_rel->reltoastrelid);
         }
         relation_close(newrel, NoLock);
     }

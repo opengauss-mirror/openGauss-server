@@ -26,6 +26,36 @@ NOTICE:  RESULT: 2
 NOTICE:  RESULT: 3
 NOTICE:  RESULT: 4
 NOTICE:  RESULT: 5
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+BEGIN
+        nstarr(1):=1;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+ERROR:  array value must start with "{" or dimension information
+CONTEXT:  PL/pgSQL function test_nested_array() line 5 at assignment
+CREATE OR REPLACE PROCEDURE test_nested_array as
+TYPE typ_PLArray_case0001 IS varray(3) OF integer;
+TYPE typ_PLArray_case0002 IS varray(3) OF typ_PLArray_case0001;
+nstarr typ_PLArray_case0002;
+arr typ_PLArray_case0001;
+BEGIN
+        arr(1):=1;
+        nstarr(1):=arr;
+        RAISE NOTICE '二维数组(1)：%', nstarr(1);
+END;
+/
+CALL test_nested_array();
+NOTICE:  二维数组(1)：{1}
+ test_nested_array 
+-------------------
+ 
+(1 row)
+
 -- record of arrays
 DECLARE
     TYPE arr1 IS VARRAY(5) OF INTEGER;
@@ -86,5 +116,81 @@ NOTICE:  ID: 1, NAME: RECORD
  
 (1 row)
 
+set behavior_compat_options='plpgsql_dependency';
+create or replace package pac_PLArray_Case0021 is
+  type typ_PLArray_1 is table of varchar(100);
+  type typ_PLArray_2 is table of typ_PLArray_1;
+  nstarr typ_PLArray_2;
+
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_2);
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_2 does not exist.
+ERROR:  nested-table type is not supported for parameter yet
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_2) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+ERROR:  package spec not found
+create or replace package pac_PLArray_Case0021 is
+  procedure p_PLArray_1;
+  procedure p_PLArray_2(var typ_PLArray_3);
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_3 does not exist.
+WARNING:  The header information of function p_plarray_2 is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+create or replace package body pac_PLArray_Case0021 is
+procedure p_PLArray_1() is
+begin
+nstarr(2)(1):='第二行第一列';
+perform p_PLArray_2(nstarr);
+end;
+
+procedure p_PLArray_2(var typ_PLArray_3) is
+begin
+    insert into t_PLArray_case0021(col) values(var(2)(1));
+end;
+end pac_PLArray_Case0021;
+/
+WARNING:  Type typ_plarray_3 does not exist.
+WARNING:  The header information of function p_plarray_2 is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  function "nstarr" doesn't exist 
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  syntax error at or near "(" when compile function p_plarray_2(undefined)
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package Body created with compilation erors.
+declare
+    type typ_PLArray_1 is varray(3) of varchar(50);
+    type typ_PLArray_2 is varray(3) of typ_PLArray_1;
+    nstarr1 typ_PLArray_2;
+    nstarr2 typ_PLArray_2;
+begin
+    nstarr1(1)(1):='第一行第一列';
+    nstarr2:=nstarr1;
+    raise notice '二维数组nstarr(1)(1): %',nstarr2(1)(1);
+end;
+/
+NOTICE:  二维数组nstarr(1)(1): 第一行第一列
+drop package pac_PLArray_Case0021;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function plpgsql_nested_array_and_record.p_plarray_1()
+drop cascades to function plpgsql_nested_array_and_record.p_plarray_2(undefined)
 DROP SCHEMA plpgsql_nested_array_and_record CASCADE;
-NOTICE:  drop cascades to function test_nested()
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function test_nested_array()
+drop cascades to function test_nested()

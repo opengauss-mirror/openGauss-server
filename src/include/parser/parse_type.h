@@ -65,6 +65,7 @@ extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname
     TypeDependExtend* depend_extend = NULL);
 extern char* CastPackageTypeName(const char* typName, Oid  pkgOid, bool isPackage, bool isPublic = true);
 extern bool IsBinaryType(Oid typid);
+typedef bool (*isBinaryType)(Oid typid);
 #define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)
 extern void check_type_supports_multi_charset(Oid typid, bool allow_array);
 extern char* ParseTypeName(const char* typName, Oid pkgOid);

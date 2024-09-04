@@ -860,34 +860,30 @@ static void ConstraintsForExecUpsert(Relation resultRelationDesc)
     }
 }
 
-static void update_slot_tuple_info(TupleTableSlot* slot, Tuple tuple) 
+static void UpdateSlotTupleInfo(TupleTableSlot* slot, Tuple tuple)
 {
-    bool tuple_is_uheap = TUPLE_IS_UHEAP_TUPLE(tuple);
-    if (slot->tts_tupslotTableAm == TAM_USTORE && !tuple_is_uheap) {
-        UHeapTuple slot_tup = (UHeapTuple) slot->tts_tuple;
-        HeapTuple htup = (HeapTuple) tuple;
-        slot_tup->ctid = htup->t_self;
-        slot_tup->table_oid = htup->t_tableOid;
-        slot_tup->t_xid_base = htup->t_xid_base;
-        slot_tup->t_multi_base = htup->t_multi_base;
-        slot_tup->xmin = htup->xmin;
-        slot_tup->xmax = htup->xmax;
-        slot_tup->xc_node_id = htup->t_xc_node_id;
-    } else if (slot->tts_tupslotTableAm == TAM_HEAP && tuple_is_uheap) {
-        HeapTuple slot_tup = (HeapTuple) slot->tts_tuple;
-        UHeapTuple htup = (UHeapTuple) tuple;
-        slot_tup->t_self = htup->ctid;
-        slot_tup->t_tableOid = htup->table_oid;
-        slot_tup->t_xid_base = htup->t_xid_base;
-        slot_tup->t_multi_base = htup->t_multi_base;
-        slot_tup->xmin = htup->xmin;
-        slot_tup->xmax = htup->xmax;
-        slot_tup->t_xc_node_id = htup->xc_node_id;
+    bool isUheapTuple = TUPLE_IS_UHEAP_TUPLE(tuple);
+    if (!isUheapTuple && slot->tts_tupslotTableAm == TAM_USTORE) {
+        UHeapTuple tup = (UHeapTuple)slot->tts_tuple;
+        HeapTuple htup = (HeapTuple)tuple;
+        tup->ctid = htup->t_self;
+        tup->table_oid = htup->t_tableOid;
+        tup->t_xid_base = htup->t_xid_base;
+        tup->t_multi_base = htup->t_multi_base;
+        tup->xmin = htup->xmin;
+        tup->xmax = htup->xmax;
     } else {
-        Assert(false);
+        Assert(isUheapTuple && slot->tts_tupslotTableAm == TAM_HEAP);
+        HeapTuple tup = (HeapTuple)slot->tts_tuple;
+        UHeapTuple utup = (UHeapTuple)tuple;
+        tup->t_self = utup->ctid;
+        tup->t_tableOid = utup->table_oid;
+        tup->t_xid_base = utup->t_xid_base;
+        tup->t_multi_base = utup->t_multi_base;
+        tup->xmin = utup->xmin;
+        tup->xmax = utup->xmax;
     }
 }
-
 
 static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableSlot* planSlot, EState* estate,
     bool canSetTag, Tuple tuple, TupleTableSlot** returning, bool* updated, Oid* targetPartOid, char* partExprKeyStr)
@@ -1026,7 +1022,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     newid = tableam_tuple_insert(targetrel, tuple, estate->es_output_cid, 0, NULL);
 
     if (slot->tts_tuple != tuple) {
-        update_slot_tuple_info(slot, tuple);
+        UpdateSlotTupleInfo(slot, tuple);
     }
 
     /* insert index entries for tuple */

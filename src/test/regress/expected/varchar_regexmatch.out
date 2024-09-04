@@ -1,0 +1,393 @@
+SET client_min_messages = warning;
+-- test char semantic regular expression case
+drop table if exists test_varchar_regex;
+create table test_varchar_regex (id int, city varchar (10 char));
+insert into test_varchar_regex values(1, '北京');
+insert into test_varchar_regex values(2, '广州');
+insert into test_varchar_regex values(3, '京广');
+insert into test_varchar_regex values(4, '北上广');
+-- test char semantic regular expression match
+select * from test_varchar_regex where city ~ '北' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_regex where city !~ '北' order by id;
+ id | city 
+----+------
+  2 | 广州
+  3 | 京广
+(2 rows)
+
+select * from test_varchar_regex where city ~ '广' order by id;
+ id |  city  
+----+--------
+  2 | 广州
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_regex where city !~ '广' order by id;
+ id | city 
+----+------
+  1 | 北京
+(1 row)
+
+-- test char semantic like expression match
+select * from test_varchar_regex where city like '北%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_regex where city like '广%' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+select * from test_varchar_regex where city like '%广' order by id;
+ id |  city  
+----+--------
+  3 | 京广
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_regex where city like '_广' order by id;
+ id | city 
+----+------
+  3 | 京广
+(1 row)
+
+select * from test_varchar_regex where city like '广_' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+-- test char semantic like operator match
+select * from test_varchar_regex where city ~~ '北%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_regex where city ~~ '广%' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+select * from test_varchar_regex where city ~~ '%广' order by id;
+ id |  city  
+----+--------
+  3 | 京广
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_regex where city ~~ '_广' order by id;
+ id | city 
+----+------
+  3 | 京广
+(1 row)
+
+select * from test_varchar_regex where city ~~ '广_' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+-- test char semantic not like operator match
+select * from test_varchar_regex where city !~~ '北%' order by id;
+ id | city 
+----+------
+  2 | 广州
+  3 | 京广
+(2 rows)
+
+select * from test_varchar_regex where city !~~ '广%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_regex where city !~~ '%广' order by id;
+ id | city 
+----+------
+  1 | 北京
+  2 | 广州
+(2 rows)
+
+select * from test_varchar_regex where city !~~ '_广' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  2 | 广州
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_regex where city !~~ '广_' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+-- test char semantic ignore case regular expression match
+truncate table test_varchar_regex;
+insert into test_varchar_regex values (1, 'beijing');
+insert into test_varchar_regex values (1, 'tianjin');
+select * from test_varchar_regex where city ~* 'Bei' order by id;
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_regex where city !~* 'Bei' order by id;
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+-- test char semantic ignore case like operator
+select * from test_varchar_regex where city ~~* 'Bei%' order by id;
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_regex where city !~~* 'Bei%' order by id;
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+-- test char semantic pattern compare
+select * from test_varchar_regex where city ~<~ 'bejng';
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_regex where city ~<=~ 'bejng';
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_regex where city ~>~ 'bejng';
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+select * from test_varchar_regex where city ~>=~ 'bejng';
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+drop table test_varchar_regex;
+-- test byte semantic regular expression case
+drop table if exists test_varchar_byte_regex;
+create table test_varchar_byte_regex (id int, city varchar (10 byte));
+insert into test_varchar_byte_regex values(1, '北京');
+insert into test_varchar_byte_regex values(2, '广州');
+insert into test_varchar_byte_regex values(3, '京广');
+insert into test_varchar_byte_regex values(4, '北上广');
+-- test char semantic regular expression match
+select * from test_varchar_byte_regex where city ~ '北' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_byte_regex where city !~ '北' order by id;
+ id | city 
+----+------
+  2 | 广州
+  3 | 京广
+(2 rows)
+
+select * from test_varchar_byte_regex where city ~ '广' order by id;
+ id |  city  
+----+--------
+  2 | 广州
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_byte_regex where city !~ '广' order by id;
+ id | city 
+----+------
+  1 | 北京
+(1 row)
+
+-- test char semantic like expression match
+select * from test_varchar_byte_regex where city like '北%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_byte_regex where city like '广%' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+select * from test_varchar_byte_regex where city like '%广' order by id;
+ id |  city  
+----+--------
+  3 | 京广
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_byte_regex where city like '_广' order by id;
+ id | city 
+----+------
+  3 | 京广
+(1 row)
+
+select * from test_varchar_byte_regex where city like '广_' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+-- test char semantic like operator match
+select * from test_varchar_byte_regex where city ~~ '北%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_byte_regex where city ~~ '广%' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+select * from test_varchar_byte_regex where city ~~ '%广' order by id;
+ id |  city  
+----+--------
+  3 | 京广
+  4 | 北上广
+(2 rows)
+
+select * from test_varchar_byte_regex where city ~~ '_广' order by id;
+ id | city 
+----+------
+  3 | 京广
+(1 row)
+
+select * from test_varchar_byte_regex where city ~~ '广_' order by id;
+ id | city 
+----+------
+  2 | 广州
+(1 row)
+
+-- test char semantic not like operator match
+select * from test_varchar_byte_regex where city !~~ '北%' order by id;
+ id | city 
+----+------
+  2 | 广州
+  3 | 京广
+(2 rows)
+
+select * from test_varchar_byte_regex where city !~~ '广%' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_byte_regex where city !~~ '%广' order by id;
+ id | city 
+----+------
+  1 | 北京
+  2 | 广州
+(2 rows)
+
+select * from test_varchar_byte_regex where city !~~ '_广' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  2 | 广州
+  4 | 北上广
+(3 rows)
+
+select * from test_varchar_byte_regex where city !~~ '广_' order by id;
+ id |  city  
+----+--------
+  1 | 北京
+  3 | 京广
+  4 | 北上广
+(3 rows)
+
+-- test byte semantic ignore case regular expression match
+truncate table test_varchar_byte_regex;
+insert into test_varchar_byte_regex values (1, 'beijing');
+insert into test_varchar_byte_regex values (1, 'tianjin');
+select * from test_varchar_byte_regex where city ~* 'Bei' order by id;
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_byte_regex where city !~* 'Bei' order by id;
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+-- test byte semantic ignore case like operator
+select * from test_varchar_byte_regex where city ~~* 'Bei%' order by id;
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_byte_regex where city !~~* 'Bei%' order by id;
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+-- test byte semantic pattern compare
+select * from test_varchar_byte_regex where city ~<~ 'bejng';
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_byte_regex where city ~<=~ 'bejng';
+ id |  city   
+----+---------
+  1 | beijing
+(1 row)
+
+select * from test_varchar_byte_regex where city ~>~ 'bejng';
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+select * from test_varchar_byte_regex where city ~>=~ 'bejng';
+ id |  city   
+----+---------
+  1 | tianjin
+(1 row)
+
+drop table test_varchar_byte_regex;

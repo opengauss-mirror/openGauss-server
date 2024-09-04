@@ -1773,6 +1773,9 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
 
 bool IsBinaryType(Oid typid)
 {
+    if (u_sess->hook_cxt.isBinaryType != NULL) {
+        return ((isBinaryType)(u_sess->hook_cxt.isBinaryType))(typid);
+    }
     return ((typid) == BLOBOID ||
             (typid) == BYTEAOID);
 }

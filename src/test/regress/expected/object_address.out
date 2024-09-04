@@ -569,8 +569,8 @@ SELECT (pg_identify_object(addr1.classid, addr1.objid, addr1.subobjid)).*
  type                      | addr_nsp   | gencomptype           | addr_nsp.gencomptype
  type                      | addr_nsp   | genenum               | addr_nsp.genenum
  type                      | addr_nsp   | gendomain             | addr_nsp.gendomain
- function                  | pg_catalog |                       | pg_identify_object(oid,oid,integer)
- function                  | addr_nsp   |                       | genaggr(integer)
+ function                  | pg_catalog |                       | pg_catalog.pg_identify_object(oid,oid,integer)
+ function                  | addr_nsp   |                       | addr_nsp.genaggr(integer)
  sequence                  | addr_nsp   | gentable_a_seq        | addr_nsp.gentable_a_seq
  table                     | addr_nsp   | gentable              | addr_nsp.gentable
  table column              | addr_nsp   | gentable              | addr_nsp.gentable.b

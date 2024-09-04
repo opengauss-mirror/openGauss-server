@@ -381,6 +381,8 @@ typedef struct Plan {
 #ifdef USE_SPQ
     bool spq_scan_partial;
 #endif
+    int cursor_expr_level;
+    int cursor_owner_node_id;
 } Plan;
 
 typedef struct NdpScanCondition { // for each scan node

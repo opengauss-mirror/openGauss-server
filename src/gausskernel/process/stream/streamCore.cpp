@@ -56,6 +56,7 @@
 #include "utils/combocid.h"
 #include "vecexecutor/vecstream.h"
 #include "access/hash.h"
+#include "access/nbtree.h"
 #include "pgstat.h"
 #include "tcop/tcopprot.h"
 #include "distributelayer/streamCore.h"
@@ -73,6 +74,7 @@ MemoryContext StreamNodeGroup::m_memoryGlobalCxt = NULL;
 pthread_mutex_t StreamNodeGroup::m_streamNodeGroupLock;
 HTAB* StreamNodeGroup::m_streamNodeGroupTbl = NULL;
 HTAB* StreamNodeGroup::m_streamConnectSyncTbl = NULL;
+HTAB* StreamNodeGroup::m_streamDescHashTbl = NULL;
 pthread_mutex_t StreamNodeGroup::m_streamConnectSyncLock;
 
 static void ConsumerNodeSyncUpMessage(RecursiveUnionController* controller, int step, StreamState* node);
@@ -438,6 +440,15 @@ void StreamNodeGroup::StartUp()
         hash_create("stream connect sync hash", 256, &nodectl, HASH_ELEM | HASH_FUNCTION | HASH_SHRCTX);
 
     pthread_mutex_init(&m_streamConnectSyncLock, NULL);
+    rc = memset_s(&nodectl, sizeof(nodectl), 0, sizeof(nodectl));
+    securec_check(rc, "\0", "\0");
+    nodectl.keysize = sizeof(StreamKey);
+    nodectl.entrysize = sizeof(StreamDescElement);
+    nodectl.hash = tag_hash;
+    nodectl.hcxt = m_memoryGlobalCxt;
+
+    m_streamDescHashTbl =
+        hash_create("stream desc hash", STREAM_DESC_HASH_NUMBER, &nodectl, HASH_ELEM | HASH_FUNCTION | HASH_SHRCTX);
 }
 
 /*
@@ -1901,6 +1912,78 @@ void StreamNodeGroup::MarkRecursiveVfdInvalid()
         recursiveLock.lock();
         u_sess->stream_cxt.global_obj->SetRecursiveVfdInvalid();
         recursiveLock.unLock();
+    }
+}
+
+void StreamNodeGroup::BuildStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    memset_s(&streamKey, sizeof(streamKey), 0, sizeof(streamKey));
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+
+    void* parallelDesc = NULL;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+            parallelDesc = palloc0(sizeof(ParallelIndexScanDescData));
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_indexid = ((IndexScan*)node)->indexid;
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_relid = ((IndexScan*)node)->scan.scanrelid;
+            ((ParallelIndexScanDescData*)parallelDesc)->psBtpscan = Btbuildparallelscan();
+            break;
+        default:
+            break;
+    }
+
+    if (!parallelDesc) {
+        return;
+    }
+    bool found = false;
+    StreamDescElement* element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_ENTER, &found);
+    if (found != false) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("streamKey of stream nodegroup id is duplicated")));
+    }
+    element->key = streamKey;
+    element->parallelDesc = (ParallelIndexScanDescData*)parallelDesc;
+}
+
+void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    memset_s(&streamKey, sizeof(streamKey), 0, sizeof(streamKey));
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+    bool found = false;
+    StreamDescElement* element = NULL;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+            element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_FIND, &found);
+            if (found == true) {
+                if (((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan) {
+                    delete ((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan;
+                }
+                pfree(element->parallelDesc);
+                (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_REMOVE, NULL);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void* StreamNodeGroup::GetParalleDesc(const uint64& queryId, const uint64& planNodeId)
+{
+    StreamKey key;
+    memset_s(&key, sizeof(key), 0, sizeof(key));
+    key.queryId = queryId;
+    key.planNodeId = planNodeId;
+    bool found = false;
+    StreamDescElement* element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &key, HASH_FIND, &found);
+    if (found == false) {
+        return NULL;
+    } else {
+        return element->parallelDesc;
     }
 }
 

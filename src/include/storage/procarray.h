@@ -96,6 +96,7 @@ extern TransactionId GetOldestCatalogXmin();
 extern TransactionId GetRecentGlobalXmin(void);
 extern TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin = false,
     bool bRecentGlobalXminNoCheck = false);
+extern TransactionId GetVacuumExtremeOldestXmin();
 extern TransactionId GetGlobalOldestXmin(void);
 extern TransactionId GetOldestXminForUndo(TransactionId * recycleXmin);
 extern void CheckCurrentTimeline(GTM_Timeline timeline);

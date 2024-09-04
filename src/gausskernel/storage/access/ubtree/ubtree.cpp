@@ -905,9 +905,10 @@ restart:
         if (minoff <= maxoff) {
             stats->num_index_tuples += maxoff - minoff + 1;
         }
-        
-        if(vstate->cycleid !=0 && opaque->btpo_cycleid == vstate->cycleid
-           && !(opaque->btpo_flags & BTP_SPLIT_END) && !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno){
+
+        if (vstate->cycleid != 0 && opaque->btpo_cycleid == vstate->cycleid
+            && !(opaque->btpo_flags & BTP_SPLIT_END)
+            && !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno) {
             recurseTo = opaque->btpo_next;
         }
     }
@@ -916,7 +917,7 @@ restart:
         /* Run pagedel in a temp context to avoid memory leakage */
         MemoryContextReset(vstate->pagedelcontext);
         MemoryContext oldcontext = MemoryContextSwitchTo(vstate->pagedelcontext);
-        BTStack dummy_del_blknos = (BTStack) palloc0(sizeof(BTStackData));
+        BTStack dummy_del_blknos = (BTStack)palloc0(sizeof(BTStackData));
 
         int ndel = UBTreePageDel(rel, buf, dummy_del_blknos);
         if (ndel) {
@@ -1219,7 +1220,8 @@ static void IndexPageShiftBase(Relation rel, Page page, int64 delta, bool needWa
     }
 
     END_CRIT_SECTION();
-    UBTreeVerifyAll(rel, page, BufferGetBlockNumber(buf), InvalidOffsetNumber, false);
+    UBTreeVerify(rel, page, BufferGetBlockNumber(buf));
+    
     WHITEBOX_TEST_STUB("IndexPageShiftBase-end", WhiteboxDefaultErrorEmit);
 }
 

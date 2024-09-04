@@ -179,6 +179,7 @@ static bool check_b_format_behavior_compat_options(char **newval, void **extra, 
 static void assign_b_format_behavior_compat_options(const char *newval, void *extra);
 static bool check_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_behavior_compat_options(const char* newval, void* extra);
+static const char* show_behavior_compat_options(void);
 static bool check_plsql_compile_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_plsql_compile_behavior_compat_options(const char* newval, void* extra);
 static void assign_connection_info(const char* newval, void* extra);
@@ -396,7 +397,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD},
     {"prefer_parse_cursor_parentheses_as_expr", OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR},
     {"update_global_index_on_partition_change", OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE},
-    {"float_as_numeric", OPT_FLOAT_AS_NUMERIC}
+    {"float_as_numeric", OPT_FLOAT_AS_NUMERIC},
+    {"disable_record_type_in_dml", OPT_DISABLE_RECORD_TYPE_IN_DML}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -2919,7 +2921,7 @@ static void InitSqlConfigureNamesString()
             "",
             check_behavior_compat_options,
             assign_behavior_compat_options,
-            NULL},
+            show_behavior_compat_options},
         {{"disable_keyword_options",
           PGC_USERSET,
           NODE_ALL,
@@ -2973,7 +2975,7 @@ static void InitSqlConfigureNamesString()
             PGC_USERSET,
             NODE_ALL,
             CLIENT_CONN,
-            gettext_noop("Configure UStore optimizations."),
+            gettext_noop("Configure Ustore optimizations."),
             NULL,
             GUC_LIST_INPUT | GUC_LIST_QUOTE},
             &u_sess->attr.attr_sql.ustore_attr,
@@ -3354,7 +3356,8 @@ static void AssignQueryDop(int newval, void* extra)
 #ifndef ENABLE_MULTIPLE_NODES
     /* do not reset backend threads tag */
     if (u_sess->opt_cxt.query_dop > 1 &&
-        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER) &&
+        !u_sess->opt_cxt.is_under_cursor) {
         u_sess->opt_cxt.smp_enabled = true;
     }
 #endif
@@ -3703,6 +3706,43 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     list_free(elemlist);
 
     u_sess->utils_cxt.behavior_compat_flags = result;
+}
+
+static const char* show_behavior_compat_options(void)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    int start = 0;
+    int64 result = 0;
+    StringInfoData strInfo;
+    bool isFirst = true;
+    initStringInfo(&strInfo);
+
+    rawstring = pstrdup(u_sess->attr.attr_sql.behavior_compat_string);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+
+    foreach (cell, elemlist) {
+        for (start = 0; start < OPT_MAX; start++) {
+            const char *item = (const char*)lfirst(cell);
+
+            if (strcmp(item, behavior_compat_options[start].name) == 0
+                && (result & behavior_compat_options[start].flag) == 0) {
+                result += behavior_compat_options[start].flag;
+                if (isFirst) {
+                    isFirst = false;
+                    appendStringInfo(&strInfo, "%s", item);
+                } else {
+                    appendStringInfo(&strInfo, ",%s", item);
+                }
+            }
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    return (const char *)strInfo.data;
 }
 
 typedef int16 (*getIgnoreKeywordTokenHook)(const char *item);

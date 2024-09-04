@@ -24,6 +24,11 @@
 #endif
 
 /*
+ *  character length semantic for bpchar and varchar type
+ */
+typedef enum { LENGTH_SEMANTIC_BYTE, LENGTH_SEMANTIC_CHAR } LengthSemanticType;
+
+/*
  * The pg_wchar type
  */
 typedef unsigned int pg_wchar;

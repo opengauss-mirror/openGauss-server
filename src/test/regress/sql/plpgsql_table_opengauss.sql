@@ -769,6 +769,85 @@ end;
 /
 call func2();
 
+create table t_PLArray_ (id int ,col varchar(500));
+create or replace procedure p_PLArray_
+as
+type typ_PLArray_1 is table of varchar(50);
+type typ_PLArray_2 is table of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+nstarr(1)(2):='第一行第二列';
+
+insert into t_PLArray_(col) values (nstarr(1));
+end;
+/
+call p_PLArray_();
+
+create or replace procedure p_PLArray_
+as
+type typ_PLArray_1 is table of varchar(50);
+type typ_PLArray_2 is table of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+nstarr(1)(2):='第一行第二列';
+
+insert into t_PLArray_(col) values (nstarr);
+end;
+/
+call p_PLArray_();
+
+create or replace procedure p_PLArray_
+as
+type typ_PLArray_1 is table of varchar(50);
+type typ_PLArray_2 is table of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+nstarr(1)(2):='第一行第二列';
+
+insert into t_PLArray_(col) values (nstarr(1)(1));
+insert into t_PLArray_(col) values (nstarr(1)(2));
+end;
+/
+call p_PLArray_();
+
+declare
+type typ_PLArray_1 is varray(3) of varchar(50);
+type typ_PLArray_2 is varray(3) of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+insert into t_PLArray_(col) values (nstarr(1));
+end;
+/
+
+declare
+type typ_PLArray_1 is varray(3) of varchar(50);
+type typ_PLArray_2 is varray(3) of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+insert into t_PLArray_(col) values (nstarr);
+end;
+/
+
+declare
+type typ_PLArray_1 is varray(3) of varchar(50);
+type typ_PLArray_2 is varray(3) of typ_PLArray_1;
+nstarr typ_PLArray_2;
+begin
+nstarr(1)(1):='第一行第一列';
+insert into t_PLArray_(col) values (nstarr(1)(1));
+end;
+/
+
+select * from t_PLArray_;
+
+drop table t_PLArray_;
+drop procedure p_PLArray_;
+
 -- test pg_get_function_result and pg_get_function_arguments
 create type ty_test is(col1 int,col2 char(10),col3 varchar2(10));
 create type tyt_test is table of ty_test;

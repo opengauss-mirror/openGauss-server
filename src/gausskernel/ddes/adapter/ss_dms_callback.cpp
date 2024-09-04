@@ -52,6 +52,8 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 
+static void ReleaseResource();
+
 /*
  * Wake up startup process to replay WAL, or to notice that
  * failover has been requested.
@@ -224,10 +226,6 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
         return DMS_ERROR;
     }
 
-    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
-        return DMS_ERROR;
-    }
-
     int retCode = DMS_ERROR;
     SnapshotData snapshot = {SNAPSHOT_MVCC};
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
@@ -240,10 +238,12 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
             txn_snapshot->xmax = snapshot.xmax;
             txn_snapshot->snapshotcsn = snapshot.snapshotcsn;
             txn_snapshot->localxmin = u_sess->utils_cxt.RecentGlobalXmin;
-            if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
-                retCode = DMS_SUCCESS;
+            if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
+                if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
+                    retCode = DMS_SUCCESS;
+                }
             } else {
-                retCode = DMS_ERROR;
+                retCode = DMS_SUCCESS;
             }
         }
     }
@@ -495,41 +495,55 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
 {
     char* type_string = NULL;
     type_string = SSGetLogHeaderTypeStr();
+    int ret = DMS_SUCCESS;
 
-    for (int ntries = 0;; ntries++) {
-        SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
-        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
-            g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
-            ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("%s Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
-                    "confirm ntries=%d.", type_string, SS_MY_INST_ID, primary_id, list_stable, ntries)));
-            return DMS_SUCCESS;
-        } else {
-            if (dms_reform_failed()) {
-                ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                        "control file indicates primary is %d, list_stable%llu; dms reform failed.",
-                        type_string, (int)primary_id, list_stable,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
-                        g_instance.dms_cxt.SSReformerControl.list_stable)));
-                return DMS_ERROR;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    PG_TRY();
+    {
+        for (int ntries = 0;; ntries++) {
+            SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
+            if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
+                g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
+                ereport(LOG, (errmodule(MOD_DMS),
+                    errmsg("%s Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
+                        "confirm ntries=%d.", type_string, SS_MY_INST_ID, primary_id, list_stable, ntries)));
+                ret = DMS_SUCCESS;
+                break;
+            } else {
+                if (dms_reform_failed()) {
+                    ereport(ERROR,
+                        (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
+                            "control file indicates primary is %d, list_stable%llu; dms reform failed.",
+                            type_string, (int)primary_id, list_stable,
+                            g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                            g_instance.dms_cxt.SSReformerControl.list_stable)));
+                    ret = DMS_ERROR;
+                    break;
+                }
+                if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
+                    ereport(ERROR,
+                        (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
+                            " control file indicates primary is %d, list_stable%llu; wait timeout.",
+                            type_string, (int)primary_id, list_stable,
+                            g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                            g_instance.dms_cxt.SSReformerControl.list_stable)));
+                    ret = DMS_ERROR;
+                    break;
+                }
             }
-            if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
-                ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                        " control file indicates primary is %d, list_stable%llu; wait timeout.",
-                        type_string, (int)primary_id, list_stable,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
-                        g_instance.dms_cxt.SSReformerControl.list_stable)));
-                return DMS_ERROR;
-            }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(REFORM_WAIT_TIME); /* wait 0.01 sec, then retry */
         }
-
-        CHECK_FOR_INTERRUPTS();
-        pg_usleep(REFORM_WAIT_TIME); /* wait 0.01 sec, then retry */
     }
-
-    return DMS_ERROR;
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        ReleaseResource();
+        ret = DMS_ERROR;
+    }
+    PG_END_TRY();
+    return ret;
 }
 
 /* called on both new primary and all standby nodes to refresh status */
@@ -838,8 +852,8 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 (void)PinBuffer(buf_desc, NULL);
             }
 
-            SS_FAULT_INJECTION_CALL(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, dms_fi_change_buffertag_blocknum);
-            FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, tag->blockNum += 1);
+            SS_FAULT_INJECTION_CALL(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, ss_fi_change_buffertag_blocknum);
+            SS_FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(DB_FI_CHANGE_BUFFERTAG_BLOCKNUM, tag->blockNum += 1);
             if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                 DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
                 buftag_equal = false;
@@ -1239,6 +1253,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
     PG_TRY();
     {
         switch (bcast_op) {
+            case BCAST_GET_XMIN:
+                ret = SSGetOldestXmin(data, len, output_msg, output_msg_len);
+                break;
             case BCAST_SI:
                 ret = SSProcessSharedInvalMsg(data, len);
                 break;
@@ -1270,7 +1287,7 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
             case BCAST_SEND_SNAPSHOT:
-                ret = SSUpdateLatestSnapshotOfStandby(data, len);
+                ret = SSUpdateLatestSnapshotOfStandby(data, len, output_msg, output_msg_len);
                 break;
             case BCAST_RELOAD_REFORM_CTRL_PAGE:
                 ret = SSReloadReformCtrlPage(len);
@@ -1301,6 +1318,9 @@ static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *bro
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
     switch (bcast_op) {
+        case BCAST_GET_XMIN_ACK:
+            ret = SSGetOldestXminAck((SSBroadcastXminAck *)data);
+            break;
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
@@ -1943,7 +1963,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
-    SSXminInfoPrepare();
+    if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
+        SSXminInfoPrepare();
+    }
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
     char reform_type_str[reform_type_str_len] = {0};

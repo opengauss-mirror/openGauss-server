@@ -1106,6 +1106,7 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
             Node *parsetree = (Node *)lfirst(cell);
             t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
             if (nodeTag(parsetree) == T_SelectStmt) {
+                ListCell* target_lc = NULL;
                 if (checkSelectIntoParse((SelectStmt*)parsetree)) {
                     list_free_deep(parsetreeList);
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1113,6 +1114,17 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
                     errdetail("query \"%s\" is not supported in cursor or for..in loop condition yet.", expr->query),
                     errcause("feature not supported"),
                     erraction("modify the query")));
+                }
+                SelectStmt *select_stmt = (SelectStmt*)parsetree;
+                foreach(target_lc, select_stmt->targetList) {
+                    Node *res_node = (Node*)lfirst(target_lc);
+                    if (res_node->type == T_ResTarget) {
+                        ResTarget* res_target = (ResTarget*)res_node;
+                        if (res_target->val->type == T_CursorExpression) {
+                            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), 
+                                    errmsg("obtain rowtype form nested cursor is not supported")));
+                        }
+                    }
                 }
             } else {
                 if (isOnlySelect) {
@@ -1158,6 +1170,48 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
     return tupleDesc;
 }
 
+static void rowtype_column_len_check(Form_pg_attribute tattr, HeapTuple var_tup, TupleDesc var_tupdesc, Oid valtype, int fnum)
+{
+    if (tattr->atttypid == VARCHAROID || tattr->atttypid == CHAROID) {
+        int maxlen = tattr->atttypmod - VARHDRSZ;
+        if (valtype == VARCHAROID||
+            valtype == NVARCHAR2OID||
+            valtype == CHAROID||
+            valtype == UNKNOWNOID||
+            valtype == CSTRINGOID||
+            valtype == TEXTOID||
+            valtype == NAMEOID) {
+            char *val = SPI_getvalue(var_tup, var_tupdesc, fnum + 1);
+            if (val && maxlen > 0) {
+                int valLen = strlen(val);
+                if (valLen > maxlen) {
+                    ereport(ERROR, (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                        errmsg("value too long for type character varying(%d)", maxlen)));
+                }
+            }
+        }
+    }
+}
+
+static void check_recfield_valid(PLpgSQL_recfield *rec_field, TupleDesc tupdesc, char* recname)
+{
+    int natts = tupdesc->natts;
+    bool found = false;
+    if (natts == 0) {
+        return;
+    }
+    for (int fnum = 0; fnum < natts; fnum++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, fnum);
+        if (strcmp(NameStr(attr->attname), rec_field->fieldname) == 0) {
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
+                        errmsg("record \"%s\" has no field \"%s\"", recname, rec_field->fieldname)));
+}
+
 static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *datum, PLpgSQL_function *func)
 {
     bool *replaces = NULL;
@@ -1180,13 +1234,18 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
 
     rec->expr->func = func;
     new_tupdesc = get_cursor_tupledesc_exec(rec->expr, false, false);
+    if (new_tupdesc == NULL) {
+        temp = MemoryContextSwitchTo(temp);
+        return;
+    }
+
     new_natts = new_tupdesc->natts;
 
     newnulls = (bool *)palloc(new_natts * sizeof(bool));
     rc = memset_s(newnulls, new_natts * sizeof(bool), true, new_natts * sizeof(bool));
     securec_check(rc, "\0", "\0");
 
-    if (!HeapTupleIsValid(rec->tup)) {
+    if (!HeapTupleIsValid(rec->tup) || rec->freetup == false) {
         rec->tupdesc = new_tupdesc;
         rec->tup = (HeapTuple)tableam_tops_form_tuple(new_tupdesc, NULL, newnulls);
         rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
@@ -1207,15 +1266,17 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
         bool isnull;
         Oid valtype;
         int32 valtypmod;
-        Oid reqtype = TupleDescAttr(new_tupdesc, fnum)->atttypid;
+        Form_pg_attribute tattr = TupleDescAttr(new_tupdesc, fnum);
+        Form_pg_attribute attr = TupleDescAttr(rec->tupdesc, anum);
+        Oid reqtype = tattr->atttypid;
 
-        while (anum < new_natts && TupleDescAttr(rec->tupdesc, anum)->attisdropped)
+        while (anum < new_natts && attr->attisdropped) {
             anum++; /* skip dropped column in tuple */
-
+        }
         if (anum < new_natts) {
             value = SPI_getbinval(rec->tup, rec->tupdesc, anum + 1, &isnull);
-            valtype = TupleDescAttr(rec->tupdesc, anum)->atttypid;
-            valtypmod = TupleDescAttr(rec->tupdesc, anum)->atttypmod;
+            valtype = attr->atttypid;
+            valtypmod = attr->atttypmod;
             anum++;
         } else {
             /* When source value is missing */
@@ -1225,6 +1286,7 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
                     errdetail("%s check is active.", "strict_multi_assignment"),
                     errhint("Make sure the query returns the exact list of columns.")));
         }
+        rowtype_column_len_check(tattr, rec->tup, rec->tupdesc, valtype, anum);
         newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
         newnulls[fnum] = isnull;
     }
@@ -1247,16 +1309,42 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
     }
     newtup = (HeapTuple)tableam_tops_modify_tuple(new_tup, new_tupdesc, newvalues, newnulls, replaces);
 
-    heap_freetuple_ext(rec->tup);
-    FreeTupleDesc(rec->tupdesc);
+    if (rec->freetup) {
+        heap_freetuple_ext(rec->tup);
+    }
+    if (rec->freetupdesc) {
+        FreeTupleDesc(rec->tupdesc);
+    }
+
     rec->tup = newtup;
     rec->tupdesc = new_tupdesc;
+    rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
+    rec->freetup = (rec->tup != NULL) ? true : false;
     pfree_ext(replaces);
     pfree_ext(newvalues);
     pfree_ext(newnulls);
 
     temp = MemoryContextSwitchTo(temp);
 
+}
+
+static void check_if_recfield_exist(PLpgSQL_execstate estate, int i, PLpgSQL_function* func)
+{
+    PLpgSQL_rec *rec = (PLpgSQL_rec *)estate.datums[i];
+    TupleDesc tupdesc = rec->tupdesc;
+    if (HeapTupleIsValid(rec->tup) && rec->field_need_check != NIL) {
+        ListCell *lc = NULL;
+        foreach (lc, rec->field_need_check) {
+            int dno = (int)lfirst_int(lc);
+            PLpgSQL_datum *datum = NULL;
+            if (func->ndatums > dno)
+                datum = (PLpgSQL_datum *)func->datums[dno];
+            if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
+                PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
+                check_recfield_valid(rec_field, tupdesc, rec->refname);
+            }
+        }
+    }
 }
 
 /* ----------
@@ -1304,8 +1392,10 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -1316,6 +1406,11 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
                 errmodule(MOD_PLSQL), errmsg("Un-support:DN does not support invoking autonomous transactions.")));
     }
 #endif
+
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errmsg("SS Standby node does not support invoking autonomous transactions.")));
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (plcallstack.prev != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
@@ -1646,8 +1741,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
 
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -2270,12 +2367,14 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
             estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         } else {
             estate.datums[i] = func->datums[i];
-	    }
+	}
 
-	    if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+	if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 
@@ -3007,6 +3106,7 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
             newm->tupdesc = NULL;
             newm->freetup = false;
             newm->freetupdesc = false;
+            newm->field_need_check = list_copy(((PLpgSQL_rec*)datum)->field_need_check);
 
             result = (PLpgSQL_datum*)newm;
         } break;
@@ -7627,7 +7727,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     gsplsql_report_query(expr);
 #ifndef ENABLE_MULTIPLE_NODES
     ListCell* l = NULL;
-    bool isforbid = true;
+    bool isforbid = false;
     bool savedisAllowCommitRollback = false;
     bool needResetErrMsg = false;
     foreach (l, SPI_plan_get_plan_sources(expr->plan)) {
@@ -8746,7 +8846,6 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
         for (int i = 0; i < estate->ndatums; i++) {
             if (estate->datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
                 PLpgSQL_rec *rec = (PLpgSQL_rec*)estate->datums[i];
-                PLpgSQL_var *cursor = (PLpgSQL_var*)estate->datums[rec->cursorDno];
                 if (rec->cursorDno == curvar->dno) {
                     MemoryContext temp = NULL;
                     MemoryContext target_cxt = NULL;
@@ -9482,6 +9581,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
         /* Walk over destination columns */
         for (fnum = 0; fnum < vtd_natts; fnum++) {
             Form_pg_attribute attr = TupleDescAttr(var_tupdesc, fnum);
+            Form_pg_attribute tattr = TupleDescAttr(tupdesc, fnum);
             Datum value;
             bool isnull;
             Oid valtype;
@@ -9504,6 +9604,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
                              errdetail("%s check is active.", "strict_multi_assignment"),
                              errhint("Make sure the query returns the exact list of columns.")));
             }
+            rowtype_column_len_check(tattr, var_tup, var_tupdesc, valtype, fnum);
             newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
             newnulls[fnum] = isnull;
         }
@@ -9516,7 +9617,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
     }
 
     rec->tup = newtup;
-    rec->freetup = true;
+    rec->freetup = (rec->tup != NULL) ? true : false;
     pfree_ext(replaces);
     pfree_ext(newvalues);
     pfree_ext(newnulls);
@@ -9980,30 +10081,58 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
              * Evaluate the subscripts, switch into left-to-right order.
              * Like ExecEvalArrayRef(), complain if any subscript is null.
              */
-            for (i = 0; i < nsubscripts; i++) {
-                bool subisnull = false;
+            bool isNestedArray = ((PLpgSQL_var*)target)->nest_table != NULL;
 
-                subscriptvals[i] = exec_eval_integer(estate, subscripts[nsubscripts - 1 - i], &subisnull);
-                if (subisnull) {
+            if (isNestedArray) {
+                Oid subscriptType = ((PLpgSQL_var*)target)->datatype->tableOfIndexType;
+                HTAB* elemTableOfIndex = ((PLpgSQL_var*)target)->tableOfIndex;
+                PLpgSQL_var* innerVar = evalSubsciptsNested(estate, (PLpgSQL_var*)target, subscripts, nsubscripts,
+                                                   0, subscriptvals, subscriptType, elemTableOfIndex);
+                target = (PLpgSQL_datum*)innerVar;
+                /* should assign inner var as an array, copy value's index */
+                if (innerVar->ispkg) {
+                    MemoryContext temp = MemoryContextSwitchTo(innerVar->pkg->pkg_cxt);
+                    innerVar->tableOfIndex = copyTableOfIndex(tableOfIndex);
+                    MemoryContextSwitchTo(temp);
+                } else {
+                    innerVar->tableOfIndex = copyTableOfIndex(tableOfIndex);
+                }
+                if (tableOfIndexInfo != NULL && innerVar->nest_layers != tableOfIndexInfo->tableOfLayers) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmodule(MOD_PLSQL),
-                            errmsg("array subscript in assignment must not be null")));
+                            errmsg("Nest layer of assigned value is miss match to tableof var(%s)'s expection",
+                                   innerVar->refname)));
                 }
 
-                /*
-                 * Clean up in case the subscript expression wasn't
-                 * simple. We can't do exec_eval_cleanup, but we can do
-                 * this much (which is safe because the integer subscript
-                 * value is surely pass-by-value), and we must do it in
-                 * case the next subscript expression isn't simple either.
-                 */
-                if (estate->eval_tuptable != NULL) {
-                    SPI_freetuptable(estate->eval_tuptable);
+                exec_assign_value(estate, target, PointerGetDatum(value),
+                                  valtype, isNull, innerVar->tableOfIndex);
+                break;
+            } else {
+                for (i = 0; i < nsubscripts; i++) {
+                    bool subisnull = false;
+
+                    subscriptvals[i] = exec_eval_integer(estate, subscripts[nsubscripts - 1 - i], &subisnull);
+                    if (subisnull) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                                errmodule(MOD_PLSQL),
+                                errmsg("array subscript in assignment must not be null")));
+                    }
+
+                    /*
+                    * Clean up in case the subscript expression wasn't
+                    * simple. We can't do exec_eval_cleanup, but we can do
+                    * this much (which is safe because the integer subscript
+                    * value is surely pass-by-value), and we must do it in
+                    * case the next subscript expression isn't simple either.
+                    */
+                    if (estate->eval_tuptable != NULL) {
+                        SPI_freetuptable(estate->eval_tuptable);
+                    }
+                    estate->eval_tuptable = NULL;
                 }
-                estate->eval_tuptable = NULL;
             }
-
             /* Now we can restore caller's SPI_execute result if any. */
             AssertEreport(estate->eval_tuptable == NULL, MOD_PLSQL, "eval tuptable should not be null");
             estate->eval_tuptable = save_eval_tuptable;
@@ -14347,8 +14476,10 @@ plpgsql_exec_event_trigger(PLpgSQL_function *func, EventTriggerData *trigdata)
         estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
         if (estate.datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
             PLpgSQL_rec *rec = (PLpgSQL_rec*)estate.datums[i];
-            if (rec->expr)
+            if (rec->expr) {
                 exec_cursor_rowtype_init(&estate, estate.datums[i], func);
+                check_if_recfield_exist(estate, i, func);
+	    }
         }
     }
 

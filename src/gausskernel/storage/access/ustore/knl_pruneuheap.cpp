@@ -367,7 +367,8 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
 
     END_CRIT_SECTION();
 
-    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_ROWS));
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, NULL, BufferGetBlockNumber(relbuf->buffer),
+        false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_ROWS));
 
     /*
      * Report the number of tuples reclaimed to pgstats. This is ndeleted
@@ -535,32 +536,27 @@ int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, Transact
      * strategy to rearrange the page where we anyway need to traverse all
      * rows.
      */
-    if (forcePrune && !UPageIsPrunableWithXminHorizon(page, oldestXmin)) {
-        ; /* no need to scan */
-    } else {
-        /* Scan the page */
-        maxoff = UHeapPageGetMaxOffsetNumber(page);
-        for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-            RowPtr *itemid = NULL;
+    maxoff = UHeapPageGetMaxOffsetNumber(page);
+    for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
+        RowPtr *itemid = NULL;
 
-            /* Ignore items already processed as part of an earlier chain */
-            if (prstate.marked[offnum]) {
-                continue;
-            }
-
-            /*
-             * Nothing to do if slot is empty, already dead or marked as
-             * deleted.
-             */
-            itemid = UPageGetRowPtr(page, offnum);
-            if (!RowPtrIsUsed(itemid) || RowPtrIsDead(itemid) || RowPtrIsDeleted(itemid)) {
-                continue;
-            }
-
-            /* Process this item */
-            ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed,
-                (offnum == targetOffnum));
+        /* Ignore items already processed as part of an earlier chain */
+        if (prstate.marked[offnum]) {
+            continue;
         }
+
+        /*
+         * Nothing to do if slot is empty, already dead or marked as
+         * deleted.
+         */
+        itemid = UPageGetRowPtr(page, offnum);
+        if (!RowPtrIsUsed(itemid) || RowPtrIsDead(itemid) || RowPtrIsDeleted(itemid)) {
+            continue;
+        }
+
+        /* Process this item */
+        ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed,
+            (offnum == targetOffnum));
     }
 
     /*

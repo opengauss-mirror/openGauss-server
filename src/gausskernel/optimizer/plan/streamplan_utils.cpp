@@ -22,6 +22,7 @@
 #include "optimizer/planner.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/tlist.h"
+#include "optimizer/planmem_walker.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_clause.h"
@@ -1565,6 +1566,44 @@ static void set_bucketmap_index(Plan* plan, NodeGroupInfoContext* node_group_inf
     }
 }
 
+typedef struct SetStreamPlanCursorWalkerContext {
+    MethodPlanWalkerContext mpwc;
+
+    int cursor_expr_level;
+    int cursor_owner_node_id;
+} SetStreamPlanCursorWalkerContext;
+
+bool set_stream_plan_cursor(Node* node_plan, void* context)
+{
+    if (node_plan == NULL) {
+        return false;
+    }
+
+    if (IsA(node_plan, Stream)) {
+        Plan* plan = (Plan*)node_plan;
+        plan->cursor_expr_level = ((SetStreamPlanCursorWalkerContext*)context)->cursor_expr_level;
+        plan->cursor_owner_node_id = ((SetStreamPlanCursorWalkerContext*)context)->cursor_owner_node_id;
+    }
+
+    return plan_tree_walker(node_plan, (MethodWalker)set_stream_plan_cursor, (void*)context);
+}
+
+/*
+ * walk through plan tree to set cursor_expr_level/cursor_owner_node_id
+ */
+void set_stream_plan_cursor_walker(Plan* node_plan)
+{
+    SetStreamPlanCursorWalkerContext context;
+    errno_t rc = memset_s(&context, sizeof(SetStreamPlanCursorWalkerContext), 0,
+        sizeof(SetStreamPlanCursorWalkerContext));
+    securec_check(rc, "\0", "\0");
+
+    context.cursor_expr_level = node_plan->cursor_expr_level;
+    context.cursor_owner_node_id = node_plan->cursor_owner_node_id;
+
+    (void)set_stream_plan_cursor((Node*)node_plan, &context);
+}
+
 /*
  * finalize_node_id
  *      To finalize node id and parent node id for result plan. The sequence of plan node id doesn't
@@ -1606,8 +1645,9 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
             /* set the index of bucketmap */
             set_bucketmap_index(result_plan, node_group_info_context);
         }
-        if (is_under_stream)
+        if (is_under_stream) {
             subplan_ids[0] = *plan_node_id;
+        }
 
         *parent_node_id = *plan_node_id;
 
@@ -1688,8 +1728,9 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                             total_num_streams, max_push_sql_num, gather_count, subplans, subroots, initplans,
                             subplan_ids, false, is_under_ctescan, is_data_node_exec, is_read_only,
                             node_group_info_context);
-                    } else
+                    } else {
                         break;
+                    }
                     /*
                      * Note, the recursive-cte processing (stream mode), RecursiveUnion
                      * operator is processed in a way like SubPlan initialization, we just
@@ -1799,8 +1840,9 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                         rq->exec_nodes = get_plan_max_ExecNodes(result_plan->lefttree, subplans);
                     (*num_streams) = 0;
                 }
-                if (!rq->is_simple)
+                if (!rq->is_simple) {
                     (*max_push_sql_num)++;
+                }
 
                 /* mark num_gather include scan_gather plan_router gather in all plan */
                 rq->num_gather = *gather_count;
@@ -1856,10 +1898,10 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                 }
             } break;
             case T_FunctionScan: {
-                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg((FuncExpr*)((FunctionScan*)result_plan)->funcexpr);
+                PlannedStmt* cursorPstmt = getCursorStreamFromFuncArg(((FunctionScan*)result_plan)->funcexpr);
                 if (cursorPstmt != NULL) {
-                    Stream* stream = (Stream*)cursorPstmt->planTree;
-                    stream->cursor_owner_node_id = result_plan->plan_node_id;
+                    cursorPstmt->planTree->cursor_owner_node_id = result_plan->plan_node_id;
+                    set_stream_plan_cursor_walker(cursorPstmt->planTree);
                 }
             } break;
             default:

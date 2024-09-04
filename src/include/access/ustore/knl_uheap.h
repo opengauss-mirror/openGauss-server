@@ -178,6 +178,8 @@ bool UHeapExecPendingUndoActions(Relation rel, Buffer buffer, TransactionId xwai
 extern XLogRecPtr LogUHeapClean(Relation reln, Buffer buffer, OffsetNumber target_offnum, Size space_required,
     OffsetNumber *nowdeleted, int ndeleted, OffsetNumber *nowdead, int ndead, OffsetNumber *nowunused, int nunused,
     OffsetNumber *nowfixed, uint16 *fixedlen, uint16 nfixed, TransactionId latestRemovedXid, bool pruned);
+extern XLogRecPtr LogUHeapNewPage(RelFileNode* rnode, ForkNumber forkNum, BlockNumber blkno, Page page, bool page_std,
+    TdeInfo* tdeinfo = NULL);
 
 extern void SimpleUHeapDelete(Relation relation, ItemPointer tid, Snapshot snapshot, TupleTableSlot** oldslot = NULL,
     TransactionId* tmfdXmin = NULL);

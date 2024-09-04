@@ -80,6 +80,7 @@
 #include "openssl/rand.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
+#include "pg_backup_cipher.h"
 #ifdef HAVE_CE
 #include "client_logic_cache/types_to_oid.h"
 #include "client_logic_processor/values_processor.h"
@@ -93,7 +94,6 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "catalog/pg_constraint.h"
-
 #else
 
 typedef enum {
@@ -302,6 +302,7 @@ const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
 const uint32 RB_OBJECT_VERSION_NUM = 92831;
 const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
+const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -311,6 +312,9 @@ char* syslogpath = NULL;
 const char* encrypt_mode = NULL;
 const char* encrypt_key = NULL;
 extern const char* encrypt_salt;
+
+static const char* module_params = NULL;
+static bool gen_key = false;
 
 /* subquery used to convert user ID (eg, datdba) to user name */
 static const char* username_subquery;
@@ -518,6 +522,8 @@ static void dumpColumnEncryptionKeys(Archive* fout, const Oid nspoid, const char
 #endif
 static void dumpEncoding(Archive* AH);
 static void dumpStdStrings(Archive* AH);
+static void DumpBehaviorCompat(Archive* archive);
+static void DummpLengthSemantics(Archive* AH);
 static void binary_upgrade_set_type_oids_by_type_oid(
     Archive* Afout, PQExpBuffer upgrade_buffer, Oid pg_type_oid, bool error_table);
 static bool binary_upgrade_set_type_oids_by_rel_oid(
@@ -669,7 +675,8 @@ int main(int argc, char** argv)
 #ifdef DUMPSYSLOG
         {"syslog", no_argument, &dump_syslog, 1},
 #endif
-        /* Database Security: Data importing/dumping support AES128. */
+        /* Database Security: enc mode , soft only AES128 is available,
+         * common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR. */
         {"with-encryption", required_argument, NULL, 6},
         {"with-key", required_argument, NULL, 7},
         {"rolepassword", required_argument, NULL, 9},
@@ -689,6 +696,8 @@ int main(int argc, char** argv)
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
         {"disable-progress", no_argument, NULL, 18},
 #endif
+        {"with-module-params", required_argument, NULL, 19},
+        {"gen-key", no_argument, NULL, 20},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -746,6 +755,7 @@ int main(int argc, char** argv)
     // log output redirect
     init_log((char*)PROG_NAME);
 
+    init_audit(PROG_NAME, argc, argv);
     validatedumpoptions();
 
     /* Identify archive format to emit */
@@ -756,8 +766,8 @@ int main(int argc, char** argv)
     }
 
     if (!could_encrypt && is_encrypt) {
-        exit_horribly(NULL, "Encrypt mode is only supported for plain text, "
-            "You should assign -F p or -F plain.\n");
+        exit_horribly(NULL, "Encrypt mode is only supported for plain text and directory, "
+            "You should assign -F p/d or -F plain/directory.\n");
     }
 
     /* Custom and directory formats are compressed by default, others not */
@@ -837,32 +847,37 @@ int main(int argc, char** argv)
     /* Let the archiver know how noisy to be */
     fout->verbose = g_verbose;
 
-    if ((encrypt_mode != NULL) && (encrypt_key == NULL)) {
-        get_encrypt_key();
-    }
-    /* Database Security: Data importing/dumping support AES128. */
-    check_encrypt_parameters(fout, encrypt_mode, encrypt_key);
+    if (module_params != NULL) {
+        CryptoModuleParamsCheck((ArchiveHandle*)fout, module_params, encrypt_mode, encrypt_key, encrypt_salt, gen_key);
+    } else if (is_encrypt) {
 
-    if (true == fout->encryptfile) {
-        if (NULL == encrypt_salt) {
-            GS_UINT32 retval = 0;
-            GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
+        if ((encrypt_mode != NULL) && (encrypt_key == NULL)) {
+            get_encrypt_key();
+        }
+        /* Database Security: Data importing/dumping support AES128. */
+        check_encrypt_parameters(fout, encrypt_mode, encrypt_key);
 
-            /* get a random values as salt for encrypt */
-            retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
-            if (retval != 1) {
-                exit_horribly(NULL, "Generate random key failed\n");
+        if (true == fout->encryptfile) {
+            if (NULL == encrypt_salt) {
+                GS_UINT32 retval = 0;
+                GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
+
+                /* get a random values as salt for encrypt */
+                retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+                if (retval != 1) {
+                    exit_horribly(NULL, "Generate random key failed\n");
+                }
+
+                rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
+                securec_check_c(rc, "\0", "\0");
+                rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, init_rand, RANDOM_LEN);
+                securec_check_c(rc, "\0", "\0");
+            } else {
+                rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
+                securec_check_c(rc, "\0", "\0");
+                rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, encrypt_salt, RANDOM_LEN);
+                securec_check_c(rc, "\0", "\0");
             }
-
-            rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
-            securec_check_c(rc, "\0", "\0");
-            rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, init_rand, RANDOM_LEN);
-            securec_check_c(rc, "\0", "\0");
-        } else {
-            rc = memset_s(fout->rand, (RANDOM_LEN + 1), 0, RANDOM_LEN + 1);
-            securec_check_c(rc, "\0", "\0");
-            rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, encrypt_salt, RANDOM_LEN);
-            securec_check_c(rc, "\0", "\0");
         }
     }
 
@@ -1129,6 +1144,12 @@ int main(int argc, char** argv)
     pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
 
+    /* Set special option: behavior_compat_options */
+    DumpBehaviorCompat(fout);
+
+    /* Dump nls_length_semantics parameter */
+    DummpLengthSemantics(fout);
+
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
         g_dumpObjNums++;
@@ -1230,6 +1251,7 @@ int main(int argc, char** argv)
 
     encryptArchive(fout, archiveFormat);
     write_msg(NULL, "dump database %s successfully\n", dbname);
+    audit_success();
 
     /* Database Security: Data importing/dumping support AES128. */
     gettimeofday(&aes_end_time, NULL);
@@ -1532,7 +1554,6 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 break;
             case 'n': /* include schema(s) */
                 simple_string_list_append(&schema_include_patterns, optarg);
-                include_everything = false;
                 break;
 
             case 'N': /* exclude schema(s) */
@@ -1730,6 +1751,15 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 disable_progress = true;
                 break;
 #endif
+            case 19:
+                GS_FREE(module_params);
+                module_params = gs_strdup(optarg);
+                is_encrypt = true;
+                break;
+            case 20:
+                gen_key = true;
+                is_encrypt = true;
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -1927,9 +1957,15 @@ void help(const char* pchProgname)
              "                                              ALTER OWNER commands to set ownership\n"));
     printf(_("  --exclude-function                          do not dump function and procedure\n"));    
     /* Database Security: Data importing/dumping support AES128. */
-    printf(_("  --with-encryption=AES128                    dump data is encrypted using AES128\n"));
-    printf(_("  --with-key=KEY                              AES128 encryption key, must be 16 bytes in length\n"));
+    printf(_("  --with-encryption=AES128                    dump data is encrypted,soft only AES128 is available"
+            "common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"));
+    printf(_("  --with-key=KEY                              soft AES128 encryption key, must be 16 bytes in length,common cipher key is base64 encoded,max 44 bytes\n"));
     printf(_("  --with-salt=RANDVALUES                      used by gs_dumpall, pass rand value array\n"));
+    printf(_("  --with-module-params=MODLUE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
+            "type:GDACCARD,JNTAKMS,SWXAKMS;MODULE_LIB_PATH:need include lib file absolute path;"
+            "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
+            "used by gs_dump, load device\n"));
+    printf(_("  --gen-key                      if you have not key for using,you can set this option to generate key and encrypt dump data,store it to using again\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE "
              "and CREATE FOREIGN TABLE commands.\n"));
@@ -2094,6 +2130,10 @@ static void setup_connection(Archive* AH)
     /*
      * Quote all identifiers, if requested.
      */
+    if (!quote_all_identifiers && findDBCompatibility(AH, PQdb(conn)) && hasSpecificExtension(AH, "dolphin")) {
+        quote_all_identifiers = true;
+    }
+
     if (quote_all_identifiers && AH->remoteVersion >= 90100)
         ExecuteSqlStatement(AH, "SET quote_all_identifiers = true");
 }
@@ -2115,8 +2155,10 @@ static ArchiveFormat parseArchiveFormat(ArchiveMode* mode)
         archiveFormat = archCustom;
     } else if (pg_strcasecmp(format, "d") == 0) {
         archiveFormat = archDirectory;
+        could_encrypt = true;
     } else if (pg_strcasecmp(format, "directory") == 0) {
         archiveFormat = archDirectory;
+        could_encrypt = true;
     } else if (pg_strcasecmp(format, "p") == 0) {
         archiveFormat = archNull;
         could_encrypt = true;
@@ -4159,6 +4201,84 @@ static void dumpStdStrings(Archive* AH)
 }
 
 /*
+ * DumpBehaviorCompat: put the correct behavior_compat_options into the archive
+ */
+static void DumpBehaviorCompat(Archive* archive)
+{
+    ddr_Assert(archive != NULL);
+    PGconn* conn = GetConnection(archive);
+    PGresult* res;
+    PQExpBuffer qry = createPQExpBuffer();
+
+    res = PQexec(conn, "show behavior_compat_options;");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        appendPQExpBuffer(qry, "SET behavior_compat_options = '%s';\n", PQgetvalue(res, 0, 0));
+    } else {
+        appendPQExpBuffer(qry, "SET behavior_compat_options = '';\n");
+    }
+    PQclear(res);
+
+    ArchiveEntry(archive,
+        nilCatalogId,
+        createDumpId(),
+        "BEHAVIORCOMPAT",
+        NULL,
+        NULL,
+        "",
+        false,
+        "BEHAVIORCOMPAT",
+        SECTION_PRE_DATA,
+        qry->data,
+        "",
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+
+    destroyPQExpBuffer(qry);
+}
+
+/*
+ * DummpLengthSemantics: put the correct nls_length_semantics into the archive
+ */
+static void DummpLengthSemantics(Archive* archive)
+{
+    ddr_Assert(archive != NULL);
+    PGconn* conn = GetConnection(archive);
+    PGresult* res;
+    PQExpBuffer qry = createPQExpBuffer();
+
+    res = PQexec(conn, "show nls_length_semantics;");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        appendPQExpBuffer(qry, "SET nls_length_semantics = '%s';\n", PQgetvalue(res, 0, 0));
+    } else {
+        appendPQExpBuffer(qry, "SET nls_length_semantics = 'byte';\n");
+    }
+    PQclear(res);
+
+    ArchiveEntry(archive,
+                 nilCatalogId,
+                 createDumpId(),
+                 "LENGTHSEMANTICS",
+                 NULL,
+                 NULL,
+                 "",
+                 false,
+                 "LENGTHSEMANTICS",
+                 SECTION_PRE_DATA,
+                 qry->data,
+                 "",
+                 NULL,
+                 NULL,
+                 0,
+                 NULL,
+                 NULL);
+
+    destroyPQExpBuffer(qry);
+}
+
+/*
  * getBlobs:
  *	Collect schema-level data about large objects
  */
@@ -4409,6 +4529,7 @@ void getPublications(Archive *fout)
     int i_pubinsert;
     int i_pubupdate;
     int i_pubdelete;
+    int i_pubtruncate = 0;
     int i_pubddl = 0;
     int i, ntups;
 
@@ -4421,7 +4542,14 @@ void getPublications(Archive *fout)
     resetPQExpBuffer(query);
 
     /* Get the publications. */
-    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete, p.pubtruncate, p.pubddl "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
         appendPQExpBuffer(query,
             "SELECT p.tableoid, p.oid, p.pubname, "
             "(%s p.pubowner) AS rolname, "
@@ -4454,7 +4582,10 @@ void getPublications(Archive *fout)
     i_pubinsert = PQfnumber(res, "pubinsert");
     i_pubupdate = PQfnumber(res, "pubupdate");
     i_pubdelete = PQfnumber(res, "pubdelete");
-    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+        i_pubtruncate = PQfnumber(res, "pubtruncate");
+        i_pubddl = PQfnumber(res, "pubddl");
+    } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
         i_pubddl = PQfnumber(res, "pubddl");
     }
 
@@ -4471,7 +4602,10 @@ void getPublications(Archive *fout)
         pubinfo[i].pubinsert = (strcmp(PQgetvalue(res, i, i_pubinsert), "t") == 0);
         pubinfo[i].pubupdate = (strcmp(PQgetvalue(res, i, i_pubupdate), "t") == 0);
         pubinfo[i].pubdelete = (strcmp(PQgetvalue(res, i, i_pubdelete), "t") == 0);
-        if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        if (GetVersionNum(fout) >= PUBLICATION_DDL_AT_VERSION_NUM) {
+            pubinfo[i].pubtruncate = (strcmp(PQgetvalue(res, i, i_pubtruncate), "t") == 0);
+            pubinfo[i].pubddl = atoxid(PQgetvalue(res, i, i_pubddl));
+        } else if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
             pubinfo[i].pubddl = atol(PQgetvalue(res, i, i_pubddl));
         }
 
@@ -4534,6 +4668,14 @@ static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
             appendPQExpBufferStr(query, ", ");
         }
         appendPQExpBufferStr(query, "delete");
+        first = false;
+    }
+
+    if (pubinfo->pubtruncate) {
+        if (!first) {
+            appendPQExpBufferStr(query, ", ");
+        }
+        appendPQExpBufferStr(query, "truncate");
         first = false;
     }
 
@@ -18665,18 +18807,24 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 newStrategy);
             for (i = 1; i <= partkeynum; i++) {
-                if (partkeyexprIsNull) {
-                    if (i == partkeynum)
+                
+                if (!partkeyexprIsNull) {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST,", i);
+                } else if (partStrategy == PART_STRATEGY_HASH) {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int ASC NULLS LAST", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int NULLS LAST", i);
+                } else {
+                    if (i == partkeynum) 
                         appendPQExpBuffer(
                             partitionq, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                     else
                         appendPQExpBuffer(
-                            partitionq, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-                } else {
-                    if (i == partkeynum)
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
-                    else
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST, ", i);
+                            partitionq, "p.boundaries[%d]::%s NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                 }
             }
         } else {
@@ -19955,6 +20103,7 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         appendPQExpBuffer(q, " DEFAULT %s", default_value);
 
                     if (hasOnUpdateFeature) {
+                        RemoveQuotes(onUpdate_value);
                         if (pg_strcasecmp(onUpdate_value, "") != 0) {
                             if (pg_strcasecmp(onUpdate_value, "pg_systimestamp()") == 0) {
                                 appendPQExpBuffer(q, " ON UPDATE CURRENT_TIMESTAMP");
@@ -22514,6 +22663,7 @@ static void dumpSynonym(Archive* fout)
     int i_tableoid = 0;
     int i_synname = 0;
     int i_nspname = 0;
+    int i_nspoid = 0;
     int i_rolname = 0;
     int i_synobjschema = 0;
     int i_synobjname = 0;
@@ -22544,7 +22694,7 @@ static void dumpSynonym(Archive* fout)
      * Only the super user can access pg_authid. Therefore, user verification is ignored.
      */
     appendPQExpBuffer(query,
-        "SELECT s.oid, s.tableoid, s.synname, n.nspname, a.rolname, s.synobjschema, s.synobjname "
+        "SELECT s.oid, s.tableoid, s.synname, n.nspname, n.oid as nspoid, a.rolname, s.synobjschema, s.synobjname "
         "FROM pg_synonym s, pg_namespace n, pg_authid a "
         "WHERE n.oid = s.synnamespace AND s.synowner = a.oid;");
 
@@ -22561,11 +22711,16 @@ static void dumpSynonym(Archive* fout)
     i_tableoid = PQfnumber(res, "tableoid");
     i_synname = PQfnumber(res, "synname");
     i_nspname = PQfnumber(res, "nspname");
+    i_nspoid = PQfnumber(res, "nspoid");
     i_rolname = PQfnumber(res, "rolname");
     i_synobjschema = PQfnumber(res, "synobjschema");
     i_synobjname = PQfnumber(res, "synobjname");
 
     for (i = 0; i < ntups; i++) {
+        Oid schemaOid = atooid(PQgetvalue(res, i, i_nspoid));
+        if (!simple_oid_list_member(&schema_include_oids, schemaOid)) {
+            continue;
+        }
         char* synname = NULL;
         char* nspname = NULL;
         char* rolname = NULL;
@@ -22607,7 +22762,7 @@ static void dumpSynonym(Archive* fout)
             rolname,          /* Owner */
             false,            /* with oids */
             "SYNONYM",        /* Desc */
-            SECTION_PRE_DATA, /* Section */
+            SECTION_POST_DATA,/* Section */
             q->data,          /* Create */
             delq->data,       /* Del */
             NULL,             /* Copy */
@@ -23696,7 +23851,8 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
 static bool eventtrigger_filter(EventTriggerInfo *evtinfo)
 {
     static char *reserved_trigger_prefix[] = {PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
-                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START};
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START,
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_TBL_REWRITE};
     static const size_t triggerPrefixLength = sizeof(reserved_trigger_prefix) / sizeof(reserved_trigger_prefix[0]);
 
     for (size_t i = 0; i < triggerPrefixLength; ++i) {
@@ -23993,4 +24149,21 @@ bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
     
     exist = isExistsSQLResult(AH->connection, query);
     return exist;
+}
+
+void RemoveQuotes(char *str) {
+    int len = strlen(str);
+    int readPtr = 0;
+    int writePtr = 0;
+
+    while (readPtr < len) {
+        if (str[readPtr] == '"') {
+            readPtr++;  // Skip the escape character '"'
+        } else {
+            str[writePtr] = str[readPtr];
+            writePtr++;
+            readPtr++;
+        }
+    }
+    str[writePtr] = '\0';  // Add null terminator at the end
 }

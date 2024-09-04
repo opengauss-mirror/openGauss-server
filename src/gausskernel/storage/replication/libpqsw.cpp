@@ -189,6 +189,7 @@ void RedirectMessageManager::push_message(int qtype, StringInfo msg, bool need_s
     last_message = qtype;
     copyStringInfo(cur_msg->pbe_stack_msgs[cur_msg->cur_pos], msg);
     cur_msg->cur_pos ++;
+    libpqsw_trace("[PUSHED MSG] %c: msg:%s, pos:%d", qtype, msg->data, cur_msg->cur_pos - 1);
     MemoryContextSwitchTo(old);
 }
 
@@ -590,6 +591,11 @@ void libpqsw_set_set_command(bool set_command)
     get_redirect_manager()->state.set_command = set_command;
 }
 
+static bool libpqsw_prepare_command(const char* commandTag)
+{
+    return commandTag != NULL && (strcmp(commandTag, "PREPARE") == 0 || strcmp(commandTag, "DEALLOCATE") == 0);
+}
+
 /* 
 * wrapper remote excute for extend query (PBE)
 */
@@ -924,7 +930,8 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
         redirect_manager->ss_standby_state |= SS_STANDBY_REQ_SAVEPOINT;
     } else if (query_list != NIL) {
         /* Don't support DDL with in transaction */
-        if (set_command_type_by_commandTag(commandTag) == CMD_DDL || libpqsw_special_command(commandTag)) {
+        if ((set_command_type_by_commandTag(commandTag) == CMD_DDL && !libpqsw_prepare_command(commandTag)) ||
+            libpqsw_special_command(commandTag)) {
             if (libpqsw_fetch_command(commandTag)) {
                 get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
                 return ret;
@@ -1068,10 +1075,14 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
 
     ready_to_excute = redirect_manager->push_message(qtype, msg, false, RT_NORMAL);
     if (ready_to_excute) {
-        libpqsw_inner_excute_pbe(true, true);
-        libpqsw_set_batch(false);
-        libpqsw_set_redirect(false);
-        libpqsw_set_set_command(false);
+        if (qtype != 'S') {
+            libpqsw_inner_excute_pbe(false, false);
+        } else if (qtype == 'S') {
+            libpqsw_inner_excute_pbe(true, true);
+            libpqsw_set_batch(false);
+            libpqsw_set_redirect(false);
+            libpqsw_set_set_command(false);
+        }
     }
 
     /* for begin in pbe and in trxn */

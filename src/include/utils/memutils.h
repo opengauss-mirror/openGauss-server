@@ -116,6 +116,8 @@ extern void MemoryContextUnSealChildren(MemoryContext context);
 extern void MemoryContextAllowInCriticalSection(MemoryContext context, bool allow);
 extern bool MemoryContextContains(MemoryContext context, void* pointer);
 extern MemoryContext MemoryContextOriginal(const char* node);
+extern Size GetMemoryTotalSpace(MemoryContext context, bool recurse);
+extern Size GetMemoryChildrenTotalSpace(MemoryContext context, bool recurse);
 extern Size GetMemoryChunkSpace(void* pointer);
 extern MemoryContext GetMemoryChunkContext(void* pointer);
 
@@ -186,6 +188,7 @@ extern MemoryContext opt_AllocSetContextCreate(MemoryContext parent,
 #define ALLOCSET_SMALL_MINSIZE 0
 #define ALLOCSET_SMALL_INITSIZE (1 * 1024)
 #define ALLOCSET_SMALL_MAXSIZE (8 * 1024)
+#define ALLOCSET_SMALL_SIZES ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE
 
 /* default grow ratio for sort and materialize when it spreads */
 #define DEFAULT_GROW_RATIO 2.0
@@ -225,5 +228,8 @@ private:
     (IS_USESS_AVAILABLE ? u_sess->attr.attr_memory.enable_memory_context_control : false)
 #define MEMORY_FAULT_PERCENT (IS_USESS_AVAILABLE ? u_sess->attr.attr_resource.memory_fault_percent : 0)
 #define STATEMENT_MAX_MEM (IS_USESS_AVAILABLE ? u_sess->attr.attr_sql.statement_max_mem : 0)
+
+#define SLAB_DEFAULT_BLOCK_SIZE     (8 * 1024)
+#define SLAB_LARGE_BLOCK_SIZE       (8 * 1024 * 1024)
 
 #endif /* MEMUTILS_H */

@@ -444,7 +444,6 @@ void StartBlockHashTableRemove(PgStat_StartBlockTableKey *tabkey)
     }
 
     LWLock *lock = LockStartBlockHashTablePartition(tabkey, LW_EXCLUSIVE);
-
     (void)hash_search(g_instance.stat_cxt.tableStat->blocks_map, tabkey, HASH_REMOVE, NULL);
     LWLockRelease(lock);
 }

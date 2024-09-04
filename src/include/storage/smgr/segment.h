@@ -60,7 +60,7 @@ void seg_physical_write(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, B
 XLogRecPtr seg_get_headlsn(SegSpace *spc, BlockNumber blockNum, bool isbucket);
 
 int32 seg_physical_aio_prep_pwrite(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, BlockNumber blocknum,
-    const char *buffer, void *iocb_ptr);
+    const char *buffer, void *iocb_ptr, void *tempAioExtra);
 
 /* segment sync callback */
 void forget_space_fsync_request(SegSpace *spc);

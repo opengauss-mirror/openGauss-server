@@ -360,6 +360,7 @@ typedef struct knl_u_optimizer_context {
 
     /* Mark smp is enabled in procedure. */
     bool smp_enabled;
+    bool is_under_cursor;
 
     double smp_thread_cost;
 
@@ -2358,6 +2359,20 @@ typedef struct knl_u_statement_context {
     bool enable_wait_events_bitmap; /* change to true in init stage of stmt handle */
     int64 current_row_count; /* Record the number of rows affected by current query */
     int64 last_row_count; /* Record the number of rows affected by last query */
+
+    void *root_query_plan; /* Record the root query plan before report */
+    bool query_plan_threshold_active; /* active if need start query_plan threshold timer */
+    bool is_exceed_query_plan_threshold; /* if true when slow sql take effect */
+    TimestampTz record_query_plan_fin_time; /* finish time when execute time exceed log_min_duration_statement */
+
+    /* whether remote jdbc rupport trace */
+    bool remote_support_trace;
+    /* whether previous statement flushed to statement_history */
+    bool previous_stmt_flushed;
+    /* if enable jdbc trace */
+    bool nettime_trace_is_working;
+    /* record total db_time like execute(sql1;sql2) */
+    int64 total_db_time;
 } knl_u_statement_context;
 
 struct Qid_key {
@@ -2933,6 +2948,7 @@ typedef struct knl_u_hook_context {
     void *deparseQueryHook;
     void *checkSqlFnRetvalHook;
     void *typeTransfer;
+    void *isBinaryType;
     void *forTsdbHook;
     void *pluginPlannerHook;
     void *groupingplannerHook;
@@ -2940,6 +2956,7 @@ typedef struct knl_u_hook_context {
     void *nullsMinimalPolicyHook;
     void *getIgnoreKeywordTokenHook;
     void *modifyTypeForPartitionKeyHook;
+    void *deparseCollectedCommandHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
@@ -3138,6 +3155,7 @@ typedef struct knl_session_context {
 
     /* standby write. */
     knl_u_libsw_context libsw_cxt;
+
 } knl_session_context;
 
 enum stp_xact_err_type {

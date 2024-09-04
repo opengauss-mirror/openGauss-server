@@ -1,0 +1,53 @@
+create database test_float_dump;
+\c test_float_dump
+set search_path to test_float_dump;
+
+\c postgres
+ALTER DATABASE test_float_dump SET behavior_compat_options TO 'float_as_numeric';
+
+\c test_float_dump
+show behavior_compat_options;
+set behavior_compat_options = 'float_as_numeric';
+
+create table test_float (c1 int, c2 float);
+insert into test_float values (1, 3.14);
+insert into test_float values (2, 1.79E+10);
+insert into test_float values (3, -0.01);
+select * from test_float order by c1;
+
+\! @abs_bindir@/gs_dump test_float_dump -p @portstring@ -f @abs_bindir@/test_float_dump.sql -F p -w >/dev/null 2>&1; echo $?
+
+drop table test_float;
+\d
+
+\! @abs_bindir@/gsql -d test_float_dump -p @portstring@ -f @abs_bindir@/test_float_dump.sql;
+
+select * from test_float order by c1;
+
+drop table test_float;
+
+-- test dump custom
+create user u_dmp password '1234@abcd';
+grant all privileges to u_dmp;
+
+create database db_restore;
+ALTER DATABASE db_restore SET behavior_compat_options TO ''; 
+
+\c test_float_dump
+create table test_float (c1 int, c2 float(120));
+insert into test_float values (1, 3.14);
+insert into test_float values (2, 1.79E+10);
+insert into test_float values (3, -0.01);
+select * from test_float order by c1;
+
+\! @abs_bindir@/gs_dump -p @portstring@ test_float_dump -f @abs_bindir@/t_dump -C -F c -w >/dev/null 2>&1; echo $?
+
+\! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_dmp -W 1234@abcd -d db_restore -F c @abs_bindir@/t_dump
+
+\c db_restore
+\d
+
+\c postgres
+drop database test_float_dump;
+drop database db_restore;
+drop user u_dmp cascade;

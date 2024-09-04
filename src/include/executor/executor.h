@@ -263,6 +263,7 @@ extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** p
 
 extern long ExecGetPlanMemCost(Plan* node);
 extern bool executorEarlyStop();
+extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
 
 /* ----------------------------------------------------------------
  *		ExecProcNode
@@ -275,6 +276,10 @@ extern bool executorEarlyStop();
 
 static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
+    if (u_sess->statement_cxt.is_exceed_query_plan_threshold) {
+        instr_stmt_report_query_plan((QueryDesc *)u_sess->statement_cxt.root_query_plan);
+        u_sess->statement_cxt.root_query_plan = NULL;
+    }
     TupleTableSlot* result;
     Assert(node->ExecProcNode);
 
@@ -832,8 +837,10 @@ public:
     {
         if (likely(u_sess != NULL)) {
             m_smpEnabled = u_sess->opt_cxt.smp_enabled;
+            m_underCursor = u_sess->opt_cxt.is_under_cursor;
         } else {
             m_smpEnabled = true;
+            m_underCursor = false;
         }
     }
 
@@ -841,6 +848,7 @@ public:
     {
         if (u_sess != NULL) {
             u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+            u_sess->opt_cxt.is_under_cursor = m_underCursor;
         }
     }
 
@@ -851,15 +859,24 @@ public:
         }
     }
 
+    void UnderCursor()
+    {
+        if (likely(u_sess != NULL)) {
+            u_sess->opt_cxt.is_under_cursor = true;
+        }
+    }
+
     void ResetSmp()
     {
         if (u_sess != NULL) {
             u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+            u_sess->opt_cxt.is_under_cursor = m_underCursor;
         }
     }
 
 private:
     bool m_smpEnabled;
+    bool m_underCursor;
 };
 
 #ifdef USE_SPQ

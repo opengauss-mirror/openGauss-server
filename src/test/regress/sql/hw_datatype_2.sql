@@ -319,6 +319,8 @@ select greatest(1.1, 1);
 select least(1, 0.9);
 select least(0.9, 1);
 
+select * from greatest(1, 1.1);
+
 create or replace function test_cast(a numeric)
 returns int as
 $$

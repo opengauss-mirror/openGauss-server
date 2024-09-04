@@ -758,6 +758,57 @@ static bool GetCurrentPath(char *currentPath, PGresult *res, int rownum)
     return true;
 }
 
+static bool SSUpdateControlFileForAllNodes(FILE* file, const char* filename, const void* copybuf)
+{
+    for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+        long seekpos = (long)BLCKSZ * node;
+        
+        if (fseek(file, seekpos, SEEK_SET) < 0) {
+            pg_log(PG_WARNING, _("could not seek in file \"%s\" for node %d: %s\n"), 
+                   filename, node, strerror(errno));
+            return false;
+        }
+        
+        if (ss_instance_config.dss.enable_dorado || node == ss_instance_config.dss.instance_id) {
+            if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
+                pg_log(PG_WARNING, _("could not write to file \"%s\" for node %d: %s\n"), 
+                       filename, node, strerror(errno));
+                return false;
+            }
+        } else {
+            ControlFileData buffer;
+            if (fread(&buffer, 1, sizeof(ControlFileData), file) != sizeof(ControlFileData)) {
+                if (feof(file)) {
+                    pg_log(PG_WARNING, _("unexpected end of file \"%s\" for node %d\n"), 
+                           filename, node);
+                } else {
+                    pg_log(PG_WARNING, _("could not read existing control file \"%s\" for node %d: %s\n"), 
+                           filename, node, strerror(errno));
+                }
+                return false;
+            }
+            
+            buffer.system_identifier = ((ControlFileData*)copybuf)->system_identifier;
+            INIT_CRC32C(buffer.crc);
+            COMP_CRC32C(buffer.crc, (char*)&buffer, offsetof(ControlFileData, crc));
+            FIN_CRC32C(buffer.crc);
+            
+            if (fseek(file, seekpos, SEEK_SET) < 0) {
+                pg_log(PG_WARNING, _("could not seek back in file \"%s\" for node %d: %s\n"), 
+                       filename, node, strerror(errno));
+                return false;
+            }
+            
+            if (fwrite(&buffer, sizeof(ControlFileData), 1, file) != 1) {
+                pg_log(PG_WARNING, _("could not write updated control file \"%s\" for node %d: %s\n"), 
+                       filename, node, strerror(errno));
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
 /*
  * Receive a tar format stream from the connection to the server, and unpack
  * the contents of it into a directory. Only files, directories and
@@ -937,7 +988,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
                     if (is_dss_file(filename)) {
-                        continue;   
+                        if (strstr(filename, "pg_replication") != NULL || strstr(filename, "pg_xlog") != NULL) {
+                            continue;
+                        }
                     }
                     if (symlink(&copybuf[bufOffset + 1], filename) != 0) {
                         if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
@@ -953,13 +1006,13 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                      * Symbolic link for relative tablespace. please refer to function _tarWriteHeader
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-
-                    nRet = snprintf_s(absolut_path,
-                        sizeof(absolut_path),
-                        sizeof(absolut_path) - 1,
-                        "%s/%s",
-                        basedir,
-                        &copybuf[bufOffset + 1]);
+                    if (is_dss_file(absolut_path)) {
+                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s",
+                                          &copybuf[bufOffset + 1]);
+                    } else {
+                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s/%s",
+                                          basedir, &copybuf[bufOffset + 1]);
+                    }
                     securec_check_ss_c(nRet, "\0", "\0");
 
                     if (symlink(absolut_path, filename) != 0) {
@@ -985,9 +1038,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              * regular file
              */
             if (forbid_write) {
-                file = fopen(filename, "ab");
+                file = fopen(filename, "ab+");
             } else {
-                file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "wb+" : "wb");
+                file = fopen(filename, "wb+");
             }
             if (NULL == file) {
                 pg_log(PG_WARNING, _("could not create file \"%s\": %s\n"), filename, strerror(errno));
@@ -1029,26 +1082,10 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /* pg_control will be written into pages of each interconnect nodes in dorado stanby cluster corresponding to */
             if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                if (ss_instance_config.dss.enable_dorado) {
-                    for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
-                        off_t seekpos = (off_t)BLCKSZ * node;
-                        fseek(file, seekpos, SEEK_SET);
-                        if (fwrite(copybuf, r, 1, file) != 1) {
-                            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
-                            DisconnectConnection();
-                            FREE_AND_RESET(copybuf);
-                            return false;
-                        }
-                    }
-                } else {
-                    off_t seekpos = (off_t)BLCKSZ * ss_instance_config.dss.instance_id;
-                    fseek(file, seekpos, SEEK_SET);
-                    if (fwrite(copybuf, r, 1, file) != 1) {
-                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
-                        DisconnectConnection();
-                        FREE_AND_RESET(copybuf);
-                        return false;
-                    }
+                if (!SSUpdateControlFileForAllNodes(file, filename, copybuf)) {
+                    DisconnectConnection();
+                    FREE_AND_RESET(copybuf);
+                    return false;
                 }
             } else {
                 if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
@@ -1512,8 +1549,13 @@ static bool BaseBackup(const char* dirname, uint32 term)
             char* relative = PQgetvalue(res, i, 3);
             char prefix[MAXPGPATH] = {'\0'};
             if (*relative == '1') {
-                nRet = snprintf_s(prefix, MAXPGPATH, strlen(basedir) + 1, "%s/", basedir);
-                securec_check_ss_c(nRet, "\0", "\0");
+                if (ss_instance_config.dss.enable_dss) {
+                    nRet = snprintf_s(prefix, MAXPGPATH, strlen(dssdir) + 1, "%s/", dssdir);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                } else {
+                    nRet = snprintf_s(prefix, MAXPGPATH, strlen(basedir) + 1, "%s/", basedir);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                }
             }
             nRet = snprintf_s(nodetablespaceparentpath,
                 MAXPGPATH,
@@ -1522,13 +1564,15 @@ static bool BaseBackup(const char* dirname, uint32 term)
                 prefix,
                 tablespacepath);
             securec_check_ss_c(nRet, "\0", "\0");
-            nRet = snprintf_s(nodetablespacepath,
-                MAXPGPATH,
-                sizeof(nodetablespacepath) - 1,
-                "%s/%s_%s",
-                nodetablespaceparentpath,
-                TABLESPACE_VERSION_DIRECTORY,
-                pgxcnodename);
+
+            if (ss_instance_config.dss.enable_dss) {
+                nRet = snprintf_s(nodetablespacepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                                  nodetablespaceparentpath, TABLESPACE_VERSION_DIRECTORY);
+            } else {
+                nRet = snprintf_s(nodetablespacepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
+                                  nodetablespaceparentpath, TABLESPACE_VERSION_DIRECTORY,
+                                  pgxcnodename);
+            }
             securec_check_ss_c(nRet, "\0", "\0");
 
             bool varifySuccess = verify_dir_is_empty_or_create(nodetablespacepath);
