@@ -28,6 +28,8 @@
 #include "tcop/ddldeparse.h"
 #include "utils/lsyscache.h"
 
+const char* string_objtype(ObjectType objtype, bool isgrant);
+
 /*
  * Check if the command can be published.
  *
@@ -110,7 +112,6 @@ Datum
 publication_deparse_ddl_command_start(PG_FUNCTION_ARGS)
 {
     EventTriggerData *trigdata;
-    char *command = psprintf("Drop table command start");
     DropStmt *stmt;
     ListCell *cell1;
 
@@ -126,10 +127,17 @@ publication_deparse_ddl_command_start(PG_FUNCTION_ARGS)
         Node *object = (Node*)lfirst(cell1);
         ObjectAddress address;
         Relation relation = NULL;
+        StringInfoData commandbuf;
+        char         *removetype = NULL;
         char        *schemaname = NULL;
         char        *objname = NULL;
         TypeName    *typname = NULL;
         Node        *ptype = NULL;
+
+        initStringInfo(&commandbuf);
+
+        removetype = pstrdup(string_objtype(stmt->removeType, false));
+        removetype = pg_strtolower(removetype);
 
         if (stmt->removeType == OBJECT_TYPE) {
             /* for DROP TYPE */
@@ -152,6 +160,15 @@ publication_deparse_ddl_command_start(PG_FUNCTION_ARGS)
                                      &relation,
                                      AccessExclusiveLock,
                                      true);
+        if (!OidIsValid(address.objectId)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("%s \"%s\" does not exist",
+                                removetype, objname)));
+        }
+
+        appendStringInfo(&commandbuf, "Drop %s command start", removetype);
+
+        pfree(removetype);
 
         /* Object does not exist, nothing to do */
         if (relation) {
@@ -170,16 +187,17 @@ publication_deparse_ddl_command_start(PG_FUNCTION_ARGS)
             */
             if (support)
                 LogLogicalDDLMessage("deparse", address.objectId, DCT_TableDropStart,
-                                     command, strlen(command) + 1);
+                                     commandbuf.data, strlen(commandbuf.data) + 1);
 
             relation_close(relation, NoLock);
         } else if (stmt->removeType == OBJECT_TYPE) {
             support = type_support_ddl_replication(address.objectId);
             if (support)
                     LogLogicalDDLMessage("deparse", address.objectId,
-                        DCT_TypeDropStart, command, strlen(command) + 1);
+                        DCT_TypeDropStart, commandbuf.data, strlen(commandbuf.data) + 1);
         }
     }
+
     return PointerGetDatum(NULL);
 }
 
