@@ -3074,7 +3074,7 @@ TupleTableSlot *EvalPlanQualUHeap(EState *estate, EPQState *epqstate, Relation r
         return NULL;
     }
 
-    Assert(copyTuple->tupTableType = UHEAP_TUPLE);
+    Assert(copyTuple->tupTableType == UHEAP_TUPLE);
 
     *tid = copyTuple->ctid;
 

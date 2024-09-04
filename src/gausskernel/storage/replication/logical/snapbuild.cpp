@@ -534,7 +534,7 @@ Snapshot SnapBuildInitialSnapshot(SnapBuild *builder)
     TransactionId tempXid;
 
     Assert(!u_sess->utils_cxt.FirstSnapshotSet);
-    Assert(u_sess->utils_cxt.XactIsoLevel = XACT_REPEATABLE_READ);
+    Assert(u_sess->utils_cxt.XactIsoLevel == XACT_REPEATABLE_READ);
 
     if (builder->state != SNAPBUILD_CONSISTENT)
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

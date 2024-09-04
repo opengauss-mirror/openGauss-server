@@ -4303,7 +4303,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         TupleDesc tupDesc;
 
         /* insert may only have one plan, inheritance is not expanded */
-        Assert(nplans = 1);
+        Assert(nplans == 1);
 
         /* already exists if created by RETURNING processing above */
         if (mt_state->ps.ps_ExprContext == NULL) {
