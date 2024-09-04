@@ -67,8 +67,8 @@ typedef struct {
     Query* viewParse; /* the query which defines/populates data */
     /* These fields are filled by intorel_startup: */
     Relation rel;            /* relation to write to */
-    ObjectAddress reladdr;      /* address of rel, for ExecCreateTableAs */
     CommandId output_cid;    /* cmin to insert in output tuples */
+    ObjectAddress reladdr;      /* address of rel, for ExecCreateTableAs */
     int hi_options;          /* heap_insert performance options */
     BulkInsertState bistate; /* bulk insert state */
 } DR_intorel;
