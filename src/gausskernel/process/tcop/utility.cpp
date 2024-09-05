@@ -5217,6 +5217,7 @@ ProcessUtilitySlow(Node *parse_tree,
                 }
 #else
                 AlterSchemaCommand((AlterSchemaStmt*)parse_tree);
+                commandCollected = true;
 #endif
             break;
 
@@ -6634,7 +6635,7 @@ ProcessUtilitySlow(Node *parse_tree,
                         ExecUtilityStmtOnNodes(query_string, exec_nodes, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
                     }
                 } else {
-                    ExecAlterOwnerStmt((AlterOwnerStmt*)parse_tree);
+                    address = ExecAlterOwnerStmt((AlterOwnerStmt*)parse_tree);
                 }
 #else
                 AlterOwnerStmt  *stmt = (AlterOwnerStmt *) parse_tree;
