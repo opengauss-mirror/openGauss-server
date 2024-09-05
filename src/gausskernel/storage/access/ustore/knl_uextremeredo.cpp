@@ -1533,6 +1533,7 @@ void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void
             offsets++;
         }
     }
+    PageSetLSN(page, buffer->lsn);
 }
 
 void UHeap2XlogExtendTDSlotsOperatorPage(RedoBufferInfo *buffer, void *recorddata)
