@@ -196,7 +196,7 @@ static const struct {
              "%s, PageHeaderInfo: pd_lsn:%X/%X, pd_checksum:%u, pd_flags:%u, "                          \
              "pd_lower:%u, pd_upper:%u, pd_special:%u, pd_pagesize_version:%u, pd_prune_xid:%u",        \
              _msg, pageHeader->pd_lsn.xlogid,                                                           \
-             pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF + pageHeader->pd_lsn.xrecoff,         \
+             ((uint64)pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF) + pageHeader->pd_lsn.xrecoff,         \
              pageHeader->pd_checksum, pageHeader->pd_flags, pageHeader->pd_lower, pageHeader->pd_upper, \
              pageHeader->pd_special, pageHeader->pd_pagesize_version, pageHeader->pd_prune_xid);        \
     } while (0)
