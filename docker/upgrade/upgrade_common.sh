@@ -731,12 +731,8 @@ function start_dbnode() {
 }
 
 function query_dn_role() {
-  if [ -f "$GAUSS_TMP_PATH/temp_dn_role" ]; then
-    dn_role=$(grep local_role "${GAUSS_TMP_PATH}/temp_dn_role" | head -1 | awk '{print $3}')
-  else
-    gs_ctl query -D ${GAUSSDATA} > ${GAUSS_TMP_PATH}/temp_dn_role
-    dn_role=$(grep local_role "${GAUSS_TMP_PATH}/temp_dn_role" | head -1 | awk '{print $3}')
-  fi
+  gs_ctl query -D ${GAUSSDATA} > ${GAUSS_TMP_PATH}/temp_dn_role
+  dn_role=$(grep local_role "${GAUSS_TMP_PATH}/temp_dn_role" | head -1 | awk '{print $3}')
 
   if [[ "$dn_role" = "Normal" ]]; then
     dn_role="normal"
