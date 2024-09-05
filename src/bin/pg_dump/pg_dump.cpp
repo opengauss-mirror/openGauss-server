@@ -20050,6 +20050,7 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         appendPQExpBuffer(q, " DEFAULT %s", default_value);
 
                     if (hasOnUpdateFeature) {
+                        RemoveQuotes(onUpdate_value);
                         if (pg_strcasecmp(onUpdate_value, "") != 0) {
                             if (pg_strcasecmp(onUpdate_value, "pg_systimestamp()") == 0) {
                                 appendPQExpBuffer(q, " ON UPDATE CURRENT_TIMESTAMP");
@@ -24095,4 +24096,21 @@ bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
     
     exist = isExistsSQLResult(AH->connection, query);
     return exist;
+}
+
+void RemoveQuotes(char *str) {
+    int len = strlen(str);
+    int readPtr = 0;
+    int writePtr = 0;
+
+    while (readPtr < len) {
+        if (str[readPtr] == '"') {
+            readPtr++;  // Skip the escape character '"'
+        } else {
+            str[writePtr] = str[readPtr];
+            writePtr++;
+            readPtr++;
+        }
+    }
+    str[writePtr] = '\0';  // Add null terminator at the end
 }
