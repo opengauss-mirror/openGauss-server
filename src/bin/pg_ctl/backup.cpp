@@ -937,7 +937,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
                     if (is_dss_file(filename)) {
-                        continue;   
+                        if (strstr(filename, "pg_replication") != NULL || strstr(filename, "pg_xlog") != NULL) {
+                            continue;
+                        }
                     }
                     if (symlink(&copybuf[bufOffset + 1], filename) != 0) {
                         if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
@@ -953,13 +955,13 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                      * Symbolic link for relative tablespace. please refer to function _tarWriteHeader
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-
-                    nRet = snprintf_s(absolut_path,
-                        sizeof(absolut_path),
-                        sizeof(absolut_path) - 1,
-                        "%s/%s",
-                        basedir,
-                        &copybuf[bufOffset + 1]);
+                    if (is_dss_file(absolut_path)) {
+                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s",
+                                          &copybuf[bufOffset + 1]);
+                    } else {
+                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s/%s",
+                                          basedir, &copybuf[bufOffset + 1]);
+                    }
                     securec_check_ss_c(nRet, "\0", "\0");
 
                     if (symlink(absolut_path, filename) != 0) {
@@ -1512,8 +1514,13 @@ static bool BaseBackup(const char* dirname, uint32 term)
             char* relative = PQgetvalue(res, i, 3);
             char prefix[MAXPGPATH] = {'\0'};
             if (*relative == '1') {
-                nRet = snprintf_s(prefix, MAXPGPATH, strlen(basedir) + 1, "%s/", basedir);
-                securec_check_ss_c(nRet, "\0", "\0");
+                if (ss_instance_config.dss.enable_dss) {
+                    nRet = snprintf_s(prefix, MAXPGPATH, strlen(dssdir) + 1, "%s/", dssdir);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                } else {
+                    nRet = snprintf_s(prefix, MAXPGPATH, strlen(basedir) + 1, "%s/", basedir);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                }
             }
             nRet = snprintf_s(nodetablespaceparentpath,
                 MAXPGPATH,
@@ -1522,13 +1529,15 @@ static bool BaseBackup(const char* dirname, uint32 term)
                 prefix,
                 tablespacepath);
             securec_check_ss_c(nRet, "\0", "\0");
-            nRet = snprintf_s(nodetablespacepath,
-                MAXPGPATH,
-                sizeof(nodetablespacepath) - 1,
-                "%s/%s_%s",
-                nodetablespaceparentpath,
-                TABLESPACE_VERSION_DIRECTORY,
-                pgxcnodename);
+
+            if (ss_instance_config.dss.enable_dss) {
+                nRet = snprintf_s(nodetablespacepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                                  nodetablespaceparentpath, TABLESPACE_VERSION_DIRECTORY);
+            } else {
+                nRet = snprintf_s(nodetablespacepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
+                                  nodetablespaceparentpath, TABLESPACE_VERSION_DIRECTORY,
+                                  pgxcnodename);
+            }
             securec_check_ss_c(nRet, "\0", "\0");
 
             bool varifySuccess = verify_dir_is_empty_or_create(nodetablespacepath);
