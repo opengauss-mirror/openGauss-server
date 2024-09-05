@@ -26,9 +26,7 @@ gsql -d $db -p $dn1_primary_port -c "CREATE unlogged TABLE table_replication_12
 							  , R_NAME       CHAR(25) NOT NULL
 							  , R_COMMENT    VARCHAR(152)
 							)
-							with (orientation = column)
-							distribute by hash(R_REGIONKEY)
-							;
+							with (orientation = column);
 							vacuum full table_replication_12;"
 
 gsql -d $db -p $dn1_primary_port -c "checkpoint;"

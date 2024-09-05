@@ -29,8 +29,7 @@ gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test2; CREATE TABL
 															  , L_SHIPMODE     CHAR(10)
 															  , L_COMMENT      VARCHAR(44)
 															)
-															with (orientation = column)
-															distribute by hash(L_ORDERKEY);"
+															with (orientation = column);"
 
 #copy data(25M) to standby 4 times
 gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=on; copy mpp_test1 from '$scripts_dir/data/data5';" &
