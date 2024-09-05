@@ -9,7 +9,3 @@ exec_sql_with_user $case_use_db $sub_node1_port "create schema fastcheck;set sea
 
 exec_sql_with_user $case_use_db $pub_node1_port "set search_path=fastcheck;create table tkey1 (a int primary key, b text);insert into tkey1 values (1, 'a'), (2, 'b'), (3, 'c');alter table tkey1 replica identity default;"
 exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;create table tkey1 (a int primary key, b text, myc int); insert into tkey1 values (101, '101a', 1), (102, '102b', 2);"
-
-exec_sql_with_user $case_use_db $pub_node1_port "CREATE USER regtest_unpriv_user PASSWORD 'gauss@123'"
-
-exec_sql_with_user $case_use_db $sub_node1_port "CREATE USER regtest_unpriv_user PASSWORD 'gauss@123'"
