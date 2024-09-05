@@ -2584,7 +2584,7 @@ static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapsh
                              bool* all_dead, CUDescScan* cudescScan)
 {
     if (!RelationIsCUFormat(relation)) {
-        return TableIndexFetchTupleCheck(relation, tid, snapshot, all_dead);
+        return heap_hot_search(tid, relation, snapshot, all_dead);
     } else {
         return cudescScan->CheckItemIsAlive(tid);
     }

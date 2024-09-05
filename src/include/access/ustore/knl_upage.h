@@ -222,9 +222,9 @@
              "%s, UPageHeaderInfo: pd_lsn:%X/%X, pd_checksum:%u, "                                                \
              "pd_flags:%u, pd_lower:%u, "                                                                         \
              "pd_upper:%u, pd_special:%u, pd_pagesize_version:%u, potential_freespace:%u, td_count:%u, "          \
-             "pd_prune_xid:%lu, pd_xid_base:%lu, pd_multi_base:%lu" _msg,                                         \
-             pageHeader->pd_lsn.xlogid,                                                                           \
-             pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF + pageHeader->pd_lsn.xrecoff,                   \
+             "pd_prune_xid:%lu, pd_xid_base:%lu, pd_multi_base:%lu",                                              \
+             _msg, pageHeader->pd_lsn.xlogid,                                                                     \
+             ((uint64)pageHeader->pd_lsn.xlogid << XLOG_UHEAP_LSN_HIGH_OFF) + pageHeader->pd_lsn.xrecoff,         \
              pageHeader->pd_checksum, pageHeader->pd_flags, pageHeader->pd_lower, pageHeader->pd_upper,           \
              pageHeader->pd_special, pageHeader->pd_pagesize_version, pageHeader->potential_freespace,            \
              pageHeader->td_count, pageHeader->pd_prune_xid, pageHeader->pd_xid_base, pageHeader->pd_multi_base); \
