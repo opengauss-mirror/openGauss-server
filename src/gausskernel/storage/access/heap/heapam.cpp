@@ -2644,6 +2644,9 @@ bool heap_hot_search(ItemPointer tid, Relation relation, Snapshot snapshot, bool
     bool result = false;
     Buffer buffer;
     HeapTupleData heap_tuple;
+    if (RelationIsUstoreFormat(relation)) {
+        ereport(ERROR, (errmsg("heap_hot_search relation type is ustore!")));
+    }
 
     buffer = ReadBuffer(relation, ItemPointerGetBlockNumber(tid));
     LockBuffer(buffer, BUFFER_LOCK_SHARE);

@@ -135,10 +135,10 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     Oid toast_relid;
     Oid toast_typid = InvalidOid;
     Oid namespaceid;
-    Oid index_am_oid = BTREE_AM_OID;
     char toast_relname[NAMEDATALEN];
     char toast_idxname[NAMEDATALEN];
     IndexInfo* indexInfo = NULL;
+    Oid index_am_oid = BTREE_AM_OID;
     Oid collationObjectId[2];
     Oid classObjectId[2];
     int16 coloptions[2];

@@ -985,25 +985,21 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
         }
     }
 
-    if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0 && toastStorageType != NULL) {
-        const char *actualStorageType = NULL;
-        if (storageType == NULL) {
-            actualStorageType = u_sess->attr.attr_sql.enable_default_ustore_table ? "ustore" : "astore";
-        } else {
-            actualStorageType = storageType;
-        }
-
-        if (pg_strcasecmp(actualStorageType, "astore") == 0 || pg_strcasecmp(actualStorageType, "ustore") == 0) {
-            if (pg_strcasecmp(actualStorageType, toastStorageType) != 0) {
+    /* we did not specify a storage type for toast, so use the same storage type as its parent */
+    if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0) {
+        if (toastStorageType != NULL) {
+            const char *parentStorageType = (storageType == NULL)
+                                          ? (u_sess->attr.attr_sql.enable_default_ustore_table ? "ustore" : "astore")
+                                          : storageType;
+            if (parentStorageType != toastStorageType) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("toast cannot be set for %s with storage_type=%s", actualStorageType, toastStorageType)));
+                                errmsg("parent storage type is %s but toast storage type is %s, toast should use the "
+                                       "same storage type as its parent",
+                                       parentStorageType, toastStorageType)));
             }
         }
-    }
 
-    /* we did not specify a storage type for toast, so use the same storage type as its parent */
-    if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0 && !toastStorageTypeSet) {
-        if (storageType != NULL) {
+        if (!toastStorageTypeSet && storageType != NULL) {
             Size len = VARHDRSZ + strlen("storage_type") + 1 + strlen(storageType);
             /* +1 leaves room for sprintf's trailing null */
             text *t = (text *)palloc(len + 1);
