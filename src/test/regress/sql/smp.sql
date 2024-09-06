@@ -263,6 +263,32 @@ drop table store_sales;
 drop table item;
 drop table catalog_sales;
 
+drop table if exists t_score_01;
+CREATE TABLE t_score_01(
+s_id int,
+s_score int,
+s_course char(8),
+c_id int);
+drop table if exists t_student_01;
+CREATE TABLE t_student_01(
+s_id int,
+s_name char(8));
+insert into t_score_01 values(
+generate_series(1, 1000000),
+random()*100,
+'course',
+generate_series(1, 1000000));
+insert into t_student_01 values(
+generate_series(1, 1000000),
+'name');
+SET enable_hashjoin TO off;
+SET enable_nestloop TO off;
+SET enable_mergejoin TO on;
+analyze t_score_01 ;
+analyze t_student_01 ;
+explain(costs off) select /*+set(query_dop 2)*/ count(*)
+from t_student_01 a join t_score_01 b
+on a.s_id=b.s_id;
 --clean
 set search_path=public;
 drop schema test_smp cascade;
