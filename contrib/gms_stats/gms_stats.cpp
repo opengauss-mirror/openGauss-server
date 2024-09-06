@@ -48,8 +48,9 @@ static List* GetRelationsInSchema(char *namespc)
     ScanKeyData skey[1];
     SysScanDesc sysscan;
     HeapTuple tuple;
-    char* relname;
+    char* relname = NULL;
     List* tbl_relnames = NIL;
+    int len;
     Oid nspid;
 
    nspid = get_namespace_oid(namespc, true);
@@ -62,7 +63,10 @@ static List* GetRelationsInSchema(char *namespc)
     while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
         Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tuple);
         if (reltup->relkind == RELKIND_RELATION || reltup->relkind == RELKIND_MATVIEW) {
-            relname = reltup->relname.data;
+            len = strlen(reltup->relname.data);
+            relname = (char *) palloc(len + 1);
+            errno_t rc = strcpy_s(relname, len + 1, reltup->relname.data);
+            securec_check(rc, "\0", "\0");
             tbl_relnames = lappend(tbl_relnames, relname);
         }
     }
@@ -90,6 +94,7 @@ static void analyze_tables(char *namespc, List *relnames_list)
             stmt = (VacuumStmt*)parsetree;
         }
         vacuum(stmt, InvalidOid, true, NULL, true);
+        pfree_ext(relnames);
         list_free(parsetree_list);
         resetStringInfo(execute_sql);
     }
