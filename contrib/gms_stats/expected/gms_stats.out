@@ -17,7 +17,7 @@ end;
 /
 NOTICE:  PL/SQL procedure successfully completed.
 CONTEXT:  SQL statement "CALL gms_stats.gather_schema_stats('gms_stats_test')"
-PL/pgSQL function inline_code_block line 3 at PERFORM
+PL/pgSQL function inline_code_block line 2 at PERFORM
 select schemaname, tablename, attname, avg_width, most_common_vals, most_common_freqs from pg_stats where schemaname='gms_stats_test' order by tablename, attname;
    schemaname   |    tablename    | attname | avg_width | most_common_vals | most_common_freqs 
 ----------------+-----------------+---------+-----------+------------------+-------------------
