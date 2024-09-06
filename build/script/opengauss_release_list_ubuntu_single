@@ -82,7 +82,7 @@
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/age--1.0.0.sql
 ./share/postgresql/extension/age.control
-./share/postgresql/extension/datavec--0.4.4.sql
+./share/postgresql/extension/datavec--1.0.sql
 ./share/postgresql/extension/datavec.control
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control
