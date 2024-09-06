@@ -1403,7 +1403,7 @@ static void init_server_ssl_passwd(SSL_CTX* pstContext, bool enc)
 #endif
     char *keyfile;
     errno_t rc = 0;
-    rc = memset_s(u_sess->libpq_cxt.server_key, CIPHER_H + 1, 0, CIPHER_H + 1);
+    rc = memset_s(u_sess->libpq_cxt.server_key, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
     securec_check(rc, "\0", "\0");
 
 #ifdef USE_TASSL
