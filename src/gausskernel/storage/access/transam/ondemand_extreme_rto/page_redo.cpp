@@ -1210,8 +1210,6 @@ void PageManagerProcLsnForwarder(RedoItem *lsnForwarder)
 
     PageManagerAddRedoItemToSegWorkers(lsnForwarder);
     PageManagerAddRedoItemToHashMapManager(lsnForwarder);
-    PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
-
     PageManagerPruneIfRealtimeBuildFailover();
     /* wait hashmapmng prune and segworker distribute segrecord to hashmap */
     uint32 refCount;
@@ -3415,6 +3413,7 @@ void HashMapManagerMain()
             SPSCBlockingQueuePop(g_dispatcher->segQueue);
         }
 
+        PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
         /**
          * step2: prune idle hashmap
          *
@@ -3425,7 +3424,7 @@ void HashMapManagerMain()
         // the head of redoItem hashmap linked list
         ondemand_htab_ctrl_t *nextHtabCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
         // the tail of redoItem hashmap linked list
-        ondemand_htab_ctrl_t *targetHtabCtrl = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl;
+        ondemand_htab_ctrl_t *targetHtabCtrl = myRedoLine->managerThd->redoItemHashCtrl;
         // the processing redoItem hashmap
         ondemand_htab_ctrl_t *procHtabCtrl = nextHtabCtrl;
         while (nextHtabCtrl != targetHtabCtrl) {
@@ -3451,6 +3450,9 @@ void HashMapManagerMain()
             pg_atomic_write_u64(&g_redoWorker->nextPrunePtr, ckptRedoPtr);
         }
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
+
+        // step4: release for global xlog memory
+        OndemandGlobalXLogMemReleaseIfNeed(&myRedoLine->batchThd->parseManager.memctl);
 
         RedoInterruptCallBack();
         ADD_ABNORMAL_POSITION(12);
