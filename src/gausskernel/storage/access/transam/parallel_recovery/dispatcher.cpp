@@ -1166,7 +1166,12 @@ static bool DispatchRepOriginRecord(XLogReaderState *record, List *expectedTLIs,
 /* Run from the dispatcher thread. */
 static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
-    DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
+    uint8 info = XLogRecGetInfo(record) & (~XLR_INFO_MASK);
+    if (info == CLOG_ZEROPAGE) {
+        DispatchRecordWithoutPage(record, expectedTLIs);
+    } else {
+        DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
+    }
     return false;
 }
 
