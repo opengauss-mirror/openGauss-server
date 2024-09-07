@@ -102,6 +102,7 @@ install:
 	@if test -d contrib/spq_plugin; then $(MAKE) -C contrib/spq_plugin $@; fi
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	@if test -d contrib/age; then $(MAKE) -C contrib/age $@; fi
+	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec clean; fi
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec $@; fi
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi

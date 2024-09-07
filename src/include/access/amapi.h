@@ -29,6 +29,7 @@
 #define PG_AM_VACUUMCLEANUP_ARGS_NUM	2
 #define PG_AM_COSTESTIMATE_ARGS_NUM		7
 #define PG_AM_OPTIONS_ARGS_NUM			2
+#define PG_AM_DELETE_ARGS_NUM			5
 #define PG_AM_FUNC_MAX_ARGS_NUM			PG_AM_COSTESTIMATE_ARGS_NUM
 
 struct IndexInfo;
@@ -173,6 +174,7 @@ typedef struct IndexAmRoutine
 	char ammarkposfuncname[NAMEDATALEN];
 	char amrestrposfuncname[NAMEDATALEN];
     char ammergefuncname[NAMEDATALEN];
+    char amdeletefuncname[NAMEDATALEN];
 } IndexAmRoutine;
 
 typedef IndexAmRoutine *AmRoutine;
