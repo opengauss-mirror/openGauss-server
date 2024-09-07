@@ -6725,7 +6725,7 @@ ProcessUtilitySlow(Node *parse_tree,
                         break;
                     case OBJECT_TSPARSER:
 #ifdef PGXC
-                        if (!IsInitdb) {
+                        if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->exec_cxt.extension_is_valid) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("user-defined text search parser is not yet supported.")));

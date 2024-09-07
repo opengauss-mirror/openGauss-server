@@ -107,6 +107,13 @@ install:
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
 	@if test -d contrib/timescaledb; then (./contrib/timescaledb/run_to_build.sh && $(MAKE) -C contrib/timescaledb/build $@); fi
+	@if test -d contrib/chparser; then \
+		if command -v scws &> /dev/null; then \
+			$(MAKE) -C contrib/chparser $@; \
+		else \
+			echo "SCWS is not installed, skipping chparser build."; \
+		fi \
+	fi
 	+@echo "openGauss installation complete."
 endif
 endif
