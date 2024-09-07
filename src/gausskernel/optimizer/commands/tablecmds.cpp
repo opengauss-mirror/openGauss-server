@@ -14936,6 +14936,16 @@ static ObjectAddress ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, R
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("column store unsupport constraint \"%s\"", GetConstraintType(newConstraint->contype))));
 
+    if (rel->rd_tam_ops == TableAmUstore && newConstraint->deferrable == true) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_COMMAND),
+                errmsg("Ustore table does not support to set deferrable."),
+                errdetail("N/A"),
+                errcause("feature not supported"),
+                erraction("check constraints of columns")));
+    }
+
     /*
      * Currently, we only expect to see CONSTR_CHECK and CONSTR_FOREIGN nodes
      * arriving here (see the preprocessing done in parse_utilcmd.c).  Use a
