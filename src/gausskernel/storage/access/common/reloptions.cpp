@@ -991,7 +991,7 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
             const char *parentStorageType = (storageType == NULL)
                                           ? (u_sess->attr.attr_sql.enable_default_ustore_table ? "ustore" : "astore")
                                           : storageType;
-            if (parentStorageType != toastStorageType) {
+            if (pg_strcasecmp(parentStorageType, toastStorageType) != 0) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                                 errmsg("parent storage type is %s but toast storage type is %s, toast should use the "
                                        "same storage type as its parent",
