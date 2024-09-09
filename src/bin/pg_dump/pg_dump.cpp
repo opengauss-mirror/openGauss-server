@@ -2126,6 +2126,10 @@ static void setup_connection(Archive* AH)
     /*
      * Quote all identifiers, if requested.
      */
+    if (findDBCompatibility(AH, PQdb(conn)) && hasSpecificExtension(AH, "dolphin")) {
+        quote_all_identifiers = true;
+    }
+        
     if (quote_all_identifiers && AH->remoteVersion >= 90100)
         ExecuteSqlStatement(AH, "SET quote_all_identifiers = true");
 }
