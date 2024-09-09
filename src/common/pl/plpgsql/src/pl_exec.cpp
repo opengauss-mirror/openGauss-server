@@ -1268,6 +1268,7 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
         int32 valtypmod;
         Form_pg_attribute tattr = TupleDescAttr(new_tupdesc, fnum);
         Form_pg_attribute attr = TupleDescAttr(rec->tupdesc, anum);
+        Oid reqtypemod = tattr->atttypmod;
         Oid reqtype = tattr->atttypid;
 
         while (anum < new_natts && attr->attisdropped) {
@@ -1276,7 +1277,6 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
         if (anum < new_natts) {
             value = SPI_getbinval(rec->tup, rec->tupdesc, anum + 1, &isnull);
             valtype = attr->atttypid;
-            valtypmod = attr->atttypmod;
             anum++;
         } else {
             /* When source value is missing */
@@ -1287,7 +1287,7 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
                     errhint("Make sure the query returns the exact list of columns.")));
         }
         rowtype_column_len_check(tattr, rec->tup, rec->tupdesc, valtype, anum);
-        newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
+        newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, reqtypemod, isnull);
         newnulls[fnum] = isnull;
     }
 
@@ -9585,7 +9585,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
             Datum value;
             bool isnull;
             Oid valtype;
-            int32 valtypmod;
+            int32 reqtypmod = TupleDescAttr(tupdesc, anum)->atttypmod;
             Oid reqtype = TupleDescAttr(tupdesc, anum)->atttypid;
 
             while (anum < td_natts && TupleDescAttr(tupdesc, anum)->attisdropped)
@@ -9594,7 +9594,6 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
             if (anum < td_natts) {
                 value = SPI_getbinval(var_tup, var_tupdesc, fnum + 1, &isnull);
                 valtype = attr->atttypid;
-                valtypmod = TupleDescAttr(var_tupdesc, fnum)->atttypmod;
                 anum++;
             } else {
                 /* When source value is missing */
@@ -9605,7 +9604,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
                              errhint("Make sure the query returns the exact list of columns.")));
             }
             rowtype_column_len_check(tattr, var_tup, var_tupdesc, valtype, fnum);
-            newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, valtypmod, isnull);
+            newvalues[fnum] = exec_simple_cast_value(estate, value, valtype, reqtype, reqtypmod, isnull);
             newnulls[fnum] = isnull;
         }
 
