@@ -6,6 +6,30 @@ CREATE SCHEMA plpgsql_nested_array_and_record;
 SET current_schema = plpgsql_nested_array_and_record;
 
 -- array of arrays
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS VARRAY(5) OF INTEGER;
+    TYPE arr1 IS VARRAY(5) OF INTEGER;
+    TYPE nt1 IS VARRAY(10) OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr1(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS TABLE OF INTEGER;
+    TYPE arr1 IS TABLE OF INTEGER;
+    TYPE nt1 IS TABLE OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr1(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
 DECLARE
     TYPE arr1 IS VARRAY(5) OF INTEGER;
     TYPE arr2 IS VARRAY(5) OF arr1;
@@ -15,6 +39,90 @@ BEGIN
         nst_arr(1)(I) := I;
         RAISE NOTICE 'RESULT: %', nst_arr(1)(I);
     END LOOP;
+END;
+/
+
+DECLARE									
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3);
+
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+nva nt1 := nt1(t1(2,3,5), t1(55,6), t1(2,3,8));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(2)(3);
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3);
+
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+nva nt1 := nt1(t1(2,3,5), t1(55,8,6), t1(2,3,8));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(2)(1);
+END;
+/
+
+DECLARE									
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3,9);
+
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+nva nt1 := nt1(va, t1(55,8,6), t1(2,3,8));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(1)(3);
+END;
+/
+
+DECLARE									
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3,9);
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nnt1 IS VARRAY(10) OF nt1;
+nva nnt1 := nt1(nt1(t1(2,3,9), t1(55,8,6), t1(2,3,8)),nt1(t1(95,80,65), t1(2,3,9), t1(2,3,8)));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(2)(1)(3);
+END;
+/
+
+DECLARE									
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3,9);
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nnt1 IS VARRAY(10) OF nt1;
+nva nnt1 := nt1(nt1(t1(2,3,9), va, t1(2,3,8)),nt1(t1(95,80,65), t1(2,3,9), t1(2,3,8)));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(1)(2)(2);
+END;
+/
+
+DECLARE									
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+va t1 := t1(2,3,9);
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nnt1 IS VARRAY(10) OF nt1;
+nva nnt1 := nt1(nt1(t1(2,3,9), va, t1(2,3,8)),nt1(va, t1(2,3,9), t1(2,3,8)));
+
+i INTEGER;
+va1 t1;
+BEGIN
+  raise notice '%', nva(2)(1)(3);
 END;
 /
 
