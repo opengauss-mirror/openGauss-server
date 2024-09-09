@@ -323,7 +323,7 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
                           BufferDesc *buf_desc, char *buf)
 {   
 #ifndef USE_ASSERT_CHECKING
-    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && 
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DMS && 
         !SS_DISASTER_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
         XLogRecPtr lsn_on_mem = PageGetLSN(buf);
@@ -336,7 +336,7 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
         }
     }       
 #else
-    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION && 
+    if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DMS && ENABLE_VERIFY_PAGE_VERSION && 
         !SS_DISASTER_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
