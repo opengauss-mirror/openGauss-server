@@ -271,3 +271,12 @@ drop trigger insert_measurement_trigger on measurement;
 drop function measurement_insert_trigger;
 drop table measurement;
 drop table measurement_movement;
+
+create table copy_header_src (c1 int);
+create table copy_header_dest (c1 int);
+insert into copy_header_src select generate_series(1,10);
+\copy copy_header_src to '~/copy_header_src.csv' with csv header;
+\copy copy_header_dest from '~/copy_header_src.csv' with csv header'on';
+
+drop table copy_header_src;
+drop table copy_header_dest;
