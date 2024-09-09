@@ -2904,10 +2904,11 @@ static MinMaxExpr* _readMinMaxExpr(void)
     READ_ENUM_FIELD(op, MinMaxOp);
     READ_NODE_FIELD(args);
     READ_LOCATION_FIELD(location);
-    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+    IF_EXIST (cmptype) {
         READ_OID_FIELD(cmptype);
+    }
+    IF_EXIST (cmpargs) {
         READ_NODE_FIELD(cmpargs);
-
         READ_TYPEINFO_FIELD(cmptype);
     }
     READ_TYPEINFO_FIELD(minmaxtype);
@@ -3067,7 +3068,7 @@ static SetToDefault* _readSetToDefault(void)
     READ_INT_FIELD(typeMod);
     READ_OID_FIELD(collation);
     READ_LOCATION_FIELD(location);
-    if (t_thrd.proc->workingVersionNum >= UNION_NULL_VERSION_NUM) {
+    IF_EXIST (lrchild_unknown) {
         READ_BOOL_FIELD(lrchild_unknown);
     }
 
@@ -3526,14 +3527,20 @@ static Plan* _readPlan(Plan* local_node)
     READ_BOOL_FIELD(recursive_union_controller);
     READ_INT_FIELD(control_plan_nodeid);
     READ_BOOL_FIELD(is_sync_plannode);
-    if (t_thrd.proc->workingVersionNum >= ML_OPT_MODEL_VERSION_NUM) {
+    IF_EXIST (pred_rows) {
         READ_FLOAT_FIELD(pred_rows);
+    }
+    IF_EXIST (pred_startup_time) {
         READ_FLOAT_FIELD(pred_startup_time);
+    }
+    IF_EXIST (pred_total_time) {
         READ_FLOAT_FIELD(pred_total_time);
+    }
+    IF_EXIST (pred_max_memory) {
         READ_LONG_FIELD(pred_max_memory);
     }
 #ifdef USE_SPQ
-    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+    IF_EXIST (spq_scan_partial) {
         READ_BOOL_FIELD(spq_scan_partial);
     }
 #endif
@@ -3616,7 +3623,9 @@ static Agg* _readAgg(Agg* local_node)
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
     if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
-        READ_OPERATOROID_ARRAY(grp_collations, numCols);
+        IF_EXIST (grp_collations) {
+            READ_OPERATOROID_ARRAY(grp_collations, numCols);
+        }
     }
 #endif
 
@@ -3650,7 +3659,7 @@ static WindowAgg* _readWindowAgg(WindowAgg* local_node)
     READ_ATTR_ARRAY(partColIdx, partNumCols);
     READ_OPERATOROID_ARRAY(partOperators, partNumCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (part_collations) {
         READ_OPERATOROID_ARRAY(part_collations, partNumCols);
     }
 #endif
@@ -3658,7 +3667,7 @@ static WindowAgg* _readWindowAgg(WindowAgg* local_node)
     READ_ATTR_ARRAY(ordColIdx, ordNumCols);
     READ_OPERATOROID_ARRAY(ordOperators, ordNumCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (ord_collations) {
         READ_OPERATOROID_ARRAY(ord_collations, ordNumCols);
     }
 #endif
@@ -3730,7 +3739,6 @@ static CStoreIndexAnd* _readCStoreIndexAnd(CStoreIndexAnd* local_node)
 
 static PruningResult* _readPruningResult(PruningResult* local_node)
 {
-    const int num = 92267;
     READ_LOCALS_NULL(PruningResult);
     READ_TEMP_LOCALS();
 
@@ -3743,7 +3751,7 @@ static PruningResult* _readPruningResult(PruningResult* local_node)
     IF_EXIST(ls_selectedSubPartitions) {
         READ_NODE_FIELD(ls_selectedSubPartitions);
     }
-    if (t_thrd.proc->workingVersionNum >= num) {
+    IF_EXIST(expr) {
         READ_NODE_FIELD(expr);
     }
     IF_EXIST(isPbeSinlePartition) {
@@ -4229,7 +4237,7 @@ static Unique* _readUnique(Unique* local_node)
     READ_ATTR_ARRAY(uniqColIdx, numCols);
     READ_OPERATOROID_ARRAY(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (uniq_collations) {
         READ_OPERATOROID_ARRAY(uniq_collations, numCols);
     }
 #endif
@@ -4430,7 +4438,7 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(rowMarks);
     READ_INT_FIELD(epqParam);
     READ_BOOL_FIELD(partKeyUpdated);
-    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+    IF_EXIST (isReplace) {
         READ_BOOL_FIELD(isReplace);
     }
 #ifdef PGXC
@@ -4476,15 +4484,13 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(targetlists) {
         READ_NODE_FIELD(targetlists);
     }
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+    IF_EXIST (withCheckOptionLists) {
         READ_NODE_FIELD(withCheckOptionLists);
     }
 #ifdef USE_SPQ
-    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
-        IF_EXIST(isSplitUpdates) {
-            READ_NODE_FIELD(isSplitUpdates);
+    IF_EXIST (isSplitUpdates) {
+        READ_NODE_FIELD(isSplitUpdates);
 	}
-    }
 #endif
     READ_DONE();
 }
@@ -4623,7 +4629,7 @@ static Group* _readGroup(Group* local_node)
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (grp_collations) {
         READ_OPERATOROID_ARRAY(grp_collations, numCols);
     }
 #endif
@@ -4689,7 +4695,7 @@ static HashJoin* _readHashJoin(HashJoin* local_node)
     read_mem_info(&local_node->mem_info);
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (hash_collations) {
         READ_NODE_FIELD(hash_collations);
     }
 #endif
@@ -5014,7 +5020,7 @@ static SetOp* _readSetOp(SetOp* local_node)
     READ_ATTR_ARRAY(dupColIdx, numCols);
     READ_OPERATOROID_ARRAY(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    IF_EXIST (dup_collations) {
         READ_OPERATOROID_ARRAY(dup_collations, numCols);
     }
 #endif
@@ -6016,8 +6022,10 @@ static IndexStmt* _readIndexStmt()
     READ_STRING_FIELD(accessMethod);
     READ_STRING_FIELD(tableSpace);
     READ_NODE_FIELD(indexParams);
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+    IF_EXIST (indexIncludingParams) {
         READ_NODE_FIELD(indexIncludingParams);
+    }
+    IF_EXIST (isGlobal) {
         READ_BOOL_FIELD(isGlobal);
     }
     READ_NODE_FIELD(options);
@@ -6074,7 +6082,7 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("DEFAULT")) {
         local_node->contype = CONSTR_DEFAULT;
         READ_NODE_FIELD(raw_expr);
-        if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+        IF_EXIST (update_expr) {
             READ_NODE_FIELD(update_expr);
         }
         READ_STRING_FIELD(cooked_expr);
@@ -6086,7 +6094,7 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("PRIMARY_KEY")) {
         local_node->contype = CONSTR_PRIMARY;
         READ_NODE_FIELD(keys);
-        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+        IF_EXIST (including) {
             READ_NODE_FIELD(including);
         }
         READ_NODE_FIELD(options);
@@ -6095,7 +6103,7 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("UNIQUE")) {
         local_node->contype = CONSTR_UNIQUE;
         READ_NODE_FIELD(keys);
-        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+        IF_EXIST (including) {
             READ_NODE_FIELD(including);
         }
         READ_NODE_FIELD(options);
@@ -6104,7 +6112,7 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("EXCLUSION")) {
         local_node->contype = CONSTR_EXCLUSION;
         READ_NODE_FIELD(exclusions);
-        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+        IF_EXIST (including) {
             READ_NODE_FIELD(including);
         }
         READ_NODE_FIELD(options);
@@ -6124,7 +6132,7 @@ static Constraint* _readConstraint()
         READ_NODE_FIELD(old_pktable_oid);
         READ_BOOL_FIELD(skip_validation);
         READ_BOOL_FIELD(initially_valid);
-        if (t_thrd.proc->workingVersionNum >= DISABLE_CONSTRAINT_VERSION_NUM) {
+        IF_EXIST (isdisable) {
             READ_BOOL_FIELD(isdisable);
         }
     } else if (MATCH_TYPE("CLUSTER")) {
