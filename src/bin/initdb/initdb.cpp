@@ -3927,14 +3927,14 @@ static void parse_vgname_args(char* args)
     vgname = xstrdup(args);
     enable_dss = true;
     if (strstr(vgname, "/") != NULL) {
-        fprintf(stderr, "invalid token \"/\" in vgname");
+        fprintf(stderr, "invalid token \"/\" in vgname\n");
         exit(1);
     }
 
     char *comma = strstr(vgname, ",");
     if (comma == NULL) {
         vgdata = vgname;
-        vglog = (char *)"";
+        vglog = vgname;
         return;
     }
 
@@ -3942,11 +3942,7 @@ static void parse_vgname_args(char* args)
     comma = strstr(vgdata, ",");
     comma[0] = '\0';
     vglog = comma + 1;
-    if (strstr(vgdata, ",") != NULL) {
-        fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
-        exit(1);
-    }
-    if (strstr(vglog, ",") != NULL) {
+    if (strstr(vgdata, ",") != NULL || strstr(vglog, ",") != NULL) {
         fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
         exit(1);
     }
