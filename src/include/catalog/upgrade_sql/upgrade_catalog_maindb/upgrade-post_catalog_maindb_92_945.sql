@@ -94,7 +94,7 @@ CREATE FUNCTION pg_catalog.get_instr_unique_sql
     OUT rtt_unknown bigint,
     OUT net_trans_time bigint
 )
-RETURNS setof record LANGUAGE INTERNAL VOLATILE NOT FENCED as 'get_instr_unique_sql';
+RETURNS setof record LANGUAGE INTERNAL STABLE NOT FENCED as 'get_instr_unique_sql';
 
 CREATE VIEW DBE_PERF.statement AS
   SELECT * FROM get_instr_unique_sql();
@@ -196,7 +196,7 @@ CREATE unlogged table IF NOT EXISTS pg_catalog.statement_history(
     rtt_unknown bigint,
     parent_query_id bigint,
     net_trans_time bigint
-);
+) WITH (orientation=row, compression=no);
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index pg_catalog.statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
 DROP FUNCTION IF EXISTS dbe_perf.standby_statement_history(boolean);
@@ -333,6 +333,8 @@ CREATE FUNCTION dbe_perf.standby_statement_history(
     OUT lwlock_wait_time bigint,
     OUT details bytea,
     OUT is_slow_sql boolean,
+    OUT trace_id text,
+    OUT advise text,
     OUT net_send_time bigint,
     OUT srt1_q bigint,
     OUT srt2_simple_query bigint,
