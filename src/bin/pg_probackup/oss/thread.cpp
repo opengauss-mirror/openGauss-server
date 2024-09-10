@@ -407,6 +407,18 @@ int getFreeReaderThread()
     return slot;
 }
 
+static int PbkFilenameCompare(const void *f1, const void *f2)
+{
+    char* filename1 = *(char**)f1;
+    char* filename2 = *(char**)f2;
+    size_t len1 = strlen(filename1);
+    size_t len2 = strlen(filename2);
+    if (len1 == len2) {
+        return strcmp(filename1, filename2);
+    }
+    return len1 - len2;
+}
+
 void* restoreReaderThreadMain(void* arg)
 {
     restoreReaderThreadArgs* args = (restoreReaderThreadArgs*)arg;
@@ -420,34 +432,43 @@ void* restoreReaderThreadMain(void* arg)
         elog(ERROR, "bucket %s not found, please create it first", bucket_name ? bucket_name : "null");
     }
     parray* objects = parray_new();
+    parray* pbkObjects = parray_new();
     oss->ListObjectsWithPrefix(bucket_name, prefix_name, objects);
     size_t objects_num = parray_num(objects);
-    size_t pbk_objects_num = 0;
-    for(size_t i = 0; i < objects_num; ++i) {
+    for (size_t i = 0; i < objects_num; ++i) {
         object_name = (char*)parray_get(objects, i);
         if (strncmp(object_name + strlen(object_name) - object_suffix_len, ".pbk", object_suffix_len) == 0) {
-            pbk_objects_num++;
+            parray_append(pbkObjects, object_name);
         }
     }
-    args->bufferCxt->fileNum = pbk_objects_num;
+    size_t pbkObjectsNum = parray_num(pbkObjects);
+    /* Sort by filename for restoring order */
+    parray_qsort(pbkObjects, PbkFilenameCompare);
+    args->bufferCxt->fileNum = pbkObjectsNum;
     elog(INFO, "the total number of backup %s's file objects is %d, and pbk file objects is %d",
-         base36enc(args->dest_backup->start_time), objects_num, pbk_objects_num);
-    for(size_t i = 0; i < objects_num; ++i) {
-        if (args->bufferCxt->earlyExit) {
-            break;
-        }
+         base36enc(args->dest_backup->start_time), objects_num, pbkObjectsNum);
+    for (size_t i = 0; i < objects_num; ++i) {
         object_name = (char*)parray_get(objects, i);
-        elog(INFO, "download object: %s from s3", object_name);
         if (strncmp(object_name + strlen(object_name) - object_suffix_len, ".pbk", object_suffix_len) == 0) {
-            args->bufferCxt->fileEnd = false;
-            oss->GetObject(bucket_name, object_name, (void*)args->bufferCxt);
+            continue;
         } else {
+            elog(INFO, "download object: %s from s3", object_name);
             char file_name[MAXPGPATH];
             int rc = snprintf_s(file_name, MAXPGPATH, MAXPGPATH - 1, "/%s", object_name);
             securec_check_ss_c(rc, "\0", "\0");
             oss->GetObject(bucket_name, object_name, (char*)file_name);
         }
     }
+    for (size_t i = 0; i < pbkObjectsNum; ++i) {
+        if (args->bufferCxt->earlyExit) {
+            break;
+        }
+        object_name = (char*)parray_get(pbkObjects, i);
+        elog(INFO, "download object: %s from s3", object_name);
+        args->bufferCxt->fileEnd = false;
+        oss->GetObject(bucket_name, object_name, (void*)args->bufferCxt);
+    }
     parray_free(objects);
+    parray_free(pbkObjects);
     return NULL;
 }
