@@ -259,6 +259,7 @@ opengauss_setup_hba_conf() {
                     echo "host replication repuser $OG_SUBNET trust"
                 fi
         } >> "$PGDATA/pg_hba.conf"
+        sed -i "/# IPv6 local connections:/a host all omm $OG_SUBNET trust" $PGDATA/pg_hba.conf
 }
 
 # append parameter to postgres.conf for connections
