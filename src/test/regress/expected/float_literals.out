@@ -30,15 +30,25 @@ ERROR:  number overflow at or near "1.79E+400"
 LINE 1: SELECT 1.79E+400;
                ^
 SELECT 1.79E-400;
- ?column? 
-----------
-        0
-(1 row)
-
+ERROR:  number overflow at or near "1.79E-400"
+LINE 1: SELECT 1.79E-400;
+               ^
 SELECT -1.79E+400;
 ERROR:  number overflow at or near "1.79E+400"
 LINE 1: SELECT -1.79E+400;
                 ^
+SELECT 1E-307;
+                                                                                                                                                       ?column?                                                                                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ .0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
+SELECT 1E-308;
+                                                                                                                                                       ?column?                                                                                                                                                        
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ .00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
 SELECT '0.0';
  ?column? 
 ----------
@@ -81,6 +91,18 @@ SELECT '-1.79E+400';
  -1.79E+400
 (1 row)
 
+SELECT '1E-307';
+ ?column? 
+----------
+ 1E-307
+(1 row)
+
+SELECT '1E-308';
+ ?column? 
+----------
+ 1E-308
+(1 row)
+
 SELECT '0.0'::float8;
  float8 
 --------
@@ -120,6 +142,18 @@ ERROR:  "-1.79E+400" is out of range for type double precision
 LINE 1: SELECT '-1.79E+400'::float8;
                ^
 CONTEXT:  referenced column: float8
+SELECT '1E-307'::float8;
+ float8 
+--------
+ 1e-307
+(1 row)
+
+SELECT '1E-308'::float8;
+ float8 
+--------
+ 1e-308
+(1 row)
+
 SELECT TO_BINARY_FLOAT(3.14 DEFAULT y ON CONVERSION ERROR);
 ERROR:  column "y" does not exist
 LINE 1: SELECT TO_BINARY_FLOAT(3.14 DEFAULT y ON CONVERSION ERROR);
@@ -215,6 +249,9 @@ ERROR:  number overflow at or near "3.14E+400"
 LINE 1: INSERT INTO t_float_literals VALUES (7, 3.14E+400);
                                                 ^
 INSERT INTO t_float_literals VALUES (8, 3.14E-400);
+ERROR:  number overflow at or near "3.14E-400"
+LINE 1: INSERT INTO t_float_literals VALUES (8, 3.14E-400);
+                                                ^
 INSERT INTO t_float_literals VALUES (9, -3.14E+400);
 ERROR:  number overflow at or near "3.14E+400"
 LINE 1: INSERT INTO t_float_literals VALUES (9, -3.14E+400);
@@ -240,8 +277,7 @@ SELECT * FROM t_float_literals ORDER bY id;
   4 | -3.14e+40
   5 |  3.14e+40
   6 | -3.14e+40
-  8 |         0
-(7 rows)
+(6 rows)
 
 UPDATE t_float_iterals SET c1 = 1.79E+400 WHERE id = 1;
 ERROR:  number overflow at or near "1.79E+400"
@@ -263,6 +299,51 @@ SELECT * FROM t_float_iterals ORDER BY c1;
 ERROR:  relation "t_float_iterals" does not exist on datanode1
 LINE 1: SELECT * FROM t_float_iterals ORDER BY c1;
                       ^
+create table llvm_enh
+(
+	l_bool boolean default false,
+	l_tint tinyint default 255,
+	l_sint smallint default 32767,
+	l_int  integer  default 2147483647,
+	l_bint bigint default 9223372036854775807,
+	l_num1 numeric(18,0) default 999999999999999999,
+	l_num2 numeric(19,19) default 0.9223372036854775807,
+	l_num3 numeric(38,0) default 99999999999999999999999999999999999999,
+	l_flo1 float4       default 999999,
+	l_flo2 float8       default 1E-307,
+	l_char char(39)      default '170141183460469231731687303715884105728',
+	l_vchar varchar(40)   default '-170141183460469231731687303715884105728',
+	l_text text          default '-170141183460469231731687303715884105729',
+	l_date date          default '2016-10-18',
+	l_time time          default '21:21:21',
+	l_times timestamp    default '2003-04-12 04:05:06',
+	l_timez timestamp with time zone default '2003-04-12 04:05:06 pst',
+	l_oid oid  default 12345
+) ;
+insert into llvm_enh(l_bool) values(true);
+insert into llvm_enh(l_tint) values(0);
+insert into llvm_enh(l_sint) values(-32768);
+insert into llvm_enh(l_int)  values(-2147483648);
+insert into llvm_enh(l_bint) values(-9223372036854775808);
+insert into llvm_enh(l_num1) values(-999999999999999999);
+insert into llvm_enh(l_num2) values(-0.9223372036854775808);
+insert into llvm_enh(l_num3) values(-99999999999999999999999999999999999999);
+insert into llvm_enh(l_flo1) values(-999999);
+insert into llvm_enh(l_flo2) values(1E+308);
+select l_flo2,l_flo1 from llvm_enh where l_flo2 < l_flo1-999998 order by 1,2;
+ l_flo2 | l_flo1 
+--------+--------
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+ 1e-307 | 999999
+(8 rows)
+
 drop table t_float_literals;
+drop table llvm_enh;
 \c regression
 drop database float_literals;

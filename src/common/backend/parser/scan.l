@@ -1636,15 +1636,10 @@ handle_float_overflow(char *token, core_yyscan_t yyscanner)
 	}
 
 	errno = 0;
-    val = strtod(result, &endptr);
+	val = strtod(result, &endptr);
 
-	// if val < 1E-130, we assume it is 0
-	if (val != 0 && log10(val) < -130) {
-		result = "0";
-	} else if (errno == ERANGE) {
-		if (val == 0.0) {
-			result = "0";
-		} else {
+	if (errno == ERANGE) {
+		if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL) {
 			yyerror("number overflow");
 		}
 	}
