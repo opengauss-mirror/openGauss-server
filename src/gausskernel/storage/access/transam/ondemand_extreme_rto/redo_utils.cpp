@@ -619,6 +619,11 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *hashmapBlockS
                         recordBlockState->blockparse.blockhead.bucketNode,
                         recordBlockState->blockparse.blockhead.forknum, recordBlockState->blockparse.blockhead.blkno)));
     }
+
+    if (SS_IN_ONDEMAND_RECOVERY && t_thrd.role == WORKER) {
+        t_thrd.xlog_cxt.current_redo_xlog_lsn = hashmapBlockState->blockparse.blockhead.start_ptr;
+    }
+
     return targetState;
 }
 

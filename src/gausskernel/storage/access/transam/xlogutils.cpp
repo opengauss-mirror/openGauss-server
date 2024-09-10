@@ -78,6 +78,9 @@ typedef struct xl_invalid_page {
 static void report_invalid_page(int elevel, xl_invalid_page *invalid_page)
 {
     char *path = relpathperm(invalid_page->key.node, invalid_page->key.forkno);
+    if (SS_IN_ONDEMAND_RECOVERY && t_thrd.role == WORKER) {
+        elevel = PANIC;
+    }
 
     if (invalid_page->type == NOT_INITIALIZED)
         ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
