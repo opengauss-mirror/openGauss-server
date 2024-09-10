@@ -302,11 +302,6 @@ bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, 
     get_lsn_info_for_read(buf_tag, block_meta_info->base_page_info_list.prev, lsn_info, read_lsn);
     UnlockReleaseBuffer(buf);
 
-    if (lsn_info->lsn_num == 0 && XLogRecPtrIsInvalid(lsn_info->base_page_lsn)) {
-        ereport(ERROR, ((errmsg("cannot find valid lsn info %u/%u/%u %d %u read lsn %lu, min lsn %lu",
-                                buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
-                                buf_tag.blockNum, read_lsn, block_meta_info->min_lsn))));
-    }
     return true;
 }
 
