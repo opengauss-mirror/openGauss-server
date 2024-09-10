@@ -2117,6 +2117,20 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"foreign_key_checks",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Enable foreign key check on insert, update or drop operation,"
+            "only applicable to b-format db."
+            ),
+            NULL},
+            &u_sess->attr.attr_common.foreign_key_checks,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
