@@ -226,10 +226,6 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
         return DMS_ERROR;
     }
 
-    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
-        return DMS_ERROR;
-    }
-
     int retCode = DMS_ERROR;
     SnapshotData snapshot = {SNAPSHOT_MVCC};
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
@@ -242,10 +238,12 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
             txn_snapshot->xmax = snapshot.xmax;
             txn_snapshot->snapshotcsn = snapshot.snapshotcsn;
             txn_snapshot->localxmin = u_sess->utils_cxt.RecentGlobalXmin;
-            if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
-                retCode = DMS_SUCCESS;
+            if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
+                if (RecordSnapshotBeforeSend(inst_id, txn_snapshot->xmin)) {
+                    retCode = DMS_SUCCESS;
+                }
             } else {
-                retCode = DMS_ERROR;
+                retCode = DMS_SUCCESS;
             }
         }
     }
@@ -1255,6 +1253,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
     PG_TRY();
     {
         switch (bcast_op) {
+            case BCAST_GET_XMIN:
+                ret = SSGetOldestXmin(data, len, output_msg, output_msg_len);
+                break;
             case BCAST_SI:
                 ret = SSProcessSharedInvalMsg(data, len);
                 break;
@@ -1286,7 +1287,7 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
             case BCAST_SEND_SNAPSHOT:
-                ret = SSUpdateLatestSnapshotOfStandby(data, len);
+                ret = SSUpdateLatestSnapshotOfStandby(data, len, output_msg, output_msg_len);
                 break;
             case BCAST_RELOAD_REFORM_CTRL_PAGE:
                 ret = SSReloadReformCtrlPage(len);
@@ -1317,6 +1318,9 @@ static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *bro
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
     switch (bcast_op) {
+        case BCAST_GET_XMIN_ACK:
+            ret = SSGetOldestXminAck((SSBroadcastXminAck *)data);
+            break;
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
@@ -1959,7 +1963,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
-    SSXminInfoPrepare();
+    if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
+        SSXminInfoPrepare();
+    }
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
     char reform_type_str[reform_type_str_len] = {0};

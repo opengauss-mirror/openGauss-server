@@ -1275,6 +1275,7 @@ typedef struct knl_g_datadir_context {
 
 typedef struct knl_g_dms_context {
     uint32 dmsProcSid;
+    uint64 xminAck;
     dms_status_t dms_status;
     ClusterNodeState SSClusterState;
     ss_reformer_ctrl_t SSReformerControl;  // saved in disk; saved by primary

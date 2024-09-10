@@ -5146,9 +5146,22 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             globalxmin = xmin;
 
         if (ENABLE_DMS && SS_PRIMARY_MODE) {
-            SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
-            globalxmin = SSGetGlobalOldestXmin(globalxmin);
-            if (ENABLE_SS_BCAST_SNAPSHOT) {
+            if (ENABLE_SS_BCAST_GETOLDESTXMIN) {
+                if (SSGetOldestXminFromAllStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo)) {
+                    TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
+                    if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
+                        TransactionIdPrecedes(ss_oldest_xmin, globalxmin)) {
+                        globalxmin = ss_oldest_xmin;
+                    }
+                } else {
+                    globalxmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
+                }
+            } else {
+                SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
+                globalxmin = SSGetGlobalOldestXmin(globalxmin);
+            }
+
+            if (ENABLE_SS_BCAST_SNAPSHOT && !ENABLE_SS_BCAST_GETOLDESTXMIN) {
                 SSSendLatestSnapshotToStandby(xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             }
         }
