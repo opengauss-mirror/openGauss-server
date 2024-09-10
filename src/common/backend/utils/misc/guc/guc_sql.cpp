@@ -4013,7 +4013,7 @@ static void ParseUstoreVerifyLevel(int* mLevel, char* ptoken, const char* pdelim
         } else if (strcasecmp(ptoken, "COMPLETE") == 0) {
             setVal = (int) USTORE_VERIFY_COMPLETE;
         } else {
-            setVal = USTORE_VERIFY_DEFAULT;
+            setVal = USTORE_VERIFY_FAST;
             ereport(LOG, (errmodule(MOD_GUC),
                 errmsg("Invalid parameter settings, only support none, fast and complete value.")));
         }
@@ -4043,7 +4043,7 @@ static void ParseUstoreVerifyModule(int* moduleVal, char* ptoken, const char* pd
             if (strcasecmp(ptoken, "ALL") == 0) {
                 setVal = USTORE_VERIFY_MOD_MASK;
             } else if (strcasecmp(ptoken, "NULL") == 0) {
-                setVal = USTORE_VERIFY_MOD_INVALID;
+                setVal = USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE;
             } else if (strcasecmp(ptoken, "UPAGE") == 0) {
                 setVal |= USTORE_VERIFY_MOD_UPAGE;
             } else if (strcasecmp(ptoken, "UBTREE") == 0) {
@@ -4175,8 +4175,8 @@ static void ResetUstoreAttrValues()
     u_sess->attr.attr_storage.enable_ustore_sync_rollback = true;
     u_sess->attr.attr_storage.enable_ustore_async_rollback = true;
     u_sess->attr.attr_storage.enable_ustore_page_rollback = true;
-    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
-    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_FAST;
+    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE;
     u_sess->attr.attr_storage.index_trace_level = TRACE_NO;
     u_sess->attr.attr_storage.enable_log_tuple = false;
 }
@@ -4205,10 +4205,10 @@ static void ResetPrevUstoreAttrSettings(bool status[])
         u_sess->attr.attr_storage.enable_ustore_page_rollback = true;
     }
     if (!status[ENABLE_USTORE_VERIFY_LEVEL_IDX]) {
-        u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
+        u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_FAST;
     }
     if (!status[ENABLE_USTORE_VERIFY_MODULE_IDX]) {
-        u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+        u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE;
     }
     if (!status[ENABLE_USTORE_TRACE_LEVEL_IDX]) {
         u_sess->attr.attr_storage.index_trace_level = TRACE_NO;

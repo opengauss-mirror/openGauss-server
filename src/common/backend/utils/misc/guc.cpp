@@ -14181,8 +14181,8 @@ static void InitUStoreAttr()
     u_sess->attr.attr_storage.enable_candidate_buf_usage_count = DEFAULT_CAND_LIST_USAGE_COUNT;
     u_sess->attr.attr_storage.ustats_tracker_naptime = DEFAULT_USTATS_TRACKER_NAPTIME;
     u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
-    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
-    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_FAST;
+    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE;
     u_sess->attr.attr_storage.enable_ustore_sync_rollback = DEFAULT_SYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_async_rollback = DEFAULT_ASYNC_ROLLBACK;
     u_sess->attr.attr_storage.enable_ustore_page_rollback = DEFAULT_PAGE_ROLLBACK;
