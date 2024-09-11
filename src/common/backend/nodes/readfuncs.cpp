@@ -5979,6 +5979,20 @@ static TypeName* _readTypeName()
 }
 
 /**
+ * @Description: deserialize the TypeCast struct.
+ * @in str, deserialized string.
+ * @return TypeCast struct.
+ */
+static TypeCast* _readTypeCast(void)
+{
+    READ_LOCALS(TypeCast);
+    READ_NODE_FIELD(arg);
+    READ_NODE_FIELD(typname);
+    READ_INT_FIELD(location);
+    READ_DONE();
+}
+
+/**
  * @Description: deserialize the IndexElem struct.
  * @in str, deserialized string.
  * @return IndexElem struct.
@@ -6719,6 +6733,8 @@ Node* parseNodeString(void)
         return_value = _readDeclareCursorStmt();
     } else if (MATCH("CURSOREXPRESSION", 16)) {
         return_value = _readCursorExpression();
+    } else if (MATCH("TYPECAST", 8)) {
+        return_value = _readTypeCast();
     } else if (MATCH("NESTLOOP", 8)) {
         return_value = _readNestLoop();
     } else if (MATCH("SEQSCAN", 7)) {
