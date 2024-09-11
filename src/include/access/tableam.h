@@ -482,7 +482,8 @@ typedef struct TableAmRoutine {
      */
 
     double (*index_build_scan)(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo, bool allow_sync,
-        IndexBuildCallback callback, void *callback_state, TableScanDesc scan);
+        IndexBuildCallback callback, void *callback_state, TableScanDesc scan,
+        BlockNumber startBlkno, BlockNumber numblocks);
 
     void (*index_validate_scan)(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo, Snapshot snapshot,
         v_i_state *state);
@@ -993,10 +994,11 @@ static inline void tableam_scan_init_parallel_seqscan(TableScanDesc sscan, int32
 }
 
 static inline double tableam_index_build_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan)
+    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan,
+    BlockNumber startBlkno = 0, BlockNumber numblocks = InvalidBlockNumber)
 {
     return heapRelation->rd_tam_ops->index_build_scan(heapRelation, indexRelation, indexInfo,
-        allow_sync, callback, callback_state, scan);
+        allow_sync, callback, callback_state, scan, startBlkno, numblocks);
 }
 
 static inline void tableam_index_validate_scan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
