@@ -834,6 +834,7 @@ int main(int argc, char *argv[])
      */
     main_tid = pthread_self();
 
+    init_audit(PROG_NAME, argc, argv);
     /* Parse subcommands and non-subcommand options */
     if (argc > 1)
     {
@@ -847,7 +848,6 @@ int main(int argc, char *argv[])
      * Make command string before getopt_long() will call. It permutes the
      * content of argv.
      */
-    init_audit(PROG_NAME, argc, argv);
     /* TODO why do we do that only for some commands? */
     command_name = gs_pstrdup(argv[1]);
     command = make_command_string(argc, argv);

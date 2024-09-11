@@ -47,6 +47,8 @@
 #include "fetchmot.h"
 #endif
 
+#define PROG_NAME_BACKUP "gs_basebackup"
+
 typedef struct TablespaceListCell {
     struct TablespaceListCell* next;
     char old_dir[MAXPGPATH];
@@ -1649,7 +1651,7 @@ int main(int argc, char **argv)
 {
     progname = get_progname(argv[0]);
     if (!strcmp(progname, "gs_basebackup")) {
-        init_audit(progname, argc, argv);
+        init_audit(PROG_NAME_BACKUP, argc, argv);
         return GsBaseBackup(argc, argv);
     } else if (!strcmp(progname, "gs_tar")) {
         return GsTar(argc, argv);

@@ -745,6 +745,7 @@ int main(int argc, char** argv)
         }
     }
 
+    init_audit(PROG_NAME, argc, argv);
     /* parse the dumpall options */
     getopt_dump(argc, argv, long_options, &optindex);
 
@@ -755,7 +756,6 @@ int main(int argc, char** argv)
     // log output redirect
     init_log((char*)PROG_NAME);
 
-    init_audit(PROG_NAME, argc, argv);
     validatedumpoptions();
 
     /* Identify archive format to emit */
@@ -1467,6 +1467,7 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
     char* listFilePath = NULL;
     char* listFileName = NULL;
     bool if_compress = false;
+    errno_t rc = EOK;
 
         /* check if a required_argument option has a void argument */
     char optstring[] = "abcCE:f:F:g:h:n:N:oOp:q:RsS:t:T:U:vwW:xZ:";
@@ -1767,9 +1768,20 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
     }
 
     /* Get database name from command line */
-    if (optind < argc)
-        dbname = argv[optind++];
-
+    if (optind < argc) {
+        dbname = gs_strdup(argv[optind]);
+        if (strncmp(argv[optind], "postgresql://", strlen("postgresql://")) == 0) {
+            char *off_argv = argv[optind] + strlen("postgresql://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            check_memset_s(rc);
+        } else if (strncmp(argv[optind], "postgres://", strlen("postgres://")) == 0) {
+            char *off_argv = argv[optind] + strlen("postgres://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            check_memset_s(rc);
+        }
+        optind++;
+    }
+        
     /* Complain if any arguments remain */
     if (optind < argc) {
         write_stderr(_("%s: too many command-line arguments (first is \"%s\")\n"), progname, argv[optind]);
