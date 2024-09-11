@@ -974,6 +974,7 @@ Oid exprCollation(const Node* expr)
         case T_NanTest:
         case T_InfiniteTest:
         case T_HashFilter:
+        case T_TypeCast:
             coll = InvalidOid; /* result is always boolean */
             break;
         case T_BooleanTest:
@@ -2919,6 +2920,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             CursorExpression* newnode = NULL;
             FLATCOPY(newnode, cursor_expression, CursorExpression, isCopy);
             MUTATE(newnode->param, cursor_expression->param, List*);
+            return (Node*)newnode;
+        } break;
+        
+        case T_TypeCast: {
+            TypeCast *tc = (TypeCast*)node;
+            TypeCast *newnode = NULL;
+            FLATCOPY(newnode, tc, TypeCast, isCopy);
+            MUTATE(newnode->arg, tc->arg, Node*);
             return (Node*)newnode;
         } break;
         

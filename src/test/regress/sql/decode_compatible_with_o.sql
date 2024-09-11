@@ -1773,6 +1773,148 @@ select decode('1.0'::text, 1, 'same', 'different');
 select case 1 when '1.0' then 'same' else 'different' end;
 select case '1.0' when 1 then 'same' else 'different' end;
 
+set sql_beta_feature = 'none';
+create table base_tab_000 (
+col_tinyint tinyint,
+col_smallint smallint,
+col_int integer,
+col_bigint bigint,
+col_numeric numeric,
+col_real real,
+col_double double precision,
+col_decimal decimal,
+col_varchar varchar,
+col_char char(30),
+col_nvarchar2 nvarchar2,
+col_text text,
+col_timestamptz timestamp with time zone,
+col_timestamp timestamp without time zone,
+col_date date,
+col_time time without time zone,
+col_timetz time with time zone,
+col_interval interval,
+col_smalldatetine smalldatetime)
+partition by range (col_int)
+(
+partition vector_base_tab_000_1 values less than (10),
+partition vector_base_tab_000_2 values less than (1357),
+partition vector_base_tab_000_3 values less than (2687),
+partition vector_base_tab_000_4 values less than (maxvalue)
+);
+create table base_type_tab_000 (
+col_tinyint tinyint,
+col_smallint smallint,
+col_int integer,
+col_bigint bigint,
+col_money money,
+col_numeric numeric,
+col_real real,
+col_double double precision,
+col_decimal decimal,
+col_varchar varchar,
+col_char char(30),
+col_nvarchar2 nvarchar2,
+col_text text,
+col_timestamp timestamp with time zone,
+col_timestamptz timestamp without time zone,
+col_date date,
+col_time time without time zone,
+col_timetz time with time zone,
+col_interval interval,
+col_tinterval tinterval,
+col_smalldatetine smalldatetime,
+col_bytea bytea,
+col_boolean boolean,
+col_inet inet,
+col_cidr cidr,
+col_bit bit(10),
+col_varbit varbit(10),
+col_oid oid) ;
+
+CREATE TABLE Customer (
+c_id int ,
+c_d_id int ,
+c_w_id int ,
+c_first varchar(16) ,
+c_middle char(2) ,
+c_last varchar(16) ,
+c_street_1 varchar(20) ,
+c_street_2 varchar(20) ,
+c_city varchar(20) ,
+c_state char(2) ,
+c_zip char(9) ,
+c_phone char(16) ,
+c_since timestamp ,
+c_credit char(2) ,
+c_credit_lim numeric(12,2) ,
+c_discount numeric(4,4) ,
+c_balance numeric(12,2) ,
+c_ytd_payment numeric(12,2) ,
+c_payment_cnt int ,
+c_delivery_cnt int ,
+c_data varchar(500))
+
+partition by range (c_id)
+(
+partition vector_engine_Customer_1 values less than (10),
+partition vector_engine_Customer_2 values less than (77),
+partition vector_engine_Customer_3 values less than (337),
+partition vector_engine_Customer_4 values less than (573),
+partition vector_engine_Customer_5 values less than (1357),
+partition vector_engine_Customer_6 values less than (2033),
+partition vector_engine_Customer_7 values less than (2087),
+partition vector_engine_Customer_8 values less than (2387),
+partition vector_engine_Customer_9 values less than (2687),
+partition vector_engine_Customer_10 values less than (2987),
+partition vector_engine_Customer_11 values less than (maxvalue)
+);
+
+select decode(bitand(a.col_int, 1), 1, 'warehouse', 'postoffice') as case1,
+decode(bitand(a.col_tinyint, 2), 2, 'ground', 'air') as case2,
+decode(bitand(b.col_smallint, 4), 4, 'insured', 'certified') as case3,
+decode(a.col_real, b.col_real, a.col_char, 'postoffice'),
+decode(b.col_nvarchar2, a.col_nvarchar2, 'ground', 'air'),
+decode(a.col_double, b.col_double, 'insured', 'certified'),
+decode(b.col_text, a.col_text, 'yes', a.col_varchar, 'no', 'default'),
+decode(a.col_char,
+b.col_nvarchar2,
+'t',
+cast('h' as char),
+false,
+true),
+decode(cast('h' as char), a.col_nvarchar2, 't', b.col_char, 'f', 't'),
+decode(to_date('2010-8-1', 'yyyy-mm-dd'),
+' 2010-08-01 00:00:00',
+1,
+to_date('2010-8-1', 'yyyy-mm-dd'),
+2,
+3),
+'print1:' || decode('myvar1', '', 1, 'myvar2', 2)
+from base_tab_000 a
+join base_type_tab_000 b
+on a.col_smallint = b.col_smallint
+and exists
+(select 1 from Customer where a.col_int = c_id)
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+
+create table t1 (id int, c_int int, c_varchar varchar(50)) with (storage_type=ustore);
+
+create or replace procedure p1 (tnum int, tname varchar) as
+x int;
+begin
+for i in 1..tnum loop
+  execute immediate 'insert into ' || tname || ' values (' || i || ',' || i || ',' || '''abc''' ||  ')';
+end loop;
+end;
+/
+
+call p1(100, 't1');
+
+select count(*) from (select sin((select max(B.id)
+from t1 B where B.id > 5))+ decode((select max(B.id) from t1 B where B.id > 5), 100000, 200, 1000000, 300) + decode ((select max (B.id)
+from t1 B where B.id>5), 100000, 200, 1000000, 300) X
+from t1 A) order by 1;
+
 reset sql_beta_feature;
 reset timezone;
 
