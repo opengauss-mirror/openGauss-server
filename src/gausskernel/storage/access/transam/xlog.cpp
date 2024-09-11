@@ -5164,7 +5164,7 @@ static void PreallocXlogFiles(XLogRecPtr endptr)
      * 1. In ss repplication dorado cluster, standby cluster sync primary xlog
      * 2. In ondemand recovery, we do not preallocate xlog files for better rto
      */
-    if (SS_DORADO_STANDBY_CLUSTER || SS_IN_ONDEMAND_RECOVERY) {
+    if (SS_DORADO_STANDBY_CLUSTER || SS_IN_ONDEMAND_RECOVERY || SS_STANDBY_MODE) {
         return;
     }
 
@@ -11110,9 +11110,11 @@ void StartupXLOG(void)
      */
 
     /* for primary node, calculate the first multi version snapshot. */
-    LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-    CalculateLocalLatestSnapshot(true);
-    LWLockRelease(ProcArrayLock);
+    if (!SS_STANDBY_MODE) {
+        LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+        CalculateLocalLatestSnapshot(true);
+        LWLockRelease(ProcArrayLock);
+    }
 
     if (SS_PERFORMING_SWITCHOVER && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING) {
         ereport(LOG, (errmsg("[SS switchover] Standby promote: StartupXLOG finished, promote success")));
@@ -11609,6 +11611,10 @@ bool HotStandbyActiveInReplay(void)
  */
 bool XLogInsertAllowed(void)
 {
+    if (SS_CLUSTER_ONDEMAND_RECOVERY && SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("[SS] SS Standby can't write xlog during recovery!")));
+    }
+
     // If value is "unconditionally true" or "unconditionally false", just
     // return it.  This provides the normal fast path once recovery is known done.
     if (t_thrd.xlog_cxt.LocalXLogInsertAllowed >= 0) {
@@ -14009,7 +14015,7 @@ void UpdateFullPageWrites(void)
      * Write an XLOG_FPW_CHANGE record. This allows us to keep track of
      * full_page_writes during archive recovery, if required.
      */
-    if (XLogStandbyInfoActive() && !RecoveryInProgress()) {
+    if (XLogStandbyInfoActive() && !RecoveryInProgress() && !SS_STANDBY_MODE) {
         XLogBeginInsert();
         XLogRegisterData((char *)(&u_sess->attr.attr_storage.fullPageWrites), sizeof(bool));
 

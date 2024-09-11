@@ -1138,7 +1138,7 @@ static bool LineOffChanged(Buffer buf, int lp_offset, uint16 saved_off)
         int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
         t_thrd.postgres_cxt.whereToSendOutput = DestNone;
         BufferDesc *buf_desc = GetBufferDescriptor(buf);
-        ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] lineoffchanged new %d/%d/%d old %d!",
+        ereport(DEBUG1, (errmsg("[%d/%d/%d/%d/%d %d-%d] lineoffchanged new %d/%d/%d old %d!",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
             (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, lpp->lp_off, lpp->lp_flags, lpp->lp_len, saved_off)));
@@ -1169,7 +1169,7 @@ void ForgetBufferNeedCheckPin(Buffer buf_id)
                 BufferDesc *buf_desc = GetBufferDescriptor(buf_id - 1);
                 int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
                 t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-                ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] ForgetBufferNeedCheckPin %d!",
+                ereport(DEBUG1, (errmsg("[%d/%d/%d/%d/%d %d-%d] ForgetBufferNeedCheckPin %d!",
                     buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                     (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
                     buf_desc->tag.blockNum, count)));

@@ -3565,7 +3565,7 @@ void heap_slot_store_heap_tuple(Tuple tup, TupleTableSlot* slot, Buffer buffer, 
                 int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
                 t_thrd.postgres_cxt.whereToSendOutput = DestNone;
                 BufferDesc *buf_desc = GetBufferDescriptor(slot->tts_buffer - 1);
-                ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] set check pin count, heap_slot_store_heap!",
+                ereport(DEBUG1, (errmsg("[%d/%d/%d/%d/%d %d-%d] set check pin count, heap_slot_store_heap!",
                     buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                     (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
                     buf_desc->tag.blockNum)));
