@@ -173,6 +173,93 @@ static bool IsCopyOptionKeyWordExists(const char* source, const char* key)
     return false;
 }
 
+static void RemoveOptionInParallelCopy(struct copy_options* options, char *src, const char *key)
+{
+    if (src == nullptr) {
+        return;
+    }
+    size_t srcLen = strlen(src);
+    size_t keyLen = strlen(key);
+    if (srcLen < keyLen) {
+        return;
+    }
+    char* upperSrc = (char*)pg_malloc(srcLen + 1);
+    char* upperKey = (char*)pg_malloc(keyLen + 1);
+    toUpper(upperSrc, src);
+    toUpper(upperKey, key);
+
+    char *firstPos = strstr(upperSrc, upperKey);
+    char *curPos = firstPos;
+    size_t keyCnt = 0;
+    /*
+     * Check exist there are multiple keys or single keys.
+     * When there are multiple headers, we will not process it,
+     * the server will report an redundant options error.
+     * because if there are two keys now, after remove one key,
+     * there are only one key, an invalid SQL will become a valid SQL.
+     */
+    while (curPos != nullptr) {
+        ++keyCnt;
+        if (keyCnt > 1) {
+            break;
+        }
+        curPos = curPos + keyLen;
+        curPos = strstr(curPos, upperKey);
+    }
+
+    bool isKey = (keyCnt == 1);
+
+    /* header option available only in CSV mode. */
+    if (pg_strcasecmp(upperKey, "HEADER") == 0) {
+        char *csvPos = strstr(upperSrc, "CSV");
+        isKey = isKey && (csvPos != nullptr);
+    }
+
+    if (isKey) {
+        const char* whitespace = " \t\n\r";
+        char *firstPosStart = firstPos;
+        char *firstPosEnd = firstPos + keyLen - 1;
+        while (--firstPosStart >= upperSrc) {
+            if (strchr(whitespace, *firstPosStart) == nullptr) {
+                break;
+            }
+        }
+
+        while (++firstPosEnd <= upperSrc + srcLen) {
+            if (strchr(whitespace, *firstPosEnd) == nullptr) {
+                break;
+            }
+        }
+
+        /*
+         * We will not handle situations where there are ","
+         * before and after the key. eg: "with (csv, header)"
+         */
+
+        if ((firstPosStart >= upperSrc && *firstPosStart == ',') ||
+             (firstPosEnd <= upperSrc + srcLen && *firstPosEnd == ',')) {
+            isKey = false;
+        }
+
+        /*
+         * We will handle situations like this:
+         * eg: "with csv header;" or "with csv header ..."
+         */
+        isKey = isKey && (firstPos == upperSrc || strchr(whitespace, *(firstPos - 1)) != nullptr)  &&
+                     (strchr(whitespace, *firstPosEnd) != nullptr || *firstPosEnd  == ';' || *firstPosEnd  == '\0');
+    }
+
+    if (keyCnt == 1 && isKey) {
+        options->hasHeader = true;
+        char *cpyDestPos = src + (firstPos - upperSrc);
+        char *cpySrcPos = cpyDestPos + keyLen;
+        errno_t rc = memmove_s(cpyDestPos, strlen(cpySrcPos) + 1, cpySrcPos, strlen(cpySrcPos) + 1);
+        securec_check_c(rc, "\0", "\0");
+    }
+    free(upperKey);
+    free(upperSrc);
+}
+
 /* parse parallel settings */
 static bool ParseParallelOption(struct copy_options* result, char** errToken)
 {
@@ -204,6 +291,7 @@ static bool ParseParallelOption(struct copy_options* result, char** errToken)
             }
 
             token = strtokx(nullptr, "", NULL, NULL, 0, false, false, pset.encoding);
+            RemoveOptionInParallelCopy(result, token, "header");
             if (token != nullptr) {
                 xstrcat(&result->after_tofrom, " ");
                 xstrcat(&result->after_tofrom, token);

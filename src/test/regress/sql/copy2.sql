@@ -280,3 +280,18 @@ insert into copy_header_src select generate_series(1,10);
 
 drop table copy_header_src;
 drop table copy_header_dest;
+
+create table copy_parallel_header_src (c1 int);
+create table copy_parallel_header_dest (c1 int);
+insert into copy_parallel_header_src select generate_series(1,100);
+\copy copy_parallel_header_src to '~/copy_parallel_header_src.csv' with csv header;
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with csv header;
+select count(*) from copy_parallel_header_dest;
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with csv header header;
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with csv header'on';
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with csv header,;
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with csv, header;
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with (csv, header);
+\copy copy_parallel_header_dest from '~/copy_parallel_header_src.csv' parallel 8 with header;
+drop table copy_parallel_header_src;
+drop table copy_parallel_header_dest;
