@@ -106,6 +106,7 @@ extern Datum float8_to_char(PG_FUNCTION_ARGS);
 #include "pgtime.h"
 #include "datatype/timestamp.h"
 extern Datum to_timestamp_default_format(PG_FUNCTION_ARGS);
+extern Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS);
 typedef struct TmToChar {
     struct pg_tm tm; /* classic 'tm' struct */
     fsec_t fsec;     /* fractional seconds */

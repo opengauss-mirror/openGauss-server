@@ -7405,6 +7405,7 @@ void Init_NUM_cache(void)
     t_thrd.format_cxt.last_NUM_cache_entry = t_thrd.format_cxt.NUM_cache + 0;
 }
 
+// to_timestamp(string)
 Datum to_timestamp_default_format(PG_FUNCTION_ARGS)
 {
     text* date_txt = PG_GETARG_TEXT_P(0);
@@ -7422,6 +7423,67 @@ Datum to_timestamp_default_format(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
 
     PG_RETURN_TIMESTAMP(result);
+}
+
+// to_timestamp(text DEFAULT RETURN_VALUE ON CONVERSION ERROR[, fmt[, nlsparam]]), _20(6, 25, 25, 16, 16, 25, 25)
+Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
+{
+    // args0 is text expr; args1 is default val; args2 is is DEFAULT gramy(bool);
+    // args3 is default expr is column ref(bool); args4 is fmt constraints;
+    // args5 is nls param constraints
+    text* date_txt = PG_GETARG_TEXT_P(0);
+    bool default_val_is_null = PG_ARGISNULL(1);
+    bool fmtIsNull = PG_ARGISNULL(4);
+    text* fmt;
+    if (fmtIsNull) {
+        fmt = cstring_to_text(u_sess->attr.attr_common.nls_timestamp_format_string);
+    }
+    else {
+        fmt = PG_GETARG_TEXT_P(4);
+    }
+
+    bool resultNull = false;
+    Timestamp result;
+    int tz = 0;
+
+    struct pg_tm tm;
+    fsec_t fsec;
+
+    PG_TRY();
+    {
+        do_to_timestamp(date_txt, fmt, &tm, &fsec);
+
+        if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+        }
+
+        pfree_ext(fmt);
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+
+        if (default_val_is_null) {
+            pfree_ext(fmt);
+            resultNull = true;
+        } else {
+            text* defaultVal = PG_GETARG_TEXT_P(1);
+
+            do_to_timestamp(defaultVal, fmt, &tm, &fsec);
+            pfree_ext(fmt);
+
+            if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
+                ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp defaultVal out of range")));
+            }
+        }
+    }
+    PG_END_TRY();
+
+    if (resultNull) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_TIMESTAMP(result);
+    }
 }
 
 /*

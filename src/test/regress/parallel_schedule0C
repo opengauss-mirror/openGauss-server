@@ -195,5 +195,6 @@ test: enable_expr_fusion_flatten
 
 # to_number func
 test: to_number_default
-
+# to_timestamp func
+test: to_timestamp_default
 
