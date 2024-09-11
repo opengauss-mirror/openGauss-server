@@ -7355,6 +7355,10 @@ int main(int argc, char** argv)
             break;
 #endif
         case BUILD_COMMAND:
+            if (enable_dss && !ss_instance_config.dss.enable_stream && !ss_instance_config.dss.enable_dorado) {
+                pg_log(PG_PROGRESS, _("build command is not supported in share storage single cluster\n"));
+                goto Error;
+            }
             if (build_mode == COPY_SECURE_FILES_BUILD && (conn_str == NULL || register_username == NULL ||
                 register_password == NULL)) {
                 pg_log(PG_PROGRESS, _("When copy secure files from remote, need remote host and authentication!\n"));
