@@ -169,7 +169,8 @@ extern void index_build(Relation heapRelation,
 			bool isTruncGTT = false);
 
 extern double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan = NULL);
+    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan = NULL,
+    BlockNumber startBlkno = 0, BlockNumber numblocks = InvalidBlockNumber);
 extern double IndexBuildUHeapScan(Relation heapRelation,
                          Relation indexRelation,
                          IndexInfo *indexInfo,
