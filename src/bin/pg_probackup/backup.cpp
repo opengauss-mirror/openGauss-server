@@ -149,14 +149,21 @@ static void compress_encrypt_directory();
 static void
 backup_stopbackup_callback(bool fatal, void *userdata)
 {
-    PGconn *pg_startbackup_conn = (PGconn *) userdata;
     /*
      * If backup is in progress, notify stop of backup to openGauss
      */
     if (backup_in_progress)
     {
         elog(WARNING, "backup in progress, stop backup");
-        pg_stop_backup(NULL, pg_startbackup_conn, NULL);	/* don't care about stop_lsn in case of error */
+        /*
+         * The backup connection, previously reserved in user data,
+         * might have been disconnected when backup_stopbackup_callback was triggered.
+         * Therefore, we ought to initiate a new connection at this point.
+        */
+        PGNodeInfo  nodeInfo;
+        auto backup_conn = pgdata_basic_setup(instance_config.conn_opt, &nodeInfo);
+        /* don't care about stop_lsn in case of error */
+        pg_stop_backup(NULL, backup_conn, NULL);
     }
 }
 
@@ -1221,6 +1228,15 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
         elog(ERROR, "backup only support on primary by dss mode");
     }
 
+    /*
+     * Set flag that pg_start_backup() was called. If an error will happen it
+     * is necessary to call pg_stop_backup() in backup_cleanup().
+     * Place this code before pg_start_backup() call to ensure that the callback
+     * can be invoked in case pg_start_backup() fails.
+     */
+    backup_in_progress = true;
+    pgut_atexit_push(backup_stopbackup_callback, conn);
+
     if (!exclusive_backup)
         res = pgut_execute(conn,
                                         "SELECT pg_catalog.pg_start_backup($1, $2, false)",
@@ -1231,13 +1247,6 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
                            "SELECT pg_catalog.pg_start_backup($1, $2)",
                            2,
                            params);
-
-    /*
-     * Set flag that pg_start_backup() was called. If an error will happen it
-     * is necessary to call pg_stop_backup() in backup_cleanup().
-     */
-    backup_in_progress = true;
-    pgut_atexit_push(backup_stopbackup_callback, conn);
 
     /* Extract timeline and LSN from results of pg_start_backup() */
     XLogDataFromLSN(ret, PQgetvalue(res, 0, 0), &lsn_hi, &lsn_lo);
