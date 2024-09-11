@@ -101,7 +101,7 @@ static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
 static const int32 MAX_PENDING = 1;
 static const int32 MAX_PENDING_STANDBY = 1;
-static const int32 ITEM_QUQUE_SIZE_RATIO = 2;
+static const int32 ITEM_QUQUE_SIZE_RATIO = 16;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
 uint32 g_readManagerTriggerFlag = TRIGGER_NORMAL;
