@@ -1657,6 +1657,23 @@ static void incre_ckpt_aio_callback(struct io_event *event)
         _exit(0);
     }
 
+    off_t roffset = 0;
+    if (IsSegmentBufferID(buf_desc->buf_id)) {
+        roffset = ((buf_desc->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
+    } else {
+        roffset = ((buf_desc->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+    }
+
+    int aioRet = dss_aio_post_pwrite(event->obj->data, tempAioExtra->aio_fd, event->obj->u.c.nbytes, roffset);
+    if (aioRet != 0) {
+        ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", errno,
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+    }
+
+    buf_desc->extra->aio_in_progress = false;
+
 #ifdef USE_ASSERT_CHECKING
     char *write_buf = (char *)(event->obj->u.c.buf);
     char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
@@ -1669,10 +1686,9 @@ static void incre_ckpt_aio_callback(struct io_event *event)
                                             buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
                                             buf_desc->extra->seg_blockno, (char *)read_buf);
     }
-    
     if (XLByteEQ(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
         Assert(memcmp(write_buf, read_buf, BLCKSZ) == 0);   
-    } else if (XLByteLT(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
+    } else if (!PageIsNew(read_buf) && XLByteLT(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
         ereport(PANIC, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d]aio write error", 
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
             (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
@@ -1691,22 +1707,6 @@ static void incre_ckpt_aio_callback(struct io_event *event)
     pfree(origin_buf);
 #endif
 
-    off_t roffset = 0;
-    if (IsSegmentBufferID(buf_desc->buf_id)) {
-        roffset = ((buf_desc->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
-    } else {
-        roffset = ((buf_desc->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
-    }
-
-    int aioRet = dss_aio_post_pwrite(event->obj->data, tempAioExtra->aio_fd, event->obj->u.c.nbytes, roffset);
-    if (aioRet != 0) {
-        ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", errno,
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-    }
-
-    buf_desc->extra->aio_in_progress = false;
     UnpinBuffer(buf_desc, true);
 }
 
