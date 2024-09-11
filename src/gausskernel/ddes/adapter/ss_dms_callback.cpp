@@ -962,10 +962,18 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
   
     /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
     if ((lsn_now != InvalidXLogRecPtr) &&  XLByteLT(lsn_now, buf_ctrl->lsn_on_disk)) {
-        ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
-            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            (unsigned long long)lsn_now, (unsigned long long)buf_ctrl->lsn_on_disk)));
+        if (SS_DISASTER_STANDBY_CLUSTER) {
+            ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_now, (unsigned long long)buf_ctrl->lsn_on_disk)));
+            return;
+        } else {
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_now, (unsigned long long)buf_ctrl->lsn_on_disk)));
+        }
     }
     
     /* we only verify segment-page version */
@@ -975,10 +983,18 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
 
     if ((lsn_now != InvalidXLogRecPtr) && XLByteLT(lsn_now, lsn_past)) {
         RelFileNode rnode = buf_desc->tag.rnode;
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS page][%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
-            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-            (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+        if (SS_DISASTER_STANDBY_CLUSTER) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS page][%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+            return;
+        } else {
+            ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS page][%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+        }
     }
     return;
 }
