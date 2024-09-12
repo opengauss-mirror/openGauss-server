@@ -1,0 +1,48 @@
+drop database db_1138120;
+drop user user1_1138120;
+drop user user2_1138120;
+-- create database and user
+CREATE DATABASE db_1138120;
+\c db_1138120
+CREATE USER user1_1138120 PASSWORD 'Abc@1138120';
+grant all on database db_1138120 to user1_1138120;
+CREATE USER user2_1138120 PASSWORD 'Abc@1138120';
+grant all on database db_1138120 to user2_1138120;
+-- create synonym
+create or replace synonym user2_1138120.syn1_1138120 for user1_1138120.tab_1138120;
+-- \c - user1_1138120
+SET SESSION AUTHORIZATION user1_1138120 password 'Abc@1138120';
+create table tab_1138120 (id int,name text);
+insert into tab_1138120 values (1,'abc');
+select * from tab_1138120;
+-- \c - user2_1138120
+-- no permission for table and schema
+SET SESSION AUTHORIZATION user2_1138120 password 'Abc@1138120';
+select * from user1_1138120.tab_1138120;
+select * from syn1_1138120;
+-- add table permission
+SET SESSION AUTHORIZATION user1_1138120 password 'Abc@1138120';
+grant all privileges on table tab_1138120 to user2_1138120;
+-- no permission for schema
+SET SESSION AUTHORIZATION user2_1138120 password 'Abc@1138120';
+select * from user1_1138120.tab_1138120;
+select * from syn1_1138120;
+-- add schema permission
+SET SESSION AUTHORIZATION user1_1138120 password 'Abc@1138120';
+grant usage on schema user1_1138120 to user2_1138120;
+-- have permission for schema and table, query success
+SET SESSION AUTHORIZATION user2_1138120 password 'Abc@1138120';
+select * from user1_1138120.tab_1138120;
+select * from syn1_1138120;
+-- revoke table permission
+SET SESSION AUTHORIZATION user1_1138120 password 'Abc@1138120';
+revoke all privileges on table tab_1138120 from user2_1138120;
+-- no table permission
+SET SESSION AUTHORIZATION user2_1138120 password 'Abc@1138120';
+select * from user1_1138120.tab_1138120;
+select * from syn1_1138120;
+--clear
+\c postgres
+drop database db_1138120;
+drop user user1_1138120;
+drop user user2_1138120;
