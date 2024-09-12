@@ -365,7 +365,7 @@ function fn_install_demoDB()
     fi
     if [ "$input"X == "yes"X ]
     then
-        fn_load_demoDB 1>load.log 2>&1
+        fn_load_demoDB 1>$shell_path/load.log 2>&1
         fn_check_demoDB
     elif [ "$input"X == "no"X ]
     then
