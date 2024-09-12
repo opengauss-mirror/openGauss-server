@@ -302,7 +302,8 @@ int main(int argc, char* argv[])
                 progname);
         exit_nicely(1);
     }
-
+    
+    init_audit(PROG_NAME, argc, argv);
     /* parse the dumpall options */
     getopt_dumpall(argc, argv, long_options, &optindex);
 
@@ -310,7 +311,6 @@ int main(int argc, char* argv[])
         get_password_pipeline();
     }
 
-    init_audit(PROG_NAME, argc, argv);
     /* validate the optons values */
     validate_dumpall_options(argv);
 

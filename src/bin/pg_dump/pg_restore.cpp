@@ -206,6 +206,7 @@ int main(int argc, char** argv)
         }
     }
 
+    init_audit(PROG_NAME, argc, argv);
     /* parse the restore options for gs_restore*/
     restore_getopts(argc, argv, cmdopts, opts, &inputFileSpec);
 
@@ -267,7 +268,6 @@ int main(int argc, char** argv)
     (void)fclose(fp);
     fp = NULL;
 
-    init_audit(PROG_NAME, argc, argv);
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
     if (is_encrypt && module_params == NULL) {

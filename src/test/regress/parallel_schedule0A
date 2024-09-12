@@ -491,3 +491,6 @@ test: test_binary_suffix
 
 # test for rotate and unrotate function
 test: gb_ora_rotate_unrotate
+
+# test backup tool audit log
+test: backup_tool_audit

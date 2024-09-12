@@ -1129,3 +1129,4 @@ test: enable_expr_fusion_flatten
 test: on_update_session1 on_update_session2
 
 test: ts_gb18030_utf8
+test: backup_tool_audit

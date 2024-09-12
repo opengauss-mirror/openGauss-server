@@ -1,0 +1,40 @@
+-- gs_basebackup failure
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_basebackup - >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_basebackup -" $GAUSSLOG/bin/gs_basebackup/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump failure
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump - >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump -" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump success
+create database gs_dump_audit;
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump -p @portstring@ gs_dump_audit > @abs_bindir@/gs_dump_audit.log 2>&1 ; echo $?
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[SUCCESS\].*gs_dump -p @portstring@ gs_dump_audit" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump with password
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump -W'asd' >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump with password
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump -W 'asd' >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump with password
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump --password 'asd' >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump with password
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump --password='asd' >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
+
+-- gs_dump with password
+\! export GAUSSLOG=@abs_bindir@/audit; @abs_bindir@/gs_dump "postgresql://asdasd" >/dev/null 2>&1
+\! GAUSSLOG=@abs_bindir@/audit; grep -rc "\[FAILURE\].*gs_dump postgresql:\/\/\*\*\*\*\*\*" $GAUSSLOG/bin/gs_dump/audit*
+\! GAUSSLOG=@abs_bindir@/audit; rm -rf $GAUSSLOG
