@@ -643,6 +643,16 @@ static void redo_atomic_xlog(XLogReaderState *record)
 static void redo_seghead_extend(XLogReaderState *record)
 {
     RedoBufferInfo redo_buf;
+    t_thrd.xlog_cxt.inRedoExtendSegment = true;
+    XLogInitBufferForRedo(record, 1, &redo_buf);
+    t_thrd.xlog_cxt.inRedoExtendSegment = false;
+    if (BufferIsValid(redo_buf.buf)) {
+        memset_s(redo_buf.pageinfo.page, BLCKSZ, 0, BLCKSZ);
+        PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
+        MarkBufferDirty(redo_buf.buf);
+        UnlockReleaseBuffer(redo_buf.buf);
+    }
+
     XLogRedoAction redo_action = XLogReadBufferForRedo(record, 0, &redo_buf);
     if (redo_action == BLK_NEEDS_REDO) {
         char *data = XLogRecGetBlockData(record, 0, NULL);
@@ -666,13 +676,6 @@ static void redo_seghead_extend(XLogReaderState *record)
 
     if (SSCheckInitPageXLogSimple(record, 1, &redo_buf) == BLK_DONE) {
         return;
-    }
-    XLogInitBufferForRedo(record, 1, &redo_buf);
-    if (BufferIsValid(redo_buf.buf)) {
-        memset_s(redo_buf.pageinfo.page, BLCKSZ, 0, BLCKSZ);
-        PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
-        MarkBufferDirty(redo_buf.buf);
-        UnlockReleaseBuffer(redo_buf.buf);
     }
 }
 
