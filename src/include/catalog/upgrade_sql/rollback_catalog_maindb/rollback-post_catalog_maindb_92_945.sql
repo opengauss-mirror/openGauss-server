@@ -93,7 +93,7 @@ CREATE FUNCTION pg_catalog.get_instr_unique_sql
     OUT srt14_after_query bigint,
     OUT rtt_unknown bigint
 )
-RETURNS setof record LANGUAGE INTERNAL VOLATILE NOT FENCED as 'get_instr_unique_sql';
+RETURNS setof record LANGUAGE INTERNAL STABLE NOT FENCED as 'get_instr_unique_sql';
 
 CREATE VIEW DBE_PERF.statement AS
   SELECT * FROM get_instr_unique_sql();
@@ -194,7 +194,7 @@ CREATE unlogged table IF NOT EXISTS pg_catalog.statement_history(
     srt14_after_query bigint,
     rtt_unknown bigint,
     parent_query_id bigint
-);
+) WITH (orientation=row, compression=no);
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index pg_catalog.statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
 DROP FUNCTION IF EXISTS dbe_perf.standby_statement_history(boolean);
@@ -330,6 +330,8 @@ CREATE FUNCTION dbe_perf.standby_statement_history(
     OUT lwlock_wait_time bigint,
     OUT details bytea,
     OUT is_slow_sql boolean,
+    OUT trace_id text,
+    OUT advise text,
     OUT net_send_time bigint,
     OUT srt1_q bigint,
     OUT srt2_simple_query bigint,
@@ -448,7 +450,6 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
                 FOR row_name IN EXECUTE(query_str_nodes) LOOP
                     query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || '''';
                     FOR row_data IN EXECUTE(query_str) LOOP
-                    IF row_data.parent_query_id = 0 then
                        node_name := row_name.node_name;
                        db_name := row_data.db_name;
                        schema_name := row_data.schema_name;
@@ -520,10 +521,9 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
                        srt14_after_query := row_data.srt14_after_query;
                        rtt_unknown := row_data.rtt_unknown;
                        return next;
-                    END IF;
+                    END LOOP;
                 END LOOP;
-            END LOOP;
-            return;
+                return;
         END; $$
         LANGUAGE 'plpgsql' NOT FENCED;
 
@@ -615,79 +615,77 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
             FOR row_name IN EXECUTE(query_str_nodes) LOOP
                 query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || ''' and is_slow_sql = true';
                 FOR row_data IN EXECUTE(query_str) LOOP
-                   IF row_data.parent_query_id = 0 THEN
-                       node_name := row_name.node_name;
-                       db_name := row_data.db_name;
-                       schema_name := row_data.schema_name;
-                       origin_node := row_data.origin_node;
-                       user_name := row_data.user_name;
-                       application_name := row_data.application_name;
-                       client_addr := row_data.client_addr;
-                       client_port := row_data.client_port;
-                       unique_query_id := row_data.unique_query_id;
-                       debug_query_id := row_data.debug_query_id;
-                       query := row_data.query;
-                       start_time := row_data.start_time;
-                       finish_time := row_data.finish_time;
-                       slow_sql_threshold := row_data.slow_sql_threshold;
-                       transaction_id := row_data.transaction_id;
-                       thread_id := row_data.thread_id;
-                       session_id := row_data.session_id;
-                       n_soft_parse := row_data.n_soft_parse;
-                       n_hard_parse := row_data.n_hard_parse;
-                       query_plan := row_data.query_plan;
-                       n_returned_rows := row_data.n_returned_rows;
-                       n_tuples_fetched := row_data.n_tuples_fetched;
-                       n_tuples_returned := row_data.n_tuples_returned;
-                       n_tuples_inserted := row_data.n_tuples_inserted;
-                       n_tuples_updated := row_data.n_tuples_updated;
-                       n_tuples_deleted := row_data.n_tuples_deleted;
-                       n_blocks_fetched := row_data.n_blocks_fetched;
-                       n_blocks_hit := row_data.n_blocks_hit;
-                       db_time := row_data.db_time;
-                       cpu_time := row_data.cpu_time;
-                       execution_time := row_data.execution_time;
-                       parse_time := row_data.parse_time;
-                       plan_time := row_data.plan_time;
-                       rewrite_time := row_data.rewrite_time;
-                       pl_execution_time := row_data.pl_execution_time;
-                       pl_compilation_time := row_data.pl_compilation_time;
-                       data_io_time := row_data.data_io_time;
-                       net_send_info := row_data.net_send_info;
-                       net_recv_info := row_data.net_recv_info;
-                       net_stream_send_info := row_data.net_stream_send_info;
-                       net_stream_recv_info := row_data.net_stream_recv_info;
-                       lock_count := row_data.lock_count;
-                       lock_time := row_data.lock_time;
-                       lock_wait_count := row_data.lock_wait_count;
-                       lock_wait_time := row_data.lock_wait_time;
-                       lock_max_count := row_data.lock_max_count;
-                       lwlock_count := row_data.lwlock_count;
-                       lwlock_wait_count := row_data.lwlock_wait_count;
-                       lwlock_time := row_data.lwlock_time;
-                       lwlock_wait_time := row_data.lwlock_wait_time;
-                       details := row_data.details;
-                       is_slow_sql := row_data.is_slow_sql;
-                       trace_id := row_data.trace_id;
-                       advise := row_data.advise;
-                       net_send_time =row_data.net_send_time;
-                       srt1_q := row_data.srt1_q;
-                       srt2_simple_query := row_data.srt2_simple_query;
-                       srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
-                       srt4_plan_query := row_data.srt4_plan_query;
-                       srt5_light_query := row_data.srt5_light_query;
-                       srt6_p := row_data.srt6_p;
-                       srt7_b := row_data.srt7_b;
-                       srt8_e := row_data.srt8_e;
-                       srt9_d := row_data.srt9_d;
-                       srt10_s := row_data.srt10_s;
-                       srt11_c := row_data.srt11_c;
-                       srt12_u := row_data.srt12_u;
-                       srt13_before_query := row_data.srt13_before_query;
-                       srt14_after_query := row_data.srt14_after_query;
-                       rtt_unknown := row_data.rtt_unknown;
-                       return next;
-                    END IF;
+                    node_name := row_name.node_name;
+                    db_name := row_data.db_name;
+                    schema_name := row_data.schema_name;
+                    origin_node := row_data.origin_node;
+                    user_name := row_data.user_name;
+                    application_name := row_data.application_name;
+                    client_addr := row_data.client_addr;
+                    client_port := row_data.client_port;
+                    unique_query_id := row_data.unique_query_id;
+                    debug_query_id := row_data.debug_query_id;
+                    query := row_data.query;
+                    start_time := row_data.start_time;
+                    finish_time := row_data.finish_time;
+                    slow_sql_threshold := row_data.slow_sql_threshold;
+                    transaction_id := row_data.transaction_id;
+                    thread_id := row_data.thread_id;
+                    session_id := row_data.session_id;
+                    n_soft_parse := row_data.n_soft_parse;
+                    n_hard_parse := row_data.n_hard_parse;
+                    query_plan := row_data.query_plan;
+                    n_returned_rows := row_data.n_returned_rows;
+                    n_tuples_fetched := row_data.n_tuples_fetched;
+                    n_tuples_returned := row_data.n_tuples_returned;
+                    n_tuples_inserted := row_data.n_tuples_inserted;
+                    n_tuples_updated := row_data.n_tuples_updated;
+                    n_tuples_deleted := row_data.n_tuples_deleted;
+                    n_blocks_fetched := row_data.n_blocks_fetched;
+                    n_blocks_hit := row_data.n_blocks_hit;
+                    db_time := row_data.db_time;
+                    cpu_time := row_data.cpu_time;
+                    execution_time := row_data.execution_time;
+                    parse_time := row_data.parse_time;
+                    plan_time := row_data.plan_time;
+                    rewrite_time := row_data.rewrite_time;
+                    pl_execution_time := row_data.pl_execution_time;
+                    pl_compilation_time := row_data.pl_compilation_time;
+                    data_io_time := row_data.data_io_time;
+                    net_send_info := row_data.net_send_info;
+                    net_recv_info := row_data.net_recv_info;
+                    net_stream_send_info := row_data.net_stream_send_info;
+                    net_stream_recv_info := row_data.net_stream_recv_info;
+                    lock_count := row_data.lock_count;
+                    lock_time := row_data.lock_time;
+                    lock_wait_count := row_data.lock_wait_count;
+                    lock_wait_time := row_data.lock_wait_time;
+                    lock_max_count := row_data.lock_max_count;
+                    lwlock_count := row_data.lwlock_count;
+                    lwlock_wait_count := row_data.lwlock_wait_count;
+                    lwlock_time := row_data.lwlock_time;
+                    lwlock_wait_time := row_data.lwlock_wait_time;
+                    details := row_data.details;
+                    is_slow_sql := row_data.is_slow_sql;
+                    trace_id := row_data.trace_id;
+                    advise := row_data.advise;
+                    net_send_time =row_data.net_send_time;
+                    srt1_q := row_data.srt1_q;
+                    srt2_simple_query := row_data.srt2_simple_query;
+                    srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
+                    srt4_plan_query := row_data.srt4_plan_query;
+                    srt5_light_query := row_data.srt5_light_query;
+                    srt6_p := row_data.srt6_p;
+                    srt7_b := row_data.srt7_b;
+                    srt8_e := row_data.srt8_e;
+                    srt9_d := row_data.srt9_d;
+                    srt10_s := row_data.srt10_s;
+                    srt11_c := row_data.srt11_c;
+                    srt12_u := row_data.srt12_u;
+                    srt13_before_query := row_data.srt13_before_query;
+                    srt14_after_query := row_data.srt14_after_query;
+                    rtt_unknown := row_data.rtt_unknown;
+                    return next;
                 END LOOP;
             END LOOP;
             return;
