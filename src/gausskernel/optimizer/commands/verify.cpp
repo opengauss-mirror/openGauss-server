@@ -1886,6 +1886,9 @@ static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, VerifyL
     if (!RelationIsUstoreIndex(rel) && !RelationIsUstoreFormat(rel)) {
         return;
     }
+    if (PageIsNew(page) || (RelationIsUstoreIndex(rel) && blkno == 0)) {
+        return;
+    }
     int prevLevel = u_sess->attr.attr_storage.ustore_verify_level;
     u_sess->attr.attr_storage.ustore_verify_level = level;    
     PG_TRY();
