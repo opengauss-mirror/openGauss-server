@@ -292,6 +292,7 @@ typedef struct RelationData {
     /* double linked list node, partition and bucket relation would be stored in fakerels list of resource owner */
     dlist_node node;
 
+    /* only valid if has mlog and used by incremental matview */
     Oid rd_mlogoid;
     /* Is under the context of creating crossbucket index? */
     bool newcbi;

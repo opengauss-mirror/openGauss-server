@@ -73,6 +73,11 @@ extern void insert_matviewdep_tuple(Oid matviewOid, Oid relid, Oid mlogid);
 extern void delete_matviewdep_tuple(Oid matviewOid);
 extern void delete_matdep_table(Oid mlogid);
 
+extern void insert_matview_log_tuple(Oid mlog, Oid relid);
+extern Oid  delete_matview_log_tuple(Oid relid);
+extern void invalidate_matdep_mlog(Oid relid);
+extern void validate_matdep_mlog(Oid mlogid, Oid relid);
+
 extern Datum get_matview_refreshtime(Oid matviewOid, bool *isNUll);
 extern Datum get_matview_mapid(Oid matviewOid);
 extern bool is_incremental_matview(Oid oid);

@@ -1,0 +1,16 @@
+<refentry id="SQL-CREATE_MATERIALIZED_VIEW_LOG">
+<refmeta>
+<refentrytitle>CREATE MATERIALIZED VIEW LOG</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE MATERIALIZED VIEW LOG</refname>
+<refpurpose>define a new materialized view log</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE MATERIALIZED VIEW LOG ON table_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

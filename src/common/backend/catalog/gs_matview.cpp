@@ -23,6 +23,7 @@
 #include "catalog/namespace.h"
 #include "catalog/gs_matview.h"
 #include "catalog/gs_matview_dependency.h"
+#include "catalog/gs_matview_log.h"
 #include "catalog/objectaddress.h"
 #include "catalog/dependency.h"
 #include "commands/matview.h"
@@ -92,9 +93,9 @@ void update_matview_tuple(Oid matviewOid, bool needrefresh, Datum curtime)
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
     securec_check(rc, "\0", "\0");
     rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
     rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-    securec_check_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
 
     /*
      * handle found.
@@ -264,6 +265,8 @@ try_delete_mlog_table(Relation matviewdep, Oid mlogid)
         mlogobject.objectId = mlogid;
         mlogobject.objectSubId = 0;
         performDeletion(&mlogobject, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+
+        delete_matview_log_tuple(relid);
     }
 
     tableam_scan_end(scan);
@@ -336,6 +339,120 @@ void delete_matdep_table(Oid mlogid)
 
     /* Make the changes visible */
     CommandCounterIncrement();
+
+    return;
+}
+
+/*
+ * invalidate mlogids since mlog dropped
+ */
+void invalidate_matdep_mlog(Oid relid)
+{
+    HeapTuple tup;
+    HeapTuple newtuple;
+    TableScanDesc scan;
+    Form_gs_matview_dependency matviewDepForm;
+    Relation relation;
+    errno_t rc = 0;
+
+    /* preapre tuple for update. */
+    Datum values[Natts_gs_matview];
+    bool nulls[Natts_gs_matview];
+    bool replaces[Natts_gs_matview];
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    /*
+     * handle found.
+     */
+    relation = heap_open(MatviewDependencyId, RowExclusiveLock);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    while (tup != NULL) {
+        matviewDepForm = (Form_gs_matview_dependency)GETSTRUCT(tup);
+        if (matviewDepForm->relid == relid) {
+            /* ok found tuple */
+            values[Anum_gs_matview_dep_mlogid - 1] = InvalidOid;
+            nulls[Anum_gs_matview_dep_mlogid - 1] = false;
+            replaces[Anum_gs_matview_dep_mlogid - 1] = true;
+            newtuple = heap_modify_tuple(tup, RelationGetDescr(relation),
+                                values, nulls, replaces);
+
+            simple_heap_update(relation, &newtuple->t_self, newtuple);
+
+            CatalogUpdateIndexes(relation, newtuple);
+        }
+        tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+    }
+
+    /* Make the changes visible */
+    CommandCounterIncrement();
+
+    tableam_scan_end(scan);
+    heap_close(relation, NoLock);
+
+    return;
+}
+
+/*
+ * validate mlogids since mlog created
+ */
+void validate_matdep_mlog(Oid mlogid, Oid relid)
+{
+    HeapTuple tup;
+    HeapTuple newtuple;
+    TableScanDesc scan;
+    Form_gs_matview_dependency matviewDepForm;
+    Relation relation;
+    errno_t rc = 0;
+
+    /* preapre tuple for update. */
+    Datum values[Natts_gs_matview];
+    bool nulls[Natts_gs_matview];
+    bool replaces[Natts_gs_matview];
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    /*
+     * handle found.
+     */
+    relation = heap_open(MatviewDependencyId, RowExclusiveLock);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    while (tup != NULL) {
+        matviewDepForm = (Form_gs_matview_dependency)GETSTRUCT(tup);
+        if (matviewDepForm->relid == relid) {
+            /* ok found tuple */
+            values[Anum_gs_matview_dep_mlogid - 1] = mlogid;
+            nulls[Anum_gs_matview_dep_mlogid - 1] = false;
+            replaces[Anum_gs_matview_dep_mlogid - 1] = true;
+            newtuple = heap_modify_tuple(tup, RelationGetDescr(relation),
+                                values, nulls, replaces);
+
+            simple_heap_update(relation, &newtuple->t_self, newtuple);
+
+            CatalogUpdateIndexes(relation, newtuple);
+        }
+        tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+    }
+
+    /* Make the changes visible */
+    CommandCounterIncrement();
+
+    tableam_scan_end(scan);
+    heap_close(relation, NoLock);
 
     return;
 }
@@ -658,4 +775,78 @@ void acquire_mativew_tables_lock(Query *query, bool incremental)
     }
 
     return;
+}
+
+void insert_matview_log_tuple(Oid mlogid, Oid relid)
+{
+    errno_t rc;
+    Relation matview_log_relation;
+    HeapTuple gs_matview_log_htup;
+    bool gs_matview_log_nulls[Natts_gs_matview_log];
+    Datum gs_matview_log_values[Natts_gs_matview_log];
+
+    matview_log_relation = heap_open(MatviewLogRelationId, RowExclusiveLock);
+
+    rc = memset_s(gs_matview_log_values, sizeof(gs_matview_log_values), 0, sizeof(gs_matview_log_values));
+    securec_check(rc, "\0", "\0");
+    rc =  memset_s(gs_matview_log_nulls, sizeof(gs_matview_log_nulls), false, sizeof(gs_matview_log_nulls));
+    securec_check(rc, "\0", "\0");
+
+    gs_matview_log_values[Anum_gs_matview_log_mlogid - 1] = ObjectIdGetDatum(mlogid);
+    gs_matview_log_values[Anum_gs_matview_relid - 1] = ObjectIdGetDatum(relid);
+
+    gs_matview_log_nulls[Anum_gs_matview_log_mlogid - 1] = false;
+    gs_matview_log_nulls[Anum_gs_matview_relid - 1] = false;
+
+    gs_matview_log_htup = heap_form_tuple(matview_log_relation->rd_att, gs_matview_log_values, gs_matview_log_nulls);
+
+    /* Do the insertion */
+    (void)simple_heap_insert(matview_log_relation, gs_matview_log_htup);
+
+    CatalogUpdateIndexes(matview_log_relation, gs_matview_log_htup);
+
+    /* Make the changes visible */
+    CommandCounterIncrement();
+
+    heap_close(matview_log_relation, NoLock);
+    return;
+}
+
+Oid delete_matview_log_tuple(Oid relid)
+{
+    Oid mlogid = InvalidOid;
+    Relation relation = NULL;
+    TableScanDesc scan;
+    Form_gs_matview_log matviewLogForm;
+    HeapTuple tup = NULL;
+
+    relation = heap_open(MatviewLogRelationId, RowExclusiveLock);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    while (tup != NULL) {
+        matviewLogForm = (Form_gs_matview_log)GETSTRUCT(tup);
+        if (matviewLogForm->relid == relid) {
+            /* ok found tuple */
+            mlogid = matviewLogForm->mlogid;
+            break;
+        }
+        tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+    }
+
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("there is no materialized view log on this table")));
+    }
+
+    simple_heap_delete(relation, &tup->t_self);
+
+    tableam_scan_end(scan);
+    heap_close(relation, NoLock);
+
+    /* Make the changes visible */
+    CommandCounterIncrement();
+
+    return mlogid;
 }

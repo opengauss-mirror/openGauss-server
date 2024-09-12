@@ -80,6 +80,7 @@ static const event_trigger_support_data event_trigger_support[] = {
     {"LANGUAGE", true},
     {"LARGE SEQUENCE", true},
     {"MATERIALIZED VIEW", true},                                                                                                                               
+    {"MATERIALIZED VIEW LOG", true},
     {"OPERATOR", true},
     {"OPERATOR CLASS", true},
     {"OPERATOR FAMILY", true},                                                                                                                                 
