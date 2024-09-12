@@ -6865,6 +6865,10 @@ static XLogSegNo GetOldestXLOGSegNo(const char *workingPath)
     (void)closedir(xlogDir);
 
     if (sscanf_s(oldestXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
+        if (SS_DORADO_STANDBY_CLUSTER) {
+            /* ss standby cluster does not actually need to remove xlog file. */
+            return (XLogSegNo)0;
+        }
         ereport(ERROR, (errcode_for_file_access(), errmsg("failed to translate name to xlog in GetOldestXLOGSegNo.")));
     }
     segno = (uint64)xlogReadLogid * XLogSegmentsPerXLogId + xlogReadLogSeg - 1;
