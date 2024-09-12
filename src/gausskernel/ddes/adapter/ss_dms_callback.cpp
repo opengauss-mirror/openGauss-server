@@ -467,7 +467,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
                 SSWaitStartupExit();
                 return DMS_ERROR;
             }
-            ntries = 0;
         }
 
         CHECK_FOR_INTERRUPTS();
