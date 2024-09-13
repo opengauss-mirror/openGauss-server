@@ -472,6 +472,23 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
     return queue;
 }
 
+static TupleTableSlot* updateTuplePseudoColumnValue(TupleTableSlot* slot, StartWithOpState *node,
+    StartWithOpColumnType type, Datum value)
+{
+    AttrNumber attnum = node->sw_pseudoCols[type]->resno;
+    int attcount = slot->tts_tupleDescriptor->natts;
+    bool nulls[attcount] = {false};
+    Datum values[attcount] = {0};
+    bool replaces[attcount] = {false};
+    HeapTuple oldtup = (HeapTuple)slot->tts_tuple;
+    replaces[attnum - 1] = true;
+    nulls[attnum - 1] = false;
+    values[attnum - 1] = value;
+    HeapTuple newtup = heap_modify_tuple(oldtup, slot->tts_tupleDescriptor, values, nulls, replaces);
+    slot->tts_tuple = newtup;
+    heap_freetuple_ext(oldtup);
+}
+
 /*
  * Construct CONNECT BY result set by depth-first order.
  *
@@ -508,24 +525,27 @@ static bool depth_first_connect(int currentLevel, StartWithOpState *node, List* 
             isCycle = true;
             continue;
         }
+        updateTuplePseudoColumnValue(dstSlot, node, SWCOL_ROWNUM, *dfsRowCount + 1);
+        RecursiveUnionState* runode = castNode(RecursiveUnionState, outerNode);
+        if (currentLevel == 1 || ExecStartWithRowLevelQual(runode, dstSlot)) {
+            tuplestore_puttupleslot(outputStore, dstSlot);
+            (*dfsRowCount)++;
+            int rowCountBefore = *dfsRowCount;
 
-        tuplestore_puttupleslot(outputStore, dstSlot);
-        (*dfsRowCount)++;
-        int rowCountBefore = *dfsRowCount;
+            /* Go into the depth NOW: sibling tuples won't get processed
+            *  until all children are done */
+            node->sw_rownum = rowCountBefore;
+            List* children = peekNextLevel(leader, outerNode, currentLevel);
+            bool expectCycle = depth_first_connect(currentLevel + 1, node,
+                                                   children,
+                                                   dfsRowCount);
+            if (expectCycle) {
+                node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
+            }
 
-        /* Go into the depth NOW: sibling tuples won't get processed
-         *  until all children are done */
-        node->sw_rownum = rowCountBefore;
-        List* children = peekNextLevel(leader, outerNode, currentLevel);
-        bool expectCycle = depth_first_connect(currentLevel + 1, node,
-                                               children,
-                                               dfsRowCount);
-        if (expectCycle) {
-            node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
-        }
-
-        if (!children) {
-            node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
+            if (!children) {
+                node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
+            }
         }
     }
     return isCycle;

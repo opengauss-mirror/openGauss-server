@@ -882,3 +882,14 @@ insert into hier values('China','天津');
 select child, level, lpad(' ', level*3, ' ')||child c1 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c1;
 select child, level, lpad(' ', level*3, ' ')||child c1, level c2 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c2;
 drop table hier;
+
+-- test connect by rownum clause
+drop table if exists t_test_connect_by_rownum;
+create table t_test_connect_by_rownum(id char(1));
+insert into t_test_connect_by_rownum values('a'),('b'),('c');
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 1;
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 2;
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 3;
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 4;
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 5;
+drop table t_test_connect_by_rownum;
