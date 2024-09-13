@@ -182,6 +182,7 @@ extern char *get_inline_schedule_name(Datum job_name);
 extern void drop_single_job_internal(PG_FUNCTION_ARGS);
 extern void ShowEventCommand(ShowEventStmt *stmt, DestReceiver* dest);
 extern TupleDesc GetEventResultDesc();
+extern void expire_backend_job(Datum job_name, bool auto_drop);
 
 #define JOBID_ALLOC_OK         0                /* alloc jobid ok */
 #define JOBID_ALLOC_ERROR      1                /* alloc jobid error */

@@ -1063,18 +1063,28 @@ void execute_job(int4 job_id)
         /* Save error info */
         MemoryContext ecxt = MemoryContextSwitchTo(current_context);
         ErrorData* edata = CopyErrorData();
+        char* autoDrop;
         FlushErrorState();
 
+        if (t_thrd.postgres_cxt.xact_started) {
+            t_thrd.postgres_cxt.xact_started = false;
+        }
         t_thrd.utils_cxt.CurrentResourceOwner = save;
         ResourceOwnerRelease(save, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         /* Update last_end_date and  job_status='f' and failure_count++ */
         update_pg_job_info(job_id, Pgjob_Fail, start_date, new_next_date, edata->message, is_scheduler_job);
         elog_job_detail(job_id, what, Pgjob_Fail, edata->message);
 
+        autoDrop = get_attribute_value_str(job_name, "auto_drop", AccessShareLock);
+        if (0 == pg_strcasecmp(job_interval, "null") && 0 == pg_strcasecmp(autoDrop, "true")) {
+            expire_backend_job(job_name, true);
+        }
+
         (void)MemoryContextSwitchTo(ecxt);
 
         pfree_ext(job_interval);
         pfree_ext(what);
+        pfree_ext(autoDrop);
 
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_FAILED),
@@ -2121,6 +2131,8 @@ static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status,
     Relation relation = NULL;
     Datum values[Natts_pg_job];
     bool nulls[Natts_pg_job];
+    MemoryContext current_context = CurrentMemoryContext;
+    ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
 
     StartTransactionCommand();
     tup = get_job_tup(job_id);
@@ -2158,6 +2170,9 @@ static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status,
     heap_close(relation, AccessShareLock);
 
     CommitTransactionCommand();
+
+    (void)MemoryContextSwitchTo(current_context);
+    t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
 
 /*

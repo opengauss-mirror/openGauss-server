@@ -398,6 +398,14 @@ drop event if exists priv_e_b;
 create event priv_a.priv_e_b on schedule at sysdate disable do select 1;
 drop event if exists priv_e_b;
 
+-- event execute failed and auto_drop is true, shuold drop event
+create event priv_a.failed_and_drop on schedule at now() do insert into t-t-t select 666; -- execute failed, and should drop event
+select pg_sleep(1);
+select count(*) from pg_job where job_name = 'failed_and_drop';
+create event priv_a.failed_and_drop on schedule at now() on completion preserve do insert into t-t-t select 1689; -- execute failed, don't drop
+select pg_sleep(1);
+select count(*) from pg_job where job_name = 'failed_and_drop';
+
 \c event_b
 revoke all on schema priv_b from priv_a;
 

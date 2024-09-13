@@ -973,6 +973,33 @@ drop event if exists priv_e_b;
 NOTICE:  event "priv_e_b" is not exists, skipping
 create event priv_a.priv_e_b on schedule at sysdate disable do select 1;
 drop event if exists priv_e_b;
+-- event execute failed and auto_drop is true, shuold drop event
+create event priv_a.failed_and_drop on schedule at now() do insert into t-t-t select 666; -- execute failed, and should drop event
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select count(*) from pg_job where job_name = 'failed_and_drop';
+ count 
+-------
+     0
+(1 row)
+
+create event priv_a.failed_and_drop on schedule at now() on completion preserve do insert into t-t-t select 1689; -- execute failed, don't drop
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select count(*) from pg_job where job_name = 'failed_and_drop';
+ count 
+-------
+     1
+(1 row)
+
 \c event_b
 revoke all on schema priv_b from priv_a;
 --test ALTER
@@ -1023,10 +1050,9 @@ select pg_sleep(2);
 (1 row)
 
 select job_name, enable, failure_msg from pg_job where job_name = 'ee11';
- job_name | enable |                failure_msg                
-----------+--------+-------------------------------------------
- ee11     | t      | relation "t1" does not exist on datanode1
-(1 row)
+ job_name | enable | failure_msg 
+----------+--------+-------------
+(0 rows)
 
 \c event_b
 grant usage on schema priv_a to priv_c;
