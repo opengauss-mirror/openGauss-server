@@ -1440,47 +1440,7 @@ SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY NOC
  121 | 111 | 江宁区   |      4 |     4
  131 | 121 | 东山街   |      5 |     5
  141 | 131 | 江南摩卡 |      6 |     6
- 142 | 131 | 四季云顶 |      7 |     6
- 143 | 131 | 盛世江南 |      8 |     6
- 144 | 131 | 七里香都 |      9 |     6
- 145 | 131 | 西山枫林 |     10 |     6
- 146 | 131 | 醉墨小镇 |     11 |     6
- 147 | 131 | 布拉格调 |     12 |     6
- 148 | 131 | 清幽别院 |     13 |     6
- 149 | 131 | 璀璨天城 |     14 |     6
- 132 | 121 | 秣陵街   |     15 |     5
- 133 | 121 | 汤山街   |     16 |     5
- 135 | 121 | 禄口街   |     17 |     5
- 134 | 121 | 淳化街   |     18 |     5
- 136 | 121 | 江宁街   |     19 |     5
- 137 | 121 | 谷里街   |     20 |     5
- 138 | 121 | 湖熟街   |     21 |     5
- 139 | 121 | 横溪街   |     22 |     5
- 122 | 111 | 雨花台   |     23 |     4
- 123 | 111 | 鼓楼区   |     24 |     4
- 124 | 111 | 玄武区   |     25 |     4
- 125 | 111 | 建邺区   |     26 |     4
- 126 | 111 | 秦淮区   |     27 |     4
- 127 | 111 | 浦口区   |     28 |     4
- 128 | 111 | 浦口区   |     29 |     4
- 129 | 111 | 六合区   |     30 |     4
- 112 |  11 | 宿迁市   |     31 |     3
- 113 |  11 | 徐州市   |     32 |     3
- 114 |  11 | 苏州市   |     33 |     3
- 115 |  11 | 盐城市   |     34 |     3
- 117 |  11 | 常州市   |     35 |     3
- 116 |  11 | 无锡市   |     36 |     3
- 118 |  11 | 连云港   |     37 |     3
- 119 |  11 | 泰州市   |     38 |     3
-  12 |   1 | 山东省   |     39 |     2
-  13 |   1 | 安徽省   |     40 |     2
-  14 |   1 | 河南省   |     41 |     2
-  15 |   1 | 河北省   |     42 |     2
-  16 |   1 | 湖南省   |     43 |     2
-  17 |   1 | 湖北省   |     44 |     2
-  18 |   1 | 贵州省   |     45 |     2
-  19 |   1 | 武汉省   |     46 |     2
-(46 rows)
+(6 rows)
 
 --test subquery pushdown
 SELECT subq_0.c1 as c0
@@ -2359,3 +2319,54 @@ ERROR:  Not support refer startwith Pseudo column in order siblings by.
 select child, level, lpad(' ', level*3, ' ')||child c1, level c2 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c2;
 ERROR:  Not support refer startwith Pseudo column in order siblings by.
 drop table hier;
+-- test connect by rownum clause
+drop table if exists t_test_connect_by_rownum;
+create table t_test_connect_by_rownum(id char(1));
+insert into t_test_connect_by_rownum values('a'),('b'),('c');
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 1;
+ id | rownum | level 
+----+--------+-------
+ a  |      1 |     1
+ b  |      2 |     1
+ c  |      3 |     1
+(3 rows)
+
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 2;
+ id | rownum | level 
+----+--------+-------
+ a  |      1 |     1
+ b  |      2 |     1
+ c  |      3 |     1
+(3 rows)
+
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 3;
+ id | rownum | level 
+----+--------+-------
+ a  |      1 |     1
+ a  |      2 |     2
+ b  |      3 |     1
+ c  |      4 |     1
+(4 rows)
+
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 4;
+ id | rownum | level 
+----+--------+-------
+ a  |      1 |     1
+ a  |      2 |     2
+ a  |      3 |     3
+ b  |      4 |     1
+ c  |      5 |     1
+(5 rows)
+
+select id, rownum, level from t_test_connect_by_rownum connect by rownum < 5;
+ id | rownum | level 
+----+--------+-------
+ a  |      1 |     1
+ a  |      2 |     2
+ a  |      3 |     3
+ a  |      4 |     4
+ b  |      5 |     1
+ c  |      6 |     1
+(6 rows)
+
+drop table t_test_connect_by_rownum;
