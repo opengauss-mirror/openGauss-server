@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           164
+#define DMS_LOCAL_VERSION           166
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -618,6 +618,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_REQ_CKPT,
     DMS_EVT_PROC_GENERIC_REQ,
     DMS_EVT_PROC_REFORM_REQ,
+    DMS_EVT_DCS_TRANSTER_PAGE_LSNDWAIT,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -899,6 +900,7 @@ typedef void (*dms_log_output)(dms_log_id_t log_type, dms_log_level_t log_level,
     unsigned int code_line_num, const char *module_name, const char *format, ...);
 typedef int (*dms_log_flush)(void *db_handle, unsigned long long *lsn);
 typedef int (*dms_log_conditional_flush)(void *db_handle, unsigned long long lfn, unsigned long long *lsn);
+typedef void (*dms_lsnd_wait)(void *db_handle,  unsigned long long lfn);
 typedef int(*dms_process_edp)(void *db_handle, dms_edp_info_t *pages, unsigned int count);
 typedef void (*dms_clean_ctrl_edp)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
 typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char *pageid);
@@ -978,15 +980,17 @@ typedef void (*dms_set_current_point)(void *db_handle);
 typedef void (*dms_get_db_role)(void *db_handle, unsigned int *role);
 typedef void (*dms_check_lrpl_takeover)(void *db_handle, unsigned int *need_takeover);
 typedef void (*dms_reset_link)(void *db_handle);
-typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list);
+typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
 typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
-typedef int (*dms_standby_stop_thread)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
+typedef int (*dms_standby_stop_thread)(void *db_handle);
 typedef int (*dms_standby_reload_node_ctrl)(void *db_handle);
 typedef int (*dms_standby_stop_server)(void *db_handle);
 typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
+typedef int (*dms_az_switchover_demote_update_node_ctrl)(void *db_handle, unsigned long long online_list);
+typedef int (*dms_az_switchover_demote_change_role)(void *db_handle);
 typedef int (*dms_az_switchover_demote_approve)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase2)(void *db_handle);
 typedef int (*dms_az_switchover_promote_phase1)(void *db_handle);
@@ -1105,6 +1109,7 @@ typedef struct st_dms_callback {
     dms_log_output log_output;
     dms_log_flush log_flush;
     dms_log_conditional_flush log_conditional_flush;
+    dms_lsnd_wait lsnd_wait;
     dms_process_edp ckpt_edp;
     dms_process_edp clean_edp;
     dms_ckpt_session ckpt_session;
@@ -1180,6 +1185,8 @@ typedef struct st_dms_callback {
 
     // for az switchover and az failover
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
+    dms_az_switchover_demote_update_node_ctrl az_switchover_demote_update_node_ctrl;
+    dms_az_switchover_demote_change_role az_switchover_demote_change_role;
     dms_az_switchover_demote_approve az_switchover_demote_approve;
     dms_az_switchover_demote_phase2 az_switchover_demote_phase2;
     dms_az_switchover_promote_phase1 az_switchover_promote_phase1;
@@ -1401,6 +1408,13 @@ typedef struct st_mes_task_priority_stats_info {
     unsigned long long finished_msgitem_num;
     unsigned long long msgitem_free_num;
 } mes_task_priority_stats_info_t;
+
+typedef struct st_mem_info_stat {
+    const char *area;
+    unsigned long long total;
+    unsigned long long used;
+    double used_percentage;
+} mem_info_stat_t;
 
 #ifdef __cplusplus
 }
