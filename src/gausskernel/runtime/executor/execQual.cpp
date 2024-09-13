@@ -1434,7 +1434,7 @@ static Datum ExecEvalParamExtern(ExprState* exprstate, ExprContext* econtext, bo
 
            *isNull = prm->isnull;
             if (prm->tabInfo && prm->tabInfo->isnestedtable && plpgsql_estate) {
-                plpgsql_estate->curr_nested_table_type = prm->ptype;
+                plpgsql_estate->curr_nested_table_type = prm->tabInfo->tableOfIndexType;
                 plpgsql_estate->curr_nested_table_layers = prm->tabInfo->tableOfLayers;
             }
            /* copy cursor option from param to econtext */

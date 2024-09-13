@@ -2213,6 +2213,15 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                         attr->attrname = $1;
 
                         PLpgSQL_type *var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$2])->datatype;
+                        PLpgSQL_var *varray_type = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$2];
+
+                        if (varray_type->nest_table != NULL) {
+                            ereport(errstate,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("nested table of type is not supported as record type attribute"),
+                                parser_errposition(@3)));
+                                u_sess->plsql_cxt.have_error = true;
+                        }
                         PLpgSQL_type *new_var_type = build_array_type_from_elemtype(var_type);
                         new_var_type->collectionType = var_type->collectionType;
                         new_var_type->tableOfIndexType = var_type->tableOfIndexType;
@@ -2241,7 +2250,7 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
 
                         $$ = attr;
                     }
-                        | attr_name table_var decl_notnull decl_rec_defval
+            | attr_name table_var decl_notnull decl_rec_defval
                   {
                         PLpgSQL_rec_attr        *attr = NULL;
 
@@ -8674,6 +8683,11 @@ read_sql_construct6(int until,
     int					loc = 0;
     int					curloc = 0;
     int					brack_cnt = 0;
+    int					nest_layers = 0;
+    int					left_brace_count = 0;
+    int					right_brace_count = 0;
+    bool					stop_count = false;
+    int					stop_tok;
      /* mark if there are 2 table of index by var call functions in an expr */
     int tableof_func_dno = -1;
     int tableof_var_dno = -1;
@@ -8702,6 +8716,14 @@ read_sql_construct6(int until,
     {
         prev_tok = tok;
         tok = yylex();
+        if (tok == '\"' || tok == '\'') {
+            if (stop_count && stop_tok == tok) {
+                stop_count = false;
+            } else {
+                stop_count = true;
+                stop_tok = tok;
+            }
+        }
         tokenstack = push_token_stack(tok, tokenstack);
         loc = yylloc;
         if (startlocation < 0)			/* remember loc of first token */
@@ -8998,6 +9020,8 @@ read_sql_construct6(int until,
                 brack_cnt--;
                 /* fall through */
             case ')':
+                if (!stop_count)
+                    right_brace_count++;
                 if (context.list_right_bracket && context.list_right_bracket->length
                     && linitial_int(context.list_right_bracket) == parenlevel) {
                     /* append bracket instead of parentheses */
@@ -9055,6 +9079,8 @@ read_sql_construct6(int until,
                 brack_cnt++;
                 /* fall through */
             case '(':
+                if (!stop_count)
+                    left_brace_count++;
                 if (context.list_left_bracket && context.list_left_bracket->length
                     && linitial_int(context.list_left_bracket) == parenlevel - 1) {
                     appendStringInfoString(&ds, left_bracket);
@@ -9266,6 +9292,10 @@ read_sql_construct6(int until,
                     yylval = temptokendata->lval;
                     u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = temptokendata->leng;
                 }
+                if (left_brace_count == 0)
+                {
+                    nest_layers = var->nest_layers;
+                }
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
                 break;
             }
@@ -9287,6 +9317,10 @@ read_sql_construct6(int until,
                 }
                 int dno = yylval.wdatum.datum->dno;
                 PLpgSQL_var *var = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                if (left_brace_count == 0)
+                {
+                    nest_layers = var->nest_layers;
+                }
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
                 break;
             }
@@ -9364,7 +9398,9 @@ read_sql_construct6(int until,
         if (IS_ARRAY_STATE(context.list_array_state, ARRAY_COERCE)) {
             /* always append right parentheses at end of each element */
             appendStringInfoString(&ds, right_parentheses);
-            plpgsql_append_object_typename(&ds, (PLpgSQL_type *)linitial(context.list_datatype));
+            if ((left_brace_count - right_brace_count) > nest_layers) {
+                plpgsql_append_object_typename(&ds, (PLpgSQL_type *)linitial(context.list_datatype));
+            }
             SET_ARRAY_STATE(context.list_array_state, ARRAY_SEPERATOR);
         }
     }
