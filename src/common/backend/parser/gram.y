@@ -12098,7 +12098,7 @@ CreateTrigStmt:
 								(errcode(ERRCODE_SYNTAX_ERROR),
 							 	errmsg("or replace is not supported here."), parser_errposition(@2)));
 					}
-					if ($3 != NULL)
+					if ($3 != NULL && !u_sess->attr.attr_common.enable_dump_trigger_definer)
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
@@ -16475,7 +16475,8 @@ view_security_expression: SQL_P SECURITY view_security_option
 
 definer_expression: DEFINER '=' UserId
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
+					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT ||
+						u_sess->attr.attr_common.enable_dump_trigger_definer) {
 						$$ = $3;
 					} else {
 						parser_yyerror("not support DEFINER function");
