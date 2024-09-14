@@ -758,7 +758,6 @@ int gs_thread_create_ex(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, 
     int error_code = 0;
     bool needFree = false;
 
-    pArg = (ThreadArg*)argv;
     if (argv == NULL) {
         /*
          * just special thread which not exit at gaussdb runtime, so the pArg no need to free. for example: signal
@@ -778,6 +777,8 @@ int gs_thread_create_ex(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, 
          */
         pArg->next = (struct ThreadArg*)INVALID_NEXT_ADDR;
         needFree = true;
+    } else {
+        pArg = (ThreadArg*)argv;
     }
 
     pArg->m_taskRoutine = taskRoutine;

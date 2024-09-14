@@ -303,6 +303,11 @@ static void print_top_stack(int fd, uintptr_t sp)
 {
     output(fd, "====== Top of stack ======\nsp = 0x016%lx\n", sp);
 
+    if (sp == 0) {
+        output(fd, "Invalid stack pointer\n");
+        return;
+    }
+    
     uint64 *start = (uint64 *)sp;
     uint64 *end = start + 64;
 
