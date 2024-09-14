@@ -47,6 +47,7 @@
 %type <str> civarind
 %type <str> ColId
 %type <str> ColLabel
+%type <str> ColLabel_with_rownum
 %type <str> connect_options
 %type <str> connection_object
 %type <str> connection_target
