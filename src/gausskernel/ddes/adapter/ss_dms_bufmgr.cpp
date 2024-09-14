@@ -553,6 +553,9 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         return false;
     } else if (SS_STANDBY_ONDEMAND_NORMAL || SS_PRIMARY_MODE) {
         return true;
+    // retry after reform finish
+    } else if (SS_IN_REFORM) {
+        return false;
     }
 
     ereport(DEBUG1,

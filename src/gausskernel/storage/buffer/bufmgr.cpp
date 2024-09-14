@@ -6373,11 +6373,11 @@ retry:
              * hold the content shared lock all the time, give the MES from the primary a chance to get it,
              * and the timeout time of the primary and standby servers is modified to open the unlocking
              * time window.
-	     */
+            */
             if (!dms_standby_retry_read && SS_STANDBY_MODE) {
-	        dms_standby_retry_read = true;
-		mode = BUFFER_LOCK_EXCLUSIVE;
-	    }
+                dms_standby_retry_read = true;
+                mode = BUFFER_LOCK_EXCLUSIVE;
+            }
             pg_usleep(5000L);
             goto retry;
         } else if (dms_standby_retry_read) {
@@ -6387,11 +6387,11 @@ retry:
              *
              * A good idea would be to add the ability to lock downgrade for LWLock.
              */
-	    mode = origin_mode;
-	    dms_standby_retry_read = false;
-	    LWLockRelease(buf->content_lock);
-	    goto retry;
-	}
+            mode = origin_mode;
+            dms_standby_retry_read = false;
+            LWLockRelease(buf->content_lock);
+            goto retry;
+        }
     }
 
 }
