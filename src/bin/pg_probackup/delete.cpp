@@ -40,10 +40,12 @@ do_delete(time_t backup_id)
     pgBackup   *target_backup = NULL;
     size_t  size_to_delete = 0;
     char    size_to_delete_pretty[20];
-    Oss::Oss* oss = getOssClient();
+    Oss::Oss* oss = nullptr;
     char* bucket_name = NULL;
 
-
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        oss = getOssClient();
+    }
     /* Get complete list of backups */
     backup_list = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
 
@@ -1112,9 +1114,12 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
     size_t      size_to_delete = 0;
     char        size_to_delete_pretty[20];
     pgBackup   *backup;
-    Oss::Oss* oss = getOssClient();
+    Oss::Oss* oss = nullptr;
     char* bucket_name = NULL;
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        oss = getOssClient();
+    }
     BackupStatus status_for_delete = str2status(status);
     delete_list = parray_new();
 
