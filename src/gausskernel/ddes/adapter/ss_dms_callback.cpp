@@ -2171,6 +2171,16 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
         return GS_SUCCESS;;
     }
 
+    if (SS_IN_REFORM) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Reform happend when primary redo page for standby,"
+            "return ONDEMAND_REDO_FAIL.",
+            tag->rnode.spcNode, tag->rnode.dbNode,
+            tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+        *redo_status = ONDEMAND_REDO_FAIL;
+        return GS_SUCCESS;
+    }
+
     Buffer buffer = InvalidBuffer;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     *redo_status = ONDEMAND_REDO_DONE;
