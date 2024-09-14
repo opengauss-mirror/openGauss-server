@@ -5240,6 +5240,11 @@ XLogSegNo XLogGetLastRemovedSegno(void)
 
 static void remove_xlogtemp_files(void)
 {
+    if (SS_DORADO_STANDBY_CLUSTER) {
+        /* in ss dorado standby cluster, we dont init or remove xlog files */
+        ereport(LOG, (errmsg("ss dorado standby cluster skip remove xlogtemp")));
+        return;
+    }
     DIR *dir = NULL;
     char fullpath[MAXPGPATH] = {0};
     struct dirent *de = NULL;
