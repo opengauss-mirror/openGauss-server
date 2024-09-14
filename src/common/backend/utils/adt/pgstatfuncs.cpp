@@ -8707,6 +8707,9 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupledesc, (AttrNumber)10, "isvalid", BOOLOID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)11, "usage_count", INT2OID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)12, "pinning_backends", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)13, "segfileno", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)14, "segblockno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)15, "aio_in_process", BOOLOID, -1, 0);
 
         fctx->tupdesc = BlessTupleDesc(tupledesc);
 
@@ -8753,6 +8756,8 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
             fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
+            fctx->record[i].segfileno = bufHdr->extra->seg_fileno;
+            fctx->record[i].segblockno = bufHdr->extra->seg_blockno;
 
             if (buf_state & BM_DIRTY)
                 fctx->record[i].isdirty = true;
@@ -8764,6 +8769,12 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
                 fctx->record[i].isvalid = true;
             else
                 fctx->record[i].isvalid = false;
+
+            if (bufHdr->extra->aio_in_progress) {
+                fctx->record[i].aio_in_process = true;
+            } else {
+                fctx->record[i].aio_in_process = false;
+            }
 
             UnlockBufHdr(bufHdr, buf_state);
         }
@@ -8809,6 +8820,9 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[9] = false;
             nulls[10] = true;
             nulls[11] = true;
+            nulls[12] = true;
+            nulls[13] = true;
+            nulls[14] = true;
         } else {
             values[1] = ObjectIdGetDatum(fctx->record[i].relfilenode);
             nulls[1] = false;
@@ -8832,6 +8846,12 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[10] = false;
             values[11] = Int32GetDatum(fctx->record[i].pinning_backends);
             nulls[11] = false;
+            values[12] = Int32GetDatum(fctx->record[i].segfileno);
+            nulls[12] = false;
+            values[13] = ObjectIdGetDatum((int64)fctx->record[i].segblockno);
+            nulls[13] = false;
+            values[14] = BoolGetDatum(fctx->record[i].aio_in_process);
+            nulls[14] = false;
         }
 
         /* Build and return the tuple. */

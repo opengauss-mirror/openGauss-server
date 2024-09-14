@@ -642,6 +642,13 @@ static uint32 ckpt_qsort_dirty_page_for_flush(bool *is_new_relfilenode, uint32 f
             item->bucketNode = buf_desc->tag.rnode.bucketNode;
             item->forkNum = buf_desc->tag.forkNum;
             item->blockNum = buf_desc->tag.blockNum;
+            if (IsSegmentBufferID(buffer - 1)) {
+                item->seg_fileno = 1;
+                item->seg_blockno = buf_desc->tag.blockNum;
+            } else {
+                item->seg_fileno = buf_desc->extra->seg_fileno;
+                item->seg_blockno = buf_desc->extra->seg_blockno;
+            }
             if(IsSegmentFileNode(buf_desc->tag.rnode) || buf_desc->tag.rnode.opt != 0) {
                 *is_new_relfilenode = true;
             }
@@ -1644,70 +1651,102 @@ void crps_destory_ctxs()
     }
 }
 
-static void incre_ckpt_aio_callback(struct io_event *event)
+static int AioAsyncCompare(const void *a1, const void *a2)
 {
-    PgwrAioExtraData *tempAioExtra = (PgwrAioExtraData *)(event->data);
-    BufferDesc *buf_desc = (BufferDesc *)(tempAioExtra->aio_bufdesc);
-    uint32 written_size = event->obj->u.c.nbytes;
-    if (written_size != event->res) {
-        ereport(WARNING, (errmsg("aio write failed (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", -(int32)(event->res),
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-        _exit(0);
+    const PgwrAioExtraData *arg1 = (PgwrAioExtraData *)(((const io_event *)a1)->data);
+    const PgwrAioExtraData *arg2 = (PgwrAioExtraData *)(((const io_event *)a2)->data);
+
+    off_t roffset1 = 0;
+    off_t roffset2 = 0;
+    if (arg1->aio_fd == arg2->aio_fd) {
+        BufferDesc *buf_desc1 = (BufferDesc *)(arg1->aio_bufdesc);
+        BufferDesc *buf_desc2 = (BufferDesc *)(arg2->aio_bufdesc);
+
+        if (IsSegmentBufferID(buf_desc1->buf_id)) {
+            roffset1 = ((buf_desc1->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
+        } else {
+            roffset1 = ((buf_desc1->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+        }
+
+        if (IsSegmentBufferID(buf_desc2->buf_id)) {
+            roffset2 = ((buf_desc2->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
+        } else {
+            roffset2 = ((buf_desc2->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+        }
+
+        return roffset1 - roffset2;
     }
 
-    off_t roffset = 0;
-    if (IsSegmentBufferID(buf_desc->buf_id)) {
-        roffset = ((buf_desc->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
-    } else {
-        roffset = ((buf_desc->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+    return arg1->aio_fd - arg2->aio_fd;
+}
+
+static void reset_buffer_aio_inprocess(struct io_event event[], int left, int right)
+{
+    for (int i = left; i < right; i++) {
+        PgwrAioExtraData *tempAioExtra = (PgwrAioExtraData *)(event[i].data);
+        BufferDesc *buf_desc = (BufferDesc *)(tempAioExtra->aio_bufdesc);
+        buf_desc->extra->aio_in_progress = false;
+    }
+}
+
+static void incre_ckpt_aio_callback(struct io_event event[], int num)
+{
+    qsort(event, num, sizeof(io_event), AioAsyncCompare);
+    int cur_fd = -1;
+    off_t cur_off = 0;
+    int cur_writesize = 0;
+    int left = 0;
+
+    for (int i = 0; i < num; i++) {
+        PgwrAioExtraData *tempAioExtra = (PgwrAioExtraData *)(event[i].data);
+        BufferDesc *buf_desc = (BufferDesc *)(tempAioExtra->aio_bufdesc);
+        if (event->obj->u.c.nbytes != event->res) {
+            ereport(WARNING, (errmsg("aio write failed errno = %d, buffer:%d/%d/%d/%d/%d %d-%d", -(int32)(event->res),
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+            _exit(0);
+        }
+
+        off_t temp_off = 0;
+        if (IsSegmentBufferID(buf_desc->buf_id)) {
+            temp_off = ((buf_desc->tag.blockNum) % RELSEG_SIZE) * BLCKSZ;
+        } else {
+            temp_off = ((buf_desc->extra->seg_blockno) % RELSEG_SIZE) * BLCKSZ;
+        }
+
+        if (cur_fd == -1) {
+            cur_fd = tempAioExtra->aio_fd;
+            cur_off = temp_off;
+            cur_writesize = event[i].obj->u.c.nbytes;
+            left = i;
+            continue;
+        } else if (cur_fd == tempAioExtra->aio_fd && temp_off == (cur_off + event[i].obj->u.c.nbytes)) {
+            cur_writesize += event[i].obj->u.c.nbytes;
+            continue;
+        }
+
+        int aioRet = dss_aio_post_pwrite(event->obj->data, cur_fd, cur_writesize, cur_off);
+        if (aioRet != 0) {
+            ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", errno,
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+        }
+        cur_fd = tempAioExtra->aio_fd;
+        reset_buffer_aio_inprocess(event, left, i);
+        cur_off = temp_off;
+        cur_writesize = event[i].obj->u.c.nbytes;
+        left = i;
     }
 
-    int aioRet = dss_aio_post_pwrite(event->obj->data, tempAioExtra->aio_fd, event->obj->u.c.nbytes, roffset);
-    if (aioRet != 0) {
-        ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", errno,
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+    if (cur_fd != -1) {
+        int aioRet = dss_aio_post_pwrite(event->obj->data, cur_fd, cur_writesize, cur_off);
+        if (aioRet != 0) {
+            ereport(PANIC, (errmsg("failed to post write by asnyc io (errno = %d)", errno)));
+        }
+        reset_buffer_aio_inprocess(event, left, num);
     }
-
-    buf_desc->extra->aio_in_progress = false;
-
-#ifdef USE_ASSERT_CHECKING
-    char *write_buf = (char *)(event->obj->u.c.buf);
-    char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
-    char *read_buf = (char *)BUFFERALIGN(origin_buf);
-    if (IsSegmentBufferID(buf_desc->buf_id)) {
-        SegSpace *spc = spc_open(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, false);
-        seg_physical_read(spc, buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, read_buf);
-    } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
-        (void)SmgrNetPageCheckRead(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
-                                            buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
-                                            buf_desc->extra->seg_blockno, (char *)read_buf);
-    }
-    if (XLByteEQ(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
-        Assert(memcmp(write_buf, read_buf, BLCKSZ) == 0);   
-    } else if (!PageIsNew(read_buf) && XLByteLT(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
-        ereport(PANIC, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d]aio write error", 
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum))); 
-    } else {
-        /* PageGetLSN(read_buf) > PageGetLSN(write_buf). Here main work is to check what write_buf has wrote by aio,
-         * therefore, the lsn of read_buf read from disk must be more than or equal to the lsn of write_buf wrote by 
-         * aio. So when PageGetLSN(read_buf) > PageGetLSN(write_buf), what should happend is aio write concurrence.
-         */
-        ereport(LOG, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d]aio write concurrence", 
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
-            buf_desc->tag.forkNum, buf_desc->tag.blockNum))); 
-    }
-      
-    pfree(origin_buf);
-#endif
-
-    UnpinBuffer(buf_desc, true);
 }
 
 void ckpt_pagewriter_main(void)
@@ -2469,6 +2508,13 @@ PUSH_DIRTY:
         item->bucketNode = buf_desc->tag.rnode.bucketNode;
         item->forkNum = buf_desc->tag.forkNum;
         item->blockNum = buf_desc->tag.blockNum;
+        if (IsSegmentBufferID(buf_id)) {
+            item->seg_fileno = 1;
+            item->seg_blockno = buf_desc->tag.blockNum;
+        } else {
+            item->seg_fileno = buf_desc->extra->seg_fileno;
+            item->seg_blockno = buf_desc->extra->seg_blockno;
+        }
         if (IsSegmentFileNode(buf_desc->tag.rnode) || IS_COMPRESSED_RNODE(buf_desc->tag.rnode, buf_desc->tag.forkNum)) {
             *contain_hashbucket = true;
         }
