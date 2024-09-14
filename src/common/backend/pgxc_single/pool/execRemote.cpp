@@ -1308,7 +1308,18 @@ void spq_adps_coordinator_thread_main()
             pthread_cond_wait(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv, &t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
             pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
         } else {
-            spq_adps_consumer();
+	    PG_TRY();
+	    {
+	        spq_adps_consumer();
+	    }
+	    PG_CATCH();
+	    {
+	        pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+		spq_finishQcThread();
+		t_thrd.spq_ctx.qc_ctx->is_exited = true;
+		PG_RE_THROW();
+	    }
+	    PG_END_TRY();
             pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
         }
     }
