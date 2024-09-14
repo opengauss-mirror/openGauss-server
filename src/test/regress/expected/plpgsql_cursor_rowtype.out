@@ -65,6 +65,65 @@ END;
 NOTICE:  Result: (,,,,,)
 drop table test_2 cascade;
 set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
+create table t_CurRowtype_Def_Case0001(col1 int primary key,col2 varchar(100));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_currowtype_def_case0001_pkey" for table "t_currowtype_def_case0001"
+insert into t_CurRowtype_Def_Case0001 values(1,'one');
+insert into t_CurRowtype_Def_Case0001 values(2,'two');
+insert into t_CurRowtype_Def_Case0001 values(3,'three');
+insert into t_CurRowtype_Def_Case0001 values(4,NULL);
+--创建游标rowtype，select 伪列;expect:成功,输出4行
+declare
+   cursor cur_CurRowtype_Def_Case0001_1 is select col1,col2,rownum from t_CurRowtype_Def_Case0001;
+   source cur_CurRowtype_Def_Case0001_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0001_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0001_1 into source;
+   exit when cur_CurRowtype_Def_Case0001_1%notfound;
+      raise notice '% , % ,% ',source.col1,source.col2,source.rownum;  
+   end loop;
+   close cur_CurRowtype_Def_Case0001_1; 
+end;
+/
+NOTICE:  1 , one ,1 
+NOTICE:  2 , two ,2 
+NOTICE:  3 , three ,3 
+NOTICE:  4 , <NULL> ,4 
+drop table t_CurRowtype_Def_Case0001;
+create table t_CurRowtype_Def_Case0002(col1 int primary key,rownum varchar(100));
+ERROR:  syntax error at or near "rownum"
+LINE 1: ...le t_CurRowtype_Def_Case0002(col1 int primary key,rownum var...
+                                                             ^
+create table t_CurRowtype_Def_Case0002(col1 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_currowtype_def_case0002_pkey" for table "t_currowtype_def_case0002"
+insert into t_CurRowtype_Def_Case0002 values(1);
+select t_CurRowtype_Def_Case0002.rownum from t_CurRowtype_Def_Case0002;
+ERROR:  column t_currowtype_def_case0002.rownum does not exist
+LINE 1: select t_CurRowtype_Def_Case0002.rownum from t_CurRowtype_De...
+               ^
+CONTEXT:  referenced column: rownum
+select rownum from t_CurRowtype_Def_Case0002;
+ rownum 
+--------
+      1
+(1 row)
+
+drop table t_CurRowtype_Def_Case0002;
+CREATE TYPE type_record AS (
+	first text,
+	rownum int4
+) ;
+ERROR:  syntax error at or near "rownum"
+LINE 3:  rownum int4
+         ^
+DECLARE 
+    type rectype is record(rownum int,row2 text);
+    source rectype := (2, 'dsaw');
+BEGIN
+    raise notice '% , %',source.row2,source.rownum;
+END;
+/
+NOTICE:  dsaw , 2
 -- Prohibit virtual column insertion
 create table t1(col1 varchar(10),col varchar(10));
 create table t2(col1 varchar(10),col varchar(10));
