@@ -402,6 +402,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->LocalXLogInsertAllowed = -1;
     xlog_cxt->ArchiveRecoveryRequested = false;
     xlog_cxt->InArchiveRecovery = false;
+    xlog_cxt->inRedoExtendSegment = false;
     xlog_cxt->ArchiveRestoreRequested = false;
     xlog_cxt->restoredFromArchive = false;
     xlog_cxt->recoveryRestoreCommand = NULL;

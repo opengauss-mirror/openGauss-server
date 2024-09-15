@@ -516,6 +516,7 @@ typedef struct knl_t_xlog_context {
      */
     bool ArchiveRecoveryRequested;
     bool InArchiveRecovery;
+    bool inRedoExtendSegment;
     bool ArchiveRestoreRequested;
 
     /* Was the last xlog file restored from archive, or local? */
