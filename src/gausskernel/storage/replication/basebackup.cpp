@@ -1724,10 +1724,10 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             /*
              * skip sending directories inside pg_tblspc, if not required.
              */
-            if (strcmp(pathbuf, "./pg_tblspc") == 0 || 
-                (ENABLE_DSS && strcmp(pathbuf, dssdir) == 0 && 
-                strstr(pathbuf + strlen(dssdir), "/pg_tblspc") != NULL && 
-                !sendtblspclinks)) {
+            if (!sendtblspclinks &&
+                ((ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 &&
+                strstr(pathbuf + strlen(dssdir), "/pg_tblspc") != NULL) ||
+                strcmp(pathbuf, "./pg_tblspc") == 0)) {
                 skip_this_dir = true;
             }
             if (!skip_this_dir)
