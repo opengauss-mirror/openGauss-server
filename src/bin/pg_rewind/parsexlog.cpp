@@ -732,9 +732,10 @@ bool CheckIfEanbedSaveSlots()
         securec_check_c(ret, "", "");
         if ((strcmp(optvalue, "1") == 0) || (strcmp(optvalue, "true") == 0) || (strcmp(optvalue, "on") == 0)) {
             pg_log(PG_PROGRESS, _("Enable saving confirmed_lsn in target %s\n"), config_file);
+            freefile(optlines);
             return true;
         }
     }
-
+    freefile(optlines);
     return false;
 }

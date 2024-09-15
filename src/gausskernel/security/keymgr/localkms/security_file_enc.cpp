@@ -146,6 +146,7 @@ static CmkemErrCode create_file_and_write(const char *real_path, const unsigned 
     int fd = 0;
     char head[KEY_FILE_HEADER_LEN] = {0};
     errno_t rc = 0;
+    ssize_t written = 0;
 
     fd = open(real_path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd == -1) {
@@ -156,12 +157,22 @@ static CmkemErrCode create_file_and_write(const char *real_path, const unsigned 
     if (is_write_header) {
         rc = sprintf_s(head, sizeof(head), "%lu", content_len);
         securec_check_ss_c(rc, "", "");
-        write(fd, head, sizeof(head));
+        written = write(fd, head, sizeof(head));
+        if (written != sizeof(head)) {
+            cmkem_errmsg("failed to write header to file '%s'.\n", real_path);
+            (void)close(fd);
+            return CMKEM_WRITE_FILE_ERR;
+        }
     }
     
-    write(fd, content, content_len);
-    close(fd);
+    written = write(fd, content, content_len);
+    if (written != content_len) {
+        cmkem_errmsg("failed to write content to file '%s'.\n", real_path);
+        (void)close(fd);
+        return CMKEM_WRITE_FILE_ERR;
+    }
 
+    (void)close(fd);
     return CMKEM_SUCCEED;
 }
 
