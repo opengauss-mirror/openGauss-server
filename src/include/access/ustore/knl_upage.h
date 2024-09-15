@@ -146,14 +146,7 @@
  * ItemIdChangeLen
  * Change the length of itemid.
  */
-#define RowPtrChangeLen(_rowptr, _length)                                                                             \
-    do {                                                                                                              \
-        if (RowPtrGetOffset(_rowptr) + _length > BLCKSZ) {                                                            \
-            elog(PANIC, "row pointer error, offset:%u, flags:%u, len:%u", RowPtrGetOffset(_rowptr), (_rowptr)->flags, \
-                 (_length));                                                                                          \
-        }                                                                                                             \
-        (_rowptr)->len = (_length);                                                                                   \
-    } while (0)
+#define RowPtrChangeLen(_rowptr, _length) ((_rowptr)->len = (_length))
 
 /*
  * RowPtrIsDead
