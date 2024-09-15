@@ -448,6 +448,11 @@ int GsUwalInit(ServerMode serverMode)
         }
     }
 
+    if ((volatile bool)u_sess->attr.attr_storage.guc_most_available_sync) {
+        ereport(ERROR, (errmsg("uwal only support most_available_sync is 'off'")));
+        return ret;
+    }
+
     if (GsUwalLoadSymbols() != 0) {
         ereport(ERROR, (errmsg("failed to dlopen libuwal.so")));
         return ret;

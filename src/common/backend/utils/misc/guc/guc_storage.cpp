@@ -214,6 +214,8 @@ static bool check_and_assign_namespace_oids(List* elemlist);
 static bool check_and_assign_general_oids(List* elemlist);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
+static bool check_most_available_sync_param(bool* newval, void** extra, GucSource source);
+
 static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source);
 static bool check_ss_ock_log_path(char **newval, void **extra, GucSource source);
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source);
@@ -811,7 +813,7 @@ static void InitStorageConfigureNamesBool()
             },
             &u_sess->attr.attr_storage.guc_most_available_sync,
             false,
-            NULL,
+            check_most_available_sync_param,
             NULL,
             NULL},
         {{"enable_show_any_tuples",
@@ -6566,6 +6568,18 @@ static int GetLengthAndCheckReplConn(const char* ConnInfoList)
 
     pfree(ReplStr);
     return repl_len;
+}
+
+static bool check_most_available_sync_param(bool* newval, void** extra, GucSource source)
+{
+    if (source == PGC_S_DEFAULT) {
+        return true;
+    }
+    if (*newval && g_instance.attr.attr_storage.enable_uwal) {
+        ereport(ERROR, (errmsg("Do not allow both enable uwal and most_available_sync")));
+        return false;
+    }
+    return true;
 }
 
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source)
