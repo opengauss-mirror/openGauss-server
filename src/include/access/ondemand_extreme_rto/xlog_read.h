@@ -32,7 +32,7 @@ namespace ondemand_extreme_rto {
 XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 XLogRecord *ReadNextXLogRecord(XLogReaderState **xlogreaderptr, int emode);
 XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg, char* xlogPath);
-
+bool ondemand_allocate_recordbuf(XLogReaderState *state, uint32 reclength);
 }  // namespace ondemand_extreme_rto
 
 typedef struct XLogFileId {

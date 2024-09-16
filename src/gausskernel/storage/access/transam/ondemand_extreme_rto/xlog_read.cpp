@@ -394,6 +394,38 @@ err:
     return -1;
 }
 
+/*
+ * copy from allocate_recordbuf
+ *
+ * In ondemand realtime build, we need save readRecordBuf for segQueue and
+ * trxnQueue, so we allocate smaller (512) for save memory.
+ */
+bool ondemand_allocate_recordbuf(XLogReaderState *state, uint32 reclength)
+{
+    uint32 newSize = reclength;
+    const uint32 recordBufferAllocStep = 512;
+
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        newSize += recordBufferAllocStep - (newSize % recordBufferAllocStep);
+    } else {
+        newSize += XLOG_BLCKSZ - (newSize % XLOG_BLCKSZ);
+    }
+    newSize = Max(newSize, recordBufferAllocStep);
+
+    if (state->readRecordBuf != NULL) {
+        pfree(state->readRecordBuf);
+        state->readRecordBuf = NULL;
+    }
+    state->readRecordBuf = (char *)palloc_extended(newSize, MCXT_ALLOC_NO_OOM);
+    if (state->readRecordBuf == NULL) {
+        state->readRecordBufSize = 0;
+        return false;
+    }
+
+    state->readRecordBufSize = newSize;
+    return true;
+}
+
 XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg, char* xlogPath)
 {
     XLogRecord *record = NULL;
@@ -521,7 +553,7 @@ XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char *
     /*
      * Enlarge readRecordBuf as needed.
      */
-    if (total_len > state->readRecordBufSize && !allocate_recordbuf(state, total_len)) {
+    if (total_len > state->readRecordBufSize && !ondemand_allocate_recordbuf(state, total_len)) {
         /* We treat this as a "bogus data" condition */
         report_invalid_record(state, "record length %u at %X/%X too long", total_len, (uint32)(RecPtr >> 32),
                               (uint32)RecPtr);

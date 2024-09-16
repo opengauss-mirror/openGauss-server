@@ -1775,7 +1775,11 @@ static void TrxnManagerPruneAndDistributeIfRealtimeBuildFailover()
 
 static void TrxnManagerPruneIfQueueFullInRealtimeBuild()
 {
-    while (SS_ONDEMAND_RECOVERY_TRXN_QUEUE_FULL && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+    /*
+     * we used OndemandTrxnQueueFullInRealtimeBuild instead of SS_ONDEMAND_RECOVERY_TRXN_QUEUE_FULL, because
+     * OndemandCtrlWorker may not get pause status immediately
+     */
+    while (OndemandTrxnQueueFullInRealtimeBuild() && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         TrxnManagerProcHashMapPrune();
         RedoInterruptCallBack();
     }
@@ -1842,7 +1846,6 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
         TestXLogReaderProbe(UTEST_EVENT_RTO_TRXNMGR_DISTRIBUTE_ITEMS,
             __FUNCTION__, &item->record);
 #endif
-        TrxnManagerPruneIfQueueFullInRealtimeBuild();
         TrxnManagerAddTrxnRecord(item, syncRecord);
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_5]);
     }
@@ -1898,6 +1901,7 @@ void TrxnManagerMain()
             }
         }
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
+        TrxnManagerPruneIfQueueFullInRealtimeBuild();
         TrxnManagerPruneAndDistributeIfRealtimeBuildFailover();
         if (!SPSCBlockingQueueIsEmpty(g_redoWorker->queue)) {
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
