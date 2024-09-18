@@ -1358,7 +1358,8 @@ void ProcReleaseLocks(bool isCommit)
     /* Release standard locks, including session-level if aborting */
     LockReleaseAll(DEFAULT_LOCKMETHOD, !isCommit);
     /* check fastpaht bit num after release all locks */
-    Check_FastpathBit();
+    if (!u_sess->hook_cxt.forTsdbHook || !DB_IS_CMPT(PG_FORMAT))
+        Check_FastpathBit();
     /* Release transaction-level advisory locks */
     LockReleaseAll(USER_LOCKMETHOD, false);
 }
