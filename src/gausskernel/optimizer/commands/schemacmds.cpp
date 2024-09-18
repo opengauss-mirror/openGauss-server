@@ -389,6 +389,7 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
     AclResult aclresult;
     const int STR_SCHEMA_NAME_LENGTH = 9;
     const int STR_SNAPSHOT_LENGTH = 8;
+    ObjectAddress address;
 
     if (withBlockchain && ((strncmp(nspName, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
         (strncmp(nspName, "snapshot", STR_SNAPSHOT_LENGTH) == 0))) {
@@ -423,6 +424,9 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
             (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("The system schema \"%s\" doesn't allow to alter to blockchain schema", nspName)));
 
+    ObjectAddressSet(address, NamespaceNameIndexId, HeapTupleGetOid(tup));
+    EventTriggerCollectSimpleCommand(address, InvalidObjectAddress, (Node*)stmt);
+    
     Datum new_record[Natts_pg_namespace] = {0};
     bool new_record_nulls[Natts_pg_namespace] = {false};
     bool new_record_repl[Natts_pg_namespace] = {false};
