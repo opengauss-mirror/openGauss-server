@@ -565,10 +565,6 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("The insert tuple is NULL")));
     }
     Assert(utuple->tupTableType == UHEAP_TUPLE);
-    
-    if (t_thrd.ustore_cxt.urecvec) {
-        t_thrd.ustore_cxt.urecvec->Reset(false);
-    }
 
     TransactionId fxid = GetTopTransactionId();
 
@@ -2024,10 +2020,6 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
     int retryTimes = 0;
 
     Assert(ItemPointerIsValid(tid));
-
-    if (t_thrd.ustore_cxt.urecvec) {
-        t_thrd.ustore_cxt.urecvec->Reset(false);
-    }
     
     BlockNumber blkno = ItemPointerGetBlockNumber(tid);
     Page page = GetPageBuffer(relation, blkno, buffer);
@@ -2463,10 +2455,6 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
 
     Assert(newtup->tupTableType == UHEAP_TUPLE);
     Assert(ItemPointerIsValid(otid));
-
-    if (t_thrd.ustore_cxt.urecvec) {
-        t_thrd.ustore_cxt.urecvec->Reset(false);
-    }
 
     /*
      * Fetch the list of attributes to be checked for various operations.
@@ -4396,7 +4384,6 @@ CommandId UHeapTupleGetCid(UHeapTuple utuple, Buffer buffer)
     }
 
     Assert(IS_VALID_UNDO_REC_PTR(tdinfo.urec_add));
-    VerifyMemoryContext();
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->Reset(tdinfo.urec_add);
     urec->SetMemoryContext(CurrentMemoryContext);
@@ -4468,6 +4455,7 @@ void UHeapResetPreparedUndo()
     } else {
         for (int i = 0; i < t_thrd.ustore_cxt.undo_buffer_idx; i++) {
             if (BufferIsValid(t_thrd.ustore_cxt.undo_buffers[i].buf)) {
+#ifdef USE_ASSERT_CHECKING
                 BufferDesc *bufdesc = GetBufferDescriptor(t_thrd.ustore_cxt.undo_buffers[i].buf - 1);
                 if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufdesc), LW_EXCLUSIVE)) {
                     LWLock *lock = BufferDescriptorGetContentLock(bufdesc);
@@ -4478,6 +4466,7 @@ void UHeapResetPreparedUndo()
                         BufferGetBlockNumber(t_thrd.ustore_cxt.undo_buffers[i].buf),
                         t_thrd.ustore_cxt.undo_buffers[i].buf, lock->state)));
                 }
+#endif
                 t_thrd.ustore_cxt.undo_buffers[i].inUse = false;
                 t_thrd.ustore_cxt.undo_buffers[i].zero = false;
             }
