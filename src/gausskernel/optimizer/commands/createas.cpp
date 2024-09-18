@@ -327,7 +327,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     create->inhRelations = NIL;
     create->ofTypename = NULL;
     create->constraints = NIL;
-    create->options = into->options;
+    create->options = (List*)copyObject(into->options);
     create->oncommit = into->onCommit;
     create->row_compress = into->row_compress;
     create->tablespacename = into->tableSpaceName;
