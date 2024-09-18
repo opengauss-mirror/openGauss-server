@@ -25,6 +25,7 @@
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
 
+#include <vector>
 #include "postgres.h"
 #include "gs_set.h"
 #include "gs_map.h"
