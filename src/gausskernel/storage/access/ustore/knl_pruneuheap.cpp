@@ -895,11 +895,6 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
          * that can be freed.
          */
         Assert(!TransactionIdIsValid(xid) || !TransactionIdIsInProgress(xid));
-        if (TransactionIdIsValid(xid) && TransactionIdIsInProgress(xid)) {
-            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("Tuple will be pruned but xid is inprogress, xid=%lu, oldestxmin=%lu, globalRecycleXid=%lu.",
-                xid, oldestXmin, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))));
-        }
         /* short aligned */
         *spaceFreed += SHORTALIGN(tup.disk_tuple_size);
     }
