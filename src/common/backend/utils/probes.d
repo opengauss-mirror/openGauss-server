@@ -30,6 +30,7 @@ provider postgresql {
 
 	probe lwlock__acquire(const char *, LWLockMode);
 	probe lwlock__release(const char *);
+	probe lwlock__downgrade(const char *);
 	probe lwlock__wait__start(const char *, LWLockMode);
 	probe lwlock__wait__done(const char *, LWLockMode);
 	probe lwlock__condacquire(const char *, LWLockMode);

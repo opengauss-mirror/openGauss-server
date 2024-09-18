@@ -6392,8 +6392,8 @@ retry:
              * Because the two sessions on the standby node will hold the content lock at the shared level,
              * at the same time, even if one of them fails, release the lock and sleep, the other will hold
              * it during this time, and the MES thread from the host will never get the exclusive lock on 
-             * this page. 
-             * 
+             * this page.
+             *
              * However, the session on the primary side holds the exclusive lock, which prevents the MES 
              * for standby from taking the shared lock, which eventually leads to a deadlock.
              *
@@ -6412,14 +6412,14 @@ retry:
         } else if (dms_standby_retry_read) {
             /*
              * We're on standby, and we have got the page, but we're holding an exclusive lock,
-             * which isn't good, so release the lock and start over.
+             * which isn't good, so lock need downgrade.
              *
-             * A good idea would be to add the ability to lock downgrade for LWLock.
+             * The lock downgrade function is only applicable for downgrading exclusive locks to shared locks.
              */
+            Assert(mode == BUFFER_LOCK_EXCLUSIVE && origin_mode == BUFFER_LOCK_SHARE);
             mode = origin_mode;
             dms_standby_retry_read = false;
-            LWLockRelease(buf->content_lock);
-            goto retry;
+            LWLockDowngrade(buf->content_lock);
         }
     }
 

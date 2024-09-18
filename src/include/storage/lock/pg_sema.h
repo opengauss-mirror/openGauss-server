@@ -81,6 +81,8 @@ extern void PGSemaphoreUnlock(PGSemaphore sema);
 /* Lock a semaphore only if able to do so without blocking */
 extern bool PGSemaphoreTryLock(PGSemaphore sema);
 
+extern int PGSemaphoreLockTimeout(PGSemaphore sema, int timeout_ms);
+
 extern void cancelSemphoreRelease(void);
 
 #endif /* PG_SEMA_H */
