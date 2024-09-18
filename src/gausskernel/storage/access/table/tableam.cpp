@@ -378,9 +378,11 @@ void HeapamScanInitParallelSeqscan(TableScanDesc sscan, int32 dop, ScanDirection
 }
 
 double HeapamIndexBuildScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo, bool allow_sync,
-                            IndexBuildCallback callback, void *callback_state, TableScanDesc scan)
+                            IndexBuildCallback callback, void *callback_state, TableScanDesc scan,
+                            BlockNumber startBlkno, BlockNumber numblocks)
 {
-    return IndexBuildHeapScan(heapRelation, indexRelation, indexInfo, allow_sync, callback, callback_state, scan);
+    return IndexBuildHeapScan(heapRelation, indexRelation, indexInfo, allow_sync, callback,
+                              callback_state, scan, startBlkno, numblocks);
 }
 
 void HeapamIndexValidateScan (Relation heapRelation, Relation indexRelation,
@@ -972,7 +974,8 @@ void UHeapamTslotStoreUHeapTuple(Tuple tuple, TupleTableSlot *slot, Buffer buffe
  */
 
 double UHeapamIndexBuildScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo, bool allowSync,
-    IndexBuildCallback callback, void *callback_state, TableScanDesc scan)
+    IndexBuildCallback callback, void *callback_state, TableScanDesc scan,
+    BlockNumber startBlkno, BlockNumber numblocks)
 {
     return IndexBuildUHeapScan(heapRelation, indexRelation, indexInfo, allowSync, callback, callback_state, scan);
 }
