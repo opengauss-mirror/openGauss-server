@@ -70,6 +70,49 @@ drop table test_2 cascade;
 
 set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
 
+create table t_CurRowtype_Def_Case0001(col1 int primary key,col2 varchar(100));
+insert into t_CurRowtype_Def_Case0001 values(1,'one');
+insert into t_CurRowtype_Def_Case0001 values(2,'two');
+insert into t_CurRowtype_Def_Case0001 values(3,'three');
+insert into t_CurRowtype_Def_Case0001 values(4,NULL);
+
+--创建游标rowtype，select 伪列;expect:成功,输出4行
+declare
+   cursor cur_CurRowtype_Def_Case0001_1 is select col1,col2,rownum from t_CurRowtype_Def_Case0001;
+   source cur_CurRowtype_Def_Case0001_1%rowtype;
+begin
+   open cur_CurRowtype_Def_Case0001_1;
+   loop
+   fetch cur_CurRowtype_Def_Case0001_1 into source;
+   exit when cur_CurRowtype_Def_Case0001_1%notfound;
+      raise notice '% , % ,% ',source.col1,source.col2,source.rownum;  
+   end loop;
+   close cur_CurRowtype_Def_Case0001_1; 
+end;
+/
+
+drop table t_CurRowtype_Def_Case0001;
+
+create table t_CurRowtype_Def_Case0002(col1 int primary key,rownum varchar(100));
+create table t_CurRowtype_Def_Case0002(col1 int primary key);
+insert into t_CurRowtype_Def_Case0002 values(1);
+select t_CurRowtype_Def_Case0002.rownum from t_CurRowtype_Def_Case0002;
+select rownum from t_CurRowtype_Def_Case0002;
+drop table t_CurRowtype_Def_Case0002;
+
+CREATE TYPE type_record AS (
+	first text,
+	rownum int4
+) ;
+
+DECLARE 
+    type rectype is record(rownum int,row2 text);
+    source rectype := (2, 'dsaw');
+BEGIN
+    raise notice '% , %',source.row2,source.rownum;
+END;
+/
+
 -- Prohibit virtual column insertion
 create table t1(col1 varchar(10),col varchar(10));
 create table t2(col1 varchar(10),col varchar(10));

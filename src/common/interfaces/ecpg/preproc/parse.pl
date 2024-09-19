@@ -74,6 +74,7 @@ my %replace_types = (
 	'type_function_name' => 'ignore',
 	'AnonyBlockStmt'     => 'ignore',
 	'ColLabel'           => 'ignore',
+	'ColLabel_with_rownum' => 'ignore',
 	'Sconst'             => 'ignore',);
 
 # these replace_line commands excise certain keywords from the core keyword
