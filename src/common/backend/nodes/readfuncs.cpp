@@ -6485,6 +6485,16 @@ static CharsetClause* _readCharsetClause()
     READ_DONE();
 }
 
+static ShrinkStmt* _readShrinkStmt()
+{
+    READ_LOCALS(ShrinkStmt);
+
+    READ_NODE_FIELD(relations);
+    READ_BOOL_FIELD(nowait);
+
+    READ_DONE();
+}
+
 static PrefixKey* _readPrefixKey()
 {
     READ_LOCALS(PrefixKey);
@@ -7105,7 +7115,9 @@ Node* parseNodeString(void)
         return_value = _readRotateClause();
     } else if (MATCH("UNROTATEINFO", 12)) {
         return_value = _readUnrotateClause();
-    }  else {
+    } else if (MATCH("SHRINK", 6)) {
+        return_value = _readShrinkStmt();
+    } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("parseNodeString(): badly formatted node string \"%s\"...", token)));
