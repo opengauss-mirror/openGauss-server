@@ -3627,6 +3627,14 @@ static bool _equalCharsetClause(const CharsetClause* a, const CharsetClause* b)
     return true;
 }
 
+
+static bool _equalShrinkStmt(const ShrinkStmt* a, const ShrinkStmt* b)
+{
+    COMPARE_NODE_FIELD(relations);
+    COMPARE_SCALAR_FIELD(nowait);
+    return true;
+}
+
 static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
 {
     COMPARE_NODE_FIELD(arg);
@@ -4635,6 +4643,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_CharsetClause:
             retval = _equalCharsetClause((const CharsetClause*) a, (const CharsetClause*) b);
+            break;
+        case T_ShrinkStmt:
+            retval = _equalShrinkStmt((const ShrinkStmt*)a, (const ShrinkStmt*)b);
             break;
         case T_PrefixKey:
             retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);
