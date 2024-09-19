@@ -108,7 +108,7 @@ static void* one_thread_func(void *data)
 {
 	int ret = 1;
 	int i = 0;
-	char options[] = {"MODLUE_TYPE=JNTAKMS,MODLUE_LIB_PATH=/home//vastbase/contrib/common_cipher/libTassSDF4GHVSM.so,MODULE_CONFIG_FILE_PATH=/home//vastbase/contrib/common_cipher/"};
+	char options[] = {"MODULE_TYPE=JNTAKMS,MODULE_LIB_PATH=/home//vastbase/contrib/common_cipher/libTassSDF4GHVSM.so,MODULE_CONFIG_FILE_PATH=/home//vastbase/contrib/common_cipher/"};
 	SupportedFeature supportedfeature;
 	char errmsg[MAX_ERRMSG_LEN] = {0};
 	void *session = NULL;
