@@ -7815,6 +7815,14 @@ static CharsetClause *_copyCharsetClause(const CharsetClause* from)
     return newnode;
 }
 
+static ShrinkStmt *_copyShrinkStmt(const ShrinkStmt* from)
+{
+    ShrinkStmt* newnode = makeNode(ShrinkStmt);
+    COPY_NODE_FIELD(relations);
+    COPY_SCALAR_FIELD(nowait);
+    return newnode;
+}
+
 static PrefixKey* _copyPrefixKey(const PrefixKey* from)
 {
     PrefixKey* newnode = makeNode(PrefixKey);
@@ -9285,6 +9293,9 @@ void* copyObject(const void* from)
             break;
         case T_CharsetClause:
             retval = _copyCharsetClause((CharsetClause *)from);
+            break;
+        case T_ShrinkStmt:
+            retval = _copyShrinkStmt((ShrinkStmt*) from);
             break;
 #ifdef USE_SPQ
         case T_Motion:

@@ -6384,6 +6384,14 @@ static void _outCharsetClause(StringInfo str, CharsetClause* node)
     WRITE_LOCATION_FIELD(location);
 }
 
+static void _outShrinkStmt(StringInfo str, ShrinkStmt* node)
+{
+    WRITE_NODE_TYPE("SHRINK");
+    WRITE_NODE_FIELD(relations);
+    WRITE_BOOL_FIELD(nowait);
+}
+
+
 static void _outPrefixKey(StringInfo str, PrefixKey* node)
 {
     WRITE_NODE_TYPE("PREFIXKEY");
@@ -7374,6 +7382,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CharsetClause:
                 _outCharsetClause(str, (CharsetClause*)obj);
+                break;
+            case T_ShrinkStmt:
+                _outShrinkStmt(str, (ShrinkStmt*)obj);
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);
