@@ -1451,21 +1451,31 @@ static int32 CBBufRebuildDrcInternal(int begin, int len, unsigned char thread_in
     */
 const int dms_invalid_thread_index = 255;
 const int dms_invalid_thread_num = 255;
-static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
+static void CBAllocBufRangeForThread(unsigned char thread_index, unsigned char thread_num,
+    int* buf_begin, int* buf_num)
 {
     Assert((thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) ||
             (thread_index != dms_invalid_thread_index && thread_num != dms_invalid_thread_num &&
             thread_index < thread_num));
-    int buf_num = TOTAL_BUFFER_NUM / thread_num;
-    int buf_begin = thread_index * buf_num;
+    int num = TOTAL_BUFFER_NUM / thread_num;
+    int begin = thread_index * num;
     if (thread_index == thread_num - 1) {
-        buf_num = TOTAL_BUFFER_NUM - buf_begin;
+        num = TOTAL_BUFFER_NUM - begin;
     }
 
     if (thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) {
-        buf_begin = 0;
-        buf_num = TOTAL_BUFFER_NUM;
+        begin = 0;
+        num = TOTAL_BUFFER_NUM;
     }
+    *buf_begin = begin;
+    *buf_num = num;
+}
+
+static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
+{
+    int buf_begin = 0;
+    int buf_num = 0;
+    CBAllocBufRangeForThread(thread_index, thread_num, &buf_begin, &buf_num);
     return CBBufRebuildDrcInternal(buf_begin, buf_num, thread_index);
 }
 
@@ -2240,6 +2250,19 @@ int CBDoCheckpointImmediately(unsigned long long *ckpt_lsn)
     return GS_SUCCESS;
 }
 
+int CBBufCtrlRcyClean(void *db_handle, unsigned char thread_index, unsigned char thread_num)
+{
+    int buf_begin = 0;
+    int buf_num = 0;
+    CBAllocBufRangeForThread(thread_index, thread_num, &buf_begin, &buf_num);
+    int buf_end = buf_begin + buf_num - 1;
+    for (int i = buf_begin; i <= buf_end; i++) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(i);
+        buf_ctrl->in_rcy = false;
+    }
+    return GS_SUCCESS;
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2308,4 +2331,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->buf_ctrl_recycle = CBBufCtrlRecycle;
     callback->dms_thread_deinit = DmsThreadDeinit;
     callback->opengauss_do_ckpt_immediate = CBDoCheckpointImmediately;
+    callback->dms_ctl_rcy_clean_parallel = CBBufCtrlRcyClean;
 }
