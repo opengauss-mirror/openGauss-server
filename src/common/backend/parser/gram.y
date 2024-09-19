@@ -704,7 +704,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <str>		Sconst comment_text notify_payload
 %type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression UserId
 %type <list>	var_list guc_value_extension_list
-%type <str>		ColId ColLabel var_name type_function_name param_name charset_collate_name
+%type <str>		ColId ColLabel ColLabel_with_rownum var_name type_function_name param_name charset_collate_name
 %type <node>	var_value zone_value
 
 %type <keyword> unreserved_keyword type_func_name_keyword
@@ -29653,7 +29653,7 @@ database_name:
 access_method:
 			ColId									{ $$ = $1; };
 
-attr_name:	ColLabel								{ $$ = $1; };
+attr_name:	ColLabel_with_rownum					{ $$ = $1; };
 
 index_name: ColId									{ $$ = $1; };
 
@@ -29913,6 +29913,19 @@ ColLabel:	IDENT
 								errmsg("ROWNUM cannot be used as an alias"),
 										parser_errposition(@1)));
 					}
+					$$ = pstrdup($1);
+				}
+		;
+ColLabel_with_rownum:	IDENT
+				{
+					$$ = IdentResolveToChar($1, yyscanner);
+				}
+			| '\''IDENT'\''							{ $$ = $2; }
+			| unreserved_keyword					{ $$ = pstrdup($1); }
+			| col_name_keyword						{ $$ = pstrdup($1); }
+			| type_func_name_keyword				{ $$ = pstrdup($1); }
+			| reserved_keyword
+				{
 					$$ = pstrdup($1);
 				}
 		;

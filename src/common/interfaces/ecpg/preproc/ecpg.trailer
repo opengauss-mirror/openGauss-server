@@ -1571,6 +1571,19 @@ ColLabel:  ECPGColLabel				{ $$ = $1; }
 		| ECPGunreserved_interval	{ $$ = $1; }
 		;
 
+ColLabel_with_rownum:  ECPGColLabel	{ $$ = $1; }
+		| ECPGTypeName				{ $$ = $1; }
+		| CHAR_P					{ $$ = mm_strdup("char"); }
+		| CURRENT_P					{ $$ = mm_strdup("current"); }
+		| INPUT_P					{ $$ = mm_strdup("input"); }
+		| INT_P						{ $$ = mm_strdup("int"); }
+		| TO						{ $$ = mm_strdup("to"); }
+		| UNION						{ $$ = mm_strdup("union"); }
+		| VALUES					{ $$ = mm_strdup("values"); }
+		| ECPGCKeywords				{ $$ = $1; }
+		| ECPGunreserved_interval	{ $$ = $1; }
+		;
+
 ECPGColLabel:  ECPGColLabelCommon	{ $$ = $1; }
 		| unreserved_keyword		{ $$ = $1; }
 		| reserved_keyword			{ $$ = $1; }
