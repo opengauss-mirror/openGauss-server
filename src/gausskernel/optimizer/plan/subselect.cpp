@@ -711,8 +711,7 @@ static Node* make_subplan(
 
     /* Reset u_sess->opt_cxt.query_dop. */
     u_sess->opt_cxt.query_dop = outerDop;
-    /* Reset is_stream/is_stream_support because cursorExpr in subquery would change them */
-    set_default_stream();
+
     /* Isolate the params needed by this specific subplan */
     plan_params = root->plan_params;
     root->plan_params = NIL;
