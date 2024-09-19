@@ -229,6 +229,13 @@ bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue *queue)
     return (COUNT(head, tail, queue->mask) == 0);
 }
 
+bool SPSCBlockingQueueIsFull(SPSCBlockingQueue *queue)
+{
+    uint32 head = pg_atomic_read_u32(&queue->writeHead);
+    uint32 tail = pg_atomic_read_u32(&queue->readTail);
+    return (SPACE(head, tail, queue->mask) == 0);
+}
+
 void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue)
 {
     uint32 head;

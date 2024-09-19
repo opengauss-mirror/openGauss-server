@@ -734,7 +734,7 @@ XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record)
 void OnDemandNotifyHashMapPruneIfNeed()
 {
     if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
-        ondemand_extreme_rto::StartupSendMarkToBatchRedo(&ondemand_extreme_rto::g_hashmapPruneMark);
+        ondemand_extreme_rto::StartupSendHashmapPruneMarkToBatchRedo();
     }
 }
 
