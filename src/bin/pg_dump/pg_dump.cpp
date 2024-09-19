@@ -675,7 +675,9 @@ int main(int argc, char** argv)
         {"syslog", no_argument, &dump_syslog, 1},
 #endif
         /* Database Security: enc mode , soft only AES128 is available,
-         * common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR. */
+         * common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR
+         * AES128_CBC_HMAC_SHA256,AES128_CTR_HMAC_SHA256,AES128_GCM_HMAC_SHA256,AES256_CBC_HMAC_SHA256,AES256_CTR_HMAC_SHA256"
+         * AES256_GCM_HMAC_SHA256,SM4_CBC_HMAC_SM3,SM4_CTR_HMAC_SM3*/
         {"with-encryption", required_argument, NULL, 6},
         {"with-key", required_argument, NULL, 7},
         {"rolepassword", required_argument, NULL, 9},
@@ -1966,10 +1968,12 @@ void help(const char* pchProgname)
     printf(_("  --exclude-function                          do not dump function and procedure\n"));    
     /* Database Security: Data importing/dumping support AES128. */
     printf(_("  --with-encryption=AES128                    dump data is encrypted,soft only AES128 is available"
-            "common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"));
+            "common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"
+            "AES128_CBC_HMAC_SHA256,AES128_CTR_HMAC_SHA256,AES128_GCM_HMAC_SHA256,AES256_CBC_HMAC_SHA256,AES256_CTR_HMAC_SHA256\n"
+            "AES256_GCM_HMAC_SHA256,SM4_CBC_HMAC_SM3,SM4_CTR_HMAC_SM3\n"));
     printf(_("  --with-key=KEY                              soft AES128 encryption key, must be 16 bytes in length,common cipher key is base64 encoded,max 44 bytes\n"));
     printf(_("  --with-salt=RANDVALUES                      used by gs_dumpall, pass rand value array\n"));
-    printf(_("  --with-module-params=MODLUE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
+    printf(_("  --with-module-params=MODULE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
             "type:GDACCARD,JNTAKMS,SWXAKMS;MODULE_LIB_PATH:need include lib file absolute path;"
             "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
             "used by gs_dump, load device\n"));

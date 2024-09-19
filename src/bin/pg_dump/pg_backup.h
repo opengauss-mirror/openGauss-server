@@ -41,7 +41,7 @@
 #define oidzero(x) ((x) == 0)
 
 #define CRYPTO_MODULE_PARAMS_MAX_LEN 1024
-#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 16
+#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 32
 
 enum trivalue { TRI_DEFAULT, TRI_NO, TRI_YES };
 
@@ -98,8 +98,8 @@ struct Archive {
     unsigned char rand[RANDOM_LEN + 1];
 
     char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
-    char crypto_modlue_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
-    CryptoModuleCtx cryptoModlueCtx;
+    char crypto_module_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
+    CryptoModuleCtx cryptoModuleCtx;
 
     /* get hash bucket info. */
     bool getHashbucketInfo;

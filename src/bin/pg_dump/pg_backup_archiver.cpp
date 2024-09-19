@@ -577,7 +577,7 @@ void RestoreArchive(Archive* AHX)
     /*
      * Put the rand value to encrypt file for decrypt if use soft crypto.
      */
-    if ((true == AHX->encryptfile) && (NULL == encrypt_salt) && AHX->crypto_modlue_params[0] == '\0') {
+    if ((true == AHX->encryptfile) && (NULL == encrypt_salt) && AHX->crypto_module_params[0] == '\0') {
         p = (char*)pg_malloc(RANDOM_LEN + 1);
         rc = memset_s(p, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
         securec_check_c(rc, "\0", "\0");
@@ -1732,9 +1732,9 @@ int ahwrite(const void* ptr, size_t size, size_t nmemb, ArchiveHandle* AH)
                     MAX_DECRYPT_BUFF_LEN,
                     AH->publicArc.Key,
                     AH->publicArc.rand,
-                    AH->publicArc.cryptoModlueCtx.key_ctx,
+                    AH->publicArc.cryptoModuleCtx.key_ctx,
                     crypto_encrypt_decrypt_use,
-                    AH->publicArc.cryptoModlueCtx.hmac_ctx,
+                    AH->publicArc.cryptoModuleCtx.hmac_ctx,
                     crypto_hmac_use);
                 if (!encrypt_result)
                     exit_horribly(modulename, "Encryption failed: %s\n", strerror(errno));
@@ -4743,7 +4743,7 @@ void encryptArchive(Archive* fout, const ArchiveFormat fmt)
         return;
 
     /* for plain format, encrypted in previous process. use crypto module encrypted in previous process. */
-    if (fmt != archDirectory || fout->crypto_modlue_params)
+    if (fmt != archDirectory || fout->crypto_module_params)
         return;
 
     fileSpec = gs_strdup(AH->fSpec);
