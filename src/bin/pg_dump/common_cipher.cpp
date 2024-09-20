@@ -211,6 +211,8 @@ void initCryptoModule(ArchiveHandle* AH)
         exit_horribly(NULL, "unsupported this mode:%s\n", fort->crypto_type);
     }
 
+    fort->key_type = supportedfeature.key_type;
+
 }
 
 void initCryptoSession(ArchiveHandle* AH)
@@ -394,7 +396,7 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
             if (tmpkey) {
                 OPENSSL_free(tmpkey);
             }
-            exit_horribly(NULL, "invalid key\n");	
+            exit_horribly(NULL, "invalid key\n");
         } else {
             rc = memset_s(fout->Key, KEY_MAX_LEN, 0x0, KEY_MAX_LEN);
             securec_check_c(rc, "\0", "\0");
@@ -405,11 +407,16 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
             OPENSSL_free(tmpkey);
         }
     } else if (is_gen_key){
-        char *encodedley = NULL;
-        symmGenerateKey((ArchiveHandle*)fout);
-        encodedley = SEC_encodeBase64((char*)fout->Key, fout->keylen);
-        write_msg(NULL, "generate key success:%s\n", encodedley);
-        OPENSSL_free(encodedley);
+        if (fout->key_type == KEY_TYPE_PLAINTEXT) {
+            exit_horribly(NULL, "forbid to generate plaint key\n");
+        } else {
+            char *encodedley = NULL;
+            symmGenerateKey((ArchiveHandle*)fout);
+            encodedley = SEC_encodeBase64((char*)fout->Key, fout->keylen);
+            write_msg(NULL, "generate key success:%s\n", encodedley);
+            OPENSSL_free(encodedley);
+        }
+        
 
     }
 
