@@ -73,14 +73,15 @@ extern crypto_hmac_type crypto_hmac_use;
 
 extern int transform_type(const char* type);
 extern int getHmacType(ModuleSymmKeyAlgo algo);
+extern int transform_hmac_type(const char* type);
 extern bool load_crypto_module_lib();
 extern void unload_crypto_module();
-extern void initCryptoModule(char* crypto_module_params, const char* encrypt_mode);
+extern void initCryptoModule(char* crypto_module_params, const char* encrypt_mode, int* key_type);
 extern void initCryptoSession(void** crypto_module_session);
 extern void releaseCryptoSession(void* crypto_module_session);
 extern void releaseCryptoCtx(void* crypto_module_keyctx);
 extern void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx, void* crypto_hmac_keyctx);
-extern void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt);
+extern void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt, int* key_type);
 
 #ifdef __cplusplus
 }
