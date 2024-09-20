@@ -475,18 +475,27 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
 static TupleTableSlot* updateTuplePseudoColumnValue(TupleTableSlot* slot, StartWithOpState *node,
     StartWithOpColumnType type, Datum value)
 {
+    HeapTuple tup = NULL;
+    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+
+    ResetResultSlotAttValueArray(node, node->sw_values, node->sw_isnull);
+    Datum *values = node->sw_values;
+    bool  *isnull = node->sw_isnull;
+
+    /* fetch physical tuple */
+    tup = ExecFetchSlotTuple(slot);
+    heap_deform_tuple(tup, tupDesc, values, isnull);
+
     AttrNumber attnum = node->sw_pseudoCols[type]->resno;
-    int attcount = slot->tts_tupleDescriptor->natts;
-    bool nulls[attcount] = {false};
-    Datum values[attcount] = {0};
-    bool replaces[attcount] = {false};
-    HeapTuple oldtup = (HeapTuple)slot->tts_tuple;
-    replaces[attnum - 1] = true;
-    nulls[attnum - 1] = false;
-    values[attnum - 1] = value;
-    HeapTuple newtup = heap_modify_tuple(oldtup, slot->tts_tupleDescriptor, values, nulls, replaces);
-    slot->tts_tuple = newtup;
-    heap_freetuple_ext(oldtup);
+
+    /* set proper value and mark isnull to false */
+    values[attnum - 1] = Int32GetDatum(value);
+    isnull[attnum - 1] = false;
+
+    /* create a local copy tuple and store it to tuplestore, mark shouldFree as 'true ' */
+    tup = heap_form_tuple(tupDesc, values, isnull);
+    slot = ExecStoreTuple(tup, slot, InvalidBuffer, true);
+    return slot;
 }
 
 /*
@@ -525,27 +534,31 @@ static bool depth_first_connect(int currentLevel, StartWithOpState *node, List* 
             isCycle = true;
             continue;
         }
-        updateTuplePseudoColumnValue(dstSlot, node, SWCOL_ROWNUM, *dfsRowCount + 1);
-        RecursiveUnionState* runode = castNode(RecursiveUnionState, outerNode);
-        if (currentLevel == 1 || ExecStartWithRowLevelQual(runode, dstSlot)) {
-            tuplestore_puttupleslot(outputStore, dstSlot);
-            (*dfsRowCount)++;
-            int rowCountBefore = *dfsRowCount;
-
-            /* Go into the depth NOW: sibling tuples won't get processed
-            *  until all children are done */
-            node->sw_rownum = rowCountBefore;
-            List* children = peekNextLevel(leader, outerNode, currentLevel);
-            bool expectCycle = depth_first_connect(currentLevel + 1, node,
-                                                   children,
-                                                   dfsRowCount);
-            if (expectCycle) {
-                node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
+        if (currentLevel != 1) {
+            dstSlot = updateTuplePseudoColumnValue(dstSlot, node, SWCOL_ROWNUM, *dfsRowCount + 1);
+            RecursiveUnionState* runode = castNode(RecursiveUnionState, outerNode);
+            if (!ExecStartWithRowLevelQual(runode, dstSlot)) {
+                return isCycle;
             }
+        }
 
-            if (!children) {
-                node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
-            }
+        tuplestore_puttupleslot(outputStore, dstSlot);
+        (*dfsRowCount)++;
+        int rowCountBefore = *dfsRowCount;
+
+        /* Go into the depth NOW: sibling tuples won't get processed
+        *  until all children are done */
+        node->sw_rownum = rowCountBefore;
+        List* children = peekNextLevel(leader, outerNode, currentLevel);
+        bool expectCycle = depth_first_connect(currentLevel + 1, node,
+                                               children,
+                                               dfsRowCount);
+        if (expectCycle) {
+            node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
+        }
+
+        if (!children) {
+            node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
         }
     }
     return isCycle;
