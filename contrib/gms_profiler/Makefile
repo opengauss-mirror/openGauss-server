@@ -7,7 +7,7 @@ EXTENSION = gms_profiler
 DATA = gms_profiler--1.0.sql
 
 exclude_option = -fPIE
-override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
+override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))
 
 REGRESS = gms_profiler
 

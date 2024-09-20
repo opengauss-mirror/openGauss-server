@@ -176,7 +176,7 @@ else()
 endif()
 
 # libraries need secure options during compling
-set(LIB_SECURE_OPTIONS -fPIC -fno-common -fstack-protector)
+set(LIB_SECURE_OPTIONS -fPIC -fno-common -fstack-protector-strong)
 # libraries need link options during linking
 set(LIB_LINK_OPTIONS -pthread -std=c++14 -Wl,-z,noexecstack -Wl,-z,relro,-z,now)
 if(NOT "${ENABLE_UT}" STREQUAL "ON")
