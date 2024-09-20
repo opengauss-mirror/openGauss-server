@@ -402,12 +402,14 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
             rc = memcpy_s((GS_UCHAR*)fout->Key, KEY_MAX_LEN, tmpkey, tmpkeylen);
             securec_check_c(rc, "\0", "\0");
             fout->keylen = tmpkeylen;
+            OPENSSL_free(tmpkey);
         }
     } else if (is_gen_key){
         char *encodedley = NULL;
         symmGenerateKey((ArchiveHandle*)fout);
         encodedley = SEC_encodeBase64((char*)fout->Key, fout->keylen);
         write_msg(NULL, "generate key success:%s\n", encodedley);
+        OPENSSL_free(encodedley);
 
     }
 
