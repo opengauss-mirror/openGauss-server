@@ -50,6 +50,7 @@
 #include "client_logic/client_logic.h"
 #include "catalog/pg_proc.h"
 #include "commands/sqladvisor.h"
+#include "miscadmin.h"
 
 #ifdef PGXC
 #include "pgxc/locator.h"
@@ -1920,6 +1921,15 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
             (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("cannot handle per-attribute ON SELECT rule")));
     }
 
+    /* Check if the expension of non_system views are restricted */
+    if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_VIEW && RelationGetRelid(relation) >= FirstNormalObjectId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(relation)),
+                errcause("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(relation)),
+                erraction("Check the value of restrict_nonsystem_relation_kind.")));
+    }
+
     if (rt_index == linitial2_int(parsetree->resultRelations)) {
         /*
          * We have a view as the result relation of the query, and it wasn't
@@ -3357,6 +3367,15 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                 ereport(ERROR, (errmsg("unrecognized CmdType: %d", (int)parsetree->commandType)));
                 break;
         }
+    }
+
+    /* Check if the expension of non_system views are restricted */
+    if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_VIEW && RelationGetRelid(view) >= FirstNormalObjectId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(view)),
+                errcause("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(view)),
+                erraction("Check the value of restrict_nonsystem_relation_kind.")));
     }
 
     /*

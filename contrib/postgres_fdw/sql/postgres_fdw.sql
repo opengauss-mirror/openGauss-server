@@ -333,6 +333,14 @@ INSERT INTO loct_empty
 DELETE FROM loct_empty;
 ANALYZE ft_empty;
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM ft_empty ORDER BY c1;
+
+-- test restriction on non_system foreign tables.
+set restrict_nonsystem_relation_kind to 'foreign-table';
+select * from ft1 where c1 < 0; --Error
+insert into ft1 (c1) values(1); --Error
+delete from ft1 where c1 = 1; --Error
+reset restrict_nonsystem_relation_kind;
+
 -- ======================================================================================================================================
 -- TEST-MODULE: WHERE with remotely-executable conditions
 -- --------------------------------------

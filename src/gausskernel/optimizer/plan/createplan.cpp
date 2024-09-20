@@ -9023,8 +9023,19 @@ static void PlanForeignModify(PlannerInfo* root, ModifyTable* node, List* result
             RangeTblEntry* rte = rt_fetch(rti, (root)->parse->rtable);
 
             Assert(rte->rtekind == RTE_RELATION);
-            if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM)
+            if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
+                /* Check if the access to foreign tables is restricted */
+                if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_FOREIGN_TABLE)) {
+                    /* There can not be built-in FDW handler */
+                    Assert(rte->relid >= FirstNormalObjectId);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("Access to non-system forign table is restricted."),
+                            errcause("Access to non-system forign table is restricted."),
+                            erraction("Check the value of restrict_nonsystem_relation_kind.")));
+                }
                 fdwroutine = GetFdwRoutineByRelId(rte->relid);
+            }
             else
                 fdwroutine = NULL;
         }
