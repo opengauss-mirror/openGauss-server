@@ -2879,13 +2879,10 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 static void uncompress_decrypt_directory(const char *instance_name_str)
 {
     errno_t rc;
-
-    bool res = false;
     DIR *data_dir = NULL;
     struct dirent *data_ent = NULL;
     uint key_len = 0;
     uint hmac_len = MAX_HMAC_LEN;
-    uint key_idx_uint = 0;
     uint dec_buffer_len = 0;
     uint out_buffer_len = MAX_CRYPTO_MODULE_LEN;
     long int enc_file_pos = 0;
@@ -2906,18 +2903,13 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
         return;
     }
     
-    CryptoModuleParamsCheck(gen_key, encrypt_dev_params, encrypt_mode, encrypt_key, encrypt_salt);
+    CryptoModuleParamsCheck(gen_key, encrypt_dev_params, encrypt_mode, encrypt_key, encrypt_salt, &key_type);
 
     initCryptoSession(&crypto_module_session);
 
     algo = transform_type(encrypt_mode);
     if (gen_key) {
-        rc = crypto_create_symm_key_use(crypto_module_session, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, (size_t*)&key_len);
-        if (rc != 1) {
-            crypto_get_errmsg_use(NULL, errmsg);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, "crypto module gen key error, errmsg:%s\n", errmsg);
-        }
+        elog(ERROR, "only backup can use --gen-key command.");
     } else {
         key = SEC_decodeBase64(encrypt_key, &key_len);
         if (NULL == key) {
@@ -2928,17 +2920,20 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
 
     rc = crypto_ctx_init_use(crypto_module_session, &crypto_module_keyctx, (ModuleSymmKeyAlgo)algo, 0, (unsigned char*)key, key_len);
 	if (rc != 1) {
+        pg_free(key);
 		crypto_get_errmsg_use(NULL, errmsg);
         clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
     }
 
-    algo = getHmacType((ModuleSymmKeyAlgo)algo);
-    rc = crypto_hmac_init_use(crypto_module_session, &crypto_hmac_keyctx, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, key_len);
-    if (rc != 1) {
-        crypto_get_errmsg_use(NULL, errmsg);
-        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+    algo = transform_hmac_type(encrypt_mode);
+    if (algo != MODULE_ALGO_MAX) {
+        rc = crypto_hmac_init_use(crypto_module_session, &crypto_hmac_keyctx, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, key_len);
+        if (rc != 1) {
+            crypto_get_errmsg_use(NULL, errmsg);
+            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+            elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
+        }
     }
 
     rc = sprintf_s(backup_instance_path, MAXPGPATH, "%s/%s/%s",
@@ -2947,6 +2942,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
 
     data_dir = fio_opendir(backup_instance_path, FIO_BACKUP_HOST);
     if (data_dir == NULL) {
+        pg_free(key);
+        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
         elog(ERROR, "cannot open directory \"%s\": %s", backup_instance_path, strerror(errno));
         return;
     }
@@ -2959,6 +2956,7 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
 
             FILE* enc_backup_fd = fopen(enc_backup_file,"rb");
             if(NULL == enc_backup_fd) {
+                pg_free(key);
                 clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
                 elog(ERROR, ("failed to create or open encrypt backup file."));
                 return;
@@ -2976,47 +2974,78 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
 
             FILE* dec_file_fd = fopen(dec_backup_file,"wb");
 
-            while(enc_file_pos < enc_file_len)
+            if (algo == MODULE_ALGO_MAX)
             {
-                memset_s(dec_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
-                memset_s(out_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
+                while(enc_file_pos < enc_file_len)
+                {
+                    memset_s(dec_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
+                    memset_s(out_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
 
-                if(enc_file_pos + MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN < enc_file_len) {
-                    fread(dec_buffer, 1, MAX_CRYPTO_MODULE_LEN, enc_backup_fd);
-                    fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
-                    dec_buffer_len = MAX_CRYPTO_MODULE_LEN;
-                    enc_file_pos += (MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN);
-                } else {
-                    fread(dec_buffer, 1, enc_file_len - (enc_file_pos + MAX_HMAC_LEN), enc_backup_fd);
-                    fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
-                    dec_buffer_len = enc_file_len - (enc_file_pos + MAX_HMAC_LEN);
-                    enc_file_pos = enc_file_len;
+                    if(enc_file_pos + MAX_CRYPTO_MODULE_LEN < enc_file_len) {
+                        fread(dec_buffer, 1, MAX_CRYPTO_MODULE_LEN, enc_backup_fd);
+                        dec_buffer_len = MAX_CRYPTO_MODULE_LEN;
+                        enc_file_pos += MAX_CRYPTO_MODULE_LEN;
+                    } else {
+                        fread(dec_buffer, 1, enc_file_len - enc_file_pos, enc_backup_fd);
+                        dec_buffer_len = enc_file_len - enc_file_pos;
+                        enc_file_pos = enc_file_len;
+                    }
+
+                    rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                    if(rc != 1) {
+                        crypto_get_errmsg_use(NULL, errmsg);
+                        pg_free(key);
+                        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                        elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
+                    }
+                    fwrite(out_buffer, 1, out_buffer_len, dec_file_fd);
                 }
+            } else {
+                while(enc_file_pos < enc_file_len)
+                {
+                    memset_s(dec_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
+                    memset_s(out_buffer, MAX_CRYPTO_MODULE_LEN, 0, MAX_CRYPTO_MODULE_LEN);
 
-                rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
-                            (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
-                if(rc != 1) {
-                    crypto_get_errmsg_use(NULL, errmsg);
-                    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-                    elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
+                    if(enc_file_pos + MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN < enc_file_len) {
+                        fread(dec_buffer, 1, MAX_CRYPTO_MODULE_LEN, enc_backup_fd);
+                        fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
+                        dec_buffer_len = MAX_CRYPTO_MODULE_LEN;
+                        enc_file_pos += (MAX_CRYPTO_MODULE_LEN + MAX_HMAC_LEN);
+                    } else {
+                        fread(dec_buffer, 1, enc_file_len - (enc_file_pos + MAX_HMAC_LEN), enc_backup_fd);
+                        fread(hmac_read_buffer, 1, MAX_HMAC_LEN, enc_backup_fd);
+                        dec_buffer_len = enc_file_len - (enc_file_pos + MAX_HMAC_LEN);
+                        enc_file_pos = enc_file_len;
+                    }
+
+                    rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                    if(rc != 1) {
+                        pg_free(key);
+                        crypto_get_errmsg_use(NULL, errmsg);
+                        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                        elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
+                    }
+
+                    rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len, hmac_cal_buffer, (size_t*)&hmac_len);
+                    if(rc != 1) {
+                        pg_free(key);
+                        crypto_get_errmsg_use(NULL, errmsg);
+                        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
+                        elog(ERROR, ("failed to calculate hmac, errmsg: %s"), errmsg);
+                    }
+
+                    if (strncmp((char*)hmac_cal_buffer, (char*)hmac_read_buffer, (size_t)hmac_len) != 0) {
+                        pg_free(key);
+                        elog(ERROR, ("hmac verify failed\n"));
+                    }
+
+                    fwrite(out_buffer, 1, out_buffer_len, dec_file_fd);
                 }
-
-                rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len, hmac_cal_buffer, (size_t*)&hmac_len);
-                if(rc != 1) {
-                    crypto_get_errmsg_use(NULL, errmsg);
-                    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-                    elog(ERROR, ("failed to calculate hmac, errmsg: %s"), errmsg);
-                }
-
-                if (strncmp((char*)hmac_cal_buffer, (char*)hmac_read_buffer, (size_t)hmac_len) != 0) {
-                    elog(ERROR, ("hmac verify failed\n"));
-                }
-
-                fwrite(out_buffer, 1, out_buffer_len, dec_file_fd);
             }
             fclose(dec_file_fd);
             fclose(enc_backup_fd);
-
             clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
             rc = sprintf_s(sys_cmd, MAXPGPATH, "tar -xPf %s/%s.tar", backup_instance_path, data_ent->d_name);
@@ -3046,6 +3075,7 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
         fio_closedir(data_dir);
         data_dir = NULL;
     }
+    pg_free(key);
 }
 
 /*
