@@ -43,6 +43,7 @@ TOOLSDIR = $(top_srcdir)/src/tools
 GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
 GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
 
+override LDFLAGS += -Wl,-z,relro,-z,now
 
 ifeq ($(GCC),yes)
 preproc.o: CXXFLAGS += -Wno-error
