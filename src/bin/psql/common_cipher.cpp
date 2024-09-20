@@ -389,7 +389,7 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
                 OPENSSL_free(tmpkey);
             }
             fprintf(stderr, ("invalid key\n"));
-            exit(1);	
+            exit(1);
         } else {
             rc = memset_s(pDecryptInfo->Key, KEY_MAX_LEN, 0x0, KEY_MAX_LEN);
             securec_check_c(rc, "\0", "\0");
@@ -397,6 +397,7 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
             rc = memcpy_s((GS_UCHAR*)pDecryptInfo->Key, KEY_MAX_LEN, tmpkey, tmpkeylen);
             securec_check_c(rc, "\0", "\0");
             pDecryptInfo->keyLen = tmpkeylen;
+            OPENSSL_free(tmpkey);
         }
     } else {
         fprintf(stderr, ("invalid key\n"));
