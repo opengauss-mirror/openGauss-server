@@ -41,6 +41,13 @@ typedef struct UndoSpaceMetaInfo {
         count = (total % unit == 0) ? (total / unit) : (total / unit) + 1; \
     } while (0)
 
+#define UNDOSPACE_META_PAGE_SIZE  UNDO_META_PAGE_SIZE * \
+((PERSIST_ZONE_COUNT % UNDOZONE_COUNT_PER_PAGE == 0) ? (PERSIST_ZONE_COUNT / UNDOZONE_COUNT_PER_PAGE) : (PERSIST_ZONE_COUNT / UNDOZONE_COUNT_PER_PAGE) + 1)
+
+#define UNDOSPACE_SPACE_PAGE_SIZE  UNDO_META_PAGE_SIZE * \
+((PERSIST_ZONE_COUNT % UNDOSPACE_COUNT_PER_PAGE == 0) ? (PERSIST_ZONE_COUNT / UNDOSPACE_COUNT_PER_PAGE) : (PERSIST_ZONE_COUNT / UNDOSPACE_COUNT_PER_PAGE) + 1)
+
+
 /*
  * UndoSpace class is used as a proxy to manipulate undo zone(segment) file.
  */

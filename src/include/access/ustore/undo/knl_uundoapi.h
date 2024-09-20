@@ -70,4 +70,5 @@ void ResetUndoZoneLock();
 } // namespace undo
 
 extern void GetUndoFileDirectory(char *path, int len, UndoPersistence upersistence);
+bool CheckUndoMetaBuf(char *undoMeta);
 #endif // __KNL_UUNDOAPI_H__
