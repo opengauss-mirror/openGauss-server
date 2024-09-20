@@ -6291,7 +6291,15 @@ static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanre
          * if functionscan is disallowed to smp, and cursorPlan has stream node,
          * rebuild non-smp plan. For example, subplan is not support smp.
          */
+
+        /* we must restore is_stream/is_stream_support cause they would be change during pgxc_planner */
+        bool outer_is_stream = u_sess->opt_cxt.is_stream;
+        bool outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
+
         ce->plan = (Node*)ReBuildNonSmpPlanForCursorExpr(pstrdup(ce->raw_query_str));
+
+        u_sess->opt_cxt.is_stream = outer_is_stream;
+        u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     }
 
     return node;

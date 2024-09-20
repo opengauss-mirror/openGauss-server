@@ -234,6 +234,35 @@ where no_o_id not in ( with tmp as (select w_id from bmsql_warehouse where bmsql
 ( select count(*) from bmsql_item group by i_im_id,i_im_id having i_im_id like f1('0')
 ) tb2;
 
+set query_dop = 1002;
+create table store_sales(ss_quantity integer, ss_list_price decimal(7,2));
+create table item(i_brand_id integer);
+
+create table catalog_sales(cs_quantity integer, cs_list_price decimal(7,2));
+
+with avg_sales as
+ (select avg(quantity*list_price) average_sales
+  from (select ss_quantity quantity
+             ,ss_list_price list_price
+       from store_sales) x)
+
+select 'store' channel
+       from store_sales
+           ,item
+       group by i_brand_id
+       having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)
+union all
+       select 'catalog' channel
+       from catalog_sales
+           ,item
+       group by i_brand_id
+       having sum(cs_quantity*cs_list_price) > (select average_sales from avg_sales)
+  ;
+
+drop table store_sales;
+drop table item;
+drop table catalog_sales;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
