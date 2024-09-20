@@ -127,6 +127,9 @@ static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr);
 
 /* compressed Function */
 static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size);
+static bool SendUndoMeta(FILE *fp, struct stat *statbuf);
+const int undometaSize = UNDOSPACE_META_PAGE_SIZE + 2 * UNDOSPACE_SPACE_PAGE_SIZE;
+const int undometaRetryMax = 3;
 
 /*
  * save xlog location
@@ -2240,6 +2243,10 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
 
     /* send the pkg header containing msg like file size */
     _tarWriteHeader(tarfilename, NULL, statbuf);
+    char *fname = NULL;
+    if ((fname = strstr(readfilename, UNDO_META_FILE)) != NULL) {
+        return SendUndoMeta(fp, statbuf);
+    }
     
     /* Because pg_control file is shared in all instance when dss is enabled. Here pg_control of primary id
      * need to send to main standby in standby cluster, so we must seek a postion accoring to primary id.
@@ -2461,4 +2468,89 @@ static XLogRecPtr GetMinLogicalSlotLSN(void)
 void ut_save_xlogloc(const char *xloglocation)
 {
     save_xlogloc(xloglocation);
+}
+
+static bool SendUndoMeta(FILE *fp, struct stat *statbuf)
+{
+    Assert(fp != NULL);
+    Assert(statbuf != NULL);
+    if (statbuf->st_size != undometaSize) {
+        (void)FreeFile(fp);
+        ereport(ERROR, (errmsg("Undometa size[%d] error", statbuf->st_size)));
+    }
+    pgoff_t len = 0;
+    MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    char *undoMeta = (char *)palloc0(statbuf->st_size);
+    MemoryContextSwitchTo(oldcxt);
+    int retry = 0;
+    size_t cnt = 0;
+    errno_t rc = 0;
+    size_t pad;
+
+    fseek(fp, 0, SEEK_SET);
+    while ((cnt = fread(undoMeta, 1, statbuf->st_size, fp)) > 0) {
+        if (t_thrd.walsender_cxt.walsender_ready_to_stop) {
+            pfree(undoMeta);
+            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup receive stop message, aborting backup")));
+        }
+        if (cnt != (size_t)statbuf->st_size) {
+            if (ferror(fp)) {
+                pfree(undoMeta);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file undometa file")));
+            }
+        }
+        if (CheckUndoMetaBuf(undoMeta)) {
+            ereport(LOG, (errmsg("checkUndoMeta Success")));
+            break;
+        }
+        retry++;
+        fseek(fp, 0, SEEK_SET);
+        if (retry > undometaRetryMax) {
+            pfree(undoMeta);
+            (void)FreeFile(fp);
+            ereport(ERROR, (errmsg("Read undo meta error")));
+        }
+    }
+    while (len < statbuf->st_size) {
+        if (t_thrd.walsender_cxt.walsender_ready_to_stop) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup receive stop message, aborting backup")));
+        }
+        cnt = Min(TAR_SEND_SIZE, statbuf->st_size - len);
+
+        /* Send the chunk as a CopyData Message */
+        if (pq_putmessage_noblock('d', undoMeta + len, cnt)) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+        }
+        len += cnt;
+        if (len >= statbuf->st_size) {
+            /*
+             * Reached end of file. The file could be longer, if it was
+             * extended while we were sending it, but for a base backup we can
+             * ignore such extended data. It will be restored from WAL.
+             */
+            break;
+        }
+    }
+
+    /* If the file was truncated while we were sending it, pad it with zeros */
+    if (len < statbuf->st_size) {
+        rc = memset_s(t_thrd.basebackup_cxt.buf_block, TAR_SEND_SIZE, 0, TAR_SEND_SIZE);
+        securec_check(rc, "", "");
+        while (len < statbuf->st_size) {
+            cnt = Min(TAR_SEND_SIZE, statbuf->st_size - len);
+            (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, cnt);
+            len += cnt;
+        }
+    }
+
+    /* Pad to 512 byte boundary, per tar format requirements */
+    pad = ((len + 511) & ~511) - len;
+    if (pad > 0) {
+        rc = memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad);
+        securec_check(rc, "", "");
+        (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
+    }
+    pfree(undoMeta);
+    (void)FreeFile(fp);
+    return true;
 }
