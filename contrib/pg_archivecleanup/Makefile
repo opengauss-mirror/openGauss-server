@@ -14,5 +14,6 @@ else
 subdir = contrib/pg_archivecleanup
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
+override LDFLAGS += -Wl,-z,relro,-z,now
 include $(top_srcdir)/contrib/contrib-global.mk
 endif

@@ -6,7 +6,7 @@ EXTENSION = gms_output
 DATA = gms_output--1.0.sql
 
 exclude_option = -fPIE
-override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
+override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))
 
 REGRESS = gms_output
 

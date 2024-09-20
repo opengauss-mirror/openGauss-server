@@ -22,8 +22,8 @@ override CPPFLAGS := -I../include -I$(top_srcdir)/src/interfaces/ecpg/include \
 	-I$(libpq_srcdir) -I$(top_srcdir)/src/include/utils $(CPPFLAGS)
 override CFLAGS += $(PTHREAD_CFLAGS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector-strong
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector-strong
 
 SHLIB_LINK = -L../ecpglib -lecpg -L../pgtypeslib -lpgtypes $(libpq) \
 	$(filter -lintl -lm, $(LIBS)) $(PTHREAD_LIBS)
