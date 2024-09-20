@@ -191,6 +191,20 @@ typedef enum { AUDIT_UNKNOWN = 0, AUDIT_OK, AUDIT_FAILED } AuditResult;
 typedef enum { AUDIT_FUNC_QUERY = 0, AUDIT_FUNC_DELETE } AuditFuncType;
 typedef enum { STD_AUDIT_TYPE = 0, UNIFIED_AUDIT_TYPE } AuditClassType;
 
+typedef struct AuditShaRecord {
+    AuditType type;
+    AuditResult result;
+    char* userid;
+    const char* username;
+    const char* dbname;
+    char* clientInfo;
+    const char* objectName;
+    const char* detailInfo;
+    const char* nodename;
+    char* threadid;
+    char* localport;
+    char* remoteport;
+} AuditShaRecord;
 extern void audit_report(AuditType type, AuditResult result, const char* object_name, const char* detail_info, AuditClassType ctype = STD_AUDIT_TYPE);
 extern Datum pg_query_audit(PG_FUNCTION_ARGS);
 extern Datum pg_delete_audit(PG_FUNCTION_ARGS);
