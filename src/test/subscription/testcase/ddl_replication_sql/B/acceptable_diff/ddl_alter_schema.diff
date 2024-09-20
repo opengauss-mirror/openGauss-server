@@ -1,0 +1,17 @@
+28,37c28
+< -- Name: regtest_unpriv_user; Type: SCHEMA; Schema: -; Owner: regtest_unpriv_user
+< --
+< 
+< CREATE SCHEMA regtest_unpriv_user;
+< 
+< 
+< ALTER SCHEMA regtest_unpriv_user OWNER TO regtest_unpriv_user;
+< 
+< --
+< -- Name: test_sche1; Type: SCHEMA; Schema: -; Owner: regtest_unpriv_user
+---
+> -- Name: test_sche1; Type: SCHEMA; Schema: -; Owner: ddl_test_user
+44c35
+< ALTER SCHEMA test_sche1 OWNER TO regtest_unpriv_user;
+---
+> ALTER SCHEMA test_sche1 OWNER TO ddl_test_user;

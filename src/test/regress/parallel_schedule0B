@@ -50,7 +50,7 @@ test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
 test: hw_grant_all hw_dynamic_sql hw_func_return_out
-test: hw_package_function type_replace
+test: hw_package_function type_replace type_with_event_trigger
 
 #show plan
 #test: plan_hint
@@ -247,7 +247,7 @@ test: string_digit_to_numeric tablesample_3 tablesample_4
 # Another group of parallel tests
 # ----------
 #test: collate tablesample tablesample_1 tablesample_2 matview
-test: matview_single
+test: matview_single matview_with_event_trigger
 
 # ----------
 # Another group of parallel tests

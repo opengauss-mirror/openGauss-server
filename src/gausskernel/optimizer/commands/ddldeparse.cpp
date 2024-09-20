@@ -891,7 +891,7 @@ static ObjTree* deparse_AlterSchemaStmt(Oid objectId, Node *parsetree)
  * Verbose syntax
  * CREATE SCHEMA %{if_not_exists}s %{name}I %{authorization}s
 */
-static ObjTree* deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
+static ObjTree* deparse_CreateSchemaStmt(Oid objectId, Node *parsetree, bool *include_owner)
 {
     CreateSchemaStmt *node = (CreateSchemaStmt *) parsetree;
     ObjTree    *ret;
@@ -904,12 +904,14 @@ static ObjTree* deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
                          node->schemaname ? node->schemaname : "");
 
     auth = new_objtree("AUTHORIZATION");
-    if (node->authid)
+    if (node->authid) {
         append_string_object(auth, "%{authorization_role}I",
                              "authorization_role",
                              node->authid);
-    else
+        *include_owner =  false;
+    } else {
         append_not_present(auth, "%{authorization_role}I");
+    }
 
     append_object_object(ret, "%{authorization}s", auth);
 
@@ -927,7 +929,7 @@ static ObjTree* deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
  * If isgrant is true, then this function is called while deparsing GRANT
  * statement and some object names are replaced.
  */
-static const char* string_objtype(ObjectType objtype, bool isgrant)
+const char* string_objtype(ObjectType objtype, bool isgrant)
 {
     switch (objtype) {
         case OBJECT_COLUMN:
@@ -3658,7 +3660,7 @@ static ObjTree* deparse_simple_command(CollectedCommand *cmd, bool *include_owne
             return deparse_CreateFunction(objectId, parsetree);
 
         case T_CreateSchemaStmt:
-            return deparse_CreateSchemaStmt(objectId, parsetree);
+            return deparse_CreateSchemaStmt(objectId, parsetree, include_owner);
 
         case T_CreateSeqStmt:
             return deparse_CreateSeqStmt(objectId, parsetree);
@@ -3685,7 +3687,7 @@ static ObjTree* deparse_simple_command(CollectedCommand *cmd, bool *include_owne
                 return (ObjTree*)((deparseCollectedCommand)(u_sess->hook_cxt.deparseCollectedCommandHook))
                                   (DEPARSE_SIMPLE_COMMAND, cmd, NULL, NULL);
             }
-            elog(INFO, "unrecognized node type in deparse command: %d",
+            elog(LOG, "unrecognized node type in deparse command: %d",
                  (int) nodeTag(parsetree));
     }
 
