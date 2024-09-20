@@ -52,6 +52,7 @@ void SPSCBlockingQueueDestroy(SPSCBlockingQueue *queue);
 bool SPSCBlockingQueuePut(SPSCBlockingQueue *queue, void *element);
 void *SPSCBlockingQueueTake(SPSCBlockingQueue *queue);
 bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue *queue);
+bool SPSCBlockingQueueIsFull(SPSCBlockingQueue *queue);
 void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue);
 void SPSCBlockingQueuePop(SPSCBlockingQueue *queue);
 void DumpQueue(const SPSCBlockingQueue *queue);

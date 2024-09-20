@@ -2612,10 +2612,16 @@ void StartupSendFowarder(RedoItem *item)
     AddPageRedoItem(g_dispatcher->auxiliaryLine.ctrlThd, item);
 }
 
-void StartupSendMarkToBatchRedo(RedoItem *item)
+void StartupSendHashmapPruneMarkToBatchRedo()
 {
     for (uint32 i = 0; i < g_dispatcher->pageLineNum; ++i) {
-        AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
+        if (SPSCBlockingQueueIsFull(g_dispatcher->pageLines[i].batchThd->queue)) {
+            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                    errmsg("[On-demand]StartupSendHashmapPruneMarkToBatchRedo, "
+                           "pageline %d is full, don't send mark.", i)));
+            continue;
+        }
+        AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, &ondemand_extreme_rto::g_hashmapPruneMark);
     }
 }
 
