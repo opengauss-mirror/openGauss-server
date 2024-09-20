@@ -10798,6 +10798,16 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "CURSOR(%s)", stmt->raw_query_str);
         } break;
 
+        case T_TypeCast: {
+            TypeCast* tc = (TypeCast*) node;
+             if (showimplicit) {
+                get_coercion_expr(tc->arg, context, tc->typname->typeOid, -1, node);
+            } else {
+                /* don't show the implicit cast */
+                get_rule_expr_paren(tc->arg, context, false, node, no_alias);
+            }
+        } break;
+
 #ifdef USE_SPQ
         case T_DMLActionExpr:
             appendStringInfo(buf, "DMLAction");
