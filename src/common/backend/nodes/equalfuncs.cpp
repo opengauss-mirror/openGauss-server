@@ -1624,6 +1624,8 @@ static bool _equalAlterFunctionStmt(const AlterFunctionStmt* a, const AlterFunct
         COMPARE_SCALAR_FIELD(isProcedure);
     }
 
+    COMPARE_SCALAR_FIELD(noargs);
+
     return true;
 }
 
