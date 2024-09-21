@@ -225,7 +225,8 @@ void transformAggregateCall(ParseState* pstate, Aggref* agg, List* args, List* a
         * didn't find any local vars or aggs.
         */
         if (min_varlevel == 0) {
-            if (pstate->p_hasAggs && checkExprHasAggs((Node*)agg->args)) {
+            if (pstate->p_hasAggs &&
+                (checkExprHasAggs((Node*)agg->args) || checkExprHasAggs((Node*)agg->aggdirectargs))) {
                 ereport(ERROR,
                     (errcode(ERRCODE_GROUPING_ERROR),
                         errmsg("aggregate function calls cannot be nested"),

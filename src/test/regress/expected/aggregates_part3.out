@@ -579,6 +579,9 @@ GROUP BY c2,c3;
 ----+----+----+------------
 (0 rows)
 
+SELECT percentile_cont(sum(value)) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ERROR:  aggregate function calls cannot be nested
+CONTEXT:  referenced column: percentile_cont
 reset current_schema;
 drop schema if exists distribute_aggregates_part3 cascade;
 NOTICE:  drop cascades to 2 other objects
