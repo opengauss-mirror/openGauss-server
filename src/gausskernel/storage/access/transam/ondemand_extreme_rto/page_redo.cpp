@@ -4261,6 +4261,9 @@ void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
     stat->ondemandRecoveryStatus = g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status;
     stat->realtimeBuildStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status;
     stat->recoveryPauseStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status;
+    stat->recordItemNum = pg_atomic_read_u32(&g_dispatcher->curItemNum);
+    stat->recordItemMemUsed = stat->recordItemNum * sizeof(RedoItem) +
+        pg_atomic_read_u64(&g_dispatcher->curItemRecordBufMemSize);
 }
 
 void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg) {

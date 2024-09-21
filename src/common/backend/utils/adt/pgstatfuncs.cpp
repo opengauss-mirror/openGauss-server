@@ -97,7 +97,7 @@
 #define DISPLACEMENTS_VALUE 32
 #define MAX_DURATION_TIME 60
 #define DSS_IO_STAT_COLUMN_NUM 3
-#define ONDEMAND_RECOVERY_STAT_COLUMN_NUM 10
+#define ONDEMAND_RECOVERY_STAT_COLUMN_NUM 12
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -14777,6 +14777,8 @@ Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "ondemand_recovery_status", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "realtime_build_status", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "recovery_pause_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "record_item_num", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "record_item_mbytes", OIDOID, -1, 0);
 
     tupdesc = BlessTupleDesc(tupdesc);
 
@@ -14840,24 +14842,27 @@ Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
 
     switch (stat.recoveryPauseStatus) {
         case NOT_PAUSE:
-            values[i] = CStringGetTextDatum("NOT PAUSE");
+            values[i++] = CStringGetTextDatum("NOT PAUSE");
             break;
         case PAUSE_FOR_SYNC_REDO:
-            values[i] = CStringGetTextDatum("PAUSE(for sync record)");
+            values[i++] = CStringGetTextDatum("PAUSE(for sync record)");
             break;
         case PAUSE_FOR_PRUNE_HASHMAP:
-            values[i] = CStringGetTextDatum("PAUSE(for hashmap full)");
+            values[i++] = CStringGetTextDatum("PAUSE(for hashmap full)");
             break;
         case PAUSE_FOR_PRUNE_TRXN_QUEUE:
-            values[i] = CStringGetTextDatum("PAUSE(for trxn queue full)");
+            values[i++] = CStringGetTextDatum("PAUSE(for trxn queue full)");
             break;
         case PAUSE_FOR_PRUNE_SEG_QUEUE:
-            values[i] = CStringGetTextDatum("PAUSE(for seg queue full)");
+            values[i++] = CStringGetTextDatum("PAUSE(for seg queue full)");
             break;
         default:
             ereport(ERROR, (errmsg("Invalid recovery pause status.")));
             break;
     }
+    uint32 recordItemMemUsedInMB = stat.recordItemMemUsed / 1024 / 1024;
+    values[i++] = UInt32GetDatum(stat.recordItemNum);
+    values[i++] = UInt32GetDatum(recordItemMemUsedInMB);
 
     HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
     result = HeapTupleGetDatum(heap_tuple);
