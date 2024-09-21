@@ -361,10 +361,10 @@ typedef struct AuditData {
 #define WRITE_TO_STDAUDITFILE(ctype) (t_thrd.role == AUDITOR && ctype == STD_AUDIT_TYPE)
 #define WRITE_TO_UNIAUDITFILE(ctype) (t_thrd.role == AUDITOR && ctype == UNIFIED_AUDIT_TYPE)
 
-#define MAX_DATA_LEN 1024 /*sha data len*/
-#define SHA256_LENTH 32 /*sha length*/
-#define SHA256_HEX_LENTH 512 /*sha hex length*/
-#define SHA_LOG_MAX_TIMELEN 80 /*sha date length*/
+#define MAX_DATA_LEN 1024 /* sha data len */
+#define SHA256_LENTH 32 /* sha length */
+#define SHA256_HEX_LENTH 512 /* sha hex length */
+#define SHA_LOG_MAX_TIMELEN 128 /* sha date length */
 
 struct AuditEventInfo {
     AuditEventInfo() : userid{0}, 
@@ -470,11 +470,9 @@ static bool pgaudit_invalid_header(const AuditMsgHdr* header, bool newVersion);
 static void pgaudit_mark_corrupt_info(uint32 fnum);
 static void audit_append_xid_info(const char *detail_info, char *detail_info_xid, uint32 len);
 static bool audit_status_check_ok();
-/*audit sha code*/
+/* audit sha code */
 static bool pgaudit_need_sha_code();
-static void generate_audit_sha_code(pg_time_t time, const char* type, const char* result, char *userid, const char* username, const char* dbname, char* client_info, \
-    const char *object_name, const char *detail_info, const char* nodename, char* threadid, char* localport, \
-    char* remoteport, unsigned char* shacode);
+static void generateAuditShaCode(AuditShaRecord *shaRecord, char* hexbuf);
 static void init_audit_signal_handlers()
 {
     (void)gspqsignal(SIGHUP, sigHupHandler); /* set flag to read config file */
@@ -612,34 +610,54 @@ static bool pgaudit_need_sha_code()
  * the fileds are arraged as below sequence, Note it's not liable to modify them as to keep compatibility of version
  * time|type|result|userid|username|dbname|client_info|object_name|detail_info|nodename|threadid|localport|remoteport
  */
-static void generate_audit_sha_code(pg_time_t time, AuditType type, AuditResult result, char* userid, const char* username, const char* dbname, char* client_info,
-    const char* object_name, const char* detail_info, const char* nodename, char* threadid, char* localport,
-    char* remoteport, unsigned char* shacode)
+static void generateAuditShaCode(AuditShaRecord *shaRecord, char* hexbuf)
 {
-    char timeTzLocaltime[SHA_LOG_MAX_TIMELEN] = {0};
-    struct tm* system;
-    system = localtime(&time);
-    if (system != nullptr) {
-        (void)strftime(timeTzLocaltime, SHA_LOG_MAX_TIMELEN, "%Y-%m-%d_%H%M%S", system);
+    if (shaRecord == NULL) {
+        return;
     }
-    userid = (userid != NULL && userid[0] != '\0') ? userid : NULL;
-    username = (username != NULL && username[0] != '\0') ? username : NULL;
-    dbname = (dbname != NULL && dbname[0] != '\0') ? dbname : NULL;
-    client_info = (client_info != NULL && client_info[0] != '\0') ? client_info : NULL;
-    object_name = (object_name != NULL && object_name[0] != '\0') ? object_name : NULL;
-    detail_info = (detail_info != NULL && detail_info[0] != '\0') ? detail_info : NULL;
-    nodename = (nodename != NULL && nodename[0] != '\0') ? nodename : NULL;
-    threadid = (threadid != NULL && threadid[0] != '\0') ? threadid : NULL;
-    localport = (localport != NULL && localport[0] != '\0') ? localport : NULL;
-    remoteport = (remoteport != NULL && remoteport[0] != '\0') ? remoteport : NULL;
-    // TimestampTz timeTz = time_t_to_timestamptz(time);
-    StringInfoData str;
-    initStringInfo(&str);
-    appendStringInfo(&str, "%s | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s",
-         timeTzLocaltime, type, result, userid, username, dbname, client_info, object_name,
-         detail_info, nodename, threadid, localport, remoteport);
-    SHA256((const unsigned char*)str.data , str.len, shacode);
-    pfree_ext(str.data);
+    // unsigned char* shacode
+    unsigned char shacode[SHA256_LENTH + 1] = {0}; // unsigned char* shacode
+    size_t textLen;
+    int rc;
+    textLen = sizeof(AuditType) + 1 + sizeof(AuditResult) + 1
+    + (shaRecord->userid == NULL ? 0 : strlen(shaRecord->userid) + 1)
+    + (shaRecord->username == NULL ? 0 : strlen(shaRecord->username) + 1)
+    + (shaRecord->dbname == NULL ? 0: strlen(shaRecord->dbname) + 1)
+    + (shaRecord->clientInfo == NULL ? 0 : strlen(shaRecord->clientInfo) + 1)
+    + (shaRecord->objectName == NULL ? 0 : strlen(shaRecord->objectName) + 1)
+    + (shaRecord->detailInfo == NULL ? 0 : strlen(shaRecord->detailInfo) + 1)
+    + (shaRecord->nodename == NULL ? 0 : strlen(shaRecord->nodename) + 1)
+    + (shaRecord->threadid == NULL ? 0 : strlen(shaRecord->threadid) + 1)
+    + (shaRecord->localport == NULL ? 0 : strlen(shaRecord->localport) + 1)
+    + (shaRecord->remoteport == NULL ? 0 : strlen(shaRecord->remoteport) + 1);
+    char* text = NULL;
+    text = (char*)palloc(textLen);
+    if (text == NULL) {
+        return;
+    }
+    rc = snprintf_s(text,
+        textLen,
+        textLen-1,
+        "%d%d%s%s%s%s%s%s%s%s%s%s",
+        shaRecord->type,
+        shaRecord->result,
+        shaRecord->userid,
+        shaRecord->username,
+        shaRecord->dbname,
+        shaRecord->clientInfo,
+        shaRecord->objectName,
+        shaRecord->detailInfo,
+        shaRecord->nodename,
+        shaRecord->threadid,
+        shaRecord->localport,
+        shaRecord->remoteport);
+    securec_check_intval(rc, , );
+    /* sha code convert to hex */
+    if (text != NULL) {
+        SHA256((const unsigned char*)text, strlen((const char*)text), shacode);
+        sha_bytes_to_hex64((uint8*)shacode, hexbuf);
+        pfree(text);
+    }
     return;
 }
 
@@ -2064,6 +2082,7 @@ static bool audit_get_clientinfo(AuditType type, const char* object_name, AuditE
 void audit_report(AuditType type, AuditResult result, const char *object_name, const char *detail_info,
                   AuditClassType ctype)
 {
+    bool newVersion = false;
     /* check the process status to decide whether to report it */
     if (!audit_status_check_ok() || (detail_info == NULL)) {
         return;
@@ -2078,7 +2097,6 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     StringInfoData buf;
     AuditData adata;
     AuditEventInfo event_info;
-    unsigned char shacode[SHA256_HEX_LENTH] = {0};
     if (!audit_get_clientinfo(type, object_name, event_info)) {
         return; 
     }
@@ -2086,6 +2104,10 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     if (audit_check_client_blacklist(event_info.client_info)) {
         return;
     }
+    if (pgaudit_need_sha_code()) {
+        newVersion = true;
+    }
+
     char *userid = event_info.userid;
     const char* username = event_info.username;
     const char* dbname = event_info.dbname;
@@ -2107,7 +2129,7 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     adata.header.signature[0] = 'A';
     adata.header.signature[1] = 'U';
     adata.header.version = 0;
-    if (pgaudit_need_sha_code()) {
+    if (newVersion) {
         adata.header.fields = PGAUDIT_QUERY_COLS_NEW;
     } else {
         adata.header.fields = PGAUDIT_QUERY_COLS;
@@ -2117,15 +2139,24 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     adata.header.size = 0;
     adata.type = type;
     adata.result = result;
-    char hexbuf[SHA256_HEX_LENTH]={0};
-    /*type result format*/
-    if (pgaudit_need_sha_code()) {
-        /*sha code for audit*/
-        generate_audit_sha_code(adata.header.time / 1000, type, result, userid, username, dbname, client_info, object_name,
-            detail_info, g_instance.attr.attr_common.PGXCNodeName, threadid, localport,
-            remoteport, shacode);
-        /*sha code convert to hex*/
-        sha_bytes_to_hex64((uint8*)shacode, hexbuf);
+    char hexbuf[SHA256_LENTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
+    AuditShaRecord shaRecord;
+    /* type result format */
+    if (newVersion) {
+        /* sha code for audit */
+        shaRecord.type = type;
+        shaRecord.result = result;
+        shaRecord.userid = userid;
+        shaRecord.username = username;
+        shaRecord.dbname = dbname;
+        shaRecord.clientInfo = (client_info[0] != '\0') ? client_info : NULL;
+        shaRecord.objectName = object_name;
+        shaRecord.detailInfo = (!audit_xid_info) ? detail_info : detail_info_xid;
+        shaRecord.nodename = g_instance.attr.attr_common.PGXCNodeName;
+        shaRecord.threadid = (threadid[0] != '\0') ? threadid : NULL;
+        shaRecord.localport = (localport[0] != '\0') ? localport : NULL;
+        shaRecord.remoteport = (remoteport[0] != '\0') ? remoteport : NULL;
+        generateAuditShaCode(&shaRecord, hexbuf);
     }
     initStringInfo(&buf);
     appendBinaryStringInfo(&buf, (char*)&adata, AUDIT_HEADER_SIZE);
@@ -2141,8 +2172,8 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     appendStringField(&buf, (threadid[0] != '\0') ? threadid : NULL);
     appendStringField(&buf, (localport[0] != '\0') ? localport : NULL);
     appendStringField(&buf, (remoteport[0] != '\0') ? remoteport : NULL);
-    if (pgaudit_need_sha_code()) {
-        appendStringField(&buf, (shacode[0] != '\0') ? (const char*)hexbuf : NULL);
+    if (newVersion) {
+        appendStringField(&buf, (hexbuf[0] != '\0') ? (const char*)hexbuf : NULL);
     }
 
     /*
@@ -2163,7 +2194,11 @@ void audit_report(AuditType type, AuditResult result, const char *object_name, c
     if (detail_info_xid != NULL) {
         pfree(detail_info_xid);
     }
-    pfree(buf.data);
+    if (buf.len > 0) {
+        pfree(buf.data);
+    } else {
+        ereport(LOG, (errmsg("audit buf data empty")));
+    }
 }
 
 /* Brief        : close a file. */
@@ -2914,27 +2949,18 @@ static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
                                      bool nulls[PGAUDIT_QUERY_COLS_NEW],
                                      bool newVersion)
 {
-    /*sha param*/
-    char* userid = NULL;
-    const char* username =NULL;
-    const char* dbname = NULL;
-    char* client_info = NULL;
-    const char* object_name = NULL;
-    const char* detail_info =NULL;
-    const char* nodename = NULL;
-    char* threadid = NULL;
-    char* localport = NULL;
-    char* remoteport = NULL;
-    unsigned char shacode[SHA256_HEX_LENTH] = {0};
+    /* sha param */
+    AuditShaRecord shaRecord;
     const char* saved_hexbuf = NULL;
-    char hexbuf[SHA256_HEX_LENTH]={0};
+    char hexbuf[SHA256_LENTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
 
     /* append timestamp info to data tuple */
     int i = 0;
     values[i++] = TimestampTzGetDatum(time_t_to_timestamptz(adata->header.time));
     values[i++] = CStringGetTextDatum(AuditTypeDesc(adata->type));
     values[i++] = CStringGetTextDatum(AuditResultDesc(adata->result));
-    // values[i++] = CStringGetTextDatum((const char*)adata->shacode);
+    shaRecord.type = adata->type;
+    shaRecord.result = adata->result;
 
     /*
      * new format of the audit file under correct record
@@ -2945,45 +2971,43 @@ static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
 
     bool new_version = (header.fields == PGAUDIT_QUERY_COLS || header.fields == PGAUDIT_QUERY_COLS_NEW);
     field = new_version ? pgaudit_string_field(adata, index_field++) : NULL;
-    userid = (char*)field;
+    shaRecord.userid = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user id */
 
     field = pgaudit_string_field(adata, index_field++);
-    username = (const char*)field;
+    shaRecord.username = field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user name */
 
     field = pgaudit_string_field(adata, index_field++);
-    dbname = (const char*)field;
+    shaRecord.dbname = field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* dbname */
 
     field = pgaudit_string_field(adata, index_field++);
-    client_info = (char*)field;
+    shaRecord.clientInfo = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* client info */
 
     field = pgaudit_string_field(adata, index_field++);
-    if (field != NULL) {
-        object_name = (const char*)field;
-    }
+    shaRecord.objectName = field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* object name */
 
     field = pgaudit_string_field(adata, index_field++);
-    detail_info = (const char*)field;
+    shaRecord.detailInfo = field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* detail info */
 
     field = pgaudit_string_field(adata, index_field++);
-    nodename = (const char*)field;
+    shaRecord.nodename = field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* node name */
 
     field = pgaudit_string_field(adata, index_field++);
-    threadid = (char*)field;
+    shaRecord.threadid = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* thread id */
 
     field = pgaudit_string_field(adata, index_field++);
-    localport = (char*)field;
+    shaRecord.localport = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* local port */
 
     field = pgaudit_string_field(adata, index_field++);
-    remoteport = (char*)field;
+    shaRecord.remoteport = (char*)field;
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* remote port */
 
     if (header.fields == PGAUDIT_QUERY_COLS_NEW) {
@@ -2992,16 +3016,13 @@ static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS_NEW],
         field = NULL;
     }
     values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* sha_code hex data*/
-    if (pgaudit_need_sha_code()) {
+    if (newVersion) {
         saved_hexbuf = field;
         if (header.fields == PGAUDIT_QUERY_COLS_NEW) {
             if (saved_hexbuf != NULL && saved_hexbuf[0] != '\0') {
                 bool verifyResult = false;
-                /*sha code for audit*/
-                generate_audit_sha_code(adata->header.time, adata->type, adata->result, userid, username, dbname, client_info, object_name,
-                    detail_info, nodename, threadid, localport, remoteport, shacode);
-                /*sha code convert to hex*/
-                sha_bytes_to_hex64((uint8*)shacode, hexbuf);
+                /* sha code for audit */
+                generateAuditShaCode(&shaRecord, hexbuf);
                 if (strcmp((const char*)hexbuf, (const char*)saved_hexbuf) == 0) {
                     verifyResult = true;
                 }
