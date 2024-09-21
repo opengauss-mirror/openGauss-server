@@ -1410,6 +1410,7 @@ typedef struct AlterFunctionStmt {
     FuncWithArgs* func; /* name and args of function */
     List* actions;      /* list of DefElem */
     bool isProcedure = false;
+    bool noargs;        /* support alter function without args in dolphin */
 } AlterFunctionStmt;
 
 enum CompileEntry {

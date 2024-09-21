@@ -269,12 +269,14 @@ void StartRemoteStreaming(const LibpqrcvConnectParam *options)
 
     appendStringInfo(&cmd, " %X/%X", (uint32)(options->startpoint >> 32), (uint32)(options->startpoint));
     if (options->logical) {
+        char *pubnames_literal = NULL;
         appendStringInfoString(&cmd, " (");
         appendStringInfo(&cmd, "proto_version '%u'", options->protoVersion);
         char *pubnames_str =
             stringlist_to_identifierstr(t_thrd.libwalreceiver_cxt.streamConn, options->publicationNames);
-        appendStringInfo(&cmd, ", publication_names %s",
-            PQescapeLiteral(t_thrd.libwalreceiver_cxt.streamConn, pubnames_str, strlen(pubnames_str)));
+        pubnames_literal = PQescapeLiteral(t_thrd.libwalreceiver_cxt.streamConn, pubnames_str, strlen(pubnames_str));
+        appendStringInfo(&cmd, ", publication_names %s", pubnames_literal);
+        PQfreemem(pubnames_literal);
         pfree(pubnames_str);
 
         if (options->binary && PQserverVersion(t_thrd.libwalreceiver_cxt.streamConn) >= 90204) {
@@ -1311,6 +1313,11 @@ void libpqrcv_disconnect(void)
 {
     PQfinish(t_thrd.libwalreceiver_cxt.streamConn);
     t_thrd.libwalreceiver_cxt.streamConn = NULL;
+
+    if (t_thrd.libwalreceiver_cxt.recvBuf != NULL) {
+        PQfreemem(t_thrd.libwalreceiver_cxt.recvBuf);
+        t_thrd.libwalreceiver_cxt.recvBuf = NULL;
+    }
 }
 
 /*
@@ -1709,13 +1716,20 @@ static char *stringlist_to_identifierstr(PGconn *conn, List *strings)
 
     foreach (lc, strings) {
         char *val = strVal(lfirst(lc));
+        char *val_escaped = NULL;
 
         if (first) {
             first = false;
         } else {
             appendStringInfoChar(&res, ',');
         }
-        appendStringInfoString(&res, PQescapeIdentifier(conn, val, strlen(val)));
+        val_escaped = PQescapeIdentifier(conn, val, strlen(val));
+        if (!val_escaped) {
+            free(res.data);
+            return NULL;
+        }
+        appendStringInfoString(&res, val_escaped);
+        PQfreemem(val_escaped);
     }
 
     return res.data;

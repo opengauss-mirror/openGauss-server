@@ -5694,6 +5694,8 @@ static AlterFunctionStmt* _copyAlterFunctionStmt(const AlterFunctionStmt* from)
         COPY_SCALAR_FIELD(isProcedure);
     }
 
+    COPY_SCALAR_FIELD(noargs);
+
     return newnode;
 }
 
