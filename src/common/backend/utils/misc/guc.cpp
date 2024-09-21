@@ -2131,6 +2131,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_dump_trigger_definer",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enable dump trigger definer"),
+            NULL},
+            &u_sess->attr.attr_common.enable_dump_trigger_definer,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
