@@ -1,0 +1,29 @@
+create database src;
+create database dest;
+create user testuser password 'Aa@123456';
+ALTER DATABASE src OWNER TO testuser;
+GRANT ALL PRIVILEGES ON DATABASE src to testuser;
+ALTER DATABASE dest OWNER TO testuser;
+GRANT ALL PRIVILEGES ON DATABASE dest to testuser;
+\c src
+ALTER SESSION SET SESSION AUTHORIZATION testuser PASSWORD 'Aa@123456';
+create schema testuser;
+SET search_path = testuser;
+CREATE TABLE test_tri (
+    id integer,
+    salary integer
+);
+CREATE FUNCTION t_test_tri_inlinefunc() RETURNS trigger
+    LANGUAGE plpgsql NOT SHIPPABLE SECURITY DEFINER
+ AS $$ DECLARE begin
+raise info 'DML on table test_tri!';
+ return NEW;end$$;
+CREATE TRIGGER t BEFORE INSERT OR DELETE OR UPDATE OF salary, id ON testuser.test_tri FOR EACH STATEMENT EXECUTE PROCEDURE testuser.t_test_tri_inlinefunc();
+select tgname, tgisinternal, pg_get_userbyid(tgowner) AS owner FROM pg_trigger;
+\! @abs_bindir@/gs_dump src -p @portstring@ -f @abs_bindir@/sss.sql >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gsql -p @portstring@ -d dest -f @abs_bindir@/sss.sql >/dev/null 2>&1; echo $?
+\c dest
+select tgname, tgisinternal, pg_get_userbyid(tgowner) AS owner FROM pg_trigger;
+\c postgres
+drop database src;
+drop database dest;

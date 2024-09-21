@@ -2844,6 +2844,8 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
     if (findDBCompatibility(&AH->publicArc, PQdb(GetConnection(&AH->publicArc))) && hasSpecificExtension(&AH->publicArc, "dolphin"))
         (void)ahprintf(AH, "SET dolphin.sql_mode = 'sql_mode_full_group,pipes_as_concat,ansi_quotes,pad_char_to_full_length';\n");
 
+    (void)ahprintf(AH, "SET enable_dump_trigger_definer = on;\n");
+
     (void)ahprintf(AH, "\n");
 }
 

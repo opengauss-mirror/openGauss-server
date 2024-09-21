@@ -116,6 +116,7 @@ select usename from pg_user where  usesysid = (select proowner from pg_proc wher
 --? .*
 --? .*
 --? .*
+--? .*
 \c mysqltestbak
 \sf proc_definer1
 CREATE DEFINER = testusr1 PROCEDURE public.proc_definer1()

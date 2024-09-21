@@ -262,7 +262,7 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         }
     }
 
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT || u_sess->attr.attr_common.enable_dump_trigger_definer) {
         Oid curuser = GetUserId();
         if (stmt->definer) {
             HeapTuple roletuple = SearchUserHostName(stmt->definer, NULL);
@@ -823,7 +823,7 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         nulls[Anum_pg_trigger_tgqual - 1] = true;
 
     /* set trigger owner */
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT || u_sess->attr.attr_common.enable_dump_trigger_definer) {
         tg_owner = proownerid;
     }
     else {
