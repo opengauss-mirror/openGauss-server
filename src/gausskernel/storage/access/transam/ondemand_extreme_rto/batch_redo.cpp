@@ -118,7 +118,7 @@ ondemand_htab_ctrl_t *PRRedoItemHashInitialize(MemoryContext context)
     ctl.hash = RedoItemTagHash;
     ctl.match = RedoItemTagMatch;
     htab_ctrl->hTab = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
-                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE | HASH_SHRCTX);
     htab_ctrl->nextHTabCtrl = NULL;
     htab_ctrl->maxRedoItemPtr = InvalidXLogRecPtr;
 
