@@ -149,6 +149,7 @@ typedef struct {
     uint64 pprCostTime;
     uint32 maxItemNum;
     uint32 curItemNum;
+    uint64 curItemRecordBufMemSize;
 
     uint32 syncEnterCount;
     uint32 syncExitCount;
@@ -203,6 +204,7 @@ extern THR_LOCAL RecordBufferState *g_recordbuffer;
 
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
+static const uint32 ONDEMAND_RECORD_BUFFER_ALLOC_STEP = 512;
 extern RedoItem g_redoEndMark;
 extern RedoItem g_terminateMark;
 extern uint32 g_readManagerTriggerFlag;

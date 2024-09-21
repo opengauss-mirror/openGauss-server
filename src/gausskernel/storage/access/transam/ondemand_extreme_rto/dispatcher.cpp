@@ -1742,6 +1742,13 @@ void FreeRedoItem(RedoItem *item)
         CountXLogNumbers(&item->record);
     }
     ClearRecordInfo(&item->record);
+    // for less memory in ondemand realtime build
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL && item->record.readRecordBufSize > ONDEMAND_RECORD_BUFFER_ALLOC_STEP) {
+        pfree(item->record.readRecordBuf);
+        pg_atomic_sub_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, item->record.readRecordBufSize);
+        item->record.readRecordBuf = NULL;
+        item->record.readRecordBufSize = 0;
+    }
     pg_write_barrier();
     RedoItem *oldHead = (RedoItem *)pg_atomic_read_uintptr((uintptr_t *)&g_dispatcher->freeHead);
     do {

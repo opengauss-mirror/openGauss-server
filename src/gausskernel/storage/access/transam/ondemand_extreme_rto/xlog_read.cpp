@@ -403,17 +403,17 @@ err:
 bool ondemand_allocate_recordbuf(XLogReaderState *state, uint32 reclength)
 {
     uint32 newSize = reclength;
-    const uint32 recordBufferAllocStep = 512;
 
     if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        newSize += recordBufferAllocStep - (newSize % recordBufferAllocStep);
+        newSize += ONDEMAND_RECORD_BUFFER_ALLOC_STEP - (newSize % ONDEMAND_RECORD_BUFFER_ALLOC_STEP);
     } else {
         newSize += XLOG_BLCKSZ - (newSize % XLOG_BLCKSZ);
     }
-    newSize = Max(newSize, recordBufferAllocStep);
+    newSize = Max(newSize, ONDEMAND_RECORD_BUFFER_ALLOC_STEP);
 
     if (state->readRecordBuf != NULL) {
         pfree(state->readRecordBuf);
+        pg_atomic_sub_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, state->readRecordBufSize);
         state->readRecordBuf = NULL;
     }
     state->readRecordBuf = (char *)palloc_extended(newSize, MCXT_ALLOC_NO_OOM);
@@ -423,6 +423,7 @@ bool ondemand_allocate_recordbuf(XLogReaderState *state, uint32 reclength)
     }
 
     state->readRecordBufSize = newSize;
+    pg_atomic_add_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, newSize);
     return true;
 }
 
