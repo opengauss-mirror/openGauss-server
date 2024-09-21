@@ -832,3 +832,109 @@ void ResetUndoZoneLock()
 }
 
 } // namespace undo
+
+bool CheckUndoZone(char *undoMeta)
+{
+    Assert(undoMeta != NULL);
+    uint32 zoneId = 0;
+    char *persistblock = undoMeta;
+    char *uspMetaBuffer = NULL;
+    pg_crc32 pageCrcVal = 0; /* CRC store in undo meta page */
+    pg_crc32 comCrcVal = 0;  /* calculating CRC current */
+    for (zoneId = 0; zoneId < PERSIST_ZONE_COUNT; zoneId++) {
+        if (zoneId % (UNDOZONE_COUNT_PER_PAGE * PAGES_READ_NUM) == 0) {
+            if (zoneId / (UNDOZONE_COUNT_PER_PAGE * PAGES_READ_NUM) > 0) {
+                persistblock = persistblock + UNDO_META_PAGE_SIZE * PAGES_READ_NUM;
+            }
+        }
+        if (zoneId % UNDOZONE_COUNT_PER_PAGE == 0) {
+            uspMetaBuffer =
+                persistblock +
+                ((zoneId % (UNDOZONE_COUNT_PER_PAGE * PAGES_READ_NUM)) / UNDOZONE_COUNT_PER_PAGE) * UNDO_META_PAGE_SIZE;
+            uint32 count = UNDOZONE_COUNT_PER_PAGE;
+            if ((uint32)(PERSIST_ZONE_COUNT - zoneId) < UNDOZONE_COUNT_PER_PAGE) {
+                count = PERSIST_ZONE_COUNT - zoneId;
+            }
+            /* Get page CRC from uspMetaBuffer. */
+            pageCrcVal = *(pg_crc32 *)(uspMetaBuffer + sizeof(undo::UndoZoneMetaInfo) * count);
+            /*
+             * Calculate the CRC value based on all undospace meta information stored on the page.
+             * Then compare with pageCrcVal.
+             */
+            INIT_CRC32C(comCrcVal);
+            COMP_CRC32C(comCrcVal, (void *)uspMetaBuffer, sizeof(undo::UndoZoneMetaInfo) * count);
+            FIN_CRC32C(comCrcVal);
+            if (!EQ_CRC32C(pageCrcVal, comCrcVal)) {
+                ereport(
+                    ERROR,
+                    (errmsg(UNDOFORMAT(
+                                "Undo meta zoneid(%d) CRC calculated(%u) is different from CRC recorded(%u) in page."),
+                            zoneId, comCrcVal, pageCrcVal)));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool CheckUndoSpace(char *undoMeta, UndoSpaceType type)
+{
+    Assert(undoMeta != NULL);
+    uint32 zoneId = 0;
+    uint32 totalPageCnt = 0;
+    char *persistblock = NULL;
+    uint32 seek = 0;
+    char *uspMetaBuffer = NULL;
+    pg_crc32 pageCrcVal = 0; /* CRC store in undo meta page */
+    pg_crc32 comCrcVal = 0; /* calculating CRC current */
+    if (type == UNDO_LOG_SPACE) {
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        seek = totalPageCnt * UNDO_META_PAGE_SIZE;
+    } else {
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        seek = totalPageCnt * UNDO_META_PAGE_SIZE;
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
+        seek += totalPageCnt * UNDO_META_PAGE_SIZE;
+    }
+    persistblock = undoMeta + seek;
+
+    for (zoneId = 0; zoneId < PERSIST_ZONE_COUNT; zoneId++) {
+        if (zoneId % (UNDOSPACE_COUNT_PER_PAGE * PAGES_READ_NUM) == 0) {
+            if (zoneId / (UNDOZONE_COUNT_PER_PAGE * PAGES_READ_NUM) > 0) {
+                persistblock = persistblock + UNDO_META_PAGE_SIZE * PAGES_READ_NUM;
+            }
+        }
+        if (zoneId % UNDOSPACE_COUNT_PER_PAGE == 0) {
+            uspMetaBuffer =
+                persistblock + ((zoneId % (UNDOSPACE_COUNT_PER_PAGE * PAGES_READ_NUM)) / UNDOSPACE_COUNT_PER_PAGE) *
+                                   UNDO_META_PAGE_SIZE;
+            uint32 count = UNDOSPACE_COUNT_PER_PAGE;
+            if ((uint32)(PERSIST_ZONE_COUNT - zoneId) < UNDOSPACE_COUNT_PER_PAGE) {
+                count = PERSIST_ZONE_COUNT - zoneId;
+            }
+            /* Get page CRC from uspMetaBuffer. */
+            pageCrcVal = *(pg_crc32 *)(uspMetaBuffer + sizeof(undo::UndoSpaceMetaInfo) * count);
+            /* 
+             * Calculate the CRC value based on all undospace meta information stored on the page. 
+             * Then compare with pageCrcVal.
+             */
+            INIT_CRC32C(comCrcVal);
+            COMP_CRC32C(comCrcVal, (void *)uspMetaBuffer, sizeof(undo::UndoSpaceMetaInfo) * count);
+            FIN_CRC32C(comCrcVal);
+            if (!EQ_CRC32C(pageCrcVal, comCrcVal)) {
+                ereport(ERROR,
+                    (errmsg(UNDOFORMAT("Undo meta space type(%d) zonid(%d) CRC calculated(%u) is different from CRC recorded(%u) in page."),
+                        type, zoneId, comCrcVal, pageCrcVal)));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool CheckUndoMetaBuf(char *undoMeta)
+{
+    Assert(undoMeta != NULL);
+    return CheckUndoZone(undoMeta) && CheckUndoSpace(undoMeta, UNDO_LOG_SPACE) &&
+           CheckUndoSpace(undoMeta, UNDO_SLOT_SPACE);
+}
