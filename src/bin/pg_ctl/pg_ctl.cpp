@@ -1913,8 +1913,7 @@ static void do_stop(bool force)
         print_msg(_("waiting for server to shut down..."));
 
         for (cnt = 0; cnt < wait_seconds; cnt++) {
-            if (((pid = get_pgpid()) != 0) ||
-                (postmaster_is_alive((pid_t)tpid) && IsMyPostmasterPid((pid_t)tpid, pg_config))) {
+            if (postmaster_is_alive((pid_t)tpid) && IsMyPostmasterPid((pid_t)tpid, pg_config)) {
                 print_msg(".");
                 pg_usleep(1000000); /* 1 sec */
             } else
