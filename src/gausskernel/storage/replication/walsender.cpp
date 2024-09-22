@@ -5438,7 +5438,39 @@ static void XLogSendPhysical(char* xlogPath)
     XLByteAdvance(endptr, g_instance.attr.attr_storage.MaxSendSize * 1024);
 
     /* if we went beyond SendRqstPtr, back off */
-    if (XLByteLE(SendRqstPtr, endptr)) {
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        if (t_thrd.xlog_cxt.uwalInfo.info.dataSize == 0) {
+            if (0 != GsUwalQueryByUser(t_thrd.xlog_cxt.ThisTimeLineID, false)) {
+                ereport(PANIC, (errcode_for_file_access(), errmsg("uwal query by user failed")));
+            }
+        } else {
+            if (0 != GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
+                return;
+            }
+        }
+        if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+            if (XLByteLE(t_thrd.xlog_cxt.uwalInfo.info.truncateOffset, startptr) || XLByteLE(SendRqstPtr, endptr)) {
+                endptr = SendRqstPtr;
+                t_thrd.walsender_cxt.walSndCaughtUp = true;
+                return;
+            } else {
+                endptr -= (endptr % XLOG_BLCKSZ);
+                t_thrd.walsender_cxt.walSndCaughtUp = false;
+                t_thrd.walsender_cxt.catchup_threshold = XLByteDifference(SendRqstPtr, endptr);
+            }
+        } else {
+            if (XLByteLE(SendRqstPtr, endptr)) {
+                endptr = SendRqstPtr;
+                t_thrd.walsender_cxt.walSndCaughtUp = true;
+            } else {
+                /* round down to page boundary. */
+                endptr -= (endptr % XLOG_BLCKSZ);
+                t_thrd.walsender_cxt.walSndCaughtUp = false;
+                t_thrd.walsender_cxt.catchup_threshold = XLByteDifference(SendRqstPtr, endptr);
+            }
+        }
+    } else if (XLByteLE(SendRqstPtr, endptr)) {
         endptr = SendRqstPtr;
         t_thrd.walsender_cxt.walSndCaughtUp = true;
     } else {
