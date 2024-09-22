@@ -117,5 +117,7 @@ SELECT
 FROM sales_transaction_line 
 GROUP BY c2,c3;
 
+SELECT percentile_cont(sum(value)) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+
 reset current_schema;
 drop schema if exists distribute_aggregates_part3 cascade;
