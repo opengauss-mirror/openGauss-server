@@ -7971,6 +7971,58 @@ Datum numtodsinterval(PG_FUNCTION_ARGS)
     CHECK_RETNULL_RETURN_DATUM(result);
 }
 
+/* Convert binary array to number*/
+Datum bin_to_num(PG_FUNCTION_ARGS)
+{
+    int i;
+    Numeric arg;
+    double argD;
+    int32 argI;
+    Datum result = DirectFunctionCall1(int4_numeric, Int32GetDatum(0));
+
+    ArrayType* arr = PG_GETARG_ARRAYTYPE_P(0);
+    Datum *elemValues;
+    bool *elemNulls;
+    int elemCount;
+    deconstruct_array(arr, NUMERICOID, -1, false, 'i', &elemValues, &elemNulls, &elemCount);
+
+    for (i = 0; i < elemCount; i++) {
+        if (elemNulls[i]) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("illegal argument for function")));   
+        }
+        arg = DatumGetNumeric(elemValues[i]);
+        argD = numeric_to_double_no_overflow(arg);        
+        if (argD > INT32_MAX) {
+            argI = INT32_MAX;
+        } else if (argD < INT32_MIN) {
+            argI = INT32_MIN;
+        } else {
+            argI = (argD < 0) ? ceil(argD) : floor(argD);
+        }
+        
+        if (argI == 0) {
+            result = DirectFunctionCall2(numeric_add, result, result);
+        } else if (argI == 1) {
+            result = DirectFunctionCall2(numeric_add, result, result);
+            result = DirectFunctionCall1(numeric_inc, result);
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("argument %d is out of range", argI)));    
+        }
+    }
+
+    PG_RETURN_DATUM(result);
+}
+
+/* Convert binary array to number*/
+Datum bin_to_num_noparam(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_NUMERIC(make_result(&const_zero));
+}
+
 /* Convert numeric to interval */
 Datum numeric_interval(PG_FUNCTION_ARGS)
 {

@@ -197,6 +197,8 @@ extern bool numeric_is_nan(Numeric num);
 int32 numeric_maximum_size(int32 typmod);
 extern char* numeric_out_sci(Numeric num, int scale);
 extern Datum numtodsinterval(PG_FUNCTION_ARGS);
+extern Datum bin_to_num(PG_FUNCTION_ARGS);
+extern Datum bin_to_num_noparam(PG_FUNCTION_ARGS);
 extern int cmp_numerics(Numeric num1, Numeric num2);
 extern int128 numeric_int16_internal(Numeric num);
 extern char* output_numeric_out(Numeric num);

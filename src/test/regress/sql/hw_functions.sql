@@ -178,6 +178,37 @@ drop table type;
 drop table varlentype;
 drop table time;
 
+-- test function bin_to_num
+select bin_to_num(1,0,0);
+select bin_to_num('1',0,0);
+select bin_to_num('1',2-1,0);
+select bin_to_num(NULL);
+select bin_to_num();
+select bin_to_num('a','b');
+select bin_to_num(-2.9);
+select bin_to_num(-2.1);
+select bin_to_num(-2.0);
+select bin_to_num(-1.9);
+select bin_to_num(-1.1);
+select bin_to_num(-1.0);
+select bin_to_num(-0.9);
+select bin_to_num(-0.1);
+select bin_to_num(-0.0);
+select bin_to_num(0.0);
+select bin_to_num(0.1);
+select bin_to_num(0.9);
+select bin_to_num(1.0);
+select bin_to_num(1.1);
+select bin_to_num(1.4);
+select bin_to_num(1.5);
+select bin_to_num(1.6);
+select bin_to_num(1.9);
+select bin_to_num(2.0);
+select bin_to_num(2.1);
+select bin_to_num(2.9);
+select bin_to_num(9999999999000);
+select bin_to_num(-9999999999000);
+
 -- tests for repeat
 -- create table at first
 create table test_null_repeat(id int, col2 text); 
