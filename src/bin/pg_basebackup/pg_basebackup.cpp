@@ -1649,15 +1649,17 @@ static void backup_dw_file(const char *target_dir)
 
 int main(int argc, char **argv)
 {
-    progname = get_progname(argv[0]);
-    if (!strcmp(progname, "gs_basebackup")) {
+    const char* tempProgname = get_progname(argv[0]);
+    if (!strcmp(tempProgname, "gs_basebackup")) {
         init_audit(PROG_NAME_BACKUP, argc, argv);
+        GS_FREE(tempProgname);
         return GsBaseBackup(argc, argv);
-    } else if (!strcmp(progname, "gs_tar")) {
+    } else if (!strcmp(tempProgname, "gs_tar")) {
+        GS_FREE(tempProgname);
         return GsTar(argc, argv);
     } else {
-        fprintf(stderr, _("unsupported progname: %s"), progname);
-        GS_FREE(progname);
+        fprintf(stderr, _("unsupported progname: %s"), tempProgname);
+        GS_FREE(tempProgname);
         return 0;
     }
 }
@@ -1717,7 +1719,6 @@ static int GsTar(int argc, char** argv)
     int c;
     int option_index;
     char* tarfilename = NULL;
-    GS_FREE(progname);
     progname = "gs_tar";
     GsTarHelp(argc, argv);
 
@@ -1765,9 +1766,11 @@ static int GsTar(int argc, char** argv)
     securec_check_c(errorno, "\0", "\0");
     tarfile = fopen(tarfilename, "rb");
     if (tarfile == NULL) {
-        fprintf(stderr, _("WARNING: %s not found!\n"), filename);
+        fprintf(stderr, _("WARNING: %s not found!\n"), tarfilename);
+        GS_FREE(tarfilename);
         exit(1);
     }
+    GS_FREE(tarfilename);
     while (true) {
         size_t r;
 
@@ -2009,7 +2012,6 @@ static int GsBaseBackup(int argc, char** argv)
                                            {"progress", no_argument, NULL, 'P'},
                                            {NULL, 0, NULL, 0}};
     int c = 0, option_index = 0;
-    GS_FREE(progname);
     progname = "gs_basebackup";
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_basebackup"));
 
