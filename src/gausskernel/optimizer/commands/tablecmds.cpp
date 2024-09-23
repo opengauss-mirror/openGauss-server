@@ -1284,6 +1284,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
                         errmsg("There is a conflict caused by storage_type and orientation")));
     }
+
     bool noSupportTable = segment || isCStore || isTsStore || relkind != RELKIND_RELATION ||
                           stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
                           stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
@@ -19701,6 +19702,18 @@ bool static transformCompressedOptions(Relation rel, bytea* relOption, List* def
     /* If delist doesn't contains compressed options, return false. */
     if (!relOption || defList == NULL || !CheckDefListContainsCompressedOptions(defList)) {
         return false;
+    }
+
+    if (g_instance.attr.attr_common.support_extended_features) {
+        ereport(WARNING,
+               (errmsg("The compressed relation you are using is an unofficial supported extended feature."))
+	);
+    } else {
+        ereport(ERROR,
+               (errmsg("The compressed relation you are trying to create or alter "
+                       "is an unofficial supported extended feature."),
+                errhint("Turn on GUC 'support_extended_features' to enable it."))
+        );
     }
 
     /* If the relkind doesn't support compressed options, check if delist contains compressed options.
