@@ -412,7 +412,13 @@ pgFileFree(void *file)
     file_ptr = (pgFile *) file;
 
     pfree(file_ptr->linked);
-    pfree(file_ptr->rel_path);
+
+    if (file_ptr->rel_path != NULL) {
+        pfree(file_ptr->rel_path);
+
+    } else if (file_ptr->name != NULL) {
+        pfree(file_ptr->name);
+    }
 
     pfree(file);
 }
