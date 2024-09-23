@@ -541,6 +541,7 @@ KmUnStr kms_mk_decrypt(KeyMgr *kmgr, KeyInfo info, KmUnStr cipher)
     LocalKmsMgr *kms = (LocalKmsMgr *)(void *)kmgr;
     CmkemErrCode ret = CMKEM_UNKNOWN_ERR;
     KmUnStr plain = {0};
+    errno_t rc = EOK;
 
     CmkemUStr _cipher = {cipher.val, cipher.len};
     CmkemUStr *_plain = NULL;
@@ -562,8 +563,17 @@ KmUnStr kms_mk_decrypt(KeyMgr *kmgr, KeyInfo info, KmUnStr cipher)
         return plain;
     }
 
-    plain.val = _plain->ustr_val;
+    size_t ustrLen = _cipher.ustr_len * 2;
+    plain.val = (unsigned char *)km_alloc_zero(ustrLen);
+    if (plain.val == NULL) {
+        km_safe_free(_plain);
+        km_err_msg(kms->kmgr.err, "%s", get_cmkem_errmsg(CMKEM_MALLOC_MEM_ERR));
+        return plain;
+    }
+    rc = memcpy_s(plain.val, ustrLen, _plain->ustr_val, ustrLen);
+    km_securec_check(rc, "\0", "\0");
     plain.len = _plain->ustr_len;
+    free_cmkem_ustr_with_erase(_plain);
     return plain;
 }
 
