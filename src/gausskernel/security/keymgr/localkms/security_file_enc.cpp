@@ -219,7 +219,7 @@ CmkemErrCode encrypt_and_write_key(const char *key_file_path, CmkemUStr *key_pla
     unsigned char salt[KEY_METERIAL_LEN] = {0};
     unsigned char iv_salt_buf[sizeof(iv) + sizeof(salt)] = {0};
     unsigned char derived_key[DRIVED_KEY_LEN] = {0};
-    unsigned char tmp_cipher[RSA2048_KEN_LEN] = {0};
+    unsigned char tmp_cipher[RSA3072_KEN_LEN] = {0};
     int tmp_cipher_len = 0;
     char rand_file_path[PATH_MAX] = {0};
     errno_t rc = 0;
