@@ -567,6 +567,8 @@ typedef struct knl_u_utils_context {
 
     char** save_argv;
 
+    unsigned int restrict_nonsystem_relation_kind_flags;
+
     /* Hash table to lookup combo cids by cmin and cmax */
     HTAB* comboHash;
 

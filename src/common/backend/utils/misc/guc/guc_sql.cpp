@@ -195,6 +195,8 @@ static void assign_sql_ignore_strategy(const char* newval, void* extra);
 static void strategy_assign_vector_targetlist(int newval, void* extra);
 static bool check_disable_keyword_options(char **newval, void **extra, GucSource source);
 static void assign_disable_keyword_options(const char *newval, void *extra);
+static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source);
+static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -358,10 +360,6 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"enable_multi_charset", B_FORMAT_OPT_ENABLE_MULTI_CHARSET}
 };
 
-typedef struct behavior_compat_entry {
-    const char* name; /* name of behavior compat entry */
-    int64 flag;         /* bit flag position */
-} behavior_compat_entry;
 
 static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"display_leading_zero", OPT_DISPLAY_LEADING_ZERO},
@@ -2971,6 +2969,18 @@ static void InitSqlConfigureNamesString()
             check_errcode_list,
             NULL,
             NULL},
+        {{"restrict_nonsystem_relation_kind",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Configure restrict_nonsystem_relation_kind."),
+            NULL,
+            GUC_LIST_INPUT | GUC_NOT_IN_SAMPLE},
+            &u_sess->attr.attr_sql.restrict_nonsystem_relation_kind_string,
+            "",
+            check_restrict_nonsystem_relation_kind,
+            assign_restrict_nonsystem_relation_kind,
+            NULL},
         {{"ustore_attr",
             PGC_USERSET,
             NODE_ALL,
@@ -4437,4 +4447,77 @@ static void strategy_assign_vector_targetlist(int newval, void* extra)
     }
 
     return;
+}
+
+static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source)
+{
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    ListCell* cell = NULL;
+    int start = 0;
+
+    /* Need a modifiable copy of string */
+    rawstring = pstrdup(*newval);
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        GUC_check_errdetail("invalid paramater for restrict_nonsystem_relation_kind.");
+        pfree(rawstring);
+        list_free(elemlist);
+
+        return false;
+    }
+
+    foreach (cell, elemlist) {
+        const char* item = (const char*)lfirst(cell);
+        bool nfound = true;
+
+        for (start = 0; start < OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_MAX; start++) {
+            if (strcmp(item, restrict_nonsystem_relation_kind[start].name) == 0) {
+                nfound = false;
+                break;
+            }
+        }
+        
+        if (nfound) {
+            GUC_check_errdetail("invalid restrict_nonsystem_relation_kind option \"%s\"", item);
+            pfree(rawstring);
+            list_free(elemlist);
+            return false;
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    return true;
+}
+
+static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra)
+{
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    ListCell* cell = NULL;
+    int start = 0;
+    int result = 0;
+
+    rawstring = pstrdup(newval);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+
+    u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags = 0;
+    foreach (cell, elemlist) {
+        char* item = static_cast<char*>(lfirst(cell));
+        for (start = 0; start < OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_MAX; start++) {
+            if (strcmp(item, restrict_nonsystem_relation_kind[start].name) == 0 &&
+                !(result & restrict_nonsystem_relation_kind[start].flag)) {
+                result += restrict_nonsystem_relation_kind[start].flag;
+                break;
+                }
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags = result;
 }

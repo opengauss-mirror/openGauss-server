@@ -14,6 +14,11 @@
 #ifndef GUC_SQL_H
 #define GUC_SQL_H
 
+typedef struct behavior_compat_entry {
+    const char* name; /* name of behavior compat entry */
+    int64 flag;         /* bit flag position */
+} behavior_compat_entry;
+
 extern void InitSqlConfigureNames();
 
 #endif /* GUC_SQL_H */

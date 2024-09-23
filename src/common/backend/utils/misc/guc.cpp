@@ -445,7 +445,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_note",
     "max_error_count",
     "enable_expr_fusion",
-    "heap_bulk_read_size"
+    "heap_bulk_read_size",
+    "restrict_nonsystem_relation_kind"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);

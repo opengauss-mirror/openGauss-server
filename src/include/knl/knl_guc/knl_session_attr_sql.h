@@ -201,6 +201,7 @@ typedef struct knl_session_attr_sql {
     char* disable_keyword_string;
     char* connection_info;
     char* retry_errcode_list;
+    char* restrict_nonsystem_relation_kind_string;
     char* sql_ignore_strategy_string;
     /* the vmoptions to start JVM */
     char* pljava_vmoptions;
