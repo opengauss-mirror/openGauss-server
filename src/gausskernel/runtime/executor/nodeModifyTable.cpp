@@ -863,7 +863,7 @@ static void ConstraintsForExecUpsert(Relation resultRelationDesc)
 static void UpdateSlotTupleInfo(TupleTableSlot* slot, Tuple tuple)
 {
     bool isUheapTuple = TUPLE_IS_UHEAP_TUPLE(tuple);
-    if (!isUheapTuple && slot->tts_tupslotTableAm == TAM_USTORE) {
+    if (!isUheapTuple && slot->tts_tam_ops == TableAmUstore) {
         UHeapTuple tup = (UHeapTuple)slot->tts_tuple;
         HeapTuple htup = (HeapTuple)tuple;
         tup->ctid = htup->t_self;
@@ -873,7 +873,7 @@ static void UpdateSlotTupleInfo(TupleTableSlot* slot, Tuple tuple)
         tup->xmin = htup->xmin;
         tup->xmax = htup->xmax;
     } else {
-        Assert(isUheapTuple && slot->tts_tupslotTableAm == TAM_HEAP);
+        Assert(isUheapTuple && slot->tts_tam_ops == TableAmHeap);
         HeapTuple tup = (HeapTuple)slot->tts_tuple;
         UHeapTuple utup = (UHeapTuple)tuple;
         tup->t_self = utup->ctid;
