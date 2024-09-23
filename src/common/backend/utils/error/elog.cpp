@@ -208,6 +208,11 @@ bool in_error_recursion_trouble(void)
     return (t_thrd.log_cxt.recursion_depth > 2);
 }
 
+inline bool IsEnableTranslation()
+{
+    return u_sess && u_sess->attr.attr_common.enable_nls;
+}
+
 /*
  * One of those fallback steps is to stop trying to localize the error
  * message, since there's a significant probability that that's exactly
@@ -216,7 +221,7 @@ bool in_error_recursion_trouble(void)
 static inline const char* err_gettext(const char* str)
 {
 #ifdef ENABLE_NLS
-    if ((!u_sess->attr.attr_common.enable_nls) || in_error_recursion_trouble())
+    if ((!IsEnableTranslation()) || in_error_recursion_trouble())
         return str;
     else
         return gettext(str);
@@ -1039,7 +1044,7 @@ int errcode_for_socket_access(void)
         char* fmtbuf = NULL;                                             \
         StringInfoData buf;                                              \
         /* Internationalize the error format string */                   \
-        if (u_sess->attr.attr_common.enable_nls                          \
+        if (IsEnableTranslation()                          \
             && (!in_error_recursion_trouble()))                          \
             fmt = dngettext(edata->domain, fmt_singular, fmt_plural, n); \
         else                                                             \
@@ -1089,7 +1094,7 @@ int errmsg(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(message, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1155,7 +1160,7 @@ int errdetail(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(detail, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(detail, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1199,7 +1204,7 @@ int errdetail_log(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(detail_log, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(detail_log, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1235,7 +1240,7 @@ int errcause(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(cause, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(cause, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1251,7 +1256,7 @@ int erraction(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(action, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(action, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1269,7 +1274,7 @@ int errhint(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(hint, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(hint, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1288,7 +1293,7 @@ int errquery(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(internalquery, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(internalquery, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1311,7 +1316,7 @@ int errcontext(const char* fmt, ...)
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(context, true, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(context, true, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -1975,7 +1980,7 @@ char* format_elog_string(const char* fmt, ...)
 
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(message, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
 
@@ -3697,7 +3702,7 @@ void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
 
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
-    EVALUATE_MESSAGE(message, false, u_sess->attr.attr_common.enable_nls);
+    EVALUATE_MESSAGE(message, false, IsEnableTranslation());
 
     MemoryContextSwitchTo(oldcontext);
 
