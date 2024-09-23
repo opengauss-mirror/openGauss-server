@@ -869,6 +869,7 @@ static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
     itemid = PageGetItemId(page, nextoffset);
     itup = (IndexTuple) PageGetItem(page, itemid);
     if (UBTreeTupleGetDownLink(itup) != rightsib) {
+        OffsetNumber topparentblkno = BufferGetBlockNumber(topparent);
         _bt_relbuf(rel, topparent);
         Buffer rbuf = _bt_getbuf(rel, rightsib, BT_READ);
         Page rpage = BufferGetPage(rbuf);
@@ -880,7 +881,7 @@ static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
         }
         elog(ERROR, "right sibling %u of block %u is not next child %u of block %u in index \"%s\"",
              rightsib, target, UBTreeTupleGetDownLink(itup) != rightsib,
-             BufferGetBlockNumber(topparent), RelationGetRelationName(rel));
+             topparentblkno, RelationGetRelationName(rel));
     }
 
     /*
