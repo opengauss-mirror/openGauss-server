@@ -840,9 +840,7 @@
 ./lib/libecpg.a
 ./lib/libecpg_compat.a
 ./lib/libpgtypes.a
-./lib/libpgtypes.so
-./lib/libpgtypes.so.3
-./lib/libpgtypes.so.3.4
+./lib/libpgtypes.so*
 ./lib/libgauss_cl_jni.so
 ./lib/libcgroup.so*
 ./lib/libcom_err_gauss.so*
