@@ -54,6 +54,7 @@
 
 #include "bin/elog.h"
 #include "openssl/rand.h"
+#include "replication/replicainternal.h"
 
 #include "common/config/cm_config.h"
 #if defined(__CYGWIN__)
@@ -164,6 +165,7 @@ char pid_file[MAXPGPATH];
 char gucconf_file[MAXPGPATH] = {0x00};
 char tempguc_file[MAXPGPATH] = {0x00};
 char gucconf_lock_file[MAXPGPATH] = {0x00};
+char gaussdb_state_file[MAXPGPATH] = {0};
 
 const int MAX_PARAM_LEN = 1024;
 const int MAX_VALUE_LEN = 1024;
@@ -1550,6 +1552,31 @@ static char* do_guccheck(const char* param)
     return guc_value;
 }
 
+void ReadDBStateFile(GaussState* state)
+{
+    FILE* statef = NULL;
+
+    if (state == NULL) {
+        write_stderr(_(" Could not get information from gaussdb.state\n"));
+        return;
+    }
+
+    statef = fopen(gaussdb_state_file, "r");
+    if (statef == NULL) {
+        if (errno == ENOENT) {
+            write_stderr(_(" file \"%s\" is not exist\n"), gaussdb_state_file);
+        } else {
+            write_stderr(_(" open file \"%s\" failed : %s\n"), gaussdb_state_file, strerror(errno));
+        }
+        exit(1);
+    }
+    if (0 == fread(state, 1, sizeof(GaussState), statef)) {
+        write_stderr(_(" read file \"%s\" failed\n"), gaussdb_state_file);
+    }
+    (void)fclose(statef);
+    statef = NULL;
+}
+
 /*
  * @@GaussDB@@
  * Brief            : static void do_config_reload()
@@ -1559,22 +1586,50 @@ static char* do_guccheck(const char* param)
 int do_config_reload()
 {
     pgpid_t pid;
+    GaussState state;
+    errno_t tnRet = 0;
 
     pid = get_pgpid();
-    if (pid == 0) /* no pid file */
-    {
+    if (pid == 0) { /* no pid file */
         write_stderr(_("%s: PID file \"%s\" does not exist\n"), progname, pid_file);
         write_stderr(_("Is server running?\n"));
         return FAILURE;
-    } else if (pid < 0) /* standalone backend, not postmaster */
-    {
+    } else if (pid < 0) { /* standalone backend, not postmaster */
         pid = -pid;
         write_stderr(_("%s: cannot reload server; "
                        "single-user server is running (PID: %ld)\n"),
-            progname,
-            pid);
+            progname, pid);
         write_stderr(_("Please terminate the single-user server and try again.\n"));
         return FAILURE;
+    }
+
+    if (kill(pid, 0) != 0) {
+        write_stderr(_("gaussdb is not alive.\n"));
+        return FAILURE;
+    }
+
+    tnRet = memset_s(&state, sizeof(state), 0, sizeof(state));
+    securec_check_c(tnRet, "\0", "\0");
+    ReadDBStateFile(&state);
+    switch (state.state) {
+        case NORMAL_STATE:
+        case NEEDREPAIR_STATE:
+        case WAITING_STATE:
+        case DEMOTING_STATE:
+        case PROMOTING_STATE:
+        case BUILDING_STATE:
+        case CATCHUP_STATE:
+            break;
+        case COREDUMP_STATE:
+            write_stderr(_("ERROR: gaussDB state is Coredump\n"));
+            return FAILURE;
+        case UNKNOWN_STATE:
+        case STARTING_STATE:
+            write_stderr(_("ERROR: gaussDB state is Unknown or Staring\n"));
+            return FAILURE;
+        default:
+            write_stderr(_("ERROR: gaussDB state is Invalid\n"));
+            return FAILURE;
     }
 
     if (kill((pid_t)pid, sig) != 0) {
@@ -3351,8 +3406,12 @@ void get_instance_configfile(const char* datadir)
                 securec_check_ss_c(nRet, "\0", "\0");
                 nRet = snprintf_s(gucconf_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/pg_hba.conf.lock", datadir);
                 securec_check_ss_c(nRet, "\0", "\0");
+                nRet = snprintf_s(gaussdb_state_file, MAXPGPATH, MAXPGPATH - 1, "%s/gaussdb.state", datadir);
+                securec_check_ss_c(nRet, "\0", "\0");
             } else {
                 nRet = snprintf_s(pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.pid", datadir);
+                securec_check_ss_c(nRet, "\0", "\0");
+                nRet = snprintf_s(gaussdb_state_file, MAXPGPATH, MAXPGPATH - 1, "%s/gaussdb.state", datadir);
                 securec_check_ss_c(nRet, "\0", "\0");
                 nRet = snprintf_s(gucconf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", datadir);
                 securec_check_ss_c(nRet, "\0", "\0");
