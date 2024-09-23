@@ -1244,7 +1244,8 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
     securec_check_for_sscanf_s(ret, 2, "\0", "\0");
     /* Calculate LSN */
     startLsn = ((uint64) lsn_hi )<< 32 | lsn_lo;
-
+    PQclear(res);
+    
     if (backup_replslots) {
         logical_replslot = parray_new();
         /* query for logical replication slots of subscriptions */
@@ -1268,10 +1269,9 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
             elog(WARNING, "logical replication slots for subscriptions will be backed up. "
                  "If don't use them after restoring, please drop them to avoid affecting xlog recycling.");
         }
+        PQclear(res);
     }
     backup->start_lsn = startLsn;
-
-    PQclear(res);
 }
 
 
@@ -1360,6 +1360,7 @@ get_database_map(PGconn *conn)
         parray_append(database_map, db_entry);
     }
 
+    PQclear(res);
     return database_map;
 }
 
