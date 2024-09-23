@@ -403,6 +403,22 @@ PGresult* ExecuteSqlQuery(Archive* AHX, const char* query, ExecStatusType status
     return res;
 }
 
+PGresult* ExecuteSqlQueryForSingleRow(Archive *fout, const char *query)
+{
+    PGresult   *res;
+    int			ntups;
+
+    res = ExecuteSqlQuery(fout, query, PGRES_TUPLES_OK);
+
+    /* Expecting a single result only */
+    ntups = PQntuples(res);
+    if (ntups != 1) {
+        exit_horribly(NULL, "query returned %d row instead of one: %s", ntups, query);
+    }
+
+    return res;
+}
+
 /*
  * Convenience function to send a query.
  * Monitors result to detect COPY statements

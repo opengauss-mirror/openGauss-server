@@ -259,6 +259,8 @@ typedef struct _tableInfo {
     bool relrowmovement;
     bool isIncremental; /* for matview, true if is an incremental type */
 
+    int			relpages;		/* table's size in pages (from pg_class) */
+
     bool interesting; /* true if need to collect more data */
     int autoinc_attnum;
     DumpId autoincconstraint;
@@ -324,6 +326,10 @@ typedef struct _tableDataInfo {
     char* filtercond;   /* WHERE condition to limit rows dumped */
 } TableDataInfo;
 
+typedef struct _tableDataSplitInfo {
+    TableDataInfo *tdinfo;
+    char* splitcond;
+} TableDataSplitInfo;
 typedef struct _indxInfo {
     DumpableObject dobj;
     TableInfo* indextable; /* link to table the index is for */

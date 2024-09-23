@@ -54,6 +54,7 @@
 
 #include "compress_io.h"
 #include "dumpmem.h"
+#include <sys/file.h>
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
@@ -413,6 +414,7 @@ struct cfp {
 #ifdef HAVE_LIBZ
     gzFile compressedfp;
 #endif
+    FILE* lock;
 };
 
 #ifdef HAVE_LIBZ
@@ -503,6 +505,30 @@ cfp* cfopen_write(const char* path, const char* mode, int compression)
     return fp;
 }
 
+cfp* cfopen_write4Lock(const char* path, const char* mode, int compression)
+{
+    cfp* fp = NULL;
+
+    if (compression == 0)
+        fp = cfopen4Lock(path, mode, 0);
+    else {
+#ifdef HAVE_LIBZ
+        int fnamelen = strlen(path) + 4;
+        char* fname = (char*)pg_malloc(fnamelen);
+        int nRet = 0;
+
+        nRet = snprintf_s(fname, fnamelen, fnamelen - 1, "%s%s", path, ".gz");
+        securec_check_ss_c(nRet, fname, "\0");
+        fp = cfopen4Lock(fname, mode, compression);
+        free_keep_errno(fname);
+        fname = NULL;
+#else
+        fp = NULL; /* keep compiler quiet */
+        exit_horribly(modulename, "not built with zlib support\n");
+#endif
+    }
+    return fp;
+}
 /*
  * Opens file 'path' in 'mode'. If 'compression' is non-zero, the file
  * is opened with libz gzopen(), otherwise with plain fopen().
@@ -553,6 +579,55 @@ cfp* cfopen(const char* path, const char* mode, int compression)
     return fp;
 }
 
+cfp* cfopen4Lock(const char* path, const char* mode, int compression)
+{
+    cfp* fp = (cfp*)pg_malloc(sizeof(cfp));
+
+    if (compression != 0) {
+#ifdef HAVE_LIBZ
+        char mode_compression[32] = {0};
+        int nRet = 0;
+
+        nRet = snprintf_s(mode_compression,
+            sizeof(mode_compression) / sizeof(char),
+            sizeof(mode_compression) / sizeof(char) - 1,
+            "%s%d",
+            mode,
+            compression);
+        securec_check_ss_c(nRet, "\0", "\0");
+        fp->lock = fopen(path, mode);
+        if (fp->lock == NULL) {
+            free_keep_errno(fp);
+            fp = NULL;
+        }
+        fp->compressedfp = gzdopen(fileno(fp->lock), mode_compression);
+        fp->uncompressedfp = NULL;
+        if (fp->compressedfp == NULL) {
+            free_keep_errno(fp);
+            fp = NULL;
+        }
+#else
+        exit_horribly(modulename, "not built with zlib support\n");
+#endif
+    } else {
+#ifdef HAVE_LIBZ
+        fp->compressedfp = NULL;
+#endif
+        fp->uncompressedfp = fopen(path, mode);
+        if (fp->uncompressedfp == NULL) {
+            free_keep_errno(fp);
+            fp = NULL;
+        }
+        fp->lock = fp->uncompressedfp;
+    }
+
+    /* update file permission */
+    if (chmod(path, FILE_PERMISSION) == -1) {
+        exit_horribly(modulename, "changing permissions for file \"%s\" failed with: %s\n", path, strerror(errno));
+    }
+
+    return fp;
+}
 int cfread(void* ptr, int size, cfp* fp)
 {
     size_t read_len;
@@ -573,6 +648,23 @@ int cfwrite(const void* ptr, int size, cfp* fp)
     else
 #endif
         return fwrite(ptr, 1, size, fp->uncompressedfp);
+}
+
+int cfwriteWithLock(const void* ptr, int size, cfp* fp)
+{
+    int rc = 0;
+#ifdef HAVE_LIBZ
+    if (fp->compressedfp != NULL) {
+        flock(fileno(fp->lock), LOCK_EX);
+        rc = gzwrite(fp->compressedfp, ptr, size);
+        flock(fileno(fp->lock), LOCK_UN);
+        return rc;
+    } else
+#endif
+    flock(fileno(fp->lock), LOCK_EX);
+    rc = fwrite(ptr, 1, size, fp->uncompressedfp);
+    flock(fileno(fp->lock), LOCK_UN);
+    return rc;
 }
 
 int cfgetc(cfp* fp)

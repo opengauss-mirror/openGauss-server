@@ -29,6 +29,7 @@
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "compress_io.h"
+#include "parallel.h"
 
 #include <sys/wait.h>
 #include "postgres.h"
@@ -144,7 +145,9 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool disable_progress;
 #endif
 
-static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode, CryptoModuleCheckParam* cryptoModluleCheckParam = NULL);
+static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode,
+                               CryptoModuleCheckParam* cryptoModluleCheckParam = NULL, int workerNum = 1,
+                               SetupWorkerPtr setupWorkerPtr = NULL);
 static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* AH);
 static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt, bool isData, bool acl_pass);
 static char* replace_line_endings(const char* str);
@@ -164,7 +167,6 @@ static bool _tocEntryIsACL(TocEntry* te);
 static void _disableTriggersIfNecessary(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt);
 static void _enableTriggersIfNecessary(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt);
 static void buildTocEntryArrays(ArchiveHandle* AH);
-static TocEntry* getTocEntryByDumpId(ArchiveHandle* AH, DumpId id);
 static void _moveBefore(ArchiveHandle* AH, TocEntry* pos, TocEntry* te);
 static int _discoverArchiveFormat(ArchiveHandle* AH);
 
@@ -195,8 +197,6 @@ static void identify_locking_dependencies(ArchiveHandle* AH, TocEntry* te);
 static void reduce_dependencies(ArchiveHandle* AH, TocEntry* te, TocEntry* ready_list);
 static void mark_create_done(ArchiveHandle* AH, TocEntry* te);
 static void inhibit_data_for_failed_table(ArchiveHandle* AH, TocEntry* te);
-static ArchiveHandle* CloneArchive(ArchiveHandle* AH);
-static void DeCloneArchive(ArchiveHandle* AH);
 
 static void setProcessIdentifier(ParallelStateEntry* pse, ArchiveHandle* AH);
 static void unsetProcessIdentifier(ParallelStateEntry* pse);
@@ -214,10 +214,10 @@ static void get_role_password(RestoreOptions* opts);
  */
 /* Create a new archive */
 /* Public */
-Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode)
-
+Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode,
+                       int workerNum, SetupWorkerPtr setupWorkerPtr)
 {
-    ArchiveHandle* AH = _allocAH(FileSpec, fmt, compression, mode);
+    ArchiveHandle* AH = _allocAH(FileSpec, fmt, compression, mode, NULL, workerNum, setupWorkerPtr);
 
     return (Archive*)AH;
 }
@@ -751,7 +751,7 @@ static void take_down_nsname_in_drop_stmt(const char *stmt, char *result, int le
     char *p = NULL;
     char *last = NULL;
     int ret = 0;
-	
+
     /* seperate string by ' ', if substring has '.', then drop the subsubstring before '.' */
     while ((p = strsep(&first, " ")) != NULL) {
         if (strchr(p, '.') != NULL) {
@@ -768,7 +768,7 @@ static void take_down_nsname_in_drop_stmt(const char *stmt, char *result, int le
         ret = strcat_s(result, len, " ");
         securec_check_c(ret, "\0", "\0");
     }
-	
+
     last = result + strlen(result) - 1;
     *last = '\0';
 }
@@ -924,10 +924,12 @@ static int restore_toc_entry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ro
                          * TRUNCATE with ONLY so that child tables are not
                          * wiped.
                          */
-                        if (PQserverVersion(AH->connection) >= 80400) {
-                            (void)ahprintf(AH, "TRUNCATE TABLE ONLY (%s);\n\n", fmtId(te->tag));
-                        } else {
-                            (void)ahprintf(AH, "TRUNCATE TABLE %s;\n\n", fmtId(te->tag));
+                        if (AH->format != archDirectory) {
+                            if (PQserverVersion(AH->connection) >= 80400) {
+                                (void)ahprintf(AH, "TRUNCATE TABLE ONLY (%s);\n\n", fmtId(te->tag));
+                            } else {
+                                (void)ahprintf(AH, "TRUNCATE TABLE %s;\n\n", fmtId(te->tag));
+                            }
                         }
                     }
 
@@ -1048,6 +1050,17 @@ size_t WriteData(Archive* AHX, const void* data, size_t dLen)
             modulename, "internal error -- WriteData cannot be called outside the context of a DataDumper routine\n");
 
     return (*AH->WriteDataptr)(AH, data, dLen);
+}
+
+size_t WriteDataParallel(Archive* AHX, const void* data, size_t dLen)
+{
+    ArchiveHandle* AH = (ArchiveHandle*)AHX;
+
+    if (NULL == (AH->currToc))
+        exit_horribly(
+            modulename, "internal error -- WriteData cannot be called outside the context of a DataDumper routine\n");
+
+    return (*AH->WriteDataptrP)(AH, data, dLen);
 }
 
 /*
@@ -1877,7 +1890,7 @@ static void buildTocEntryArrays(ArchiveHandle* AH)
     }
 }
 
-static TocEntry* getTocEntryByDumpId(ArchiveHandle* AH, DumpId id)
+TocEntry* getTocEntryByDumpId(ArchiveHandle* AH, DumpId id)
 {
     /* build index arrays if we didn't already */
     if (AH->tocsByDumpId == NULL) {
@@ -2236,11 +2249,13 @@ static int _discoverArchiveFormat(ArchiveHandle* AH)
 /*
  * Allocate an archive handle
  */
-static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode, CryptoModuleCheckParam* cryptoModuleCheckParam)
+static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode,
+                               CryptoModuleCheckParam* cryptoModuleCheckParam, int workerNum,
+                               SetupWorkerPtr setupWorkerPtr)
 {
     ArchiveHandle* AH = NULL;
 
-    AH = (ArchiveHandle*)pg_calloc(1, sizeof(ArchiveHandle));
+    AH = (ArchiveHandle*)pg_malloc_zero(sizeof(ArchiveHandle));
 
     /* AH debugLevel was 100; */
     AH->vmaj = K_VERS_MAJOR;
@@ -2278,6 +2293,8 @@ static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, co
     } else {
         AH->fSpec = NULL;
     }
+
+    AH->SetupWorkerptr = setupWorkerPtr;
 
     AH->connection = NULL;
     AH->currUser = NULL;         /* unknown */
@@ -2335,13 +2352,16 @@ static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, co
             break;
 
         case archDirectory:
-            InitArchiveFmt_Directory(AH);
+            if (workerNum > 1) {
+                InitArchiveFmt_Parallel(AH);
+            } else {
+                InitArchiveFmt_Directory(AH);
+            }
             break;
 
         case archTar:
             InitArchiveFmt_Tar(AH);
             break;
-
         default:
             exit_horribly(modulename, "unrecognized file format \"%d\"\n", fmt);
     }
@@ -2383,6 +2403,35 @@ void WriteDataChunks(ArchiveHandle* AH)
             AH->currToc = NULL;
         }
     }
+}
+
+void WriteDataChunksForTocEntry(ArchiveHandle *AH, TocEntry *te)
+{
+    StartDataPtr startPtr;
+    EndDataPtr endPtr;
+
+    AH->currToc = te;
+
+    if (strcmp(te->desc, "BLOBS") == 0) {
+        startPtr = AH->StartBlobsptr;
+        endPtr = AH->EndBlobsptr;
+    } else {
+        startPtr = AH->StartDataptr;
+        endPtr = AH->EndDataptr;
+    }
+
+    if (startPtr != NULL)
+        (*startPtr) (AH, te);
+
+    /*
+     * The user-provided DataDumper routine needs to call AH->WriteData
+     */ 
+    te->dataDumper((Archive *) AH, te->dataDumperArg);
+
+    if (endPtr != NULL)
+        (*endPtr) (AH, te);
+
+    AH->currToc = NULL;
 }
 
 void WriteToc(ArchiveHandle* AH)
@@ -3730,7 +3779,11 @@ static void archive_close_connection(int code, void* arg)
 void on_exit_close_archive(Archive* AHX)
 {
     shutdown_info.AHX = AHX;
-    on_exit_nicely(archive_close_connection, &shutdown_info);
+    if (AHX->workerNum > 1) {
+        on_exit_close_parallel_archive(AHX);
+    } else {
+        on_exit_nicely(archive_close_connection, &shutdown_info);
+    }
     on_exit_nicely(releaseHmacCtx, AHX);
     on_exit_nicely(releaseCryptoCtx, AHX);
     on_exit_nicely(releaseCryptoSession, AHX);
@@ -4566,7 +4619,7 @@ static void inhibit_data_for_failed_table(ArchiveHandle* AH, TocEntry* te)
  *
  * These could be public, but no need at present.
  */
-static ArchiveHandle* CloneArchive(ArchiveHandle* AH)
+ArchiveHandle* CloneArchive(ArchiveHandle* AH)
 {
     ArchiveHandle* pstClone = NULL;
 
@@ -4651,7 +4704,7 @@ static ArchiveHandle* CloneArchive(ArchiveHandle* AH)
  *
  * Note: we assume any clone-local connection was already closed.
  */
-static void DeCloneArchive(ArchiveHandle* AH)
+void DeCloneArchive(ArchiveHandle* AH)
 {
     errno_t rc;
     /* Clear format-specific state */

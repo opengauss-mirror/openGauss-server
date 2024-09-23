@@ -104,10 +104,14 @@ struct Archive {
 
     /* get hash bucket info. */
     bool getHashbucketInfo;
+
+    int			workerNum;		    /* number of parallel processes */
+    char	   *sync_snapshot_id;   /* sync snapshot id for parallel operation */
     /* The rest is private */
 };
 
 typedef int (*DataDumperPtr)(Archive* AH, void* userArg);
+typedef void (*SetupWorkerPtr) (Archive *AH);
 
 typedef struct _restoreOptions {
     int createDB;           /* Issue commands to create the database */
@@ -198,6 +202,7 @@ extern void ArchiveEntry(Archive* AHX, CatalogId catalogId, DumpId dumpId, const
 
 /* Called to write *data* to the archive */
 extern size_t WriteData(Archive* AH, const void* data, size_t dLen);
+extern size_t WriteDataParallel(Archive* AH, const void* data, size_t dLen);
 
 extern int StartBlob(Archive* AH, Oid oid);
 extern int EndBlob(Archive* AH, Oid oid);
@@ -212,7 +217,8 @@ extern void RestoreArchive(Archive* AH);
 extern Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt, CryptoModuleCheckParam* cryptoModuleCheckParam = NULL);
 
 /* Create a new archive */
-extern Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
+extern Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode,
+                              int workerNum, SetupWorkerPtr setupWorkerPtr);
 
 /* The --list option */
 extern void PrintTOCSummary(Archive* AH, RestoreOptions* ropt);
