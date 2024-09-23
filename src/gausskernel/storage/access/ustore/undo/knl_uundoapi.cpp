@@ -56,10 +56,8 @@ bool CheckNeedSwitch(UndoPersistence upersistence)
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("CheckNeedSwitch: uzone is NULL")));
     }
-    if ((uint64)UNDO_PTR_GET_OFFSET(uzone->GetInsertURecPtr()) + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE) {
-        return true;
-    }
-    return false;
+    
+    return uzone->CheckNeedSwitch();
 }
 
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
