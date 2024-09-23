@@ -127,7 +127,7 @@ bool VerifyFrozenXidAdvance(TransactionId oldestXmin, TransactionId globalFrozen
         return true;
     }
     if (TransactionIdIsNormal(globalFrozenXid) && TransactionIdFollows(globalFrozenXid,  oldestXmin)) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
+        ereport(WARNING, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT(
                 "Advance frozen xid failed, globalFrozenXid %lu is bigger than oldestXmin %lu."),
                 globalFrozenXid, oldestXmin)));
@@ -135,7 +135,7 @@ bool VerifyFrozenXidAdvance(TransactionId oldestXmin, TransactionId globalFrozen
     if (TransactionIdIsNormal(globalFrozenXid) &&
         TransactionIdIsNormal(g_instance.undo_cxt.globalFrozenXid) &&
         TransactionIdPrecedes(globalFrozenXid, g_instance.undo_cxt.globalFrozenXid)) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
+        ereport(WARNING, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT(
                 "Advance frozen xid failed, globalFrozenXid %lu is smaller than globalFrozenXid %lu."),
                 globalFrozenXid, g_instance.undo_cxt.globalFrozenXid)));
@@ -143,7 +143,7 @@ bool VerifyFrozenXidAdvance(TransactionId oldestXmin, TransactionId globalFrozen
     if (TransactionIdIsNormal(globalFrozenXid) &&
         TransactionIdIsNormal(g_instance.undo_cxt.globalRecycleXid) &&
         TransactionIdPrecedes(globalFrozenXid, g_instance.undo_cxt.globalRecycleXid)) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
+        ereport(WARNING, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT(
                 "Advance frozen xid failed, globalFrozenXid %lu is smaller than globalRecycleXid %lu."),
                 globalFrozenXid, g_instance.undo_cxt.globalRecycleXid)));
@@ -157,18 +157,10 @@ bool VerifyRecycleXidAdvance(TransactionId globalFrozenXid, TransactionId oldest
         return true;
     }
     if (TransactionIdIsNormal(oldestRecycleXid) && TransactionIdFollows(oldestRecycleXid,  globalFrozenXid)) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
+        ereport(WARNING, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT(
                 "Advance recycle xid failed, oldestRecycleXid %lu is bigger than globalFrozenXid %lu."),
                 oldestRecycleXid, globalFrozenXid)));
-    }
-    if (TransactionIdIsNormal(oldestRecycleXid) &&
-        TransactionIdIsNormal(g_instance.undo_cxt.globalRecycleXid) &&
-        TransactionIdPrecedes(oldestRecycleXid, g_instance.undo_cxt.globalRecycleXid)) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT(
-                "Advance recycle xid failed, oldestRecycleXid %lu is smaller than globalRecycleXid %lu."),
-                globalFrozenXid, g_instance.undo_cxt.globalRecycleXid)));
     }
     return true;
 }
