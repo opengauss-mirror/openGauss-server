@@ -494,6 +494,15 @@ FdwRoutine* GetFdwRoutine(Oid fdwhandler)
     Datum datum;
     FdwRoutine* routine = NULL;
 
+    /* Check if the access to foreign tables is restricted */
+    if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_FOREIGN_TABLE)) {
+        /* There can not be built-in FDW handler */
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Access to non-system forign table is restricted."),
+                errcause("Access to non-system forign table is restricted."),
+                erraction("Check the value of restrict_nonsystem_relation_kind.")));
+    }
     datum = OidFunctionCall0(fdwhandler);
     routine = (FdwRoutine*)DatumGetPointer(datum);
 

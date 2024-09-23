@@ -95,3 +95,22 @@ ERROR:  "viewtest" is not a table
 HINT:  Use DROP VIEW to remove a view.
 DROP VIEW viewtest;
 DROP TABLE viewtest_tbl;
+-- test restriction on non_system view expansion
+create table t1 (a int);
+create view ttv1 as select a from t1;
+set restrict_nonsystem_relation_kind to 'view';
+select a from ttv1 where a > 0; --Error
+ERROR:  Access to non-system view "ttv1" is restricted.
+insert into ttv1 values(1); --Error
+ERROR:  Access to non-system view "ttv1" is restricted.
+delete from ttv1 where a = 1; --Error
+ERROR:  Access to non-system view "ttv1" is restricted.
+select relname from pg_class where relname = 'ttv1';
+ relname 
+---------
+ ttv1
+(1 row)
+
+reset restrict_nonsystem_relation_kind;
+drop view ttv1;
+drop table t1;

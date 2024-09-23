@@ -81,3 +81,15 @@ DROP TABLE viewtest;
 
 DROP VIEW viewtest;
 DROP TABLE viewtest_tbl;
+
+-- test restriction on non_system view expansion
+create table t1 (a int);
+create view ttv1 as select a from t1;
+set restrict_nonsystem_relation_kind to 'view';
+select a from ttv1 where a > 0; --Error
+insert into ttv1 values(1); --Error
+delete from ttv1 where a = 1; --Error
+select relname from pg_class where relname = 'ttv1';
+reset restrict_nonsystem_relation_kind;
+drop view ttv1;
+drop table t1;
