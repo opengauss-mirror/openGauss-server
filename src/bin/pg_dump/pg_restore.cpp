@@ -845,10 +845,12 @@ void usage(const char* pchProgname)
     printf(_("  -W, --password=PASSWORD               the password of specified database user\n"));
     printf(_("  --role=ROLENAME                       do SET ROLE before restore\n"));
     printf(_("  --rolepassword=ROLEPASSWORD           the password for role\n"));
-    printf(_("  --with-decryption= type               common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"));
+    printf(_("  --with-decryption= type               common cipher support AES128_CBC,AES128_CTR,AES128_GCM,AES256_CBC,AES256_CTR,AES256_GCM,SM4_CBC,SM4_CTR\n"
+             "AES128_CBC_HMAC_SHA256,AES128_CTR_HMAC_SHA256,AES128_GCM_HMAC_SHA256,AES256_CBC_HMAC_SHA256,AES256_CTR_HMAC_SHA256\n"
+             "AES256_GCM_HMAC_SHA256,SM4_CBC_HMAC_SM3,SM4_CTR_HMAC_SM3\n"));
     printf(_("  --with-key=KEY                        common cipher key is base64 encoded,max 44 bytes\n"));
     printf(_("  --with-salt=RANDVALUES                 common cipher salt must be 16 bytes\n"));
-    printf(_("  --with-module-params=MODLUE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
+    printf(_("  --with-module-params=MODULE_TYPE=TYPE,MODULE_LIB_PATH=path,MODULE_CONFIG_FILE_PATH=path"
             "type:GDACCARD,JNTAKMS,SWXAKMS;MODULE_LIB_PATH:need include lib file absolute path;"
             "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
             "used by gs_dump, load device\n"));

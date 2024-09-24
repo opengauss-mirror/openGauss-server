@@ -805,17 +805,23 @@ static void encryptAndFlushCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCa
     int flushLen = MAX_CRYPTO_CACHE_LEN;
     int hmacLen = 0;
 
-    /*计算明文hmac，填充到密文头*/
-    cryptoHmac(AH, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData, &hmacLen);
+    /*如果指定需要计算hmac，则计算明文hmac，填充到密文头*/
+    if (AH->publicArc.cryptoModuleCtx.hmac_ctx) {
+        cryptoHmac(AH, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData, &hmacLen);
 
-    /*去掉填充hmac的长度作为输入*/
-    flushLen = MAX_CRYPTO_CACHE_LEN - hmacLen;
+        /*去掉填充hmac的长度作为输入*/
+        flushLen = MAX_CRYPTO_CACHE_LEN - hmacLen;
 
-    symmEncDec(AH, true, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData + hmacLen, &flushLen);
+        symmEncDec(AH, true, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData + hmacLen, &flushLen);
 
-    /*输出密文长度再加上hmac的长度作为最终刷盘长度*/
-    flushLen += hmacLen;
+        /*输出密文长度再加上hmac的长度作为最终刷盘长度*/
+        flushLen += hmacLen;
+    } else {
+        symmEncDec(AH, true, cryptoCache->cryptoCache.wrCryptoCache.writeCache, cryptoCache->cryptoCache.wrCryptoCache.writeCacheLen, flushData, &flushLen);
+    }
 
+    /*先写长度，再写数据*/
+    cfwrite(&flushLen, 4, FH);
     cfwrite(flushData, flushLen, FH);
 }
 
@@ -838,27 +844,41 @@ static void fillReadCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCac
 {
     char encData[MAX_CRYPTO_CACHE_LEN] = {0};
     int encLen = 0;
+    int readLen = 0;
 
+    /*先读长度，再读数据*/
+    cfread(&readLen, 4, FH);
     /*先读取文件密文，然后解密写入缓存*/
-    encLen = cfread(encData, MAX_CRYPTO_CACHE_LEN, FH);
+    encLen = cfread(encData, readLen, FH);
 
-    if (encLen >= (CRYPTO_BLOCK_SIZE + CRYPTO_HMAC_SIZE)) {
-        char hmac[CRYPTO_HMAC_SIZE + 1] = {0};
-        int hmacLen = 0;
+    /*如果指定了hmac算法，则进行hmac校验*/
+    if (AH->publicArc.cryptoModuleCtx.hmac_ctx) {
+        if (encLen >= (CRYPTO_BLOCK_SIZE + CRYPTO_HMAC_SIZE)) {
+            char hmac[CRYPTO_HMAC_SIZE + 1] = {0};
+            int hmacLen = 0;
 
-        cryptoCache->cryptoCache.rCryptoCache.readCacheLen = encLen - CRYPTO_HMAC_SIZE;
-        symmEncDec(AH, false, encData + CRYPTO_HMAC_SIZE, encLen - CRYPTO_HMAC_SIZE, cryptoCache->cryptoCache.rCryptoCache.readCache, &(cryptoCache->cryptoCache.rCryptoCache.readCacheLen));
+            cryptoCache->cryptoCache.rCryptoCache.readCacheLen = encLen - CRYPTO_HMAC_SIZE;
+            symmEncDec(AH, false, encData + CRYPTO_HMAC_SIZE, encLen - CRYPTO_HMAC_SIZE, cryptoCache->cryptoCache.rCryptoCache.readCache, &(cryptoCache->cryptoCache.rCryptoCache.readCacheLen));
 
-        /*对明文做hmac进行校验*/
-        cryptoHmac(AH, cryptoCache->cryptoCache.rCryptoCache.readCache, cryptoCache->cryptoCache.rCryptoCache.readCacheLen, hmac, &hmacLen);
-        
-        if (hmacLen != CRYPTO_HMAC_SIZE || strncmp(hmac, encData, CRYPTO_HMAC_SIZE) != 0) {
-            exit_horribly(modulename, "hmac verify failed\n");
+            /*对明文做hmac进行校验*/
+            cryptoHmac(AH, cryptoCache->cryptoCache.rCryptoCache.readCache, cryptoCache->cryptoCache.rCryptoCache.readCacheLen, hmac, &hmacLen);
+
+            if (hmacLen != CRYPTO_HMAC_SIZE || strncmp(hmac, encData, CRYPTO_HMAC_SIZE) != 0) {
+                exit_horribly(modulename, "hmac verify failed\n");
+            }
+        } else if (encLen > 0) {
+            exit_horribly(modulename, "read encrypted data error\n");
         }
-    } else if (encLen > 0) {
-        exit_horribly(modulename, "read encrypted data error\n");
-    }
+    } else {
+        if (encLen >= CRYPTO_BLOCK_SIZE) {
 
+            cryptoCache->cryptoCache.rCryptoCache.readCacheLen = encLen;
+            symmEncDec(AH, false, encData, encLen, cryptoCache->cryptoCache.rCryptoCache.readCache, &(cryptoCache->cryptoCache.rCryptoCache.readCacheLen));
+
+        } else if (encLen > 0) {
+             exit_horribly(modulename, "read encrypted data error\n");
+        }
+    }
 }
 
 static int readFromCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, void* buf, size_t len, bool *isempty)

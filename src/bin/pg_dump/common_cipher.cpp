@@ -136,27 +136,56 @@ void unload_crypto_module(int code, void* args)
 
 }
 
-static ModuleSymmKeyAlgo transform_type(char* type)
+static void transform_type(char* type, ModuleSymmKeyAlgo* symmtype, ModuleSymmKeyAlgo* hmactype)
 {
+    *symmtype = MODULE_ALGO_MAX;
+    *hmactype = MODULE_ALGO_MAX;
+
     if (strcmp(type, "AES128_CBC") == 0) {
-        return MODULE_AES_128_CBC;
+        *symmtype = MODULE_AES_128_CBC;
     } else if (strcmp(type, "AES128_CTR") == 0) {
-        return MODULE_AES_128_CTR;
+        *symmtype = MODULE_AES_128_CTR;
     } else if (strcmp(type, "AES128_GCM") == 0) {
-        return MODULE_AES_128_GCM;
+        *symmtype = MODULE_AES_128_GCM;
     } else if (strcmp(type, "AES256_CBC") == 0) {
-        return MODULE_AES_256_CBC;
+        *symmtype = MODULE_AES_256_CBC;
     } else if (strcmp(type, "AES256_CTR") == 0) {
-    return MODULE_AES_256_CTR;
+        *symmtype = MODULE_AES_256_CTR;
     } else if (strcmp(type, "AES256_GCM") == 0) {
-        return MODULE_AES_256_GCM;
+        *symmtype = MODULE_AES_256_GCM;
     } else if (strcmp(type, "SM4_CBC") == 0) {
-        return MODULE_SM4_CBC;
+        *symmtype = MODULE_SM4_CBC;
     } else if (strcmp(type, "SM4_CTR") == 0) {
-        return MODULE_SM4_CTR;
+        *symmtype = MODULE_SM4_CTR;
+    }else if (strcmp(type, "AES128_CBC_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_CBC;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES128_CTR_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_CTR;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES128_GCM_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_GCM;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_CBC_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_CBC;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_CTR_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_CTR;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_GCM_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_GCM;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "SM4_CBC_HMAC_SM3") == 0) {
+        *symmtype = MODULE_SM4_CBC;
+        *hmactype = MODULE_HMAC_SM3;
+    } else if (strcmp(type, "SM4_CTR_HMAC_SM3") == 0) {
+        *symmtype = MODULE_SM4_CTR;
+        *hmactype = MODULE_HMAC_SM3;
     }
 
-    return MODULE_ALGO_MAX;
+    if (*symmtype == MODULE_ALGO_MAX) {
+        exit_horribly(NULL, ("error algocrypto type\n"));
+    }
 
 }
 
@@ -164,20 +193,25 @@ void initCryptoModule(ArchiveHandle* AH)
 {
     int ret = 1;
     SupportedFeature supportedfeature;
-    int modulType = 0;
     Archive* fort = (Archive*)AH;
     char errmsg[MAX_ERRMSG_LEN] = {0};
 
-    ret = crypto_module_init_use(fort->crypto_modlue_params, &supportedfeature);
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
+
+    transform_type(fort->crypto_type, &symmtype, &hmactype);
+
+    ret = crypto_module_init_use(fort->crypto_module_params, &supportedfeature);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         exit_horribly(NULL, "%s\n", errmsg);
     }
 
-    modulType = transform_type(fort->crypto_type);
-    if (modulType < 0 || supportedfeature.supported_symm[modulType] == 0) {
+    if (symmtype < 0 || supportedfeature.supported_symm[symmtype] == 0) {
         exit_horribly(NULL, "unsupported this mode:%s\n", fort->crypto_type);
     }
+
+    fort->key_type = supportedfeature.key_type;
 
 }
 
@@ -187,7 +221,7 @@ void initCryptoSession(ArchiveHandle* AH)
     Archive* fort = (Archive*)AH;
     char errmsg[MAX_ERRMSG_LEN] = {0};
 
-    ret = crypto_module_sess_init_use(NULL, &(fort->cryptoModlueCtx.moduleSession));
+    ret = crypto_module_sess_init_use(NULL, &(fort->cryptoModuleCtx.moduleSession));
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         exit_horribly(NULL, "%s\n", errmsg);
@@ -197,9 +231,9 @@ void initCryptoSession(ArchiveHandle* AH)
 
 void releaseCryptoSession(int code, void* args)
 {
-    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.moduleSession) {
-        crypto_module_sess_exit_use(((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.moduleSession);
-        ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.moduleSession = NULL;
+    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.moduleSession) {
+        crypto_module_sess_exit_use(((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.moduleSession);
+        ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.moduleSession = NULL;
     }
 }
 
@@ -209,20 +243,24 @@ void initCryptoKeyCtx(ArchiveHandle* AH)
     int enc = (AH->mode == archModeWrite) ? 1 : 0;
     Archive* fort = (Archive*)AH;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
 
-    ret = crypto_ctx_init_use(fort->cryptoModlueCtx.moduleSession, &(fort->cryptoModlueCtx.key_ctx), (ModuleSymmKeyAlgo)transform_type(fort->crypto_type), enc, fort->Key, fort->keylen);
+    transform_type(AH->publicArc.crypto_type, &symmtype, &hmactype);
+
+    ret = crypto_ctx_init_use(fort->cryptoModuleCtx.moduleSession, &(fort->cryptoModuleCtx.key_ctx), symmtype, enc, fort->Key, fort->keylen);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
-        crypto_module_sess_exit_use(fort->cryptoModlueCtx.moduleSession);
+        crypto_module_sess_exit_use(fort->cryptoModuleCtx.moduleSession);
         exit_horribly(NULL, "%s\n", errmsg);
     }
 }
 
 void releaseCryptoCtx(int code, void* args)
 {
-    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.key_ctx) {
-        crypto_ctx_clean_use(((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.key_ctx);
-        ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.key_ctx = NULL;
+    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.key_ctx) {
+        crypto_ctx_clean_use(((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.key_ctx);
+        ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.key_ctx = NULL;
     }
 }
 
@@ -230,8 +268,12 @@ void symmGenerateKey(ArchiveHandle* AH)
 {
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
 
-    ret = crypto_create_symm_key_use(AH->publicArc.cryptoModlueCtx.moduleSession, (ModuleSymmKeyAlgo)transform_type(AH->publicArc.crypto_type), AH->publicArc.Key, (size_t*)&(AH->publicArc.keylen));
+    transform_type(AH->publicArc.crypto_type, &symmtype, &hmactype);
+
+    ret = crypto_create_symm_key_use(AH->publicArc.cryptoModuleCtx.moduleSession, symmtype, AH->publicArc.Key, (size_t*)&(AH->publicArc.keylen));
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         releaseCryptoSession(0, AH);
@@ -245,7 +287,7 @@ void symmEncDec(ArchiveHandle* AH, bool isEnc, char* indata, int inlen, char* ou
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
 
-    ret = crypto_encrypt_decrypt_use(AH->publicArc.cryptoModlueCtx.key_ctx, isEnc, (unsigned char*)indata, inlen, AH->publicArc.rand, 16, (unsigned char*)outdata, (size_t*)outlen, NULL);
+    ret = crypto_encrypt_decrypt_use(AH->publicArc.cryptoModuleCtx.key_ctx, isEnc, (unsigned char*)indata, inlen, AH->publicArc.rand, 16, (unsigned char*)outdata, (size_t*)outlen, NULL);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         releaseHmacCtx(0, AH);
@@ -256,27 +298,26 @@ void symmEncDec(ArchiveHandle* AH, bool isEnc, char* indata, int inlen, char* ou
     }
 }
 
-static ModuleSymmKeyAlgo getHmacType(ModuleSymmKeyAlgo symmAlgoType)
-{
-    if (symmAlgoType >= MODULE_AES_128_CBC && symmAlgoType <= MODULE_AES_256_GCM) {
-        return MODULE_HMAC_SHA256;
-    } else if (symmAlgoType == MODULE_SM4_CBC || symmAlgoType == MODULE_SM4_CTR){
-        return MODULE_HMAC_SM3;
-    }
-
-    return MODULE_ALGO_MAX;
-}
-
 void initHmacCtx(ArchiveHandle* AH)
 {
     int ret = 1;
     Archive* fort = (Archive*)AH;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
 
-    ret = crypto_hmac_init_use(fort->cryptoModlueCtx.moduleSession, &(fort->cryptoModlueCtx.hmac_ctx), getHmacType(transform_type(fort->crypto_type)), fort->Key, fort->keylen);
+    transform_type(fort->crypto_type, &symmtype, &hmactype);
+
+    /*不需要计算hmac*/
+    if (hmactype == MODULE_ALGO_MAX) {
+        fort->cryptoModuleCtx.hmac_ctx = NULL;
+        return;
+    }
+
+    ret = crypto_hmac_init_use(fort->cryptoModuleCtx.moduleSession, &(fort->cryptoModuleCtx.hmac_ctx), hmactype, fort->Key, fort->keylen);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
-        crypto_module_sess_exit_use(fort->cryptoModlueCtx.moduleSession);
+        crypto_module_sess_exit_use(fort->cryptoModuleCtx.moduleSession);
         exit_horribly(NULL, "%s\n", errmsg);
     }
 
@@ -284,9 +325,9 @@ void initHmacCtx(ArchiveHandle* AH)
 
 void releaseHmacCtx(int code, void* args)
 {
-    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.hmac_ctx) {
-        crypto_hmac_clean_use(((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.hmac_ctx);
-        ((ArchiveHandle*)args)->publicArc.cryptoModlueCtx.hmac_ctx = NULL;
+    if (libhandle && ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.hmac_ctx) {
+        crypto_hmac_clean_use(((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.hmac_ctx);
+        ((ArchiveHandle*)args)->publicArc.cryptoModuleCtx.hmac_ctx = NULL;
     }
 }
 
@@ -295,7 +336,7 @@ void cryptoHmac(ArchiveHandle* AH, char* indata, int inlen, char* outdata, int* 
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
 
-    ret = crypto_hmac_use(AH->publicArc.cryptoModlueCtx.hmac_ctx, (unsigned char*)indata, inlen, (unsigned char*)outdata, (size_t*)outlen);
+    ret = crypto_hmac_use(AH->publicArc.cryptoModuleCtx.hmac_ctx, (unsigned char*)indata, inlen, (unsigned char*)outdata, (size_t*)outlen);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         releaseHmacCtx(0, AH);
@@ -315,12 +356,18 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
         exit_horribly(NULL, "load crypto module lib failed\n");
     }
 
-    rc = memcpy_s((GS_UCHAR*)fout->crypto_modlue_params, CRYPTO_MODULE_PARAMS_MAX_LEN, params, strlen(params));
+    rc = memset_s(fout->crypto_module_params, CRYPTO_MODULE_PARAMS_MAX_LEN, 0x0, CRYPTO_MODULE_PARAMS_MAX_LEN);
+    securec_check_c(rc, "\0", "\0");
+
+    rc = memcpy_s((GS_UCHAR*)fout->crypto_module_params, CRYPTO_MODULE_PARAMS_MAX_LEN, params, strlen(params));
     securec_check_c(rc, "\0", "\0");
 
     if (module_encrypt_mode == NULL) {
         exit_horribly(NULL, "encrypt_mode cannot be NULL\n");
     } else {
+        rc = memset_s(fout->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, 0x0, CRYPTO_MODULE_ENC_TYPE_MAX_LEN);
+        securec_check_c(rc, "\0", "\0");
+
         rc = memcpy_s((GS_UCHAR*)fout->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, module_encrypt_mode, strlen(module_encrypt_mode));
         securec_check_c(rc, "\0", "\0");
     }
@@ -328,6 +375,9 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
     if (module_encrypt_salt == NULL || strlen(module_encrypt_salt) != 16) {
         exit_horribly(NULL, "salt is needed and must be 16 bytes\n");
     } else {
+        rc = memset_s(fout->rand, RANDOM_LEN, 0x0, RANDOM_LEN);
+        securec_check_c(rc, "\0", "\0");
+
         rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN + 1, module_encrypt_salt, strlen(module_encrypt_salt));
         securec_check_c(rc, "\0", "\0");
     }
@@ -346,17 +396,27 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
             if (tmpkey) {
                 OPENSSL_free(tmpkey);
             }
-            exit_horribly(NULL, "invalid key\n");	
+            exit_horribly(NULL, "invalid key\n");
         } else {
+            rc = memset_s(fout->Key, KEY_MAX_LEN, 0x0, KEY_MAX_LEN);
+            securec_check_c(rc, "\0", "\0");
+
             rc = memcpy_s((GS_UCHAR*)fout->Key, KEY_MAX_LEN, tmpkey, tmpkeylen);
             securec_check_c(rc, "\0", "\0");
             fout->keylen = tmpkeylen;
+            OPENSSL_free(tmpkey);
         }
     } else if (is_gen_key){
-        char *encodedley = NULL;
-        symmGenerateKey((ArchiveHandle*)fout);
-        encodedley = SEC_encodeBase64((char*)fout->Key, fout->keylen);
-        write_msg(NULL, "generate key success:%s\n", encodedley);
+        if (fout->key_type == KEY_TYPE_PLAINTEXT) {
+            exit_horribly(NULL, "forbid to generate plaint key\n");
+        } else {
+            char *encodedley = NULL;
+            symmGenerateKey((ArchiveHandle*)fout);
+            encodedley = SEC_encodeBase64((char*)fout->Key, fout->keylen);
+            write_msg(NULL, "generate key success:%s\n", encodedley);
+            OPENSSL_free(encodedley);
+        }
+        
 
     }
 

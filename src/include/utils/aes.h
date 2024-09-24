@@ -46,7 +46,7 @@ typedef int (*kernel_crypto_encrypt_decrypt_type)(void *ctx, int enc, unsigned c
 typedef int (*kernel_crypto_hmac_type)(void *ctx, unsigned char * data, size_t data_size, unsigned char *result, size_t *result_size);
 
 #define CRYPTO_MODULE_PARAMS_MAX_LEN 1024
-#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 16
+#define CRYPTO_MODULE_ENC_TYPE_MAX_LEN 32
 #define CRYPTO_MODULE_HMAC_LEN 32
 typedef struct decrypt_struct {
     unsigned char* decryptBuff;
@@ -66,7 +66,7 @@ typedef struct decrypt_struct {
     void* moduleSessionCtx;
     void* moduleKeyCtx;
     void* moduleHmacCtx;
-    char crypto_modlue_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
+    char crypto_module_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
     char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
 } DecryptInfo;
 

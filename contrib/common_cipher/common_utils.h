@@ -13,8 +13,8 @@ typedef enum {
 } ModuleType;
 
 /*定义以下字符串宏，用来对输入的kv结构字符串做解析，获取对应的value*/
-#define MODLUE_TYPE "MODLUE_TYPE"
-#define MODLUE_LIB_PATH "MODLUE_LIB_PATH"
+#define MODULE_TYPE "MODULE_TYPE"
+#define MODULE_LIB_PATH "MODULE_LIB_PATH"
 #define MODULE_CONFIG_FILE_PATH "MODULE_CONFIG_FILE_PATH"
 
 /*支持的硬件类型字符串*/
@@ -31,8 +31,8 @@ typedef enum {
     : IS_JNTA_KMS_TYPE(s) ? MODULE_JNTA_KMS_TYPE \
     : IS_SWXA_KMS_TYPE(s) ? MODULE_SWXA_KMS_TYPE : MODULE_INVALID_TYPE)
 
-#define IS_MODULE_TYPE(s) (strcmp(s, MODLUE_TYPE) == 0)
-#define IS_MODULE_LIB_PATH(s) (strcmp(s, MODLUE_LIB_PATH) == 0)
+#define IS_MODULE_TYPE(s) (strcmp(s, MODULE_TYPE) == 0)
+#define IS_MODULE_LIB_PATH(s) (strcmp(s, MODULE_LIB_PATH) == 0)
 #define IS_MODULE_CONFIG_FILE_PATH(s) (strcmp(s, MODULE_CONFIG_FILE_PATH) == 0)
 
 #define MODULE_MAX_PATH_LEN 1024

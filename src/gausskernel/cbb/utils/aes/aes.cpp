@@ -93,7 +93,7 @@ bool writeFileAfterEncryption(
      * cipher text len max is plain text len + RANDOM_LEN(aes128)
      * writeBufflen equals to  ciphertextlen + RANDOM_LEN(rand_vector) + RANDOM_LEN(encrypt_salt).
      * so writeBufflen equals to inputstrlen(palin text len) + 48.
-     * if use crypto module,writebuff header after cipherlen add hmac,hmac length is 32.
+     * if use crypto module,and need hmac, writebuff header after cipherlen add hmac,hmac length is 32.
      */
     writeBuffLen = (int64)inputstrlen + RANDOM_LEN * 3;
     if (moduleKeyCtx && encFunc && moduleHmacCtx && hmacFunc) {
@@ -145,32 +145,46 @@ bool writeFileAfterEncryption(
     }
 
     /* the real encrypt operation */
-    if (moduleKeyCtx && encFunc && moduleHmacCtx && hmacFunc) {
+    if (moduleKeyCtx && encFunc) {
         int ret = 1;
-        size_t hmaclen = 0;
         cipherlen = outputlen;
 
-        /*caculate plaint hmac*/
-        ret = hmacFunc(moduleHmacCtx, (unsigned char*)inputstr, inputstrlen, (unsigned char*)writeBuff + RANDOM_LEN, &hmaclen);
-        if (ret != 1) {
-            free(writeBuff);
-            writeBuff = NULL;
-            free(outputstr);
-            outputstr = NULL;
-            return false;
-        }
+        if (moduleHmacCtx && hmacFunc) {
+            /*caculate plaint hmac*/
+            size_t hmaclen = 0;
+            ret = hmacFunc(moduleHmacCtx, (unsigned char*)inputstr, inputstrlen, (unsigned char*)writeBuff + RANDOM_LEN, &hmaclen);
+            if (ret != 1) {
+                free(writeBuff);
+                writeBuff = NULL;
+                free(outputstr);
+                outputstr = NULL;
+                return false;
+            }
 
-        ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
-        if (ret != 1) {
-            free(writeBuff);
-            writeBuff = NULL;
-            free(outputstr);
-            outputstr = NULL;
-            return false;
-        }
+            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
+            if (ret != 1) {
+                free(writeBuff);
+                writeBuff = NULL;
+                free(outputstr);
+                outputstr = NULL;
+                return false;
+            }
 
-        cipherlen += CRYPTO_MODULE_HMAC_LEN;
-        cipherstart = CRYPTO_MODULE_HMAC_LEN + RANDOM_LEN;
+            cipherlen += CRYPTO_MODULE_HMAC_LEN;
+            cipherstart = CRYPTO_MODULE_HMAC_LEN + RANDOM_LEN;
+        }else {
+            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
+            if (ret != 1) {
+                free(writeBuff);
+                writeBuff = NULL;
+                free(outputstr);
+                outputstr = NULL;
+                return false;
+            }
+
+            cipherstart = RANDOM_LEN;
+        }
+        
     } else {
         encryptstatus = aes128Encrypt((GS_UCHAR*)inputstr,
             (GS_UINT32)inputstrlen,
@@ -239,7 +253,7 @@ void initDecryptInfo(DecryptInfo* pDecryptInfo)
     errorno = memset_s(pDecryptInfo->rand, RANDOM_LEN + 1, '\0', RANDOM_LEN + 1);
     securec_check_c(errorno, "\0", "\0");
 
-    errorno = memset_s(pDecryptInfo->crypto_modlue_params, CRYPTO_MODULE_PARAMS_MAX_LEN, '\0', CRYPTO_MODULE_PARAMS_MAX_LEN);
+    errorno = memset_s(pDecryptInfo->crypto_module_params, CRYPTO_MODULE_PARAMS_MAX_LEN, '\0', CRYPTO_MODULE_PARAMS_MAX_LEN);
     securec_check_c(errorno, "\0", "\0");
 
     errorno = memset_s(pDecryptInfo->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, '\0', CRYPTO_MODULE_ENC_TYPE_MAX_LEN);
@@ -260,7 +274,7 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
     bool decryptstatus = false;
     errno_t errorno = EOK;
     int moduleRet = 1;
-    bool hmacverified = false;
+    bool hmacverified = true;
 
     if (!feof(source) && (false == pDecryptInfo->isCurrLineProcess)) {
         nread = (int)fread((void*)cipherleninfo, 1, RANDOM_LEN, source);
@@ -318,17 +332,25 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         nread = (int)fread((void*)ciphertext, 1, cipherlen, source);
         if (nread) {
             if (pDecryptInfo->moduleKeyCtx && pDecryptInfo->clientSymmCryptoFunc) {
-                unsigned char hmac[CRYPTO_MODULE_HMAC_LEN + 1] = {0};
-                size_t hmaclen = 0;
-                plainlen = cipherlen;
-                moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext + CRYPTO_MODULE_HMAC_LEN, cipherlen - CRYPTO_MODULE_HMAC_LEN,
-                    pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
 
-                /*verify hmac*/
-                moduleRet = pDecryptInfo->clientHmacFunc(pDecryptInfo->moduleHmacCtx, outputstr, plainlen, hmac, &hmaclen);
-                if (strncmp((char*)hmac, (char*)ciphertext, CRYPTO_MODULE_HMAC_LEN) == 0) {
-                    hmacverified = true;
+                if (pDecryptInfo->moduleHmacCtx && pDecryptInfo->clientHmacFunc) {
+                    unsigned char hmac[CRYPTO_MODULE_HMAC_LEN + 1] = {0};
+                    size_t hmaclen = 0;
+                    plainlen = cipherlen;
+                    moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext + CRYPTO_MODULE_HMAC_LEN, cipherlen - CRYPTO_MODULE_HMAC_LEN,
+                        pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
+
+                    /*verify hmac*/
+                    moduleRet = pDecryptInfo->clientHmacFunc(pDecryptInfo->moduleHmacCtx, outputstr, plainlen, hmac, &hmaclen);
+                    if (strncmp((char*)hmac, (char*)ciphertext, CRYPTO_MODULE_HMAC_LEN)) {
+                        hmacverified = false;
+                    }
+                } else {
+                    plainlen = cipherlen;
+                    moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext, cipherlen,
+                        pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
                 }
+                
             } else {
                 decryptstatus = aes128Decrypt(ciphertext,
                     (GS_UINT32)cipherlen,

@@ -142,27 +142,57 @@ void unload_crypto_module(int code, void* args)
     }
 }
 
-static ModuleSymmKeyAlgo transform_type(char* type)
+static void transform_type(char* type, ModuleSymmKeyAlgo* symmtype, ModuleSymmKeyAlgo* hmactype)
 {
+    *symmtype = MODULE_ALGO_MAX;
+    *hmactype = MODULE_ALGO_MAX;
+
     if (strcmp(type, "AES128_CBC") == 0) {
-        return MODULE_AES_128_CBC;
+        *symmtype = MODULE_AES_128_CBC;
     } else if (strcmp(type, "AES128_CTR") == 0) {
-        return MODULE_AES_128_CTR;
+        *symmtype = MODULE_AES_128_CTR;
     } else if (strcmp(type, "AES128_GCM") == 0) {
-        return MODULE_AES_128_GCM;
+        *symmtype = MODULE_AES_128_GCM;
     } else if (strcmp(type, "AES256_CBC") == 0) {
-        return MODULE_AES_256_CBC;
+        *symmtype = MODULE_AES_256_CBC;
     } else if (strcmp(type, "AES256_CTR") == 0) {
-        return MODULE_AES_256_CTR;
+        *symmtype = MODULE_AES_256_CTR;
     } else if (strcmp(type, "AES256_GCM") == 0) {
-        return MODULE_AES_256_GCM;
+        *symmtype = MODULE_AES_256_GCM;
     } else if (strcmp(type, "SM4_CBC") == 0) {
-        return MODULE_SM4_CBC;
+        *symmtype = MODULE_SM4_CBC;
     } else if (strcmp(type, "SM4_CTR") == 0) {
-        return MODULE_SM4_CTR;
+        *symmtype = MODULE_SM4_CTR;
+    }else if (strcmp(type, "AES128_CBC_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_CBC;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES128_CTR_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_CTR;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES128_GCM_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_128_GCM;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_CBC_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_CBC;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_CTR_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_CTR;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "AES256_GCM_HMAC_SHA256") == 0) {
+        *symmtype = MODULE_AES_256_GCM;
+        *hmactype = MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "SM4_CBC_HMAC_SM3") == 0) {
+        *symmtype = MODULE_SM4_CBC;
+        *hmactype = MODULE_HMAC_SM3;
+    } else if (strcmp(type, "SM4_CTR_HMAC_SM3") == 0) {
+        *symmtype = MODULE_SM4_CTR;
+        *hmactype = MODULE_HMAC_SM3;
     }
 
-    return MODULE_ALGO_MAX;
+    if (*symmtype == MODULE_ALGO_MAX) {
+        fprintf(stderr, ("error algocrypto type\n"));
+        exit(1);
+    }
 
 }
 
@@ -170,19 +200,22 @@ void initCryptoModule(DecryptInfo* pDecryptInfo)
 {
     int ret = 1;
     SupportedFeature supportedfeature;
-    int modulType = 0;
 
     char errmsg[MAX_ERRMSG_LEN] = {0};
 
-    ret = crypto_module_init_use(pDecryptInfo->crypto_modlue_params, &supportedfeature);
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
+
+    ret = crypto_module_init_use(pDecryptInfo->crypto_module_params, &supportedfeature);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         fprintf(stderr, ("%s\n"), errmsg);
         exit(1);
     }
 
-    modulType = transform_type(pDecryptInfo->crypto_type);
-    if (modulType < 0 || supportedfeature.supported_symm[modulType] == 0) {
+    transform_type(pDecryptInfo->crypto_type, &symmtype, &hmactype);
+
+    if (symmtype < 0 || supportedfeature.supported_symm[symmtype] == 0) {
         fprintf(stderr, ("%s\n"), errmsg);
         exit(1);
     }
@@ -216,8 +249,12 @@ void initCryptoKeyCtx(DecryptInfo* pDecryptInfo)
     int ret = 1;
     int enc = 0;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
 
-    ret = crypto_ctx_init_use(pDecryptInfo->moduleSessionCtx, &(pDecryptInfo->moduleKeyCtx), (ModuleSymmKeyAlgo)transform_type(pDecryptInfo->crypto_type), enc, pDecryptInfo->Key, pDecryptInfo->keyLen);
+    transform_type(pDecryptInfo->crypto_type, &symmtype, &hmactype);
+
+    ret = crypto_ctx_init_use(pDecryptInfo->moduleSessionCtx, &(pDecryptInfo->moduleKeyCtx), symmtype, enc, pDecryptInfo->Key, pDecryptInfo->keyLen);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         crypto_module_sess_exit_use(pDecryptInfo->moduleSessionCtx);
@@ -250,23 +287,22 @@ void symmEncDec(DecryptInfo* pDecryptInfo, bool isEnc, char* indata, int inlen, 
     }
 }
 
-static ModuleSymmKeyAlgo getHmacType(ModuleSymmKeyAlgo symmAlgoType)
-{
-    if (symmAlgoType >= MODULE_AES_128_CBC && symmAlgoType <= MODULE_AES_256_GCM) {
-        return MODULE_HMAC_SHA256;
-    } else if (symmAlgoType == MODULE_SM4_CBC || symmAlgoType == MODULE_SM4_CTR){
-        return MODULE_HMAC_SM3;
-    }
-
-    return MODULE_ALGO_MAX;
-}
-
 void initHmacCtx(DecryptInfo* pDecryptInfo)
 {
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    ModuleSymmKeyAlgo symmtype;
+    ModuleSymmKeyAlgo hmactype;
 
-    ret = crypto_hmac_init_use(pDecryptInfo->moduleSessionCtx, &(pDecryptInfo->moduleHmacCtx), getHmacType(transform_type(pDecryptInfo->crypto_type)), pDecryptInfo->Key, pDecryptInfo->keyLen);
+    transform_type(pDecryptInfo->crypto_type, &symmtype, &hmactype);
+
+    /*不需要计算hmac*/
+    if (hmactype == MODULE_ALGO_MAX) {
+        pDecryptInfo->moduleHmacCtx = NULL;
+        return;
+    }
+
+    ret = crypto_hmac_init_use(pDecryptInfo->moduleSessionCtx, &(pDecryptInfo->moduleHmacCtx), hmactype, pDecryptInfo->Key, pDecryptInfo->keyLen);
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         crypto_module_sess_exit_use(pDecryptInfo->moduleSessionCtx);
@@ -310,13 +346,19 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
         exit(1);
     }
 
-    rc = memcpy_s((GS_UCHAR*)pDecryptInfo->crypto_modlue_params, CRYPTO_MODULE_PARAMS_MAX_LEN, params, strlen(params));
+    rc = memset_s(pDecryptInfo->crypto_module_params, CRYPTO_MODULE_PARAMS_MAX_LEN, 0x0, CRYPTO_MODULE_PARAMS_MAX_LEN);
+    securec_check_c(rc, "\0", "\0");
+
+    rc = memcpy_s((GS_UCHAR*)pDecryptInfo->crypto_module_params, CRYPTO_MODULE_PARAMS_MAX_LEN, params, strlen(params));
     securec_check_c(rc, "\0", "\0");
 
     if (module_encrypt_mode == NULL) {
         fprintf(stderr, ("encrypt_mode cannot be NULL\n"));
         exit(1);
     } else {
+        rc = memset_s(pDecryptInfo->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, 0x0, CRYPTO_MODULE_ENC_TYPE_MAX_LEN);
+        securec_check_c(rc, "\0", "\0");
+
         rc = memcpy_s((GS_UCHAR*)pDecryptInfo->crypto_type, CRYPTO_MODULE_ENC_TYPE_MAX_LEN, module_encrypt_mode, strlen(module_encrypt_mode));
         securec_check_c(rc, "\0", "\0");
     }
@@ -325,6 +367,9 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
         fprintf(stderr, ("salt is needed and must be 16 bytes\n"));
         exit(1);
     } else {
+        rc = memset_s(pDecryptInfo->rand, RANDOM_LEN + 1, 0x0, RANDOM_LEN + 1);
+        securec_check_c(rc, "\0", "\0");
+
         rc = memcpy_s((GS_UCHAR*)pDecryptInfo->rand, RANDOM_LEN + 1, module_encrypt_salt, strlen(module_encrypt_salt));
         securec_check_c(rc, "\0", "\0");
 
@@ -344,11 +389,15 @@ void CryptoModuleParamsCheck(DecryptInfo* pDecryptInfo, const char* params, cons
                 OPENSSL_free(tmpkey);
             }
             fprintf(stderr, ("invalid key\n"));
-            exit(1);	
+            exit(1);
         } else {
+            rc = memset_s(pDecryptInfo->Key, KEY_MAX_LEN, 0x0, KEY_MAX_LEN);
+            securec_check_c(rc, "\0", "\0");
+
             rc = memcpy_s((GS_UCHAR*)pDecryptInfo->Key, KEY_MAX_LEN, tmpkey, tmpkeylen);
             securec_check_c(rc, "\0", "\0");
             pDecryptInfo->keyLen = tmpkeylen;
+            OPENSSL_free(tmpkey);
         }
     } else {
         fprintf(stderr, ("invalid key\n"));
