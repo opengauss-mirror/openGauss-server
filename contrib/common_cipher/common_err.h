@@ -77,7 +77,7 @@ extern "C" {
 #define CRYPTO_MOD_UNPADDING_ERR                    (CRYPTO_MOD_BASE_ERR + 0x00014)/*去pad失败*/
 #define CRYPTO_MOD_NOT_ENOUGH_SPACE_ERR             (CRYPTO_MOD_BASE_ERR + 0x00015)/*分配的空间不足*/
 #define CRYPTO_MOD_DETERMINISTIC_DEC_VERIFY_ERR     (CRYPTO_MOD_BASE_ERR + 0x00016)/*确定性解密校验失败*/
-#define CRYPTO_MOD_UNKNOWN_PARAM_ERR                (CRYPTO_MOD_BASE_ERR + 0xFFFFF)/*未知的参数*/
+#define CRYPTO_MOD_UNKNOWN_PARAM_ERR                (CRYPTO_MOD_BASE_ERR + 0x00017)/*未知的参数*/
 
 extern void set_thread_errno(int errno);
 extern const char* common_get_errmsg();
