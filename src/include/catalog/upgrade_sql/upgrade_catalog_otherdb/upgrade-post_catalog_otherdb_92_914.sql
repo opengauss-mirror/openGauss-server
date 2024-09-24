@@ -393,7 +393,7 @@ FOR row_data IN EXECUTE(query_str) LOOP
                        is_slow_sql := row_data.is_slow_sql;
                        trace_id := row_data.trace_id;
                        advise := row_data.advise;
-                       net_send_time =row_data.net_send_time;
+                       net_send_time := row_data.net_send_time;
                        srt1_q := row_data.srt1_q;
                        srt2_simple_query := row_data.srt2_simple_query;
                        srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
@@ -560,7 +560,7 @@ FOR row_data IN EXECUTE(query_str) LOOP
                        is_slow_sql := row_data.is_slow_sql;
                        trace_id := row_data.trace_id;
                        advise := row_data.advise;
-                       net_send_time =row_data.net_send_time;
+                       net_send_time := row_data.net_send_time;
                        srt1_q := row_data.srt1_q;
                        srt2_simple_query := row_data.srt2_simple_query;
                        srt3_analyze_rewrite := row_data.srt3_analyze_rewrite;
