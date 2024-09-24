@@ -521,6 +521,7 @@ static void StreamLogicalLog(void)
 {
     char* copybuf = NULL;
     int64 last_status = -1;
+    PQExpBuffer res = NULL;
 
     output_written_lsn = InvalidXLogRecPtr;
     output_fsync_lsn = InvalidXLogRecPtr;
@@ -741,7 +742,7 @@ static void StreamLogicalLog(void)
         /* signal that a fsync is needed */
         output_unsynced = true;
 
-        PQExpBuffer res = createPQExpBuffer();
+        res = createPQExpBuffer();
         char *resultStream = copybuf + hdr_len;
         if (g_parallel_decode && !g_raw && g_decode_style == 'b') {
             StreamToText(copybuf +  hdr_len, res);
@@ -806,6 +807,7 @@ error:
     }
     PQfinish(conn);
     conn = NULL;
+    destroyPQExpBuffer(res);
 }
 
 /*
