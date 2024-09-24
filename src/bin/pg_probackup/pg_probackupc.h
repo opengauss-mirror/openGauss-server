@@ -82,6 +82,7 @@ extern bool specify_extdir;
 extern bool specify_tbsdir;
 
 extern bool gen_key;
+extern int key_type;
 extern char* encrypt_mode ;
 extern char* encrypt_key ;
 extern char* encrypt_salt;
