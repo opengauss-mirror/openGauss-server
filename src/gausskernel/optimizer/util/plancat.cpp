@@ -731,6 +731,16 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
     /* Grab the fdwroutine info using the relcache, while we have it */
     if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE || relation->rd_rel->relkind == RELKIND_STREAM) {
+        /* Check if the access to foreign tables is restricted*/
+        if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_FOREIGN_TABLE)) {
+            /* There can not be built-in FDW handler */
+            Assert(RelationGetRelid(relation) >= FirstNormalObjectId);
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("Access to non-system forign table is restricted."),
+                    errcause("Access to non-system forign table is restricted."),
+                    erraction("Check the value of restrict_nonsystem_relation_kind.")));
+        }
         rel->serverid = GetForeignServerIdByRelId(RelationGetRelid(relation));
         rel->fdwroutine = GetFdwRoutineForRelation(relation, true);
     } else {

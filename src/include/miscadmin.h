@@ -31,6 +31,7 @@
 #include "gs_thread.h"
 #include "pgtime.h" /* for pg_time_t */
 #include "libpq/libpq-be.h"
+#include "utils/guc_sql.h"
 
 #define PG_BACKEND_VERSIONSTR "gaussdb " DEF_GS_VERSION "\n"
 
@@ -230,6 +231,16 @@ extern bool contain_backend_version(uint32 version_number);
 #define PLPSQL_OPT_OUTPARAM 2
 #define PLPSQL_OPT_MAX 2
 
+#define OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_MAX 3
+#define OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_VIEW 1
+#define OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_FOREIGN 2
+
+static const struct behavior_compat_entry restrict_nonsystem_relation_kind[OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_MAX] = {
+    {"", 0},
+    {"view", OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_VIEW},
+    {"foreign-table", OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_FOREIGN}
+};
+
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
 #define END_MONTH_CALCULATE (u_sess->utils_cxt.behavior_compat_flags & OPT_END_MONTH_CALCULATE)
 #define SUPPORT_PRETTY_ANALYZE (!(u_sess->utils_cxt.behavior_compat_flags & OPT_COMPAT_ANALYZE_SAMPLE))
@@ -273,6 +284,12 @@ extern bool contain_backend_version(uint32 version_number);
 #define UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE)
 #define FLOAT_AS_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_FLOAT_AS_NUMERIC)
 #define DISABLE_RECORD_TYPE_IN_DML (u_sess->utils_cxt.behavior_compat_flags & OPT_DISABLE_RECORD_TYPE_IN_DML)
+#define RESTRICT_NONSYSTEM_RELATION_KIND_VIEW \
+    (bool(u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags \
+    & OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_VIEW))
+#define RESTRICT_NONSYSTEM_RELATION_KIND_FOREIGN_TABLE \
+    (bool(u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags \
+    & OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_FOREIGN))
 
 /* define database compatibility Attribute */
 typedef struct {

@@ -569,6 +569,7 @@ static bool needIgnoreSequence(TableInfo* tbinfo);
 static void *ProgressReportDump(void *arg);
 static void *ProgressReportScanDatabase(void *arg);
 inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
+static void setup_restrict_relation_kind(Archive* fout, const char* value);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
@@ -2144,6 +2145,13 @@ static void setup_connection(Archive* AH)
         
     if (quote_all_identifiers && AH->remoteVersion >= 90100)
         ExecuteSqlStatement(AH, "SET quote_all_identifiers = true");
+
+    /*
+     * For security, we restrict the expansion of non_system views and
+     * access to foreign tables during the pg_dump process. This restriction
+     * is adjusted when dumping foreign table data
+     */
+    setup_restrict_relation_kind(AH, "view, foreign-table");
 }
 
 static ArchiveFormat parseArchiveFormat(ArchiveMode* mode)
@@ -2700,6 +2708,10 @@ static int dumpTableData_copy(Archive* fout, void* dcontext)
             fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname),
             column_list);
     } else if (NULL != tdinfo->filtercond || tdinfo->tdtable->isMOT) {
+        /* Temprorary allows to access to foreign tables to dump data */
+        if (tbinfo->relkind == RELKIND_FOREIGN_TABLE) {
+            setup_restrict_relation_kind(fout, "view");
+        }
         /* Note: this syntax is only supported in 8.2 and up */
         appendPQExpBufferStr(q, "COPY (SELECT ");
         /* klugery to get rid of parens in column list */
@@ -2811,6 +2823,11 @@ static int dumpTableData_copy(Archive* fout, void* dcontext)
     PQclear(res);
 
     destroyPQExpBuffer(q);
+
+    /* Revert back the setting*/
+    if (tbinfo->relkind == RELKIND_FOREIGN_TABLE) {
+        setup_restrict_relation_kind(fout, "view, foreign-table");
+    }
     return 1;
 }
 
@@ -2840,6 +2857,12 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
     int tuple;
     int nfields;
     int field;
+
+
+    /* Temprorary allows to access to foreign tables to dump data */
+    if (tbinfo->relkind == RELKIND_FOREIGN_TABLE) {
+        setup_restrict_relation_kind(fout, "view");
+    }
 
     if (isDB4AIschema(tbinfo->dobj.nmspace) && !isExecUserSuperRole(fout)) {
         write_msg(NULL, "WARNING: schema db4ai not dumped because current user is not a superuser\n");
@@ -2973,6 +2996,12 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
     ExecuteSqlStatement(fout, "CLOSE _pg_dump_cursor");
 
     destroyPQExpBuffer(q);
+
+    /* Revert back the setting*/
+    if (tbinfo->relkind == RELKIND_FOREIGN_TABLE) {
+        setup_restrict_relation_kind(fout, "view, foreign-table");
+    }
+
     return 1;
 }
 
@@ -24129,4 +24158,24 @@ void RemoveQuotes(char *str) {
         }
     }
     str[writePtr] = '\0';  // Add null terminator at the end
+}
+
+/*
+ * Set the giavn value to restrict_nonsystem_relation_kind. Since
+ * restrict_nonsystem_relation_kind is introduced in minor version
+ * releases, the setting query is effective only available.
+ */
+static void setup_restrict_relation_kind(Archive* fout, const char* value) {
+    PQExpBuffer query = createPQExpBuffer();
+    PGresult *result;
+
+    appendPQExpBuffer(query,
+        "SELECT pg_catalog.set_config(name, '%s', false) "
+        "FROM pg_catalog.pg_settings "
+        "WHERE name = 'restrict_nonsystem_relation_kind'",
+        value);
+    result = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+    PQclear(result);
+    destroyPQExpBuffer(query);
 }
