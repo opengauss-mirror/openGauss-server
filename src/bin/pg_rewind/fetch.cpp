@@ -396,10 +396,13 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
 
         switch (PQresultStatus(res)) {
             case PGRES_SINGLE_TUPLE:
+                PQclear(res);
+                res = nullptr;
                 break;
 
             case PGRES_TUPLES_OK:
                 PQclear(res);
+                res = nullptr;
                 continue; /* final zero-row result */
 
             default:
@@ -500,6 +503,8 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             FetchCompressedFile(chunk, (uint32)chunkoff, (int32)chunkspace, (uint16)chunkSize, (uint8)algorithm);
         }
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
+        PQclear(res);
+        res = nullptr;
     }
 
     g_progressFlag = true;
