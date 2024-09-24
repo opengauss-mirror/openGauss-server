@@ -35,7 +35,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           167
+#define DMS_LOCAL_VERSION           170
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -443,6 +443,7 @@ typedef struct st_dms_buf_ctrl
     volatile unsigned char release_conflict;
     volatile unsigned char is_reform_visit;
     volatile unsigned char unused;
+    unsigned long long edp_lsn;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -463,9 +464,12 @@ typedef struct st_dms_buf_ctrl
 } dms_buf_ctrl_t;
 
 typedef struct st_dms_ctrl_info {
-    dms_buf_ctrl_t      ctrl;
+    char                pageid[DMS_PAGEID_SIZE];
     unsigned long long  lsn;
     unsigned char       is_dirty;
+    unsigned char       is_edp;
+    unsigned char       lock_mode;
+    unsigned char       in_rcy;
 } dms_ctrl_info_t;
 
 typedef enum en_dms_page_latch_mode {
@@ -974,17 +978,20 @@ typedef void (*dms_set_current_point)(void *db_handle);
 typedef void (*dms_get_db_role)(void *db_handle, unsigned int *role);
 typedef void (*dms_check_lrpl_takeover)(void *db_handle, unsigned int *need_takeover);
 typedef void (*dms_reset_link)(void *db_handle);
-typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list);
+typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
 typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
-typedef int (*dms_standby_stop_thread)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
+typedef int (*dms_standby_stop_thread)(void *db_handle);
 typedef int (*dms_standby_reload_node_ctrl)(void *db_handle);
 typedef int (*dms_standby_stop_server)(void *db_handle);
 typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
+typedef int (*dms_az_switchover_demote_update_node_ctrl)(void *db_handle, unsigned long long online_list);
+typedef int (*dms_az_switchover_demote_change_role)(void *db_handle);
 typedef int (*dms_az_switchover_demote_approve)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase2)(void *db_handle);
+typedef int (*dms_az_switchover_promote_prepare)(void *db_handle);
 typedef int (*dms_az_switchover_promote_phase1)(void *db_handle);
 typedef int (*dms_az_switchover_promote_phase2)(void *db_handle);
 typedef void (*dms_dyn_log)(void *db_handle, long long dyn_log_time);
@@ -1177,8 +1184,11 @@ typedef struct st_dms_callback {
 
     // for az switchover and az failover
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
+    dms_az_switchover_demote_update_node_ctrl az_switchover_demote_update_node_ctrl;
+    dms_az_switchover_demote_change_role az_switchover_demote_change_role;
     dms_az_switchover_demote_approve az_switchover_demote_approve;
     dms_az_switchover_demote_phase2 az_switchover_demote_phase2;
+    dms_az_switchover_promote_prepare az_switchover_promote_prepare;
     dms_az_switchover_promote_phase1 az_switchover_promote_phase1;
     dms_az_switchover_promote_phase2 az_switchover_promote_phase2;
     dms_az_failover_promote_phase1 az_failover_promote_phase1;
