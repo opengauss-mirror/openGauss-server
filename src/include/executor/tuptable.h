@@ -163,7 +163,6 @@ typedef struct TupleTableSlot {
     Oid tts_xcnodeoid;                   /* Oid of node from where the datarow is fetched */
     MemoryContext tts_per_tuple_mcxt;
 #endif
-    TableAmType tts_tupslotTableAm;      /* slots's tuple table type */
     bool tts_ndpAggHandled;              /* slot is from ndp backend, handled by aggregate */
 } TupleTableSlot;
 
