@@ -1096,11 +1096,6 @@ static void WalRcvDie(int code, Datum arg)
     /* Wake up the startup process to notice promptly that we're gone */
     WakeupRecovery();
 
-    if (t_thrd.libwalreceiver_cxt.recvBuf != NULL) {
-        PQfreemem(t_thrd.libwalreceiver_cxt.recvBuf);
-        t_thrd.libwalreceiver_cxt.recvBuf = NULL;
-    }
-
     if (t_thrd.libwalreceiver_cxt.decompressBuf != NULL) {
         pfree(t_thrd.libwalreceiver_cxt.decompressBuf);
         t_thrd.libwalreceiver_cxt.decompressBuf = NULL;
