@@ -321,14 +321,20 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
             elevel = ERROR;
         }
     }
-    if (u_sess == NULL && (g_instance.role == VUNKNOWN || t_thrd.role == MASTER_THREAD)) {
-        // there out of memory in startup, we exit directly.
-        /* Ooops, hard crash time; very little we can do safely here */
-        write_stderr("error occurred at %s:%d before error message processing is available\n"
-                     " u_sess is NULL! gaussdb is exit now.\n",
-            filename ? filename : "(unknown file)",
-            lineno);
-        _exit(-1);
+
+    if (unlikely(u_sess == NULL)) {
+        if (g_instance.role == VUNKNOWN || t_thrd.role == MASTER_THREAD) {
+            // there out of memory in startup, we exit directly.
+            /* Ooops, hard crash time; very little we can do safely here */
+            write_stderr("error occurred at %s:%d before error message processing is available\n"
+                        " u_sess is NULL! gaussdb is exit now.\n",
+                filename ? filename : "(unknown file)", lineno);
+            _exit(STATUS_ERROR);
+        } else {
+            write_stderr("error occurred at %s:%d before session context available, u_sess is NULL.\n",
+                         filename ? filename : "(unknown file)", lineno);
+            ThreadExitCXX(STATUS_ERROR);
+        }
     }
     /*
      * Now decide whether we need to process this report at all; if it's
