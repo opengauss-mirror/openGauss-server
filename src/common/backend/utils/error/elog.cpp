@@ -6042,6 +6042,8 @@ void pushErrorData(ErrorData *edata)
             errorDataArea->sqlErrorDataList = lappend(errorDataArea->sqlErrorDataList, dolphinErrorData);
             errorDataArea->current_edata_count++;
             errorDataArea->current_edata_count_by_level[errorLevelToDolphin(edata->elevel)]++;
+            pfree_ext(class_origin);
+            pfree_ext(subclass_origin);
         }
     }
     MemoryContextSwitchTo(oldcontext);
