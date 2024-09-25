@@ -288,8 +288,8 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
      * Send the newest connection information to the subscriber,
      * when the connection information about the standby changes.
      */
-    if ((t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) ||
-        t_thrd.publication_cxt.firstTimeSendConninfo) {
+    if (t_thrd.publication_cxt.updateConninfoNeeded &&
+        (ReplconninfoChanged() || t_thrd.publication_cxt.firstTimeSendConninfo)) {
         StringInfoData standbysInfo;
         initStringInfo(&standbysInfo);
 
