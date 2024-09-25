@@ -154,6 +154,7 @@ static ProbackupSubcmd backup_subcmd = NO_CMD;
 
 /* encrypt options */
 bool gen_key = false;
+int key_type = KEY_TYPE_INVALID;
 char* encrypt_mode = NULL;
 char* encrypt_key = NULL;
 char* encrypt_salt = NULL;

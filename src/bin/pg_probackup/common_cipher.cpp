@@ -103,21 +103,21 @@ void unload_crypto_module()
 
 int transform_type(const char* type)
 {
-    if (strcmp(type, "AES128_CBC") == 0) {
+    if (strcmp(type, "AES128_CBC") == 0 || strcmp(type, "AES128_CBC_HMAC_SHA256") == 0) {
         return MODULE_AES_128_CBC;
-    } else if (strcmp(type, "AES128_CTR") == 0) {
+    } else if (strcmp(type, "AES128_CTR") == 0 || strcmp(type, "AES128_CTR_HMAC_SHA256") == 0) {
         return MODULE_AES_128_CTR;
-    } else if (strcmp(type, "AES128_GCM") == 0) {
+    } else if (strcmp(type, "AES128_GCM") == 0 || strcmp(type, "AES128_GCM_HMAC_SHA256") == 0) {
         return MODULE_AES_128_GCM;
-    } else if (strcmp(type, "AES256_CBC") == 0) {
+    } else if (strcmp(type, "AES256_CBC") == 0 || strcmp(type, "AES256_CBC_HMAC_SHA256") == 0) {
         return MODULE_AES_256_CBC;
-    } else if (strcmp(type, "AES256_CTR") == 0) {
+    } else if (strcmp(type, "AES256_CTR") == 0 || strcmp(type, "AES256_CTR_HMAC_SHA256") == 0) {
         return MODULE_AES_256_CTR;
-    } else if (strcmp(type, "AES256_GCM") == 0) {
+    } else if (strcmp(type, "AES256_GCM") == 0 || strcmp(type, "AES256_GCM_HMAC_SHA256") == 0) {
         return MODULE_AES_256_GCM;
-    } else if (strcmp(type, "SM4_CBC") == 0) {
+    } else if (strcmp(type, "SM4_CBC") == 0 || strcmp(type, "SM4_CBC_HMAC_SM3") == 0) {
         return MODULE_SM4_CBC;
-    } else if (strcmp(type, "SM4_CTR") == 0) {
+    } else if (strcmp(type, "SM4_CTR") == 0 || strcmp(type, "SM4_CTR_HMAC_SM3") == 0) {
         return MODULE_SM4_CTR;
     }
 
@@ -136,7 +136,24 @@ int getHmacType(ModuleSymmKeyAlgo algo)
     return MODULE_ALGO_MAX;
 }
 
-void initCryptoModule(char* crypto_module_params, const char* encrypt_mode)
+int transform_hmac_type(const char* type)
+{
+    if (strcmp(type, "AES128_CBC_HMAC_SHA256") == 0
+        || strcmp(type, "AES128_CTR_HMAC_SHA256") == 0
+        || strcmp(type, "AES128_GCM_HMAC_SHA256") == 0
+        || strcmp(type, "AES256_CBC_HMAC_SHA256") == 0
+        || strcmp(type, "AES256_CTR_HMAC_SHA256") == 0
+        || strcmp(type, "AES256_GCM_HMAC_SHA256") == 0) {
+        return MODULE_HMAC_SHA256;
+    } else if (strcmp(type, "SM4_CBC_HMAC_SM3") == 0
+        || strcmp(type, "SM4_CTR_HMAC_SM3") == 0) {
+        return MODULE_HMAC_SM3;
+    }
+
+    return MODULE_ALGO_MAX;
+}
+
+void initCryptoModule(char* crypto_module_params, const char* encrypt_mode, int* key_type)
 {
     int ret = 1;
     SupportedFeature supportedfeature;
@@ -161,6 +178,7 @@ void initCryptoModule(char* crypto_module_params, const char* encrypt_mode)
         exit(1);
     }
 
+    *key_type = supportedfeature.key_type;
 }
 
 void initCryptoSession(void** crypto_module_session)
@@ -209,10 +227,8 @@ void clearCrypto(void* crypto_module_session, void* crypto_module_keyctx, void* 
     unload_crypto_module();
 }
 
-void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt)
+void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encrypt_mode, const char* module_encrypt_key, const char* module_encrypt_salt, int* key_type)
 {
-    errno_t rc = 0;
-
     if (!load_crypto_module_lib()) {
         fprintf(stderr, ("load crypto module lib failed\n"));
         exit(1);
@@ -222,7 +238,7 @@ void CryptoModuleParamsCheck(bool gen_key, char* params, const char* module_encr
         fprintf(stderr, ("encrypt mode and crypto module params cannot be NULL\n"));
         exit(1);
     } else {
-        initCryptoModule(params, module_encrypt_mode);
+        initCryptoModule(params, module_encrypt_mode, key_type);
     }
     
     if (gen_key && NULL != module_encrypt_key) {
