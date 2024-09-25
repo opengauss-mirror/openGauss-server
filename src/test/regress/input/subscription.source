@@ -76,6 +76,11 @@ select subname, subskiplsn from pg_subscription where subname='testsub';
 ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEFGH');
 ALTER SUBSCRIPTION testsub SET (skiplsn = 'none');
 select subname, subskiplsn from pg_subscription where subname='testsub';
+-- set syncconninfo
+ALTER SUBSCRIPTION testsub SET (syncconninfo = true);
+select subname, subsyncconninfo from pg_subscription where subname='testsub';
+ALTER SUBSCRIPTION testsub SET (syncconninfo = false);
+select subname, subsyncconninfo from pg_subscription where subname='testsub';
 -- disable test
 ALTER SUBSCRIPTION testsub DISABLE;
 --rename

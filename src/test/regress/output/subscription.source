@@ -171,6 +171,21 @@ select subname, subskiplsn from pg_subscription where subname='testsub';
  testsub | 0/0
 (1 row)
 
+-- set syncconninfo
+ALTER SUBSCRIPTION testsub SET (syncconninfo = true);
+select subname, subsyncconninfo from pg_subscription where subname='testsub';
+ subname | subsyncconninfo 
+---------+-----------------
+ testsub | t
+(1 row)
+
+ALTER SUBSCRIPTION testsub SET (syncconninfo = false);
+select subname, subsyncconninfo from pg_subscription where subname='testsub';
+ subname | subsyncconninfo 
+---------+-----------------
+ testsub | f
+(1 row)
+
 -- disable test
 ALTER SUBSCRIPTION testsub DISABLE;
 --rename
@@ -359,13 +374,15 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testsub              | ALTER SUBSCRIPTION testsub SET (binary=true);
  testsub              | ALTER SUBSCRIPTION testsub SET (skiplsn = '0/ABCDEF');
  testsub              | ALTER SUBSCRIPTION testsub SET (skiplsn = 'none');
+ testsub              | ALTER SUBSCRIPTION testsub SET (syncconninfo = true);
+ testsub              | ALTER SUBSCRIPTION testsub SET (syncconninfo = false);
  testsub              | ALTER SUBSCRIPTION testsub DISABLE;
  testsub              | ALTER SUBSCRIPTION testsub rename to testsub_rename;
  sub_len_999          | CREATE SUBSCRIPTION sub_len_999 CONNECTION *********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************PUBLICATION insert_only WITH (connect = false);
  testsub_rename       | DROP SUBSCRIPTION IF EXISTS testsub_rename;
  testsub_maskconninfo | DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
  sub_len_999          | DROP SUBSCRIPTION IF EXISTS sub_len_999;
-(20 rows)
+(22 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');
