@@ -394,6 +394,39 @@ err:
     return -1;
 }
 
+/*
+ * copy from allocate_recordbuf
+ *
+ * In ondemand realtime build, we need save readRecordBuf for segQueue and
+ * trxnQueue, so we allocate smaller (512) for save memory.
+ */
+bool ondemand_allocate_recordbuf(XLogReaderState *state, uint32 reclength)
+{
+    uint32 newSize = reclength;
+
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        newSize += ONDEMAND_RECORD_BUFFER_ALLOC_STEP - (newSize % ONDEMAND_RECORD_BUFFER_ALLOC_STEP);
+    } else {
+        newSize += XLOG_BLCKSZ - (newSize % XLOG_BLCKSZ);
+    }
+    newSize = Max(newSize, ONDEMAND_RECORD_BUFFER_ALLOC_STEP);
+
+    if (state->readRecordBuf != NULL) {
+        pfree(state->readRecordBuf);
+        pg_atomic_sub_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, state->readRecordBufSize);
+        state->readRecordBuf = NULL;
+    }
+    state->readRecordBuf = (char *)palloc_extended(newSize, MCXT_ALLOC_NO_OOM);
+    if (state->readRecordBuf == NULL) {
+        state->readRecordBufSize = 0;
+        return false;
+    }
+
+    state->readRecordBufSize = newSize;
+    pg_atomic_add_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, newSize);
+    return true;
+}
+
 XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg, char* xlogPath)
 {
     XLogRecord *record = NULL;
@@ -521,7 +554,7 @@ XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char *
     /*
      * Enlarge readRecordBuf as needed.
      */
-    if (total_len > state->readRecordBufSize && !allocate_recordbuf(state, total_len)) {
+    if (total_len > state->readRecordBufSize && !ondemand_allocate_recordbuf(state, total_len)) {
         /* We treat this as a "bogus data" condition */
         report_invalid_record(state, "record length %u at %X/%X too long", total_len, (uint32)(RecPtr >> 32),
                               (uint32)RecPtr);
@@ -732,24 +765,12 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             /* In ondemand realtime build mode, loop back to retry. Otherwise, give up. */
             if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
                 xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
-                /* No valid record available from this source */
-                streamFailCount++;
-                if (streamFailCount > SS_WAIT_TIME) {
-                    XLogRecPtr primaryRedoLsn = InvalidXLogRecPtr;
-                    primaryRedoLsn = SSOndemandRequestPrimaryCkptAndGetRedoLsn();
-                    streamFailCount = 0;
-                    if (XLByteLT(t_thrd.xlog_cxt.ReadRecPtr, primaryRedoLsn)) {
-                        ereport(WARNING,
-                                (errmsg("read xlog record for %uth times at %X/%X", streamFailCount,
-                                (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32), (uint32)t_thrd.xlog_cxt.ReadRecPtr)));    
-                    }
-                }
-                retry = 0;  
-            } else if (SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN){
-                // directly exit when ondemand_realtime_build_status = BUILD_TO_DISABLED, do not send endMark to dispatcher.
-                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
                 retry = 0;
+            } else if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER) {
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
+            } else if (unlikely(SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN)) {
                 RedoInterruptCallBack();
+                retry = 0;
             }
 
             if (retry <= 3) {

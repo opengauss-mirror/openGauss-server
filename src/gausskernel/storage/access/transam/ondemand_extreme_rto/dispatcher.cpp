@@ -443,10 +443,11 @@ void HandleStartupInterruptsForExtremeRto()
 
 static void SetOndemandXLogParseFlagValue(uint32 maxParseBufNum)
 {
-    g_ondemandXLogParseMemFullValue = maxParseBufNum * ONDEMAND_FORCE_PRUNE_RATIO;
+    g_ondemandXLogParseMemFullValue = maxParseBufNum * ONDEMAND_HASHMAP_FORCE_PRUNE_RATIO;
     g_ondemandXLogParseMemCancelPauseVaule = maxParseBufNum * ONDEMAND_DISTRIBUTE_CANCEL_RATIO;
-
-    g_ondemandRealtimeBuildQueueFullValue = REALTIME_BUILD_RECORD_QUEUE_SIZE * ONDEMAND_FORCE_PRUNE_RATIO;
+    g_ondemandXLogParseMemCancelPauseVaulePerPipeline =
+        (maxParseBufNum - g_ondemandXLogParseMemFullValue) / get_batch_redo_num();
+    g_ondemandRealtimeBuildQueueFullValue = REALTIME_BUILD_RECORD_QUEUE_SIZE * ONDEMAND_RECORD_QUEUE_FORCE_PRUNE_RATIO;
 }
 
 /* Run from the dispatcher thread. */
@@ -473,8 +474,7 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
             rc = memcpy_s(g_dispatcher->restoreControlFile, (size_t)sizeof(ControlFileData), &restoreControlFile, (size_t)sizeof(ControlFileData));
             securec_check(rc, "", "");
         }
-        g_dispatcher->maxItemNum = (get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE *
-                                   ITEM_QUQUE_SIZE_RATIO;  // 4: a startup, readmanager, txnmanager, txnworker
+        g_dispatcher->maxItemNum = 3 * REALTIME_BUILD_RECORD_QUEUE_SIZE;  // 3: TrxnQueue, SegQueue, Hashmap(reuse)
         uint32 maxParseBufNum = (uint32)((uint64)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size *
             1024 / (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc) + sizeof(RedoMemSlot)));
         XLogParseBufferInitFunc(&(g_dispatcher->parseManager), maxParseBufNum, &recordRefOperate, RedoInterruptCallBack);
@@ -1741,6 +1741,13 @@ void FreeRedoItem(RedoItem *item)
         CountXLogNumbers(&item->record);
     }
     ClearRecordInfo(&item->record);
+    // for less memory in ondemand realtime build
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL && item->record.readRecordBufSize > ONDEMAND_RECORD_BUFFER_ALLOC_STEP) {
+        pfree(item->record.readRecordBuf);
+        pg_atomic_sub_fetch_u64(&g_dispatcher->curItemRecordBufMemSize, item->record.readRecordBufSize);
+        item->record.readRecordBuf = NULL;
+        item->record.readRecordBufSize = 0;
+    }
     pg_write_barrier();
     RedoItem *oldHead = (RedoItem *)pg_atomic_read_uintptr((uintptr_t *)&g_dispatcher->freeHead);
     do {
@@ -1841,7 +1848,7 @@ void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderStat
     errno_t rc = EOK;
     if ((newReaderState->readRecordBuf == NULL) ||
         (oldReaderState->readRecordBufSize > newReaderState->readRecordBufSize)) {
-        if (!allocate_recordbuf(newReaderState, oldReaderState->readRecordBufSize)) {
+        if (!ondemand_allocate_recordbuf(newReaderState, oldReaderState->readRecordBufSize)) {
             ereport(PANIC,
                 (errmodule(MOD_REDO),
                     errcode(ERRCODE_LOG),

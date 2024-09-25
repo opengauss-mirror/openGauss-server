@@ -61,6 +61,9 @@ static const int ONDEMAND_AUXILIARY_WORKER_NUM = 2;   // segredoworker and ctrlw
 static const int MAX_EXTREME_THREAD_NUM = MAX_PARSE_WORKERS * MAX_REDO_WORKERS_PER_PARSE + MAX_PARSE_WORKERS + 
     MAX_PARSE_WORKERS + TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM;
 
+#define PAGE_REDO_WORKER_NUM (g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker * \
+                              g_instance.attr.attr_storage.batch_redo_num)
+
 #ifndef ENABLE_LITE_MODE
 static const int MAX_RECOVERY_THREAD_NUM = (MAX_EXTREME_THREAD_NUM > MOST_FAST_RECOVERY_LIMIT) ? 
     MAX_EXTREME_THREAD_NUM : MOST_FAST_RECOVERY_LIMIT;

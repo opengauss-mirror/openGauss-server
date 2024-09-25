@@ -1603,6 +1603,10 @@ static void setup_config(void)
         securec_check_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#enable_segment = off", repltok);
 
+        nRet = strcpy_s(repltok, sizeof(repltok), "enable_double_write = off");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "enable_double_write = on", repltok);
+
         conflines = ss_addnodeparmater(conflines);
     }
 

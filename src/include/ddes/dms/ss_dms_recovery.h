@@ -124,6 +124,8 @@ typedef struct ondemand_recovery_stat {
     SSGlobalClusterState ondemandRecoveryStatus;
     ondemand_realtime_build_status_t realtimeBuildStatus;
     ondemand_recovery_pause_status_t recoveryPauseStatus;
+    uint32 recordItemNum;
+    uint64 recordItemMemUsed;
 } ondemand_recovery_stat;
 
 typedef struct ss_recovery_info {

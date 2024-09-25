@@ -42,7 +42,8 @@
 namespace ondemand_extreme_rto {
 
 #define ONDEMAND_DISTRIBUTE_CANCEL_RATIO 0.5
-#define ONDEMAND_FORCE_PRUNE_RATIO 0.99
+#define ONDEMAND_HASHMAP_FORCE_PRUNE_RATIO 0.99
+#define ONDEMAND_RECORD_QUEUE_FORCE_PRUNE_RATIO 0.95
 #define ONDEMAND_HASHTAB_SWITCH_LIMIT 100000
 #define SEG_PROC_PIPELINE_SLOT 0
 #define ONDEMAND_LOG_PAUSE_STATUS_TIME 30
@@ -52,7 +53,7 @@ namespace ondemand_extreme_rto {
 #define ONDEMAND_HASHMAP_ENTRY_NEED_REDO 2
 
 static const uint32 PAGE_WORK_QUEUE_SIZE = 65536;
-static const uint32 REALTIME_BUILD_RECORD_QUEUE_SIZE = 4194304;
+static const uint32 REALTIME_BUILD_RECORD_QUEUE_SIZE = 2097152;
 
 static const uint32 ONDEMAND_EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
@@ -60,6 +61,7 @@ static const uint32 ADVANCE_GLOBALLSN_INTERVAL = 1; /* unit second */
 
 extern uint32 g_ondemandXLogParseMemFullValue;
 extern uint32 g_ondemandXLogParseMemCancelPauseVaule;
+extern uint32 g_ondemandXLogParseMemCancelPauseVaulePerPipeline;
 extern uint32 g_ondemandRealtimeBuildQueueFullValue;
 
 typedef bool (*OndemandCheckPauseCB)(void);
