@@ -119,6 +119,13 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
         sub->skiplsn = TextDatumGetLsn(datum);
     }
 
+    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subsyncconninfo, &isnull);
+    if (unlikely(isnull)) {
+        sub->subsyncconninfo = true;
+    } else {
+        sub->subsyncconninfo = DatumGetBool(datum);
+    }
+
     ReleaseSysCache(tup);
 
     return sub;
