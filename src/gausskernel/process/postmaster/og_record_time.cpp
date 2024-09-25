@@ -403,7 +403,7 @@ OgRecordAutoController::OgRecordAutoController(TimeInfoType time_info_type)
     time_info = time_info_type;
     bool report_enable = OgRecordAutoController::report_enable();
     if (report_enable) {
-        MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        MemoryContext old = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
         og_operator = New(CurrentMemoryContext) OgRecordOperator(time_info);
         MemoryContextSwitchTo(old);
     } else {
@@ -414,7 +414,7 @@ OgRecordAutoController::OgRecordAutoController(TimeInfoType time_info_type)
 OgRecordAutoController::~OgRecordAutoController()
 {
     if (og_operator != NULL && u_sess != NULL) {
-        MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        MemoryContext old = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
         DELETE_EX_TYPE(og_operator,OgRecordOperator);
         MemoryContextSwitchTo(old);
     }
