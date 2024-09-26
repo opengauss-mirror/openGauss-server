@@ -2043,10 +2043,8 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
             /* default is definer in b format database */
             checkAsUser = RelationGetOwner(relation);
         }
-        if (checkAsUser != RelationGetOwner(relation)) {
-            /* set all relations' and functions' invoker information */
-            query_tree_walker((Query *)rule_action, (bool (*)())viewSecurityPassDown, (void *)&checkAsUser, QTW_EXAMINE_RTES);
-        }
+        /* set all relations' and functions' invoker information */
+        query_tree_walker((Query *)rule_action, (bool (*)())viewSecurityPassDown, (void *)&checkAsUser, QTW_EXAMINE_RTES);
     } else if (RelationHasViewSecurityOption(relation)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
