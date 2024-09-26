@@ -235,6 +235,9 @@ Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 
             /* OK to skip */
             ereport(NOTICE, (errmsg("schema \"%s\" already exists,skipping", schemaName)));
+
+            /* Reset current user and security context. */
+            SetUserIdAndSecContext(saved_uid, save_sec_context);
             return InvalidOid;
 	}
     } 
