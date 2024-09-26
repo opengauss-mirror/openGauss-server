@@ -343,3 +343,29 @@ order by
 	n_name,
 	s_name,
 	p_partkey;
+
+
+create table t1(c1 int,c2 int);
+create table t2(c1 int,c2 int);
+create table t3(c1 int,c2 int);
+insert into t1 values(1,1),(2,2),(3,3);
+insert into t2 values(1,1),(2,2),(3,3);
+insert into t3 values(1,1),(2,2),(3,3);
+
+select count(0)
+from 
+(
+    select t1.* from t1
+    where ((
+            (select count(1)
+             from t2
+             where t2.c1=t1.c1) + 
+             (select count(1)
+              from t3
+              where t3.c1=t1.c1)) > 0
+            or t1.c1 = 5)
+) tmp_count;
+
+drop table t1;
+drop table t2;
+drop table t3;

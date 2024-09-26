@@ -6436,7 +6436,6 @@ void convert_ORCLAUSE_to_join(PlannerInfo *root, BoolExpr *or_clause, Node **jtl
                 /* fall through */
             case T_OpExpr:
             {
-                Node        *notNullAnd = NULL;
                 bool        replace = false;
                 ListCell    *cell = NULL;
 
@@ -6454,16 +6453,10 @@ void convert_ORCLAUSE_to_join(PlannerInfo *root, BoolExpr *or_clause, Node **jtl
                                             jtlink1, available_rels1, replace, isnull);
 
                     if (notNullExpr != NULL) {
-                        notNullAnd = make_and_qual(notNullAnd, notNullExpr);
                         replace = true;
                     }
                 }
 
-                /* This opexpr's sublink always be pulled up, and it will be replaced with not null expr.*/
-
-                if (notNullAnd != NULL) {
-                    or_clause = (BoolExpr*)replace_node_clause((Node*)or_clause, clause, notNullAnd, RNC_RECURSE_AGGREF);
-                }
             }
                 break;
 
