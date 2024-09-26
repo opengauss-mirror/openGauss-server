@@ -2272,7 +2272,12 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             /* Check namespace permissions. */
             AclResult aclresult;
 
-            aclresult = pg_namespace_aclcheck(namespaceId, ownerId, ACL_CREATE);
+            if (DB_IS_CMPT(PG_FORMAT) && u_sess->hook_cxt.forTsdbHook) {
+                aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
+            } else {
+                aclresult = pg_namespace_aclcheck(namespaceId, ownerId, ACL_CREATE);
+            }
+            
             bool anyResult = false;
             if (aclresult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
                 anyResult = CheckRelationCreateAnyPrivilege(ownerId, relkind);
