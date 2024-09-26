@@ -722,6 +722,7 @@ static void StopRecoveryWorkers(int code, Datum arg)
         g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
         ereport(LOG, (errmsg("[On-demand] realtime build shutdown, set status to DISABLED.")));
     }
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
     SSDestroyRecoveryWorkers();
     g_startupTriggerState = TRIGGER_NORMAL;
     g_readManagerTriggerFlag = TRIGGER_NORMAL;

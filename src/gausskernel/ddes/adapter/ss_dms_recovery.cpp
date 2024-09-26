@@ -141,8 +141,9 @@ bool SSRecoveryApplyDelay()
     if (SS_DISASTER_STANDBY_CLUSTER) {
         return true;
     }
-
-    OnDemandNotifyHashMapPruneIfNeed();
+    if (IsOndemandExtremeRtoMode) {
+        OnDemandNotifyHashMapPruneIfNeed();
+    }
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag || SS_ONDEMAND_RECOVERY_PAUSE) {
         /* might change the trigger file's location */
         RedoInterruptCallBack();
