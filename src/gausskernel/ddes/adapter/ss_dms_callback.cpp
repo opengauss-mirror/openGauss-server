@@ -2238,8 +2238,11 @@ int CBDoCheckpointImmediately(unsigned long long *ckpt_lsn)
 {
     Assert(SS_PRIMARY_MODE);
 
-    RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
+    RequestCheckpoint(CHECKPOINT_IMMEDIATE);
+    pg_usleep(REFORM_WAIT_LONG);
+    LWLockAcquire(ControlFileLock, LW_SHARED);
     *ckpt_lsn = (unsigned long long)t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+    LWLockRelease(ControlFileLock);
     return GS_SUCCESS;
 }
 
