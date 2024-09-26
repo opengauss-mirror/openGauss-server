@@ -1675,6 +1675,10 @@ void UpdateFsm(RedoBufferTag *blockInfo, Size freespace)
     uint16 slot;
     FSMAddress addr = fsm_get_location(blockInfo->blkno, &slot);
     BlockNumber blkno = fsm_logical_to_physical(addr);
+    if (IsSegmentFileNode(blockInfo->rnode)) {
+        XLogRecordPageWithFreeSpace(blockInfo->rnode, blockInfo->blkno, freespace, &(blockInfo->pblk));
+        return;
+    }
 
     RedoBufferInfo fsmBufInfo = {0};
     fsmBufInfo.blockinfo.rnode = blockInfo->rnode;

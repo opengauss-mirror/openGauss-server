@@ -48,7 +48,8 @@ void seg_post_ckpt(void);
 void seg_async_read(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dList, int32 dn);
 void seg_async_write(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dList, int32 dn);
 void seg_move_buckets(const RelFileNodeBackend &dest, const RelFileNodeBackend &src, List *bucketList);
-bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk);
+bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk,
+    XLogPhyBlock *fsm_pblk = NULL);
 void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber *blocknums, char *buffer,
                      BlockNumber *locBlock);
 BlockNumber seg_direct_read_get_range(BlockNumber logic_id);

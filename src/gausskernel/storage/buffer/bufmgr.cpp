@@ -2302,6 +2302,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
 static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
 {
     if (pblk != NULL) {
+        Assert(PhyBlockIsValid(*pblk));
         buf->extra->seg_fileno = pblk->relNode;
         buf->extra->seg_blockno = pblk->block;
     }
@@ -2911,6 +2912,10 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
         return;
     }
 
+    if (IsSegmentFileNode(buf->tag.rnode) && buf->tag.forkNum != MAIN_FORKNUM) {
+        return;
+    }
+
     Block tmpBlock = BufHdrGetBlock(buf);
 
     if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) &&
@@ -2933,6 +2938,10 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
 void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags)
 {
     if (SS_REFORM_REFORMER || SS_DISASTER_STANDBY_CLUSTER) {
+        return;
+    }
+
+    if (IsSegmentFileNode(buf->tag.rnode) && buf->tag.forkNum != MAIN_FORKNUM) {
         return;
     }
 
@@ -3288,6 +3297,14 @@ retry_new_buffer:
                      */
                     *found = FALSE;
                 }
+            }
+
+            /* set Physical segment file. */
+            if (ENABLE_DMS && pblk != NULL) {
+                Assert(PhyBlockIsValid(*pblk));
+                buf->extra->seg_fileno = pblk->relNode;
+                buf->extra->seg_blockno = pblk->block;
+                MarkReadPblk(buf->buf_id, pblk);
             }
 
             return buf;
@@ -4624,10 +4641,7 @@ uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_c
         tag.blockNum = buf_desc->extra->seg_blockno;
     }
 
-    if (!t_thrd.dms_cxt.buf_in_aio) {
-        /* when enable DSS AIO, UnpinBuffer in AIO complete callback */
-        UnpinBuffer(buf_desc, true);
-    }
+    UnpinBuffer(buf_desc, true);
 
     ScheduleBufferTagForWriteback(wb_context, &tag);
 
@@ -7435,35 +7449,51 @@ int ckpt_buforder_comparator(const void *pa, const void *pb)
     const CkptSortItem *a = (CkptSortItem *)pa;
     const CkptSortItem *b = (CkptSortItem *)pb;
 
-    /* compare tablespace */
-    if (a->tsId < b->tsId) {
-        return -1;
-    } else if (a->tsId > b->tsId) {
-        return 1;
-    }
-    /* compare relation */
-    if (a->relNode < b->relNode) {
-        return -1;
-    } else if (a->relNode > b->relNode) {
-        return 1;
-    }
+    if (ENABLE_DMS) {
+        if (a->forkNum < b->forkNum) { /* compare fork */
+            return -1;
+        } else if (a->forkNum > b->forkNum) {
+            return 1;
+        } else if (a->seg_fileno < b->seg_fileno) {
+            return -1;
+        } else if (a->seg_fileno > b->seg_fileno) {
+            return 1;
+        } else if (a->seg_blockno < b->seg_blockno) {
+            return -1;
+        } else {
+            return 1;
+        }
+    } else {
+        /* compare tablespace */
+        if (a->tsId < b->tsId) {
+            return -1;
+        } else if (a->tsId > b->tsId) {
+            return 1;
+        }
+        /* compare relation */
+        if (a->relNode < b->relNode) {
+            return -1;
+        } else if (a->relNode > b->relNode) {
+            return 1;
+        }
 
-    /* compare bucket */
-    if (a->bucketNode < b->bucketNode) {
-        return -1;
-    } else if (a->bucketNode > b->bucketNode) {
-        return 1;
-    } else if (a->forkNum < b->forkNum) { /* compare fork */
-        return -1;
-    } else if (a->forkNum > b->forkNum) {
-        return 1;
-        /* compare block number */
-    } else if (a->blockNum < b->blockNum) {
-        return -1;
-    } else { /* should not be the same block ... */
-        return 1;
+        /* compare bucket */
+        if (a->bucketNode < b->bucketNode) {
+            return -1;
+        } else if (a->bucketNode > b->bucketNode) {
+            return 1;
+        } else if (a->forkNum < b->forkNum) { /* compare fork */
+            return -1;
+        } else if (a->forkNum > b->forkNum) {
+            return 1;
+            /* compare block number */
+        } else if (a->blockNum < b->blockNum) {
+            return -1;
+        } else { /* should not be the same block ... */
+            return 1;
+        }
+        /* do not need to compare opt */
     }
-    /* do not need to compare opt */
 }
 
 /*
@@ -7853,7 +7883,7 @@ void SSTryEliminateBuf(uint64 times)
     }
 
     if (flags & BM_TAG_VALID) {
-        if (!DmsReleaseOwner(tag, buf->buf_id)) {
+        if (buf->extra->aio_in_progress || !DmsReleaseOwner(tag, buf->buf_id)) {
             UnlockBufHdr(buf, buf_state);
             LWLockRelease(partition_lock);
             return;

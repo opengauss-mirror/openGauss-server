@@ -2726,22 +2726,10 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                 querystringForLibpqsw = query_string;
             }
             // create table as / select into / insert into
-            if (nodeTag(parsetree) == T_CreateTableAsStmt
+            if (NODETAG_IS_WRITE(parsetree)
                 || ((nodeTag(parsetree) == T_SelectStmt) && ((SelectStmt*)parsetree)->intoClause != NULL)
                 ) {
                 libpqsw_set_redirect(true);
-            }
-
-        }
-
-        if (ENABLE_REMOTE_EXECUTE && libpqsw_get_redirect()) {
-            if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw, is_multistmt, lnext(parsetree_item) == NULL)) {
-                libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
-                if (snapshot_set) {
-                    PopActiveSnapshot();
-                }
-                finish_xact_command();
-                continue;
             }
         }
 
@@ -2780,6 +2768,19 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         if (analyze_requires_snapshot(parsetree)) {
             PushActiveSnapshot(GetTransactionSnapshot());
             snapshot_set = true;
+        }
+
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_get_redirect()) {
+            if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw, is_multistmt,
+                                              lnext(parsetree_item) == NULL)) {
+                libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
+                if (snapshot_set) {
+                    PopActiveSnapshot();
+                }
+                CommandCounterIncrement();
+                finish_xact_command();
+                continue;
+            }
         }
 
         /*

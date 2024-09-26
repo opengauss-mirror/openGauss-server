@@ -40,6 +40,10 @@ enum PhaseType {
     LIBPQ_SW_BIND
 };
 
+#define NODETAG_IS_WRITE(a)                                                                           \
+    (nodeTag(a) == T_CreateTableAsStmt || nodeTag(a) == T_InsertStmt || nodeTag(a) == T_DeleteStmt || \
+     nodeTag(a) == T_UpdateStmt || nodeTag(a) == T_MergeStmt)
+
 void DestroyStringInfo(StringInfo str);
 /* process msg from backend */
 bool libpqsw_process_message(int qtype, const StringInfo msg);

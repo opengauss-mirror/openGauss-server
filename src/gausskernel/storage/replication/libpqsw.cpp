@@ -962,6 +962,9 @@ static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *
                 return ret;
             }
         }
+    } else if (libpqsw_get_redirect() && libpqsw_get_transaction()) {
+        get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
+        return ret;
     }
     libpqsw_set_end(false);
 
@@ -1144,11 +1147,6 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
             }
         }
 
-        if (get_sw_cxt()->streamConn->xactStatus == PQTRANS_INERROR) {
-            libpqsw_disconnect(true);
-            AbortCurrentTransaction();
-        }
-
         // because we are not skip Q message process, so send_ready_for_query will be true after transfer.
         // but after transter, master will send Z message for front, so we not need to this flag.
         if (get_redirect_manager()->state.client_enable_ce || libpqsw_end_command(commandTag) ||
@@ -1162,6 +1160,11 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
             SSStandbyUpdateRedirectInfo();
             SetTxnInfoForSSLibpqsw(get_redirect_manager()->ss_standby_sxid, get_redirect_manager()->ss_standby_scid);
             get_redirect_manager()->ss_standby_state &= ~(SS_STANDBY_RES_OK_REDIRECT | SS_STANDBY_REQ_WRITE_REDIRECT);
+        }
+
+        if (get_sw_cxt()->streamConn->xactStatus == PQTRANS_INERROR) {
+            libpqsw_disconnect(true);
+            AbortCurrentTransaction();
         }
     } else {
         // we need send_ready_for_query for init.

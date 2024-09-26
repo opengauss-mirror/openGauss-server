@@ -344,6 +344,8 @@ typedef struct CkptSortItem {
     ForkNumber forkNum;
     BlockNumber blockNum;
     int buf_id;
+    uint8 seg_fileno;
+    BlockNumber seg_blockno;
 } CkptSortItem;
 
 /*

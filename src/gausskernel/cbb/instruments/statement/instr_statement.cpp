@@ -2414,11 +2414,11 @@ static int32 get_wait_events_idx_in_bms(uint32 class_id, uint32 event_id)
             break;
         case PG_WAIT_DMS:
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - DMS")));
-            event_idx = event_id;
+            event_idx = event_id + wait_event_io_event_max_index;
             break;
         case PG_WAIT_LOCK:
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - LOCK")));
-            event_idx = event_id + wait_event_io_event_max_index;
+            event_idx = event_id + wait_event_dms_event_max_index;
             break;
         case PG_WAIT_LWLOCK:
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - LWLOCK")));

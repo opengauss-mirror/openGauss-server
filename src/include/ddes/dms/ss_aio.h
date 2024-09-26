@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-typedef void (*aio_callback)(struct io_event *event);
+typedef void (*aio_callback)(struct io_event event[], int num);
 #define DSS_AIO_BATCH_SIZE 128
 #define DSS_AIO_UTIL_NUM 2
 typedef struct AioUtil {
