@@ -420,9 +420,11 @@ char* gs_perm_setlocale_r(int category, const char* locale)
         else
             category_mask = (1 << (unsigned int)category);
 
-        t_thrd.port_cxt.save_locale_r = newlocale(category_mask, locale, t_thrd.port_cxt.save_locale_r);
-        if (t_thrd.port_cxt.save_locale_r == (locale_t)0)
+        locale_t newLocale = newlocale(category_mask, locale, t_thrd.port_cxt.save_locale_r);
+        if (newLocale == (locale_t)0) {
             return NULL;
+        }
+        t_thrd.port_cxt.save_locale_r = newLocale;
         old_locale = uselocale(t_thrd.port_cxt.save_locale_r);
         if (old_locale == (locale_t)0)
             return NULL;
