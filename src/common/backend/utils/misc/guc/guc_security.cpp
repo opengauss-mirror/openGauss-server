@@ -1446,4 +1446,3 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
     pfree_ext(ciphers_list);
     return true;
 }
-

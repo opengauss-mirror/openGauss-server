@@ -66,6 +66,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "knl/knl_guc/knl_session_attr_security.h"
 #ifdef ENABLE_BBOX
 #include "gs_bbox.h"
 #endif
@@ -3593,6 +3594,16 @@ static void CheckShareStorageConfigConflicts(void)
     }
 }
 
+static void CheckPasswordLenConfigConflics(void)
+{
+    if (u_sess->attr.attr_security.Password_min_length > u_sess->attr.attr_security.Password_max_length) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                           errmsg("password_min_length (%d) should be no more than password_max_length (%d).",
+                                   u_sess->attr.attr_security.Password_min_length,
+                                   u_sess->attr.attr_security.Password_max_length)));
+    }
+}
+
 /*
  * Check for invalid combinations of GUC settings during starting up.
  */
@@ -3656,6 +3667,7 @@ static void CheckGUCConflicts(void)
     }
     CheckExtremeRtoGUCConflicts();
     CheckShareStorageConfigConflicts();
+    CheckPasswordLenConfigConflics();
 #if ((defined(USE_SSL)) && (defined(USE_TASSL))) 
     CheckSSLConflict();
 #endif
