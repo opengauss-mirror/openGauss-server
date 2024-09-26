@@ -2309,7 +2309,8 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (queryDesc == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2 
         || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
-        || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)) {
+        || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)
+        || queryDesc->for_simplify_func) {
         return;
     }
     /* when getting plan directly from CN, the plan is partial, deparse plan will be failed,

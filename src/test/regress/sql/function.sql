@@ -1154,3 +1154,48 @@ end;
 $$;
 
 drop function test_debug1;
+
+\c postgres
+
+alter system set enable_stmt_track=on;
+set log_min_duration_statement=0;
+set track_stmt_stat_level='L1,L1';
+alter system set instr_unique_sql_count = 10000;
+delete from dbe_perf.statement_history;
+
+CREATE TABLE stmt_hist_t1 ( first_name text, last_name text, job_id int, department_id int,d1 bigint ) ;
+create index stmt_hist_t1_i1 on stmt_hist_t1 (job_id) ;
+create index stmt_hist_t1_i2 on stmt_hist_t1 (department_id) ;
+insert into stmt_hist_t1 (first_name,last_name,job_id,department_id) values('Alice', 'Adams', 2, 1 );
+insert into stmt_hist_t1 (first_name,last_name,job_id,department_id) values('Beatrice', 'Brand', 3, 1);
+
+CREATE TABLE stmt_hist_t2 ( job_title text, job_id int) ;
+insert into stmt_hist_t2 values( 'Job1', 1 );
+insert into stmt_hist_t2 values( 'Job2', 2 );
+insert into stmt_hist_t2 values( 'Job3', 3 );
+
+analyze stmt_hist_t1;
+analyze stmt_hist_t2;
+
+CREATE FUNCTION func_add_sql() RETURNS integer
+AS 'select 3;'
+LANGUAGE SQL
+IMMUTABLE
+RETURNS NULL ON NULL INPUT;
+
+explain (verbose, costs off) select func_add_sql() from stmt_hist_t2 join stmt_hist_t1 on stmt_hist_t2.job_id = stmt_hist_t1.job_id where stmt_hist_t1.job_id not in (select department_id from stmt_hist_t1 );
+select func_add_sql() from stmt_hist_t2 join stmt_hist_t1 on stmt_hist_t2.job_id = stmt_hist_t1.job_id where stmt_hist_t1.job_id not in (select department_id from stmt_hist_t1 );
+
+call pg_sleep(1);
+
+select query_plan from dbe_perf.statement_history where query ilike '%select func_add_sql() from stmt_hist_t2 join stmt_hist_t1 on stmt_hist_t2.job_id = stmt_hist_t1.job_id where stmt_hist_t1.job_id not in (select department_id from stmt_hist_t1 );%';
+
+drop table stmt_hist_t1, stmt_hist_t2 cascade;
+drop function func_add_sql;
+
+alter system set enable_stmt_track=off;
+reset log_min_duration_statement;
+reset track_stmt_stat_level;
+alter system set instr_unique_sql_count = 100;
+
+\c regression
