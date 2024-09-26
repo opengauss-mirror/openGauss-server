@@ -267,6 +267,7 @@ typedef struct knl_session_attr_storage {
     int ignore_standby_lsn_window;
     int ignore_feedback_xmin_window;
     bool enable_heap_multi_insert_for_insert_select;
+    bool enable_xlog_insert_record_group;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
