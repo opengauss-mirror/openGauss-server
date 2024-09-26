@@ -5366,3 +5366,58 @@ void GetOldestGlobalProcXmin(TransactionId *globalProcXmin)
     }
     LWLockRelease(ProcArrayLock);
 }
+
+TransactionId GetVacuumExtremeOldestXmin()
+{
+    pg_read_barrier();
+    (void)LWLockAcquire(ProcArrayLock, LW_SHARED);
+
+    /* initialize minXmin calculation with xmax: latestCompletedXid + 1 */
+    TransactionId minXmin = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
+    Assert(TransactionIdIsNormal(minXmin));
+    TransactionIdAdvance(minXmin);
+
+    /*
+     * Spin over procArray checking xid, xmin, and subxids. The goal is
+     * to gather all active xids, find the lowest xmin, and try to record subxids.
+     */
+    ProcArrayStruct* arrayP = g_instance.proc_array_idx;
+    int* pgprocnos = arrayP->pgprocnos;
+    int numProcs = arrayP->numProcs;
+    TransactionId xid = InvalidTransactionId;
+    for (int i = 0; i < numProcs; i++) {
+        int procNo = pgprocnos[i];
+        volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[procNo];
+
+        /*
+        * Ignore procs doing logical decoding which manages xmin
+        * separately or running LAZY VACUUM
+        */
+        if ((pgxact->vacuumFlags & PROC_IN_LOGICAL_DECODING) ||
+            (pgxact->vacuumFlags & PROC_IN_VACUUM)) {
+            continue;
+        }
+
+        /* Fetch xid just once - see GetNewTransactionId */
+        xid = pgxact->xid;
+        /* If no XID assigned, use xid passed down from CN */
+        if (!TransactionIdIsNormal(xid)) {
+            xid = pgxact->next_xid;
+        }
+        if (TransactionIdIsNormal(xid) &&
+            TransactionIdPrecedes(xid, minXmin)) {
+            minXmin = xid;
+        }
+    }
+
+    uint64 deferAge = (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
+    if (TransactionIdPrecedes(minXmin, deferAge)) {
+        minXmin = FirstNormalTransactionId;
+    } else {
+        minXmin -= deferAge;
+    }
+
+    LWLockRelease(ProcArrayLock);
+
+    return minXmin;
+}
