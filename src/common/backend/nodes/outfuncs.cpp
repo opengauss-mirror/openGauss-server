@@ -2243,6 +2243,33 @@ static void _outLimit(StringInfo str, Limit* node)
 
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isPercent);
+        WRITE_BOOL_FIELD(withTies);
+        WRITE_INT_FIELD(numCols);
+
+        if (node->numCols > 0) {
+            appendStringInfo(str, " :sortColIdx");
+            for (size_t i = 0; i < node->numCols; i++) {
+                appendStringInfo(str, " %d", node->sortColIdx[i]);
+            }
+
+            WRITE_GRPOP_FIELD(equalOperators, numCols);
+
+            appendStringInfo(str, " :collations");
+            for (size_t i = 0; i < node->numCols; i++) {
+                appendStringInfo(str, " %u", node->collations[i]);
+            }
+
+            for (size_t i = 0; i < node->numCols; i++) {
+                if (node->collations[i] >= FirstBootstrapObjectId &&
+                    IsStatisfyUpdateCompatibility(node->collations[i])) {
+                    appendStringInfo(str, " :collname ");
+                    _outToken(str, get_collation_name(node->collations[i]));
+                }
+            }
+        }
+    }
 }
 
 static void _outNestLoopParam(StringInfo str, NestLoopParam* node)
@@ -4275,6 +4302,10 @@ static void _outSelectStmt(StringInfo str, SelectStmt* node)
     WRITE_NODE_FIELD(sortClause);
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(limitIsPercent);
+        WRITE_BOOL_FIELD(limitWithTies);
+    }
     WRITE_NODE_FIELD(lockingClause);
     WRITE_ENUM_FIELD(op, SetOperation);
     WRITE_BOOL_FIELD(all);
@@ -4980,6 +5011,10 @@ static void _outQuery(StringInfo str, Query* node)
     WRITE_NODE_FIELD(sortClause);
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(limitIsPercent);
+        WRITE_BOOL_FIELD(limitWithTies);
+    }
     WRITE_NODE_FIELD(rowMarks);
     WRITE_NODE_FIELD(setOperations);
     WRITE_NODE_FIELD(constraintDeps);
@@ -6033,6 +6068,34 @@ static void _outVecLimit(StringInfo str, VecLimit* node)
 
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isPercent);
+        WRITE_BOOL_FIELD(withTies);
+        WRITE_INT_FIELD(numCols);
+
+        if (node->numCols > 0) {
+            appendStringInfo(str, " :sortColIdx");
+            for (size_t i = 0; i < node->numCols; i++) {
+                appendStringInfo(str, " %d", node->sortColIdx[i]);
+            }
+
+            WRITE_GRPOP_FIELD(equalOperators, numCols);
+
+            appendStringInfo(str, " :collations");
+            for (size_t i = 0; i < node->numCols; i++) {
+                appendStringInfo(str, " %u", node->collations[i]);
+            }
+
+            for (size_t i = 0; i < node->numCols; i++) {
+                if (node->collations[i] >= FirstBootstrapObjectId 
+                        && IsStatisfyUpdateCompatibility(node->collations[i])) {
+                    appendStringInfo(str, " :collname ");
+                    _outToken(str, get_collation_name(node->collations[i]));
+                }
+            }
+        }
+    }
 }
 
 static void _outVecModifyTable(StringInfo str, VecModifyTable* node)

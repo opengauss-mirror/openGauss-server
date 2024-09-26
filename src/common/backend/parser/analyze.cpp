@@ -3068,8 +3068,11 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     }
 
     /* transform LIMIT */
+    pstate->p_is_percent = stmt->limitIsPercent;
     qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, EXPR_KIND_OFFSET, "OFFSET");
     qry->limitCount = transformLimitClause(pstate, stmt->limitCount, EXPR_KIND_LIMIT, "LIMIT");
+    qry->limitIsPercent = stmt->limitIsPercent;
+    qry->limitWithTies = stmt->limitWithTies && stmt->sortClause != NIL;
 
     /* transform window clauses after we have seen all window functions */
     qry->windowClause = transformWindowDefinitions(pstate, pstate->p_windowdefs, &qry->targetList);

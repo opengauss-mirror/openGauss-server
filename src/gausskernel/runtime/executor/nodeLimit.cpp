@@ -30,7 +30,9 @@
 
 static TupleTableSlot* ExecLimit(PlanState* state);
 static void pass_down_bound(LimitState* node, PlanState* child_node);
+static TupleTableSlot* exec_get_tuple(LimitState* node);
 
+static constexpr double PERCENTAGE_BASE = 100;
 /* ----------------------------------------------------------------
  *		ExecLimit
  *
@@ -41,9 +43,11 @@ static void pass_down_bound(LimitState* node, PlanState* child_node);
 static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
 {
     LimitState* node = castNode(LimitState, state);
+    Plan* plan = node->ps.plan;
     ScanDirection direction;
     TupleTableSlot* slot = NULL;
     PlanState* outer_plan = NULL;
+    TupleTableSlot* result_tuple_slot = node->ps.ps_ResultTupleSlot;
 
     CHECK_FOR_INTERRUPTS();
 
@@ -79,9 +83,19 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
             /*
              * Check for empty window; if so, treat like empty subplan.
              */
-            if (node->count <= 0 && !node->noCount) {
+            if (!node->noCount && 
+                ((node->count <= 0 && !node->isPercent) || 
+                (node->isPercent && node->fraction <= 0))) {
                 node->lstate = LIMIT_EMPTY;
                 return NULL;
+            }
+
+            if (node->withTies) {
+                if (node->outputSlot == NULL) {
+                    node->outputSlot = MakeSingleTupleTableSlot(ExecGetResultType(outer_plan));
+                } else {
+                    (void)ExecClearTuple(node->outputSlot);
+                }
             }
 
             /*
@@ -98,8 +112,66 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
                     return NULL;
                 }
                 node->subSlot = slot;
+                
                 if (++node->position > node->offset)
                     break;
+            }
+
+            if (node->isPercent) {
+                int64 operator_mem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
+                int64 max_mem = (plan->operatorMaxMem > 0) ? SET_NODEMEM(plan->operatorMaxMem, plan->dop) : 0;
+                size_t tuple_num = node->position;
+                TupleTableSlot* result_tuple_slot = node->ps.ps_ResultTupleSlot;
+
+                /*
+                 * We have a new tuple different from the previous saved tuple (if any).
+                 * We must copy it because the source subplan won't guarantee that 
+                 * this source tuple is still accessible after fetching the next source tuple.
+                 */
+                ExecCopySlot(result_tuple_slot, slot);
+
+                /* Initialize Tuple store */
+                if (node->tuplestorestate) {
+                    tuplestore_end(node->tuplestorestate);
+                    node->tuplestorestate = NULL;
+                }
+                node->tuplestorestate = 
+                            tuplestore_begin_heap(true, false, operator_mem, max_mem, 
+                                plan->plan_node_id, SET_DOP(plan->dop), true);
+
+                /* Fetching all the results from subplan */
+                TupleTableSlot* next_slot = ExecProcNode(outer_plan);
+                while (!TupIsNull(next_slot)) {
+                    tuplestore_puttupleslot(node->tuplestorestate, next_slot);
+                    next_slot = ExecProcNode(outer_plan);
+                    tuple_num++;
+                }
+
+                node->count = (int64)(node->fraction * tuple_num);
+                if (node->count <= 0) {
+                    node->lstate = LIMIT_EMPTY;
+                    return NULL;
+                }
+
+                EARLY_FREE_LOG(elog(LOG,
+                    "Early Free: Before completing the fetch percent "
+                    "at node %d, memory used %d MB.",
+                    plan_node->plan.plan_node_id,
+                    getSessionMemoryUsageMB()));
+
+                /* Finish scanning the subplan, it's safe to early free the memory of lefttree */
+                ExecEarlyFree(outerPlanState(node));
+
+                EARLY_FREE_LOG(elog(LOG,
+                    "Early Free: After completing the fetch percent "
+                    "at node %d, memory used %d MB.",
+                    plan_node->plan.plan_node_id,
+                    getSessionMemoryUsageMB()));
+                
+                /* restore next tuple from result_tuple_slot */
+                slot = result_tuple_slot;
+                node->subSlot = slot;
+                Assert(!TupIsNull(slot));
             }
 
             /*
@@ -125,6 +197,23 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
                  * the state machine state to record having done so.
                  */
                 if (!node->noCount && node->position - node->offset >= node->count) {
+                    if (node->withTies) {
+                        Assert(node->outputSlot != NULL);
+                        slot = exec_get_tuple(node);
+                        if (TupIsNull(slot)) {
+                            node->lstate = LIMIT_WINDOWEND;
+                            return NULL;
+                        }
+                        if (execTuplesMatch(slot, node->outputSlot, node->numCols, node->sortColIdx,
+                                            node->eqfunctions, node->tempContext, node->collations)) {
+                            node->subSlot = slot;
+                            node->position++;
+                            return slot;
+                        } else {
+                            node->lstate = LIMIT_WINDOWEND;
+                            return NULL;
+                        }
+                    }
                     node->lstate = LIMIT_WINDOWEND;
                     return NULL;
                 }
@@ -132,7 +221,7 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
                 /*
                  * Get next tuple from subplan, if any.
                  */
-                slot = ExecProcNode(outer_plan);
+                slot = exec_get_tuple(node);
                 if (TupIsNull(slot)) {
                     node->lstate = LIMIT_SUBPLANEOF;
                     return NULL;
@@ -152,7 +241,7 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
                 /*
                  * Get previous tuple from subplan; there should be one!
                  */
-                slot = ExecProcNode(outer_plan);
+                slot = exec_get_tuple(node);
                 if (TupIsNull(slot))
                     ereport(ERROR,
                         (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -171,7 +260,7 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
              * Backing up from subplan EOF, so re-fetch previous tuple; there
              * should be one!  Note previous tuple must be in window.
              */
-            slot = ExecProcNode(outer_plan);
+            slot = exec_get_tuple(node);
             if (TupIsNull(slot))
                 ereport(ERROR,
                     (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -220,6 +309,10 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
     /* Return the current tuple */
     Assert(!TupIsNull(slot));
 
+    if (node->withTies && node->position - node->offset == node->count) {
+        ExecCopySlot(node->outputSlot, slot);
+    }
+
     return slot;
 }
 
@@ -258,9 +351,19 @@ void recompute_limits(LimitState* node)
         if (is_null) {
             node->count = 0;
             node->noCount = true;
-        } else {
+        } else if (!node->isPercent) {
             node->count = DatumGetInt64(val);
+            node->fraction = 0;
             if (node->count < 0)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
+                        errmodule(MOD_EXECUTOR),
+                        errmsg("LIMIT must not be negative")));
+            node->noCount = false;
+        } else if (node->isPercent) {
+            node->count = 0;
+            node->fraction = DatumGetFloat8(val) / PERCENTAGE_BASE;
+            if (node->fraction < 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
                         errmodule(MOD_EXECUTOR),
@@ -271,6 +374,7 @@ void recompute_limits(LimitState* node)
         /* No COUNT supplied */
         node->count = 0;
         node->noCount = true;
+        node->fraction = 0;
     }
 
     /*
@@ -282,12 +386,14 @@ void recompute_limits(LimitState* node)
     /* Reset position to start-of-scan */
     node->position = 0;
     node->subSlot = NULL;
+    (void)ExecClearTuple(node->ps.ps_ResultTupleSlot);
 
     /* Set state-machine state */
     node->lstate = LIMIT_RESCAN;
 
     /* Notify child node about limit, if useful */
-    pass_down_bound(node, outerPlanState(node));
+    if (!node->withTies && !node->isPercent)
+        pass_down_bound(node, outerPlanState(node));
 }
 
 /*
@@ -351,6 +457,33 @@ static void pass_down_bound(LimitState* node, PlanState* child_node)
     }
 }
 
+/**
+ * @brief Retrieves a tuple from the LimitState node.
+ *
+ * This function is responsible for fetching a tuple from the outer plan of the LimitState node.
+ * If the tuplestorestate is not NULL, it retrieves the tuple from the tuplestorestate.
+ * Otherwise, it calls ExecProcNode to fetch the tuple from the outer plan.
+ *
+ * @param node The LimitState node.
+ * @return The TupleTableSlot containing the fetched tuple.
+ */
+static TupleTableSlot* exec_get_tuple(LimitState* node)
+{
+    PlanState* outer_plan = outerPlanState(node);
+    TupleTableSlot* slot = NULL;
+    bool dir = ScanDirectionIsForward(node->ps.state->es_direction);
+
+    if (node->tuplestorestate == NULL) {
+        slot = ExecProcNode(outer_plan);
+    } else {
+        slot = node->ps.ps_ResultTupleSlot;
+        if (!tuplestore_gettupleslot(node->tuplestorestate, dir, false, slot)) {
+            return NULL;
+        }
+    }
+    return slot;
+}
+
 /* ----------------------------------------------------------------
  *		ExecInitLimit
  *
@@ -365,6 +498,10 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
 
     /* check for unsupported flags */
     Assert(!(eflags & EXEC_FLAG_MARK));
+
+    int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);
+    AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);
+    set->maxSpaceSize = operator_mem * 1024L + SELF_GENRIC_MEMCTX_LIMITATION;
 
     /*
      * create state structure
@@ -384,17 +521,24 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
      */
     ExecAssignExprContext(estate, &limit_state->ps);
 
+    limit_state->tempContext = AllocSetContextCreate(
+        CurrentMemoryContext, "limit", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+
     /*
      * initialize child expressions
      */
     limit_state->limitOffset = ExecInitExpr((Expr*)node->limitOffset, (PlanState*)limit_state);
     limit_state->limitCount = ExecInitExpr((Expr*)node->limitCount, (PlanState*)limit_state);
+    limit_state->isPercent = node->isPercent;
+    limit_state->withTies = node->withTies;
+    limit_state->numCols = node->numCols;
+    limit_state->sortColIdx = node->sortColIdx;
+    limit_state->collations = node->collations;
 
     /*
      * Tuple table initialization (XXX not actually used...)
      */
     ExecInitResultTupleSlot(estate, &limit_state->ps);
-
     /*
      * then initialize outer plan
      */
@@ -411,6 +555,11 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
 
     limit_state->ps.ps_ProjInfo = NULL;
 
+    /*
+     * Precompute fmgr lookup data for inner loop
+     */
+    limit_state->eqfunctions = execTuplesMatchPrepare(node->numCols, node->equalOperators);
+
     return limit_state;
 }
 
@@ -424,6 +573,22 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
 void ExecEndLimit(LimitState* node)
 {
     ExecFreeExprContext(&node->ps);
+
+    /*
+     * Release tuplestore resources
+     */
+    if (node->tuplestorestate != NULL)
+        tuplestore_end(node->tuplestorestate);
+    node->tuplestorestate = NULL;
+
+    if (node->ps.ps_ResultTupleSlot)
+        (void)ExecClearTuple(node->ps.ps_ResultTupleSlot);
+    
+    if (node->outputSlot)
+        ExecDropSingleTupleTableSlot(node->outputSlot);
+    
+    MemoryContextDelete(node->tempContext);
+
     ExecEndNode(outerPlanState(node));
 }
 
@@ -435,6 +600,17 @@ void ExecReScanLimit(LimitState* node)
      * it's a Sort that we are passing the parameters down to.
      */
     recompute_limits(node);
+
+    if (node->ps.ps_ResultTupleSlot)
+        (void)ExecClearTuple(node->ps.ps_ResultTupleSlot);
+
+    if (node->tuplestorestate) {
+        tuplestore_end(node->tuplestorestate);
+        node->tuplestorestate = NULL;
+    }
+
+    if (node->outputSlot)
+        (void)ExecClearTuple(node->outputSlot);
 
     /*
      * if chgParam of subnode is not null then plan will be re-scanned by

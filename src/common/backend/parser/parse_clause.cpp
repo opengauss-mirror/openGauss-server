@@ -1697,7 +1697,8 @@ Node* transformLimitClause(ParseState* pstate, Node* clause, ParseExprKind exprK
     }
     qual = transformExpr(pstate, clause, exprKind);
 
-    qual = coerce_to_specific_type(pstate, qual, INT8OID, constructName);
+    bool isFloat8 = (exprKind == EXPR_KIND_LIMIT && pstate->p_is_percent);
+    qual = coerce_to_specific_type(pstate, qual, isFloat8 ? FLOAT8OID:INT8OID, constructName);
 
     /* LIMIT can't refer to any vars or aggregates of the current query */
     checkExprIsVarFree(pstate, qual, constructName);

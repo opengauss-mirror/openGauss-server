@@ -2813,9 +2813,21 @@ typedef struct LimitState {
     PlanState ps;            /* its first field is NodeTag */
     ExprState* limitOffset;  /* OFFSET parameter, or NULL if none */
     ExprState* limitCount;   /* COUNT parameter, or NULL if none */
+    bool isPercent;          /* COUNT is a percentage */
+    bool withTies;           /* whether to include ties */
+
+    int numCols;            /* number of sort-key columns */
+    AttrNumber* sortColIdx; /* their indexes in the target list */
+    Oid* collations;        /* OIDs of collations */
+    
+    FmgrInfo* eqfunctions;     /* per-field lookup data for equality fns */
+    MemoryContext tempContext; /* short-term context for comparisons */
     int64 offset;            /* current OFFSET value */
     int64 count;             /* current COUNT, if any */
+    float8 fraction;         /* current fraction, if any */
     bool noCount;            /* if true, ignore count */
+    TupleTableSlot* outputSlot; /* store the last tuple slot where position == count */
+    Tuplestorestate* tuplestorestate;   /* store for all the results from subplan */
     LimitStateCond lstate;   /* state machine status, as above */
     int64 position;          /* 1-based index of last tuple returned */
     TupleTableSlot* subSlot; /* tuple last obtained from subplan */

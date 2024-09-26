@@ -1408,6 +1408,14 @@ typedef struct Limit {
     Plan plan;
     Node* limitOffset; /* OFFSET parameter, or NULL if none */
     Node* limitCount;  /* COUNT parameter, or NULL if none */
+    bool isPercent;  /* fetch percent option, expect limitCount to be a float8 if true, int8 otherwise  */
+    
+    bool withTies;          /* fetch with ties option */
+    int numCols;            /* number of sort-key columns */
+    AttrNumber* sortColIdx; /* their indexes in the target list */
+    Oid* equalOperators;     /* OIDs of operators to compare them by */
+    Oid* collations;        /* OIDs of collations */
+    bool* nullsFirst;       /* NULLS FIRST/LAST directions */
 } Limit;
 
 typedef struct VecLimit : public Limit {

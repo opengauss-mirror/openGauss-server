@@ -6407,18 +6407,37 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
     }
 
     /* Add the LIMIT clause if given */
+    bool hasOffset = false;
     if (query->limitOffset != NULL &&
         !(IsA(query->limitOffset, Const) && ((Const*)(query->limitOffset))->ismaxvalue)) {
 
         appendContextKeyword(context, " OFFSET ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
         get_rule_expr(query->limitOffset, context, false);
+        hasOffset = true;
     }
     if (query->limitCount != NULL) {
-        appendContextKeyword(context, " LIMIT ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
-        if (IsA(query->limitCount, Const) && ((Const*)query->limitCount)->constisnull)
-            appendStringInfo(buf, "ALL");
-        else
+        if (DB_IS_CMPT(A_FORMAT) && !(IsA(query->limitCount, Const) && ((Const*)query->limitCount)->constisnull)) {
+            /* We use FETCH instead of LIMIT in A_FORMAT */
+            if (hasOffset) {
+                appendContextKeyword(context, " ROWS ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            }
+            appendContextKeyword(context, " FETCH FIRST ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
             get_rule_expr(query->limitCount, context, false);
+            if (query->limitIsPercent) {
+                appendContextKeyword(context, " PERCENT ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            }
+            if (query->limitWithTies) {
+                appendContextKeyword(context, " ROWS WITH TIES", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            } else {
+                appendContextKeyword(context, " ROWS ONLY", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            }
+        } else {
+            appendContextKeyword(context, " LIMIT ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            if (IsA(query->limitCount, Const) && ((Const*)query->limitCount)->constisnull)
+                appendStringInfo(buf, "ALL");
+            else
+                get_rule_expr(query->limitCount, context, false);
+        }
     }
 
     /* Add FOR [KEY] UPDATE/SHARE clauses if present */

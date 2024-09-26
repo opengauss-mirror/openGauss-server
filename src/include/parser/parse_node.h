@@ -185,6 +185,7 @@ struct ParseState {
     List* p_target_relation;
     List* p_target_rangetblentry;
     bool p_is_decode;
+    bool p_is_percent;      /* using fraction in fetch clause? */
 
     Node *p_last_srf; /* most recent set-returning func/op found */
 

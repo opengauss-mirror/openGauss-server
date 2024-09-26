@@ -983,6 +983,10 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_NODE_FIELD(sortClause);
     COMPARE_NODE_FIELD(limitOffset);
     COMPARE_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(limitIsPercent);
+        COMPARE_SCALAR_FIELD(limitWithTies);
+    }
     COMPARE_NODE_FIELD(rowMarks);
     COMPARE_NODE_FIELD(setOperations);
     COMPARE_NODE_FIELD(constraintDeps);
@@ -1112,6 +1116,10 @@ static bool _equalSelectStmt(const SelectStmt* a, const SelectStmt* b)
     COMPARE_NODE_FIELD(sortClause);
     COMPARE_NODE_FIELD(limitOffset);
     COMPARE_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(limitIsPercent);
+        COMPARE_SCALAR_FIELD(limitWithTies);
+    }
     COMPARE_NODE_FIELD(lockingClause);
     COMPARE_SCALAR_FIELD(op);
     COMPARE_SCALAR_FIELD(all);

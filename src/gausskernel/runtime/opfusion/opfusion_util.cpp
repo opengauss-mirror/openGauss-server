@@ -772,9 +772,11 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
             }
         }
         if (limit->limitCount != NULL) {
-            if (IsA(limit->limitCount, Const)) {
-                Assert(((Const *)limit->limitCount)->consttype == 20);
-                if (DatumGetInt64(((Const *)limit->limitCount)->constvalue) < 0) {
+            if (IsA(limit->limitCount, Const) && !limit->isPercent && !limit->withTies) {
+                Assert(((Const *)limit->limitCount)->consttype == INT8OID
+                 || ((Const *)limit->limitCount)->consttype == FLOAT8OID);
+                if ((!limit->isPercent && DatumGetInt64(((Const *)limit->limitCount)->constvalue) < 0) || 
+                    limit->isPercent && DatumGetFloat8(((Const *)limit->limitCount)->constvalue) < 0) {
                     return NOBYPASS_LIMITCOUNT_CONST_LESS_THAN_ZERO;
                 }
             } else {

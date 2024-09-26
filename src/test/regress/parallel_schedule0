@@ -96,6 +96,7 @@ test: single_node_ddl
 test: single_node_sqlbypass
 test: median deferrable
 test: array_funcs first_last_agg
+test: fetch_rows_with_ties
 
 test: hw_pwd_encryption_sm3
 
