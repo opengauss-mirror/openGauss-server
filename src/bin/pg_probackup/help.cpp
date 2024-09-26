@@ -274,7 +274,6 @@ static void help_add_instance(void)
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
-    printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
