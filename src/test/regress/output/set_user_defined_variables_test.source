@@ -1525,6 +1525,28 @@ CREATE TABLE userset_t1 (a VARCHAR(500) CHARACTER SET UTF8);
 SET @num=1000;
 INSERT INTO userset_t1 VALUES (CONCAT((@num:=@num+1), 'a'));
 set enable_set_variable_b_format = default;
+-- index scan卡住问题
+\c test_set
+set enable_set_variable_b_format = 1;
+set enable_seqscan = false;
+set enable_bitmapscan = false;
+create table account_instance_stats(id int primary key, stat_id int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "account_instance_stats_pkey" for table "account_instance_stats"
+insert into account_instance_stats values(1,1),(2,1),(3,1),(4,1);
+set @pids = 1;
+SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
+ stat_id | ?column? 
+---------+----------
+       1 |        1
+       1 |        2
+       1 |        3
+       1 |        4
+(4 rows)
+
+drop table account_instance_stats;
+set enable_seqscan = default;
+set enable_bitmapscan = default;
+set enable_set_variable_b_format = default;
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
