@@ -355,7 +355,6 @@ static void help_set_config(void)
     printf(_("                 [--log-rotation-age=log-rotation-age]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
-    printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
