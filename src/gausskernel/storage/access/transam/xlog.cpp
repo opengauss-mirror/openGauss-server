@@ -1073,8 +1073,6 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
     XLogRecPtr EndPos = InvalidXLogRecPtr;
     int32 currlrc = 0;
 
-    bool isLogSwitch = (rechdr->xl_rmid == RM_XLOG_ID && rechdr->xl_info == XLOG_SWITCH);
-
     /* we assume that all of the record header is in the first chunk */
     Assert(rdata->len >= SizeOfXLogRecord);
 
@@ -1120,7 +1118,9 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
      * ----------
      */
     START_CRIT_SECTION();
-    if (isLogSwitch) {
+
+    bool isLogSwitch = (rechdr->xl_rmid == RM_XLOG_ID && rechdr->xl_info == XLOG_SWITCH);
+    if (isLogSwitch || !u_sess->attr.attr_storage.enable_xlog_insert_record_group) {
         StartSuspendWalInsert(&currlrc);
     }
 

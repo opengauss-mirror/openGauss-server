@@ -87,6 +87,7 @@ typedef struct knl_session_attr_storage {
     bool guc_most_available_sync;
     bool enable_show_any_tuples;
     bool enable_debug_vacuum;
+    bool enableVacuumExtremeXmin;
     bool enable_adio_debug;
     bool gds_debug_mod;
     bool log_pagewriter;
@@ -267,6 +268,7 @@ typedef struct knl_session_attr_storage {
     int ignore_standby_lsn_window;
     int ignore_feedback_xmin_window;
     bool enable_heap_multi_insert_for_insert_select;
+    bool enable_xlog_insert_record_group;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
