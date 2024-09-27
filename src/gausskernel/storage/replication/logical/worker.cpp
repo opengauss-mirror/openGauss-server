@@ -2387,6 +2387,13 @@ static void UpdateConninfo(char* standbysInfo)
     }
     subid = HeapTupleGetOid(tup);
 
+    if (!sub->subsyncconninfo) {
+        AbortOutOfAnyTransaction();
+        ereport(LOG, (errmsg("Prevent subscription \"%s\" update connection info, as the configuration setting "
+                             "\"syncconninfo = false\" is applied.", t_thrd.applyworker_cxt.mySubscription->name)));
+        return;
+    }
+
     /* Form a new tuple. */
     int rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(rc, "", "");
