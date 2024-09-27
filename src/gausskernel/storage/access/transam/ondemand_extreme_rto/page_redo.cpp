@@ -4261,6 +4261,9 @@ void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
         stat->hmpTotalBlkNum = g_dispatcher->parseManager.memctl.totalblknum;
         stat->trxnQueueNum = SPSCGetQueueCount(g_dispatcher->trxnQueue);
         stat->segQueueNum = SPSCGetQueueCount(g_dispatcher->segQueue);
+        stat->recordItemNum = pg_atomic_read_u32(&g_dispatcher->curItemNum);
+        stat->recordItemMemUsed = stat->recordItemNum * sizeof(RedoItem) +
+            pg_atomic_read_u64(&g_dispatcher->curItemRecordBufMemSize);
     } else {
         stat->checkpointPtr = InvalidXLogRecPtr;
         stat->replayedPtr = InvalidXLogRecPtr;
@@ -4268,14 +4271,13 @@ void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
         stat->hmpTotalBlkNum = 0;
         stat->trxnQueueNum = 0;
         stat->segQueueNum = 0;
+        stat->recordItemNum = 0;
+        stat->recordItemMemUsed = 0;
     }
     stat->inOndemandRecovery = SS_IN_ONDEMAND_RECOVERY;
     stat->ondemandRecoveryStatus = g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status;
     stat->realtimeBuildStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status;
     stat->recoveryPauseStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status;
-    stat->recordItemNum = pg_atomic_read_u32(&g_dispatcher->curItemNum);
-    stat->recordItemMemUsed = stat->recordItemNum * sizeof(RedoItem) +
-        pg_atomic_read_u64(&g_dispatcher->curItemRecordBufMemSize);
 }
 
 void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg) {
