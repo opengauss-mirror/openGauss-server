@@ -31,6 +31,7 @@
 #include "utils/plpgsql.h"
 #include "utils/timestamp.h"
 #include "utils/resowner.h"
+#include "utils/palloc.h"
 #include "nodes/execnodes.h"
 #include "opfusion/opfusion.h"
 
@@ -274,6 +275,7 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     portal->isAutoOutParam = false;
     portal->isPkgCur = false;
 #endif
+    portal->specialDataList = NULL;
     /* put portal in table (sets portal->name) */
     PortalHashTableInsert(portal, name);
 
@@ -530,6 +532,25 @@ void MarkPortalFailed(Portal portal)
     }
 }
 
+void PortalReleaseSpecialData(Portal portal)
+{
+    ListCell *lc = NULL;
+
+    if (!list_length(portal->specialDataList)) {
+        return;
+    }
+
+    foreach (lc, portal->specialDataList) {
+        PortalSpecialData *specialData = (PortalSpecialData *)lfirst(lc);
+        if (specialData->cleanup) {
+            specialData->cleanup(specialData->data);
+        }
+        pfree(specialData);
+    }
+
+    list_free_ext(portal->specialDataList);
+}
+
 /*
  * PortalDrop
  *		Destroy the portal.
@@ -642,6 +663,8 @@ void PortalDrop(Portal portal, bool isTopCommit)
     if (portal->holdContext)
 #endif
         MemoryContextDelete(portal->holdContext);
+
+    PortalReleaseSpecialData(portal);
 
     /* release subsidiary storage */
     MemoryContextDelete(PortalGetHeapMemory(portal));

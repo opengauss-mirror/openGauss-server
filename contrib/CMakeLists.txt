@@ -31,6 +31,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_profiler
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_lob
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_sql
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp
 )
 
 add_subdirectory(hstore)
@@ -51,6 +52,7 @@ add_subdirectory(file_fdw)
 add_subdirectory(log_fdw)
 add_subdirectory(gms_stats)
 add_subdirectory(gms_sql)
+add_subdirectory(gms_tcp)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     add_subdirectory(gc_fdw)
 endif()

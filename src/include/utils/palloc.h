@@ -379,6 +379,11 @@ public:
     }
 };
 
+typedef struct {
+    std::shared_ptr<void> data;
+    void (*cleanup)(std::shared_ptr<void> data); /* cleanup hook */
+} PortalSpecialData;
+
 /*
  *It is used for delete object whose destructor is null and free memory in Destroy()
  *_objptr can't include type change, for example (A*)b, that will lead to compile error in (_objptr) = NULL

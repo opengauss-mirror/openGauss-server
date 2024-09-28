@@ -1,0 +1,75 @@
+\! chmod -R 700 @abs_bindir@/../jre
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/../../../src/test/regress/jdbc_test/gsjdbc400.jar:@abs_builddir@/gms_tcp_test/. gms_tcp_server
+Server is ok.
+Client connect ok.
+start test: in buffer
+Send msg: aaaabbbb
+Send msg: ccccdddd
+Send msg: eeeeffff
+Send msg: gggghhhh
+Send msg: 01234567
+Send msg: aaaabbbb
+Send msg: ccccdddd
+Send msg: eeeeffff
+Send msg: gggghhhh
+one client over
+===================================================================
+
+Client connect ok.
+start test: get line
+Send msg: get line, abcdefg1234567890
+
+one client over
+===================================================================
+
+Client connect ok.
+start test: get text
+Send msg: get text, abcdefg1234567890
+
+one client over
+===================================================================
+
+Client connect ok.
+start test: get raw
+one client over
+===================================================================
+
+Client connect ok.
+start test: read line
+Send msg: read line, abcdefg1234567890
+
+one client over
+===================================================================
+
+Client connect ok.
+start test: read text
+Send msg: read text, abcdefg1234567890
+
+one client over
+===================================================================
+
+Client connect ok.
+start test: read raw
+one client over
+===================================================================
+
+Client connect ok.
+start test: write line
+0123456789
+
+one client over
+===================================================================
+
+Client connect ok.
+start test: write text
+012345
+one client over
+===================================================================
+
+Client connect ok.
+start test: char set
+one client over
+===================================================================
+
+Client connect ok.
+start test: quit
