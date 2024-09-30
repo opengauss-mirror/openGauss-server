@@ -268,6 +268,10 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count,
 int logical_read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                                  char *cur_page, TimeLineID *pageTLI, char* xlog_path)
 {
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("SS Standby node doesn't support this function!")));
+    }
+
     XLogRecPtr flushptr, loc;
     int count;
 
@@ -621,7 +625,13 @@ char* getXlogDirUpdateLsn(FunctionCallInfo fcinfo, XLogRecPtr *start_lsn, XLogRe
     str_lsn = (char*)palloc(MAXPGPATH);
     ret = memset_s(str_lsn, MAXPGPATH, '\0', MAXPGPATH);
     securec_check(ret, "", "");
-    sprintf_s(str_lsn, MAXPGPATH, "%X/%X000000", log, seg);
+    const int numberOfXlogFileOfSS = 4;      // 4 is the number of segment per xlog in shared storage
+    if (ENABLE_DMS) {
+        seg = seg * numberOfXlogFileOfSS;
+        sprintf_s(str_lsn, MAXPGPATH, "%X/%X0000000", log, seg);
+    } else {
+        sprintf_s(str_lsn, MAXPGPATH, "%X/%X000000", log, seg);
+    }
     ValidateInputString(str_lsn);
     if (!AssignLsn(start_lsn, str_lsn)) {
         ereport(ERROR,
@@ -631,7 +641,12 @@ char* getXlogDirUpdateLsn(FunctionCallInfo fcinfo, XLogRecPtr *start_lsn, XLogRe
     }
     ret = memset_s(str_lsn, MAXPGPATH, '\0', MAXPGPATH);
     securec_check(ret, "", "");
-    sprintf_s(str_lsn, MAXPGPATH, "%X/%XFFFFFF", log, seg);
+    if (ENABLE_DMS) {
+        seg = seg + numberOfXlogFileOfSS - 1;
+        sprintf_s(str_lsn, MAXPGPATH, "%X/%XFFFFFFF", log, seg);
+    } else {
+        sprintf_s(str_lsn, MAXPGPATH, "%X/%XFFFFFF", log, seg);
+    }
     ValidateInputString(str_lsn);
     if (!AssignLsn(upto_lsn, str_lsn)) {
         ereport(ERROR,
@@ -717,10 +732,26 @@ static Datum pg_logical_get_area_changes_guts(FunctionCallInfo fcinfo)
     if (PG_ARGISNULL(4)) {
         xlog_dir = NULL;
     } else {
-        xlog_dir = getXlogDirUpdateLsn(fcinfo, &start_lsn, &upto_lsn);
+        XLogRecPtr start_lsn_from_file = InvalidXLogRecPtr;
+        XLogRecPtr upto_lsn_from_file = InvalidXLogRecPtr;
+        xlog_dir = getXlogDirUpdateLsn(fcinfo, &start_lsn_from_file, &upto_lsn_from_file);
+        if ((start_lsn != InvalidXLogRecPtr && start_lsn < start_lsn_from_file) ||
+            (upto_lsn != InvalidXLogRecPtr && upto_lsn > upto_lsn_from_file)) {
+            ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                errmsg("start_lsn or upto_lsn is not in the xlog file.")));
+        }
+        if (start_lsn == InvalidXLogRecPtr) {
+            start_lsn = start_lsn_from_file;
+        }
     }
     /* The memory is controlled. The number of decoded files cannot exceed 10. */
-    XLogRecPtr max_lsn_distance = XLOG_SEG_SIZE * 10;
+    XLogRecPtr max_lsn_distance = InvalidXLogRecPtr;
+    const int limitedFilesOfXLogSeg = 10;       // The number of decoded files cannot exceed 10
+    if (ENABLE_DMS) {
+        max_lsn_distance = XLogSegmentSize;
+    } else {
+        max_lsn_distance = XLOG_SEG_SIZE * limitedFilesOfXLogSeg;
+    }
     if (upto_lsn != InvalidXLogRecPtr && upto_lsn < start_lsn) {
         ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("upto_lsn can not be smaller than start_lsn.")));
     }
