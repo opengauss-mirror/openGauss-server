@@ -386,6 +386,8 @@ Datum publication_deparse_ddl_command_end(PG_FUNCTION_ARGS)
         EventTriggerData *trigdata;
         char *command;
         DeparsedCommandType cmdtype;
+        char* indexDropName = NULL;
+        errno_t ret = 0;
 
         trigdata = (EventTriggerData *) fcinfo->context;
 
@@ -409,6 +411,13 @@ Datum publication_deparse_ddl_command_end(PG_FUNCTION_ARGS)
                  strcmp(obj->objecttype, "trigger") == 0 ||
                  strcmp(obj->objecttype, "function") == 0) {
             cmdtype = DCT_ObjectDrop;
+        } else if (strcmp(obj->objecttype, "table constraint") == 0) {
+            cmdtype = DCT_ObjectDrop;
+
+            int len = strlen(obj->schemaname) + strlen(obj->objidentity) + 2;
+            indexDropName = (char*)palloc0(len);
+            ret = snprintf_s(indexDropName, len, len - 1, "%s.%s", obj->schemaname, obj->objidentity);
+            securec_check_ss(ret, "", "");
         } else {
             continue;
         }
@@ -423,7 +432,12 @@ Datum publication_deparse_ddl_command_end(PG_FUNCTION_ARGS)
             continue;
         }
 
-        command = deparse_drop_command(obj->objidentity, obj->objecttype, (Node*)trigdata->parsetree);
+        if (indexDropName != NULL) {
+            command = deparse_drop_command(indexDropName, "index", (Node*)trigdata->parsetree);
+            pfree(indexDropName);
+        } else {
+            command = deparse_drop_command(obj->objidentity, obj->objecttype, (Node*)trigdata->parsetree);
+        }
 
         if (command)
             LogLogicalDDLMessage("deparse", obj->address.objectId, cmdtype,
