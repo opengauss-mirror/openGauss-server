@@ -1067,7 +1067,7 @@ static void objtree_to_jsonb_element(JsonbParseState *state, ObjElem *object,
             val.type = jbvNumeric;
             val.numeric = (Numeric)
                 DatumGetNumeric(DirectFunctionCall1(float8_numeric,
-                                                    object->value.flt));
+                                                    Float8GetDatum(object->value.flt)));
             val.estSize = 2 * sizeof(JEntry) + VARSIZE_ANY(val.numeric);
             pushJsonbValue(&state, elem_token, &val);
             break;
@@ -4894,6 +4894,7 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
             case AT_SplitSubPartition: {
                     SplitPartitionState *s = (SplitPartitionState*)subcmd->def;
                     ObjTree *define_list = NULL;
+                    const int arg_num = 4;
                     tmp_obj = new_objtree_VA("SPLIT SUBPARTITION %{name}s", 2,
                                              "type", ObjTypeString, "split subpartition",
                                              "name", ObjTypeString, s->src_partition_name);
@@ -4908,7 +4909,8 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
                             ListPartitionDefState *p2 = (ListPartitionDefState*)lsecond(s->dest_partition_define_list);
 
                             define_list = new_objtree_VA(
-                                "SUBPARTITION %{name1}s %{tblspc1}s, SUBPARTITION %{name2}s %{tblspc2}s", 4,
+                                "SUBPARTITION %{name1}s TABLESPACE %{tblspc1}s, "
+                                "SUBPARTITION %{name2}s TABLESPACE %{tblspc2}s", arg_num,
                                 "name1", ObjTypeString, p1->partitionName,
                                 "tblspc1", ObjTypeString, p1->tablespacename ? p1->tablespacename : "",
                                 "name2", ObjTypeString, p2->partitionName,
@@ -4928,7 +4930,8 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
                                 (RangePartitionDefState*)lsecond(s->dest_partition_define_list);
 
                             define_list = new_objtree_VA(
-                                "SUBPARTITION %{name1}s %{tblspc1}s, SUBPARTITION %{name2}s %{tblspc2}s", 4,
+                                "SUBPARTITION %{name1}s TABLESPACE %{tblspc1}s, "
+                                "SUBPARTITION %{name2}s TABLESPACE %{tblspc2}s", arg_num,
                                 "name1", ObjTypeString, p1->partitionName,
                                 "tblspc1", ObjTypeString, p1->tablespacename ? p1->tablespacename : "",
                                 "name2", ObjTypeString, p2->partitionName,
@@ -5613,10 +5616,16 @@ static ObjTree* deparse_AlterFunction(Oid objectId, Node *parsetree)
         params = lappend(params, new_object_object(tmp_obj));
     }
 
-    sign = new_objtree_VA("%{identity}D (%{arguments:, }s)", 2,
-                          "identity", ObjTypeObject,
-                          new_objtree_for_qualname_id(ProcedureRelationId, objectId),
-                          "arguments", ObjTypeArray, params);
+    if (params == NIL) {
+        sign = new_objtree_VA("%{identity}D ()", 1,
+                              "identity", ObjTypeObject,
+                              new_objtree_for_qualname_id(ProcedureRelationId, objectId));
+    } else {
+        sign = new_objtree_VA("%{identity}D (%{arguments:, }s)", 2,
+                              "identity", ObjTypeObject,
+                              new_objtree_for_qualname_id(ProcedureRelationId, objectId),
+                              "arguments", ObjTypeArray, params);
+    }
 
     append_object_object(ret, "%{signature}s", sign);
 

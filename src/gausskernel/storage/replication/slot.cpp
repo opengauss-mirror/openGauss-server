@@ -506,6 +506,7 @@ retry:
     ReplicationSlotValidateName(name, ERROR);
 
     /* Search for the named slot and mark it active if we find it. */
+    slot = NULL;
     LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
     for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
         ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];

@@ -72,7 +72,7 @@ function run_test() {
         exec_dump_db $cur_case $pub_node1_port "$dump_result_dir/$cur_case.dump.pub"
         exec_dump_db $cur_case $sub_node1_port "$dump_result_dir/$cur_case.dump.sub"
 
-        diff $dump_result_dir/$cur_case.dump.pub $dump_result_dir/$cur_case.dump.sub > ${results_dir}/$cur_case.dump.diff
+        diff $dump_result_dir/$cur_case.dump.pub $dump_result_dir/$cur_case.dump.sub | grep -v '^[0-9]' > ${results_dir}/$cur_case.dump.diff
 
         if [ -s ${results_dir}/$cur_case.dump.diff ]; then
             if [ -f $sql_dir/acceptable_diff/$cur_case.diff ]; then

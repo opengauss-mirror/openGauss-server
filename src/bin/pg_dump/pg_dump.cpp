@@ -11547,7 +11547,7 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
         NULL);
 
     /* Dump Schema Comments and Security Labels */
-    if (strcasecmp(qnspname, "public") != 0) {
+    if (strcasecmp(qnspname, "public") != 0 && strcasecmp(qnspname, "\"public\"") != 0) {
         dumpComment(fout, labelq->data, NULL, nspinfo->rolname, nspinfo->dobj.catId, 0, nspinfo->dobj.dumpId);
     }
     dumpSecLabel(fout, labelq->data, NULL, nspinfo->rolname, nspinfo->dobj.catId, 0, nspinfo->dobj.dumpId);
