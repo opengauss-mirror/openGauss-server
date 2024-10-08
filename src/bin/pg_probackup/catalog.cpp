@@ -2297,28 +2297,28 @@ readBackupControlFile(const char *path)
     {
         elog(WARNING, "Control file \"%s\" is empty", path);
         pgBackupFree(backup);
-        return NULL;
+        backup = NULL;
+        goto finish;
     }
 
     if (recovery_name)
-	{
-                rc = snprintf_s(backup->recovery_name, lengthof(backup->recovery_name),
-                                lengthof(backup->recovery_name) - 1, recovery_name);
-                securec_check_ss_c(rc, "\0", "\0");
-		free(recovery_name);
-	}
+    {
+        rc = snprintf_s(backup->recovery_name, lengthof(backup->recovery_name),
+                        lengthof(backup->recovery_name) - 1, recovery_name);
+        securec_check_ss_c(rc, "\0", "\0");
+    }
 
     if (backup->start_time == 0)
     {
         elog(WARNING, "Invalid ID/start-time, control file \"%s\" is corrupted", path);
         pgBackupFree(backup);
-        return NULL;
+        backup = NULL;
+        goto finish;
     }
 
     if (backup_mode)
     {
         backup->backup_mode = parse_backup_mode(backup_mode);
-        free(backup_mode);
     }
 
     if (start_lsn)
@@ -2330,7 +2330,6 @@ readBackupControlFile(const char *path)
             backup->start_lsn = (XLogRecPtr) ((uint64) xlogid << 32) | xrecoff;
         else
             elog(WARNING, "Invalid START_LSN \"%s\"", start_lsn);
-        free(start_lsn);
     }
 
     if (stop_lsn)
@@ -2342,7 +2341,6 @@ readBackupControlFile(const char *path)
             backup->stop_lsn = (XLogRecPtr) ((uint64) xlogid << 32) | xrecoff;
         else
             elog(WARNING, "Invalid STOP_LSN \"%s\"", stop_lsn);
-        free(stop_lsn);
     }
 
     set_backup_status(status, backup);
@@ -2350,13 +2348,11 @@ readBackupControlFile(const char *path)
     if (parent_backup)
     {
         backup->parent_backup = base36dec(parent_backup);
-        free(parent_backup);
     }
 
     if (merge_dest_backup)
     {
         backup->merge_dest_backup = base36dec(merge_dest_backup);
-        free(merge_dest_backup);
     }
 
     if (program_version)
@@ -2364,7 +2360,6 @@ readBackupControlFile(const char *path)
         rc = strncpy_s(backup->program_version, sizeof(backup->program_version),program_version,
             sizeof(backup->program_version) - 1);
         securec_check_c(rc, "", "");
-        pfree(program_version);
     }
 
     if (server_version)
@@ -2372,14 +2367,15 @@ readBackupControlFile(const char *path)
         rc = strncpy_s(backup->server_version, sizeof(backup->server_version),server_version,
             sizeof(backup->server_version) - 1);
         securec_check_c(rc, "", "");
-        pfree(server_version);
     }
 
-    if (compress_alg)
+    if (compress_alg) {
         backup->compress_alg = parse_compress_alg(compress_alg);
+    }
 
-    if (storage_type)
+    if (storage_type) {
         backup->storage_type = str2dev(storage_type);
+    }
 
     if (oss_status) {
         backup->oss_status = str2ossStatus(oss_status);
@@ -2388,6 +2384,21 @@ readBackupControlFile(const char *path)
     if (current.media_type == MEDIA_TYPE_OSS) {
         remove(path);
     }
+    
+
+finish:
+    pg_free(backup_mode);
+    pg_free(start_lsn);
+    pg_free(stop_lsn);
+    pg_free(status);
+    pg_free(parent_backup);
+    pg_free(merge_dest_backup);
+    pg_free(program_version);
+    pg_free(server_version);
+    pg_free(compress_alg);
+    pg_free(recovery_name);
+    pg_free(storage_type);
+    pg_free(oss_status);
 
     return backup;
 }
