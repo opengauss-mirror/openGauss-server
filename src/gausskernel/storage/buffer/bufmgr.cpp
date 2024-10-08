@@ -2578,7 +2578,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         }
 
         if ((blockNum >= totalBlkNum || totalBlkNum == InvalidBlockNumber) &&
-            !t_thrd.xlog_cxt.inRedoExtendSegment) {
+            !t_thrd.xlog_cxt.inRedoExtendSegment && mode != RBM_ZERO_ON_ERROR) {
             return InvalidBuffer;
         }
     }
