@@ -139,3 +139,112 @@ drop user testuser cascade;
 
 \c regression
 drop database test_imv_db;
+
+-- mlog基础语法
+create table mview_log_t1(c1 int, c2 varchar(10));
+create materialized view log on mview_log_t1;
+drop materialized view log on mview_log_t1;
+-- 复用手动创建的物化视图日志
+create materialized view log on mview_log_t1;
+create incremental materialized view v1 as select c1, c2 from mview_log_t1 where c1 > 1;
+create incremental materialized view v2 as select c1 from mview_log_t1;
+insert into mview_log_t1 values(1,'1');
+insert into mview_log_t1 values(2,'2');
+update mview_log_t1 set c1 = 3, c2 = '3' where c1 = 1;
+delete from mview_log_t1 where c1 = 2;
+refresh incremental materialized view v1;
+refresh incremental materialized view v2;
+select * from v1;
+select * from v2;
+drop materialized view v1;
+drop materialized view v2; -- 物化视图日志一起被删除
+-- 重复创建删除物化视图日志
+create incremental materialized view v1 as select c1, c2 from mview_log_t1 where c1 > 1;
+create incremental materialized view v2 as select c1 from mview_log_t1;
+insert into mview_log_t1 values(1,'1');
+drop materialized view log on mview_log_t1;  -- 自动创建的物化视图日志也可手动删除
+refresh incremental materialized view v1; -- 缺少物化视图日志，增量刷新报错
+create materialized view log on mview_log_t1;
+create materialized view log on mview_log_t1; -- 物化视图日志重复，创建报错。
+drop materialized view log on mview_log_t1;
+drop materialized view log on mview_log_t1; -- 物化视图日志不存在，删除报错。
+create materialized view log on mview_log_t1;
+refresh incremental materialized view v1; -- 物化视图日志创建时间晚于最近一次刷新时间，增量刷新报错
+refresh materialized view v1;
+refresh materialized view v2;
+insert into mview_log_t1 values(2,'2');
+refresh incremental materialized view v1; -- 全量刷新后，增量刷新成功
+refresh incremental materialized view v2;
+select * from v1;
+select * from v2;
+-- 删除所有对象
+drop materialized view log on mview_log_t1;
+drop materialized view v1; -- 先删除物化视图日志，再删除物化视图
+drop materialized view v2;
+drop table mview_log_t1;
+
+-- 延迟刷新基础功能
+create table defer_t1(c1 int);
+insert into defer_t1 values(1);
+create materialized view v1 build deferred as select * from defer_t1;
+create materialized view v2 build immediate as select * from defer_t1;
+select * from v1; -- 无数据
+select * from v2; -- 有数据
+refresh materialized view v1;
+select * from v1; -- 有数据
+-- 同时放开with no data，但不支持一起指定
+create incremental materialized view v3 as select * from defer_t1 with no data;
+create incremental materialized view v4 as select * from defer_t1 with data;
+create materialized view v5 as select * from defer_t1 with no data;
+create materialized view v6 as select * from defer_t1 with data;
+create materialized view v7 build deferred as select * from defer_t1 with no data; -- 语法不支持
+select * from v3; -- 无数据
+select * from v4; -- 有数据
+select * from v5; -- 无数据
+select * from v6; -- 有数据
+refresh incremental materialized view v3; -- 报错，第一次需全量刷新
+refresh materialized view v3;
+refresh materialized view v5;
+select * from v3; -- 有数据
+select * from v5; -- 有数据
+-- 结合手动创建删除mlog
+drop materialized view log on defer_t1;
+create materialized view log on defer_t1;
+insert into defer_t1 values(2);
+create incremental materialized view v8 as select * from defer_t1 with no data;
+select * from v8; -- 无数据
+refresh materialized view v8;
+select * from v8; -- 有数据
+drop table defer_t1 cascade;
+
+-- 多张表的情况
+create table cov_t1(c1 int);
+create table cov_t2(c1 int);
+create materialized view log on cov_t1;
+create materialized view log on cov_t2;
+drop materialized view log on cov_t2;
+create materialized view log on cov_t2;
+create materialized view log on cov_t2;
+drop table cov_t1,cov_t2 cascade;
+
+-- 只有mlog没有incre matview，不维护mlog
+create table only_mlog_t1(c1 int);
+create materialized view log on only_mlog_t1;
+insert into only_mlog_t1 values (1);
+create table only_mlog_record(c1 int);
+declare
+    oid int := (select oid from pg_class where relname = 'only_mlog_t1');
+    table_name varchar(20) := 'mlog_' || oid;
+    stmt text := 'insert into only_mlog_record select count(*) from ' || table_name;
+begin
+    execute stmt;
+    commit;
+END;
+/
+select * from only_mlog_record;
+drop table only_mlog_t1, only_mlog_record;
+
+-- \help
+\h create materialized view log
+\h drop materialized view log
+\h create materialized view

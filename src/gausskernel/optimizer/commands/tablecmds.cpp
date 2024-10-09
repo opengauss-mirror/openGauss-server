@@ -4118,7 +4118,7 @@ static bool CheckClassFormPermission(Form_pg_class classform)
 }
 
 /* Allow DROP to table owner, schema owner or users who have DROP privilege of the target object */
-static void DropRelationPermissionCheck(char relkind, Oid relOid, Oid nspOid, const char* relname)
+void DropRelationPermissionCheck(char relkind, Oid relOid, Oid nspOid, const char* relname)
 {
     AclResult aclresult;
     if (relkind == RELKIND_INDEX) {

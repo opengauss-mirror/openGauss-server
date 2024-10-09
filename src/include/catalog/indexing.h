@@ -621,6 +621,10 @@ DECLARE_UNIQUE_INDEX(gs_matview_oid_index, 9991, on gs_matview using btree(oid o
 #define GsMatviewOidIndexId 9991
 DECLARE_UNIQUE_INDEX(gs_matviewdep_oid_index, 9992, on gs_matview_dependency using btree(oid oid_ops));
 #define GsMatviewDepOidIndexId 9992
+DECLARE_UNIQUE_INDEX(gs_matviewlog_mlogid_index, 9754, on gs_matview_log using btree(mlogid oid_ops));
+#define GsMatviewLogMlogIdIndexId 9754
+DECLARE_UNIQUE_INDEX(gs_matviewlog_relid_index, 9755, on gs_matview_log using btree(relid oid_ops));
+#define GsMatviewLogRelidIndexId 9755
 
 /* Add indexes for pg_recyclebin */
 DECLARE_UNIQUE_INDEX(gs_recyclebin_id_index, 8647, on gs_recyclebin using btree(oid oid_ops));

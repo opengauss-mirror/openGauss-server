@@ -1,0 +1,10 @@
+create database matview_dump;
+\c matview_dump
+create table matview_dump_t1(a int, b int);
+create materialized view log on matview_dump_t1;
+\! @abs_bindir@/gs_dump matview_dump -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP|^Progress'| tr -s '\n' > @abs_bindir@/matview_dump.sql 2>&1
+\! cat @abs_bindir@/matview_dump.sql
+DROP TABLE matview_dump_t1 CASCADE;
+\i @abs_bindir@/matview_dump.sql
+\c regression
+drop database matview_dump;

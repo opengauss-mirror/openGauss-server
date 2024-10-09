@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_MATERIALIZED_VIEW_LOG">
+<refmeta>
+<refentrytitle>DROP MATERIALIZED VIEW LOG</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP MATERIALIZED VIEW LOG</refname>
+<refpurpose>drop materialized view log</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP MATERIALIZED VIEW LOG ON table_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

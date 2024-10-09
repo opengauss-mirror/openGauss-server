@@ -589,6 +589,8 @@ typedef enum NodeTag {
     T_ShrinkStmt,
     T_VariableMultiSetStmt,
     T_CursorExpression,
+    T_CreateMatViewLogStmt,
+    T_DropMatViewLogStmt,
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
      * note: TAGS FOR PARSE TREE NODES (parsenodes.h) can no longer place new tags, 

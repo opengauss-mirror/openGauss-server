@@ -2189,6 +2189,26 @@ typedef struct RefreshMatViewStmt
 } RefreshMatViewStmt;
 
 /* ----------------------
+ *     CREATE MATERIALIZED VIEW LOG Statement
+ * ----------------------
+ */
+typedef struct CreateMatViewLogStmt
+{
+   NodeTag     type;
+   RangeVar*   relation;       /* relation to create matview log for */
+} CreateMatViewLogStmt;
+
+/* ----------------------
+ *     DROP MATERIALIZED VIEW LOG Statement
+ * ----------------------
+ */
+typedef struct DropMatViewLogStmt
+{
+   NodeTag     type;
+   RangeVar*   relation;       /* relation to drop matview log from */
+} DropMatViewLogStmt;
+
+/* ----------------------
  * Checkpoint Statement
  * ----------------------
  */

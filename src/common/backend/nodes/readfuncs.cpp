@@ -1733,6 +1733,20 @@ static AlterTriggerStmt* _readAlterTriggerStmt(void)
     READ_LOCALS(AlterTriggerStmt);
     READ_STRING_FIELD(trigname);
     READ_CHAR_FIELD(tgenabled);
+}
+
+static CreateMatViewLogStmt* _readCreateMatViewLogStmt(void)
+{
+    READ_LOCALS(CreateMatViewLogStmt);
+    READ_NODE_FIELD(relation);
+
+    READ_DONE();
+}
+
+static DropMatViewLogStmt* _readDropMatViewLogStmt(void)
+{
+    READ_LOCALS(DropMatViewLogStmt);
+    READ_NODE_FIELD(relation);
 
     READ_DONE();
 }
@@ -7081,6 +7095,10 @@ Node* parseNodeString(void)
         return_value = _readCopyStmt();
     } else if (MATCH("ALTERTABLE", 10)) {
         return_value = _readAlterTableStmt();
+    } else if (MATCH("CREATEMATVIEWLOG", 16)) {
+        return_value = _readCreateMatViewLogStmt();
+    } else if (MATCH("DROPMATVIEWLOG", 14)) {
+        return_value = _readDropMatViewLogStmt();
     } else if (MATCH("PLDEBUG_VARIABLE", 16)) {
         return_value = _readPLDebug_variable(); 
     } else if (MATCH("PLDEBUG_BREAKPOINT", 18)) {

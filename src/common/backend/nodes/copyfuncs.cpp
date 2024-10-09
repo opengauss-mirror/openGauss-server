@@ -6098,6 +6098,24 @@ _copyRefreshMatViewStmt(const RefreshMatViewStmt *from)
    return newnode;
 }
 
+static CreateMatViewLogStmt* _copyCreateMatViewLogStmt(const CreateMatViewLogStmt* from)
+{
+    CreateMatViewLogStmt* newnode = makeNode(CreateMatViewLogStmt);
+
+    COPY_NODE_FIELD(relation);
+
+    return newnode;
+}
+
+static DropMatViewLogStmt* _copyDropMatViewLogStmt(const DropMatViewLogStmt* from)
+{
+    DropMatViewLogStmt* newnode = makeNode(DropMatViewLogStmt);
+
+    COPY_NODE_FIELD(relation);
+
+    return newnode;
+}
+
 static CreateSeqStmt* _copyCreateSeqStmt(const CreateSeqStmt* from)
 {
     CreateSeqStmt* newnode = makeNode(CreateSeqStmt);
@@ -8671,6 +8689,12 @@ void* copyObject(const void* from)
             break;
         case T_RefreshMatViewStmt:
             retval = _copyRefreshMatViewStmt((RefreshMatViewStmt*)from);
+            break;
+        case T_CreateMatViewLogStmt:
+            retval = _copyCreateMatViewLogStmt((CreateMatViewLogStmt*)from);
+            break;
+        case T_DropMatViewLogStmt:
+            retval = _copyDropMatViewLogStmt((DropMatViewLogStmt*)from);
             break;
         case T_ReplicaIdentityStmt:
             retval = _copyReplicaIdentityStmt((ReplicaIdentityStmt*)from);

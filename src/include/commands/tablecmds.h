@@ -246,6 +246,7 @@ extern void ExecuteTimeCapsule(TimeCapsuleStmt* stmt);
 extern void truncate_check_rel(Relation rel);
 extern void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relname);
 extern int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid);
+extern void DropRelationPermissionCheck(char relkind, Oid relOid, Oid nspOid, const char* relname);
 
 extern void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table);
 extern bool ConstraintSatisfyAutoIncrement(HeapTuple tuple, TupleDesc desc, AttrNumber attrnum, char contype);

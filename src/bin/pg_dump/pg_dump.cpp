@@ -17204,6 +17204,50 @@ static int collectSecLabels(Archive* fout, SecLabelItem** items)
 }
 
 /*
+* tryDumpMlogTable
+*     Write out to fout the declarations of a materialized view log.
+*/
+static void tryDumpMlogTable(Archive* fout, TableInfo* tbinfo)
+{
+    PQExpBuffer query = createPQExpBuffer();
+    PQExpBuffer q = createPQExpBuffer();
+    PGresult* res = NULL;
+
+    appendPQExpBuffer(query,
+        "SELECT 1 FROM pg_catalog.gs_matview_log "
+        "WHERE relid = '%u'",
+        tbinfo->dobj.catId.oid);
+
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+    if (PQntuples(res) != 0) {
+        appendPQExpBuffer(q, "CREATE MATERIALIZED VIEW LOG ON %s;\n", fmtId(tbinfo->dobj.name));
+        ArchiveEntry(fout,
+            tbinfo->dobj.catId,
+            tbinfo->dobj.dumpId,
+            tbinfo->dobj.name,
+            tbinfo->dobj.nmspace->dobj.name,
+            NULL,
+            tbinfo->rolname,
+            false,
+            "MATERIALIZED VIEW LOG",
+            SECTION_PRE_DATA,
+            q->data,
+            "",
+            NULL,
+            NULL,
+            0,
+            NULL,
+            NULL);
+    }
+
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    destroyPQExpBuffer(q);
+    return;
+}
+
+/*
  * dumpTable
  *	  write out to fout the declarations (not data) of a user-defined table
  */
@@ -17285,6 +17329,8 @@ static void dumpTable(Archive* fout, TableInfo* tbinfo)
 
         free(namecopy);
         namecopy = NULL;
+
+        tryDumpMlogTable(fout, tbinfo);
     }
 }
 

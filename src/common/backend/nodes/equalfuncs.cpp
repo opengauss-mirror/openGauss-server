@@ -1952,6 +1952,20 @@ static bool _equalRefreshMatViewStmt(const RefreshMatViewStmt *a, const RefreshM
    return true;
 }
 
+static bool _equalCreateMatViewLogStmt(const CreateMatViewLogStmt* a, const CreateMatViewLogStmt* b)
+{
+    COMPARE_NODE_FIELD(relation);
+
+    return true;
+}
+
+static bool _equalDropMatViewLogStmt(const DropMatViewLogStmt* a, const DropMatViewLogStmt* b)
+{
+    COMPARE_NODE_FIELD(relation);
+
+    return true;
+}
+
 static bool _equalReplicaIdentityStmt(const ReplicaIdentityStmt* a, const ReplicaIdentityStmt* b)
 {
     COMPARE_SCALAR_FIELD(identity_type);
@@ -4188,6 +4202,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_RefreshMatViewStmt:
             retval = _equalRefreshMatViewStmt((RefreshMatViewStmt *)a, (RefreshMatViewStmt *)b);
+            break;
+        case T_CreateMatViewLogStmt:
+            retval = _equalCreateMatViewLogStmt((CreateMatViewLogStmt*)a, (CreateMatViewLogStmt*)b);
+            break;
+        case T_DropMatViewLogStmt:
+            retval = _equalDropMatViewLogStmt((DropMatViewLogStmt*)a, (DropMatViewLogStmt*)b);
             break;
         case T_CreateSeqStmt:
             retval = _equalCreateSeqStmt((CreateSeqStmt*)a, (CreateSeqStmt*)b);

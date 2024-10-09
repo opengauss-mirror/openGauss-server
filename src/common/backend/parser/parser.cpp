@@ -336,6 +336,26 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+        case LOG_P:
+            /*
+            * For materialized view log, view log must be reduced to one token
+            */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case ON:
+                    cur_token = LOG_ON;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         case WITH:
             /*
              * WITH TIME must be reduced to one token

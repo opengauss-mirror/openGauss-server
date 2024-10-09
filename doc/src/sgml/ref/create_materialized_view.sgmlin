@@ -24,7 +24,9 @@ PostgreSQL documentation
 CREATE [ INCREMENTAL ] MATERIALIZED VIEW <replaceable>table_name</replaceable>
     [ (<replaceable>column_name</replaceable> [, ...] ) ]
     [ TABLESPACE <replaceable class="PARAMETER">tablespace_name</replaceable> ]
+    [ BUILD DEFERRED | BUILD IMMEDIATE ]
     AS <replaceable>query</replaceable>
+    [ WITH [ NO ] DATA ]
 </synopsis>
  </refsynopsisdiv>
 

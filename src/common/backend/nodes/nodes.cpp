@@ -642,7 +642,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_CondInfo, "CondInfo"},
     {T_GetDiagStmt, "GetDiagStmt"},
     {T_DolphinCallStmt, "DolphinCallStmt"},
-    {T_CallContext, "CallContext"}
+    {T_CallContext, "CallContext"},
+    {T_CreateMatViewLogStmt, "CreateMatViewLogStmt"},
+    {T_DropMatViewLogStmt, "DropMatViewLogStmt"}
 };
 
 char* nodeTagToString(NodeTag tag)

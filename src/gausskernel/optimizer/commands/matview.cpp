@@ -27,6 +27,7 @@
 #include "catalog/namespace.h"
 #include "catalog/gs_matview.h"
 #include "catalog/gs_matview_dependency.h"
+#include "catalog/gs_matview_log.h"
 #include "catalog/toasting.h"
 #include "catalog/cstore_ctlg.h"
 #include "commands/cluster.h"
@@ -807,6 +808,170 @@ static void ExecutorRefreshMatInc(QueryDesc* queryDesc, Query *query,
     return;
 }
 
+/*
+* Guarantee mlog created time bigger than mview last refresh time
+*/
+static void checkTimeChangeForMlog(Oid mlogid, Oid relid)
+{
+    Relation rel = NULL;
+    TableScanDesc scan;
+    ScanKeyData scanKey;
+    HeapTuple tup = NULL;
+    Form_gs_matview_dependency dep;
+    Datum createTime;
+    Datum createTimeTZ;
+    bool isTimeNULL = false;
+    bool ctimeIsNULL = false;
+
+    Relation pgObjectRelation = heap_open(PgObjectRelationId, RowExclusiveLock);
+    TupleDesc pgObjectTupdesc = RelationGetDescr(pgObjectRelation);
+    tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(mlogid), CharGetDatum(RELKIND_RELATION));
+    if (!HeapTupleIsValid(tup)) {
+        return;
+    }
+
+    createTimeTZ = heap_getattr(tup, Anum_pg_object_ctime, pgObjectTupdesc, &ctimeIsNULL);
+    createTime = DirectFunctionCall1(timestamptz_timestamp, DatumGetTimestampTz(createTimeTZ));
+
+    ReleaseSysCache(tup);
+    heap_close(pgObjectRelation, RowExclusiveLock);
+
+    ScanKeyInit(&scanKey,
+        Anum_gs_matview_dep_relid,
+        BTEqualStrategyNumber,
+        F_OIDEQ,
+        ObjectIdGetDatum(relid));
+    rel = heap_open(MatviewDependencyId, AccessShareLock);
+    scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKey);
+
+    while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+        dep = (Form_gs_matview_dependency)GETSTRUCT(tup);
+        Datum oldTime = get_matview_refreshtime(dep->matviewid, &isTimeNULL);
+        if (timestamp_cmp_internal(DatumGetTimestamp(createTime), DatumGetTimestamp(oldTime)) <= 0) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("system time cannot be smaller than last refresh time")));
+        }
+    }
+
+    tableam_scan_end(scan);
+    heap_close(rel, NoLock);
+}
+
+static void checkTimeChangeForRelativeMlog(List *mlogidList, Datum curtime, Datum curMViewOldTime, bool incRefresh)
+{
+    Relation rel = NULL;
+    TableScanDesc scan;
+    ScanKeyData scanKey;
+    HeapTuple tup = NULL;
+    Form_gs_matview_dependency dep;
+    ListCell *mlogidCell = NULL;
+    Oid mlogid = InvalidOid;
+    TupleDesc pgObjectTupdesc;
+    bool isTimeNULL = false;
+    bool isNewMlog = false;
+
+    /* Compare with relevant mlog */
+    foreach (mlogidCell, mlogidList) {
+        mlogid = lfirst_oid(mlogidCell);
+        rel = heap_open(PgObjectRelationId, RowExclusiveLock);
+        pgObjectTupdesc = RelationGetDescr(rel);
+        tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(mlogid), CharGetDatum(RELKIND_RELATION));
+        if (!HeapTupleIsValid(tup)) {
+            return;
+        }
+
+        Datum createTimeTZ = heap_getattr(tup, Anum_pg_object_ctime, pgObjectTupdesc, &isTimeNULL);
+        Datum createTime = DirectFunctionCall1(timestamptz_timestamp, DatumGetTimestampTz(createTimeTZ));
+
+        ReleaseSysCache(tup);
+        heap_close(rel, RowExclusiveLock);
+
+        if (timestamp_cmp_internal(DatumGetTimestamp(curtime), DatumGetTimestamp(createTime)) <= 0) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("system time cannot be smaller than mlog created time")));
+        }
+
+        isNewMlog = timestamp_cmp_internal(DatumGetTimestamp(curMViewOldTime), DatumGetTimestamp(createTime)) <= 0;
+        if (incRefresh && isNewMlog) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized view log younger than last refresh")));
+        }
+
+        ScanKeyInit(&scanKey,
+            Anum_gs_matview_dep_mlogid,
+            BTEqualStrategyNumber,
+            F_OIDEQ,
+            ObjectIdGetDatum(mlogid));
+        rel = heap_open(MatviewDependencyId, AccessShareLock);
+        scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKey);
+
+        /* Compare current time with the last refresh time of relevant mviews */
+        while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+            dep = (Form_gs_matview_dependency)GETSTRUCT(tup);
+            Datum otherMViewOldTime = get_matview_refreshtime(dep->matviewid, &isTimeNULL);
+            if (timestamp_cmp_internal(DatumGetTimestamp(curtime), DatumGetTimestamp(otherMViewOldTime)) <= 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("system time cannot be smaller than last refresh time")));
+            }
+        }
+
+        tableam_scan_end(scan);
+        heap_close(rel, NoLock);
+    }
+
+    list_free(mlogidList);
+}
+
+/*
+* Incremental mview refresh time must bigger than mlog created time and relative mview last refresh time.
+*/
+static void checkTimeChangeForMView(Oid matviewid, Datum curtime, bool incRefresh)
+{
+    Relation rel = NULL;
+    TableScanDesc scan;
+    ScanKeyData scanKey;
+    HeapTuple tup = NULL;
+    Form_gs_matview_dependency dep;
+    List *mlogidList = NULL;
+    bool isTimeNULL = false;
+
+    /* Compare current time with the last refresh time of current matview */
+    Datum curMViewOldTime = get_matview_refreshtime(matviewid, &isTimeNULL);
+
+    if (isTimeNULL) {
+        if (incRefresh) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized view must use complete refresh first")));
+        }
+    } else if (timestamp_cmp_internal(DatumGetTimestamp(curtime), DatumGetTimestamp(curMViewOldTime)) <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("system time cannot be smaller than last refresh time")));
+    }
+
+    ScanKeyInit(&scanKey,
+        Anum_gs_matview_dep_matviewid,
+        BTEqualStrategyNumber,
+        F_OIDEQ,
+        ObjectIdGetDatum(matviewid));
+    rel = heap_open(MatviewDependencyId, AccessShareLock);
+    scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKey);
+
+    while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+        dep = (Form_gs_matview_dependency)GETSTRUCT(tup);
+        if (dep->mlogid != InvalidOid) {
+            mlogidList = lappend_oid(mlogidList, dep->mlogid);
+        } else if (incRefresh) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("missing mlog for incrementally refresh")));
+        }
+    }
+
+    tableam_scan_end(scan);
+    heap_close(rel, NoLock);
+
+    checkTimeChangeForRelativeMlog(mlogidList, curtime, curMViewOldTime, incRefresh);
+}
+
 ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
                  ParamListInfo params, char *completionTag)
 {
@@ -816,7 +981,6 @@ ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryS
     Query *query = NULL;
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
-    bool isTimeNULL = false;
     Datum curtime;
     Oid save_userid;
     int save_sec_context;
@@ -835,11 +999,8 @@ ObjectAddress ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryS
                                            RangeVarCallbackOwnsMatView, NULL);
 
     Oid mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
-    Datum oldTime = get_matview_refreshtime(matviewOid, &isTimeNULL);
-    if (timestamp_cmp_internal(DatumGetTimestamp(curtime),
-            DatumGetTimestamp(oldTime)) <= 0) {
-        return InvalidObjectAddress;
-    }
+
+    checkTimeChangeForMView(matviewOid, curtime, true);
 
     matviewRel = heap_open(matviewOid, ExclusiveLock);
 
@@ -975,6 +1136,7 @@ ObjectAddress ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *que
                    RelationGetRelationName(matviewRel))));
     }
 
+    checkTimeChangeForMView(matviewOid, curtime, false);
 
     Assert(!IsSystemRelation(matviewRel));
     Assert(!matviewRel->rd_rel->relhasoids);
@@ -1248,7 +1410,9 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
         ListCell *idx = NULL;
 
         /* update tuples in mlog which refreshtime if NULL based on current */
-        update_mlog_time_all(mlogid, curtime);
+        if (mlogid != InvalidOid) {
+            update_mlog_time_all(mlogid, curtime);
+        }
 
         index = get_index_ref(queryDesc, relid);
 
@@ -1363,10 +1527,15 @@ ObjectAddress  ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* querySt
     matviewid = RelationGetRelid(matview);
     mapid = DatumGetObjectId(get_matview_mapid(matviewid));
 
-    /* update matview metadata of gs_matview. */
-    update_matview_tuple(matviewid, true, curtime);
+    if (!stmt->into->skipData) {
+        checkTimeChangeForMView(matviewid, curtime, false);
 
-    ExecCreateMatInc(queryDesc, query, matview, mapid, curtime);
+        /* update matview metadata of gs_matview. */
+        update_matview_tuple(matviewid, true, curtime);
+
+        ExecCreateMatInc(queryDesc, query, matview, mapid, curtime);
+    }
+
     address = ((DR_intorel *) dest)->reladdr;
     (*dest->rShutdown)(dest);
 
@@ -1783,6 +1952,8 @@ static Oid create_mlog_table(Oid relid)
 
     AlterTableCreateToastTable(mlogid, reloptions);
 
+    insert_matview_log_tuple(mlogid, relid);
+
     /*
      * Make changes visible
      */
@@ -1796,18 +1967,18 @@ static Oid find_mlog_table(Oid relid)
     Oid mlogid;
     HeapTuple tup;
     TableScanDesc scan;
-    Relation matview_dep;
-    Form_gs_matview_dependency matviewdepForm;
+    Relation matview_log;
+    Form_gs_matview_log matviewlogForm;
 
-    matview_dep = heap_open(MatviewDependencyId, AccessShareLock);
-    scan = tableam_scan_begin(matview_dep, SnapshotNow, 0, NULL);
+    matview_log = heap_open(MatviewLogRelationId, AccessShareLock);
+    scan = tableam_scan_begin(matview_log, SnapshotNow, 0, NULL);
     tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
-    while(tup != NULL) {
-        matviewdepForm = (Form_gs_matview_dependency)GETSTRUCT(tup);
+    while (tup != NULL) {
+        matviewlogForm = (Form_gs_matview_log)GETSTRUCT(tup);
 
-        if (matviewdepForm->relid == relid) {
-            mlogid = matviewdepForm->mlogid;
+        if (matviewlogForm->relid == relid) {
+            mlogid = matviewlogForm->mlogid;
             break;
         }
         tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
@@ -1815,15 +1986,17 @@ static Oid find_mlog_table(Oid relid)
 
     if (tup != NULL && HeapTupleIsValid(tup)) {
         tableam_scan_end(scan);
-        heap_close(matview_dep, NoLock);
+        heap_close(matview_log, NoLock);
         return mlogid;
     }
 
     tableam_scan_end(scan);
-    heap_close(matview_dep, NoLock);
+    heap_close(matview_log, NoLock);
 
     /* if not found, create mlog-table. */
     mlogid = create_mlog_table(relid);
+
+    checkTimeChangeForMlog(mlogid, relid);
 
     return mlogid;
 }
@@ -2098,6 +2271,28 @@ Oid find_matview_mlog_table(Oid relid)
     heap_close(rel, AccessShareLock);
 
     return mlogid;
+}
+
+bool is_table_in_incre_matview(Oid relid)
+{
+    Relation rel = NULL;
+    TableScanDesc scan;
+    ScanKeyData scanKey;
+    bool result = false;
+
+    ScanKeyInit(&scanKey,
+        Anum_gs_matview_dep_relid,
+        BTEqualStrategyNumber,
+        F_OIDEQ,
+        ObjectIdGetDatum(relid));
+    rel = heap_open(MatviewDependencyId, AccessShareLock);
+    scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKey);
+    if (tableam_scan_getnexttuple(scan, ForwardScanDirection) != NULL) {
+        result = true;
+    }
+    tableam_scan_end(scan);
+    heap_close(rel, NoLock);
+    return result;
 }
 
 void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple, ItemPointer tid, TransactionId xid, char action)
@@ -2659,6 +2854,75 @@ void create_matview_meta(Query *query, RangeVar *rel, bool incremental)
     return;
 }
 
+ObjectAddress CreateMatViewLog(CreateMatViewLogStmt* parse_tree)
+{
+    RangeVar* rv = parse_tree->relation;
+    ObjectAddress address = InvalidObjectAddress;
+    Oid mlogid = InvalidOid;
+    Oid relid = RangeVarGetRelidExtended(rv, NoLock, false, false, false, true, NULL, NULL, NULL, NULL);
+    HeapTuple tup;
+    TableScanDesc scan;
+    Relation matview_log;
+    Form_gs_matview_log matview_log_form;
+
+    matview_log = heap_open(MatviewLogRelationId, AccessShareLock);
+    scan = tableam_scan_begin(matview_log, SnapshotNow, 0, NULL);
+    tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    while (tup != NULL) {
+        matview_log_form = (Form_gs_matview_log)GETSTRUCT(tup);
+        /* If mlog already exists */
+        if (matview_log_form->relid == relid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized view log for table \"%s\" already exists.", rv->relname)));
+        }
+        tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection);
+    }
+
+    tableam_scan_end(scan);
+    heap_close(matview_log, NoLock);
+
+    mlogid = create_mlog_table(relid);
+
+    checkTimeChangeForMlog(mlogid, relid);
+
+    /* validate all mlogids in relevant matview dependency */
+    validate_matdep_mlog(mlogid, relid);
+
+    ObjectAddressSet(address, RelationRelationId, mlogid);
+    return address;
+}
+
+void DropMatViewLog(DropMatViewLogStmt* parse_tree)
+{
+    RangeVar* rv = parse_tree->relation;
+    Oid mlogid = InvalidOid;
+    HeapTuple tuple;
+    Form_pg_class classform;
+    Oid relid = RangeVarGetRelidExtended(rv, NoLock, false, false, false, true, NULL, NULL, NULL, NULL);
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tuple)) {
+        ReleaseSysCache(tuple);
+        return;
+    }
+
+    classform = (Form_pg_class)GETSTRUCT(tuple);
+    DropRelationPermissionCheck(classform->relkind, relid, classform->relnamespace, rv->relname);
+    ReleaseSysCache(tuple);
+
+    mlogid = delete_matview_log_tuple(relid);
+
+    /* invalidate all mlogids in relevant matview dependency */
+    invalidate_matdep_mlog(relid);
+
+    ObjectAddress mlogobject;
+    mlogobject.classId = RelationRelationId;
+    mlogobject.objectId = mlogid;
+    mlogobject.objectSubId = 0;
+    performDeletion(&mlogobject, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+}
+
 DistributeBy *infer_incmatview_distkey(CreateTableAsStmt *stmt) {
     Query *query = NULL;
     RangeTblEntry *rte = NULL;
@@ -2749,7 +3013,9 @@ static void vacuum_mlog_for_matview(Oid matviewid) {
 
     while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL ) {
         dep = (Form_gs_matview_dependency)GETSTRUCT(tup);
-        mlogidList = lappend_oid(mlogidList, dep->mlogid);
+        if (dep->mlogid != InvalidOid) {
+            mlogidList = lappend_oid(mlogidList, dep->mlogid);
+        }
     }
     tableam_scan_end(scan);
     heap_close(rel, NoLock);

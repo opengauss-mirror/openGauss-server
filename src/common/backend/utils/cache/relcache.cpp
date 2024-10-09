@@ -144,6 +144,7 @@
 #include "catalog/gs_db_privilege.h"
 #include "catalog/gs_matview.h"
 #include "catalog/gs_matview_dependency.h"
+#include "catalog/gs_matview_log.h"
 #include "catalog/pg_snapshot.h"
 #include "catalog/gs_opt_model.h"
 #include "catalog/gs_global_chain.h"
@@ -328,6 +329,7 @@ static const FormData_pg_attribute Desc_gs_masking_policy_filters[Natts_gs_maski
 static const FormData_pg_attribute Desc_gs_asp[Natts_gs_asp] = {Schema_gs_asp};
 static const FormData_pg_attribute Desc_gs_matview[Natts_gs_matview] = {Schema_gs_matview};
 static const FormData_pg_attribute Desc_gs_matview_dependency[Natts_gs_matview_dependency] = {Schema_gs_matview_dependency};
+static const FormData_pg_attribute Desc_gs_matview_log[Natts_gs_matview_log] = {Schema_gs_matview_log};
 static const FormData_pg_attribute Desc_pgxc_slice[Natts_pgxc_slice] = {Schema_pgxc_slice};
 
 static const FormData_pg_attribute Desc_gs_column_keys[Natts_gs_column_keys] = {Schema_gs_column_keys};
@@ -1250,6 +1252,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_gs_encrypted_proc,
         Desc_gs_encrypted_proc,
+        false,
+        true},
+    {MatviewLogRelationId,
+        "gs_matview_log",
+        MatviewLogRelationId_Rowtype_Id,
+        false,
+        false,
+        Natts_gs_matview_log,
+        Desc_gs_matview_log,
         false,
         true},
     {MatviewRelationId,
@@ -2456,7 +2467,12 @@ static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool b
      * mlog oid
      */
     if (!IsCatalogRelation(relation)) {
-        relation->rd_mlogoid = find_matview_mlog_table(relid);
+        /* if do not have incremental matview, no need to insert into mlog */
+        if (is_table_in_incre_matview(relid)) {
+            relation->rd_mlogoid = find_matview_mlog_table(relid);
+        } else {
+            relation->rd_mlogoid = InvalidOid;
+        }
     }
 
     /*

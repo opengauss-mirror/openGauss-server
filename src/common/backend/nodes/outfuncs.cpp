@@ -4141,6 +4141,18 @@ static void _outAlterTriggerStmt(StringInfo str, AlterTriggerStmt *node)
     WRITE_CHAR_FIELD(tgenabled);
 }
 
+static void _outCreateMatViewLogStmt(StringInfo str, CreateMatViewLogStmt* node)
+{
+    WRITE_NODE_TYPE("CREATEMATVIEWLOG");
+    WRITE_NODE_FIELD(relation);
+}
+
+static void _outDropMatViewLogStmt(StringInfo str, DropMatViewLogStmt* node)
+{
+    WRITE_NODE_TYPE("DROPMATVIEWLOG");
+    WRITE_NODE_FIELD(relation);
+}
+
 static void _outCopyStmt(StringInfo str, CopyStmt* node)
 {
     WRITE_NODE_TYPE("COPY");
@@ -6968,6 +6980,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_AlterTriggerStmt:
                 _outAlterTriggerStmt(str, (AlterTriggerStmt*)obj);
+                break;
+            case T_CreateMatViewLogStmt:
+                _outCreateMatViewLogStmt(str, (CreateMatViewLogStmt*)obj);
+                break;
+            case T_DropMatViewLogStmt:
+                _outDropMatViewLogStmt(str, (DropMatViewLogStmt*)obj);
                 break;
             case T_SelectStmt:
                 _outSelectStmt(str, (SelectStmt*)obj);

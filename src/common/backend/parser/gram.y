@@ -407,7 +407,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 		CreateResourcePoolStmt AlterResourcePoolStmt DropResourcePoolStmt
 		CreateWorkloadGroupStmt AlterWorkloadGroupStmt DropWorkloadGroupStmt
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
-		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt CreateAmStmt
+		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt CreateMatViewLogStmt DropMatViewLogStmt CreateAmStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
 		AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
@@ -864,6 +864,10 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <condinfo> statement_information_item condition_information_item
 %type <node>	condition_number
 %type <list>	condition_information statement_information
+
+/* MATVIEW */
+%type <boolean> build_deferred
+
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -891,7 +895,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
         ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS
-	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTE_P BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
+	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BUILD BY BYTE_P BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
@@ -934,8 +938,8 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
+	LOCATION LOCK_P LOCKED LOG_ON LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
 	NAME_P NAMES NAN_P NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
@@ -1264,6 +1268,8 @@ stmt :
 			| CreatePackageBodyStmt
 			| CreateGroupStmt
 			| CreateMatViewStmt
+			| CreateMatViewLogStmt
+			| DropMatViewLogStmt
 			| CreateModelStmt  // DB4AI
 			| CreateNodeGroupStmt
 			| CreateNodeStmt
@@ -9977,7 +9983,7 @@ OptSnapshotStratify:
  *****************************************************************************/
 
 CreateMatViewStmt:
-	   CREATE OptNoLog opt_incremental MATERIALIZED VIEW create_mv_target AS SelectStmt opt_with_data
+	   CREATE OptNoLog INCREMENTAL MATERIALIZED VIEW create_mv_target AS SelectStmt opt_with_data
 			   {
 				   CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
 				   ctas->query = $8;
@@ -9987,14 +9993,8 @@ CreateMatViewStmt:
 				   /* cram additional flags into the IntoClause */
 				   $6->rel->relpersistence = $2;
 				   $6->skipData = !($9);
-				   if ($6->skipData) {
-        				const char* message = "WITH NO DATA for materialized views not yet supported";
-    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-				        ereport(errstate,
-				            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				                errmsg("WITH NO DATA for materialized views not yet supported")));
-                   }
-                   if ($3 && $6->options) {
+				   $6->ivm = true;
+                   if ($6->options) {
         				const char* message = "options for incremental materialized views not yet supported";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
                         ereport(errstate,
@@ -10002,7 +10002,7 @@ CreateMatViewStmt:
                                 errmsg("options for incremental materialized views not yet supported")));
                    }
 #ifndef ENABLE_MULTIPLE_NODES
-                   if ($3 && $6->distributeby) {
+                   if ($6->distributeby) {
         				const char* message = "It's not supported to specify distribute key on incremental materialized views";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
                         ereport(errstate,
@@ -10014,10 +10014,47 @@ CreateMatViewStmt:
                         ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("matview is not supported while DMS and DSS enabled.")));
                    }
-                    
-				   $6->ivm = $3;
+
 				   $$ = (Node *) ctas;
 			   }
+		| CREATE MATERIALIZED VIEW create_mv_target build_deferred AS SelectStmt
+				{
+					CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
+					ctas->query = $7;
+					ctas->into = $4;
+					ctas->relkind = OBJECT_MATVIEW;
+					ctas->is_select_into = false;
+					/* cram additional flags into the IntoClause */
+					$4->rel->relpersistence = RELPERSISTENCE_PERMANENT;
+					$4->skipData = $5;
+					$4->ivm = false;
+
+					if (ENABLE_DMS) {
+						ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("matview is not supported while DMS and DSS enabled.")));
+					}
+
+					$$ = (Node *) ctas;
+				}
+		| CREATE MATERIALIZED VIEW create_mv_target AS SelectStmt opt_with_data
+				{
+					CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
+					ctas->query = $6;
+					ctas->into = $4;
+					ctas->relkind = OBJECT_MATVIEW;
+					ctas->is_select_into = false;
+					/* cram additional flags into the IntoClause */
+					$4->rel->relpersistence = RELPERSISTENCE_PERMANENT;
+					$4->skipData = !($7);
+					$4->ivm = false;
+
+					if (ENABLE_DMS) {
+						ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("matview is not supported while DMS and DSS enabled.")));
+					}
+
+					$$ = (Node *) ctas;
+				}
 	   ;
 
 create_mv_target:
@@ -10051,6 +10088,10 @@ opt_incremental:
 			| /*EMPTY*/							{ $$ = FALSE; }
 		;
 
+build_deferred:
+			BUILD DEFERRED						{ $$ = TRUE; }
+			| BUILD IMMEDIATE					{ $$ = FALSE; }
+		;
 
 /*****************************************************************************
  *
@@ -10077,6 +10118,23 @@ RefreshMatViewStmt:
                }
        ;
 
+CreateMatViewLogStmt:
+			CREATE MATERIALIZED VIEW LOG_ON qualified_name
+				{
+					CreateMatViewLogStmt* stmt = makeNode(CreateMatViewLogStmt);
+					stmt->relation = $5;
+					$$ = (Node*)stmt;
+				}
+		;
+
+DropMatViewLogStmt:
+			DROP MATERIALIZED VIEW LOG_ON qualified_name
+				{
+					DropMatViewLogStmt* stmt = makeNode(DropMatViewLogStmt);
+					stmt->relation = $5;
+					$$ = (Node*)stmt;
+				}
+		;
 
 /*****************************************************************************
  *
@@ -30021,6 +30079,7 @@ unreserved_keyword:
 			| BLOB_P
 			| BLOCKCHAIN
 			| BODY_P
+			| BUILD
 			| BY
 			| BYTE_P
 			| CACHE
