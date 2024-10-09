@@ -121,6 +121,7 @@ void plpgsql_add_pkg_ns(PLpgSQL_package* pkg)
                     plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, objname, pkgname);
                     break;
                 case PLPGSQL_DTYPE_COMPOSITE:
+                case PLPGSQL_DTYPE_SUBTYPE:
                     break;    
                 default:
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -930,6 +931,25 @@ void free_expr(PLpgSQL_expr* expr)
     }
 }
 
+static void DropDependencyForAnonymousType(PLpgSQL_type *type, PLpgSQL_function* func)
+{
+    char* funcname = "inline_code_block";
+    if (func != NULL) {
+        int len = Min(strlen(func->fn_signature), strlen(funcname));
+        if (memcmp(func->fn_signature, funcname, len) == 0) {
+            DropStmt *n = makeNode(DropStmt);
+            n->removeType = OBJECT_TYPE;
+            n->missing_ok = TRUE;
+            n->objects = list_make1(list_make1(makeString(type->typname)));
+            n->arguments = NIL;
+            n->behavior = DROP_CASCADE;
+            n->concurrent = false;
+            n->purge = false;
+            RemoveObjects(n, true);
+        }
+    }
+}
+
 void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
 {
     int i;
@@ -989,6 +1009,9 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
             case PLPGSQL_DTYPE_UNKNOWN:
                 break;
             case PLPGSQL_DTYPE_COMPOSITE:
+                break;
+            case PLPGSQL_DTYPE_SUBTYPE:
+                DropDependencyForAnonymousType((PLpgSQL_type*)d, func);
                 break;
             case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;
@@ -1103,6 +1126,7 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
             case PLPGSQL_DTYPE_ASSIGNLIST:
                 free_assignlist(((PLpgSQL_assignlist*)d)->assignlist);
             case PLPGSQL_DTYPE_COMPOSITE:
+            case PLPGSQL_DTYPE_SUBTYPE:
                 break;
             case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;

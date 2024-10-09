@@ -19,6 +19,7 @@
 
 #include <ctype.h>
 
+#include "catalog/pg_synonym.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
@@ -578,6 +579,38 @@ int CompileStatusSwtichTo(int newCompileStatus)
 int getCompileStatus()
 {
     return u_sess->plsql_cxt.compile_status;
+}
+
+/* check functionname and typename */
+void getPkgFuncTypeName(char *typname, char **functypname, char **pkgtypname)
+{
+    if (NULL == u_sess->plsql_cxt.curr_compile_context) {
+        return;
+    }
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        *functypname = CastPackageTypeName(typname,
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, false);
+        if (strlen(*functypname) >= NAMEDATALEN) {
+            ereport(ERROR,
+                (errcode(ERRCODE_NAME_TOO_LONG),
+                    errmsg("type name too long"),
+                    errdetail("record name %s with func oid %d should be less the %d letters.",
+                        typname, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, NAMEDATALEN)));
+        }
+    }
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        *pkgtypname = CastPackageTypeName(typname,
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, true);
+        if (strlen(*pkgtypname) >= NAMEDATALEN) {
+            ereport(ERROR,
+                (errcode(ERRCODE_NAME_TOO_LONG),
+                    errmsg("type name too long"),
+                    errdetail("record name %s with package name %s should be less the %d letters.",
+                        typname,
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature,
+                        NAMEDATALEN)));
+        }
+    }
 }
 
 PLpgSQL_resolve_option GetResolveOption()
@@ -4126,6 +4159,99 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, typname);
     }
     return result;
+}
+
+/*
+ * typname: SUBTYPE name
+ * basetypname: base type name
+ */
+void plpgsql_build_synonym(char* typname, char* basetypname)
+{
+    CreateSynonymStmt stmt;
+    stmt.replace = true;
+    Node* lc = NULL;
+    List* synList = NIL;
+    List* objList = NIL;
+    Oid NamespaceOid = InvalidOid;
+    char* functypname = NULL;
+    char* pkgtypname = NULL;
+    ObjectAddress myself, referenced;
+
+    PLpgSQL_package* curr_package = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+    PLpgSQL_function* curr_function = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
+
+    getPkgFuncTypeName(typname, &functypname, &pkgtypname);
+
+    if (curr_package) {
+        NamespaceOid = curr_package->namespaceOid;
+    }
+    if (!OidIsValid(NamespaceOid)) {
+        NamespaceOid = getCurrentNamespace();
+    }
+    
+    if (curr_package) {
+        lc = (Node*)makeString(curr_package->pkg_signature);
+        synList = lappend(synList, lc);
+    }
+
+    lc = (Node*)makeString(typname);
+    synList = lappend(synList, lc);
+    
+    lc = (Node*)makeString(basetypname);
+    objList = lappend(objList, lc);
+
+    stmt.synName = synList;
+    stmt.objName = objList;
+
+    HeapTuple tuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(NamespaceOid));
+    if (!HeapTupleIsValid(tuple)) {
+        CreateSynonym(&stmt);
+        CommandCounterIncrement();
+    } else {
+        Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(tuple);
+        if (pg_strcasecmp(synForm->synobjname.data, basetypname) != 0) {
+            ereport(ERROR,
+                (errmsg(
+                    "The basetypename are different from synonym \"%s\": "\
+                    "the old basetype is \"%s\", the new base type is \"%s\".",
+                    typname, synForm->synobjname.data, basetypname)));
+        }
+        ReleaseSysCache(tuple);
+        pfree_ext(functypname);
+        pfree_ext(pkgtypname);
+        return ;
+    }
+
+    tuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(NamespaceOid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("synonym \"%s\" does not exist", typname)));
+    }
+    Oid synOid = HeapTupleGetOid(tuple);
+    ReleaseSysCache(tuple);
+
+    /* build dependency on Synonym */
+    if (curr_package) {
+        myself.classId = PackageRelationId;
+        myself.objectId = curr_package->pkg_oid;
+        myself.objectSubId = 0;
+    } else {
+        myself.classId = ProcedureRelationId;
+        myself.objectId = curr_function->fn_oid;
+        myself.objectSubId = 0;
+    }
+
+    referenced.classId = PgSynonymRelationId;
+    referenced.objectId = synOid;
+    referenced.objectSubId = 0;
+    recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
+
+    PgObjectOption objectOpt = {true, true, false, false};
+    CreatePgObject(synOid, OBJECT_TYPE_SYNONYM, GetUserId(), objectOpt);
+
+    CommandCounterIncrement();
+
+    pfree_ext(functypname);
+    pfree_ext(pkgtypname);
 }
 
 /*

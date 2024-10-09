@@ -72,7 +72,8 @@ enum {
     PLPGSQL_NSTYPE_UNKNOWN,
     PLPGSQL_NSTYPE_COMPOSITE,
     PLPGSQL_NSTYPE_GOTO_LABEL,
-    PLPGSQL_NSTYPE_CURSORROW
+    PLPGSQL_NSTYPE_CURSORROW,
+    PLPGSQL_NSTYPE_SUBTYPE
 };
 
 /* ----------
@@ -94,7 +95,8 @@ enum {
     PLPGSQL_DTYPE_ASSIGNLIST,
     PLPGSQL_DTYPE_COMPOSITE, /* composite type */
     PLPGSQL_DTYPE_RECORD_TYPE, /* record type */
-    PLPGSQL_DTYPE_CURSORROW
+    PLPGSQL_DTYPE_CURSORROW,
+    PLPGSQL_DTYPE_SUBTYPE
 };
 
 /* ----------
@@ -447,6 +449,16 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
     int tableof_func_dno;
     uint64 unique_sql_id;
 } PLpgSQL_expr;
+
+/* To save subtype range constraints */
+typedef struct SubTypeRange {
+    bool valid;
+    Oid SubTypeOid;
+    Oid functionOid;
+    Oid packageOid;
+    PLpgSQL_expr* lowValue;
+    PLpgSQL_expr* highValue;
+} SubTypeRange;
 
 typedef struct { /* openGauss data type */
     int dtype;
@@ -1810,6 +1822,7 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
 PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace);
 extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc);
+extern void plpgsql_build_synonym(char* typname, char* basetypname);
 extern int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate);
 extern PLpgSQL_condition* plpgsql_parse_err_condition(char* condname);
 PLpgSQL_condition* plpgsql_parse_err_condition_b_signal(const char* condname);
@@ -2113,6 +2126,7 @@ extern TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool 
 extern int CompileStatusSwtichTo(int newCompileStatus);
 extern void checkCompileMemoryContext(MemoryContext cxt);
 extern int getCompileStatus();
+extern void getPkgFuncTypeName(char* typname, char** functypname, char** pkgtypname);
 extern void pushCompileContext();
 extern PLpgSQL_compile_context* popCompileContext();
 void popToOldCompileContext(PLpgSQL_compile_context* save);

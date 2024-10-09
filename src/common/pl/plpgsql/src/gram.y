@@ -246,6 +246,8 @@ static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype);
 static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace);
 static void  plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend = NULL);
 static void plpgsql_build_package_refcursor_type(const char* typname);
+static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
+static Oid plpgsql_build_function_package_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
 int plpgsql_yylex_single(void);
 static void get_datum_tok_type(PLpgSQL_datum* target, int* tok_flag);
 static bool copy_table_var_indents(char* tableName, char* idents, int tablevar_namelen);
@@ -353,10 +355,10 @@ static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 %type <plnode> assign_el
 %type <declhdr> decl_sect
 %type <varname> decl_varname declare_condname
-%type <list> decl_varname_list
+%type <list> decl_varname_list opt_subtype_range
 %type <boolean>	decl_const decl_notnull exit_type
 %type <expr>	decl_defval decl_rec_defval decl_cursor_query
-%type <dtype>	decl_datatype opt_cursor_returntype
+%type <dtype>	decl_datatype opt_cursor_returntype subtype_base_type
 %type <oid>		decl_collate
 %type <datum>	decl_cursor_args
 %type <list>	decl_cursor_arglist assign_list
@@ -407,6 +409,7 @@ static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 %type <ival>	varray_var
 %type <ival>	table_var
 %type <ival>	record_var
+%type <ival>    subtype_base_collect_type
 %type <expr>	expr_until_parenthesis
 %type <ival>	opt_scrollable
 %type <fetch>	opt_fetch_direction
@@ -602,6 +605,7 @@ static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 %token <keyword>	K_STACKED
 %token <keyword>	K_STRICT
 %token <keyword>	K_SUBCLASS_ORIGIN
+%token <keyword>	K_SUBTYPE
 %token <keyword>	K_SYS_REFCURSOR
 %token <keyword>	K_TABLE
 %token <keyword>	K_TABLE_NAME
@@ -2060,7 +2064,122 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             u_sess->plsql_cxt.have_error = true;
                         }
                     }
+                |   K_SUBTYPE decl_varname K_IS subtype_base_type  decl_notnull ';'
+                    {
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("SUBTYPE is only supported in database which dbcompatibility='A'")));
+                        }
+                        IsInPublicNamespace($2->name);
+                        PLpgSQL_type *newp = $4;
+                        Oid newtypeoid = InvalidOid;
+
+                        if (PLPGSQL_TTYPE_ROW == newp->ttype) {
+                            /* handle when basetype is ROW */
+                            plpgsql_build_synonym($2->name, newp->typname);
+                        } else if (F_ARRAY_IN == newp->typinput.fn_oid) {
+                            /* collection handle in next project */
+                            ereport(errstate,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmodule(MOD_PLSQL),
+                                    errmsg("array or table type nested by table type is not supported yet."),
+                                    errdetail("Define table type \"%s\" of array or table type is not supported yet.", $2->name),
+                                    errcause("feature not supported"),
+                                    erraction("check define of table type")));
+                            u_sess->plsql_cxt.have_error = true;
+                        } else {
+                            /* basstype is not a row, build subtype, save constraint in plsql cache */
+                            if (IS_ANONYMOUS_BLOCK) {
+                                newtypeoid = plpgsql_build_anonymous_subtype($2->name, newp, NULL, $5);
+                            } else {
+                                newtypeoid = plpgsql_build_function_package_subtype($2->name, newp, NULL, $5);
+                            }
+
+                            pfree_ext($2->name);
+                            pfree_ext($2);
+                        }
+                    }
+                |   K_SUBTYPE decl_varname K_IS record_var ';'
+                    {
+                        /* copy all params if basetype is record, build a new record */
+                        List* attr_list = NIL;
+                        PLpgSQL_type* newp = (PLpgSQL_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$4];
+                        PLpgSQL_rec_type* old = (PLpgSQL_rec_type*)newp;
+                        for (int i = 0; i < old->attrnum; i++) {
+                            PLpgSQL_rec_attr* attr = (PLpgSQL_rec_attr*)palloc0(sizeof(PLpgSQL_rec_attr));
+                            attr->attrname = pstrdup(old->attrnames[i]);
+                            attr->type = old->types[i];
+                            attr->notnull = old->notnulls[i];
+                            attr->defaultvalue = old->defaultvalues[i];
+                            attr_list = lappend(attr_list, attr);
+                        }
+                        if (attr_list == NIL) {
+                            elog(errstate, "Execption when defining subtype");
+                            u_sess->plsql_cxt.have_error = true;
+                        }
+                        PLpgSQL_rec_type* rec = NULL;
+                        rec = plpgsql_build_rec_type($2->name, $2->lineno, attr_list, true);
+                        if (IS_PACKAGE) {
+                            rec->typoid = plpgsql_build_package_record_type($2->name, attr_list, true);
+                        } else if (enable_plpgsql_gsdependency()){
+                            ListCell* cell =  NULL;
+                            foreach(cell, attr_list) {
+                                gsplsql_build_gs_type_in_body_dependency(((PLpgSQL_rec_attr*)lfirst(cell))->type);
+                            }
+                        }
+                        list_free_deep(attr_list);
+                    }
+                |   K_SUBTYPE decl_varname K_IS subtype_base_collect_type ';'
+                    {
+                        /* SUBTYPE basse type is table/varray type */
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT){
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("SUBTYPE is only supported in database which dbcompatibility='A'")));
+                        } 
+                        IsInPublicNamespace($2->name);
+                        PLpgSQL_var *arrarytype = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$4];
+                        PLpgSQL_type *newp = arrarytype->datatype;
+                        plpgsql_build_varrayType($2->name, $2->lineno, newp, true);
+                        if (IS_PACKAGE) {
+                            plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_ARRAY, newp->dependExtend);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            gsplsql_build_gs_type_in_body_dependency(newp);
+                        }
+                        pfree_ext($2->name);
+                        pfree_ext($2);
+                    }
                 ;
+
+subtype_base_type: T_REFCURSOR
+                {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmodule(MOD_PLSQL),
+                            errmsg("ref cursor type nested by record is not supported yet."),
+                            errdetail("Define record type of ref cursor type is not supported yet."),
+                            errcause("feature not supported"),
+                            erraction("check define of record type")));
+                    u_sess->plsql_cxt.have_error = true;
+                }
+                | decl_datatype
+                {
+                    $$ = $1;
+                }
+                ;
+
+subtype_base_collect_type: 
+                varray_var 
+                {
+                    $$ = $1;
+                }
+                | table_var
+                {
+                    $$ = $1;
+                }
+                ;
+
 
 error_code       : ICONST
                  {
@@ -2083,6 +2202,8 @@ init_proc        :
                      yyclearin;
                  }    
 
+opt_subtype_range : 
+                 { $$ = NIL; };
 
 record_attr_list : record_attr
                    {
@@ -10025,8 +10146,7 @@ read_datatype(int tok)
             break;
         }
         /* Possible followers for datatype in a declaration */
-        if (tok == K_COLLATE || tok == K_NOT ||
-            tok == '=' || tok == COLON_EQUALS || tok == K_DEFAULT || tok == K_INDEX)
+        if (tok == K_COLLATE || tok == K_NOT || tok == '=' || tok == COLON_EQUALS || tok == K_DEFAULT || tok == K_INDEX)
             break;
         /* Possible followers for datatype in a cursor_arg list */
         if ((tok == ',' || tok == ')') && parenlevel == 0)
@@ -12523,36 +12643,6 @@ static int get_nest_tableof_layer(PLpgSQL_var *var, const char *typname, int err
     return depth + 1;
 }
 
-static void getPkgFuncTypeName(char* typname, char** functypname, char** pkgtypname)
-{
-    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
-        *functypname = CastPackageTypeName(typname,
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, false);
-        if (strlen(*functypname) >= NAMEDATALEN) {
-            const char* message = "record name too long";
-            InsertErrorMessage(message, plpgsql_yylloc, true);
-            ereport(ERROR,
-                (errcode(ERRCODE_NAME_TOO_LONG),
-                    errmsg("type name too long"),
-                    errdetail("record name %s with func oid %d should be less the %d letters.",
-                        typname, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, NAMEDATALEN)));
-        }
-    } 
-    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
-        *pkgtypname = CastPackageTypeName(typname,
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, true);
-        if (strlen(*pkgtypname) >= NAMEDATALEN) {
-            const char* message = "record name too long";
-            InsertErrorMessage(message, plpgsql_yylloc, true);
-            ereport(ERROR,
-                (errcode(ERRCODE_NAME_TOO_LONG),
-                    errmsg("type name too long"),
-                    errdetail("record name %s with package name %s should be less the %d letters.",
-                        typname, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature, NAMEDATALEN)));
-        }
-    }
-}
-
 /* 
  * look up composite type from namespace
  */
@@ -13050,13 +13140,13 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
 
     referenced = TypeCreate(InvalidOid, /* force the type's OID to this */
         casttypename,               /* Array type name */
-        pkgNamespaceOid,               /* Same namespace as parent */
+        pkgNamespaceOid,            /* Same namespace as parent */
         InvalidOid,                 /* Not composite, no relationOid */
         0,                          /* relkind, also N/A here */
         ownerId,                    /* owner's ID */
         -1,                         /* Internal size (varlena) */
-        typtyp,               /* Not composite - typelem is */
-        arraytype,          /* type-category (array or table of) */
+        typtyp,                     /* Not composite - typelem is */
+        arraytype,                  /* type-category (array or table of) */
         false,                      /* array types are never preferred */
         DEFAULT_TYPDELIM,           /* default array delimiter */
         F_ARRAY_IN,                 /* array input proc */
@@ -13066,7 +13156,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         InvalidOid,                 /* typmodin procedure - none */
         InvalidOid,                 /* typmodout procedure - none */
         F_ARRAY_TYPANALYZE,         /* array analyze procedure */
-        elemtypoid,               /* array element type - the rowtype */
+        elemtypoid,                 /* array element type - the rowtype */
         false,                       /* yes, this is an array type */
         InvalidOid,                 /* this has no array type */
         InvalidOid,                 /* domain base type - irrelevant */
@@ -13208,6 +13298,293 @@ static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr)
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype)
 {
     return makeTypeNameFromOid(datatype->typoid, datatype->atttypmod, datatype->dependExtend);
+}
+
+/*
+ * build SUBTYPE in ANONYMOUS_BLOCK
+ * typname : name of subtype to be create
+ * newp : base type info
+ * RangeList : unsuport in opengauss util now, use to supprt type like pls_interge
+ * isNotNull : is not null
+ */
+static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull)
+{
+    /* some variable */
+    Oid NamespaceOid = InvalidOid;
+    Oid ownerId = InvalidOid;
+    Oid newtypeoid = InvalidOid;
+    HeapTuple baseTypeTup;
+    Form_pg_type baseType;
+    ObjectAddress referenced;
+    PLpgSQL_type* res = NULL;
+    SubTypeRange* typerange = NULL;
+
+    /* check is typname too long */
+    if (strlen(typname) >= NAMEDATALEN) {
+        ereport(errstate,
+            (errcode(ERRCODE_NAME_TOO_LONG),
+                errmsg("type name too long")));
+        u_sess->plsql_cxt.have_error = true;
+    }
+
+    if (!OidIsValid(NamespaceOid)) {
+        NamespaceOid = getCurrentNamespace();
+    }
+
+    /* check for duplicate name */
+    Oid oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(NamespaceOid));
+    if (OidIsValid(oldtypeoid)) {
+        ereport(errstate,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_DUPLICATE_OBJECT),
+                errmsg("duplicate type name"),
+                errdetail("type name of \"%s\" duplicated with an existed type when build subtype.", typname),
+                errcause("duplicate type name"),
+                erraction("modify subtype name")));
+        u_sess->plsql_cxt.have_error = true;
+    }
+
+    ownerId = GetUserIdFromNspId(NamespaceOid);
+    if (!OidIsValid(ownerId)) {
+        ownerId = GetUserId();
+    }
+
+    baseTypeTup = SearchSysCache(TYPEOID, ObjectIdGetDatum(newp->typoid), 0, 0, 0 );
+    baseType = (Form_pg_type)GETSTRUCT(baseTypeTup);
+    /* refer DOMAIN */
+    referenced = TypeCreate(InvalidOid, /* force the type's OID to this */
+        typname,                        /* Array type name */
+        NamespaceOid,                   /* Same namespace as parent */
+        InvalidOid,                     /* Not composite, no relationOid */
+        0,                              /* relkind, also N/A here */
+        ownerId,                        /* owner's ID */
+        baseType->typlen,               /* Internal size (varlena) */
+        TYPTYPE_DOMAIN,                 /* Not composite - typelem is */
+        baseType->typcategory,          /* type-category (array or table of) */
+        false,                          /* array types are never preferred */
+        baseType->typdelim,             /* default array delimiter */
+        F_SUBTYPE_IN,                   /* input proc */
+        baseType->typoutput,            /* output proc */
+        F_SUBTYPE_RECV,                 /* recv (bin) proc */
+        baseType->typsend,              /* send (bin) proc */
+        baseType->typmodin,             /* typmodin procedure - none */
+        baseType->typmodout,            /* typmodout procedure - none */
+        baseType->typanalyze,           /* array analyze procedure */
+        baseType->typelem,              /* array element type - the rowtype */
+        false,                          /* yes, this is an array type */
+        baseType->typarray,             /* this has no array type */
+        newp->typoid,                   /* domain base type - irrelevant */
+        NULL,                           /* default value - none */
+        NULL,                           /* default binary representation */
+        baseType->typbyval,             /* passed by reference */
+        baseType->typalign,             /* alignment - must be the largest! */
+        baseType->typstorage,           /* fully TOASTable */
+        newp->atttypmod,                /* typmod */
+        baseType->typndims,             /* array dimensions for typBaseType */
+        isNotNull,                      /* Type NOT NULL */
+        baseType->typcollation);
+
+    ReleaseSysCache(baseTypeTup);
+
+    CommandCounterIncrement();
+
+    if (RangeList != NIL) {
+        ereport(errstate,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("not support range in subtype")));
+    }
+
+    /* get the oid of type we built just now, for saving subtype into func. we can delete type when we delete func */
+    newtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(NamespaceOid));
+    res = plpgsql_build_datatype(newtypeoid, -1, InvalidOid);
+    res->dtype = PLPGSQL_DTYPE_SUBTYPE;
+    res->ttype = PLPGSQL_TTYPE_SCALAR;
+    res->ispkg = false;
+    res->typoid = newtypeoid;
+    int varno = plpgsql_adddatum((PLpgSQL_datum*)res);
+    plpgsql_ns_additem(PLPGSQL_NSTYPE_SUBTYPE, varno, typname);
+
+    return newtypeoid;
+}
+
+/*
+ * Suild SUBTYPE in FUNKTION or PACKAGE
+ * What's difference with anonym block:
+ * 1. Subtype has different name, it need concat oid in pkg/func 
+ * 2. Subtype isn't needed to delete immediately, constraints will 
+ *    be released when obj released
+ * typname : name of subtype to be create
+ * newp : base type info
+ * RangeList : unsuport in opengauss util now, use to supprt type like pls_interge
+ * isNotNull : is not null
+ */
+static Oid 
+plpgsql_build_function_package_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull)
+{
+    /* some variable */
+    Oid NamespaceOid = InvalidOid;
+    Oid ownerId = InvalidOid;
+    HeapTuple typeTup;
+    Form_pg_type baseType;
+    ObjectAddress myself;
+    ObjectAddress referenced;
+    char* functypname = NULL;
+    char* pkgtypname = NULL;
+    char* schamaname = NULL;
+    Oid pkgoid = InvalidOid;
+    SubTypeRange* typerange = NULL;
+    char* casttypename = NULL;
+    bool sameType = false;
+
+    /* it should be a function if curr_package is null */
+    PLpgSQL_package* curr_package = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+    PLpgSQL_function* curr_function = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
+
+    AssertEreport(curr_package || curr_function, MOD_PLSQL, "Error defining subtype range");
+
+    if (RangeList != NIL) {
+        ereport(errstate,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("not support range in subtype")));
+    }
+
+
+    /* exchange name into oid_typname, check length in this function */
+    getPkgFuncTypeName(typname, &functypname, &pkgtypname);
+
+    if (curr_package) {
+        NamespaceOid = curr_package->namespaceOid;
+    }
+    if (!OidIsValid(NamespaceOid)) {
+        NamespaceOid = getCurrentNamespace();
+    }
+
+    Oid oldtypeoid = getOldTypeOidByTypeName(&casttypename, &schamaname, functypname, pkgtypname, &pkgoid);
+
+    HeapTuple old_typtuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oldtypeoid));
+    /* check can old record we use */
+    if (HeapTupleIsValid(old_typtuple)) {
+        Form_pg_type typform = (Form_pg_type)GETSTRUCT(old_typtuple);
+        if (typform->typbasetype != newp->typoid){
+            ereport(errstate,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_DUPLICATE_OBJECT),
+                errmsg("duplicate type name"),
+                errdetail("type name of \"%s\" duplicated with an existed type when build subtype.", typname),
+                errcause("duplicate type name"),
+                erraction("modify subtype name")));
+        } else {
+            sameType = true;
+        }
+        ReleaseSysCache(old_typtuple);
+    }
+
+    if (OidIsValid(oldtypeoid) && sameType) {
+        /* skip same check for we have build it, get the constraint and return */
+        if (!IsPackageDependType(oldtypeoid, pkgoid)) {
+            /* create dependency if there wasn't any one */
+            referenced.classId = TypeRelationId;
+            referenced.objectId = oldtypeoid;
+            referenced.objectSubId = 0;
+            /* create dependency relation with pkg/func */
+            if (curr_package) {
+                myself.classId = PackageRelationId;
+                myself.objectId = curr_package->pkg_oid;
+                myself.objectSubId = 0;
+            } else {
+                myself.classId = ProcedureRelationId;
+                myself.objectId = curr_function->fn_oid;
+                myself.objectSubId = 0;
+            }
+            recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
+        }
+        CommandCounterIncrement();
+
+        /* save to current ns*/
+        PLpgSQL_type* res = plpgsql_build_datatype(oldtypeoid, -1, InvalidOid);
+        res->dtype = PLPGSQL_DTYPE_SUBTYPE;
+        res->ttype = PLPGSQL_TTYPE_SCALAR;
+        res->ispkg = false;
+        res->typoid = oldtypeoid;
+        int varno = plpgsql_adddatum((PLpgSQL_datum*)res);
+        plpgsql_ns_additem(PLPGSQL_NSTYPE_SUBTYPE, varno, typname);
+
+        pfree_ext(functypname);
+        pfree_ext(pkgtypname);
+
+        return oldtypeoid;
+    }
+    ownerId = GetUserIdFromNspId(NamespaceOid);
+    if (!OidIsValid(ownerId)) {
+        ownerId = GetUserId();
+    }
+
+    typeTup = SearchSysCache(TYPEOID, ObjectIdGetDatum(newp->typoid), 0, 0, 0);
+    baseType = (Form_pg_type)GETSTRUCT(typeTup);
+
+    /* refer DOMAIN */
+    referenced = TypeCreate(InvalidOid, /* force the type's OID to this */
+        casttypename,                        /* Array type name */
+        NamespaceOid,                   /* Same namespace as parent */
+        InvalidOid,                     /* Not composite, no relationOid */
+        0,                              /* relkind, also N/A here */
+        ownerId,                        /* owner's ID */
+        baseType->typlen,               /* Internal size (varlena) */
+        TYPTYPE_DOMAIN,                 /* Not composite - typelem is */
+        baseType->typcategory,          /* type-category (array or table of) */
+        false,                          /* array types are never preferred */
+        baseType->typdelim,             /* default array delimiter */
+        F_SUBTYPE_IN,                   /* input proc */
+        baseType->typoutput,            /* output proc */
+        F_SUBTYPE_RECV,                 /* recv (bin) proc */
+        baseType->typsend,              /* send (bin) proc */
+        baseType->typmodin,             /* typmodin procedure - none */
+        baseType->typmodout,            /* typmodout procedure - none */
+        baseType->typanalyze,           /* array analyze procedure */
+        baseType->typelem,              /* no array element type */
+        false,                          /* yes, this is an array type */
+        baseType->typarray,                 /* no array for subtype */
+        newp->typoid,                   /* domain base type - irrelevant */
+        NULL,                           /* default value - none */
+        NULL,                           /* default binary representation */
+        baseType->typbyval,             /* passed by reference */
+        baseType->typalign,             /* alignment - must be the largest! */
+        baseType->typstorage,           /* fully TOASTable */
+        newp->atttypmod,                /* typmod */
+        baseType->typndims,             /* array dimensions for typBaseType */
+        isNotNull,                      /* Type NOT NULL */
+        baseType->typcollation);        /* type's collation */
+
+    ReleaseSysCache(typeTup);
+    CommandCounterIncrement();
+
+    /* build dependcy relation with FUNC/PKG */
+    if (curr_package) {
+        myself.classId = PackageRelationId;
+        myself.objectId = curr_package->pkg_oid;
+        myself.objectSubId = 0;
+    } else {
+        myself.classId = ProcedureRelationId;
+        myself.objectId = curr_function->fn_oid;
+        myself.objectSubId = 0;
+    }
+    recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
+
+    CommandCounterIncrement();
+
+    /* save to datum in current function */
+    Oid newtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename), ObjectIdGetDatum(NamespaceOid));
+    PLpgSQL_type* res = plpgsql_build_datatype(newtypeoid, -1, InvalidOid);
+    res->dtype = PLPGSQL_DTYPE_SUBTYPE;
+    res->ttype = PLPGSQL_TTYPE_SCALAR;
+    res->ispkg = false;
+    res->typoid  = newtypeoid;
+    int varno = plpgsql_adddatum((PLpgSQL_datum*)res);
+    plpgsql_ns_additem(PLPGSQL_NSTYPE_SUBTYPE, varno, typname);
+
+    pfree_ext(functypname);
+    pfree_ext(pkgtypname);
+    return newtypeoid;
 }
 
 /*
