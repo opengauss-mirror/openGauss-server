@@ -3445,7 +3445,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
     } else if (IsA(jtnode, JoinExpr)) {
         JoinExpr* j = (JoinExpr*)jtnode;
 
-        if (j->jointype == JOIN_FULL && !equalAndRedistributable(j->quals)) {
+        if (j->jointype == JOIN_FULL && !equalAndRedistributable(j->quals) && root->parse->commandType != CMD_MERGE) {
             Query* partial_query = makeNode(Query);
             Query* setop1 = (Query*)copyObject(root->parse);
             Query* setop2 = (Query*)copyObject(root->parse);

@@ -76,3 +76,19 @@ select * from merge_subquery_test1;
 
 drop table merge_subquery_test1;
 drop table merge_subquery_test2;
+
+create table merge_subquery_fulljoin_1(id int, val int);
+create table merge_subquery_fulljoin_2(id int, val int);
+insert into merge_subquery_fulljoin_1 values(1, 1);
+insert into merge_subquery_fulljoin_2 values(1, 1);
+
+merge into merge_subquery_fulljoin_1 mg1
+using (select 'test' from
+(select 'aaa' from merge_subquery_fulljoin_2) mg21
+full join (select 'bbb' from merge_subquery_fulljoin_2) mg22 on 1=1 ) mg2 on(1=1)
+when matched then
+    update set id = 10;
+select * from merge_subquery_fulljoin_1;
+drop table merge_subquery_fulljoin_1;
+drop table merge_subquery_fulljoin_2;
+
