@@ -278,7 +278,7 @@ test: single_node_bitmapops single_node_combocid
 #single_node_window
 #test: single_node_xmlmap 
 #test: single_node_functional_deps single_node_advisory_lock single_node_json single_node_equivclass
-test: xml
+test: xml xmltype
 test: subtype
 
 # ----------
