@@ -23,7 +23,7 @@ function test_1() {
 	exec_sql $case_db $pub_node1_port "CREATE PUBLICATION sw_tap_pub for all tables"
 	exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION sw_tap_sub CONNECTION '$publisher_connstr' PUBLICATION sw_tap_pub"
 
-	conninfo = "$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription WHERE subname = 'sw_tap_sub'")"
+	conninfo="$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription WHERE subname = 'sw_tap_sub'")"
 
 	# Wait for initial table sync to finish
 	wait_for_subscription_sync $case_db $sub_node1_port
@@ -64,7 +64,7 @@ function test_1() {
 
 	# default sync conntion info
 	if [ "$conninfo" = "$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription where subname = 'sw_tap_sub'")" ]; then
-		echo "publication node switchover, subsciption node do sync connection info failed"
+		echo "$failed_keyword publication node switchover, subsciption node do sync connection info failed"
 		exit 1
 	else
 		echo "publication node do switchover, subsciption node do sync connection info success"
@@ -72,7 +72,7 @@ function test_1() {
 
 	# alter syncconninfo to false, disable sync conntion info after publication switchover
 	exec_sql $case_db $sub_node1_port "alter subscription sw_tap_sub set (syncconninfo = false)"
-	conninfo = "$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription WHERE subname = 'sw_tap_sub'")"
+	conninfo="$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription WHERE subname = 'sw_tap_sub'")"
 
 	echo "switchover pub_node1 to primary"
 	switchover_to_primary "pub_datanode1"
@@ -92,7 +92,7 @@ function test_1() {
 	if [ "$conninfo" = "$(exec_sql $case_db $sub_node1_port "SELECT subconninfo FROM pg_subscription where subname = 'sw_tap_sub'")" ]; then
 		echo "publication node switchover, syncconninfo is false, subsciption node don't sync connection info , success."
 	else
-		echo "publication node do switchover, syncconninfo is false, subsciption node still do sync connection info, false."
+		echo "$failed_keyword publication node do switchover, syncconninfo is false, subsciption node still do sync connection info, false."
 		exit 1
 	fi
 }
