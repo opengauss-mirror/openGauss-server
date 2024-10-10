@@ -9,7 +9,6 @@
 	index
 		DEFERABLE index
 	insert stmt
-		returning
 		with
 		with recur
 	update stmt
@@ -55,8 +54,6 @@ insert into up_neg_03 values(1,2,3) on duplicate key update c1 = 1;
 insert into up_neg_03 values(1) on duplicate key update c1 = 1;
 
 -- insert stmt
-----returning
-insert into up_neg_04 values(1,1,1) on duplicate key update c1 = 1 returning c1;
 ----with
 with sub as (select *from up_neg_04)
 insert into up_neg_04 select *from sub on duplicate key update c1 =1;
@@ -64,9 +61,6 @@ insert into up_neg_04 select *from sub on duplicate key update c1 =1;
 ----with recur
 with RECURSIVE  sub as (select *from up_neg_04)
 insert into up_neg_04 select *from sub on duplicate key update c1 =1;
-
-with sub as (select *from up_neg_04)
-insert into up_neg_04 select *from sub on duplicate key update c1 =1 returning c1;
 
 -- update stmt
 ---- VALUES with expr

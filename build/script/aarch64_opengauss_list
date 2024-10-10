@@ -99,6 +99,8 @@
 ./share/postgresql/extension/age.control
 ./share/postgresql/extension/datavec--1.0.sql
 ./share/postgresql/extension/datavec.control
+./share/postgresql/extension/chparser--1.0.sql
+./share/postgresql/extension/chparser.control
 ./share/postgresql/extension/assessment--1.0.sql
 ./share/postgresql/extension/assessment.control
 ./share/postgresql/extension/file_fdw--1.0.sql
@@ -737,6 +739,7 @@
 ./share/postgresql/tsearch_data/swedish.stop
 ./share/postgresql/tsearch_data/ispell_sample.dict
 ./share/postgresql/tsearch_data/italian.stop
+./share/postgresql/tsearch_data/dict.utf8.xdb
 ./share/postgresql/information_schema.sql
 ./share/postgresql/timezonesets/Antarctica.txt
 ./share/postgresql/timezonesets/Australia.txt
@@ -816,6 +819,7 @@
 ./lib/postgresql/dolphin.so
 ./lib/postgresql/age.so
 ./lib/postgresql/datavec.so
+./lib/postgresql/chparser.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so
