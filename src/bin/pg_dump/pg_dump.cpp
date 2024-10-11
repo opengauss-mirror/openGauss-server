@@ -11334,7 +11334,7 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
             break;
         case DO_TRIGGER: {
             /* -t condition will not dump trigger without trigger function. */
-            if (gTableCount == 0)
+            if (gTableCount == 0 || outputClean)
                 dumpTrigger(fout, (TriggerInfo*)dobj);
             break;
         }
