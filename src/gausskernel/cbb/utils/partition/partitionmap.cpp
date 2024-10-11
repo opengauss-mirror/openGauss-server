@@ -3171,6 +3171,7 @@ Const **transformConstIntoPartkeyType(FormData_pg_attribute *attrs, int2vector *
 
     int2 partKeyPos = 0;
     Const *newBoundary = NULL;
+    MemoryContext oldcxt = CurrentMemoryContext;
     for (int i = 0; i < len; i++) {
         partKeyPos = partitionKey->values[i];
 
@@ -3180,15 +3181,33 @@ Const **transformConstIntoPartkeyType(FormData_pg_attribute *attrs, int2vector *
             continue;
         }
 
-        newBoundary = (Const *)GetTargetValue(&attrs[partKeyPos - 1], boundary[i], false);
-        if (!PointerIsValid(newBoundary)) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
-                errmsg("partition key value must be const or const-evaluable expression")));
+        bool transformRes = true;
+        PG_TRY();
+        {
+            newBoundary = (Const *)GetTargetValue(&attrs[partKeyPos - 1], boundary[i], false);
         }
-        if (!OidIsValid(newBoundary->constcollid) && OidIsValid(attrs[partKeyPos - 1].attcollation)) {
-            newBoundary->constcollid = attrs[partKeyPos - 1].attcollation;
+        PG_CATCH();
+        {
+            (void)MemoryContextSwitchTo(oldcxt);
+            int ecode = geterrcode();
+            if (ecode == ERRCODE_STRING_DATA_RIGHT_TRUNCATION) {
+                transformRes = false;
+                FlushErrorState();
+            } else {
+                PG_RE_THROW();
+            }
         }
-        boundary[i] = newBoundary;
+        PG_END_TRY();
+        if (transformRes) {
+            if (!PointerIsValid(newBoundary)) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg("partition key value must be const or const-evaluable expression")));
+            }
+            if (!OidIsValid(newBoundary->constcollid) && OidIsValid(attrs[partKeyPos - 1].attcollation)) {
+                newBoundary->constcollid = attrs[partKeyPos - 1].attcollation;
+            }
+            boundary[i] = newBoundary;
+        }
     }
 
     return boundary;
