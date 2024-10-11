@@ -11800,6 +11800,7 @@ unreserved_keyword:
 			| ENDS
 			| ENUM_P
 			| EOL
+			| ERROR_P
 			| ERRORS
 			| ESCAPE
 			| ESCAPED
