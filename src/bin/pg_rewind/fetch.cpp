@@ -396,8 +396,6 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
 
         switch (PQresultStatus(res)) {
             case PGRES_SINGLE_TUPLE:
-                PQclear(res);
-                res = nullptr;
                 break;
 
             case PGRES_TUPLES_OK:
