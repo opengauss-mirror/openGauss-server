@@ -7219,7 +7219,7 @@ static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSour
     uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
@@ -7228,8 +7228,8 @@ static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSour
     }
 
     if (ss_fi_set_entries(DDES_FI_TYPE_PACKET_LOSS, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_packet_loss_entries fail")));
-        return false;
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_packet_loss_entries fail")));
+        return true;
     }
     return true;
 }
@@ -7239,7 +7239,7 @@ static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSour
     uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
@@ -7248,7 +7248,7 @@ static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSour
     }
 
     if (ss_fi_set_entries(DDES_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
         return false;
     }
     return true;
@@ -7263,7 +7263,7 @@ static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSour
         return true;
     }
 
-    if (g_instance.shared_fi_ctx == NULL) {
+    if (!g_instance.fi_ctx_inited.exchange(true) && g_instance.shared_fi_ctx == NULL) {
         int32 shared_fi_ctx_size = ss_fi_get_context_size();
         if (shared_fi_ctx_size <= 0) {
             ereport(FATAL, (errmsg("failed to get fi context size")));
@@ -7276,14 +7276,18 @@ static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSour
         }
 
         ss_fi_set_and_init_context(g_instance.shared_fi_ctx);
+        g_instance.fi_ctx_init_finished = true;
     }
 
+    if (!g_instance.fi_ctx_init_finished) {
+        return true;
+    }
     if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
         return false;
     }
 
     if (ss_fi_set_entries(DDES_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_net_latency_entries fail")));
         return false;
     }
     return true;
@@ -7294,7 +7298,7 @@ static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSo
     uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
@@ -7303,7 +7307,7 @@ static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSo
     }
 
     if (ss_fi_set_entries(DDES_FI_TYPE_PROCESS_FAULT, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_process_fault_entries fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_process_fault_entries fail")));
         return false;
     }
     return true;
@@ -7314,7 +7318,7 @@ static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSou
     uint32 entry_list[DDES_FI_ENTRY_COUNT_PER_TYPE] = {0};
     uint32 count = 0;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
@@ -7323,7 +7327,7 @@ static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSou
     }
 
     if (ss_fi_set_entries(DDES_FI_TYPE_CUSTOM_FAULT, entry_list, count) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_custom_fault_entries fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_custom_fault_entries fail")));
         return false;
     }
     return true;
@@ -7334,12 +7338,12 @@ static bool check_ss_fi_packet_loss_prob(int* newval, void** extra, GucSource so
     int32 int_val;
     int_val = *newval;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
     if (ss_fi_set_entry_value(DDES_FI_TYPE_PACKET_LOSS, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_packet_loss_prob fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_packet_loss_prob fail")));
         return false;
     }
 
@@ -7351,12 +7355,12 @@ static bool check_ss_fi_net_latency_ms(int* newval, void** extra, GucSource sour
     int32 int_val;
     int_val = *newval;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
     if (ss_fi_set_entry_value(DDES_FI_TYPE_NET_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_net_latency_ms fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_net_latency_ms fail")));
         return false;
     }
 
@@ -7368,12 +7372,12 @@ static bool check_ss_fi_cpu_latency_ms(int* newval, void** extra, GucSource sour
     int32 int_val;
     int_val = *newval;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
     if (ss_fi_set_entry_value(DDES_FI_TYPE_CPU_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_cpu_latency_ms fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_cpu_latency_ms fail")));
         return false;
     }
 
@@ -7385,12 +7389,12 @@ static bool check_ss_fi_process_fault_prob(int* newval, void** extra, GucSource 
     int32 int_val;
     int_val = *newval;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
     if (ss_fi_set_entry_value(DDES_FI_TYPE_PROCESS_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_process_fault_prob fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_process_fault_prob fail")));
         return false;
     }
 
@@ -7402,12 +7406,12 @@ static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource 
     int32 int_val;
     int_val = *newval;
 
-    if (!g_ss_dms_func.inited) {
+    if (!g_ss_dms_func.inited || !g_instance.fi_ctx_init_finished) {
         return true;
     }
 
     if (ss_fi_set_entry_value(DDES_FI_TYPE_CUSTOM_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("[DMS]set parameter ss_fi_custom_fault_param fail")));
+        ereport(WARNING, (errmsg("[DMS]set parameter ss_fi_custom_fault_param fail")));
         return false;
     }
 
