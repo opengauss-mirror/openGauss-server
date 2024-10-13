@@ -146,6 +146,10 @@
 ./share/postgresql/extension/gms_xmlgen.control
 ./share/postgresql/extension/gms_i18n--1.0.sql
 ./share/postgresql/extension/gms_i18n.control
+./share/postgresql/extension/gms_raw--1.0.sql
+./share/postgresql/extension/gms_raw.control
+./share/postgresql/extension/gms_match--1.0.sql
+./share/postgresql/extension/gms_match.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -857,6 +861,8 @@
 ./lib/postgresql/gms_sql.so
 ./lib/postgresql/gms_xmlgen.so
 ./lib/postgresql/gms_i18n.so
+./lib/postgresql/gms_raw.so
+./lib/postgresql/gms_match.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so

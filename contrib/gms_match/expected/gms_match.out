@@ -1,0 +1,241 @@
+create extension gms_match;
+create extension gms_output;
+select gms_match.edit_distance(NULL, NULL);
+ edit_distance 
+---------------
+            -1
+(1 row)
+
+select gms_match.edit_distance(NULL, 'ab');
+ edit_distance 
+---------------
+            -1
+(1 row)
+
+select gms_match.edit_distance(NULL, 'ff');
+ edit_distance 
+---------------
+            -1
+(1 row)
+
+select gms_match.edit_distance('', '');
+ edit_distance 
+---------------
+            -1
+(1 row)
+
+select gms_match.edit_distance('', 'ab');
+ edit_distance 
+---------------
+            -1
+(1 row)
+
+select gms_match.edit_distance(' ', 'ab');
+ edit_distance 
+---------------
+             2
+(1 row)
+
+select gms_match.edit_distance('ab', 'ab');
+ edit_distance 
+---------------
+             0
+(1 row)
+
+select gms_match.edit_distance('00', 'ff');
+ edit_distance 
+---------------
+             2
+(1 row)
+
+select gms_match.edit_distance('00', 'fff');
+ edit_distance 
+---------------
+             3
+(1 row)
+
+select gms_match.edit_distance('shackleford', 'shackelford');
+ edit_distance 
+---------------
+             2
+(1 row)
+
+select gms_match.edit_distance('ssttten', 'sitting');
+ edit_distance 
+---------------
+             4
+(1 row)
+
+select gms_match.edit_distance('ssitten', 'sitting');
+ edit_distance 
+---------------
+             3
+(1 row)
+
+select gms_match.edit_distance('kitten', 'sitting');
+ edit_distance 
+---------------
+             3
+(1 row)
+
+select gms_match.edit_distance('saturdy', 'monday');
+ edit_distance 
+---------------
+             6
+(1 row)
+
+select gms_match.edit_distance('abdfdjdfjfdkkgrmgjgjfgjhffd', 'kfkgndmdgns;ccvdermdfmdfefdfngtnt');
+ edit_distance 
+---------------
+            27
+(1 row)
+
+select gms_match.edit_distance('我爱你中国', '中国是我的祖国lalalala');
+ edit_distance 
+---------------
+            24
+(1 row)
+
+select gms_match.edit_distance('&^^(($$$))aaa', '中国是我的祖国lalalala');
+ edit_distance 
+---------------
+            26
+(1 row)
+
+select gms_match.edit_distance_similarity(NULL, NULL);
+ edit_distance_similarity 
+--------------------------
+                      100
+(1 row)
+
+select gms_match.edit_distance_similarity(NULL, 'ab');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity(NULL, 'ff');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity('', '');
+ edit_distance_similarity 
+--------------------------
+                      100
+(1 row)
+
+select gms_match.edit_distance_similarity('', 'ab');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity(' ', 'ab');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity('ab', 'ab');
+ edit_distance_similarity 
+--------------------------
+                      100
+(1 row)
+
+select gms_match.edit_distance_similarity('00', 'ff');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity('00', 'fff');
+ edit_distance_similarity 
+--------------------------
+                        0
+(1 row)
+
+select gms_match.edit_distance_similarity('shackleford', 'shackelford');
+ edit_distance_similarity 
+--------------------------
+                       82
+(1 row)
+
+select gms_match.edit_distance_similarity('ssttten', 'sitting');
+ edit_distance_similarity 
+--------------------------
+                       43
+(1 row)
+
+select gms_match.edit_distance_similarity('ssitten', 'sitting');
+ edit_distance_similarity 
+--------------------------
+                       58
+(1 row)
+
+select gms_match.edit_distance_similarity('kitten', 'sitting');
+ edit_distance_similarity 
+--------------------------
+                       58
+(1 row)
+
+select gms_match.edit_distance_similarity('saturdy', 'monday');
+ edit_distance_similarity 
+--------------------------
+                       15
+(1 row)
+
+select gms_match.edit_distance_similarity('abdfdjdfjfdkkgrmgjgjfgjhffd', 'kfkgndmdgns;ccvdermdfmdfefdfngtnt');
+ edit_distance_similarity 
+--------------------------
+                       19
+(1 row)
+
+select gms_match.edit_distance_similarity('我爱你中国', '中国是我的祖国lalalala');
+ edit_distance_similarity 
+--------------------------
+                       18
+(1 row)
+
+select gms_match.edit_distance_similarity('&^^(($$$))aaa', '中国是我的祖国lalalala');
+ edit_distance_similarity 
+--------------------------
+                       11
+(1 row)
+
+select gms_output.enable(200);
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+DECLARE
+   distance NUMBER;
+BEGIN
+   distance := GMS_MATCH.EDIT_DISTANCE('kitten', 'sitting');
+   GMS_OUTPUT.PUT_LINE('Edit distance between "kitten" and "sitting": ' || distance);
+end;
+/
+Edit distance between "kitten" and "sitting": 3
+DECLARE
+   similarity NUMBER;
+BEGIN
+   similarity := GMS_MATCH.EDIT_DISTANCE_SIMILARITY('kitten', 'sitting');
+   GMS_OUTPUT.PUT_LINE('Edit distance similarity between "kitten" and "sitting": ' || similarity);
+end;
+/
+Edit distance similarity between "kitten" and "sitting": 58
+drop schema gms_match;
+ERROR:  cannot drop schema gms_match because extension gms_match requires it
+HINT:  You can drop extension gms_match instead.
+drop schema gms_match cascade;
+ERROR:  cannot drop schema gms_match because extension gms_match requires it
+HINT:  You can drop extension gms_match instead.
+drop extension gms_match;
+drop extension gms_output;
+-- test create again
+create extension gms_match;
+drop extension gms_match;
