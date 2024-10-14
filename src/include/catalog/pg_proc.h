@@ -142,7 +142,6 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define Anum_pg_proc_allargtypes 38
 #define Anum_pg_proc_allargtypesext 39
 
-
 /* proc_oid is only for builitin
  * func view shouldn't be included in Natts_pg_proc
  */
@@ -438,7 +437,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define UNDEFINEDRECV 5710
 
 /*
- * Symbolic values for prokind column
+ * Symbolic values for prokind column, use highest bit to identify whether this procedure belongs to an object type.
  */
 #define PROKIND_FUNCTION    'f'
 #define PROKIND_AGGREGATE   'a'

@@ -175,8 +175,8 @@ extern bool TSConfigIsVisible(Oid cfgid);
 extern void DeconstructQualifiedName(const List *names,
 						 char **nspname_p,
 						 char **objname_p,
-
-						 char **pkgname_p = NULL);
+						 char **pkgname_p = NULL,
+						 char ** typname_p = NULL);
 extern Oid	LookupNamespaceNoError(const char *nspname);
 extern Oid	LookupExplicitNamespace(const char *nspname, bool missing_ok = false);
 extern Oid	get_namespace_oid(const char *nspname, bool missing_ok);

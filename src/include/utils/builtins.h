@@ -1862,6 +1862,7 @@ extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
 
 /* launcher.cpp */
 extern Datum pg_stat_get_subscription(PG_FUNCTION_ARGS);
+extern Datum object_table_value(FunctionCallInfo fcinfo);
 
 /* sqlpatch.cpp */
 extern Datum create_sql_patch_by_id_hint(PG_FUNCTION_ARGS);

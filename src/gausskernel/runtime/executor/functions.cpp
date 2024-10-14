@@ -1728,7 +1728,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
         /* Set up junk filter if needed */
         if (junk_filter != NULL)
             *junk_filter = ExecInitJunkFilter(tlist, false, NULL, TableAmHeap);
-    } else if (fn_type == TYPTYPE_COMPOSITE || ret_type == RECORDOID) {
+    } else if (fn_type == TYPTYPE_COMPOSITE || fn_type == TYPTYPE_ABSTRACT_OBJECT || ret_type == RECORDOID) {
         /* Returns a rowtype */
         TupleDesc tup_desc;
         int tup_natts;          /* physical number of columns in tuple */

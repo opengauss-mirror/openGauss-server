@@ -57,12 +57,15 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_type.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_am.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type_fn.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "commands/typecmds.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "distribute_core.h"
 #endif
@@ -427,6 +430,13 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <node>    CreateModelStmt	hyperparameter_name_value DropModelStmt
 %type <list>	features_clause hyperparameter_name_value_list target_clause with_hyperparameters_clause
 /* </DB4AI> */
+
+/* oracle object type */
+%type <list>	type_body_subprogram Method_specList object_func_args_with_defaults object_proc_args method_decl_in_type_list
+%type <node>	element_spec element_decl_in_type subprogram_decl_in_type constructor_decl_in_type map_order_decl_in_type
+%type <boolean> final_clause inheritance_clause
+
+
 
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
@@ -1099,6 +1109,14 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED
 /* kluge to keep xml_whitespace_option from causing shift/reduce conflicts */
 %right		PRESERVE STRIP_P
+%token <keyword> CONSTRUCTOR FINAL MAP MEMBER RESULT SELF STATIC_P UNDER
+%token		SELF_INOUT
+			STATIC_FUNCTION
+			MEMBER_FUNCTION
+			STATIC_PROCEDURE
+			MEMBER_PROCEDURE
+			CONSTRUCTOR_FUNCTION
+			MAP_MEMBER
 %%
 
 /*
@@ -12247,8 +12265,8 @@ CreateTrigStmt:
 					n->whenClause = $11;
 					n->trgordername = $12->trigger_name;
 					n->is_follows = $12->is_follows;
-					FunctionSources *funSource = (FunctionSources *)$14;
-					n->funcSource = funSource;
+					FunctionSources *funcSource = (FunctionSources *)$14;
+					n->funcSource = funcSource;
 					n->isconstraint  = FALSE;
 					n->deferrable	 = FALSE;
 					n->initdeferred  = FALSE;
@@ -12291,8 +12309,8 @@ CreateTrigStmt:
 					n->whenClause = $14;
 					n->trgordername = $15->trigger_name;
 					n->is_follows = $15->is_follows;
-					FunctionSources *funSource = (FunctionSources *)$17;
-					n->funcSource = funSource;
+					FunctionSources *funcSource = (FunctionSources *)$17;
+					n->funcSource = funcSource;
 					n->isconstraint  = FALSE;
 					n->deferrable	 = FALSE;
 					n->initdeferred  = FALSE;
@@ -12770,6 +12788,11 @@ DefineStmt:
 					n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
 					n->replace = false;
 					n->coldeflist = $6;
+					n->final = true;
+					n->typekind = TYPE_COMPOSITE_DEFAULT;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = NULL;
 					$$ = (Node *)n;
 				}
 			| CREATE OR REPLACE TYPE_P any_name as_is '(' OptTableFuncElementList ')'
@@ -12780,6 +12803,297 @@ DefineStmt:
 					n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
 					n->replace = true;
 					n->coldeflist = $8;
+					n->final = true;
+					n->typekind = TYPE_COMPOSITE_DEFAULT;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = NULL;
+					$$ = (Node *)n;
+				}
+			| CREATE TYPE_P any_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+					if ($7 == NIL) {
+						ereport(errstate, 
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("no attributes found in object type \"%s\"",strVal(linitial($3)))));						
+					}
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typespec;
+					initStringInfo(&typespec);
+					/* Cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+					n->replace = false;
+					n->coldeflist = $7;
+					n->final = $9;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = NULL;
+
+					appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @6, @8-@6+1);
+					n->typespec = typespec.data;
+					n->typebody = NULL;
+					$$ = (Node *)n;					
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+					if ($9 == NIL) {
+						ereport(errstate, 
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("no attributes found in object type \"%s\"",strVal(linitial($5)))));						
+					}
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typespec;
+					initStringInfo(&typespec);
+					/* Cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+					n->replace = true;
+					n->coldeflist = $9;
+					n->final = $11;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = NULL;
+
+					appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @8, @10-@8+1);
+					n->typespec = typespec.data;
+					n->typebody = NULL;
+					$$ = (Node *)n;					
+				}
+			| CREATE TYPE_P any_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typespec;
+					initStringInfo(&typespec);
+					/* Cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+					n->replace = false;
+					n->coldeflist = $7;
+					n->final = $11;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = $9;
+
+					appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @6, @10-@6+1);
+					n->typespec = typespec.data;
+					n->typebody = NULL;
+					$$ = (Node *)n;						
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typespec;
+					initStringInfo(&typespec);
+					/* Cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+					n->replace = true;
+					n->coldeflist = $9;
+					n->final = $13;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+					n->issubtype = false;
+					n->supertype = NULL;
+					n->methodlist = $11;
+
+					appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @8, @12-@8+1);
+					n->typespec = typespec.data;
+					n->typebody = NULL;
+					$$ = (Node *)n;						
+				}
+			| CREATE TYPE_P any_name UNDER any_name '(' TableFuncElementList ')' final_clause
+				{
+						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+						}
+						CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+						base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+						StringInfoData typespec;
+						initStringInfo(&typespec);
+
+						/* cannot use qualified_name, sigh */
+						n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+						n->supertype = makeRangeVarFromAnyName($5, @5, yyscanner);
+						n->coldeflist = $7;
+						n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+						n->replace = false;
+						n->final = $9;
+						n->issubtype = true;
+						n->methodlist = NULL;
+
+						appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @6, @8-@6+1);
+						n->typespec = typespec.data;
+						n->typebody = NULL;
+						$$ = (Node *)n;	
+				}
+			| CREATE OR REPLACE TYPE_P any_name UNDER any_name '(' TableFuncElementList ')' final_clause
+				{
+						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+						}
+						CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+						base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+						StringInfoData typespec;
+						initStringInfo(&typespec);
+
+						/* cannot use qualified_name, sigh */
+						n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+						n->supertype = makeRangeVarFromAnyName($7, @7, yyscanner);
+						n->coldeflist = $9;
+						n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+						n->replace = true;
+						n->final = $11;
+						n->issubtype = true;
+						n->methodlist = NULL;
+						
+						appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @8, @10-@8+1);
+						n->typespec = typespec.data;
+						n->typebody = NULL;
+						$$ = (Node *)n;	
+				}
+			| CREATE TYPE_P any_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
+				{
+						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+						}
+						CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+						base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+						StringInfoData typespec;
+						initStringInfo(&typespec);
+
+						/* cannot use qualified_name, sigh */
+						n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+						n->supertype = makeRangeVarFromAnyName($5, @5, yyscanner);
+						n->coldeflist = $7;
+						n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+						n->replace = false;
+						n->final = $11;
+						n->issubtype = true;
+						n->methodlist = $9;
+
+						appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @6, @10-@6+1);
+						n->typespec = typespec.data;
+						n->typebody = NULL;
+						$$ = (Node *)n;		
+				}
+			| CREATE OR REPLACE TYPE_P any_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
+				{
+						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+						}
+						CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+						base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+						StringInfoData typespec;
+						initStringInfo(&typespec);
+
+						/* cannot use qualified_name, sigh */
+						n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+						n->supertype = makeRangeVarFromAnyName($7, @7, yyscanner);
+						n->coldeflist = $9;
+						n->typekind = TYPE_COMPOSITE_OBJECT_TYPE;
+						n->replace = true;
+						n->final = $13;
+						n->issubtype = true;
+						n->methodlist = $11;
+
+						appendBinaryStringInfo(&typespec, yyextra->core_yy_extra.scanbuf + @8, @12-@8+1);
+						n->typespec = typespec.data;
+						n->typebody = NULL;
+						$$ = (Node *)n;
+				}
+			| CREATE TYPE_P BODY_P any_name as_is type_body_subprogram
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typebody;
+					initStringInfo(&typebody);
+
+					/* cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($4, @4, yyscanner);
+					n->replace = false;
+					n->methodlist = $6;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE_BODY;
+					appendBinaryStringInfo(&typebody, yyextra->core_yy_extra.scanbuf + @5, yylloc - @5 +1);
+					n->typebody = typebody.data;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P BODY_P any_name as_is type_body_subprogram
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("CREATE TYPE AS OBJECT is only support in A-format database")));
+					}
+
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					StringInfoData typebody;
+					initStringInfo(&typebody);
+
+					/* cannot use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($6, @6, yyscanner);
+					n->replace = true;
+					n->methodlist = $8;
+					n->typekind = TYPE_COMPOSITE_OBJECT_TYPE_BODY;
+					appendBinaryStringInfo(&typebody, yyextra->core_yy_extra.scanbuf + @7, yylloc - @7 +1);
+					n->typebody = typebody.data;
+					$$ = (Node *)n;
+				}
+			| CREATE TYPE_P any_name as_is VARRAY '(' ICONST ')' OF func_type
+				{
+					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->typname = $3;
+					n->reftypname = $10;
+					n->replace = false;
+					n->typtype = TYPTYPE_VARRAY;
+					n->typecategory = TYPCATEGORY_VARRAY;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is VARRAY '(' ICONST ')' OF func_type
+				{
+					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->typname = $5;
+					n->reftypname = $12;
+					n->replace = true;
+					n->typtype = TYPTYPE_VARRAY;
+					n->typecategory = TYPCATEGORY_VARRAY;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is TABLE OF func_type
@@ -12788,6 +13102,8 @@ DefineStmt:
 					n->replace = false;
 					n->typname = $3;
 					n->reftypname = $7;
+					n->typtype = TYPTYPE_TABLEOF;
+					n->typecategory = TYPCATEGORY_TABLEOF;
 					$$ = (Node *)n;
 				}
 			| CREATE OR REPLACE TYPE_P any_name as_is TABLE OF func_type
@@ -12796,6 +13112,8 @@ DefineStmt:
 					n->replace = true;
 					n->typname = $5;
 					n->reftypname = $9;
+					n->typtype = TYPTYPE_TABLEOF;
+					n->typecategory = TYPCATEGORY_TABLEOF;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is ENUM_P '(' opt_enum_val_list ')'
@@ -12866,6 +13184,568 @@ DefineStmt:
 					n->definition = list_make1(makeDefElem("from", (Node *) $5));
 					$$ = (Node *)n;
 				}
+		;
+type_body_subprogram: method_decl_in_type_list  ';' END_P ';'
+				{ $$ = $1;};
+
+Method_specList: element_spec
+				{
+					$$ = list_make1($1);
+				}
+		| Method_specList ',' element_spec
+				{
+					$$ = lappend($1, $3);
+				}
+		;
+
+element_spec : inheritance_clause MEMBER_FUNCTION func_name_opt_arg object_proc_args RETURN func_return
+				{
+					if ($4 != NIL && NULL != (FunctionParameter*)linitial($4))
+					{
+						FunctionParameter* firstparam = (FunctionParameter*)linitial($4);
+						if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+							ereport(errstate, 
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+					}
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = false;
+					n->definer = NULL;
+					n->funcname = $3;
+					n->parameters = $4;
+					n->returnType = $6;
+					n->typfunckind = OBJECTTYPE_MEMBER_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = false;
+					$$ = (Node*)n;
+				}
+				| inheritance_clause STATIC_FUNCTION func_name_opt_arg object_proc_args RETURN func_return
+				{
+					if ($4 != NIL && NULL != (FunctionParameter*)linitial($4))
+					{
+						FunctionParameter* firstparam = (FunctionParameter*)linitial($4);
+						if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+							ereport(errstate, 
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+					}
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = false;
+					n->definer = NULL;
+					n->funcname = $3;
+					n->parameters = $4;
+					n->returnType = $6;
+					n->typfunckind = OBJECTTYPE_STATIC_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = false;
+					$$ = (Node*)n;					
+				}
+				| inheritance_clause MEMBER_PROCEDURE func_name_opt_arg object_proc_args
+				{
+					if ($4 != NIL && NULL != (FunctionParameter*)linitial($4))
+					{
+						FunctionParameter* firstparam = (FunctionParameter*)linitial($4);
+						if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+							ereport(errstate, 
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+					}
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					int count = get_outarg_num($4);
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = false;
+					n->definer = NULL;
+					n->funcname = $3;
+					n->parameters = $4;
+					n->returnType = NULL;
+					if (count == 0)
+					{
+						n->returnType = makeTypeName("void");
+						n->returnType->typmods = NULL;
+						n->returnType->arrayBounds = NULL;
+					}
+					n->typfunckind = OBJECTTYPE_MEMBER_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = true;
+					$$ = (Node*)n;					
+				}
+				| inheritance_clause STATIC_PROCEDURE func_name_opt_arg proc_args
+				{
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					int count = get_outarg_num($4);
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = false;
+					n->definer = NULL;
+					n->funcname = $3;
+					n->parameters = $4;
+					n->returnType = NULL;
+					if (count == 0)
+					{
+						n->returnType = makeTypeName("void");
+						n->returnType->typmods = NULL;
+						n->returnType->arrayBounds = NULL;
+					}
+					n->typfunckind = OBJECTTYPE_STATIC_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = true;
+					$$ = (Node*)n;
+				}
+				| inheritance_clause CONSTRUCTOR_FUNCTION func_name_opt_arg object_proc_args RETURN SELF AS RESULT
+				{
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = true;
+					n->definer = NULL;
+					n->funcname = $3;
+					n->parameters = $4;
+					n->returnType = NULL;
+					n->typfunckind = OBJECTTYPE_CONSTRUCTOR_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = false;
+					$$ = (Node*)n;
+				}
+				| inheritance_clause MAP_MEMBER FUNCTION func_name_opt_arg object_proc_args RETURN func_return
+				{
+					if ($5 != NIL && NULL != (FunctionParameter*)linitial($5))
+					{
+						FunctionParameter* firstparam = (FunctionParameter*)linitial($5);
+						if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+							ereport(errstate, 
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+					}
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = true;
+					n->definer = NULL;
+					n->funcname = $4;
+					n->parameters = $5;
+					n->returnType = $7;
+					n->typfunckind = OBJECTTYPE_MAP_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = false;
+					$$ = (Node*)n;					
+				}
+				| inheritance_clause MAP_MEMBER PROCEDURE func_name_opt_arg object_proc_args
+				{
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("Only a function can be a MAP,ORDER or CONSTRUCTOR method")));					
+				}
+				| inheritance_clause ORDER MEMBER_PROCEDURE func_name_opt_arg object_proc_args
+				{
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("Only a function can be a MAP,ORDER or CONSTRUCTOR method")));
+				}
+				| inheritance_clause ORDER MEMBER_FUNCTION func_name_opt_arg object_proc_args RETURN func_return
+				{
+					if ($5 != NIL && NULL != (FunctionParameter*)linitial($5))
+					{
+						FunctionParameter* firstparam = (FunctionParameter*)linitial($5);
+						if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+							ereport(errstate, 
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+					}
+					CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+					List *list = list_make1(makeDefElem("as", (Node *)list_make1(makeString("begin\nend"))));
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = true;
+					n->definer = NULL;
+					n->funcname = $4;
+					n->parameters = $5;
+					n->returnType = $7;
+					n->typfunckind = OBJECTTYPE_ORDER_PROC;
+					n->isfinal = $1;
+					list = lappend(list, makeDefElem("language", (Node*) makeString("plpgsql")));
+					n->options = list;
+					n->withClause = NULL;
+					n->isProcedure = false;
+					$$ = (Node*)n;
+				}
+
+final_clause: FINAL										{ $$ = true;}
+			| NOT FINAL									{ $$ = false;}
+			| /* EMPTY */								{ $$ = true; } /*FINAL for default, allow to create subtype*/
+		;
+
+inheritance_clause: FINAL										{ $$ = true;}
+			| NOT FINAL									{ $$ = false;}
+			| /* EMPTY */								{ $$ = false; }/*NOT FINAL for default, allow subtype to override method*/
+		;
+
+object_func_args_with_defaults: '(' SELF_INOUT func_type ',' func_args_with_defaults_list ')'
+		{
+			FunctionParameter *self = makeNode(FunctionParameter);
+			self->name = pstrdup("self");
+			self->argType = $3;
+			self->mode = FUNC_PARAM_INOUT;
+			self->defexpr = NULL;
+			$$ = list_concat(list_make1(self), $5);
+		}
+		| '(' func_args_with_defaults_list ')'			{ $$ = $2; }
+		| '(' ')'										{ $$ = NIL; }
+		;
+
+object_proc_args:	object_func_args_with_defaults		{ $$ = $1; }
+			| /* EMPTY */								{ $$ = NIL; }
+		;
+
+method_decl_in_type_list:
+		element_decl_in_type								{ $$ = list_make1($1); }
+		| method_decl_in_type_list ';' element_decl_in_type { $$ = lappend($1, $3); }
+		;
+
+element_decl_in_type: subprogram_decl_in_type
+		| constructor_decl_in_type
+		| map_order_decl_in_type
+		{$$ = $1;}
+		;
+
+subprogram_decl_in_type : inheritance_clause MEMBER_FUNCTION func_name_opt_arg object_proc_args RETURN func_return opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			if ($4 != NIL && NULL != (FunctionParameter*)linitial($4))
+			{
+				FunctionParameter* firstparam = (FunctionParameter*)linitial($4);
+				if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+			}
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @8);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$10;
+			n->isOraStyle = true;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = $6;
+			n->options = $7;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+			n->funcname = $3;
+			n->parameters = $4;
+			n->typfunckind = OBJECTTYPE_MEMBER_PROC;
+			n->isfinal = $1;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			n->withClause = NULL;
+			n->isProcedure = false;
+			$$ = (Node*)n;
+		}
+		| inheritance_clause STATIC_FUNCTION func_name_opt_arg object_proc_args RETURN func_return opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @8);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$10;
+			n->isOraStyle = true;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = $6;
+			n->options = $7;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+			n->funcname = $3;
+			n->parameters = $4;
+			n->typfunckind = OBJECTTYPE_STATIC_PROC;
+			n->isfinal = $1;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			n->withClause = NULL;
+			n->isProcedure = false;
+			$$ = (Node*)n;
+		}
+		| inheritance_clause MEMBER_PROCEDURE func_name_opt_arg object_proc_args opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			if ($4 != NIL && NULL != (FunctionParameter*)linitial($4))
+			{
+				FunctionParameter* firstparam = (FunctionParameter*)linitial($4);
+				if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+			}
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @6);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$8;
+			int count = get_outarg_num($4);
+			n->isOraStyle = true;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+
+			n->funcname = $3;
+			n->parameters = $4;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = NULL;
+			n->isProcedure = true;
+			if (0 == count)
+			{
+				n->returnType = makeTypeName("void");
+				n->returnType->typmods = NULL;
+				n->returnType->arrayBounds = NULL;
+			}
+			n->options = $5;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			
+			n->withClause = NIL;
+			u_sess->parser_cxt.isCreateFuncOrProc = false;
+			n->typfunckind = OBJECTTYPE_MEMBER_PROC;
+			n->isfinal = $1;
+			$$ = (Node*)n;
+		}
+		| inheritance_clause STATIC_PROCEDURE func_name_opt_arg object_proc_args opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			int rc = 0;
+			rc = CompileWhich();
+			if ((rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) && u_sess->cmd_cxt.CurrentExtensionObject == InvalidOid) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @6);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$8;
+			int count = get_outarg_num($4);
+			n->isOraStyle = true;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+
+			n->funcname = $3;
+			n->parameters = $4;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = NULL;
+			n->isProcedure = true;
+			if (0 == count)
+			{
+				n->returnType = makeTypeName("void");
+				n->returnType->typmods = NULL;
+				n->returnType->arrayBounds = NULL;
+			}
+			n->options = $5;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			
+			n->withClause = NIL;
+			u_sess->parser_cxt.isCreateFuncOrProc = false;
+			n->typfunckind = OBJECTTYPE_STATIC_PROC;
+			n->isfinal = $1;
+			$$ = (Node*)n;
+		}
+		;
+
+constructor_decl_in_type: inheritance_clause CONSTRUCTOR_FUNCTION func_name_opt_arg object_proc_args RETURN SELF AS RESULT opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @6);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$12;
+			n->isOraStyle = true;
+
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = NULL;
+			n->options = $9;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+			n->funcname = $3;
+			n->parameters = $4;
+			n->typfunckind = OBJECTTYPE_CONSTRUCTOR_PROC;
+			n->isfinal = $1;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			n->withClause = NULL;
+			n->isProcedure = false;
+			$$ = (Node *)n;
+		}
+		;
+
+map_order_decl_in_type : inheritance_clause MAP_MEMBER FUNCTION func_name_opt_arg object_proc_args RETURN func_return opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			if ($5 != NIL && NULL != (FunctionParameter*)linitial($5))
+			{
+				FunctionParameter* firstparam = (FunctionParameter*)linitial($5);
+				if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+			}
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @6);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$11;
+			n->isOraStyle = true;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = $7;
+			n->options = $8;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+			n->funcname = $4;
+			n->parameters = $5;
+			n->typfunckind = OBJECTTYPE_MAP_PROC;
+			n->isfinal = $1;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			n->withClause = NULL;
+			n->isProcedure = false;
+			$$ = (Node*)n;
+		}
+		| inheritance_clause MAP_MEMBER PROCEDURE func_name_opt_arg object_proc_args opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			ereport(errstate, 
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("Only a function can be a MAP,ORDER or CONSTRUCTOR method")));
+		}
+		| inheritance_clause ORDER MEMBER_FUNCTION func_name_opt_arg object_proc_args RETURN func_return opt_createproc_opt_list as_is{
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			if ($5 != NIL && NULL != (FunctionParameter*)linitial($5))
+			{
+				FunctionParameter* firstparam = (FunctionParameter*)linitial($5);
+				if ((NULL != firstparam->name) && (strcmp(firstparam->name,"self") == 0) && !(firstparam->mode == FUNC_PARAM_IN || firstparam->mode == FUNC_PARAM_INOUT))
+					ereport(errstate, 
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("the SELF parameter can be declared only as IN or as IN OUT")));
+			}
+			int rc = 0;
+			rc = CompileWhich();
+			if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+				u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @6);
+			}
+			CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+			FunctionSources *funcSource = (FunctionSources *)$11;
+			n->isOraStyle = true;
+			n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+			n->returnType = $7;
+			n->options = $8;
+			n->isPrivate = false;
+			n->replace = true;
+			n->definer = NULL;
+			n->funcname = $4;
+			n->parameters = $5;
+			n->typfunckind = OBJECTTYPE_ORDER_PROC;
+			n->isfinal = $1;
+			n->options = lappend(n->options, makeDefElem("as",
+							(Node*)list_make1(makeString(funcSource->bodySrc))));
+			n->options = lappend(n->options, makeDefElem("language",
+							(Node*)makeString("plpgsql")));
+			n->withClause = NULL;
+			n->isProcedure = false;
+			$$ = (Node*)n;			
+		}
+		| inheritance_clause ORDER MEMBER_PROCEDURE func_name_opt_arg object_proc_args opt_createproc_opt_list as_is {
+			u_sess->parser_cxt.eaten_declare = false;
+			u_sess->parser_cxt.eaten_begin = false;
+			pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+			u_sess->parser_cxt.isCreateFuncOrProc = true;
+		} subprogram_body
+		{
+			ereport(errstate, 
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("Only a function can be a MAP,ORDER or CONSTRUCTOR method")));			
+		}
 		;
 
 opt_cfoptions: WITH cfoptions							{ $$ = $2; }
@@ -15408,7 +16288,7 @@ CreateFunctionStmt:
                                             u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @10);
                                         }
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
-					FunctionSources *funSource = (FunctionSources *)$12;
+					FunctionSources *funcSource = (FunctionSources *)$12;
 					n->isOraStyle = true;
 					n->isPrivate = false;
 					n->replace = $2;
@@ -15418,14 +16298,14 @@ CreateFunctionStmt:
 					}
 					n->funcname = $5;
 					n->parameters = $6;
-					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
+					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
 					if (enable_plpgsql_gsdependency_guc()) {
 						n->funcHeadSrc = ParseFuncHeadSrc(yyscanner);
 					}
 					n->returnType = $8;
 					n->options = $9;
 					n->options = lappend(n->options, makeDefElem("as",
-										(Node *)list_make1(makeString(funSource->bodySrc))));
+										(Node *)list_make1(makeString(funcSource->bodySrc))));
 					n->options = lappend(n->options, makeDefElem("language",
 										(Node *)makeString("plpgsql")));
 
@@ -16291,7 +17171,7 @@ CreateProcedureStmt:
                                         }
 					rc = CompileWhich();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
-					FunctionSources *funSource = (FunctionSources *)$10;
+					FunctionSources *funcSource = (FunctionSources *)$10;
 					int count = get_outarg_num($6);
 
 					n->isOraStyle = true;
@@ -16303,7 +17183,7 @@ CreateProcedureStmt:
 					}
 					n->funcname = $5;
 					n->parameters = $6;
-					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
+					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
 					if (enable_plpgsql_gsdependency_guc()) {
 						n->funcHeadSrc = ParseFuncHeadSrc(yyscanner, false);
 					}
@@ -16317,7 +17197,7 @@ CreateProcedureStmt:
 					}
 					n->options = $7;
 					n->options = lappend(n->options, makeDefElem("as",
-										(Node *)list_make1(makeString(funSource->bodySrc))));
+										(Node *)list_make1(makeString(funcSource->bodySrc))));
 					n->options = lappend(n->options, makeDefElem("language",
 										(Node *)makeString("plpgsql")));
 					n->withClause = NIL;
@@ -30134,6 +31014,7 @@ unreserved_keyword:
 			| CONSTRAINT_NAME
 			| CONSTRAINT_SCHEMA
 			| CONSTRAINTS
+			| CONSTRUCTOR
 			| CONTENT_P
 			| CONTINUE_P
 			| CONTVIEW
@@ -30227,6 +31108,7 @@ unreserved_keyword:
 			| FILLER
 			| FILL_MISSING_FIELDS
 			| FILTER
+			| FINAL
 			| FIRST_P
 			| FIXED_P
 			| FOLLOWING
@@ -30304,6 +31186,7 @@ unreserved_keyword:
 			| LOGIN_SUCCESS
 			| LOGOUT
 			| LOOP
+			| MAP
 			| MAPPING
 			| MASKING
 			| MASTER
@@ -30313,6 +31196,7 @@ unreserved_keyword:
 			| MAXEXTENTS
 			| MAXSIZE
 			| MAXTRANS
+			| MEMBER
 			| MERGE
 			| MESSAGE_TEXT
 			| METHOD
@@ -30424,6 +31308,7 @@ unreserved_keyword:
 			| RESOURCE
 			| RESTART
 			| RESTRICT
+			| RESULT
 			| RETURN
 			| RETURNED_SQLSTATE
 			| RETURNS
@@ -30448,6 +31333,7 @@ unreserved_keyword:
 			| SEARCH
 			| SECOND_P
 			| SECURITY
+			| SELF
 			| SEPARATOR_P
 			| SEQUENCE
 			| SEQUENCES
@@ -30482,6 +31368,7 @@ unreserved_keyword:
 			| STARTS
 			| STATEMENT
 			| STATEMENT_ID
+			| STATIC_P
 			| STATISTICS
 			| STDIN
 			| STDOUT
@@ -30542,6 +31429,7 @@ unreserved_keyword:
 			| VALIDATOR
 			| VALUE_P
 			| VARIABLES
+			| VARRAY
 			| VARYING
 			| VCGROUP
 			| VERSION_P

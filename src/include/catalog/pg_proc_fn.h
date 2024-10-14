@@ -15,6 +15,7 @@
 #define PG_PROC_FN_H
 
 #include "catalog/objectaddress.h"
+#include "catalog/pg_object.h"
 #include "nodes/pg_list.h"
 
 extern ObjectAddress ProcedureCreate(const char *procedureName,
@@ -54,7 +55,10 @@ extern ObjectAddress ProcedureCreate(const char *procedureName,
                 TypeDependExtend* retTypDependExt = NULL,
                 CreateFunctionStmt* stmt = NULL,
                 bool isPipelined = false,
-                FunctionPartitionInfo* partInfo = NULL
+                FunctionPartitionInfo* partInfo = NULL,
+                Oid protypeid = InvalidOid,
+                char typefunckind = OBJECTTYPE_NULL_PROC,
+                bool isfinal = false
                 );
 
 extern bool function_parse_error_transpose(const char *prosrc);

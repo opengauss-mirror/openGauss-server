@@ -135,6 +135,7 @@ extern Oid getBaseTypeAndTypmod(Oid typid, int32* typmod);
 #ifdef PGXC
 extern char* get_cfgname(Oid cfgid);
 extern char* get_typename(Oid typid);
+extern List* get_typename_with_schema(Oid typid);
 extern char* get_enumlabelname(Oid enumlabelid);
 extern char* get_exprtypename(Oid enumlabelid);
 extern char* get_typename_with_namespace(Oid typid);

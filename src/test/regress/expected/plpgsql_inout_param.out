@@ -1892,7 +1892,8 @@ drop type test_inout_type;
 -- clean
 drop table inttest;
 drop schema if exists plpgsql_inout cascade;
-NOTICE:  drop cascades to 40 other objects
+NOTICE:  drop cascades to 41 other objects
+--?.*
 --?.*
 --?.*
 --?.*

@@ -90,10 +90,11 @@ select count(*) from  tickertable;
 
 reset search_path;
 drop schema plpgsql_othercase cascade;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table plpgsql_othercase.stocktable
 drop cascades to type plpgsql_othercase.tickertype
 drop cascades to type plpgsql_othercase.tickertypeset
+drop cascades to function plpgsql_othercase.tickertypeset(plpgsql_othercase.tickertype[])
 drop cascades to table plpgsql_othercase.tickertable
 --?.*
 drop cascades to function plpgsql_othercase.stockpivot_pl(refcursor)

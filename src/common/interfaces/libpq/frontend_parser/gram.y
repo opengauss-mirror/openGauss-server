@@ -697,7 +697,14 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED
 /* kluge to keep xml_whitespace_option from causing shift/reduce conflicts */
 %right		PRESERVE STRIP_P
-
+%token <keyword> CONSTRUCTOR FINAL MAP MEMBER RESULT SELF STATIC_P UNDER
+%token		SELF_INOUT
+			STATIC_FUNCTION
+			MEMBER_FUNCTION
+			STATIC_PROCEDURE
+			MEMBER_PROCEDURE
+			CONSTRUCTOR_FUNCTION
+			MAP_MEMBER
 %%
 
 /*
@@ -11733,6 +11740,7 @@ unreserved_keyword:
 			| CONSISTENT
 			| CONSTANT
 			| CONSTRAINTS
+			| CONSTRUCTOR
 			| CONTENT_P
 			| CONTINUE_P
 			| CONVERSION_P

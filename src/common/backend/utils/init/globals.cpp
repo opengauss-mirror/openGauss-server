@@ -77,7 +77,7 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93004;
+const uint32 GRAND_VERSION_NUM = 93005;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
@@ -87,6 +87,7 @@ const uint32 CHARBYTE_SEMANTIC_VERSION_NUMBER = 93001;
 const uint32 FLUSH_LSN_FUN_VERSION_NUM = 92951;
 const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
 const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM = 92948;
+const uint32 OBJECT_TYPE_VERSION_NUM = 93005;
 const uint32 PARTITION_NAME_VERSION_NUM = 92947;
 const uint32 AUDIT_SHA_VERSION_NUM = 92946;
 const uint32 NETTIME_TRACE_VERSION_NUM = 92945;

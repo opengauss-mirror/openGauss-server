@@ -20,7 +20,7 @@ endif
 OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        objectaddress.o pg_aggregate.o pg_collation.o pg_constraint.o pg_conversion.o \
        pg_depend.o pg_enum.o pg_set.o pg_inherits.o pg_largeobject.o pg_namespace.o pg_object.o\
-       pg_operator.o gs_package.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
+       pg_operator.o pg_object_type.o gs_package.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
        pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
@@ -62,7 +62,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	gs_matview_dependency.h gs_matview_log.h pgxc_slice.h gs_opt_model.h gs_dependencies.h gs_dependencies_obj.h gs_package.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
 	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
-	pg_subscription_rel.h pg_proc_ext.h\
+	pg_subscription_rel.h pg_proc_ext.h pg_object_type.h \
     )
 
 # location of Catalog.pm

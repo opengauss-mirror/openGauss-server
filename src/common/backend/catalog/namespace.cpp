@@ -80,6 +80,7 @@
 #include "c.h"
 #include "pgstat.h"
 #include "catalog/pg_proc_fn.h"
+#include "parser/parse_type.h"
 #include "catalog/gs_collation.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1208,6 +1209,7 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     Datum packageOidDatum;	
     ArrayType* arr = NULL;
     int numProcAllArgs = proNargs;
+    bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isNull);
     packageOidDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isNull);
 #ifndef ENABLE_MULTIPLE_NODES
     if (!enable_outparam_override && includeOut) {
@@ -1328,7 +1330,7 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     newResult->oid = HeapTupleGetOid(procTup);
     newResult->nargs = effectiveNargs;
     newResult->argnumbers = argNumbers;
-    newResult->packageOid = DatumGetObjectId(packageOidDatum);
+    newResult->packageOid = ispackage ? DatumGetObjectId(packageOidDatum) : InvalidOid;
     /* record the referenced synonym oid for building view dependency. */
     newResult->refSynOid = refSynOid;
     newResult->allArgNum = allArgNum;
@@ -1568,12 +1570,14 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     char* funcname = NULL;
     Oid namespaceId;
     char* pkgname = NULL;
+    char* typname = NULL;
     int i;
     bool isNull;
     Oid funcoid;
     Oid caller_pkg_oid = InvalidOid;
     Oid initNamespaceId = InvalidOid;
     bool enable_outparam_override = false;
+    Oid objecttyp_oid = InvalidOid;
 
 #ifndef ENABLE_MULTIPLE_NODES
     enable_outparam_override = enable_out_param_override();
@@ -1593,7 +1597,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
 
 
     /* deconstruct the name list */
-    DeconstructQualifiedName(names, &schemaname, &funcname, &pkgname);
+    DeconstructQualifiedName(names, &schemaname, &funcname, &pkgname, &typname);
     if (schemaname != NULL) {
         // if this function called by ProcedureCreate(A db style), ignore usage right.
         if (func_create)
@@ -1607,7 +1611,35 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
         recomputeNamespacePath();
     }
     initNamespaceId = namespaceId;
+    /* Find object type's oid */
+    if (typname != NULL) {
+        Oid typnsp = PG_PUBLIC_NAMESPACE;
+        char* nspname = "public";
+        if (OidIsValid(namespaceId)) {
+            typnsp = namespaceId;
+            nspname = schemaname;
+        } else {
+            List* tempActiveSearchPath = NIL;
+            ListCell* l = NULL;
 
+            recomputeNamespacePath();
+
+            tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
+            foreach(l, tempActiveSearchPath) {
+                Oid namespaceId = lfirst_oid(l);
+                if (OidIsValid(get_typeoid(namespaceId, typname))) {
+                    typnsp = namespaceId;
+                    list_free_ext(tempActiveSearchPath);
+                    break;
+                }
+            }
+            list_free_ext(tempActiveSearchPath);
+        }
+        objecttyp_oid = get_typeoid(typnsp, typname);
+        if (!OidIsValid(objecttyp_oid))
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("object type \"%s\".\"%s\" does not exist", get_namespace_name(typnsp), typname)));
+    }
     /* Step1. search syscache by name only and add candidates from pg_proc */
     CatCList* catlist = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1642,12 +1674,34 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
         funcoid = HeapTupleGetOid(proctup);
         Oid pkg_oid = InvalidOid;
         Oid package_oid = InvalidOid;
+        bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
         Datum package_oid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
-        if (!isNull) {
+        if (!isNull && ispackage) {
             package_oid = DatumGetObjectId(package_oid_datum);
         }
-        
-        if (OidIsValid(package_oid)) {
+        Oid objtype_oid = InvalidOid;
+        if (!isNull && !ispackage) {
+            objtype_oid = DatumGetObjectId(package_oid_datum);
+        }
+
+        /* Find method type from pg_object */
+        char typeMethodKind = OBJECTTYPE_NULL_PROC;
+        HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(funcoid), CharGetDatum(OBJECT_TYPE_PROC));
+        if (HeapTupleIsValid(objTuple)) {
+            typeMethodKind = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+            ReleaseSysCache(objTuple);
+        }
+        /* Only member function can use object call */
+        if (OidIsValid(objtype_oid)) {
+            /* Only static object function can be called like object_type.method */
+            if (objtype_oid !=objecttyp_oid && typeMethodKind == OBJECTTYPE_STATIC_PROC)
+                continue;
+            if ((typeMethodKind == OBJECTTYPE_CONSTRUCTOR_PROC) ||
+                (typeMethodKind == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC)) {
+                include_out = false;
+                enable_outparam_override = false;
+            }
+        } else if (OidIsValid(package_oid)) {
             if (schemaname != NULL && pkgname == NULL) {
                 continue;
             }
@@ -3107,49 +3161,83 @@ bool TSConfigIsVisible(Oid cfgid)
  * *nspname_p is set to NULL if there is no explicit schema name.
  */
 
-void DeconstructQualifiedName(const List* names, char** nspname_p, char** objname_p, char **pkgname_p)
+void DeconstructQualifiedName(const List* names, char** nspname_p, char** objname_p, char **pkgname_p, char** typname_p)
 {
     char* catalogname = NULL;
     char* schemaname = NULL;
     char* objname = NULL;
     char* pkgname = NULL;
     Oid nspoid = InvalidOid;
+    char* typname = NULL;
     switch (list_length(names)) {
         case 1:
             objname = strVal(linitial(names));
             break;
         case 2:
-            objname = strVal(lsecond(names));
-            schemaname = strVal(linitial(names));
-            if (nspname_p != NULL) {
-                nspoid = get_namespace_oid(schemaname, true);
-            }   
-            pkgname = strVal(linitial(names));
-            if (!OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
-                pkgname = strVal(lsecond(names));
-                if (OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
-                    schemaname = strVal(linitial(names));
-                    objname = pkgname;
-                    pkgname = NULL;
+            {
+                objname = strVal(lsecond(names));
+                schemaname = strVal(linitial(names));
+                if (nspname_p != NULL) {
+                    nspoid = get_namespace_oid(schemaname, true);
+                }   
+                pkgname = strVal(linitial(names));
+                if (!OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
+                    pkgname = strVal(lsecond(names));
+                    if (OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
+                        schemaname = strVal(linitial(names));
+                        objname = pkgname;
+                        pkgname = NULL;
+                    } else {
+                        pkgname = NULL;
+                    }
                 } else {
-                    pkgname = NULL;
+                    schemaname = NULL;
                 }
-            } else {
-                schemaname = NULL;
+                /* Deconstruct typname */
+                if (pkgname == NULL) {
+                    typname = strVal(linitial(names));
+                    Type typtup = LookupTypeName(NULL, makeTypeNameFromNameList(list_make1(makeString(typname))), NULL);
+                    if (HeapTupleIsValid(typtup)) {
+                        Form_pg_type typ_struct = (Form_pg_type)GETSTRUCT(typtup);
+                        if (typ_struct->typtype == TYPTYPE_ABSTRACT_OBJECT) {
+                            objname = strVal(lsecond(names));
+                            schemaname = NULL;
+                        } else {
+                            typname = NULL;
+                        }
+                        ReleaseSysCache(typtup);
+                    } else {
+                        pkgname = NULL;
+                        typname = NULL;
+                    }
+                }
             }
             break;
         case 3:
-            objname = strVal(lthird(names));
-            pkgname = strVal(lsecond(names));
-            schemaname = strVal(linitial(names));
-            if (nspname_p != NULL) {
-                nspoid = get_namespace_oid(schemaname, true);
-            }   
-            if (!OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
-                catalogname = strVal(linitial(names));
-                schemaname = strVal(lsecond(names));
-                pkgname = NULL;
-                break;
+            {
+                /* schemaname.pkgname.objname */
+                objname = strVal(lthird(names));
+                pkgname = strVal(lsecond(names));
+                schemaname = strVal(linitial(names));
+                if (nspname_p != NULL) {
+                    nspoid = get_namespace_oid(schemaname, true);
+                }
+                typname = strVal(lsecond(names));
+                if (nspoid != InvalidOid &&
+                    SearchSysCacheExists2(TYPENAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(nspoid))) {
+                    /* schemaname.typname.objname */
+                    objname = strVal(lthird(names));
+                    schemaname = strVal(linitial(names));
+                } else {
+                    typname = NULL;
+                }
+                /* catalogname.schemaname.objname */
+                if (typname == NULL && !OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
+                    catalogname = strVal(linitial(names));
+                    schemaname = strVal(lsecond(names));
+                    pkgname = NULL;
+                    break;
+                }
             }
             break;
         case 4:
@@ -3176,6 +3264,8 @@ void DeconstructQualifiedName(const List* names, char** nspname_p, char** objnam
     *objname_p = objname;
     if (pkgname_p != NULL)
         *pkgname_p = pkgname;
+    if (typname_p != NULL)
+        *typname_p = typname;
 }
 
 /*
@@ -3243,12 +3333,26 @@ bool IsPackageFunction(List* funcname)
     for (int i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+        Datum ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
+        result = DatumGetBool(ispackage);
         Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
         Oid packageid = InvalidOid;
-        if (!isNull) {
+        if (!isNull && result) {
             packageid = DatumGetObjectId(packageid_datum);
         } else {
             packageid = InvalidOid;
+        }
+        HeapTuple objTuple = SearchSysCache2(PGOBJECTID,
+            ObjectIdGetDatum(HeapTupleGetOid(proctup)), CharGetDatum(OBJECT_TYPE_PROC));
+        if (HeapTupleIsValid(objTuple)) {
+            /* Find method type from pg_object */
+            char typeMethodKind = GET_PROTYPEKIND(SysCacheGetAttr(
+                    PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+            ReleaseSysCache(objTuple);
+            if (!isNull && typeMethodKind != OBJECTTYPE_NULL_PROC) {
+                ReleaseSysCacheList(catlist);
+                return true;
+            }
         }
         if (!isSynonymPkg) {
             if (OidIsValid(namespaceId)) {
@@ -3274,8 +3378,6 @@ bool IsPackageFunction(List* funcname)
         }
         /* package function and not package function can not overload */
         proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
-        Datum ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
-        result = DatumGetBool(ispackage);
         if (IsSystemObjOid(HeapTupleGetOid(proctup))) {
             continue;
         }

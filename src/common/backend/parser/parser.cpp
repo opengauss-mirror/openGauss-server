@@ -792,6 +792,90 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 }
             }
             break;
+        case STATIC_P:
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                /* static function/procedure */
+                case FUNCTION:
+                    cur_token = STATIC_FUNCTION;
+                    break;
+                case PROCEDURE:
+                    cur_token = STATIC_PROCEDURE;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case MEMBER:
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                /* MEMBER function/procedure */
+                case FUNCTION:
+                    cur_token = MEMBER_FUNCTION;
+                    break;
+                case PROCEDURE:
+                    cur_token = MEMBER_PROCEDURE;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case CONSTRUCTOR:
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                /* MEMBER function/procedure */
+                case FUNCTION:
+                    cur_token = CONSTRUCTOR_FUNCTION;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case MAP:
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                case MEMBER:
+                    cur_token = MAP_MEMBER;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case SELF:
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                case INOUT:
+                    cur_token = SELF_INOUT;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         default:
             break;
     }

@@ -88,6 +88,7 @@
 #include "catalog/pg_largeobject_metadata.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
+#include "catalog/pg_object_type.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
@@ -350,6 +351,7 @@ static const FormData_pg_attribute Desc_pg_publication_rel[Natts_pg_publication_
 static const FormData_pg_attribute Desc_pg_replication_origin[Natts_pg_replication_origin] = {
     Schema_pg_replication_origin
 };
+static const FormData_pg_attribute Desc_pg_object_type[Natts_pg_object_type] = {Schema_pg_object_type};
 static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
 static const FormData_pg_attribute Desc_gs_sql_patch_origin[Natts_gs_sql_patch] = {Schema_gs_sql_patch};
 static const FormData_pg_attribute Desc_pg_proc_ext[Natts_pg_proc_ext] = {Schema_pg_proc_ext};
@@ -1263,6 +1265,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_gs_matview_log,
         false,
         true},
+    {ObjectTypeRelationId,
+        "pg_object_type",
+        ObjectTypeRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_pg_object_type,
+        Desc_pg_object_type,
+        false,
+        true},
     {MatviewRelationId,
         "gs_matview",
         MatviewRelationId_Rowtype_Id,
@@ -1289,7 +1300,8 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Natts_gs_opt_model,
         Desc_gs_opt_model,
         false,
-        true}};
+        true}
+    };
 
 // Get cluster information of relation
 //

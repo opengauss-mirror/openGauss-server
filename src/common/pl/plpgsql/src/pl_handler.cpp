@@ -22,6 +22,7 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_object_type.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc_fn.h"
@@ -292,13 +293,14 @@ static void ProcInsertGsSource(Oid funcOid, bool status)
     bool isnull = false;
 
     /* Skip nested create function stmt within package body */
+    bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isnull);
     Datum packageIdDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isnull);
     if (isnull) {
         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The prokind of the function is null"),
                 errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
     }
-    Oid packageOid = DatumGetObjectId(packageIdDatum);
+    Oid packageOid = ispackage ? DatumGetObjectId(packageIdDatum) : InvalidOid;
     if (OidIsValid(packageOid)) {
         ReleaseSysCache(procTup);
         return;
@@ -584,8 +586,9 @@ static Oid get_package_id(Oid func_oid)
                 errmsg("cache lookup failed for function %u, while compile function", func_oid)));
     }
     proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
+    bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &isnull);
     package_oid_datum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
-    package_oid = DatumGetObjectId(package_oid_datum);
+    package_oid = ispackage ? DatumGetObjectId(package_oid_datum) : InvalidOid;
 
     if (OidIsValid(package_oid)) {
         pkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(package_oid));
@@ -796,6 +799,44 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     int pkgDatumsNumber = 0;
     bool savedisAllowCommitRollback = true;
     bool enableProcCoverage = u_sess->attr.attr_common.enable_proc_coverage;
+
+    
+    /* Check if type body exists if using type method */
+    HeapTuple proc_tup = NULL;
+    bool isnull = false;
+    /*
+     * If the function in a package, thne compile the package, and find the compiled function in
+     * pkg->proc_compiled_list
+     */
+    proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    if (!HeapTupleIsValid(proc_tup)) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for function %u, while compile function.", func_oid)));
+    }
+    bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &isnull);
+    Oid protypoid = ispackage ? InvalidOid : DatumGetObjectId(
+        SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull));
+    /* Find method type from pg_object */
+    char typmethodkind = OBJECTTYPE_NULL_PROC;
+    HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(func_oid), CharGetDatum(OBJECT_TYPE_PROC));
+    if (HeapTupleIsValid(objTuple)) {
+        typmethodkind = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull));
+        ReleaseSysCache(objTuple);
+    }
+    if (OidIsValid(protypoid) && (typmethodkind != OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC) &&
+        (typmethodkind != TABLE_VARRAY_CONSTRUCTOR_PROC)) {
+        HeapTuple tuple = SearchSysCache1(OBJECTTYPE, ObjectIdGetDatum(protypoid));
+        if (!HeapTupleIsValid(tuple)) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for object type %u, while compile function.", protypoid)));
+        }
+        Form_pg_object_type pg_object_type_struct = (Form_pg_object_type)GETSTRUCT(tuple);
+        if (!pg_object_type_struct->isbodydefined)
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_OBJECT_TYPE_BODY_DEFINE_ERROR),
+                errmsg("type body \"%s\" not define", get_typename(protypoid))));
+        ReleaseSysCache(tuple);
+    }
+    ReleaseSysCache(proc_tup);
     /*
      * if the atomic stored in fcinfo is false means allow
      * commit/rollback within stored procedure.
@@ -1589,6 +1630,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
                         InsertError(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid);
                     }
                     u_sess->plsql_cxt.isCreateFunction = false;
+                    u_sess->plsql_cxt.isCreateTypeBody = false;
                 }
             }
 #endif
@@ -1598,6 +1640,8 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             u_sess->plsql_cxt.package_as_line = 0;
             u_sess->plsql_cxt.package_first_line = 0;
             u_sess->plsql_cxt.isCreateFunction = false;
+            u_sess->plsql_cxt.isCreateTypeBody = false;
+            u_sess->plsql_cxt.typfunckind = OBJECTTYPE_NULL_PROC;
             ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
                 errmsg("%s clear curr_compile_context because of error.", __func__)));
             /* reset nest plpgsql compile */

@@ -1046,9 +1046,10 @@ DETAIL:  function tableof_1(typea) depends on type typea
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop type typeB;
 drop type s_type cascade;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to type typea
 drop cascades to function tableof_1(typea)
+drop cascades to function typea(s_type[])
 drop cascades to function tableof_4()
 drop cascades to function tableof_5()
 drop cascades to function tableof_9()
@@ -1058,6 +1059,7 @@ drop type typeG;
 drop type s_type_extend;
 ERROR:  cannot drop type s_type_extend because other objects depend on it
 DETAIL:  type typea_ext depends on type s_type_extend[]
+function typea_ext(s_type_extend[]) depends on type s_type_extend[]
 function tableof_8() depends on type s_type_extend[]
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop type typeA_ext;
@@ -1098,19 +1100,23 @@ drop procedure tableof_27;
 ERROR:  function tableof_27 does not exist
 drop table customers;
 drop schema if exists plpgsql_table_opengauss cascade;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to table int8_tbl
 drop cascades to view tt17v
 drop cascades to type typed
+drop cascades to function typed(character varying[])
 drop cascades to type type1
+drop cascades to function type1(character varying[])
 drop cascades to type type2
 drop cascades to type type3
 drop cascades to type type4
+drop cascades to function type4(type3[])
 drop cascades to type type5
 drop cascades to table tycod01
 drop cascades to type tycod02
 drop cascades to table tycod03
 drop cascades to type tycode23
+drop cascades to function tycode23(tycod01[])
 drop cascades to function recordnes23()
 drop cascades to type s_type_extend
 drop cascades to function tableof_20()

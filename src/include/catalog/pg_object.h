@@ -61,6 +61,7 @@ CATALOG(pg_object,9025)   BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
     int8           createcsn;          /* When create relation */
     int8           changecsn;          /* When modify the table structure or store properties */
     bool           valid;              /* Is valid? */
+    int4           object_options;      /* options for object type and object type method */
 } FormData_pg_object;
 
 #ifdef new_timestamptz
@@ -79,7 +80,7 @@ typedef FormData_pg_object* Form_pg_object;
  *        compiler constants for pg_object
  *-------------------------------------------------------------------------
  */
-#define Natts_pg_object                          8
+#define Natts_pg_object                          9
 #define Anum_pg_object_oid                       1
 #define Anum_pg_object_type                      2
 #define Anum_pg_object_creator                   3
@@ -88,8 +89,23 @@ typedef FormData_pg_object* Form_pg_object;
 #define Anum_pg_object_createcsn                 6
 #define Anum_pg_object_changecsn                 7
 #define Anum_pg_object_valid                     8
+#define Anum_pg_object_options                   9
 
 #define PgObjectType char
+
+#define ISFINAL_MASK 0x0100
+#define PROKIND_MASK 0x00ff
+#define GET_PROTYPEKIND(options) ((char)((options) & PROKIND_MASK))
+#define GET_ISFINAL(options) ((((options) & ISFINAL_MASK) != 0))
+
+#define OBJECTTYPE_MEMBER_PROC 'm'
+#define OBJECTTYPE_STATIC_PROC 's'
+#define OBJECTTYPE_CONSTRUCTOR_PROC 'c'
+#define OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC 'd'
+#define OBJECTTYPE_MAP_PROC 'a'
+#define OBJECTTYPE_ORDER_PROC 'o'
+#define OBJECTTYPE_NULL_PROC 'n'
+#define TABLE_VARRAY_CONSTRUCTOR_PROC 't'
 
 /* Define the type of object which maybe different with object is pg_class. */
 #define OBJECT_TYPE_INVALID '\0'
@@ -113,7 +129,8 @@ extern bool GetCurrCompilePgObjStatus();
 extern void SetCurrCompilePgObjStatus(bool status);
 extern void UpdateCurrCompilePgObjStatus(bool status);
 extern void InvalidateCurrCompilePgObj();
-extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt, bool isValid = true);
+extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt,
+    bool isValid = true, int32 object_options = 0);
 extern void DeletePgObject(Oid objectOid, PgObjectType objectType);
 extern void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, ObjectCSN * const csnInfo);
 void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType);
@@ -122,5 +139,6 @@ void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType);
 extern PgObjectType GetPgObjectTypePgClass(char relkind);
 extern void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objType);
 extern void recordRelationMTime(Oid relOid, char relkind);
+extern char get_object_method_kind(Oid funcid);
 
 #endif /* PG_OBJECT_H */

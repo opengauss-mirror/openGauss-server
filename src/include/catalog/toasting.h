@@ -58,6 +58,7 @@ DECLARE_TOAST(pg_partition, 5502, 5503);
 DECLARE_TOAST(pgxc_class, 5506, 5507);
 DECLARE_TOAST(pg_hashbucket, 4392, 4393);
 DECLARE_TOAST(gs_package, 8002, 8003);
+DECLARE_TOAST(pg_object_type, 8633, 8636);
 DECLARE_TOAST(gs_global_chain, 5816, 5817);
 DECLARE_TOAST(gs_model_warehouse, 3995, 3996);
 

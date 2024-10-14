@@ -94,9 +94,10 @@ END;
 \! @abs_bindir@/gs_dump plpgsql_dump -p @portstring@ -f @abs_bindir@/plpgsql_dump.sql -n plpgsql_dump -w >/dev/null 2>&1; echo $?
 0
 drop schema plpgsql_dump cascade;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to type t_tf_row
 drop cascades to type t_tf_tab
+drop cascades to function t_tf_tab(t_tf_row[])
 drop cascades to function get_tab_ptf(numeric)
 --?.*
 drop cascades to function plpgsql_dump.table_of_rec(integer)
@@ -282,9 +283,10 @@ select unnest(get_table_of_int_autom(2));
 (4 rows)
 
 drop schema plpgsql_dump cascade;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to type t_tf_row
 drop cascades to type t_tf_tab
+drop cascades to function t_tf_tab(t_tf_row[])
 drop cascades to function get_tab_ptf(numeric)
 drop cascades to function get_tab_ptf_autom(numeric)
 drop cascades to function get_table_of_int_autom(numeric)

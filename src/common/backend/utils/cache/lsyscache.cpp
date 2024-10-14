@@ -2518,6 +2518,28 @@ char* get_typename(Oid typid)
     ReleaseSysCache(tuple);
     return result;
 }
+
+/*
+ * get_typename_with_schema
+ * Get type schema.name list for given type ID.
+ */
+List* get_typename_with_schema(Oid typid)
+{
+    HeapTuple tuple;
+    Form_pg_type typeForm;
+    List* result = NULL;
+    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+    }
+    typeForm = (Form_pg_type)GETSTRUCT(tuple);
+    result = list_make2(makeString(get_namespace_name(typeForm->typnamespace)),
+        makeString(pstrdup(NameStr(typeForm->typname))));
+
+    ReleaseSysCache(tuple);
+    return result;
+}
+
 /*
  * get_typename
  *		Get enumtype label name for given enumtype labeliD
@@ -4214,7 +4236,8 @@ char get_typtype(Oid typid)
  */
 bool type_is_rowtype(Oid typid)
 {
-    return (typid == RECORDOID || get_typtype(typid) == TYPTYPE_COMPOSITE);
+    return (typid == RECORDOID || get_typtype(typid) == TYPTYPE_COMPOSITE ||
+        get_typtype(typid) == TYPTYPE_ABSTRACT_OBJECT);
 }
 
 /*
@@ -5359,8 +5382,9 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             Oid pkgOid = InvalidOid;
             procform = (Form_pg_proc)GETSTRUCT(proctupl);
             proname = NameStr(procform->proname);
+            bool ispackage = SysCacheGetAttr(PROCOID, proctupl, Anum_pg_proc_package, &isnull);
             pkgOiddatum = SysCacheGetAttr(PROCOID, proctupl, Anum_pg_proc_packageid, &isnull);
-            if (!isnull) {
+            if (!isnull && ispackage) {
                 pkgOid = DatumGetObjectId(pkgOiddatum);
                 pkgname = GetPackageName(pkgOid);
             }

@@ -1130,7 +1130,8 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
                         (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for type  %u", atttypid)));
             }
             typForm = (Form_pg_type)GETSTRUCT(typTupe);
-            if (typForm->typrelid >= FirstNormalObjectId && typForm->typtype == TYPTYPE_COMPOSITE) {
+            if (typForm->typrelid >= FirstNormalObjectId && (typForm->typtype == TYPTYPE_COMPOSITE
+                || typForm->typtype == TYPTYPE_ABSTRACT_OBJECT)) {
                 HeapTuple relTupe = SearchSysCache1(RELOID, ObjectIdGetDatum(typForm->typrelid));
                 Form_pg_class relForm;
                 if (HeapTupleIsValid(relTupe)) {

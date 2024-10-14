@@ -72,8 +72,9 @@ bool gsplsql_is_undefined_func(Oid func_oid)
     }
     procForm = (Form_pg_proc)GETSTRUCT(tup);
     bool is_null;
+    bool ispackage = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_package, &is_null);
     Datum proPackageIdDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &is_null);
-    Oid proPackageId = DatumGetObjectId(proPackageIdDatum);
+    Oid proPackageId = ispackage ? DatumGetObjectId(proPackageIdDatum) : InvalidOid;
     obj = gsplsql_construct_func_head_obj(func_oid, procForm->pronamespace, proPackageId);
     obj.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
     ReleaseSysCache(tup);
@@ -253,8 +254,9 @@ Oid gsplsql_get_pkg_oid_by_func_oid(Oid func_oid)
         return InvalidOid;
     }
     bool is_null;
+    bool ispackage = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_package, &is_null);
     Datum packageOidDatum = SysCacheGetAttr((int)PROCOID, tuple, Anum_pg_proc_packageid, &is_null);
-    Oid pkg_oid = DatumGetObjectId(packageOidDatum);
+    Oid pkg_oid =  ispackage ? DatumGetObjectId(packageOidDatum) : InvalidOid;
     ReleaseSysCache(tuple);
     return pkg_oid;
 }
@@ -285,8 +287,9 @@ Oid gsplsql_get_proc_oid(const char* schemaName, const char* packageName, const 
             if (proc_form->pronamespace != expected_nsp_oid) {
                 continue;
             }
+            bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &is_null);
             Datum proPackageIdDatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &is_null);
-            Oid proPackageId = DatumGetObjectId(proPackageIdDatum);
+            Oid proPackageId = ispackage ? DatumGetObjectId(proPackageIdDatum) : InvalidOid;
             if (proPackageId != expected_pkg_oid) {
                 continue;
             }
@@ -323,8 +326,9 @@ Oid gsplsql_get_proc_oid(const char* schemaName, const char* packageName, const 
             if (proc_form->pronamespace != expected_nsp_oid) {
                 continue;
             }
+            bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &is_null);
             Datum proPackageIdDatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &is_null);
-            Oid proPackageId = DatumGetObjectId(proPackageIdDatum);
+            Oid proPackageId = ispackage ? DatumGetObjectId(proPackageIdDatum) : InvalidOid;
             if (proPackageId != expected_pkg_oid) {
                 continue;
             }

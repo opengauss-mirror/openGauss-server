@@ -3069,9 +3069,12 @@ select pr.proname, po.valid, pr.proargtypes, pr.proargsrc from pg_proc as pr inn
 drop type ssr;
 ERROR:  cannot drop type ssr because other objects depend on it
 DETAIL:  type stab depends on type ssr[]
+function stab(ssr[]) depends on type ssr[]
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop type ssr cascade;
-NOTICE:  drop cascades to type stab
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to type stab
+drop cascades to function stab(ssr[])
 select a.schemaname as sn, a.packagename as pn, a.objectname as on, a.refobjpos as refpos, b.schemaname as refsn, b.packagename as refpn, b.name as refon, b.type as refot, b.objnode as refast from gs_dependencies as a right join gs_dependencies_obj as b on b.oid = a.refobjoid where (a.schemaname='plpgsql_depend_type' and a.objectname = 'stab') order by a.schemaname, a.objectname, a.refobjpos, b.type, b.name;
  sn | pn | on | refpos | refsn | refpn | refon | refot | refast 
 ----+----+----+--------+-------+-------+-------+-------+--------
@@ -3153,6 +3156,7 @@ select pr.proname, po.valid, pr.proargtypes, pr.proargsrc from pg_proc as pr inn
 drop type ssr;
 ERROR:  cannot drop type ssr because other objects depend on it
 DETAIL:  type stab depends on type ssr[]
+function stab(ssr[]) depends on type ssr[]
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_type' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 

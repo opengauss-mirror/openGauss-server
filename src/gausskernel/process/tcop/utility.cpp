@@ -5618,17 +5618,41 @@ ProcessUtilitySlow(Node *parse_tree,
                     if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
                         ExecUtilityStmtOnNodes_ParallelDDLMode(
                             query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
-                        address = DefineCompositeType(stmt->typevar, stmt->coldeflist);
+                        if (stmt->typekind == TYPE_COMPOSITE_DEFAULT)
+                            address = DefineCompositeType(stmt->typevar, stmt->coldeflist, stmt->replace);
+                        else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE)
+                            address = DefineObjectTypeSpec(stmt);
+                        else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE_BODY)
+                            DefineObjectTypeBody(stmt);
+                        else
+                            ereport(ERROR,
+                                (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("create composite type kind \"%s\" error.", stmt->typevar->relname)));
                         ExecUtilityStmtOnNodes_ParallelDDLMode(
                             query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
                     } else {
-                        address = DefineCompositeType(stmt->typevar, stmt->coldeflist);
+                        if (stmt->typekind == TYPE_COMPOSITE_DEFAULT)
+                            address = DefineCompositeType(stmt->typevar, stmt->coldeflist, stmt->replace);
+                        else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE)
+                            address = DefineObjectTypeSpec(stmt);
+                        else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE_BODY)
+                            DefineObjectTypeBody(stmt);
+                        else
+                            ereport(ERROR,
+                                (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("create composite type kind \"%s\" error.", stmt->typevar->relname)));
                         ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
                     }
                 } else
 #endif
                 {
-                    address = DefineCompositeType(stmt->typevar, stmt->coldeflist);
+                    if (stmt->typekind == TYPE_COMPOSITE_DEFAULT)
+                        address = DefineCompositeType(stmt->typevar, stmt->coldeflist, stmt->replace);
+                    else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE)
+                        address = DefineObjectTypeSpec(stmt);
+                    else if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE_BODY)
+                        DefineObjectTypeBody(stmt);
+                    else
+                        ereport(ERROR,
+                            (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("create composite type kind \"%s\" error.", stmt->typevar->relname)));
                 }
             } break;
 

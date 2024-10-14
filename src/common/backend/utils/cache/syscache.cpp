@@ -108,6 +108,7 @@
 #include "utils/syscache.h"
 #include "catalog/pg_user_status.h"
 #include "lite/memory_lite.h"
+#include "catalog/pg_object_type.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
 #include "catalog/pg_replication_origin.h"
@@ -636,6 +637,7 @@ const cachedesc cacheinfo[] = {
         1,
         {Anum_streaming_cont_query_id, 0, 0, 0},
         STREAMING_CONT_QUERY_ID_INDEX_ID_NBUCKETS},
+#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQLOOKUPID */
         StreamingContQueryLookupidxidIndexId,
         1,
@@ -646,12 +648,25 @@ const cachedesc cacheinfo[] = {
         1,
         {Anum_streaming_cont_query_matrelid, 0, 0, 0},
         STREAMING_CONT_QUERY_MATRELID_INDEX_ID_NBUCKETS},
-#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQOID */
         StreamingContQueryOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         STREAMING_CONT_QUERY_OID_INDEX_ID_NBUCKETS},
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    {ObjectTypeRelationId, /* OBJECTTYPEOID */
+        ObjectTypeOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        1024},
+    {ObjectTypeRelationId, /* OBJECTTYPE */
+        ObjectTypeIndexId,
+        1,
+        {Anum_pg_object_type_typoid, 0, 0, 0},
+        1024},
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
     {StreamingContQueryRelationId, /* STREAMCQRELID */
         StreamingContQueryRelidIndexId,
         1,
