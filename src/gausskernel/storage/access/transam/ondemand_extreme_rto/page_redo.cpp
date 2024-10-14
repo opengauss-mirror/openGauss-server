@@ -1426,7 +1426,7 @@ static void OnDemandPageManagerProcSegParseState(XLogRecParseState *preState, XL
     OnDemandPageManagerRedoSegParseState(preState);
 }
 
-static bool WaitPrimaryDoCheckpointAndAllPRTrackEmpty(XLogRecParseState *preState, HTAB *redoItemHash)
+static bool WaitPrimaryDoCheckpointAndAllPRTrackEmpty(XLogRecParseState *preState)
 {
     if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         return false;
@@ -1534,14 +1534,14 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
         return;
     }
 
-    HTAB *hashMap = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl->hTab;
     XLogRecParseType type = GetCurrentXLogRecParseType(preState);
-    if (type == PARSE_TYPE_DDL && WaitPrimaryDoCheckpointAndAllPRTrackEmpty(preState, hashMap)) {
+    if (type == PARSE_TYPE_DDL && WaitPrimaryDoCheckpointAndAllPRTrackEmpty(preState)) {
         ReleaseBlockParseStateIfNotReplay(preState);
         return;
     }
 
     PageManagerPruneIfRealtimeBuildFailover();
+    HTAB *hashMap = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl->hTab;
     switch (preState->blockparse.blockhead.block_valid) {
         case BLOCK_DATA_MAIN_DATA_TYPE:
         case BLOCK_DATA_UNDO_TYPE:

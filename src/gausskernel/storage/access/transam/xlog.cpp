@@ -10559,7 +10559,7 @@ void StartupXLOG(void)
                 TransactionId xl_xid = record->xl_xid;
                 if (t_thrd.xlog_cxt.standbyState >= STANDBY_INITIALIZED && TransactionIdIsValid(xl_xid)) {
                     CSNLogRecordAssignedTransactionId(xl_xid);
-                } else if (TransactionIdIsValid(xl_xid)) {
+                } else if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL && TransactionIdIsValid(xl_xid)) {
                     ExtendCSNLOG(xl_xid);
                 }
                 xtime = GetLatestXTime();
