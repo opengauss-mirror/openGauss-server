@@ -111,7 +111,8 @@ typedef enum {
     CHANGE_ROLE_COMMAND,
     MINORITY_START_COMMAND,
     COPY_COMMAND,
-    GS_STACK_COMMAND
+    GS_STACK_COMMAND,
+    START_WALRCV_COMMAND
 } CtlCommand;
 
 typedef enum {
@@ -361,6 +362,9 @@ extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
 const char *BuildModeToString(BuildMode mode);
 static char* get_gausshome();
+static ServerMode get_mode_by_string(char *str_mode);
+static DbState get_db_state_by_string(char *str_state);
+#define MAXFIELDLEN 64
 
 void check_input_for_security(char* input_env_value)
 {
@@ -688,6 +692,7 @@ static ServerMode get_runmode(void)
     char* val = NULL;
     char run_mode[MAXRUNMODE] = {0};
     GaussState state;
+    ServerMode return_mode;
     errno_t tnRet = EOK;
 
     conn = get_connectionex();
@@ -741,22 +746,9 @@ static ServerMode get_runmode(void)
     close_connection();
     conn = NULL;
 
-    if (!strncmp(run_mode, "Normal", MAXRUNMODE))
-        return NORMAL_MODE;
-    if (!strncmp(run_mode, "Primary", MAXRUNMODE))
-        return PRIMARY_MODE;
-    if (!strncmp(run_mode, "Standby", MAXRUNMODE))
-        return STANDBY_MODE;
-    if (!strncmp(run_mode, "Cascade Standby", MAXRUNMODE))
-        return CASCADE_STANDBY_MODE;
-    if (!strncmp(run_mode, "Main Standby", MAXRUNMODE))
-        return STANDBY_MODE;
-    if (!strncmp(run_mode, "Pending", MAXRUNMODE))
-        return PENDING_MODE;
-    if (!strncmp(run_mode, "Unknown", MAXRUNMODE))
-        return UNKNOWN_MODE;
+    return_mode = get_mode_by_string(run_mode);
 
-    return UNKNOWN_MODE;
+    return return_mode;
 }
 
 static void freefile(char** lines)
@@ -3715,6 +3707,7 @@ static void do_help(void)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
     (void)printf(_("  %s stack [-D DATADIR] [-I lwtid]\n"), progname);
+    (void)printf(_("  %s startwalrcv [-w] [-t SECS] [-D DATADIR]\n"), progname);
 #ifndef ENABLE_MULTIPLE_NODES
 #ifndef ENABLE_LITE_MODE
     doDCFAddCmdHelp();
@@ -5701,6 +5694,236 @@ void do_gs_stack(void)
     return;
 }
 
+ServerMode get_mode_by_string(char *str_mode)
+{
+    if (!strncmp(str_mode, "Normal", MAXRUNMODE))
+        return NORMAL_MODE;
+    if (!strncmp(str_mode, "Primary", MAXRUNMODE))
+        return PRIMARY_MODE;
+    if (!strncmp(str_mode, "Standby", MAXRUNMODE))
+        return STANDBY_MODE;
+    if (!strncmp(str_mode, "Cascade Standby", MAXRUNMODE))
+        return CASCADE_STANDBY_MODE;
+    if (!strncmp(str_mode, "Main Standby", MAXRUNMODE))
+        return STANDBY_MODE;
+    if (!strncmp(str_mode, "Pending", MAXRUNMODE))
+        return PENDING_MODE;
+    if (!strncmp(str_mode, "Unknown", MAXRUNMODE))
+        return UNKNOWN_MODE;
+
+    return UNKNOWN_MODE;
+}
+
+static DbState get_db_state_by_string(char *str_state)
+{
+    if (!strcmp(str_state, "Normal"))
+        return NORMAL_STATE;
+    if (!strcmp(str_state, "Unknown"))
+        return UNKNOWN_STATE;
+    if (!strcmp(str_state, "Need repair"))
+        return NEEDREPAIR_STATE;
+    if (!strcmp(str_state, "Starting"))
+        return STARTING_STATE;
+    if (!strcmp(str_state, "Wait promoting"))
+        return WAITING_STATE;
+    if (!strcmp(str_state, "Demoting"))
+        return DEMOTING_STATE;
+    if (!strcmp(str_state, "Promoting"))
+        return PROMOTING_STATE;
+    if (!strcmp(str_state, "Building"))
+        return BUILDING_STATE;
+    if (!strcmp(str_state, "Catchup"))
+        return CATCHUP_STATE;
+    if (!strcmp(str_state, "Coredump"))
+        return COREDUMP_STATE;
+
+    return UNKNOWN_STATE;
+}
+
+static void convert_pg_result(PGresult *res, ServerMode *run_mode, DbState *db_state, char *detail_info)
+{
+    char str_mode[MAXFIELDLEN] = {0};
+    char str_state[MAXFIELDLEN] = {0};
+    char* val = NULL;
+    errno_t nret = EOK;
+
+    if ((val = PQgetvalue(res, 0, 0)) != NULL) {
+        nret = strncpy_s(str_mode, MAXFIELDLEN, val, strlen(val));
+        securec_check_c(nret, "\0", "\0");
+        str_mode[MAXFIELDLEN - 1] = '\0';
+        *run_mode = get_mode_by_string(str_mode);
+    }
+    if ((val = PQgetvalue(res, 0, 1)) != NULL) {
+        nret = strncpy_s(str_state, MAXFIELDLEN, val, strlen(val));
+        securec_check_c(nret, "\0", "\0");
+        str_state[MAXFIELDLEN - 1] = '\0';
+        *db_state = get_db_state_by_string(str_state);
+    }
+    if ((val = PQgetvalue(res, 0, 2)) != NULL) {
+        nret = strncpy_s(detail_info, MAXFIELDLEN, val, strlen(val));
+        securec_check_c(nret, "\0", "\0");
+        detail_info[MAXFIELDLEN - 1] = '\0';
+    }
+}
+
+static void get_mode_and_state(ServerMode *run_mode, DbState *db_state, char *detail_info)
+{
+#define NFIELDS 3
+#define NTUPLES 1
+    PGconn* pgconn = NULL;
+    PGresult* res = NULL;
+    const char* sql = "select local_role, db_state, detail_information from "
+        "pg_catalog.pg_stat_get_stream_replications();";
+    GaussState state;
+    errno_t nret = EOK;
+
+    pgconn = get_connectionex();
+    if (PQstatus(pgconn) != CONNECTION_OK) {
+        nret = memset_s(&state, sizeof(state), 0, sizeof(state));
+        securec_check_c(nret, "\0", "\0");
+        pg_log(PG_PROGRESS, _("Getting state from gaussdb.state!\n"));
+        ReadDBStateFile(&state);
+        *run_mode = state.mode;
+        *db_state = state.state;
+        close_connection();
+        pgconn = NULL;
+        return;
+    }
+    res = PQexec(pgconn, sql);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        pg_log(PG_WARNING, _("could not get state from the local server: %s"), PQerrorMessage(pgconn));
+        close_connection();
+        pgconn = NULL;
+        return;
+    }
+    if (PQnfields(res) != NFIELDS || PQntuples(res) != NTUPLES) {
+        int ntuples = PQntuples(res);
+        int nfields = PQnfields(res);
+
+        PQclear(res);
+        pg_log(PG_WARNING, _("invalid response from standby server: "
+            "expected %d tuples with %d fields, got %d tuples with %d fields."),
+            NTUPLES, NFIELDS, ntuples, nfields);
+        close_connection();
+        pgconn = NULL;
+        return;
+    }
+    convert_pg_result(res, run_mode, db_state, detail_info);
+
+    PQclear(res);
+    close_connection();
+    pgconn = NULL;
+    return;
+}
+
+static void check_before_start_walrcv(pgpid_t pid)
+{
+    ServerMode run_mode;
+    DbState db_state;
+    char detail_info[MAXFIELDLEN] = {0};
+
+    if (pid == 0) { /* no pid file */
+        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
+        pg_log(PG_WARNING, _(" Is server running?\n"));
+        exit(1);
+    } else if (pid < 0) { /* standalone backend, not postmaster */
+        pid = -pid;
+        pg_log(PG_WARNING, _(" cannot start walrcv;"
+            "single-user server is running (PID: %ld)\n"), pid);
+        exit(1);
+    }
+
+    get_mode_and_state(&run_mode, &db_state, detail_info);
+    if (run_mode == UNKNOWN_MODE) {
+        pg_log(PG_WARNING, _(" cannot start walrcv: server mode is unknown\n"));
+        exit(1);
+    } else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE && run_mode != MAIN_STANDBY_MODE) {
+        pg_log(PG_WARNING, _(" cannot start walrcv: server is not in standby or cascade standby mode\n"));
+        exit(1);
+    }
+
+    if (db_state == STARTING_STATE) {
+        pg_log(PG_PROGRESS, _("try to start walrcv when standby is still starting\n"));
+    } else if (db_state == NEEDREPAIR_STATE &&
+        (strcmp(detail_info, "Disconnected") == 0 || strcmp(detail_info, "Connecting...") == 0)) {
+        pg_log(PG_PROGRESS, _("try to start walrcv when standby is still redoing\n"));
+    } else if (db_state == PROMOTING_STATE &&
+        (strcmp(detail_info, "Disconnected") == 0 || strcmp(detail_info, "Connecting...") == 0)) {
+        pg_log(PG_PROGRESS, _("try to start walrcv when main standby is still redoing\n"));
+    } else {
+        pg_log(PG_WARNING, _(" cannot start walrcv: server is already trying to start walrcv\n"));
+        exit(1);
+    }
+
+    if (!do_wait) {
+        pg_log(PG_WARNING, _(" server starting walrcv\n"));
+    } else {
+        pg_log(PG_WARNING, _(" waiting for server to start walrcv\n"));
+    }
+}
+
+void do_start_walrcv()
+{
+    int ret;
+    char flag_path[MAXPGPATH] = {0};
+    FILE* fofile = NULL;
+    pgpid_t pid;
+    ServerMode run_mode;
+    DbState db_state;
+    char detail_info[MAXFIELDLEN] = {0};
+
+    pid = get_pgpid();
+    check_before_start_walrcv(pid);
+
+    ret = snprintf_s(flag_path, MAXPGPATH, MAXPGPATH - 1, "%s/preparse", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    canonicalize_path(flag_path);
+    if ((fofile = fopen(flag_path, "w")) == NULL) {
+        pg_log(PG_WARNING, _(" could not open file successfully\n"));
+        exit(1);
+    }
+    if (fwrite(&wait_seconds, sizeof(int), 1, fofile) != 1) {
+        pg_log(PG_WARNING, _(" could not write file successfully\n"));
+    }
+    if (fclose(fofile)) {
+        pg_log(PG_WARNING, _(" file is closed\n"));
+    }
+
+    fofile = NULL;
+
+    for (int cnt = 0; ; cnt++) {
+        if (kill((pid_t)pid, SIGUSR1) != 0) {
+            pg_log(PG_WARNING, _(" could not send SIGUSR1 signal (PID: %ld): %s\n"), pid, strerror(errno));
+            if (unlink(flag_path) != 0) {
+                pg_log(PG_WARNING, _(" could not remove file \"%s\": %s\n"), flag_path, strerror(errno));
+            }
+            exit(1);
+        }
+        if (!do_wait) {
+            return;
+        } else if (cnt >= wait_seconds) {
+            break;
+        }
+        pg_log(PG_PRINT, ".");
+        pg_usleep(1000000); /* 1 sec */
+
+        get_mode_and_state(&run_mode, &db_state, detail_info);
+        if (db_state == NORMAL_STATE && strcmp(detail_info, "Normal") == 0) {
+            break;
+        }
+    }
+    if (db_state == NORMAL_STATE && strcmp(detail_info, "Normal") == 0) {
+        pg_log(PG_WARNING, _(" start walrcv completed (%s)\n"), pg_data);
+    } else if (db_state == STARTING_STATE) {
+        pg_log(PG_WARNING, _(" server is still starting (%s), refer to gs_log for more info\n"), pg_data);
+    } else {
+        pg_log(PG_WARNING, _(" start walrcv failed (%s), detail info: %s\n"), pg_data, detail_info);
+    }
+
+    return;
+}
+
 static void Help(int argc, const char** argv)
 {
     /* support --help and --version even if invoked as root */
@@ -6699,6 +6922,8 @@ int main(int argc, char** argv)
                 ctl_command = COPY_COMMAND;
             else if (strcmp(argv[optind], "stack") == 0)
                 ctl_command = GS_STACK_COMMAND;
+            else if (strcmp(argv[optind], "startwalrcv") == 0)
+                ctl_command = START_WALRCV_COMMAND;
             else {
                 pg_log(PG_WARNING, _(" unrecognized operation mode \"%s\"\n"), argv[optind]);
                 do_advice();
@@ -6772,6 +6997,7 @@ int main(int argc, char** argv)
             case FAILOVER_COMMAND:
             case BUILD_COMMAND:
             case NOTIFY_COMMAND:
+            case START_WALRCV_COMMAND:
                 do_wait = true;
                 break;
             default:
@@ -7009,7 +7235,15 @@ int main(int argc, char** argv)
             } else {
                 pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, copy failed.\n"));
             }
-	    break;
+            break;
+        case START_WALRCV_COMMAND:
+            if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
+                do_start_walrcv();
+                (void)pg_ctl_unlock(lockfile);
+            } else {
+                pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, start walrcv failed.\n"));
+            }
+            break;
         default:
             break;
     }

@@ -2,7 +2,11 @@
 #some enviroment vars
 
 export g_base_port=8888
-export prefix=${GAUSSHOME}
+# Remove the trailing slash from the path: 
+while [ "${GAUSSHOME: -1}" == "/" ]; do
+    GAUSSHOME="${GAUSSHOME%/}"
+done
+export prefix=${PREFIX_HOME}
 export g_pooler_base_port=`expr $g_base_port \+ 410`
 export g_base_standby_port=`expr $g_base_port \+ 400`
 export install_path="$prefix"

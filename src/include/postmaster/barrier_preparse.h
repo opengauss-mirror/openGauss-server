@@ -27,6 +27,7 @@
 #define BARRIER_PREPARSE_H
 
 #define INIBARRIERCACHESIZE 100
+#define WAL_PREPARSER_SIGNAL_FILE "preparse"
 
 #define IS_BARRIER_HASH_INIT \
     (g_instance.csn_barrier_cxt.barrier_hash_table != NULL && \

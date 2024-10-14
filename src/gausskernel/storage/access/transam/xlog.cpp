@@ -8052,14 +8052,29 @@ static bool CheckApplyDelayReady(void)
         return false;
     }
 
-    /* the walreceiver process is started behind here,
-     * ensure that the walreceiver process has been started,
-     * otherwise, the stream replication will be disconnected */
-    if (g_instance.pid_cxt.WalReceiverPID == 0) {
-        return false;
-    }
-
     return true;
+}
+
+static void KeepWalrecvAliveWhenRecoveryDelay()
+{
+    static TimestampTz lastTestWalrecvTime = (TimestampTz)0;
+
+    TimestampTz now = GetCurrentTimestamp();
+    if (!TimestampDifferenceExceeds(lastTestWalrecvTime, now, 1000)) {  // 1s
+        return;
+    }
+    lastTestWalrecvTime = now;
+    
+    if (WalRcvInProgress()) {
+        return;
+    }
+    
+    if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
+        return;
+    }
+    
+    /* wake up walrecv by pre-parse thread */
+    g_instance.csn_barrier_cxt.pre_parse_started = false;
 }
 
 /*
@@ -8086,6 +8101,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     if (!CheckApplyDelayReady()) {
         return false;
     }
+
+    KeepWalrecvAliveWhenRecoveryDelay();
 
     /*
      * Is it a COMMIT record?
@@ -8121,6 +8138,8 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
 
         /* might change the trigger file's location */
         RedoInterruptCallBack();
+
+        KeepWalrecvAliveWhenRecoveryDelay();
 
         if (CheckForFailoverTrigger() || CheckForSwitchoverTrigger() || CheckForStandbyTrigger()) {
             break;
@@ -10883,15 +10902,6 @@ static void sendPMBeginHotStby()
             pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.hotStdby), ATOMIC_TRUE);
             ereport(LOG, (errmsg("send signal to be hot standby at %X/%X", (uint32)(lastReplayedEndRecPtr >> 32),
                                  (uint32)lastReplayedEndRecPtr)));
-#ifdef ENABLE_MULTIPLE_NODES
-            /*
-             * If we are in cluster-standby-mode, we need launch barreir preparse
-             * thread from the minrecoverypoint point.
-             */
-            if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
-                SetBarrierPreParseLsn(t_thrd.xlog_cxt.minRecoveryPoint);
-            }
-#endif
             SendPostmasterSignal(PMSIGNAL_BEGIN_HOT_STANDBY);
         }
     }
