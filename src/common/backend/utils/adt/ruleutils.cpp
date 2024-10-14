@@ -4784,6 +4784,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     char* p = NULL;
     bool isOraFunc = false;
     char* pkgname = NULL;
+    char* typname = NULL;
     initStringInfo(&buf);
 
     /* Look up the function */
@@ -4816,21 +4817,30 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
         Datum datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isnull);
         proIsProcedure = isnull ? false : PROC_IS_PRO(CharGetDatum(datum));
     }
- 
+    bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isnull);
     Datum packageOidDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isnull);
-    if (!isnull)
+    if (!isnull && ispackage)
     {
         Oid packageoid = DatumGetObjectId(packageOidDatum);
         if (OidIsValid(packageoid)) {
             pkgname = GetPackageName(packageoid);
         }
     } 
+    if (!isnull && !ispackage) {
+        Oid typeoid = DatumGetObjectId(packageOidDatum);
+        if (OidIsValid(typeoid)) {
+            typname = get_typename(typeoid);
+        }
+    }
 
     if (proIsProcedure) {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
                                 quote_qualified_identifier(nsp, pkgname, name));
-        } else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
+        } else if (typname != NULL) {
+            appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
+                                quote_qualified_identifier(nsp, typname, name));
+        } else if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s PROCEDURE %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
         } else {
@@ -4842,7 +4852,10 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
                                 quote_qualified_identifier(nsp, pkgname, name));
-        }  else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
+        } else if (typname != NULL) {
+            appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
+                                quote_qualified_identifier(nsp, typname, name));
+        } else if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s FUNCTION %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
         } else {
@@ -12718,8 +12731,9 @@ static char* generate_function_name(
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     procform = (Form_pg_proc)GETSTRUCT(proctup);
     proname = NameStr(procform->proname);
+    bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isnull);
     pkgOiddatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isnull);
-    if (!isnull) {
+    if (!isnull && ispackage) {
         pkgOid = DatumGetObjectId(pkgOiddatum);
         pkgname = GetPackageName(pkgOid);
     }

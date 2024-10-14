@@ -16,16 +16,19 @@
 #include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 
+#include "access/transam.h"
 #include "access/xact.h"
 #include "access/tupconvert.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_package.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
+#include "catalog/pg_object_type.h"
 #include "commands/typecmds.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
@@ -136,7 +139,7 @@ static bool is_paren_friendly_datatype(TypeName *name);
 static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
 static PLpgSQL_stmt 	*make_callfunc_stmt(const char *sqlstart,
-                                int location, bool is_assign, bool eaten_first_token, List* funcNameList = NULL, int arrayFuncDno = -1, bool isCallFunc = false);
+                                int location, bool is_assign, bool eaten_first_token, List* funcNameList = NULL, int arrayFuncDno = -1, bool isCallFunc = false, PLwdatum *objtypwdatum = NULL);
 static PLpgSQL_stmt 	*make_callfunc_stmt_no_arg(const char *sqlstart, int location, bool withsemicolon = false, List* funcNameList = NULL);
 static PLpgSQL_expr 	*read_sql_construct6(int until,
                                              int until2,
@@ -238,8 +241,7 @@ static PLpgSQL_type* build_type_from_record_var(int dno, int location);
 static PLpgSQL_type * build_array_type_from_elemtype(PLpgSQL_type *elem_type);
 static PLpgSQL_var* plpgsql_build_nested_variable(PLpgSQL_var *nest_table, bool isconst, char* name, int lineno);
 static void read_multiset(StringInfoData* ds, char* tableName1, Oid typeOid1);
-static Oid get_table_type(PLpgSQL_datum* datum);
-static void read_multiset(StringInfoData* ds, char* tableName1, Oid typeOid1);
+static void CastTypeVariableNameToString(StringInfoData* ds, List* idents, bool needDot = true);
 static Oid get_table_type(PLpgSQL_datum* datum);
 static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr);
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype);
@@ -274,6 +276,14 @@ static void check_record_nest_tableof_index(PLpgSQL_datum* datum);
 static void check_tableofindex_args(int tableof_var_dno, Oid argtype);
 static bool need_build_row_for_func_arg(PLpgSQL_rec **rec, PLpgSQL_row **row, int out_arg_num, int all_arg, int *varnos, char *p_argmodes);
 static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam);
+static void yylex_object_type_selfparam(char** fieldnames,
+                int *varnos,
+                int nfields,
+                PLpgSQL_row **row,
+                PLpgSQL_rec **rec,
+                int *retvarno,
+                PLwdatum *objtypwdatum,
+                bool overload = false);
 static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 %}
 
@@ -446,7 +456,7 @@ static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 %token <word>		T_PLACEHOLDER		/* place holder , for IN/OUT parameters */
 %token <word>		T_LABELLOOP T_LABELWHILE T_LABELREPEAT
 %token <wdatum>		T_VARRAY T_ARRAY_FIRST  T_ARRAY_LAST  T_ARRAY_COUNT  T_ARRAY_EXISTS  T_ARRAY_PRIOR  T_ARRAY_NEXT  T_ARRAY_DELETE  T_ARRAY_EXTEND  T_ARRAY_TRIM  T_VARRAY_VAR  T_RECORD
-%token <wdatum>		T_TABLE T_TABLE_VAR T_PACKAGE_VARIABLE
+%token <wdatum>		T_TABLE T_TABLE_VAR T_PACKAGE_VARIABLE T_OBJECT_TYPE_VAR_METHOD
 %token <wdatum>     T_PACKAGE_CURSOR_ISOPEN T_PACKAGE_CURSOR_FOUND T_PACKAGE_CURSOR_NOTFOUND T_PACKAGE_CURSOR_ROWCOUNT
 %token				LESS_LESS
 %token				GREATER_GREATER
@@ -1304,7 +1314,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                 if (var->dtype == PLPGSQL_DTYPE_VAR)
                                     ((PLpgSQL_var *) var)->default_val = $6;
                                 else if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD) {
-                                    ((PLpgSQL_row *) var)->default_val = $6;
+                                    PLpgSQL_row * row = (PLpgSQL_row *) var;
+                                    if (!(row->atomically_null_object && pg_strcasecmp($6->query, "select null") == 0))
+                                        row->default_val = $6;
                                 } else if (var->dtype == PLPGSQL_DTYPE_CURSORROW) {
                                      ((PLpgSQL_rec *) var)->default_val = $6;
                                 }
@@ -3177,6 +3189,10 @@ getdiag_item :    K_ROW_COUNT
                 | K_PG_EXCEPTION_CONTEXT
                     {
                         $$ = PLPGSQL_GETDIAG_ERROR_CONTEXT;
+                    }
+                | K_PG_EXCEPTION_HINT
+                    {
+                        $$ = PLPGSQL_GETDIAG_ERROR_HINT;
                     }
                 | K_MESSAGE_TEXT
                     {
@@ -5385,6 +5401,67 @@ stmt_execsql			: K_ALTER
                     yyerror("syntax error");
                 }
             }
+        | T_OBJECT_TYPE_VAR_METHOD
+            {
+                int tok = -1;
+                bool FuncNoarg = false;
+                char* serverName = NULL;
+                PLwdatum *objtypwdatum = NULL;
+                PLwdatum objtypwdatumtemp;
+                objtypwdatumtemp.datum = yylval.wdatum.datum;
+                objtypwdatumtemp.idents = yylval.wdatum.idents;
+                objtypwdatumtemp.quoted = yylval.wdatum.quoted;
+                objtypwdatumtemp.ident = yylval.wdatum.ident;
+                objtypwdatumtemp.dno = yylval.wdatum.dno;
+                objtypwdatum = &objtypwdatumtemp;
+                PLpgSQL_row* row = (PLpgSQL_row*)yylval.wdatum.datum;
+                HeapTuple typtuple = NULL;
+                Form_pg_type typeform = NULL;
+                char* nspname = NULL;
+                StringInfoData ds;
+                char* name = NULL;
+                bool isCallFunc = false;
+
+                initStringInfo(&ds);
+                typtuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(row->datatype->typoid));
+                if (!HeapTupleIsValid(typtuple))
+                    ereport(errstate,
+                                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("object type with OID %u does not exist", row->datatype->typoid)));
+                typeform = (Form_pg_type)GETSTRUCT(typtuple);
+                nspname = get_namespace_name(typeform->typnamespace);
+                if (NULL != nspname) {
+                    appendStringInfo(&ds, "%s.",nspname);
+                }
+                appendStringInfo(&ds, "%s",objtypwdatumtemp.ident);
+                ReleaseSysCache(typtuple);
+                name = pstrdup(ds.data);
+                pfree_ext(ds.data);
+
+                tok = yylex();
+                if ('(' == tok)
+                    isCallFunc = is_function(name, false, false);
+                else if (';' == tok) {
+                    isCallFunc = is_function(name, false, false);
+                    FuncNoarg = true;
+                }
+                plpgsql_push_back_token(tok);
+                if (isCallFunc) {
+                    if (FuncNoarg) {
+                        $$ = make_callfunc_stmt_no_arg(name, @1);
+                    } else {
+                        PLpgSQL_stmt* stmt = make_callfunc_stmt(name, @1, false, false, NULL, -1, false, objtypwdatum);
+                        if (stmt->cmd_type == PLPGSQL_STMT_PERFORM) {
+                            ((PLpgSQL_stmt_perform*)stmt)->expr->is_funccall = true;
+                        } else if (stmt->cmd_type == PLPGSQL_STMT_EXECSQL) {
+                            ((PLpgSQL_stmt_execsql*)stmt)->sqlstmt->is_funccall = true;
+                        }
+                        $$ = stmt;
+                    }
+                } else {
+                    $$ = make_execsql_stmt(T_OBJECT_TYPE_VAR_METHOD, @1);
+                }
+            }
         | T_CWORD '('
             {
 
@@ -6462,6 +6539,8 @@ expr_until_semi :
                         bool isCallFunc = false;
                         PLpgSQL_expr* expr = NULL;
                         List* funcNameList = NULL;
+                        PLwdatum *objtypwdatum = NULL;
+                        PLwdatum objtypwdatumtemp;
                         if (!enable_out_param_override() && u_sess->parser_cxt.isPerform) {
                             u_sess->parser_cxt.isPerform = false;
                         }
@@ -6487,14 +6566,44 @@ expr_until_semi :
                                         (errcode(ERRCODE_SYNTAX_ERROR),
                                         errmsg("perform not support expression when open guc proc_outparam_override")));
                             u_sess->plsql_cxt.have_error = true;
+                        } else if (plpgsql_is_token_match2(T_OBJECT_TYPE_VAR_METHOD,'(')) {
+                            PLpgSQL_row *row = NULL;
+                            HeapTuple typtuple = NULL;
+                            Form_pg_type typeform = NULL;
+                            char* nspname = NULL;
+                            StringInfoData ds;
+                            tok = yylex();
+                            objtypwdatumtemp.datum = yylval.wdatum.datum;
+                            objtypwdatumtemp.idents = yylval.wdatum.idents;
+                            objtypwdatumtemp.quoted = yylval.wdatum.quoted;
+                            objtypwdatumtemp.ident = yylval.wdatum.ident;
+                            objtypwdatumtemp.dno = yylval.wdatum.dno;
+                            objtypwdatum = &objtypwdatumtemp;
+                            initStringInfo(&ds);
+                            row = (PLpgSQL_row*)yylval.wdatum.datum;
+                            typtuple = SearchSysCache1(TYPEOID,ObjectIdGetDatum(row->datatype->typoid));
+                            if (!HeapTupleIsValid(typtuple))
+                                ereport(errstate,
+                                            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                            errmsg("object type with OID %u does not exist", row->datatype->typoid)));
+                            typeform = (Form_pg_type)GETSTRUCT(typtuple);
+                            nspname = get_namespace_name(typeform->typnamespace);
+                            if (NULL != nspname) {
+                                appendStringInfo(&ds, "%s.",nspname);
+                            }
+                            appendStringInfo(&ds, "%s",objtypwdatumtemp.ident);
+                            ReleaseSysCache(typtuple);
+                            name = pstrdup(ds.data);
+                            pfree_ext(ds.data);
+                            isCallFunc = is_function(name, true, false);
                         }
 
                         if (isCallFunc || (enable_out_param_override() && u_sess->parser_cxt.isPerform))
                         {
                             if (u_sess->parser_cxt.isPerform) {
-                                stmt = make_callfunc_stmt(name, yylloc, false, false, funcNameList, -1, true);
+                                stmt = make_callfunc_stmt(name, yylloc, false, false, funcNameList, -1, true, objtypwdatum);
                             } else {
-                                stmt = make_callfunc_stmt(name, yylloc, true, false, funcNameList, -1, isCallFunc);
+                                stmt = make_callfunc_stmt(name, yylloc, true, false, funcNameList, -1, isCallFunc, objtypwdatum);
                             }
                             if (u_sess->parser_cxt.isPerform) {
                                 u_sess->parser_cxt.stmt = (void*)stmt;
@@ -7222,7 +7331,7 @@ static int get_func_out_arg_num(char* p_argmodes, int all_arg)
  * Notes		:
  */ 
 static PLpgSQL_stmt *
-make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eaten_first_token, List* funcNameList, int arrayFuncDno, bool isCallFunc)
+make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eaten_first_token, List* funcNameList, int arrayFuncDno, bool isCallFunc, PLwdatum *objtypwdatum)
 {
     int nparams = 0;
     int nfields = 0;
@@ -7428,14 +7537,18 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
      *  if eaten_first_token is true,first token is '(' ,so if next token is ')',it means
      *  no args
      */
-    if (eaten_first_token==true) {
-        if (tok == ')')
-            noargs = TRUE;
+    if (NULL != objtypwdatum) {
+        noargs = false;
     } else {
-        if ((tok = yylex()) == ')')
-            noargs = TRUE;
+        if (eaten_first_token==true) {
+            if (tok == ')')
+                noargs = TRUE;
+        } else {
+            if ((tok = yylex()) == ')')
+                noargs = TRUE;
+        }
+        plpgsql_push_back_token(tok);
     }
-    plpgsql_push_back_token(tok);
 
     if (isCallFunc && is_function_with_plpgsql_language_and_outparam(clist->oid)) {
         is_assign = false;
@@ -7491,7 +7604,24 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 if (plpgsql_is_token_match2(T_DATUM, PARA_EQUALS)
                     || plpgsql_is_token_match2(T_WORD, PARA_EQUALS))
                 {
-
+                    int varno = -1;
+                    /*For objtype.member methods, explicit add a self parameter*/
+                    if (0  == i && NULL != objtypwdatum) {
+                        if ('b' == p_argmodes[i]) {
+                            nfields++;
+                            pos_outer++;
+                            yylex_object_type_selfparam(fieldnames, varnos, pos_outer, &row, &rec, &varno, objtypwdatum);
+                            processFunctionRecordOutParam(varno, clist->oid, &out_param_dno);
+                        }
+                        CastTypeVariableNameToString(&func_inparas, objtypwdatum->idents, false);
+                        nparams++;
+                        i++;
+                        if ((tok = yylex()) == ')') {
+                            break;
+                        }
+                        plpgsql_push_back_token(tok);
+                        j = 1;
+                    }
                     tok = yylex();
                     if (T_DATUM == tok)
                         appendStringInfoString(&argname, NameOfDatum(&yylval.wdatum));
@@ -7513,7 +7643,6 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                              * if argmodes is 'i', just append the text, else, 
                              * row or rec should be assigned to store the out arg values
                              */
-                            int varno = -1;
                             switch (p_argmodes[j])
                             {
                                 case 'i':
@@ -7594,8 +7723,25 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 }
                 else
                 {
-                    tok = yylex();
                     int varno = -1;
+                    /*For objtype.member methods, explicit add a self parameter*/
+                    if (0  == i && NULL != objtypwdatum) {
+                        if ('b' == p_argmodes[i]) {
+                            nfields++;
+                            pos_outer++;
+                            yylex_object_type_selfparam(fieldnames, varnos, pos_outer, &row, &rec, &varno, objtypwdatum);
+                            processFunctionRecordOutParam(varno, clist->oid, &out_param_dno);
+                        }
+                        CastTypeVariableNameToString(&func_inparas, objtypwdatum->idents, false);
+                        nparams++;
+                        if ((tok = yylex()) == ')') {
+                            i++;
+                            break;
+                        }
+                        plpgsql_push_back_token(tok);
+                        continue;
+                    }
+                    tok = yylex();
                     /* p_argmodes may be null, 'i'->in , 'o'-> out ,'b' inout,others error */
                     switch (p_argmodes[i])
                     {
@@ -7718,6 +7864,17 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         {	
             for ( i = 0; i < narg; i++)
             {
+                /*For objtype.member methods, explicit add a self parameter*/
+                if (0  == i && NULL != objtypwdatum) {
+                    CastTypeVariableNameToString(&func_inparas, objtypwdatum->idents, false);
+                    nparams++;
+                    if ((tok = yylex()) == ')') {
+                        i++;
+                        break;
+                    }
+                    plpgsql_push_back_token(tok);
+                    continue;
+                }
                 tok = yylex();
                 if (T_PLACEHOLDER == tok)
                     placeholders++;
@@ -7746,6 +7903,19 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         while (true)
         {
             int varno = -1;
+            if (0 == nfields && NULL != objtypwdatum) {
+                CastTypeVariableNameToString(&func_inparas, objtypwdatum->idents, false);
+                yylex_object_type_selfparam(fieldnames, varnos, pos_outer, &row, &rec, &varno, objtypwdatum);
+                namedarg[nfields] = false;
+                namedargnamses[nfields] = NULL;
+                nparams++;
+                nfields++;
+                if ((tok = yylex()) == ')') {
+                    break;
+                }
+                plpgsql_push_back_token(tok);
+                continue;
+            }
             /* for named arguemnt */
             if (plpgsql_is_token_match2(T_DATUM, PARA_EQUALS)
                 || plpgsql_is_token_match2(T_WORD, PARA_EQUALS))
@@ -8192,6 +8362,9 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
     int narg = 0;
     int i = 0;
     char *cp[3] = {0};
+    bool isNull = false;
+    Datum typeIdDatum = InvalidOid;
+    char typMethodKind = OBJECTTYPE_NULL_PROC;
 
     /* the function is_function is only to judge if it's a function call, so memory used in it is all temp */
     AutoContextSwitch plCompileCxtGuard(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
@@ -8270,6 +8443,18 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
                 }
                 return false;
             }
+            bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
+            typeIdDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            /*Find method type from pg_object*/
+            HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(clist->oid), CharGetDatum(OBJECT_TYPE_PROC));
+            if (HeapTupleIsValid(objTuple)) {
+                typMethodKind = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+                ReleaseSysCache(objTuple);
+            }
+            if (!isNull && !ispackage && OidIsValid(ObjectIdGetDatum(typeIdDatum)) && (typMethodKind == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC || typMethodKind == OBJECTTYPE_CONSTRUCTOR_PROC)) {
+                ReleaseSysCache(proctup);
+                return false;
+            }
 
             /* get the all args informations, only "in" parameters if p_argmodes is null */
             narg = get_func_arg_info(proctup,&p_argtypes, &p_argnames, &p_argmodes);
@@ -8338,7 +8523,18 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
                 }
                 return false;
             }
-
+            bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
+            typeIdDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            /*Find method type from pg_object*/
+            HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(clist->oid), CharGetDatum(OBJECT_TYPE_PROC));
+            if (HeapTupleIsValid(objTuple)) {
+                typMethodKind = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+                ReleaseSysCache(objTuple);
+            }
+            if (!isNull && !ispackage && OidIsValid(ObjectIdGetDatum(typeIdDatum)) && (typMethodKind == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC || typMethodKind == OBJECTTYPE_CONSTRUCTOR_PROC)) {
+                ReleaseSysCache(proctup);
+                return false;
+            }
             /* get the all args informations, only "in" parameters if p_argmodes is null */
             narg = get_func_arg_info(proctup,&p_argtypes, &p_argnames, &p_argmodes);
             if (p_argmodes)
@@ -8614,14 +8810,18 @@ static bool construct_object_type(StringInfo ds, ArrayParseContext *context, Typ
         return true;
     }
     PLpgSQL_type *type = parse_datatype(name_str, loc);\
-    pfree_ext(name_str);
 
     type = get_real_elemtype(type);
     if (type->collectionType == PLPGSQL_COLLECTION_ARRAY || \
         type->collectionType == PLPGSQL_COLLECTION_TABLE) {
+        pfree_ext(name_str);
         return construct_array_start(ds, context, type, tok, parenlevel, loc);
     }
-    appendStringInfoString(ds, "ROW");
+    if (type->typtyp == TYPTYPE_ABSTRACT_OBJECT)
+        appendStringInfo(ds, name_str);
+    else
+        appendStringInfo(ds, "ROW");
+    pfree_ext(name_str);
     return true;
 }
 
@@ -9475,6 +9675,33 @@ read_sql_construct6(int until,
             case T_CWORD:
                 ds_changed = construct_cword(&ds, &context, &tok, parenlevel, loc);
                 break;
+            case T_OBJECT_TYPE_VAR_METHOD:
+                {
+                    appendStringInfo(&ds, " %s(", yylval.wdatum.ident);
+                    CastTypeVariableNameToString(&ds, yylval.wdatum.idents, false);
+                    ds_changed = true;
+
+                    parenlevel++;
+                    // Look ahead for another token to specify var.method format
+                    tok = yylex();
+                    if ('(' == tok) {
+                        int tok1 = yylex();
+                        /*if var.method()*/
+                        if (tok1 == ')') {
+                            appendStringInfo(&ds, ")");
+                            parenlevel--;
+                        } else { /* method with parameters*/
+                            appendStringInfo(&ds, ",");
+                            plpgsql_push_back_token(tok1);
+                        }
+                    } else {
+                        /*var.method*/
+                        appendStringInfo(&ds, ")");
+                        parenlevel--;
+                        plpgsql_push_back_token(tok);
+                    }
+                }
+                break;
             default:
                 tok = yylex();
 
@@ -9693,6 +9920,35 @@ static void read_multiset(StringInfoData* ds, char* tableName1, Oid typeOid1)
     }
     strlcat(funcName, suffix, sizeof(funcName));
     appendStringInfoString(ds, funcName);
+}
+
+static void CastTypeVariableNameToString(StringInfoData* ds, List* idents, bool needDot)
+{
+    char* name1 = NULL;
+    char* name2 = NULL;
+
+    switch (list_length(idents)) {
+        case 1:
+            /* object type var */
+            name1 = strVal(linitial(idents));
+            appendStringInfo(ds, "%s", name1);
+            break;
+        case 2:
+            /* package.var */
+            name1 = strVal(linitial(idents));
+            name2 = strVal(lsecond(idents));
+            appendStringInfo(ds,"%s.%s", name1, name2);
+            break;
+        default:
+            yyerror("syntax error of array functions");
+            break;
+    }
+    
+    if (needDot) {
+        appendStringInfo(ds, ", ");
+    } else {
+        appendStringInfo(ds, " ");
+    }
 }
 
 static bool copy_table_var_indents(char* tableName, char* idents, int tablevar_namelen)
@@ -13125,10 +13381,15 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     if (arraytype == TYPCATEGORY_TABLEOF ||
         arraytype == TYPCATEGORY_TABLEOF_VARCHAR ||
         arraytype == TYPCATEGORY_TABLEOF_INTEGER) {
+        typtyp = TYPTYPE_TABLEOF;
         if (UNDEFINEDOID != elemtypoid) {
             elemtypoid = get_array_type(elemtypoid);
         }
-        typtyp = TYPTYPE_TABLEOF;
+    } else if (arraytype == TYPCATEGORY_VARRAY) {
+        typtyp = TYPTYPE_VARRAY;
+        if (UNDEFINEDOID != elemtypoid) {
+            elemtypoid = get_array_type(elemtypoid);
+        }
     } else {
         typtyp = TYPTYPE_BASE;
     }
@@ -14849,4 +15110,49 @@ static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch)
     if (fetch->direction != FETCH_FORWARD || fetch->expr != NULL || fetch->is_move) {
         ereport(ERROR, (errmsg("only support FETCH CURSOR for parallel cursor \"%s\"", var->varname)));
     }
+}
+
+static void
+yylex_object_type_selfparam(char ** fieldnames,
+                int *varnos,
+                int nfields,
+                PLpgSQL_row **row,
+                PLpgSQL_rec **rec,
+                int *retvarno,
+                PLwdatum *objtypwdatum,
+                bool overload)
+{
+    StringInfoData ds;
+    initStringInfo(&ds);
+    if (NULL != objtypwdatum && NULL != objtypwdatum->idents)
+        CastTypeVariableNameToString(&ds, objtypwdatum->idents, false);
+    if (!overload) {
+        if (PLPGSQL_DTYPE_ROW == objtypwdatum->datum->dtype) {
+            fieldnames[nfields] = pstrdup(ds.data);
+            int varno = objtypwdatum->dno;
+            varnos[nfields] = varno;
+            *row = (PLpgSQL_row *)objtypwdatum->datum;
+            *retvarno = varno;
+        } else if (PLPGSQL_DTYPE_RECORD == objtypwdatum->datum->dtype) {
+            check_assignable(objtypwdatum->datum, yylloc);
+            fieldnames[nfields] = pstrdup(ds.data);
+            varnos[nfields] = objtypwdatum->dno;
+            *row = (PLpgSQL_row *)objtypwdatum->datum;
+        } else if(PLPGSQL_DTYPE_REC == objtypwdatum->datum->dtype) {
+            check_assignable(objtypwdatum->datum, yylloc);
+            fieldnames[nfields] = pstrdup(ds.data);
+            varnos[nfields] = objtypwdatum->dno;
+            *rec = (PLpgSQL_rec *)objtypwdatum->datum;            
+        } else {
+            const char *message = "It is not a object type variable";
+            InsertErrorMessage(message, plpgsql_yylloc);
+            ereport(errstate,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("\"%s\" is not a object variable", NameOfDatum(&yylval.wdatum))));
+        }
+    } else {
+        fieldnames[nfields] = NULL;
+        varnos[nfields] = -1;
+    }
+    pfree_ext(ds.data);
 }

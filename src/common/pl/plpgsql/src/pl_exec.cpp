@@ -695,8 +695,9 @@ static char* AssembleAutomnousStatement(PLpgSQL_function* func, FunctionCallInfo
 
 #ifndef ENABLE_MULTIPLE_NODES
         bool isNull = true;
+        bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isNull);
         Datum datum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isNull);
-        Oid proPackageId = DatumGetObjectId(datum);
+        Oid proPackageId = ispackage ? DatumGetObjectId(datum) : InvalidOid;
 
         if (proPackageId != InvalidOid) {
             char* pkgName = GetPackageName(proPackageId);
@@ -2018,6 +2019,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
                         MemoryContext old = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
                         u_sess->plsql_cxt.pass_func_tupdesc = CreateTupleDescCopy(tupdesc);
                         MemoryContextSwitchTo(old);
+                        retdesc = u_sess->plsql_cxt.pass_func_tupdesc;
                     }
 
                     tupmap = convert_tuples_by_position(retdesc,
@@ -8567,6 +8569,7 @@ static int exchange_parameters(
                         newrow->nfields = 0;
                         newrow->fieldnames = NULL;
                         newrow->varnos = NULL;
+                        newrow->atomically_null_object = false;
 
                         /* add all out paramters */
                         newrow->intoplaceholders = outcount;
@@ -9766,6 +9769,8 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
                 exec_move_row(estate, NULL, row, &tmptup, tupdesc);
                 ReleaseTupleDesc(tupdesc);
             }
+            if (row->atomically_null_object)
+                row->atomically_null_object = false;
             break;
         }
         case PLPGSQL_DTYPE_CURSORROW: {
@@ -11578,7 +11583,8 @@ static void exec_eval_datum(PLpgSQL_execstate* estate, PLpgSQL_datum* datum, Oid
             *typeId = row->rowtupdesc->tdtypeid;
             *typetypmod = row->rowtupdesc->tdtypmod;
             *value = HeapTupleGetDatum(tup);
-            *isnull = false;
+            /*if atomically_null_object specified(an uninitialized object type object), just record isnull*/
+            *isnull = row->atomically_null_object;
             break;
         }
         case PLPGSQL_DTYPE_CURSORROW:
@@ -12541,7 +12547,7 @@ static bool exec_eval_simple_expr(
                                 errmsg("cache lookup failed for type %u", plpgsql_estate->curr_nested_table_type)));
             }
             typtup = (Form_pg_type)GETSTRUCT(tp);
-            if (typtup->typtype != TYPTYPE_COMPOSITE)
+            if ((typtup->typtype != TYPTYPE_COMPOSITE) && (typtup->typtype != TYPTYPE_ABSTRACT_OBJECT))
                 *rettype = plpgsql_estate->curr_nested_table_type;
             ReleaseSysCache(tp);
         }
@@ -13335,6 +13341,8 @@ static void exec_move_row(PLpgSQL_execstate* estate,
         } else {
             t_natts = 0;
         }
+        if (row->atomically_null_object)
+            row->atomically_null_object = false;
 
         if (row->dtype == PLPGSQL_DTYPE_RECORD) {
             int m_natts = 0;
@@ -13371,7 +13379,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
              * row type(in rowtupdesc), but the row has more attrs than tuple, so we need
              * to split the tuple using exec_assign_value.
              */
-            if (needSplitByNattrs && needSplitByType && tup != NULL && get_typtype(tupTypeOid) == TYPTYPE_COMPOSITE) {
+            if (needSplitByNattrs && needSplitByType && tup != NULL && ((get_typtype(tupTypeOid) == TYPTYPE_COMPOSITE) || (get_typtype(tupTypeOid) == TYPTYPE_ABSTRACT_OBJECT))) {
                 Datum value;
                 bool isnull = false;
                 Oid valtype;

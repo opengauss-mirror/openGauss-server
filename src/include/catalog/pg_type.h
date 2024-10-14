@@ -388,6 +388,7 @@ DATA(insert OID = 75 (	pg_attribute	PGNSP PGUID -1 f c C f t \054 1249 0 0 recor
 DATA(insert OID = 81 (	pg_proc			PGNSP PGUID -1 f c C f t \054 1255 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 83 (	pg_class		PGNSP PGUID -1 f c C f t \054 1259 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 9745 (	gs_package			PGNSP PGUID -1 f c C f t \054 7815 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 2989 (	pg_object_type			PGNSP PGUID -1 f c C f t \054 9815 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 
 /* OIDS 100 - 199 */
 DATA(insert OID = 114 ( json		   PGNSP PGUID -1 f b U f t \054 0 0 199 json_in json_out json_recv json_send - - - i x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -824,16 +825,18 @@ DESCR("undefined objects as PLSQL compilation time");
 /*
  * macros
  */
-#define  TYPTYPE_INVALID	'\0'	/* not an allowed type */
-#define  TYPTYPE_BASE		'b' /* base type (ordinary scalar type) */
-#define  TYPTYPE_COMPOSITE	'c' /* composite (e.g., table's rowtype) */
-#define  TYPTYPE_DOMAIN		'd' /* domain over another type */
-#define  TYPTYPE_ENUM		'e' /* enumerated type */
-#define  TYPTYPE_PSEUDO		'p' /* pseudo-type */
-#define  TYPTYPE_RANGE		'r' /* range type */
-#define  TYPTYPE_TABLEOF    'o' /* table of type */
-#define  TYPTYPE_SET		's' /* set type */
-#define  TYPTYPE_UNDEFINE   'u' /* undefine type */
+#define  TYPTYPE_INVALID	     '\0'/* not an allowed type */
+#define  TYPTYPE_BASE		     'b' /* base type (ordinary scalar type) */
+#define  TYPTYPE_COMPOSITE	     'c' /* composite (e.g., table's rowtype) */
+#define  TYPTYPE_DOMAIN		     'd' /* domain over another type */
+#define  TYPTYPE_ENUM		     'e' /* enumerated type */
+#define  TYPTYPE_PSEUDO		     'p' /* pseudo-type */
+#define  TYPTYPE_RANGE		     'r' /* range type */
+#define  TYPTYPE_TABLEOF         'o' /* table of type */
+#define  TYPTYPE_VARRAY          'y' /* varray */
+#define  TYPTYPE_SET		     's' /* set type */
+#define  TYPTYPE_UNDEFINE        'u' /* undefine type */
+#define  TYPTYPE_ABSTRACT_OBJECT 'a' /* abstract object type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'
@@ -854,6 +857,7 @@ DESCR("undefined objects as PLSQL compilation time");
 #define  TYPCATEGORY_TABLEOF    'O'     /* table of type */
 #define  TYPCATEGORY_TABLEOF_VARCHAR  'Q' /* table of type, index by varchar */
 #define  TYPCATEGORY_TABLEOF_INTEGER  'F' /* table of type, index by integer */
+#define  TYPCATEGORY_VARRAY    'Y'     /* array type */
 #define  TYPCATEGORY_SET		'H' 	/* for set type */
 
 #define  TYPALIGN_CHAR			'c' /* char alignment (i.e. unaligned) */

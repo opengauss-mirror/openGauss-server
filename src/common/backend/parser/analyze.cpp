@@ -35,6 +35,7 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#include "commands/typecmds.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #endif
@@ -490,6 +491,12 @@ Query* transformVariableAlterEventStmt(ParseState* pstate, AlterEventStmt* stmt)
 static Query* TransformCompositeTypeStmt(ParseState* pstate, CompositeTypeStmt* stmt)
 {
     Query* result = makeNode(Query);
+    /* object type handle replace by itself */
+    if (stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE || stmt->typekind == TYPE_COMPOSITE_OBJECT_TYPE_BODY) {
+        result->utilityStmt = (Node*)stmt;
+        result->commandType = CMD_UTILITY;
+        return result;
+    }
     result->commandType = CMD_UTILITY;
 
     Oid old_type_oid = InvalidOid;

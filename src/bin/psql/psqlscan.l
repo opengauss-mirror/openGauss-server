@@ -92,6 +92,8 @@ typedef enum
     IDEN_SCROLL,
     IDEN_DETERMINISTIC,
 	IDEN_PACKAGE,
+	IDEN_TYPE,
+	IDEN_BODY,
     IDEN_SELECT,
     IDEN_BUTT
 }GramIdentify;
@@ -2230,6 +2232,10 @@ keywordRead(const char* text)
 		return IDEN_PROCEDURE;
     else if (!upperstrcmp(text, "package"))
         return IDEN_PACKAGE;
+    else if (!upperstrcmp(text, "type"))
+        return IDEN_TYPE;
+    else if (!upperstrcmp(text, "body"))
+        return IDEN_BODY;
 	else if (!upperstrcmp(text, "return"))
 		return IDEN_RETURN;
 	else if (!upperstrcmp(text, "returns"))
@@ -2306,6 +2312,8 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
 			state->gram_state[IDEN_PACKAGE] = true;
+			state->gram_state[IDEN_TYPE] = true;
+			state->gram_state[IDEN_BODY] = true;
 			state->count_to_read++;
 			break;
 		case IDEN_OR:
@@ -2318,6 +2326,8 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_PACKAGE] = true;
+			state->gram_state[IDEN_TYPE] = true;
+			state->gram_state[IDEN_BODY] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
 			state->count_to_read++;
 			break;
@@ -2325,6 +2335,8 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_PACKAGE] = true;
+			state->gram_state[IDEN_TYPE] = true;
+			state->gram_state[IDEN_BODY] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
 			state->count_to_read++;
 			state->count_to_read = -1;
@@ -2350,6 +2362,23 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->count_to_read = -1;
 			break;
         case IDEN_PACKAGE:
+            state->gram_state[IDEN_AS] = true;
+            state->gram_state[IDEN_IS] = true;
+            state->gram_state[IDEN_RETURN] = true;
+            state->gram_state[IDEN_RETURNS] = true;
+			state->include_ora_comment = true;
+            state->count_to_read = -1;
+            break;
+        case IDEN_TYPE:
+            state->gram_state[IDEN_AS] = false;
+            state->gram_state[IDEN_IS] = false;
+            state->gram_state[IDEN_RETURN] = true;
+            state->gram_state[IDEN_RETURNS] = true;
+            state->gram_state[IDEN_BODY] = true;
+			state->include_ora_comment = true;
+            state->count_to_read = 1;
+            break;
+        case IDEN_BODY:
             state->gram_state[IDEN_AS] = true;
             state->gram_state[IDEN_IS] = true;
             state->gram_state[IDEN_RETURN] = true;

@@ -393,7 +393,7 @@ static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
     }
 
     /* Composite types need their own input routine, though */
-    if (typeStruct->typtype == TYPTYPE_COMPOSITE) {
+    if (typeStruct->typtype == TYPTYPE_COMPOSITE || typeStruct->typtype == TYPTYPE_ABSTRACT_OBJECT) {
         arg->func = PLyObject_ToComposite;
     }
 

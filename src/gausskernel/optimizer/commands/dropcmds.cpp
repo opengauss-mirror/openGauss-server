@@ -26,6 +26,7 @@
 #include "catalog/pg_proc.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "commands/typecmds.h"
 #include "gs_policy/gs_policy_masking.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -36,6 +37,7 @@
 #include "utils/inval.h"
 #include "utils/builtins.h"
 #include "utils/syscache.h"
+#include "utils/lsyscache.h"
 
 static void does_not_exist_skipping(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
 static bool schema_does_not_exist_skipping(List *object, char **msg, char **name);
@@ -199,12 +201,9 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             HeapTuple tup;
             bool isnull = false;
             tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
-            if (tup == NULL) {
+            if (!HeapTupleIsValid(tup)) /* should not happen */
                 ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("function not found by oid:%u", address.objectId),
-                        errhint("system error")));
-            }
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
             Datum packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
             if (!isnull) {
                 Oid pkgFuncOid = DatumGetObjectId(packageOidDatum);
@@ -215,9 +214,18 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                             errhint("Use DROP PACKAGE.")));
                 }
             }
-            if (!HeapTupleIsValid(tup)) /* should not happen */
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
+            isnull = false;
+            bool ispackage = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_package, &isnull);
+            Datum typeOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
+            if (!isnull && !ispackage) {
+                Oid typFuncOid = DatumGetObjectId(typeOidDatum);
+                if (OidIsValid(typFuncOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s\" is a function in TYPE", NameListToString(objname)),
+                            errhint("Use DROP TYPE.")));
+                }
+            }
 
             if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
                 ereport(ERROR,
@@ -230,7 +238,14 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
             ReleaseSysCache(tup);
         }
-
+        /* For DROP TYPE */
+        if (stmt->removeType == OBJECT_TYPE) {
+            char typtype = get_typtype(address.objectId);
+            if ((typtype == TYPTYPE_ABSTRACT_OBJECT) || (typtype == TYPTYPE_TABLEOF) || (typtype == TYPTYPE_VARRAY)) {
+                /* Also need to drop related methods of object type */
+                RemoveTypeMethod(address.objectId);
+            }
+        }
         /* For DROP PACKAGE */
         if (stmt->removeType == OBJECT_PACKAGE) {
             pkgOid = address.objectId;

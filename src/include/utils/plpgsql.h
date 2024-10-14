@@ -138,7 +138,8 @@ enum {
     PLPGSQL_TOK_TABLE,
     PLPGSQL_TOK_TABLE_VAR,
     PLPGSQL_TOK_RECORD,
-    PLPGSQL_TOK_PACKAGE_VARIABLE
+    PLPGSQL_TOK_PACKAGE_VARIABLE,
+    PLPGSQL_TOK_OBJECT_TYPE_VAR_METHOD
 };
 
 /* ----------
@@ -487,6 +488,7 @@ typedef struct { /* openGauss data type */
     TypeDependExtend* dependExtend;
     PLpgSQL_expr* cursorExpr;
     int cursorDno;
+    char typtyp;
 } PLpgSQL_type;
 
 typedef struct {
@@ -538,7 +540,7 @@ typedef struct { /* Row variable */
     bool isImplicit;
     bool addNamespace;
     char* varname;
-
+    PLpgSQL_type* datatype;
     TupleDesc rowtupdesc;
 
     /*
@@ -562,6 +564,7 @@ typedef struct { /* Row variable */
     PLpgSQL_expr* default_val = NULL;
     Oid recordVarTypOid; /* package record var's composite type oid */
     bool hasExceptionInit;
+    bool atomically_null_object;
 } PLpgSQL_row;
 
 typedef struct {

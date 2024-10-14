@@ -129,6 +129,57 @@ BEGIN
 END;
 /
 
+drop table employee_tab2_1154887;
+drop type person_typ2_1154887;
+CREATE OR REPLACE TYPE person_typ2_1154887 AS OBJECT(
+     name VARCHAR2(10),
+	 gender VARCHAR2(4),
+     birthdate DATE,
+	 address VARCHAR2(100),
+     MEMBER PROCEDURE change_address(new_addr VARCHAR2),
+     MEMBER FUNCTION get_info RETURN VARCHAR2
+);
+
+
+
+
+CREATE TABLE employee_tab2_1154887(
+      eno NUMBER(6),person person_typ2_1154887,
+      sal NUMBER(6,2),job VARCHAR2(20)
+);
+
+
+CREATE OR REPLACE TYPE BODY person_typ2_1154887 IS
+       MEMBER PROCEDURE change_address(new_addr VARCHAR2)
+       IS
+       BEGIN
+          address:=new_addr;
+      END;
+      MEMBER FUNCTION get_info RETURN VARCHAR2
+      IS
+           v_info VARCHaR2(100);
+      BEGIN
+           v_info := '姓名：'||name||',出生日期：'||birthdate;
+           RETURN v_info;
+      END;
+end;
+/
+
+
+INSERT INTO employee_tab2_1154887(eno,sal,job,person)
+      VALUES(1,2000,'软件工程师',
+                    person_typ2_1154887('王明','男','2020-12-01','武汉北路55号'));
+
+DECLARE
+       v_person person_typ2_1154887;
+BEGIN
+       SELECT person INTO v_person FROM employee_tab2_1154887
+               WHERE eno=1;
+       v_person.change_address('江西南昌东街12号'); --改变员工地址
+       UPDATE employee_tab2_1154887 SET person=v_person WHERE eno=1;
+       raise info '%',v_person.get_info; --获取员工信息
+END;
+/
 CREATE ROLE test_role WITH PASSWORD 'openGauss@123';
 CREATE TYPE test_type as (id int);
 ALTER TYPE test_type OWNER TO test_role;

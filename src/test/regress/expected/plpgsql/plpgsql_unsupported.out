@@ -217,7 +217,7 @@ PL/pgSQL function func_pipelined_0013(numeric) line 5 at SQL statement
 referenced column: func_pipelined_0013
 reset search_path;
 drop schema plpgsql_pipelined_unsupported cascade;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to function plpgsql_pipelined_unsupported.func_with_out_param()
 drop cascades to function plpgsql_pipelined_unsupported.func_with_out_param_autonm()
 drop cascades to function plpgsql_pipelined_unsupported.func_test(numeric)
@@ -225,5 +225,6 @@ drop cascades to function plpgsql_pipelined_unsupported.func_test(numeric)
 drop cascades to function plpgsql_pipelined_unsupported.func_test(numeric)
 drop cascades to function plpgsql_pipelined_unsupported.alter_func_pipelined(numeric)
 drop cascades to type plpgsql_pipelined_unsupported.tb_type_0013
+drop cascades to function plpgsql_pipelined_unsupported.tb_type_0013(character varying[])
 drop cascades to table plpgsql_pipelined_unsupported.t_pipelined_0013
 drop cascades to function plpgsql_pipelined_unsupported.func_pipelined_0013(numeric)

@@ -37,6 +37,7 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/tableam.h"
+#include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
@@ -58,6 +59,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
 #include "catalog/gs_db_privilege.h"
+#include "commands/dbcommands.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "commands/typecmds.h"
@@ -86,6 +88,9 @@
 #include "utils/typcache.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/pg_object.h"
+#include "catalog/pg_object_type.h"
+#include "funcapi.h"
+#include "utils/typcache.h"
 
 /* result structure for get_rels_with_domain() */
 typedef struct {
@@ -115,6 +120,35 @@ static void CheckFuncParamType(Oid foid, Oid toid, bool isin);
 static void CheckTypeMatch(Oid funcOid, bool isInputFunc, int16 typlen, bool typbyval);
 static Oid GetBuiltinFuncTypeOid(Oid custumTypeFunc, bool isInputFunc);
 
+/* object type methods */
+static Oid SubTypeInheritBaseType(CompositeTypeStmt* stmt);
+static List* object_type_get_function_arguments(HeapTuple proctup);
+static List* MergeObjectTypeMethod(CompositeTypeStmt* stmt, Oid typeoid);
+static bool isSameTypeMethodArgList(List* argList1, List* argList2, List* funcname);
+static List* MergeObjectTypeAttributes(List* schema, Oid supertypeid, int32 typmod);
+static void GetSuperTypeAttribute(CompositeTypeStmt* stmt, Oid supertypeoid);
+static bool is_same_function(HeapTuple proctup, TupleDesc tupdesc, CreateFunctionStmt* method);
+static void DealTypeMethodSelfParam(CompositeTypeStmt* stmt, Oid typeoid, List* methodList);
+static void UpdateObjectTypeTypeAttribute(Oid typid);
+static void GetObjectTypeMapOrderMethod(Oid typeoid, char* mapOrder, Oid* mapid, Oid* orderid);
+static void MakeDefaultArrayConstructMethod(List* typname, Oid elemtypoid, Oid typoid);
+static List* ConstructQualifiedName(char* catalogname, char* schemaname, char* relname);
+static Node *makeAArrayExpr(List *elements, int location)
+{
+    A_ArrayExpr *n = makeNode(A_ArrayExpr);
+
+    n->elements = elements;
+    n->location = location;
+    return (Node *) n;
+}
+static Node *makeTypeCast(Node *arg, TypeName *typname, int location)
+{
+    TypeCast *n = makeNode(TypeCast);
+    n->arg = arg;
+    n->typname = typname;
+    n->location = location;
+    return (Node *) n;
+}
 /*
  * DefineType
  *		Registers a new base type.
@@ -663,12 +697,27 @@ void RemoveTypeById(Oid typeOid)
 #endif
     Relation relation;
     HeapTuple tup;
+    Relation objectrel = NULL;
+    HeapTuple objecttuple;
+    char typtype = 0;
 
     relation = heap_open(TypeRelationId, RowExclusiveLock);
-
     tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typeOid)));
+    typtype = ((Form_pg_type)GETSTRUCT(tup))->typtype;
+    /* Delete related methods while deleting object type */
+    if (typtype == TYPTYPE_ABSTRACT_OBJECT) {
+        /* Delete data in pg_object_type */
+        objectrel = heap_open(ObjectTypeRelationId, RowExclusiveLock);
+        objecttuple = SearchSysCache1(OBJECTTYPE, ObjectIdGetDatum(typeOid));
+        if (!HeapTupleIsValid(objecttuple))
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for object type %u", typeOid)));
+        CatalogTupleDelete(objectrel, &objecttuple->t_self);
+        heap_close(objectrel, RowExclusiveLock);
+        ReleaseSysCache(objecttuple);
+    }
 
     simple_heap_delete(relation, &tup->t_self);
 
@@ -2232,26 +2281,31 @@ ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt)
                 errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for type %u, type Oid is invalid", typeOid)));
     }
+    Form_pg_type typform = (Form_pg_type)GETSTRUCT(type_tup);
 
-    if (((Form_pg_type)GETSTRUCT(type_tup))->typtype == TYPTYPE_TABLEOF) {
+    if (typform->typtype == TYPTYPE_TABLEOF) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("table type does not support nested table.")));
     }
 
-    Oid refTypeOid = ((Form_pg_type)GETSTRUCT(type_tup))->typarray;
+    Oid refTypeOid = typform->typarray;
     if (!OidIsValid(refTypeOid)) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("type %s doesn't support table type.", (((Form_pg_type)GETSTRUCT(type_tup))->typname).data)));
+                errmsg("type %s doesn't support table type.", (typform->typname).data)));
     }
     ReleaseSysCache(type_tup);
 
     if (OidIsValid(typoid) && get_typisdefined(typoid)) {
-        return ReplaceTableOfType(typoid, refTypeOid);
+        /* Remove and rebuild Array construct method */
+        RemoveTypeMethod(typoid);
+        ObjectAddress address = ReplaceTableOfType(typoid, refTypeOid);
+        MakeDefaultArrayConstructMethod(stmt->typname, typeOid, address.objectId);
+        return address;
     } else {
         /* Create the pg_type entry */
-        return TypeCreate(InvalidOid, /* no predetermined type OID */
+        ObjectAddress address = TypeCreate(InvalidOid, /* no predetermined type OID */
             typname,                    /* type name */
             typeNamespace,              /* namespace */
             InvalidOid,                 /* relation oid (n/a here) */
@@ -2282,8 +2336,58 @@ ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt)
             0,                          /* Array dimensions of typbasetype */
             false,                      /* Type NOT NULL */
             InvalidOid);                /* type's collation (ranges never have one) */
+        CommandCounterIncrement();
+
+        MakeDefaultArrayConstructMethod(stmt->typname, typeOid, address.objectId);
+
+        return address;
     }
-    
+}
+
+static void MakeDefaultArrayConstructMethod(List* typname, Oid elemtypoid, Oid typoid)
+{
+    Form_pg_type type = NULL;
+    HeapTuple tuple = NULL;
+    List* paramlist = NULL;
+    List* option = NULL;
+    FunctionParameter *self = makeNode(FunctionParameter);
+    StringInfoData defassign;
+    Oid arraytypeoid = get_array_type(elemtypoid);
+    initStringInfo(&defassign);
+    appendStringInfo(&defassign, "begin return self; \nend");
+
+    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(arraytypeoid));
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("array type with OID %u does not exist", arraytypeoid)));
+    type = (Form_pg_type)GETSTRUCT(tuple);
+    self->name = pstrdup("self");
+    self->argType = makeTypeNameFromNameList(list_make2(
+        makeString(get_namespace_name(type->typnamespace)), makeString(NameStr(type->typname))));
+    self->mode = FUNC_PARAM_VARIADIC;
+    self->defexpr = (Node*)makeNullAConst(-1);
+    paramlist = lappend(paramlist, self);
+
+    CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+    n->isOraStyle = true;
+    n->isPrivate = false;
+    n->replace = true;
+    n->definer = NULL;
+    n->funcname = list_copy(typname);
+
+    n->parameters = paramlist;
+    n->returnType = makeTypeNameFromNameList(typname);
+    n->typfunckind = TABLE_VARRAY_CONSTRUCTOR_PROC;
+    n->isfinal = true;
+    option = list_make1(makeDefElem("as", (Node*)list_make1(makeString(defassign.data))));
+    option = lappend(option, makeDefElem("language", (Node*)makeString("plpgsql")));
+    option = lappend(option, makeDefElem("strict", (Node*)makeInteger(TRUE)));
+    n->options = option;
+    n->withClause = NULL;
+    n->isProcedure = false;
+
+    CreateFunction(n, NULL, InvalidOid, typoid);
+    ReleaseSysCache(tuple);
 }
 
 /* -------------------------------------------------------------------
@@ -2300,12 +2404,14 @@ ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt)
  * an implicit composite type during function creation
  * -------------------------------------------------------------------
  */
-ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist)
+ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist, bool replace,
+    ObjectAddress* reladdress, bool is_object_type)
 {
     CreateStmt* createStmt = makeNode(CreateStmt);
     Oid old_type_oid;
     Oid typeNamespace;
     ObjectAddress address;
+    Oid pkgOid = InvalidOid;
     /*
      * now set the parameters for keys/inheritance etc. All of these are
      * uninteresting for composite types...
@@ -2331,20 +2437,1311 @@ ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist)
     old_type_oid =
         GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(createStmt->relation->relname), ObjectIdGetDatum(typeNamespace));
     if (OidIsValid(old_type_oid)) {
+        /* replace will drop the ojbect type. */
+        if (replace) {
+            DropStmt* n = makeNode(DropStmt);
+            n->removeType = OBJECT_TYPE;
+            n->missing_ok = true;
+            n->objects = list_make1(list_make1(makeTypeNameFromNameList(
+                ConstructQualifiedName(typevar->catalogname, typevar->schemaname, typevar->relname))));
+            n->arguments = NIL;
+            n->behavior = DROP_CASCADE;
+            n->concurrent = false;
+            n->purge = false;
+            RemoveObjects(n, true, has_createrole_privilege(GetUserId()));
+        }
         if (!moveArrayTypeName(old_type_oid, createStmt->relation->relname, typeNamespace))
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
                     errmsg("type \"%s\" already exists", createStmt->relation->relname)));
     }
 
+    /* Check object type related package exists since object type is hard to distinguish package and object type */
+    if (is_object_type) {
+        pkgOid = PackageNameGetOid(createStmt->relation->relname, typeNamespace);
+        if (OidIsValid(pkgOid))
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("type \"%s\" already exists same package object", createStmt->relation->relname)));
+    }
+
     /*
      * Finally create the relation.  This also creates the type.
      */
 
-    DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid, &address);
+    ObjectAddress relation_address = DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid, &address);
+    if (reladdress)
+        *reladdress = relation_address;
     return address;
 }
 
+void RemoveTypeMethod(Oid typeoid)
+{
+    Relation desc;
+    ScanKeyData skey[1];
+    SysScanDesc sysscan;
+    HeapTuple tuple;
+
+    ScanKeyInit(&skey[0], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typeoid));
+    desc = heap_open(ProcedureRelationId, AccessShareLock);
+    sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 1, skey);
+
+    /* Get all method according to type_oid */
+    while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
+        Oid result = InvalidOid;
+        result = HeapTupleGetOid(tuple);
+        if (OidIsValid(result)) {
+            (void)deleteDependencyRecordsFor(ProcedureRelationId, result, true);
+            (void)deleteSharedDependencyRecordsFor(ProcedureRelationId, result, 0);
+            /* delete this method */
+            DeleteTypesDenpendOnPackage(ProcedureRelationId, result);
+            RemoveFunctionById(result);
+        }
+    }
+
+    systable_endscan(sysscan);
+    heap_close(desc, AccessShareLock);
+}
+
+static void GetObjectTypeMapOrderMethod(Oid typeoid, char *mapOrder, Oid* mapid, Oid* orderid)
+{
+    Relation desc;
+    ScanKeyData skey[2];
+    SysScanDesc sysscan;
+    HeapTuple tuple;
+
+    ScanKeyInit(&skey[0], Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(mapOrder));
+    ScanKeyInit(&skey[1], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typeoid));
+    desc = heap_open(ProcedureRelationId, AccessShareLock);
+    sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 2, skey);
+
+    /* Get all method according to type_oid */
+    while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
+        Oid result = InvalidOid;
+        result = HeapTupleGetOid(tuple);
+        bool isNull = false;
+        char methodtype = OBJECTTYPE_NULL_PROC;
+        if (!OidIsValid(result)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("map or order method \"%s\" is not exist.", mapOrder)));
+        }
+        /* Find method type from pg_object */
+        Assert(result >= FirstBootstrapObjectId);
+        HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(result), CharGetDatum(OBJECT_TYPE_PROC));
+        if (!HeapTupleIsValid(objTuple)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("map or order method \"%s\" is not exist.", mapOrder)));
+        }
+        methodtype = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+        ReleaseSysCache(objTuple);
+        if ((methodtype != OBJECTTYPE_MAP_PROC) && (methodtype != OBJECTTYPE_ORDER_PROC))
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("map or order method \"%s\" type error.", mapOrder)));
+        if (methodtype == OBJECTTYPE_MAP_PROC)
+            *mapid = result;
+        else
+            *orderid = result;
+    }
+
+    systable_endscan(sysscan);
+    heap_close(desc, AccessShareLock);
+}
+
+static void MakeDefaultParamConstructMethod(CompositeTypeStmt* stmt, Oid typoid)
+{
+    Relation relation;
+    TupleDesc tupledesc;
+    AttrNumber parent_attno;
+    Form_pg_type type = NULL;
+    HeapTuple tuple = NULL;
+    List* paramlist = NIL;
+    List* option = NIL;
+    List* typ = list_make1(makeString(stmt->typevar->relname));
+    StringInfoData defassign;
+
+    initStringInfo(&defassign);
+    appendStringInfo(&defassign, "begin \n self := ROW(");
+
+    if (stmt->typevar->schemaname)
+        typ = lcons(makeString(stmt->typevar->schemaname), typ);
+    
+    FunctionParameter *self = makeNode(FunctionParameter);
+    self->name = pstrdup("self");
+    self->argType = makeTypeNameFromNameList(typ);
+    self->mode = FUNC_PARAM_OUT;
+    paramlist = lappend(paramlist, self);
+    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("Ojbect type with Oid %u does not exist", typoid)));
+    }
+    type = (Form_pg_type)GETSTRUCT(tuple);
+
+    relation = relation_open(type->typrelid, AccessShareLock);
+    tupledesc = RelationGetDescr(relation);
+
+    for (parent_attno = 1; parent_attno <= tupledesc->natts; parent_attno++) {
+        Form_pg_attribute attribute = &tupledesc->attrs[parent_attno - 1];
+        char* attributeName = NameStr(attribute->attname);
+        FunctionParameter *param = NULL;
+
+        /* Ignore dropped columns in parent. */
+        if (attribute->attisdropped) {
+            continue; /* leave newattno entry as zero */
+        }
+        param = makeNode(FunctionParameter);
+
+        param->argType = makeTypeNameFromNameList(get_typename_with_schema(attribute->atttypid));
+        param->name = pstrdup(attributeName);
+        param->mode = FUNC_PARAM_IN;
+        param->defexpr = NULL;
+        paramlist = lappend(paramlist, param);
+        /*
+         * Use row method to build for default, add quote to make sure we can use origin value of columns
+         */
+        if (parent_attno == tupledesc->natts)
+            appendStringInfo(&defassign, "%s", quote_identifier(attributeName));
+        else
+            appendStringInfo(&defassign, "%s, ", quote_identifier(attributeName));
+    }
+
+    appendStringInfoString(&defassign, "); \nend");
+    CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+    n->isOraStyle = true;
+    n->isPrivate = false;
+    n->replace = true;
+    n->definer = NULL;
+    n->funcname = list_make1(makeString(stmt->typevar->relname));
+    if (stmt->typevar->schemaname)
+        n->funcname = lcons(makeString(stmt->typevar->schemaname), n->funcname);
+    n->parameters = paramlist;
+    n->typfunckind = OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC;
+    n->isfinal = true;
+    option = list_make1(makeDefElem("as", (Node*)list_make1(makeString(defassign.data))));
+    option = lappend(option, makeDefElem("language", (Node*)makeString("plpgsql")));
+    n->options = option;
+    n->withClause = NULL;
+    n->isProcedure = false;
+
+    stmt->methodlist = lcons(n, stmt->methodlist);
+    relation_close(relation, AccessShareLock);
+    ReleaseSysCache(tuple);
+}
+
+/*
+ * Check names and typoid, make sure it is the same type
+ * names cane be any of formates:
+ *  database.schema.type
+ *  schema.type
+ *  type
+ *
+ */
+static bool check_type_with_oid(List* names, Oid typoid)
+{
+    bool typeUnmatch = true;
+    if (list_length(names) == 1
+        && get_typeoid(SchemaNameGetSchemaOid(NULL, true), strVal(linitial(names))) == typoid) {
+        typeUnmatch = false;
+    } else if (list_length(names) == 2
+        && get_typeoid(SchemaNameGetSchemaOid(strVal(linitial(names)), true), strVal(llast(names))) == typoid) {
+        typeUnmatch = false;
+    } else if (list_length(names) == 3
+        && strcmp(get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true), strVal(linitial(names))) == 0
+        && get_typeoid(SchemaNameGetSchemaOid(strVal(lsecond(names)), true), strVal(llast(names))) == typoid) {
+        typeUnmatch = false;
+    }
+
+    return typeUnmatch;
+}
+
+void DefineObjectTypeMethodSpec(CompositeTypeStmt* stmt, Oid typoid, char** mapOrder)
+{
+    ListCell* func = NULL;
+    bool ordermap = false;
+    bool issubtype = true;
+    List* typ = list_make1(makeString(stmt->typevar->relname));
+
+    if (stmt->typevar->schemaname)
+        typ = lcons(makeString(stmt->typevar->schemaname), typ);
+    
+    /* 1. Find methods of super type. Constructor method cannot be inheritate */
+    if (NULL != stmt->supertype) {
+        /* Get Oid of super type */
+        Oid supertypeoid = InvalidOid;
+        List* inhmethod = NULL;
+        Oid typeNamespace = RangeVarGetAndCheckCreationNamespace(stmt->supertype, NoLock, NULL, RELKIND_COMPOSITE_TYPE);
+        RangeVarAdjustRelationPersistence(stmt->supertype, typeNamespace);
+        supertypeoid =
+        GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(stmt->supertype->relname), ObjectIdGetDatum(typeNamespace));
+        if (!OidIsValid(supertypeoid)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("super type \"%s\" does not exist", stmt->supertype->relname)));
+        }
+        MergeObjectTypeMethod(stmt, supertypeoid);
+        inhmethod = list_concat(inhmethod, stmt->methodlist);
+        stmt->methodlist = inhmethod;
+    } else {
+        issubtype = false;
+    }
+
+    /* 2. Build default constructor function with args */
+    MakeDefaultParamConstructMethod(stmt, typoid);
+
+    /* 3. build method recursively */
+    foreach(func, stmt->methodlist) {
+        CreateFunctionStmt* submethod = (CreateFunctionStmt*)lfirst(func);
+        char* funcname = NULL;
+        FunctionParameter *firstparam = NULL;
+        FunctionParameter *self = makeNode(FunctionParameter);
+        self->name = pstrdup("self");
+        self->argType = makeTypeNameFromNameList(typ);
+        self->mode = FUNC_PARAM_INOUT;
+
+        submethod->replace = stmt->replace;
+        QualifiedNameGetCreationNamespace(submethod->funcname, &funcname);
+
+        if (submethod->parameters != NULL) {
+            firstparam = (FunctionParameter *) linitial(submethod->parameters);
+            /* check self param type */
+            if ((submethod->typfunckind != OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC)
+                && ((NULL != firstparam->name) && (strcmp(firstparam->name, "self") == 0))
+                && check_type_with_oid(firstparam->argType->names, typoid))
+                ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                            errmsg("The self parameter type is not object type")));
+        }
+        /* The first parameter of constructor function is self and check */
+        if (submethod->typfunckind == OBJECTTYPE_CONSTRUCTOR_PROC) {
+            /* IF TYPE HAVE SCHEMA, constructor function SHOULD ALSO HAVE IT */
+            if ((list_length(submethod->funcname) != 1) || strcmp(funcname, stmt->typevar->relname) != 0)
+                ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                            errmsg("Constructor function Name %s Fault, construct function name must be same with type", funcname)));
+            submethod->returnType = makeTypeNameFromOid(typoid, -1);
+
+            if (firstparam == NULL || ((firstparam != NULL)
+                && ((NULL == firstparam->name) || (strcmp(firstparam->name, "self") != 0)))) {
+                self->mode = FUNC_PARAM_OUT;
+                submethod->parameters = lcons(self, submethod->parameters);
+            } else {
+                firstparam->mode = FUNC_PARAM_OUT;
+            }
+            if (stmt->typevar->schemaname)
+                submethod->funcname = lcons(makeString(stmt->typevar->schemaname), submethod->funcname);
+        }
+
+        /* member first param is self */
+        if (submethod->typfunckind == OBJECTTYPE_MEMBER_PROC) {
+            if ((firstparam == NULL) || ((firstparam != NULL)
+                && ((NULL == firstparam->name) || (strcmp(firstparam->name, "self") != 0)))) {
+                self->mode = FUNC_PARAM_INOUT;
+                submethod->parameters = lcons(self, submethod->parameters);
+                if (submethod->isProcedure) {
+                    submethod->returnType = NULL;
+                }
+            }
+        }
+        /* static method do not have self param */
+        if ((submethod->typfunckind == OBJECTTYPE_STATIC_PROC) && (firstparam != NULL)
+            && (NULL != firstparam->name) && (strcmp(firstparam->name, "self") == 0)) {
+            ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                        errmsg("a static method cannot declare a parameter name SELF.")));
+        }
+        /* report error if already have map method */
+        if ((submethod->typfunckind == OBJECTTYPE_ORDER_PROC
+            || submethod->typfunckind == OBJECTTYPE_MAP_PROC) && ordermap) {
+            ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                        errmsg("An object type may have only 1 MAP or 1 ORDER method.")));
+        }
+
+        /* Make sure the first parameter of map is self. Allow it to only have one parameter */
+        if (submethod->typfunckind == OBJECTTYPE_MAP_PROC) {
+            if (firstparam == NULL) {
+                self->mode = FUNC_PARAM_IN;
+                submethod->parameters = lcons(self, submethod->parameters);
+            }  else if (((NULL == firstparam->name) || (strcmp(firstparam->name, "self") != 0))
+                || list_length(submethod->parameters) >1) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                        errmsg("MAP methods must be declared without any parameters other than (optional) SELF")));
+            }
+            ordermap = true;
+            *mapOrder = funcname;
+        }
+
+        if (submethod->typfunckind == OBJECTTYPE_ORDER_PROC) {
+            if (firstparam == NULL)
+                ereport(ERROR,
+                        (errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                        errmsg("ORDER methods must be declared without any parameters other than (optional) SELF")));
+                
+            if ((((NULL != firstparam->name) && (strcmp(firstparam->name, "self") == 0))
+                    && (list_length(submethod->parameters) !=2)) ||
+                (((NULL == firstparam->name) || (strcmp(firstparam->name, "self") != 0))
+                    && (list_length(submethod->parameters) !=1)))
+                ereport(ERROR,
+                        (errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                        errmsg("ORDER methods must be declared with 1 parameters in addition to (optional)SELF.")));
+            /* order parameter check, exclude self, parameter type must be object type */
+            if ((NULL == firstparam->name) || (strcmp(firstparam->name, "self") != 0)) {
+                if (check_type_with_oid(firstparam->argType->names, typoid))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                            errmsg("The parameter type in an ORDER method must be the containing object type.")));
+            } else {
+                FunctionParameter *secondparam = (FunctionParameter *)lsecond(submethod->parameters);
+                if (check_type_with_oid(secondparam->argType->names, typoid))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_MAP_METHOD_PARAMETER),
+                            errmsg("The parameter type in an ORDER method must be the containing object type.")));
+            }
+
+            /* order method return type check, can only be number like types */
+            if (submethod->returnType != NULL) {
+                Oid returntypeid = InvalidOid;
+                Type typtup = LookupTypeName(NULL, submethod->returnType, NULL);
+                if (!HeapTupleIsValid(typtup))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                            errmsg("ORDER methods must return an INTEGER.")));
+                returntypeid = typeTypeId(typtup);
+                if (returntypeid != INT2OID && returntypeid != INT4OID
+                    && returntypeid != INT8OID && returntypeid != INT1OID)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                            errmsg("ORDER methods must return an INTEGER.")));
+                ReleaseSysCache(typtup);
+            } else {
+                ereport(ERROR,
+                        (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                        errmsg("ORDER methods must return an INTEGER.")));
+            }
+
+            /* Order function with self parameter */
+            if ((NULL != firstparam->name) && (strcmp(firstparam->name, "self") != 0)) {
+                self->mode = FUNC_PARAM_IN;
+                submethod->parameters = lcons(self, submethod->parameters);
+            }
+            ordermap = true;
+            *mapOrder = funcname;
+        }
+
+        submethod->replace = true;
+        CreateFunction(submethod, NULL, InvalidOid, typoid);
+    }
+}
+
+ObjectAddress DefineObjectTypeSpec(CompositeTypeStmt* stmt)
+{
+    Oid relid = InvalidOid;
+    Oid supertypeoid = InvalidOid;
+    Relation objectrel = NULL;
+    TupleDesc tupdesc = NULL;
+    Datum values[Natts_pg_object_type];
+    bool isnull[Natts_pg_object_type];
+    errno_t rc = EOK;
+    HeapTuple tup = NULL;
+    Oid typoid = InvalidOid;
+    Form_pg_class pgclasstuple = NULL;
+    HeapTuple classtuple = NULL;
+    HeapTuple oldobjecttuple = NULL;
+    char* mapOrder = NULL;
+    Oid mapid = InvalidOid;
+    Oid orderid = InvalidOid;
+    ObjectAddress reladdress;
+
+    /* Check if system type with the same name already exists */
+    typoid = GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(stmt->typevar->relname),
+        ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
+    if (OidIsValid(typoid)) {
+        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("type %s already exists", stmt->typevar->relname)));
+    }
+
+    /* 1. Inherite super type's method */
+    supertypeoid = SubTypeInheritBaseType(stmt);
+    /* 2. Build composite type */
+    ObjectAddress address = DefineCompositeType(stmt->typevar, stmt->coldeflist, stmt->replace, &reladdress, true);
+    relid = reladdress.objectId;
+
+    /* 3. Get Oid of composite type */
+    classtuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classtuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
+    }
+    pgclasstuple = (Form_pg_class)GETSTRUCT(classtuple);
+    typoid = pgclasstuple->reltype;
+    ReleaseSysCache(classtuple);
+
+    /* 4. Create function declaration */
+    DefineObjectTypeMethodSpec(stmt, typoid, &mapOrder);
+
+    /* 5. Build dependencies for supertype and subtype */
+    if (OidIsValid(supertypeoid)) {
+        ObjectAddress myself, referenced;
+        myself.classId = TypeRelationId;
+        myself.objectId = typoid;
+        myself.objectSubId = 0;
+
+        /* dependency on namespace */
+        referenced.classId = TypeRelationId;
+        referenced.objectId = supertypeoid;
+        referenced.objectSubId = 0;
+        recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+    }
+
+    /* 6. get object's map/order method */
+    if (mapOrder != NULL) {
+        GetObjectTypeMapOrderMethod(typoid, mapOrder, &mapid, &orderid);
+    }
+
+    /* 7. insert record to pg_object_type */
+    oldobjecttuple = SearchSysCache1(OBJECTTYPE, ObjectIdGetDatum(typoid));
+    objectrel = heap_open(ObjectTypeRelationId, RowExclusiveLock);
+    tupdesc = RelationGetDescr(objectrel);
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
+    securec_check(rc, "\0", "\0");
+
+    values[Anum_pg_object_type_typoid-1] = ObjectIdGetDatum(typoid);
+    values[Anum_pg_object_type_supertypeoid-1] = ObjectIdGetDatum(supertypeoid);
+    values[Anum_pg_object_type_isfinal-1] = BoolGetDatum(false);
+    values[Anum_pg_object_type_isinstantiable-1] = BoolGetDatum(true);
+    values[Anum_pg_object_type_ispersistable-1] = BoolGetDatum(true);
+    values[Anum_pg_object_type_isbodydefined-1] = BoolGetDatum(false);
+    values[Anum_pg_object_type_mapmethod-1] = ObjectIdGetDatum(false);
+    values[Anum_pg_object_type_ordermethod-1] = ObjectIdGetDatum(false);
+    values[Anum_pg_object_type_objectoptions-1] = Int32GetDatum(0);
+    values[Anum_pg_object_type_typespecsrc-1] = CStringGetTextDatum(stmt->typespec);
+    isnull[Anum_pg_object_type_typebodydeclsrc-1] = true;
+    isnull[Anum_pg_object_type_objectextensions-1] = true;
+
+    /* replace will delete type firstly, report an error if other object depend it */
+    if (stmt->replace && HeapTupleIsValid(oldobjecttuple)) {
+        bool replaces[Natts_pg_object_type];
+        replaces[Anum_pg_object_type_typoid-1] = true;
+        replaces[Anum_pg_object_type_supertypeoid-1] = true;
+        replaces[Anum_pg_object_type_isfinal-1] = true;
+        replaces[Anum_pg_object_type_isbodydefined-1] = true;
+        replaces[Anum_pg_object_type_mapmethod-1] = true;
+        replaces[Anum_pg_object_type_ordermethod-1] = true;
+        replaces[Anum_pg_object_type_typespecsrc-1] = true;
+
+        tup = heap_modify_tuple(oldobjecttuple, tupdesc, values, isnull, replaces);
+        CatalogTupleUpdate(objectrel, &tup->t_self, tup);
+        ReleaseSysCache(oldobjecttuple);
+    } else {
+        tup = heap_form_tuple(tupdesc, values, isnull);
+        CatalogTupleInsert(objectrel, tup);
+    }
+    /* 8.update typetyptype of pg_type */
+    UpdateObjectTypeTypeAttribute(typoid);
+
+    heap_freetuple_ext(tup);
+    heap_close(objectrel, RowExclusiveLock);
+    return address;
+}
+
+static void UpdateObjectTypeTypeAttribute(Oid typid)
+{
+    HeapTuple typetuple = NULL;
+    Relation typrel = NULL;
+    TupleDesc typtupdesc = NULL;
+    Datum values[Natts_pg_type];
+    bool isnulls[Natts_pg_type];
+    bool replace[Natts_pg_type];
+    HeapTuple tup = NULL;
+    errno_t rc = EOK;
+
+    typetuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+    if (!HeapTupleIsValid(typetuple))
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("type with OID %u does not exist.", typid)));
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(isnulls, sizeof(isnulls), 0, sizeof(isnulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replace, sizeof(replace), 0, sizeof(replace));
+    securec_check(rc, "\0", "\0");
+    typrel = heap_open(TypeRelationId, RowExclusiveLock);
+    typtupdesc = RelationGetDescr(typrel);
+    values[Anum_pg_type_typtype - 1] = CharGetDatum(TYPTYPE_ABSTRACT_OBJECT);
+    isnulls[Anum_pg_type_typtype - 1] = false;
+    replace[Anum_pg_type_typtype - 1] = true;
+
+    tup = heap_modify_tuple(typetuple, typtupdesc, values, isnulls, replace);
+    CatalogTupleUpdate(typrel, &tup->t_self, tup);
+    ReleaseSysCache(typetuple);
+    heap_close(typrel, RowExclusiveLock);
+    heap_freetuple_ext(tup);
+}
+
+void DefineObjectTypeBody(CompositeTypeStmt* stmt)
+{
+    Relation objectrel = NULL;
+    TupleDesc objectypetupdesc = NULL;
+    HeapTuple objecttuple = NULL;
+    Oid typeNamespace;
+    Form_pg_object_type objtypetup = NULL;
+    Oid typoid = InvalidOid;
+    Datum values[Natts_pg_object_type] = {0};
+    bool isnull[Natts_pg_object_type] = {0};
+    bool replaces[Natts_pg_object_type] = {0};
+    ListCell* func = NULL;
+    HeapTuple tup = NULL;
+    HeapTuple proctup = NULL;
+    ScanKeyData entry;
+    Relation procrel = NULL;
+    TupleDesc tupledesc = NULL;
+    char *mapOrder = NULL;
+    Oid mapid = InvalidOid;
+    Oid orderid = InvalidOid;
+    bool issubtype = true;
+
+    /* 1. Check if this type exists */
+    typeNamespace = RangeVarGetAndCheckCreationNamespace(stmt->typevar, NoLock, NULL, RELKIND_COMPOSITE_TYPE);
+    typoid =
+        GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(stmt->typevar->relname), ObjectIdGetDatum(typeNamespace));
+    if (!OidIsValid(typoid))
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("type \"%s\" not exists", stmt->typevar->relname)));
+    objecttuple = SearchSysCache1(OBJECTTYPE, ObjectIdGetDatum(typoid));
+    objectrel = heap_open(ObjectTypeRelationId, RowExclusiveLock);
+    objectypetupdesc = RelationGetDescr(objectrel);
+    if (!HeapTupleIsValid(objecttuple))
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("object type \"%s\" not exists", stmt->typevar->relname)));
+    objtypetup = (Form_pg_object_type)GETSTRUCT(objecttuple);
+    /* 2. Check if type body already created */
+    if (objtypetup->isbodydefined && !(stmt->replace)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("type body \"%s\" already exists", stmt->typevar->relname)));
+    }
+    /* deal with self in type method */
+    DealTypeMethodSelfParam(stmt, typoid, stmt->methodlist);
+
+    /* Inherit methods from super type */
+    if (OidIsValid(objtypetup->supertypeoid)) {
+        List *inhmethod = MergeObjectTypeMethod(stmt, objtypetup->supertypeoid);
+        DealTypeMethodSelfParam(stmt, typoid, inhmethod);
+        inhmethod = list_concat(inhmethod, stmt->methodlist);
+        stmt->methodlist = inhmethod;
+    } else {
+        issubtype = false;
+    }
+    /* 3. Recurisively build type method, if function doesnot exist while creating type body, report an error */
+    ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typoid));
+    procrel = heap_open(ProcedureRelationId, AccessShareLock);
+
+    tupledesc = RelationGetDescr(procrel);
+    SysScanDesc scan = systable_beginscan(procrel, InvalidOid, false, NULL, 1, &entry);
+    while ((proctup = systable_getnext(scan)) != NULL) {
+        Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(proctup);
+        bool isnull =  true;
+        /* Find method type from pg_object */
+        Oid result = HeapTupleGetOid(proctup);
+        Assert(result >= FirstBootstrapObjectId);
+        HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(result), CharGetDatum(OBJECT_TYPE_PROC));
+        if (!HeapTupleIsValid(objTuple)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("method with oid %u is not exist.", result)));
+        }
+        char proctype = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull));
+        ReleaseSysCache(objTuple);
+        char* funcnameintype = NameStr(proc->proname);
+        /* Check method declared in type is also defined in type body */
+        bool functiondeined = false;
+
+        if (proctype == OBJECTTYPE_NULL_PROC || isnull)
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("object method \"%s\" type is invalid", NameStr(proc->proname))));
+        if (proctype == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC) {
+            continue;
+        }
+        /* Check typelist in type body */
+        foreach(func, stmt->methodlist) {
+            CreateFunctionStmt* method = (CreateFunctionStmt*)lfirst(func);
+            char* funcname = NULL;
+            Oid bodyreturntypeid = InvalidOid;
+            bool ismemberprocedure = method->isProcedure && OBJECTTYPE_MEMBER_PROC;
+
+            QualifiedNameGetCreationNamespace(method->funcname, &funcname);
+            /* comparete type declaration in type and type body */
+            if (strcmp(funcname, funcnameintype) != 0)
+                continue;
+            /* Compare return type */
+            if (!is_same_function(proctup, tupledesc, method))
+                continue;
+            /* Check return type */
+            if (method->returnType != NULL) {
+                Type typtup = LookupTypeName(NULL, method->returnType, NULL);
+                if (!HeapTupleIsValid(typtup))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                                errmsg("type body method \"%s\" return type not exist", NameStr(proc->proname))));
+                bodyreturntypeid = typeTypeId(typtup);
+                ReleaseSysCache(typtup);
+            } else {
+                bodyreturntypeid = get_typeoid(PG_CATALOG_NAMESPACE, "void");
+            }
+
+            if ((proc->prorettype != bodyreturntypeid) && (!ismemberprocedure))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                                errmsg("type body method \"%s\" define return type error", NameStr(proc->proname))));
+            if (!functiondeined) {
+                functiondeined = true;
+            }
+        }
+        if (!functiondeined)
+            ereport(ERROR,
+                    (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+                        errmsg("type declare method \"%s\" must define type body", NameStr(proc->proname))));
+    }
+    systable_endscan(scan);
+    heap_close(procrel, NoLock);
+
+    u_sess->plsql_cxt.isCreateTypeBody = true;
+
+    /* Check typelist in type body */
+    foreach(func, stmt->methodlist) {
+        CreateFunctionStmt* method = (CreateFunctionStmt*)lfirst(func);
+        method->replace = true;
+        if (method->typfunckind == OBJECTTYPE_ORDER_PROC || method->typfunckind == OBJECTTYPE_MAP_PROC)
+            QualifiedNameGetCreationNamespace(method->funcname, &mapOrder);
+        CreateFunction(method, NULL, InvalidOid, typoid);
+    }
+    /* Get map/order method of object */
+    if (mapOrder != NULL) {
+        GetObjectTypeMapOrderMethod(typoid, mapOrder, &mapid, &orderid);
+    }
+
+    /*
+     * 4. Update pg_object_type if type body already exists, otherwise create type body.
+     */
+    if (!objtypetup->isbodydefined || stmt->replace) {
+        replaces[Anum_pg_object_type_isbodydefined-1] = true;
+        values[Anum_pg_object_type_isbodydefined-1] = BoolGetDatum(true);
+        isnull[Anum_pg_object_type_isbodydefined-1] = false;
+
+        replaces[Anum_pg_object_type_mapmethod-1] = true;
+        values[Anum_pg_object_type_mapmethod-1] = ObjectIdGetDatum(mapid);
+        isnull[Anum_pg_object_type_mapmethod-1] = false;
+        
+        replaces[Anum_pg_object_type_ordermethod-1] = true;
+        values[Anum_pg_object_type_ordermethod-1] = ObjectIdGetDatum(orderid);
+        isnull[Anum_pg_object_type_ordermethod-1] = false;
+
+        replaces[Anum_pg_object_type_typebodydeclsrc-1] = true;
+        values[Anum_pg_object_type_typebodydeclsrc-1] = CStringGetTextDatum(stmt->typebody);
+        isnull[Anum_pg_object_type_typebodydeclsrc-1] = false;
+        tup = heap_modify_tuple(objecttuple, objectypetupdesc, values, isnull, replaces);
+        CatalogTupleUpdate(objectrel, &tup->t_self, tup);
+    }
+    ReleaseSysCache(objecttuple);
+    heap_freetuple_ext(tup);
+    heap_close(objectrel, RowExclusiveLock);
+    u_sess->plsql_cxt.isCreateTypeBody = false;
+}
+
+static void DealTypeMethodSelfParam(CompositeTypeStmt* stmt, Oid typoid, List* methodlist)
+{
+    ListCell* func = NULL;
+    List* typ = list_make1(makeString(stmt->typevar->relname));
+
+    if (stmt->typevar->schemaname)
+        typ = lcons(makeString(stmt->typevar->schemaname), typ);
+
+    /* 3. build method recursively */
+    foreach(func, methodlist) {
+        CreateFunctionStmt* submethod = (CreateFunctionStmt*)lfirst(func);
+        char* funcname = NULL;
+        FunctionParameter *firstparam = NULL;
+        FunctionParameter *self = makeNode(FunctionParameter);
+        self->name = pstrdup("self");
+        self->argType = makeTypeNameFromNameList(typ);
+        self->mode = FUNC_PARAM_INOUT;
+
+        submethod->replace = stmt->replace;/* replace method while replace type */
+        QualifiedNameGetCreationNamespace(submethod->funcname, &funcname);
+        if (submethod->parameters != NULL) {
+            firstparam = (FunctionParameter*) linitial(submethod->parameters);
+            /* Check self parameter type */
+            if (((NULL != firstparam->name) && (strcmp(firstparam->name, "self") == 0))
+                && (submethod->typfunckind != OBJECTTYPE_CONSTRUCTOR_PROC)) {
+                if (firstparam->mode == FUNC_PARAM_INOUT) {
+                    self->mode = FUNC_PARAM_INOUT;
+                    submethod->parameters = list_delete_first(submethod->parameters);
+                    submethod->parameters = lcons(self, submethod->parameters);
+                }
+                continue;
+            }
+        }
+
+        /*
+         * The first parameter of construct function should be self, fix it if missing.
+         * Also, check function name and type name and build return value for object type.
+         */
+        if (submethod->typfunckind == OBJECTTYPE_CONSTRUCTOR_PROC) {
+            submethod->returnType = makeTypeNameFromOid(typoid, -1);
+            if (firstparam == NULL || ((firstparam != NULL) && ((NULL != firstparam->name)
+                && (strcmp(firstparam->name, "self") != 0)))) {
+                self->mode = FUNC_PARAM_OUT;
+                submethod->parameters = lcons(self, submethod->parameters);
+            } else {
+                firstparam->mode = FUNC_PARAM_OUT;
+            }
+            if (stmt->typevar->schemaname)
+                submethod->funcname = lcons(makeString(stmt->typevar->schemaname), submethod->funcname);
+        }
+
+        /* member, order method's first parameter is self, fix it if doesn't have one */
+        if (submethod->typfunckind == OBJECTTYPE_MAP_PROC
+            || submethod->typfunckind == OBJECTTYPE_ORDER_PROC) {
+            self->mode = FUNC_PARAM_IN;
+            submethod->parameters = lcons(self, submethod->parameters);
+        }
+        if (submethod->typfunckind == OBJECTTYPE_MEMBER_PROC) {
+            self->mode = FUNC_PARAM_INOUT;
+            submethod->parameters = lcons(self, submethod->parameters);
+            if (submethod->isProcedure) {
+                submethod->returnType = NULL;
+            }
+        }
+    }
+}
+
+static bool is_same_function(HeapTuple proctup, TupleDesc tupdesc, CreateFunctionStmt* method)
+{
+    bool isnull;
+    List *param = NULL;
+    char* language = NULL;
+    bool isWindowFunc = false;
+    bool isStrict = false;
+    bool isLeakProof = false;
+    char volatility;
+    ArrayType* proconfig = NULL;
+    float4 procost;
+    float4 prorows;
+    List* as_clause = NIL;
+    bool fenced = IS_SINGLE_NODE ? false:true;
+    bool shippable = false;
+    bool package = false;
+    bool isPipelined = false;
+    HeapTuple langtup;
+    Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(proctup);
+    Form_pg_language lang;
+    Datum fencedintype;
+    Datum shippableintype;
+    bool finalintype = true;
+    bool security = false;
+    FunctionPartitionInfo* partInfo = NULL;
+
+    /* Compare param list */
+    param = object_type_get_function_arguments(proctup);
+    if (!isSameTypeMethodArgList(param, method->parameters, method->funcname)) {
+        return false;
+    }
+    
+    /* Compare option */
+    compute_attributes_sql_style((const List*)method->options, &as_clause, &language, &isWindowFunc, &volatility,
+        &isStrict, &security, &isLeakProof, &proconfig, &procost, &prorows,
+        &fenced, &shippable, &package, &isPipelined, &partInfo);
+    
+    /* Validate language */
+    langtup = SearchSysCache1(LANGOID, ObjectIdGetDatum(proc->prolang));
+    if (!HeapTupleIsValid(langtup))
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for language %u", proc->prolang)));
+    lang = (Form_pg_language)GETSTRUCT(langtup);
+    if (strcmp(NameStr(lang->lanname), language) != 0)
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define language error", NameStr(proc->proname))));
+    ReleaseSysCache(langtup);
+
+    /* Validate isWindowFunc */
+    if (isWindowFunc != proc->proiswindow)
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define Iswindow option error", NameStr(proc->proname))));
+    /* Validate proisstrict */
+    if (isStrict != proc->proisstrict)
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define strict option error", NameStr(proc->proname))));
+    /* Validate isLeakProof */
+    if (isLeakProof != proc->proleakproof)
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define leakproof option error", NameStr(proc->proname))));
+    /* Validate fenced */
+    fencedintype = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_fenced, &isnull);
+    if (!isnull && (shippable != DatumGetBool(fencedintype)))
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define fence option error", NameStr(proc->proname))));
+    /* Validate shippable */
+    shippableintype = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_shippable, &isnull);
+    if (!isnull && (shippable != DatumGetBool(shippableintype)))
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define shippable option error", NameStr(proc->proname))));
+    /* Validate final in type */
+    Oid result = HeapTupleGetOid(proctup);
+    /* Find isfinal from pg_object */
+    HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(result), CharGetDatum(OBJECT_TYPE_PROC));
+    if (HeapTupleIsValid(objTuple)) {
+        finalintype = GET_ISFINAL(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull));
+        ReleaseSysCache(objTuple);
+    }
+    if (!isnull && (finalintype != method->isfinal))
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR),
+            errmsg("type body method \"%s\" define final option error", NameStr(proc->proname))));
+    return true;
+}
+
+static void GetSuperTypeAttribute(CompositeTypeStmt* stmt, Oid supertypeoid)
+{
+    HeapTuple supertuple = NULL;
+    Form_pg_type supertypeform = NULL;
+    /* 1. find and validate supertype info in pg_type. */
+    supertuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(supertypeoid));
+    if (!HeapTupleIsValid(supertuple))
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("super object type with OID %u does not exist", supertypeoid)));
+    supertypeform = (Form_pg_type)GETSTRUCT(supertuple);
+    /* raise an error if not object type */
+    if (!OidIsValid(supertypeform->typrelid) || supertypeform->typtype != TYPTYPE_ABSTRACT_OBJECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("super object type with OID %u is not object type", supertypeoid)));
+
+    stmt->coldeflist = MergeObjectTypeAttributes(stmt->coldeflist, supertypeoid, supertypeform->typtypmod);
+    ReleaseSysCache(supertuple);
+}
+
+static List* MergeObjectTypeAttributes(List* schema, Oid supertypeid, int32 typmod)
+{
+    List* inhSchema = NIL;
+    TupleDesc tupledesc;
+    AttrNumber parant_attno;
+
+    tupledesc = lookup_rowtype_tupdesc(supertypeid, typmod);
+
+    for (parant_attno = 1; parant_attno <= tupledesc->natts; parant_attno++) {
+        Form_pg_attribute attribute = &tupledesc->attrs[parant_attno - 1];
+        char* attributeName = NameStr(attribute->attname);
+        ColumnDef* def = NULL;
+
+        /* Ignore dropped columns in the parent */
+        if (attribute->attisdropped)
+            continue;
+        
+        /* Now, create a new inherited column */
+        def = makeNode(ColumnDef);
+        def->colname = pstrdup(attributeName);
+        def->typname = makeTypeNameFromOid(attribute->atttypid, attribute->atttypmod);
+        def->inhcount = 1;
+        def->is_local = false;
+        def->is_not_null = attribute->attnotnull;
+        def->is_from_type = false;
+        def->storage = attribute->attstorage;
+        def->kvtype = attribute->attkvtype;
+        def->cmprs_mode = attribute->attcmprmode;
+        def->raw_default = NULL;
+        def->generatedCol = '\0';
+        def->cooked_default = NULL;
+        def->collClause = NULL;
+        def->collOid = attribute->attcollation;
+        def->constraints = NIL;
+        inhSchema = lappend(inhSchema, def);
+    }
+
+    inhSchema = list_concat(inhSchema, schema);
+    schema = inhSchema;
+    ReleaseTupleDesc(tupledesc);
+
+    return schema;
+}
+
+static List* GetSuperTypeMethod(Oid supertypeoid)
+{
+    List* inhmethod = NIL;
+    Relation procrel = NULL;
+    TupleDesc tupledesc = NULL;
+    HeapTuple proctup;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(supertypeoid));
+    procrel = heap_open(ProcedureRelationId, AccessShareLock);
+
+    tupledesc = RelationGetDescr(procrel);
+    SysScanDesc scan = systable_beginscan(procrel, InvalidOid, false, NULL, 1, &entry);
+    while ((proctup = systable_getnext(scan)) != NULL) {
+        Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(proctup);
+        bool isnull = true;
+        /* Find method type from pg_object */
+        Oid result = HeapTupleGetOid(proctup);
+        Assert(result >= FirstBootstrapObjectId);
+        HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(result), CharGetDatum(OBJECT_TYPE_PROC));
+        if (!HeapTupleIsValid(objTuple)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("method with oid %u is not exist.", result)));
+        }
+        Datum object_options = SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull);
+        char proctype = GET_PROTYPEKIND(object_options);
+        bool isfinal = GET_ISFINAL(object_options);
+        ReleaseSysCache(objTuple);
+        if (proctype == OBJECTTYPE_NULL_PROC || isnull)
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("super object method \"%s\" type is invalid. ", NameStr(proc->proname))));
+        if (proctype == OBJECTTYPE_MEMBER_PROC || proctype == OBJECTTYPE_STATIC_PROC
+            || proctype == OBJECTTYPE_MAP_PROC || proctype == OBJECTTYPE_ORDER_PROC) {
+            char prokind = CharGetDatum(heap_getattr(proctup, Anum_pg_proc_prokind, tupledesc, &isnull));
+            char* procSource = TextDatumGetCString(heap_getattr(proctup, Anum_pg_proc_prosrc, tupledesc, &isnull));
+
+            CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
+            n->isOraStyle = true;
+            n->isPrivate = false;
+            n->replace = true;
+            n->definer = NULL;
+            n->inputHeaderSrc = NULL;
+            n->funcname = list_make1(makeString(pstrdup(NameStr(proc->proname))));
+            n->parameters = object_type_get_function_arguments(proctup);
+            if (proc->prorettype != supertypeoid)
+                n->returnType = makeTypeName(get_typename(proc->prorettype));
+            n->typfunckind = proctype;
+            n->isfinal = isfinal;
+            n->options = lappend(n->options, makeDefElem("as", (Node*)list_make1(makeString(procSource))));
+            n->options = lappend(n->options, makeDefElem("language", (Node*)makeString("plpgsql")));
+            n->withClause = NULL;
+            n->isProcedure = prokind;
+            inhmethod = lappend(inhmethod, n);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(procrel, NoLock);
+    return inhmethod;
+}
+
+static List* MergeObjectTypeMethod(CompositeTypeStmt* stmt, Oid supertypeoid)
+{
+    ListCell* submethodcell = NULL;
+    bool supertypemap = false;
+    List* inhmethod = NIL;
+
+    /* 1. Get supertype accroding to supertype oid */
+    inhmethod = GetSuperTypeMethod(supertypeoid);
+
+    foreach (submethodcell, stmt->methodlist) {
+        CreateFunctionStmt* submethod = (CreateFunctionStmt*)lfirst(submethodcell);
+        char* subfuncname = NULL;
+        bool issame = false;
+        ListCell* cell = NULL;
+        QualifiedNameGetCreationNamespace(submethod->funcname, &subfuncname);
+
+        if (submethod->typfunckind == OBJECTTYPE_ORDER_PROC) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("UNDER object order method \"%s\" can not defined", subfuncname)));
+        }
+
+        cell = list_head(inhmethod);
+
+        /* recursive supertype */
+        while (cell != NULL) {
+            CreateFunctionStmt* parentdef = (CreateFunctionStmt*)lfirst(cell);
+            char* parentfuncname = NULL;
+
+            cell = lnext(cell);
+            QualifiedNameGetCreationNamespace(parentdef->funcname, &parentfuncname);
+            /* subtype override supertype's map method */
+            if (parentdef->typfunckind == OBJECTTYPE_MAP_PROC) {
+                supertypemap = true;
+            }
+            if (strcmp(subfuncname, parentfuncname) == 0) {
+                /* Same funcname and same args */
+                if ((submethod->typfunckind == OBJECTTYPE_MEMBER_PROC
+                    || submethod->typfunckind == OBJECTTYPE_STATIC_PROC) && parentdef->isfinal) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("super object method \"%s\" is FINAL. ", parentfuncname)));
+                }
+                if (submethod->typfunckind != parentdef->typfunckind) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("object method \"%s\" type is not same. ", parentfuncname)));
+                }
+
+                if (isSameTypeMethodArgList(parentdef->parameters, submethod->parameters, submethod->funcname)) {
+                    /* delete supertype method from method list */
+                    list_delete(inhmethod, submethod);
+                    issame = true;
+                }
+                if (submethod->typfunckind == OBJECTTYPE_MAP_PROC) {
+                    list_delete(inhmethod, submethod);
+                }
+            }
+
+            if (parentdef->parameters != NULL) {
+                FunctionParameter *firstparam = (FunctionParameter*)linitial(parentdef->parameters);
+
+                if ((NULL != firstparam->name)
+                    && (strcmp(firstparam->name, "self") == 0) && (firstparam->mode != FUNC_PARAM_INOUT))
+                    parentdef->parameters = list_delete_first(parentdef->parameters);
+            }
+        }
+
+        if (submethod->typfunckind == OBJECTTYPE_MAP_PROC && !supertypemap)
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("super type map method not exists, sub type cannot define.")));
+    }
+    return inhmethod;
+}
+
+static bool isSameTypeMethodArgList(List* argList1, List* argList2, List* funcname)
+{
+    ListCell* cell = NULL;
+    int length1 = list_length(argList1);
+    int length2 = list_length(argList2);
+    bool enableOutparamOverride = enable_out_param_override();
+    bool isSameName = true;
+    FunctionParameter** arr1 = (FunctionParameter**)palloc(length1 *sizeof(FunctionParameter*));
+    FunctionParameter** arr2 = (FunctionParameter**)palloc(length2 *sizeof(FunctionParameter*));
+    FunctionParameter* fp1 = NULL;
+    FunctionParameter* fp2 = NULL;
+    int inArgNum1 = 0;
+    int inArgNum2 = 0;
+    int inLoc1 = 0;
+    int inLoc2 = 0;
+    int length = 0;
+
+    foreach(cell, argList1) {
+        arr1[length] = (FunctionParameter*)lfirst(cell);
+        /* Do not compare implicit parameter self */
+        if ((length ==0) && ((NULL != arr1[length]->name) && (strcmp(arr1[length]->name, "self") == 0)))
+            continue;
+        if (arr1[length]->mode != FUNC_PARAM_OUT) {
+            inArgNum1++;
+        }
+        length = length + 1;
+    }
+    length1 = length;
+    length = 0;
+
+    foreach(cell, argList2) {
+        arr2[length] = (FunctionParameter*)lfirst(cell);
+        /* Do not compare implicit parameter self */
+        if ((length ==0) && ((NULL != arr2[length]->name) && (strcmp(arr2[length]->name, "self") == 0)))
+            continue;
+        if (arr2[length]->mode != FUNC_PARAM_OUT) {
+            inArgNum2++;
+        }
+        length = length + 1;
+    }
+    length2 = length;
+    if (!enableOutparamOverride) {
+        if (inArgNum1 != inArgNum2) {
+            return false;
+        } else if (inArgNum1 == inArgNum2 && length1 != length2) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmodule(MOD_PLSQL),
+                        errmsg("can not override out param:%s",
+                        NameListToString(funcname))));
+        }
+    } else {
+        if (length1 != length2) {
+            return false;
+        }
+    }
+
+    for (int i = 0, j = 0; i < length1 || j< length2; i++, j++) {
+        if (!enableOutparamOverride) {
+            fp1 = arr1[inLoc1];
+            fp2 = arr2[inLoc2];
+        } else {
+            fp1 = arr1[i];
+            fp2 = arr2[j];
+        }
+        TypeName* t1 = fp1->argType;
+        TypeName* t2 = fp2->argType;
+        if (!enableOutparamOverride) {
+            if (fp1->mode == FUNC_PARAM_OUT && fp2->mode == FUNC_PARAM_OUT) {
+                continue;
+            } else if (fp1->mode != FUNC_PARAM_OUT && fp2->mode == FUNC_PARAM_OUT) {
+                inLoc1++;
+                continue;
+            } else if (fp1->mode == FUNC_PARAM_OUT && fp2->mode != FUNC_PARAM_OUT) {
+                inLoc2++;
+                continue;
+            } else {
+                inLoc1++;
+                inLoc2++;
+            }
+        }
+        Oid toid1 = InvalidOid;
+        Oid toid2 = InvalidOid;
+        Type typtup1;
+        Type typtup2;
+        typtup1 = LookupTypeName(NULL, t1, NULL);
+        typtup2 = LookupTypeName(NULL, t2, NULL);
+        bool isTableOf1 = false;
+        bool isTableOf2 = false;
+        Oid baseOid1 = InvalidOid;
+        Oid baseOid2 = InvalidOid;
+        if (HeapTupleIsValid(typtup1)) {
+            toid1 = typeTypeId(typtup1);
+            if (((Form_pg_type)GETSTRUCT(typtup1))->typtype == TYPTYPE_TABLEOF) {
+                baseOid1 = ((Form_pg_type)GETSTRUCT(typtup1))->typelem;
+                isTableOf1 = true;
+            }
+            ReleaseSysCache(typtup1);
+        }
+
+        if (HeapTupleIsValid(typtup2)) {
+            toid2 = typeTypeId(typtup2);
+            if (((Form_pg_type)GETSTRUCT(typtup2))->typtype == TYPTYPE_TABLEOF) {
+                baseOid2 = ((Form_pg_type)GETSTRUCT(typtup2))->typelem;
+                isTableOf2 = true;
+            }
+            ReleaseSysCache(typtup2);
+        }
+
+        /* If table of type should check its base type */
+        if (isTableOf1 == isTableOf2 && isTableOf1 == true) {
+            if (baseOid1 != baseOid2 || fp1->mode != fp2->mode) {
+                pfree_ext(arr1);
+                pfree_ext(arr2);
+                return false;
+            }
+        } else if (toid1 != toid2 || fp1->mode != fp2->mode) {
+            pfree_ext(arr1);
+            pfree_ext(arr2);
+            return false;
+        }
+        if (fp1->name == NULL || fp2->name == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("type is not exists.")));
+        }
+        if (strcmp(fp1->name, fp2->name) != 0) {
+            isSameName = false;
+        }
+    }
+    pfree_ext(arr1);
+    pfree_ext(arr2);
+    return true;
+}
+
+static Oid SubTypeInheritBaseType(CompositeTypeStmt* stmt)
+{
+    Oid supertypeoid = InvalidOid;
+    Oid typeNamespace = InvalidOid;
+    HeapTuple supertuple = NULL;
+    Form_pg_object_type supertypeform = NULL;
+
+    if (stmt->issubtype) {
+        if (NULL == stmt->supertype)
+            return InvalidOid;
+        
+        /* 1.Check if supertype exists */
+        typeNamespace = RangeVarGetAndCheckCreationNamespace(stmt->supertype, NoLock, NULL, RELKIND_COMPOSITE_TYPE);
+        RangeVarAdjustRelationPersistence(stmt->supertype, typeNamespace);
+        supertypeoid =
+            GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(stmt->supertype->relname), ObjectIdGetDatum(typeNamespace));
+        if (!OidIsValid(supertypeoid)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("SUPER TYPE \"%s\" not exists.", stmt->supertype->relname)));
+        }
+
+        /* 2. Is supertype allow to be inherited */
+        supertuple = SearchSysCache1(OBJECTTYPE, ObjectIdGetDatum(supertypeoid));
+        if (!HeapTupleIsValid(supertuple))
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("object type with oid %u does not exist.", supertypeoid)));
+        supertypeform = (Form_pg_object_type)GETSTRUCT(supertuple);
+        if (supertypeform->isfinal)
+            ereport(ERROR, (errcode(ERRCODE_CREATE_SUBTYPE_UNDER_FINAL),
+                errmsg("attempting to create a subtype UNDER a FINAL type")));
+        /* 3. subtype inherite supertype's parameter */
+        GetSuperTypeAttribute(stmt, supertypeoid);
+        ReleaseSysCache(supertuple);
+    }
+    return supertypeoid;
+}
+
+static List* object_type_get_function_arguments(HeapTuple proctup)
+{
+    int numargs;
+    Oid* argtypes = NULL;
+    char** argnames = NULL;
+    char* argmodes = NULL;
+    int i;
+    List* paramlist = NULL;
+    Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(proctup);
+    numargs = get_func_arg_info(proctup, &argtypes, &argnames, &argmodes);
+
+    for (i = 0; i < numargs; i++) {
+        FunctionParameter* n = makeNode(FunctionParameter);
+        n->argType = makeTypeNameFromNameList(get_typename_with_schema(argtypes[i]));
+        n->name = argnames ? argnames[i] : NULL;
+        n->mode = FUNC_PARAM_IN;
+        n->defexpr = NULL;
+        if (argmodes != NULL) {
+            switch (argmodes[i]) {
+                case PROARGMODE_IN:
+                    n->mode = FUNC_PARAM_IN;
+                    break;
+                case PROARGMODE_OUT:
+                    n->mode = FUNC_PARAM_OUT;
+                    break;
+                case PROARGMODE_INOUT:
+                    n->mode = FUNC_PARAM_INOUT;
+                    break;
+                case PROARGMODE_VARIADIC:
+                    n->mode = FUNC_PARAM_VARIADIC;
+                    break;
+                case PROARGMODE_TABLE:
+                    n->mode = FUNC_PARAM_TABLE;
+                    break;
+                default:
+                    ereport(ERROR, (errcode(ERRCODE_CREATE_SUBTYPE_UNDER_FINAL),
+                        errmsg("object function \"%s\" argument \"%s\" mod error.", NameStr(proc->proname), n->name)));
+            }
+        }
+        paramlist = lappend(paramlist, n);
+    }
+    return paramlist;
+}
+
+static List* ConstructQualifiedName(char* catalogname, char* schemaname, char* relname)
+{
+    List* qualifiedName = NIL;
+    if (catalogname) {
+        qualifiedName = list_make1(makeString(catalogname));
+        if (schemaname) {
+            if (relname) {
+                qualifiedName = lappend(qualifiedName, makeString(relname));
+            }
+        } else {
+            if (relname) {
+                qualifiedName = lappend(qualifiedName, makeString(relname));
+            }
+        }
+    } else {
+        if (schemaname) {
+            qualifiedName = list_make1(makeString(schemaname));
+            if (relname) {
+                qualifiedName = lappend(qualifiedName, makeString(relname));
+            }
+        } else {
+            if (relname) {
+                qualifiedName = lappend(qualifiedName, makeString(relname));
+            }
+        }
+    }
+    return qualifiedName;
+}
 /*
  * AlterDomainDefault
  *
@@ -3375,7 +4772,8 @@ ObjectAddress RenameType(RenameStmt* stmt)
      * free-standing composite type, and not a table's rowtype. We want people
      * to use ALTER TABLE not ALTER TYPE for that case.
      */
-    if (typTup->typtype == TYPTYPE_COMPOSITE && get_rel_relkind(typTup->typrelid) != RELKIND_COMPOSITE_TYPE)
+    if (((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT))
+        && (get_rel_relkind(typTup->typrelid) != RELKIND_COMPOSITE_TYPE))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("%s is a table's row type", format_type_be(typeOid)),
@@ -3414,7 +4812,7 @@ ObjectAddress RenameType(RenameStmt* stmt)
      * If type is composite we need to rename associated pg_class entry too.
      * RenameRelationInternal will call RenameTypeInternal automatically.
      */
-    if (typTup->typtype == TYPTYPE_COMPOSITE)
+    if ((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT))
         RenameRelationInternal(typTup->typrelid, newTypeName);
     else
         RenameTypeInternal(typeOid, newTypeName, typTup->typnamespace);
@@ -3473,7 +4871,8 @@ ObjectAddress AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype,
      * free-standing composite type, and not a table's rowtype. We want people
      * to use ALTER TABLE not ALTER TYPE for that case.
      */
-    if (typTup->typtype == TYPTYPE_COMPOSITE && get_rel_relkind(typTup->typrelid) != RELKIND_COMPOSITE_TYPE)
+    if (((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT))
+        && get_rel_relkind(typTup->typrelid) != RELKIND_COMPOSITE_TYPE)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("%s is a table's row type", format_type_be(typeOid)),
@@ -3525,7 +4924,7 @@ ObjectAddress AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype,
          * up the pg_class entry properly.	That will call back to
          * AlterTypeOwnerInternal to take care of the pg_type entry(s).
          */
-        if (typTup->typtype == TYPTYPE_COMPOSITE)
+        if ((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT))
             ATExecChangeOwner(typTup->typrelid, newOwnerId, true, AccessExclusiveLock);
         else {
             /*
@@ -3831,9 +5230,11 @@ Oid AlterTypeNamespaceInternal(
 
     /* Detect whether type is a composite type (but not a table rowtype) */
     isCompositeType =
-        (typform->typtype == TYPTYPE_COMPOSITE && get_rel_relkind(typform->typrelid) == RELKIND_COMPOSITE_TYPE);
+        ((typform->typtype == TYPTYPE_COMPOSITE || typform->typtype == TYPTYPE_ABSTRACT_OBJECT)
+            && get_rel_relkind(typform->typrelid) == RELKIND_COMPOSITE_TYPE);
     /* Enforce not-table-type if requested */
-    if (typform->typtype == TYPTYPE_COMPOSITE && !isCompositeType && errorOnTableType)
+    if ((typform->typtype == TYPTYPE_COMPOSITE || typform->typtype == TYPTYPE_ABSTRACT_OBJECT)
+        && !isCompositeType && errorOnTableType)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("%s is a table's row type", format_type_be(typeOid)),
@@ -3881,7 +5282,7 @@ Oid AlterTypeNamespaceInternal(
      * Update dependency on schema, if any --- a table rowtype has not got
      * one, and neither does an implicit array.
      */
-    if ((isCompositeType || typform->typtype != TYPTYPE_COMPOSITE) && !isImplicitArray)
+    if ((isCompositeType || (typform->typtype != TYPTYPE_COMPOSITE) || (typform->typtype == TYPTYPE_ABSTRACT_OBJECT)) && !isImplicitArray)
         if (changeDependencyFor(TypeRelationId, typeOid, NamespaceRelationId, oldNspOid, nspOid) != 1)
             ereport(ERROR,
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),

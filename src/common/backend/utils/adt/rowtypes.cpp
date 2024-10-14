@@ -22,6 +22,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
+#include "catalog/pg_object_type.h"
 
 /*
  * structure to cache metadata needed for record I/O
@@ -831,6 +832,8 @@ static int record_cmp(FunctionCallInfo fcinfo)
     int i1;
     int i2;
     int j;
+    Oid orderid = InvalidOid;
+    Oid mapid = InvalidOid;
 
     /* Extract type info from the tuples */
     tupType1 = HeapTupleHeaderGetTypeId(record1);
@@ -841,6 +844,13 @@ static int record_cmp(FunctionCallInfo fcinfo)
     tupTypmod2 = HeapTupleHeaderGetTypMod(record2);
     tupdesc2 = lookup_rowtype_tupdesc(tupType2, tupTypmod2);
     ncolumns2 = tupdesc2->natts;
+
+    /* Object types have their own order methods, just use it. */
+    if (tupType2 == tupType1 && isNeedObjectCmp(tupType1, &mapid, &orderid)) {
+        ReleaseTupleDesc(tupdesc1);
+        ReleaseTupleDesc(tupdesc2);
+        return ObjectIntanceCmp(PG_GETARG_DATUM(0), PG_GETARG_DATUM(1), mapid, orderid);
+    }
 
     /* Build temporary HeapTuple control structures */
     tuple1.t_len = HeapTupleHeaderGetDatumLength(record1);

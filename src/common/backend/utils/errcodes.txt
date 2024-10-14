@@ -352,6 +352,12 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P27    E    ERRCODE_PLAN_PARENT_NOT_FOUND                                  plan_parent_not_found
 42P28    E    ERRCODE_MODIFY_CONFLICTS                                       modify_conflicts
 42P29    E    ERRCODE_DISTRIBUTION_ERROR                                     distribution_error
+42P30    E    ERRCODE_CREATE_SUBTYPE_UNDER_FINAL                              create_subtype_under_final
+42P31    E    ERRCODE_MAP_METHOD_PARAMETER                                   parameter_error_for_map
+42P32    E    ERRCODE_OBJECT_ONLY_ONE_MAP_OR_ORDER_METHOD                    An_object_type_can_have_only_1_MAP_OR_ORDER_method
+42P33    E    ERRCODE_OBJECT_TYPE_METHOD_DEFINE_ERROR                        object_type_method_define_error
+42P34    E    ERRCODE_OBJECT_TYPE_BODY_DEFINE_ERROR                          object_type_body_define_error
+42P34    E    ERRCODE_OBJECT_TYPE_STATIC_ERROR                               a_static_method_cannot_declare_parameter_self
 
 # Note: for ERRCODE purposes, we divide namable objects into these categories:
 # databases, schemas, prepared statements, cursors, tables, columns,

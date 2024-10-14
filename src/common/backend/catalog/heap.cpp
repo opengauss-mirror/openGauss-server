@@ -863,7 +863,7 @@ void CheckAttributeType(
          * If it's a domain, recurse to check its base type.
          */
         CheckAttributeType(attname, getBaseType(atttypid), attcollation, containing_rowtypes, allow_system_table_mods);
-    } else if (att_typtype == TYPTYPE_COMPOSITE) {
+    } else if (att_typtype == TYPTYPE_COMPOSITE || att_typtype == TYPTYPE_ABSTRACT_OBJECT) {
         /*
          * For a composite type, recurse into its attributes.
          */

@@ -5844,7 +5844,15 @@ static CompositeTypeStmt* _copyCompositeTypeStmt(const CompositeTypeStmt* from)
     COPY_SCALAR_FIELD(replace);
     COPY_NODE_FIELD(typevar);
     COPY_NODE_FIELD(coldeflist);
-
+    if (t_thrd.proc->workingVersionNum >= OBJECT_TYPE_VERSION_NUM) {
+        COPY_NODE_FIELD(methodlist);
+        COPY_SCALAR_FIELD(typekind);
+        COPY_SCALAR_FIELD(final);
+        COPY_SCALAR_FIELD(issubtype);
+        COPY_NODE_FIELD(supertype);
+        COPY_STRING_FIELD(typespec);
+        COPY_STRING_FIELD(typebody);
+    }
     return newnode;
 }
 
@@ -5855,6 +5863,10 @@ static TableOfTypeStmt* _copyTableOfTypeStmt(const TableOfTypeStmt* from)
     COPY_SCALAR_FIELD(replace);
     COPY_NODE_FIELD(typname);
     COPY_NODE_FIELD(reftypname);
+    if (t_thrd.proc->workingVersionNum >= OBJECT_TYPE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(typtype);
+        COPY_SCALAR_FIELD(typecategory);
+    }
 
     return newnode;
 }

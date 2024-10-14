@@ -126,8 +126,15 @@ enum SysCacheIdentifier {
     STATRELKINDATTINH, /* single column statistics */
     STATRELKINDKEYINH, /* multi column statistics */
     STREAMCQID,
+#ifdef ENABLE_MULTIPLE_NODES
     STREAMCQLOOKUPID,
     STREAMCQMATRELID,
+    STREAMCQOID,
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    OBJECTTYPEOID,
+    OBJECTTYPE,
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     STREAMCQOID,
     STREAMCQRELID,

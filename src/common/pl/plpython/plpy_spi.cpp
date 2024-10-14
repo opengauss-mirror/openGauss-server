@@ -122,7 +122,7 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
 
             plan->types[i] = typeId;
             typeStruct = (Form_pg_type)GETSTRUCT(typeTup);
-            if (typeStruct->typtype != TYPTYPE_COMPOSITE) {
+            if (typeStruct->typtype != TYPTYPE_COMPOSITE || typeStruct->typtype != TYPTYPE_ABSTRACT_OBJECT) {
                 PLy_output_datum_func(&plan->args[i], typeTup);
             } else {
                 ereport(ERROR,

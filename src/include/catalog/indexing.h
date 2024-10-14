@@ -248,6 +248,12 @@ DECLARE_UNIQUE_INDEX(pg_rewrite_oid_index, 2692, on pg_rewrite using btree(oid o
 DECLARE_UNIQUE_INDEX(pg_rewrite_rel_rulename_index, 2693, on pg_rewrite using btree(ev_class oid_ops, rulename name_ops));
 #define RewriteRelRulenameIndexId  2693
 
+DECLARE_UNIQUE_INDEX(pg_object_type_index, 2990, on pg_object_type using btree(typoid oid_ops));
+#define ObjectTypeIndexId  2990
+
+DECLARE_UNIQUE_INDEX(pg_object_type_oid_index, 2992, on pg_object_type using btree(oid oid_ops));
+#define ObjectTypeOidIndexId  2992
+
 DECLARE_UNIQUE_INDEX(gs_package_oid_index, 9993, on gs_package using btree(oid oid_ops));
 #define PackageOidIndexId  9993
 

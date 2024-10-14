@@ -1735,7 +1735,7 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
 
 #ifndef ENABLE_MULTIPLE_NODES
 Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid procNamespace,
-                          Oid propackageid, Datum* values, Datum parameterModes)
+    Oid propackageid, Datum* values, Datum parameterModes, Oid protypeoid)
 {
     bool enableOutparamOverride = enable_out_param_override();
     if (t_thrd.proc->workingVersionNum < 92470) {
@@ -1752,10 +1752,13 @@ Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid pro
     }
     CatCList* catlist = NULL;
     catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
-    Oid packageid = InvalidOid;
+    Oid packageid;
+    Oid typeoid;
     for (int i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         if (HeapTupleIsValid(proctup)) {
+            packageid = InvalidOid;
+            typeoid = InvalidOid;
             Form_pg_proc pform = (Form_pg_proc)GETSTRUCT(proctup);
             Oid oldTupleOid = HeapTupleGetOid(proctup);
             /* compare function's namespace */
@@ -1763,11 +1766,19 @@ Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid pro
                 continue;
             }
             bool isNull = false;
+            bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
             Datum packageIdDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
-            if (!isNull) {
+            if (!isNull && ispackage) {
                 packageid = ObjectIdGetDatum(packageIdDatum);
             }
             if (packageid != propackageid) {
+                continue;
+            }
+            /* search for typeoid in pg_proc */
+            if (!isNull && !ispackage) {
+                typeoid = ObjectIdGetDatum(packageIdDatum);
+            }
+            if (protypeoid != typeoid) {
                 continue;
             }
             if (enableOutparamOverride) {

@@ -22,6 +22,7 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/gs_package.h"
@@ -103,7 +104,8 @@ static bool plpgsql_lookup_tripword_datum(int itemno, const char* word2, const c
 static void get_datum_tok_type(PLpgSQL_datum* target, int* tok_flag);
 static PLpgSQL_type* plpgsql_get_cursor_type_relid(const char* cursorname, const char* colname, MemoryContext oldCxt);
 static int find_package_rowfield(PLpgSQL_datum* datum, const char* pkgName, const char* schemaName = NULL);
-
+static bool isObjectTypeMethod(char* compWord, char* firstword, char* secondWord,
+    char* thirdWord, PLwdatum* wdatum, int* nsflag);
 extern bool is_func_need_cache(Oid funcid, const char* func_name);
 
 /* ----------
@@ -149,8 +151,9 @@ PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, b
      * try to find one in the hash table.
      */
     PLpgSQL_function* func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
+    bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &isnull);
     Datum pkgoiddatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
-    Oid packageOid = DatumGetObjectId(pkgoiddatum);
+    Oid packageOid = ispackage ? DatumGetObjectId(pkgoiddatum) : InvalidOid;
     Oid old_value = saveCallFromPkgOid(packageOid);
     if (enable_plpgsql_gsdependency_guc()) {
         if (func == NULL) {
@@ -272,10 +275,22 @@ recheck:
         {
             List* ref_obj_list = gsplsql_prepare_recompile_func(func_oid, proc_struct->pronamespace, packageOid, isRecompile);
             SetCurrCompilePgObjStatus(true);
+            bool isNull = false;
+            /* Find method type from pg_object */
+            char protypkind = OBJECTTYPE_NULL_PROC;
+            HeapTuple objTuple = SearchSysCache2(PGOBJECTID,
+                ObjectIdGetDatum(func_oid), CharGetDatum(OBJECT_TYPE_PROC));
+            if (HeapTupleIsValid(objTuple)) {
+                protypkind = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull));
+                ReleaseSysCache(objTuple);
+            }
+            if (!isNull && (protypkind == OBJECTTYPE_MEMBER_PROC || protypkind == OBJECTTYPE_CONSTRUCTOR_PROC))
+                u_sess->plsql_cxt.typfunckind = protypkind;
             func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
             UpdateCurrCompilePgObjStatus(save_curr_status);
             gsplsql_complete_recompile_func(ref_obj_list);
             (void)CompileStatusSwtichTo(save_compile_status);
+            u_sess->plsql_cxt.typfunckind = OBJECTTYPE_NULL_PROC;
         }
         PG_CATCH();
         {
@@ -287,6 +302,7 @@ recheck:
                 InsertError(func_oid);
             }
 #endif
+            u_sess->plsql_cxt.typfunckind = OBJECTTYPE_NULL_PROC;
             SetCurrCompilePgObjStatus(save_compile_status);
             popToOldCompileContext(save_compile_context);
             (void)CompileStatusSwtichTo(save_compile_status);
@@ -731,8 +747,9 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     }
     
     char* proc_source = TextDatumGetCString(prosrcdatum);
+    bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &isnull);
     Datum pkgoiddatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
-    if (!isnull) {
+    if (!isnull && ispackage) {
         pkgoid = ObjectIdGetDatum(pkgoiddatum);
     }
     if (OidIsValid(Anum_pg_proc_proisprivate)) {
@@ -2043,7 +2060,14 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
     nse = plpgsql_ns_lookup(expr->ns, false, name1, name2, name3, &nnames);
 
     if (nse == NULL) {
-        return NULL; /* name not known to plpgsql */
+        /* Attemt to find parameter in object type's explicit self parameter field */
+        char* selfparam = "self";
+        nnames_wholerow = 2;
+        nnames_field = 1;
+        colname = name1;
+        nse = plpgsql_ns_lookup(expr->ns, false, selfparam, name1, name3, &nnames);
+        if (nse == NULL)
+            return NULL; /* name not known to plpgsql */
     }
     if (nse->itemtype == PLPGSQL_NSTYPE_UNKNOWN) {
         if (nse->pkgname == NULL) {
@@ -2917,6 +2941,23 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
         wdatum->idents = idents;
         return true;
     }
+    /* Try to find varray word in self's field for object type */
+    if ((OBJECTTYPE_MEMBER_PROC == u_sess->plsql_cxt.typfunckind
+        || OBJECTTYPE_CONSTRUCTOR_PROC == u_sess->plsql_cxt.typfunckind
+        || OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC == u_sess->plsql_cxt.typfunckind
+        || OBJECTTYPE_MAP_PROC == u_sess->plsql_cxt.typfunckind
+        || OBJECTTYPE_ORDER_PROC == u_sess->plsql_cxt.typfunckind)
+        && isVarrayWord(word2, "self", word1, NULL, wdatum, nsflag)) {
+        wdatum->ident = NULL;
+        wdatum->quoted = false;
+        wdatum->idents = idents;
+        return true;
+    }
+    if (isObjectTypeMethod(word2, word1, NULL, NULL, wdatum, nsflag)) {
+        wdatum->ident = word2;
+        wdatum->idents = list_make1(makeString(word1));
+        return true;
+    }
     /* Nothing found */
     cword->idents = idents;
     return false;
@@ -3074,6 +3115,11 @@ bool plpgsql_parse_tripword(char* word1, char* word2, char* word3, PLwdatum* wda
         wdatum->idents = idents;
         return true;
     }
+    if (isObjectTypeMethod(word3, word1, word2, NULL, wdatum, tok_flag)) {
+        wdatum->ident = word3;
+        wdatum->idents = list_make2(makeString(word1), makeString(word2));
+        return true;
+    }
 
     /* Nothing found */
     cword->idents = idents;
@@ -3211,6 +3257,11 @@ bool plpgsql_parse_quadword(char* word1, char* word2, char* word3, char* word4,
         wdatum->ident = NULL;
         wdatum->quoted = false;
         wdatum->idents = idents;
+        return true;
+    }
+    if (isObjectTypeMethod(word4, word1, word2, word3, wdatum, tok_flag)) {
+        wdatum->ident = word4;
+        wdatum->idents = list_make3(makeString(word1), makeString(word2), makeString(word3));
         return true;
     }
 
@@ -3889,9 +3940,12 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             row->dtype = PLPGSQL_DTYPE_ROW;
             row->refname = pstrdup(refname);
             row->lineno = lineno;
+            row->datatype = dtype;
             row->addNamespace = add2namespace;
             row->varname = varname == NULL ? NULL : pstrdup(varname);
             row->default_val = NULL;
+            if (dtype->typtyp == TYPTYPE_ABSTRACT_OBJECT)
+                row->atomically_null_object = true;
             varno = plpgsql_adddatum((PLpgSQL_datum*)row);
             if (add2namespace) {
                 plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, refname, pkgname);
@@ -3986,8 +4040,10 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
 
             row = build_row_from_rec_type(refname, lineno, (PLpgSQL_rec_type*)dtype);
             row->addNamespace = add2namespace;
+            row->datatype = dtype;
             row->varname = varname == NULL ? NULL : pstrdup(varname);
             row->default_val = NULL;
+            row->atomically_null_object = false;
             varno = plpgsql_adddatum((PLpgSQL_datum*)row);
             if (add2namespace) {
                 plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, refname, pkgname);
@@ -4285,6 +4341,7 @@ PLpgSQL_row* build_row_from_class(Oid class_oid)
     row->fieldnames = (char**)palloc(sizeof(char*) * row->nfields);
     row->varnos = (int*)palloc(sizeof(int) * row->nfields);
     row->default_val = NULL;
+    row->atomically_null_object = false;
 
     for (int i = 0; i < row->nfields; i++) {
         Form_pg_attribute attr_struct;
@@ -4345,7 +4402,8 @@ static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars)
     row->fieldnames = (char**)palloc(numvars * sizeof(char*));
     row->varnos = (int*)palloc(numvars * sizeof(int));
     row->default_val = NULL;
-
+    row->atomically_null_object = false;
+    
     for (int i = 0; i < numvars; i++) {
         PLpgSQL_variable* var = vars[i];
         Oid typoid = RECORDOID;
@@ -4400,6 +4458,7 @@ PLpgSQL_row* build_row_from_tuple_desc(const char* rowname, int lineno, TupleDes
     row->fieldnames = (char**)palloc(row->nfields * sizeof(char*));
     row->varnos = (int*)palloc(row->nfields * sizeof(int));
     row->default_val = NULL;
+    row->atomically_null_object = false;
 
     for (int i = 0; i < desc->natts; i++) {
         Form_pg_attribute pg_att_form = &desc->attrs[i];
@@ -4458,6 +4517,7 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
     row->varnos = (int*)palloc(row->nfields * sizeof(int));
     row->default_val = NULL;
     row->recordVarTypOid = type->typoid;
+    row->atomically_null_object = false;
 
     for (int i = 0; i < row->nfields; i++) {
         PLpgSQL_variable* var = NULL;
@@ -4503,7 +4563,9 @@ PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation, T
     }
 
     PLpgSQL_type* typ = NULL;
-    if (((Form_pg_type)GETSTRUCT(type_tup))->typtype == TYPTYPE_TABLEOF) {
+    Form_pg_type type_struct = (Form_pg_type)GETSTRUCT(type_tup);
+    char typtyp = type_struct->typtype;
+    if (type_struct->typtype == TYPTYPE_TABLEOF) {
         /* if type is table of, find the base type tuple */
         Oid base_oid = ((Form_pg_type)GETSTRUCT(type_tup))->typelem;
         HeapTuple base_type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(base_oid));
@@ -4515,14 +4577,29 @@ PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation, T
         }
         typ = build_datatype(base_type_tup, typmod, collation);
         typ->collectionType = PLPGSQL_COLLECTION_TABLE;
-        if (((Form_pg_type)GETSTRUCT(type_tup))->typcategory == TYPCATEGORY_TABLEOF_VARCHAR) {
+        if (type_struct->typcategory == TYPCATEGORY_TABLEOF_VARCHAR) {
             typ->tableOfIndexType = VARCHAROID;
-        } else if (((Form_pg_type)GETSTRUCT(type_tup))->typcategory == TYPCATEGORY_TABLEOF_INTEGER) {
+        } else if (type_struct->typcategory == TYPCATEGORY_TABLEOF_INTEGER) {
             typ->tableOfIndexType = INT4OID;
         }
         ReleaseSysCache(base_type_tup);
+    } else if (type_struct->typtype == TYPTYPE_VARRAY) {
+        /* if type is varray, find the base type tuple */
+        Oid base_oid = type_struct->typelem;
+        HeapTuple base_type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(base_oid));
+        if (!HeapTupleIsValid(base_type_tup)) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for type %u, type Oid is invalid", base_oid)));
+        }
+        typ = build_datatype(base_type_tup, typmod, collation);
+        typ->collectionType = PLPGSQL_COLLECTION_TABLE;
+        typ->tableOfIndexType = InvalidOid;
+        ReleaseSysCache(base_type_tup);
     } else {
         typ = build_datatype(type_tup, typmod, collation);
+        typ->collectionType = PLPGSQL_COLLECTION_NONE;
     }
     ReleaseSysCache(type_tup);
     if (enable_plpgsql_gsdependency() && NULL != typ) {
@@ -4530,6 +4607,7 @@ PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation, T
         typ->dependExtend = type_depend_extend;
         typ->dependExtend->typeOid = typeOid;
     }
+    typ->typtyp = typtyp;
     return typ;
 }
 
@@ -4580,6 +4658,7 @@ PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
             typ->ttype = PLPGSQL_TTYPE_SCALAR;
             break;
         case TYPTYPE_COMPOSITE:
+        case TYPTYPE_ABSTRACT_OBJECT:
             AssertEreport(OidIsValid(type_struct->typrelid), MOD_PLSQL, "It is invalid oid.");
             typ->ttype = PLPGSQL_TTYPE_ROW;
             break;
@@ -4997,8 +5076,9 @@ static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo
     hashkey->funcOid = fcinfo->flinfo->fn_oid;
 
     bool isnull = false;
+    bool ispackage = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_package, &isnull);
     Datum packageOid_datum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
-    Oid packageOid = DatumGetObjectId(packageOid_datum);
+    Oid packageOid = ispackage ? DatumGetObjectId(packageOid_datum) : InvalidOid;
     hashkey->packageOid = packageOid;
     /* get call context */
     hashkey->isTrigger = CALLED_AS_TRIGGER(fcinfo);
@@ -5814,6 +5894,32 @@ Oid searchsubtypebytypeId(Oid typeOid, int32 *typmod)
                         errmsg("unsupported search subtype by type %u", typeOid)));
     }
     return type == TYPTYPE_TABLEOF ? searchsubtypebytypeId(resultType, typmod) : resultType;
+}
+
+static bool isObjectTypeMethod(char* compWord, char* firstWord, char* secondWord,
+    char* thirdWord, PLwdatum* wdatum, int* nsflag)
+{
+    PLpgSQL_nsitem *ns = NULL;
+    bool ret = false;
+
+    ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, firstWord, secondWord, thirdWord, NULL);
+    if (ns == NULL) {
+        return false;
+    }
+
+    if (ns->itemtype == PLPGSQL_NSTYPE_ROW) {
+        /* object type var reference method: var.method, package.var.method, schema.package.var.method */
+        PLpgSQL_row* var = (PLpgSQL_row*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+        if (var->datatype && var->datatype->dtype != PLPGSQL_DTYPE_RECORD_TYPE
+            && var->datatype->typtyp == TYPTYPE_ABSTRACT_OBJECT) {
+            wdatum->datum = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+            wdatum->dno = ns->itemno;
+            *nsflag = PLPGSQL_TOK_OBJECT_TYPE_VAR_METHOD;
+            return true;
+        }
+    }
+    
+    return ret;
 }
 
 void checkArrayTypeInsert(ParseState* pstate, Expr* expr)

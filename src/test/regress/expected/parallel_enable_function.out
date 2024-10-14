@@ -785,12 +785,13 @@ select count(*) from my_pkg.pkg_f(cursor (select * from employees));
 (1 row)
 
 drop schema parallel_enable_function cascade;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table employees
 drop cascades to type my_outrec_typ
 drop cascades to function hash_srf(refcursor)
 drop cascades to function multi_partkey_srf(refcursor)
 drop cascades to type table_my_outrec_typ
+drop cascades to function table_my_outrec_typ(my_outrec_typ[])
 drop cascades to function pipelined_table_f(refcursor)
 drop cascades to function pipelined_array_f(refcursor)
 drop cascades to function no_partition_srf(refcursor)

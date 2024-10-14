@@ -11247,7 +11247,7 @@ void check_of_type(HeapTuple typetuple)
     Form_pg_type typ = (Form_pg_type)GETSTRUCT(typetuple);
     bool typeOk = false;
 
-    if (typ->typtype == TYPTYPE_COMPOSITE) {
+    if (typ->typtype == TYPTYPE_COMPOSITE || typ->typtype == TYPTYPE_ABSTRACT_OBJECT) {
         Relation typeRelation;
 
         Assert(OidIsValid(typ->typrelid));

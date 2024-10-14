@@ -28,6 +28,8 @@
 #include "access/reloptions.h"
 #include "access/xlogdefs.h"
 #include "access/ustore/knl_uundovec.h"
+#include "catalog/pg_object.h"
+#include "catalog/pg_proc.h"
 #include "commands/tablespace.h"
 #include "executor/instrument.h"
 #include "gssignal/gs_signal.h"
@@ -884,6 +886,8 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
     plsql_cxt->parallel_cursor_arg_name = NULL;
+    plsql_cxt->isCreateTypeBody = false;
+    plsql_cxt->typfunckind = OBJECTTYPE_NULL_PROC;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)

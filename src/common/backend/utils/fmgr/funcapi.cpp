@@ -18,6 +18,7 @@
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_language.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
@@ -207,28 +208,32 @@ bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
         ReleaseSysCache(tp);
         return false;
     }
-    
-    Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tp, Anum_pg_proc_proargmodes, &isNull);
-    if (!isNull) {
-        ArrayType* arr = DatumGetArrayTypeP(proargmodes);
-        if (arr != NULL) {
-            int modelen = ARR_DIMS(arr)[0];
-            char *argmodes = (char*)ARR_DATA_PTR(arr);
-            for (int i = 0; i < modelen; i++) {
-                if (argmodes[i] == PROARGMODE_OUT || argmodes[i] == PROARGMODE_INOUT ||
-                    argmodes[i] == PROARGMODE_TABLE) {
-                    existOutParam = true;
-                    break;
+    /* Do not handle object type's constructor method */
+    char objMethodKind = get_object_method_kind(funcid);
+    if ((objMethodKind == OBJECTTYPE_CONSTRUCTOR_PROC) || (objMethodKind == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC)) {
+        existOutParam = false;
+    } else {
+        Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tp, Anum_pg_proc_proargmodes, &isNull);
+        if (!isNull) {
+            ArrayType* arr = DatumGetArrayTypeP(proargmodes);
+            if (arr != NULL) {
+                int modelen = ARR_DIMS(arr)[0];
+                char *argmodes = (char*)ARR_DATA_PTR(arr);
+                for (int i = 0; i < modelen; i++) {
+                    if (argmodes[i] == PROARGMODE_OUT || argmodes[i] == PROARGMODE_INOUT ||
+                        argmodes[i] == PROARGMODE_TABLE) {
+                        existOutParam = true;
+                        break;
+                    }
                 }
             }
         }
+        Form_pg_proc procstruct = (Form_pg_proc)GETSTRUCT(tp);
+        if (existOutParam && procstruct->proretset) {
+            ReleaseSysCache(tp);
+            return false;
+        }
     }
-    Form_pg_proc procstruct = (Form_pg_proc)GETSTRUCT(tp);
-    if (existOutParam && procstruct->proretset) {
-        ReleaseSysCache(tp);
-        return false;
-    }
-    
     ReleaseSysCache(tp);
     return existOutParam;
 }
@@ -852,6 +857,7 @@ static TypeFuncClass get_type_func_class(Oid typid)
 {
     switch (get_typtype(typid)) {
         case TYPTYPE_COMPOSITE:
+        case TYPTYPE_ABSTRACT_OBJECT:
             return TYPEFUNC_COMPOSITE;
 
         case TYPTYPE_BASE:
@@ -859,6 +865,7 @@ static TypeFuncClass get_type_func_class(Oid typid)
         case TYPTYPE_ENUM:
         case TYPTYPE_RANGE:
         case TYPTYPE_TABLEOF:
+        case TYPTYPE_VARRAY:
             return TYPEFUNC_SCALAR;
 
         case TYPTYPE_PSEUDO:

@@ -203,7 +203,8 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                 }
             }
 
-            if (rvTypeStruct->typtype == TYPTYPE_COMPOSITE || procStruct->prorettype == RECORDOID) {
+            if (rvTypeStruct->typtype == TYPTYPE_COMPOSITE || rvTypeStruct->typtype == TYPTYPE_ABSTRACT_OBJECT
+                || procStruct->prorettype == RECORDOID) {
                 /*
                  * Tuple: set up later, during first call to
                  * PLy_function_handler
@@ -270,6 +271,7 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                                 errmsg("PL/Python functions cannot accept type %s", format_type_be(types[i]))));
                         break;
                     case TYPTYPE_COMPOSITE:
+                    case TYPTYPE_ABSTRACT_OBJECT:
                         /* we'll set IO funcs at first call */
                         proc->args[pos].is_rowtype = 2;
                         break;

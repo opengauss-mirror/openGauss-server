@@ -571,7 +571,8 @@ static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
  */
 static bool checkPackageFunctionConflicts(const char* procedureName,
     Datum allParameterTypes, oidvector* parameterTypes, Datum parameterModes,
-    Oid procNamespace, bool package, Oid propackageid, Oid languageId, bool isOraStyle, bool replace)
+    Oid procNamespace, bool package, Oid propackageid, Oid languageId, bool isOraStyle,
+    bool replace, Oid protypeid = InvalidOid)
 {
     int inpara_count;
     int allpara_count = 0;
@@ -632,16 +633,23 @@ static bool checkPackageFunctionConflicts(const char* procedureName,
             /* compare function's namespace */
             if (pform->pronamespace != procNamespace)
                 continue;
-            Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
-            Oid packageid = ObjectIdGetDatum(packageid_datum);
-            if (packageid != propackageid) 
-                continue;
             Datum propackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
             bool ispackage = false;
             if (!isNull)
                 ispackage = DatumGetBool(propackage);
+            Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            Oid packageid = InvalidOid;
+            Oid typid  = InvalidOid;
+            if (!isNull && ispackage)
+                packageid = ObjectIdGetDatum(packageid_datum);
+            if (packageid != propackageid) 
+                continue;
+            if (!isNull && !ispackage)
+                typid = ObjectIdGetDatum(packageid_datum);
+            if (protypeid != typid)
+                continue;
             /* only check package function */
-            if (ispackage != package) {
+            if (ispackage != package && protypeid == InvalidOid) {
                 ReleaseSysCacheList(catlist);
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1066,7 +1074,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
     bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate,
     TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt, bool isPipelined,
-    FunctionPartitionInfo* partInfo)
+    FunctionPartitionInfo* partInfo, Oid protypeid, char typefunckind, bool isfinal)
 {
     Oid retval;
     int parameterCount;
@@ -1371,10 +1379,13 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     values[Anum_pg_proc_proisprivate - 1] = BoolGetDatum(isPrivate ? true : false);
     if (OidIsValid(propackageid)) {
         values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(propackageid);
+    } else if (OidIsValid(protypeid)) {
+        /* packageid also record oid for object type procedure */
+        values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(protypeid);
     } else {
         values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(InvalidOid);
     }
-	
+
     if (allParameterTypes != PointerGetDatum(NULL))
         values[Anum_pg_proc_proallargtypes - 1] = allParameterTypes;
     else
@@ -1446,6 +1457,9 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     if (OidIsValid(propackageid)) {
         values[Anum_pg_proc_package - 1] = true;
         package = true;
+    } else if (OidIsValid(protypeid)) {
+        /* we treat object type methods as package function. But we don't record it in pg_proc */
+        package = true;
     } else {
         values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
     }
@@ -1478,14 +1492,22 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
 
     /* A db do not overload a function by arguments.*/
     char* pkgname = NULL;
+    char* typname = NULL;
     char* schemaName = get_namespace_name(procNamespace);
     if (OidIsValid(propackageid)) {
         pkgname = GetPackageName(propackageid);
     }
-    if (pkgname == NULL) { 
-        name = list_make2(makeString(schemaName), makeString(pstrdup(procedureName)));
-    } else {
+    if (OidIsValid(protypeid)) {
+        Type oid_type = typeidType(protypeid);
+        typname = typeTypeName(oid_type);
+        ReleaseSysCache((HeapTuple)oid_type);
+    }
+    if (typname != NULL) {
+        name = list_make3(makeString(schemaName), makeString(pstrdup(typname)), makeString(pstrdup(procedureName)));
+    } else if (pkgname != NULL) {
         name = list_make3(makeString(schemaName), makeString(pstrdup(pkgname)), makeString(pstrdup(procedureName)));
+    } else {
+        name = list_make2(makeString(schemaName), makeString(pstrdup(procedureName)));
     }
 #ifndef ENABLE_MULTIPLE_NODES
     if (pkgname == NULL) {
@@ -1512,7 +1534,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* Check for pre-existing definition */
 #ifndef ENABLE_MULTIPLE_NODES
         Oid oldTupleOid = GetOldTupleOid(procedureName, parameterTypes, procNamespace,
-                                          propackageid, values, parameterModes);
+            propackageid, values, parameterModes, protypeid);
         oldtup = SearchSysCache1(PROCOID, ObjectIdGetDatum(oldTupleOid));
 #else
         oldtup = SearchSysCache3(PROCNAMEARGSNSP,
@@ -1538,7 +1560,8 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             isWindowFunc);
 
         Datum ispackage = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_package, &isNull);
-        if (!isNull && DatumGetBool(ispackage) != package) {
+        /* skip this restrict for obejct type method */
+        if (!isNull && DatumGetBool(ispackage) != package && protypeid == InvalidOid) {
             ReleaseSysCache(oldtup);
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1587,7 +1610,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* checking for package function */
         bool conflicts =
             checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, parameterModes,
-                procNamespace, package, propackageid, languageObjectId, isOraStyle, replace);
+                procNamespace, package, propackageid, languageObjectId, isOraStyle, replace, protypeid);
         if (conflicts) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1694,25 +1717,32 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             gsDependParamBody.dependName = funcHeadObjDesc.name;
         }
 
-        /* dependency on return type */
-        referenced.classId = TypeRelationId;
-        referenced.objectId = returnType;
-        referenced.objectSubId = 0;
-        if (enable_plpgsql_gsdependency() && NULL != retTypDependExt) {
-            gsDependParamBody.dependExtend = retTypDependExt;
-            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
-            if (gsDependParamBody.hasDependency) {
-                hasDependency = true;
+        /* Do not record dependency while return type is current object type */
+        if (protypeid != returnType && typefunckind != TABLE_VARRAY_CONSTRUCTOR_PROC) {
+            /* dependency on return type */
+            referenced.classId = TypeRelationId;
+            referenced.objectId = returnType;
+            referenced.objectSubId = 0;
+            if (enable_plpgsql_gsdependency() && NULL != retTypDependExt) {
+                gsDependParamBody.dependExtend = retTypDependExt;
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
+                if (gsDependParamBody.hasDependency) {
+                    hasDependency = true;
+                }
+                if (gsDependParamBody.dependExtend->dependUndefined) {
+                    hasUndefined = true;
+                }
+            } else {
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
             }
-            if (gsDependParamBody.dependExtend->dependUndefined) {
-                hasUndefined = true;
-            }
-        } else {
-            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
         }
 
         /* dependency on parameter types */
         for (i = 0; i < allParamCount; i++) {
+            /* Do not record dependency while parameter type is current object type */
+            if (typefunckind == TABLE_VARRAY_CONSTRUCTOR_PROC || protypeid == allParams[i]) {
+                continue;
+            }
             referenced.classId = TypeRelationId;
             referenced.objectId = allParams[i];
             referenced.objectSubId = 0;
@@ -1741,7 +1771,13 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             referenced.objectSubId = 0;
             recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
         }
-
+        /* dependency on type */
+        if (protypeid != InvalidOid) {
+            referenced.classId = TypeRelationId;
+            referenced.objectId = protypeid;
+            referenced.objectSubId = 0;
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+        }
         /* dependency on parameter default expressions */
         if (parameterDefaults != NULL)
             recordDependencyOnExpr(&myself, (Node*)parameterDefaults, NIL, DEPENDENCY_NORMAL);
@@ -1805,7 +1841,12 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     if (OidIsValid(retval)) {
         if (!is_update) {
             PgObjectOption objectOpt = {true, true, false, false};
-            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, objectOpt, !hasUndefined);
+            /* build object_options for pg_object */
+            int32 object_options = 0x0ff;
+            object_options &= (int32)typefunckind;
+            if (isfinal)
+                object_options += 0x100;
+            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, objectOpt, !hasUndefined, object_options);
         } else {
             UpdatePgObjectMtime(retval, OBJECT_TYPE_PROC);
             CommandCounterIncrement();
@@ -1861,9 +1902,10 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             ProcessGUCArray(set_items, (superuser() ? PGC_SUSET : PGC_USERSET), PGC_S_SESSION, GUC_ACTION_SAVE);
         } else
             save_nestlevel = 0; /* keep compiler quiet */
-
+        /* Record the typefunckind for object type's methods */
+        u_sess->plsql_cxt.typfunckind = typefunckind;
         OidFunctionCall3(languageValidator, ObjectIdGetDatum(retval), BoolGetDatum(isPrivate), BoolGetDatum(replace));
-
+        u_sess->plsql_cxt.typfunckind = OBJECTTYPE_NULL_PROC;
         if (set_items != NULL)
             AtEOXact_GUC(true, save_nestlevel);
     }
@@ -2873,4 +2915,5 @@ void LockProcName(char* schemaname, char* pkgname, const char* funcname)
         LockDatabaseObject(ProcedureRelationId, schemaOid, hash_value, ExclusiveLock);
     }
 }
+
 #endif

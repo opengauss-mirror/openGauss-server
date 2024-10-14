@@ -169,6 +169,8 @@ DATA(insert OID = 1255 (  pg_proc       PGNSP 81 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0
 DESCR("");
 DATA(insert OID = 7815 (  gs_package       PGNSP 9745 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 8 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_ 1));
 DESCR("");
+DATA(insert OID = 9815 (  pg_object_type       PGNSP 2989 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 13 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_ 1));
+DESCR("");
 DATA(insert OID = 1259 (  pg_class      PGNSP 83 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 40 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_ 1));
 DESCR("");
 

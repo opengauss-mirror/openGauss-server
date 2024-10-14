@@ -1521,11 +1521,27 @@ typedef struct UnlistenStmt {
  */
 typedef struct CompositeTypeStmt {
     NodeTag type;
-    bool replace;
+    bool replace;      /* replace if already exists */
     RangeVar* typevar; /* the composite type to be created */
     List* coldeflist;  /* list of ColumnDef nodes */
+    List* methodlist; /* list of method declaration */
+    uint8 typekind;   /* what kind of compisite type */
+    bool final;       /* final means not allow to create subtype */
+    bool issubtype;   /* is subtype or not */
+    RangeVar* supertype; /* super type */
+    char* typespec;
+    char* typebody;
 } CompositeTypeStmt;
-
+/* ----------------------
+ *		Create Type Statement, composite types
+ * ----------------------
+ */
+typedef struct CompositeTypeBodyStmt {
+    NodeTag type;
+    RangeVar* typevar; /* the composite type to be created */
+    List* methodlist; /* method declaration list */
+    bool replace;     /* replace if already exists */
+} CompositeTypeBodyStmt;
 /* ----------------------
  *		Create Type Statement, table of types
  * ----------------------
@@ -1535,6 +1551,8 @@ typedef struct TableOfTypeStmt {
     bool replace;
     List* typname;         /* the table of type to be quoted */
     TypeName* reftypname;  /* the name of the type being referenced */
+    char typtype;          /* distinct table of type and varray of type */
+    char typecategory;     /* distinct table of type and varray of type */
 } TableOfTypeStmt;
 
 /* ----------------------

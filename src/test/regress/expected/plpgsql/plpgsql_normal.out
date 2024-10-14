@@ -431,11 +431,13 @@ select * from pkg0016.func_pipelined_0016(2);
 
 reset search_path;
 drop schema plpgsql_pipelined cascade;
-NOTICE:  drop cascades to 20 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to type plpgsql_pipelined.t_tf_row
 drop cascades to type plpgsql_pipelined.t_tf_tab
+drop cascades to function plpgsql_pipelined.t_tf_tab(plpgsql_pipelined.t_tf_row[])
 drop cascades to function plpgsql_pipelined.get_tab_ptf(numeric)
 drop cascades to type plpgsql_pipelined.int_arr
+drop cascades to function plpgsql_pipelined.int_arr(integer[])
 drop cascades to function plpgsql_pipelined.get_table_of_int(numeric)
 drop cascades to function plpgsql_pipelined.get_tab_ptf_autom(numeric)
 drop cascades to function plpgsql_pipelined.get_table_of_int_autom(numeric)
@@ -446,6 +448,7 @@ drop cascades to table plpgsql_pipelined.stocktable
 drop cascades to function plpgsql_pipelined.stockpivot_pl()
 drop cascades to type plpgsql_pipelined.type_0022
 drop cascades to type plpgsql_pipelined.tb_type_0022
+drop cascades to function plpgsql_pipelined.tb_type_0022(plpgsql_pipelined.type_0022[])
 drop cascades to function plpgsql_pipelined.func_pipelined_022(numeric)
 drop cascades to table plpgsql_pipelined.test
 drop cascades to function plpgsql_pipelined.insert_test()

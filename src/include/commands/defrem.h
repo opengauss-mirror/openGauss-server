@@ -51,8 +51,10 @@ extern bool PrepareCFunctionLibrary(HeapTuple tup);
 extern void InsertIntoPendingLibraryDelete(const char* filename, bool atCommit);
 extern void libraryDoPendingDeletes(bool isCommit);
 extern void ResetPendingLibraryDelete();
-extern ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_oid = InvalidOid);
-extern ObjectAddress CreateFunction_extend(CreateFunctionStmt* stmt, const char* queryString, void* getHeaderInfoCtx, void** pHeapTuple, bool isPackageFunc = false);
+extern ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString,
+    Oid pkg_oid = InvalidOid, Oid type_oid = InvalidOid);
+extern ObjectAddress CreateFunction_extend(CreateFunctionStmt* stmt, const char* queryString,
+    void* getHeaderInfoCtx, void** pHeapTuple, bool isPackageFunc = false, Oid type_oid = InvalidOid);
 extern ObjectAddress RenameFunction(List* name, List* argtypes, const char* newname);
 extern void RemoveFunctionById(Oid funcOid);
 extern void remove_encrypted_proc_by_id(Oid funcOid);
@@ -206,6 +208,10 @@ extern ObjectAddress AlterDataSourceOwner(const char* name, Oid newOwnerId);
 extern void RemoveDataSourceById(Oid src_Id);
 
 extern Oid GetFunctionNodeGroup(CreateFunctionStmt* stmt, bool* multi_group);
+extern List* compute_attributes_sql_style(const List* options, List** as, char** language,
+    bool* windowfunc_p, char* volatility_p, bool* strict_p, bool* security_definer, bool* leakproof_p,
+    ArrayType** proconfig, float* procost, float4* prorows, bool* fenced,
+    bool* shippable, bool* package, bool* is_pipelined, FunctionPartitionInfo** partInfo);
 extern Oid GetFunctionNodeGroupByFuncid(Oid funcid);
 extern Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt);
 

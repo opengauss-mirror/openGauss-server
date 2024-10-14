@@ -828,8 +828,8 @@ end pkg112;
 set behavior_compat_options='proc_outparam_override';
 drop package if exists pkg112;
 NOTICE:  drop cascades to 3 other objects
---?.*
---?.*
+--?DETAIL:  drop cascades to function public.p1(.*)
+--?drop cascades to function public.p1(.*)
 drop cascades to function public.p4()
 create or replace package pkg112 
 as
@@ -842,8 +842,8 @@ end pkg112;
 /
 drop package if exists pkg112;
 NOTICE:  drop cascades to 3 other objects
---?.*
---?.*
+--?DETAIL:  drop cascades to function public.p1(.*)
+--?drop cascades to function public.p1(.*)
 drop cascades to function public.p4()
 set behavior_compat_options='';
 --fix package synonym 

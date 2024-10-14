@@ -2341,6 +2341,8 @@ typedef struct CreateFunctionStmt {
     int startLineNumber;
     int firstLineNumber;
     char *definer;
+    char typfunckind = 'n';
+    bool isfinal = false;
 } CreateFunctionStmt;
 
 typedef struct FunctionSources {

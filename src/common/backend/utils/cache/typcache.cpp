@@ -394,7 +394,8 @@ TypeCacheEntry* lookup_type_cache(Oid type_id, int flags)
     /*
      * If it's a composite type (row type), get tupdesc if requested
      */
-    if ((flags & TYPECACHE_TUPDESC) && typentry->typtype == TYPTYPE_COMPOSITE) {
+    if ((flags & TYPECACHE_TUPDESC) &&
+        (typentry->typtype == TYPTYPE_COMPOSITE || typentry->typtype == TYPTYPE_ABSTRACT_OBJECT)) {
         if (typentry->tupDesc == NULL) {
             load_typcache_tupdesc(typentry);
         }
@@ -582,7 +583,7 @@ static void cache_record_field_properties(TypeCacheEntry* typentry)
      */
     if (typentry->type_id == RECORDOID) {
         typentry->flags |= (TCFLAGS_HAVE_FIELD_EQUALITY | TCFLAGS_HAVE_FIELD_COMPARE);
-    } else if (typentry->typtype == TYPTYPE_COMPOSITE) {
+    } else if (typentry->typtype == TYPTYPE_COMPOSITE || typentry->typtype == TYPTYPE_ABSTRACT_OBJECT) {
         TupleDesc tupdesc;
         int newflags;
         int i;

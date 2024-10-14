@@ -5405,8 +5405,10 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
+    bool ispackage = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_package, &isNull);
     packageOidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
-    if (!isNull) {
+    /* packageid can be oid of object type */
+    if (!isNull && ispackage) {
         packageOid = DatumGetObjectId(packageOidDatum);
     }
     /* For procs in schema dbe_perf and schema snapshot,

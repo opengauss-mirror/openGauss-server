@@ -1675,6 +1675,7 @@ typedef struct knl_u_plpgsql_context {
 
     int package_as_line;
     int package_first_line;
+    int type_first_line;
     int procedure_start_line;
     int procedure_first_line;
     bool rawParsePackageFunction;
@@ -1707,6 +1708,8 @@ typedef struct knl_u_plpgsql_context {
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
+    bool isCreateTypeBody;
+    char typfunckind;
     List* CursorRecordTypeList;  /*Save the type recorded during the cursor definition*/
 
     // gs depend

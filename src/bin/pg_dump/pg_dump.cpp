@@ -409,6 +409,8 @@ static TablespaceInfo* g_tablespaces = nullptr;
 
 void help(const char* progname);
 static void setup_connection(Archive* AH);
+static void dumpObjectTypeBody(Archive* fout, TypeInfo* tyinfo);
+static void dumpObjectTypeSpec(Archive* fout, TypeInfo* tyinfo);
 static void dumpsyslog(Archive* fout);
 static void getopt_dump(int argc, char** argv, struct option options[], int* result);
 static void validatedumpoptions(void);
@@ -11840,6 +11842,10 @@ static void dumpType(Archive* fout, TypeInfo* tyinfo)
         dumpDomain(fout, tyinfo);
     else if (tyinfo->typtype == TYPTYPE_COMPOSITE)
         dumpCompositeType(fout, tyinfo);
+    else if (tyinfo->typtype == TYPTYPE_ABSTRACT_OBJECT) {
+        dumpObjectTypeSpec(fout, tyinfo);
+        dumpObjectTypeBody(fout, tyinfo);
+    }
     else if (tyinfo->typtype == TYPTYPE_ENUM) {
         if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin")) {
             return;
@@ -13052,6 +13058,177 @@ static void dumpCompositeType(Archive* fout, TypeInfo* tyinfo)
 }
 
 /*
+ * dumpObjectTypeSpec
+ *	  dump obejct type spec
+ */
+static void dumpObjectTypeSpec(Archive* fout, TypeInfo* tyinfo)
+{
+    PGresult* res = NULL;
+    char* typeSpec = NULL;
+    char* qtypname = NULL;
+    Oid supertype = InvalidOid;
+    char* isfinal = NULL;
+    char* status = NULL;
+    char* config = NULL;
+
+    PQExpBuffer q = createPQExpBuffer();
+    PQExpBuffer labelq = createPQExpBuffer();
+    PQExpBuffer query = createPQExpBuffer();
+    PQExpBuffer resetq = createPQExpBuffer();
+    /* Set proper schema serach path so type references list correctly */
+    selectSourceSchema(fout, tyinfo->dobj.nmspace->dobj.name);
+
+    appendPQExpBuffer(query,
+        "SELECT typespecsrc, supertypeoid, isfinal "
+        "FROM pg_catalog.pg_object_type "
+        "WHERE typoid = '%u'::pg_catalog.oid",
+        tyinfo->dobj.catId.oid);
+    
+    res = ExecuteSqlQueryForSingleRow(fout, query->data);
+    typeSpec = PQgetvalue(res, 0, PQfnumber(res, "typespecsrc"));
+    supertype = atooid(PQgetvalue(res, 0, PQfnumber(res, "supertypeoid")));
+    isfinal = PQgetvalue(res, 0, PQfnumber(res, "isfinal"));
+
+    qtypname = gs_strdup(fmtId(tyinfo->dobj.name));
+
+    if (supertype != InvalidOid) {
+        char* supertypename = NULL;
+        PQExpBuffer qsql = createPQExpBuffer();
+        appendPQExpBuffer(qsql, "SELECT typname FROM pg_catalog.pg_type where oid = '%u'::pg_catalog.oid", supertype);
+        res = ExecuteSqlQueryForSingleRow(fout, qsql->data);
+        supertypename = PQgetvalue(res, 0, PQfnumber(res, "typname"));
+        destroyPQExpBuffer(qsql);
+    } else {
+        appendPQExpBuffer(q, "CREATE OR REPLACE TYPE %s AS OBJECT %s", qtypname, typeSpec);
+    
+    if (isfinal != NULL && pg_strcasecmp(isfinal, "f") == 0) {
+        appendPQExpBuffer(q, "not final;\n");
+    } else 
+        appendPQExpBuffer(q, ";\n");
+    }
+    appendPQExpBuffer(labelq,"TYPE %s",qtypname);
+
+    if (binary_upgrade)
+        binary_upgrade_extension_member(q, &tyinfo->dobj, labelq->data);
+    ArchiveEntry(fout,
+        tyinfo->dobj.catId,
+        tyinfo->dobj.dumpId,
+        tyinfo->dobj.name,
+        tyinfo->dobj.nmspace->dobj.name,
+        NULL,
+        tyinfo->rolname,
+        false,
+        "TYPE",
+        SECTION_PRE_DATA,
+        q->data,
+        "",
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+    /*Dump type comments and security labels*/
+    dumpComment(fout,
+        labelq->data,
+        tyinfo->dobj.nmspace->dobj.name,
+        tyinfo->rolname,
+        tyinfo->dobj.catId,
+        0,
+        tyinfo->dobj.dumpId);
+
+    dumpSecLabel(fout,
+        labelq->data,
+        tyinfo->dobj.nmspace->dobj.name,
+        tyinfo->rolname,
+        tyinfo->dobj.catId,
+        0,
+        tyinfo->dobj.dumpId);
+
+    dumpACL(fout,
+        tyinfo->dobj.catId,
+        tyinfo->dobj.dumpId,
+        "TYPE",
+        qtypname,
+        NULL,
+        tyinfo->dobj.name,
+        tyinfo->dobj.nmspace->dobj.name,
+        tyinfo->rolname,
+        tyinfo->typacl);
+    PQclear(res);
+    destroyPQExpBuffer(q);
+    destroyPQExpBuffer(labelq);
+    destroyPQExpBuffer(query);
+    GS_FREE(qtypname);
+
+    /* dump any per-column comments*/
+    dumpCompositeTypeColComments(fout, tyinfo);      
+}
+
+static void dumpObjectTypeBody(Archive* fout, TypeInfo* tyinfo)
+{
+    PGresult* res = NULL;
+    char* typeBody = NULL;
+    char* qtypname = NULL;
+    bool istypbody = false;
+
+    PQExpBuffer q = createPQExpBuffer();
+    PQExpBuffer dropped = createPQExpBuffer();
+    PQExpBuffer query = createPQExpBuffer();
+    /* Set proper schema serach path so type references list correctly */
+    selectSourceSchema(fout, tyinfo->dobj.nmspace->dobj.name);
+
+    appendPQExpBuffer(query,
+    "SELECT typebodydeclsrc, isbodydefined "
+    "FROM pg_catalog.pg_object_type "
+    "WHERE typoid = '%u'::pg_catalog.oid",
+    tyinfo->dobj.catId.oid);
+
+    res = ExecuteSqlQueryForSingleRow(fout, query->data);
+    typeBody = PQgetvalue(res, 0, PQfnumber(res, "typebodydeclsrc"));
+    istypbody = PQgetvalue(res, 0, PQfnumber(res, "isbodydefined"));
+    if (typeBody == NULL || strlen(typeBody) == 0 || !istypbody) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        destroyPQExpBuffer(q);
+        destroyPQExpBuffer(dropped);
+        return ;
+    }
+    qtypname = gs_strdup(fmtId(tyinfo->dobj.name));
+    /* add slash at the end for a procedure */
+    if (!fout->encryptfile && (pg_strcasecmp(format, "plain") == 0 || 
+        pg_strcasecmp(format, "p") == 0) || pg_strcasecmp(format, "a") == 0
+        || pg_strcasecmp(format, "append") == 0) {
+            appendPQExpBuffer(q, "CREATE TYPE BODY %s %s\n/", qtypname, typeBody);
+        } else {
+            appendPQExpBuffer(q, "CREATE TYPE BODY %s %s;\n", qtypname, typeBody);
+        }
+
+    ArchiveEntry(fout,
+        tyinfo->dobj.catId,
+        tyinfo->dobj.dumpId,
+        tyinfo->dobj.name,
+        tyinfo->dobj.nmspace->dobj.name,
+        NULL,
+        tyinfo->rolname,
+        false,
+        "TYPE",
+        SECTION_PRE_DATA,
+        q->data,
+        "",
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        destroyPQExpBuffer(q);
+        destroyPQExpBuffer(dropped);
+        GS_FREE(qtypname);
+        
+}
+
+/*
  * dumpCompositeTypeColComments
  *	  writes out to fout the queries to recreate comments on the columns of
  *	  a user-defined stand-alone composite type
@@ -13561,6 +13738,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     char* proKind = NULL;
     char* proshippable = NULL;
     char* propackage = NULL;
+    char* protypeid = NULL;
     char* rettypename = NULL;
     char* propackageid = NULL;
     char* definer = NULL;

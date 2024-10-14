@@ -51,7 +51,8 @@
  * @in changecsn - the commit sequence number when the old version expires. 
  * @returns - void
  */
-void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt, bool isValid)
+void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator,
+    const PgObjectOption objectOpt, bool isValid, int32 object_options)
 {
     Datum values[Natts_pg_object];
     bool nulls[Natts_pg_object];
@@ -108,6 +109,13 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const P
     } else {
         nulls[Anum_pg_object_changecsn - 1] = true;
     }
+
+    if (object_options != 0) {
+        values[Anum_pg_object_options - 1] = Int32GetDatum(object_options);
+    } else {
+        nulls[Anum_pg_object_options - 1] = true;
+    }
+    
     rel = heap_open(PgObjectRelationId, RowExclusiveLock);
 
     oldtuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
@@ -600,4 +608,17 @@ void InvalidateCurrCompilePgObj()
         default:
             break;
     }
+}
+
+char get_object_method_kind(Oid funcid)
+{
+    char result = OBJECTTYPE_NULL_PROC;
+    bool isNull = false;
+    /* Find method type from pg_object */
+    HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(funcid), CharGetDatum(OBJECT_TYPE_PROC));
+    if (HeapTupleIsValid(objTuple)) {
+        result = GET_PROTYPEKIND(SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isNull));
+        ReleaseSysCache(objTuple);
+    }
+    return result;
 }

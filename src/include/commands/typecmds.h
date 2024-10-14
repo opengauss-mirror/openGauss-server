@@ -20,6 +20,9 @@
 #include "nodes/parsenodes.h"
 
 #define DEFAULT_TYPDELIM ','
+#define TYPE_COMPOSITE_DEFAULT 0 /* Postgres composite type for default */
+#define TYPE_COMPOSITE_OBJECT_TYPE 1 /* object type */
+#define TYPE_COMPOSITE_OBJECT_TYPE_BODY 2 /* object type body */
 
 extern ObjectAddress DefineType(List* names, List* parameters);
 extern void RemoveTypeById(Oid typeOid);
@@ -28,7 +31,12 @@ extern ObjectAddress DefineEnum(CreateEnumStmt* stmt);
 extern ObjectAddress DefineRange(CreateRangeStmt* stmt);
 extern ObjectAddress AlterEnum(AlterEnumStmt* stmt);
 extern ObjectAddress DefineSet(CreateSetStmt* stmt);
-extern ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist);
+extern ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist,
+    bool replace = false, ObjectAddress *reladdress = NULL, bool is_object_type = false);
+extern ObjectAddress DefineObjectTypeSpec(CompositeTypeStmt* stmt);
+extern void DefineObjectTypeBody(CompositeTypeStmt* stmt);
+extern void RemoveTypeMethod(Oid typeoid);
+
 extern Oid AssignTypeArrayOid(void);
 extern ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt);
 extern ObjectAddress AlterDomainDefault(List* names, Node* defaultRaw);

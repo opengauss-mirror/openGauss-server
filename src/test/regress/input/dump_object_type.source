@@ -1,0 +1,79 @@
+drop database if exists dump_object_db;
+drop database if exists restore_object_d1;
+drop database if exists restore_object_d2;
+--Build backup databse 
+create database restore_object_d1;
+create database restore_object_d2;
+create database dump_object_db;
+\c dump_object_db
+--without type body
+create or replace type t_type as object
+(
+    id int,
+    name varchar
+);
+create table t_test(id int, obj t_type);
+create or replace procedure test_pro(num1 t_type)
+as 
+begin
+    insert into t_test values(1,num1);
+end
+/
+call test_pro(t_type(1,'张三'));
+select * from t_test;
+
+--with type body
+create or replace type obj_map as object (
+    id int,
+    name text,
+    CONSTRUCTOR FUNCTION obj_map(SELF IN OUT obj_map, id integer, name text) RETURN SELF AS RESULT,
+    MAP MEMBER FUNCTION map return int
+);
+
+CREATE OR REPLACE TYPE BODY obj_map AS
+CONSTRUCTOR FUNCTION obj_map(SELF IN OUT obj_map, id integer, name text) RETURN SELF AS RESULT as
+begin
+    self.id = id;
+    self.name = name;
+end;
+MAP MEMBER FUNCTION map return int as
+begin
+    return self.id;
+end;
+END;
+/
+
+create table objmap_t1(no int, obj obj_map);
+insert into objmap_t1 values(1, obj_map(1,'vbase1'));
+insert into objmap_t1 values(2, obj_map(2,'vbase2'));
+insert into objmap_t1 values(3, obj_map(3,'vbase3'));
+insert into objmap_t1 values(4, obj_map(4,'vbase4'));
+insert into objmap_t1 values(5, obj_map(5,'vbase5'));
+
+SELECT * FROM objmap_t1 ORDER BY obj;
+\! @abs_bindir@/gs_dump dump_object_db -p @portstring@ -f @abs_bindir@/dump_object_type1.sql >/dev/null 2>&1; echo $?
+-- restore using gsql
+\! @abs_bindir@/gsql -d restore_object_d1 -p @portstring@ -f @abs_bindir@/dump_object_type1.sql >/dev/null 2>&1; echo $?
+\c restore_object_d1
+call test_pro(t_type(44,'张无'));
+select * from t_test;
+
+declare
+var1 obj_map := obj_map(id=>100, name=>'23');
+var2 obj_map := obj_map(id=>44, name=>'23');
+result integer;
+begin
+    IF var1 > var2 THEN
+        raise info 'var1.id larger than var2.id';
+    ELSIF var1 < var2 THEN
+        raise info 'var1.id smaller than var2.id';
+    ELSE
+        raise info 'var1.id is equal to var2.id';
+    END IF;
+end;
+/
+
+\c regression 
+drop database if exists dump_object_db;
+drop database if exists restore_object_d1;
+drop database if exists restore_object_d2;

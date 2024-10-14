@@ -5165,7 +5165,8 @@ Query* inline_set_returning_function(PlannerInfo* root, RangeTblEntry* rte)
      * returning is a single composite column which is not what we need.
      */
     if (!check_sql_fn_retval(func_oid, fexpr->funcresulttype, querytree_list, &modifyTargetList, NULL) &&
-        (get_typtype(fexpr->funcresulttype) == TYPTYPE_COMPOSITE || fexpr->funcresulttype == RECORDOID))
+        (get_typtype(fexpr->funcresulttype) == TYPTYPE_COMPOSITE
+            || get_typtype(fexpr->funcresulttype) == TYPTYPE_ABSTRACT_OBJECT || fexpr->funcresulttype == RECORDOID))
         goto fail; /* reject not-whole-tuple-result cases */
 
     /*

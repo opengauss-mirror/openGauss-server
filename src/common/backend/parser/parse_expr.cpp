@@ -19,8 +19,10 @@
 
 #include "catalog/pg_enum.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
+#include "catalog/pg_proc_fn.h"
 #include "catalog/gs_collation.h"
 #include "catalog/pg_proc_ext.h"
 #include "commands/dbcommands.h"
@@ -1357,8 +1359,11 @@ static bool isCol2Function(List* fields)
 
         if (OidIsValid(pkgOid)) {
             bool isNull = false;
+            bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
             Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
-            Oid packageid = ObjectIdGetDatum(packageid_datum);
+            Oid packageid = InvalidOid;
+            if (!isNull && ispackage)
+                packageid = ObjectIdGetDatum(packageid_datum);
             if (packageid != pkgOid) {
                 continue;
             }
@@ -1795,7 +1800,12 @@ static bool NeedExtractOutParam(FuncCall* fn, Node* result)
         return false;
     }
 #ifndef ENABLE_MULTIPLE_NODES
-    return enable_out_param_override();
+    char objMethodKind = get_object_method_kind(funcexpr->funcid);
+    if ((objMethodKind == OBJECTTYPE_CONSTRUCTOR_PROC) || (objMethodKind == OBJECTTYPE_DEFAULT_CONSTRUCTOR_PROC)) {
+        return false;
+    } else {
+        return enable_out_param_override();
+    }
 #else
     return false;
 #endif
