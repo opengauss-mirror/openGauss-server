@@ -69,4 +69,17 @@ execute l7_1188069('H','V');
 deallocate l7_1188069;
 drop table par4_1188069;
 
+CREATE TABLE test_part_list (id int4,  a VARCHAR(8))
+PARTITION BY LIST (a)
+(
+PARTITION p1 VALUES ('00000000'),
+PARTITION p2 VALUES ('11111111'),
+PARTITION pdefault VALUES (DEFAULT)
+);
+INSERT INTO  test_part_list VALUES(1, '00000000');
+INSERT INTO  test_part_list VALUES(1, '11111111');
+INSERT INTO  test_part_list VALUES(1, '12345678');
+SELECT * FROM test_part_list WHERE a='123456789';
+DROP TABLE test_part_list;
+
 DROP SCHEMA partition_pruning;
