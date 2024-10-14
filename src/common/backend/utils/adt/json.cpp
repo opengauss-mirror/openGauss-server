@@ -2212,3 +2212,10 @@ Datum json_typeof(PG_FUNCTION_ARGS)
 
     PG_RETURN_TEXT_P(cstring_to_text(type));
 }
+
+extern int json_typeof_internal(text* json)
+{
+    JsonLexContext *lex = makeJsonLexContext(json, false);
+    json_lex(lex);
+    return lex_peek(lex);
+}

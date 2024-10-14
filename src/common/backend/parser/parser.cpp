@@ -898,6 +898,100 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+        case FALSE_P:
+            /* ERROR ON ERROR, TRUE ON ERROR and FALSE ON ERROR must be reduced to one token */
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            next_token_1 = next_token;
+
+            switch (next_token) {
+                case ON:
+                    GET_NEXT_TOKEN();
+                    core_yystype_2 = cur_yylval;
+                    cur_yylloc_2 = cur_yylloc;
+                    next_token_2 = next_token;
+
+                    switch (next_token) {
+                        case ERROR_P:
+                            cur_token = FALSE_ON_ERROR;
+                            break;
+                        default:
+                            SET_LOOKAHEAD_2_TOKEN();
+                            break;
+                    }
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case TRUE_P:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            next_token_1 = next_token;
+
+            switch (next_token) {
+                case ON:
+                    GET_NEXT_TOKEN();
+                    core_yystype_2 = cur_yylval;
+                    cur_yylloc_2 = cur_yylloc;
+                    next_token_2 = next_token;
+
+                    switch (next_token) {
+                        case ERROR_P:
+                            cur_token = TRUE_ON_ERROR;
+                            break;
+                        default:
+                            SET_LOOKAHEAD_2_TOKEN();
+                            break;
+                    }
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case ERROR_P:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            next_token_1 = next_token;
+
+            switch (next_token) {
+                case ON:
+                    GET_NEXT_TOKEN();
+                    core_yystype_2 = cur_yylval;
+                    cur_yylloc_2 = cur_yylloc;
+                    next_token_2 = next_token;
+
+                    switch (next_token) {
+                        case ERROR_P:
+                            cur_token = ERROR_ON_ERROR;
+                            break;
+                        default:
+                            SET_LOOKAHEAD_2_TOKEN();
+                            break;
+                    }
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         default:
             break;
     }

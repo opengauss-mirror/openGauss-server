@@ -673,7 +673,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 				ExclusionWhereClause func_table_with_table
 %type <list>	ExclusionConstraintList ExclusionConstraintElem
 %type <list>	func_arg_list
-%type <node>	func_arg_expr
+%type <node>	func_arg_expr on_error_clause opt_on_error_clause
 %type <list>	row explicit_row implicit_row type_list array_expr_list
 %type <node>	case_expr case_arg when_clause case_default
 %type <list>	when_clause_list
@@ -960,7 +960,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
 	INTERSECT INTERVAL INTO INVISIBLE INVOKER IP IS ISNULL ISOLATION
 
-	JOIN
+	JOIN JSON_EXISTS
 
 	KEEP KEY KILL KEY_PATH KEY_STORE
 
@@ -1046,6 +1046,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 			FORCE_INDEX USE_INDEX IGNORE_INDEX
 			CURSOR_EXPR
 			LATERAL_EXPR
+			FALSE_ON_ERROR TRUE_ON_ERROR ERROR_ON_ERROR
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -29273,6 +29274,25 @@ func_application_special:	func_name '(' ')'
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
+			| JSON_EXISTS '(' func_arg_list opt_on_error_clause ')'
+				{
+					FuncCall* n = makeNode(FuncCall);
+					Node* onError;
+					n->funcname = list_make1(makeString("json_exists"));
+					if ($4 == NULL)
+						onError = makeIntConst(0, @4);
+					else
+						onError = $4;
+					n->args = lappend($3, onError);
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					n->call_func = FALSE;
+					$$ = (Node *)n;
+				}
 		;
 
 
@@ -29287,6 +29307,13 @@ opt_default_nls_clause:
                 $$ = $2;
             }
 	;
+
+opt_on_error_clause: /* EMPTY */ { $$ = NULL; }
+				   | on_error_clause { $$ = $1; };
+
+on_error_clause:	ERROR_ON_ERROR { $$ = makeIntConst(2, @1); }
+				| TRUE_ON_ERROR { $$ = makeIntConst(1, @1); }
+				| FALSE_ON_ERROR { $$ = makeIntConst(0, @1); };
 
 /*
  * Function with SEPARATOR keword arguments;
@@ -31980,6 +32007,7 @@ col_name_keyword:
 			| INT_P
 			| INTEGER
 			| INTERVAL
+			| JSON_EXISTS
 			| LEAST
 			| NATIONAL
 			| NCHAR

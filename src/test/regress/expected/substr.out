@@ -98,7 +98,7 @@ ERROR:  negative substring length not allowed
 -- If no third argument (length) is provided, the length to the end of the
 -- string is assumed.
 SELECT substr(f1, 99995) from toasttest;
-ERROR:  syntax error at or near "ERROR"
+ERROR:  syntax error at or near "ERROR:"
 LINE 1: ERROR:  negative substring length not allowed
         ^
 -- If start plus length is > string length, the result is truncated to
@@ -209,7 +209,7 @@ ERROR:  negative substring length not allowed
 -- If no third argument (length) is provided, the length to the end of the
 -- string is assumed.
 SELECT substr(f1, 99995) from toasttest;
-ERROR:  syntax error at or near "ERROR"
+ERROR:  syntax error at or near "ERROR:"
 LINE 1: ERROR:  negative substring length not allowed
         ^
 -- If start plus length is > string length, the result is truncated to

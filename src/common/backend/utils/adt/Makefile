@@ -27,7 +27,7 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	cash.o char.o date.o datetime.o datum.o domains.o \
 	enum.o set.o float.o format_type.o \
 	geo_ops.o geo_selfuncs.o hotkey.o int.o int8.o int16.o \
-	json.o jsonb.o jsonb_gin.o jsonb_op.o jsonb_util.o jsonfuncs.o like.o lockfuncs.o \
+	json.o jsonb.o jsonb_gin.o jsonb_op.o jsonb_util.o jsonfuncs.o jsonpath.o jsonpath_gram.o like.o lockfuncs.o \
 	misc.o nabstime.o name.o numeric.o numutils.o \
 	oid.o a_compat.o orderedsetaggs.o pseudotypes.o rangetypes.o rangetypes_gist.o \
 	rowtypes.o regexp.o regproc.o ruleutils.o selfuncs.o \
@@ -44,4 +44,31 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 
 like.o: like.cpp like_match.cpp
 
+FLEXFLAGS = -CF -b -p -p
+
 include $(top_srcdir)/src/gausskernel/common.mk
+
+jsonpath_gram.o: jsonpath_scan.inc
+
+# Latest flex causes warnings in this file.
+ifeq ($(GCC),yes)
+jsonpath_gram.o: CXXFLAGS += -Wno-error
+endif
+
+jsonpath_gram.hpp: jsonpath_gram.cpp ;
+
+jsonpath_gram.cpp: jsonpath_gram.y
+ifdef BISON
+		$(BISON) -d $(BISONFLAGS) -o $@ $<
+		sed -i 's/YY_NULL nullptr/YY_NULL 0/g' jsonpath_gram.cpp
+else
+		@$(missing) bison $< $@
+		sed -i 's/YY_NULL nullptr/YY_NULL 0/g' jsonpath_gram.cpp
+endif
+
+jsonpath_scan.inc: jsonpath_scan.l
+ifdef FLEX
+		$(FLEX) $(FLEXFLAGS) -o'$@' $<
+else
+		@$(missing) flex $< $@
+endif
