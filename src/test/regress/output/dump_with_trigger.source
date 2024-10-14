@@ -1,0 +1,56 @@
+create database dump_with_trigger;
+\c dump_with_trigger
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+           $$
+           DECLARE
+           BEGIN
+                   INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3);
+                   RETURN NEW;
+           END
+           $$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+           BEFORE INSERT ON test_trigger_src_tbl
+           FOR EACH ROW
+           EXECUTE PROCEDURE tri_insert_func();
+\! @abs_bindir@/gs_dump dump_with_trigger -p @portstring@ -f @abs_bindir@/dump_with_trigger.sql -w -c -t test_trigger_src_tbl >/dev/null 2>&1; echo $?
+0
+drop table test_trigger_src_tbl;
+\! @abs_bindir@/gsql -ddump_with_trigger -p @portstring@ -f "@abs_bindir@/dump_with_trigger.sql";
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+--?.*
+DROP TABLE
+SET
+SET
+SET
+SET
+SET
+CREATE TABLE
+ALTER TABLE
+CREATE TRIGGER
+--?.*
+-- dump_with_trigger check
+SELECT tgname AS trigger_name,
+       tgisinternal AS internal,
+       tgtype::varchar AS trigger_type,
+       tgrelid::regclass AS table_name,
+       tgfoid::regproc AS function_name,
+       tgattr AS trigger_columns,
+       tgqual AS qualifier
+FROM pg_trigger order by 1;
+  trigger_name  | internal | trigger_type |      table_name      |  function_name  | trigger_columns | qualifier 
+----------------+----------+--------------+----------------------+-----------------+-----------------+-----------
+ insert_trigger | f        | 7            | test_trigger_src_tbl | tri_insert_func |                 | 
+(1 row)
+
+\c postgres
+drop database dump_with_trigger;
