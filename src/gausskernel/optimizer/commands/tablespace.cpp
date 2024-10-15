@@ -2922,6 +2922,7 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
         }
 
         if (segment && requestSize != 0 && slotIndex == TABLESPACE_BUCKET_CONFLICT_LISTLEN) {
+            SpinLockRelease(&bucket->mutex);
             return;
         }
 
