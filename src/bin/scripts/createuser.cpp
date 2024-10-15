@@ -216,6 +216,8 @@ int main(int argc, char* argv[])
             if (CheckUserPasswd(newuser, pw1)) {
                 break;
             }
+            free(pw1);
+            pw1 = NULL;
         }
         if (i == 3) {
             free(pw1);
