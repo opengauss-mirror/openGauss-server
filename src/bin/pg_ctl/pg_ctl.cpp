@@ -7506,6 +7506,7 @@ int main(int argc, char** argv)
             } else {
                 pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, start walrcv failed.\n"));
             }
+            break;
         default:
             break;
     }
