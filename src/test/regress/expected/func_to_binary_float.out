@@ -446,6 +446,8 @@ SELECT TO_BINARY_FLOAT('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR);
 SELECT TO_BINARY_FLOAT('today' DEFAULT 'roll' ON CONVERSION ERROR);  -- error
 ERROR:  invalid input syntax for type real
 CONTEXT:  referenced column: to_binary_float
+SQL function "to_binary_float" statement 1
+referenced column: to_binary_float
 SELECT TO_BINARY_FLOAT(3.402E+100);
  to_binary_float 
 -----------------

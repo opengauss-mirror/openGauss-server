@@ -1136,3 +1136,6 @@ test: on_update_session1 on_update_session2
 
 test: ts_gb18030_utf8
 test: backup_tool_audit
+
+# to_number func
+test: to_number_default

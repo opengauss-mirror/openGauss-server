@@ -96,6 +96,8 @@ extern Datum interval_to_char(PG_FUNCTION_ARGS);
 extern Datum to_timestamp(PG_FUNCTION_ARGS);
 extern Datum to_date(PG_FUNCTION_ARGS);
 extern Datum numeric_to_number(PG_FUNCTION_ARGS);
+extern Datum numeric_to_text_number(PG_FUNCTION_ARGS);
+extern Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS);
 extern Datum numeric_to_char(PG_FUNCTION_ARGS);
 extern Datum int4_to_char(PG_FUNCTION_ARGS);
 extern Datum int8_to_char(PG_FUNCTION_ARGS);

@@ -1,0 +1,1355 @@
+-- For function TO_NUMBER
+-- create new schema
+drop schema if exists func_to_number;
+NOTICE:  schema "func_to_number" does not exist, skipping
+create schema func_to_number;
+set search_path=func_to_number;
+CREATE TABLE tonumber (c1 int, c2 float4, c3 float8, c4 char(50), c5 varchar(50), c6 text);
+INSERT INTO tonumber VALUES (1, 1.23, 1.23, '1.23', '1.23', '1.23');
+INSERT INTO tonumber VALUES (2, 3.141567, 3.141567, '3.141567', '3.141567', '3.141567');
+INSERT INTO tonumber VALUES (3, 202405291733, 202405291733, '202405291733', '202405291733', '3.141567');
+INSERT INTO tonumber VALUES (4, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO tonumber VALUES (5, NULL, NULL, 'tonight', '12.34yesterday', 'sunday6.66');
+INSERT INTO tonumber VALUES (6, CAST('NAN' as float4), CAST('NAN' as float8), 'nan', 'NAN', 'NaN');
+INSERT INTO tonumber VALUES (7, 3.40282E+38, 1.79769313486231E+100, '3.40282E+38F', '3.40282E+38', '1.79769313486231E+308');
+SELECT c1, c2, TO_NUMBER(c2) FROM tonumber ORDER BY c1;
+ c1 |     c2      |                to_number                
+----+-------------+-----------------------------------------
+  1 |        1.23 |                                    1.23
+  2 |     3.14157 |                                 3.14157
+  3 | 2.02405e+11 |                            202405000000
+  4 |             |                                        
+  5 |             |                                        
+  6 |         NaN |                                     NaN
+  7 | 3.40282e+38 | 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT c1, c3, TO_NUMBER(c3) FROM tonumber ORDER BY c1;
+ c1 |          c3           |                                               to_number                                               
+----+-----------------------+-------------------------------------------------------------------------------------------------------
+  1 |                  1.23 |                                                                                                  1.23
+  2 |              3.141567 |                                                                                              3.141567
+  3 |          202405291733 |                                                                                          202405291733
+  4 |                       |                                                                                                      
+  5 |                       |                                                                                                      
+  6 |                   NaN |                                                                                                   NaN
+  7 | 1.79769313486231e+100 | 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT c1, c4, TO_NUMBER(c4) FROM tonumber WHERE c1 NOT IN (5, 7) ORDER BY c1;
+ c1 |                         c4                         |  to_number   
+----+----------------------------------------------------+--------------
+  1 | 1.23                                               |         1.23
+  2 | 3.141567                                           |     3.141567
+  3 | 202405291733                                       | 202405291733
+  4 |                                                    |             
+  6 | nan                                                |          NaN
+(5 rows)
+
+SELECT c1, c4, TO_NUMBER(c4) FROM tonumber WHERE c1 = 5 ORDER BY c1; -- error: invalid input syntax for type numeric: "tonight"
+ERROR:  invalid input syntax for type numeric: "tonight"
+CONTEXT:  referenced column: to_number
+SELECT c1, c4, TO_NUMBER(c4) FROM tonumber WHERE c1 = 7 ORDER BY c1; -- error: invalid input syntax for type numeric: "3.40282E+38F"
+ERROR:  invalid input syntax for type numeric: "3.40282E+38F"
+CONTEXT:  referenced column: to_number
+SELECT c1, c5, TO_NUMBER(c5) FROM tonumber WHERE c1 NOT IN (5) ORDER BY c1;
+ c1 |      c5      |                to_number                
+----+--------------+-----------------------------------------
+  1 | 1.23         |                                    1.23
+  2 | 3.141567     |                                3.141567
+  3 | 202405291733 |                            202405291733
+  4 |              |                                        
+  6 | NAN          |                                     NaN
+  7 | 3.40282E+38  | 340282000000000000000000000000000000000
+(6 rows)
+
+SELECT c1, c5, TO_NUMBER(c5) FROM tonumber WHERE c1 = 5 ORDER BY c1; -- error: invalid input syntax for type numeric: "12.34yesterday"
+ERROR:  invalid input syntax for type numeric: "12.34yesterday"
+CONTEXT:  referenced column: to_number
+SELECT c1, c6, TO_NUMBER(c6) FROM tonumber WHERE c1 NOT IN (5) ORDER BY c1;
+ c1 |          c6           |                                                                                                                                                       to_number                                                                                                                                                       
+----+-----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 1.23                  |                                                                                                                                                                                                                                                                                                                  1.23
+  2 | 3.141567              |                                                                                                                                                                                                                                                                                                              3.141567
+  3 | 3.141567              |                                                                                                                                                                                                                                                                                                              3.141567
+  4 |                       |                                                                                                                                                                                                                                                                                                                      
+  6 | NaN                   |                                                                                                                                                                                                                                                                                                                   NaN
+  7 | 1.79769313486231E+308 | 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(6 rows)
+
+SELECT c1, c6, TO_NUMBER(c6) FROM tonumber WHERE c1 = 7 ORDER BY c1;
+ c1 |          c6           |                                                                                                                                                       to_number                                                                                                                                                       
+----+-----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  7 | 1.79769313486231E+308 | 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT c1, c6, TO_NUMBER(c6) FROM tonumber WHERE c1 = 5 ORDER BY c1; -- error: invalid input syntax for type numeric: "sunday6.66"
+ERROR:  invalid input syntax for type numeric: "sunday6.66"
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('2.00');;
+ to_number 
+-----------
+      2.00
+(1 row)
+
+select TO_NUMBER('2.11');
+ to_number 
+-----------
+      2.11
+(1 row)
+
+select TO_NUMBER('200');
+ to_number 
+-----------
+       200
+(1 row)
+
+select TO_NUMBER('2a.ab'); -- error: invalid input syntax for type numeric: "2a.ab"
+ERROR:  invalid input syntax for type numeric: "2a.ab"
+CONTEXT:  referenced column: numeric_in
+SQL function "to_number" statement 1
+referenced column: to_number
+select TO_NUMBER('a.ab'); -- error: invalid input syntax for type numeric: "a.ab"
+ERROR:  invalid input syntax for type numeric: "a.ab"
+CONTEXT:  referenced column: numeric_in
+SQL function "to_number" statement 1
+referenced column: to_number
+select TO_NUMBER('1A3E');  -- error: invalid input syntax for type numeric: "1A3E"
+ERROR:  invalid input syntax for type numeric: "1A3E"
+CONTEXT:  referenced column: numeric_in
+SQL function "to_number" statement 1
+referenced column: to_number
+select TO_NUMBER(2.11);
+ to_number 
+-----------
+      2.11
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+100);
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(2.22507485850720E-100);
+                                                      to_number                                                      
+---------------------------------------------------------------------------------------------------------------------
+ .000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507485850720
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+255);
+                                                                                                                            to_number                                                                                                                             
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1797693134862310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+300);
+                                                                                                                                                   to_number                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1797693134862310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+308);
+                                                                                                                                                       to_number                                                                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+309);
+ERROR:  number overflow at or near "1.79769313486231E+309"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+309);
+                         ^
+SELECT TO_NUMBER(1.79769313486231E+310);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+310);
+                         ^
+SELECT TO_NUMBER(1.79769313486231E+6310); -- error: overflow. invalid input syntax for type numeric: "1.79769313486231E+6310"
+ERROR:  number overflow at or near "1.79769313486231E+6310"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+6310);
+                         ^
+SELECT TO_NUMBER('1.79769313486231E+100');
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER('2.22507485850720E-100');
+                                                      to_number                                                      
+---------------------------------------------------------------------------------------------------------------------
+ .000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507485850720
+(1 row)
+
+SELECT TO_NUMBER('1.79769313486231E+310');
+                                                                                                                                                        to_number                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+6310); -- error: overflow. invalid input syntax for type numeric: "1.79769313486231E+6310"
+ERROR:  number overflow at or near "1.79769313486231E+6310"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+6310);
+                         ^
+SELECT TO_NUMBER('1.79769313486231E+100');
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER('2.22507485850720E-100');
+                                                      to_number                                                      
+---------------------------------------------------------------------------------------------------------------------
+ .000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507485850720
+(1 row)
+
+SELECT TO_NUMBER('1.79769313486231E+310');
+                                                                                                                                                        to_number                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+-- with default
+SELECT TO_NUMBER(c1 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER('abd' DEFAULT c1 ON CONVERSION ERROR) FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
+ to_number 
+-----------
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                 3.14157
+                            202405000000
+                                        
+                                        
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                 3.14157
+                            202405000000
+                                        
+                                        
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                 3.14157
+                            202405000000
+                                        
+                                        
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                 3.14157
+                            202405000000
+                                        
+                                        
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+                                                                                                  1.23
+                                                                                              3.141567
+                                                                                          202405291733
+                                                                                                      
+                                                                                                      
+                                                                                                   NaN
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+                                                                                                  1.23
+                                                                                              3.141567
+                                                                                          202405291733
+                                                                                                      
+                                                                                                      
+                                                                                                   NaN
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+                                                                                                  1.23
+                                                                                              3.141567
+                                                                                          202405291733
+                                                                                                      
+                                                                                                      
+                                                                                                   NaN
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+                                                                                                  1.23
+                                                                                              3.141567
+                                                                                          202405291733
+                                                                                                      
+                                                                                                      
+                                                                                                   NaN
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ c1 |  to_number   
+----+--------------
+  1 |         1.23
+  2 |     3.141567
+  3 | 202405291733
+  4 |             
+  5 |         3.14
+  6 |          NaN
+  7 |         3.14
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ c1 |  to_number   
+----+--------------
+  1 |         1.23
+  2 |     3.141567
+  3 | 202405291733
+  4 |             
+  5 |         3.14
+  6 |          NaN
+  7 |         3.14
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber WHERE c1 NOT IN (5, 7) ORDER By c1;
+ c1 |  to_number   
+----+--------------
+  1 |         1.23
+  2 |     3.141567
+  3 | 202405291733
+  4 |             
+  6 |          NaN
+(5 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber where c1 = 7 ORDER By c1; -- erro: invalid input syntax for type numeric: "3.14FDW"
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber where c1 = 5 ORDER By c1; -- error: invalid input syntax for type numeric: "3.14FDW"
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
+SELECT c1, TO_NUMBER(c4 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+ c1 |  to_number   
+----+--------------
+  1 |         1.23
+  2 |     3.141567
+  3 | 202405291733
+  4 |             
+  5 |             
+  6 |          NaN
+  7 |             
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                3.141567
+                            202405291733
+                                        
+                                    3.14
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                3.141567
+                            202405291733
+                                        
+                                    3.14
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1; -- error: invalid input syntax for type numeric: "3.14FDW"
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
+SELECT TO_NUMBER(c5 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                to_number                
+-----------------------------------------
+                                    1.23
+                                3.141567
+                            202405291733
+                                        
+                                        
+                                     NaN
+ 340282000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                                                                                                                                       to_number                                                                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                  1.23
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                  3.14
+                                                                                                                                                                                                                                                                                                                   NaN
+ 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                                                                                                                                       to_number                                                                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                  1.23
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                  3.14
+                                                                                                                                                                                                                                                                                                                   NaN
+ 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;  -- error: invalid input syntax for type numeric: "3.14FDW"
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
+SELECT TO_NUMBER(c6 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
+                                                                                                                                                       to_number                                                                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                  1.23
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                              3.141567
+                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                   NaN
+ 179769313486231000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(7 rows)
+
+SELECT TO_NUMBER(3.145 DEFAULT 'tomorrow' ON CONVERSION ERROR);
+ to_number 
+-----------
+     3.145
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT 3.14 ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT '3.14' ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('3.15today' DEFAULT 3.14 ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR);
+ to_number 
+-----------
+      6.66
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT 'roll' ON CONVERSION ERROR);  -- error： invalid input syntax for type numeric: "roll"
+ERROR:  invalid input syntax for type numeric: "roll"
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('1A3F' DEFAULT 199 ON CONVERSION ERROR, 'XXXX');
+ to_number 
+-----------
+      6719
+(1 row)
+
+select TO_NUMBER('1A3E' DEFAULT 199 ON CONVERSION ERROR, 'XXXX');
+ to_number 
+-----------
+      6718
+(1 row)
+
+-- with  fmt
+SELECT TO_NUMBER(1.79769313486231E+100, '9G999D99');  -- error: overflow. numeric field overflow
+ERROR:  numeric field overflow
+CONTEXT:  referenced column: to_number
+SELECT TO_NUMBER(2.22507485850720E-100, '9G999D99');
+ to_number 
+-----------
+      0.00
+(1 row)
+
+select TO_NUMBER('100.00', '9G999D99');
+ to_number 
+-----------
+    100.00
+(1 row)
+
+select TO_NUMBER('100.1212', '9G999D99');
+ to_number 
+-----------
+    100.12
+(1 row)
+
+select TO_NUMBER('2a.ab', '9G999D99');
+ to_number 
+-----------
+         2
+(1 row)
+
+select TO_NUMBER('', '9G999D99');
+ to_number 
+-----------
+          
+(1 row)
+
+select TO_NUMBER(' ', '9G999D99'); -- error: invalid input syntax for type numeric: " "
+ERROR:  invalid input syntax for type numeric: " "
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('a.ab', '9G999D99'); -- error: invalid input syntax for type numeric: " "
+ERROR:  invalid input syntax for type numeric: " "
+CONTEXT:  referenced column: to_number
+select TO_NUMBER(2.11, '9G999D99');
+ to_number 
+-----------
+      2.11
+(1 row)
+
+select TO_NUMBER(25.123456, '9G999D99');
+ to_number 
+-----------
+     25.12
+(1 row)
+
+select TO_NUMBER(100.1212, '9G999D99');
+ to_number 
+-----------
+    100.12
+(1 row)
+
+/*
+ * TO_NUMBER XXXX
+ */
+select TO_NUMBER('1A3F', 'XXXX');
+ to_number 
+-----------
+      6719
+(1 row)
+
+select TO_NUMBER('1A3E', 'XXXX');
+ to_number 
+-----------
+      6718
+(1 row)
+
+select TO_NUMBER('1A3E', 'XAXX');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER(null,'XXXX');
+ to_number 
+-----------
+          
+(1 row)
+
+select TO_NUMBER('127.532','XXXX');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('1234567890abcdefABCDEF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+         to_number          
+----------------------------
+ 22007822917795467892608495
+(1 row)
+
+--to_number only support 16 bytes hex to decimal conversion or plen less than 0
+select TO_NUMBER('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+                to_number                
+-----------------------------------------
+ 340282366920938463463374607431768211455
+(1 row)
+
+select TO_NUMBER('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+                to_number                
+-----------------------------------------
+ 340282366920938463463374607431768211455
+(1 row)
+
+select TO_NUMBER('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+create table TONUM_001(COL_NUM numeric);
+insert into TONUM_001 values(TO_NUMBER('A0', 'X'));
+ERROR:  invalid number
+CONTEXT:  referenced column: col_num
+insert into TONUM_001 values(TO_NUMBER('A0', 'XX'));
+insert into TONUM_001 values(TO_NUMBER('A0', 'XXX'));
+select COL_NUM as RESULT from TONUM_001;
+ result 
+--------
+    160
+    160
+(2 rows)
+
+drop table TONUM_001;
+select TO_NUMBER('-ABF1','-xxxx');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('AA','XXXZ');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('-AA','-XX');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('AA','-XX');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('-AA','XX');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('+AA','XX');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('+AA','XX');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('AA','X');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('aa','x');
+ERROR:  invalid number
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('AA.A','XXX.X');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('A0','XX X');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('A0','XX.X');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('A0','+xxx');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+select TO_NUMBER('A0','-xxx');
+ERROR:  invalid number format model
+CONTEXT:  referenced column: to_number
+SELECT TO_NUMBER('-34,338,492', '99G999G999');
+ to_number 
+-----------
+ -34338492
+(1 row)
+
+SELECT TO_NUMBER('-34,338,492.654,878', '99G999G999D999G999');
+    to_number     
+------------------
+ -34338492.654878
+(1 row)
+
+SELECT TO_NUMBER('<564646.654564>', '999999.999999PR');
+   to_number    
+----------------
+ -564646.654564
+(1 row)
+
+SELECT TO_NUMBER('0.00001-', '9.999999S');
+ to_number 
+-----------
+   -.00001
+(1 row)
+
+SELECT TO_NUMBER('5.01-', 'FM9.999999S');
+ to_number 
+-----------
+     -5.01
+(1 row)
+
+SELECT TO_NUMBER('5.01-', 'FM9.999999MI');
+ to_number 
+-----------
+     -5.01
+(1 row)
+
+SELECT TO_NUMBER('5 4 4 4 4 8 . 7 8', '9 9 9 9 9 9 . 9 9');
+ to_number 
+-----------
+ 544448.78
+(1 row)
+
+SELECT TO_NUMBER('.01', 'FM9.99');
+ to_number 
+-----------
+       .01
+(1 row)
+
+SELECT TO_NUMBER('.0', '99999999.99999999');
+ to_number 
+-----------
+       0.0
+(1 row)
+
+SELECT TO_NUMBER('0', '99.99');
+ to_number 
+-----------
+         0
+(1 row)
+
+SELECT TO_NUMBER('.-01', 'S99.99');
+ to_number 
+-----------
+      -.01
+(1 row)
+
+SELECT TO_NUMBER('.01-', '99.99S');
+ to_number 
+-----------
+      -.01
+(1 row)
+
+SELECT TO_NUMBER(' . 0 1-', ' 9 9 . 9 9 S');
+ to_number 
+-----------
+      -.01
+(1 row)
+
+-- with default and fmt
+SELECT TO_NUMBER(c1 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(c1 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER('abd' DEFAULT c1 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
+ to_number 
+-----------
+         1
+         2
+         3
+         4
+         5
+         6
+         7
+(7 rows)
+
+SELECT TO_NUMBER(3.14 DEFAULT c1 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
+ to_number 
+-----------
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+      3.14
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     2.024
+          
+          
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     2.024
+          
+          
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     2.024
+          
+          
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c2 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     2.024
+          
+          
+          
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+          
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+          
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+          
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c3 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+          
+          
+          
+          
+     1.797
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ c1 | to_number 
+----+-----------
+  1 |      1.23
+  2 |     3.141
+  3 |      3.14
+  4 |          
+  5 |      3.14
+  6 |      3.14
+  7 |     3.402
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ c1 | to_number 
+----+-----------
+  1 |      1.23
+  2 |     3.141
+  3 |      3.14
+  4 |          
+  5 |      3.14
+  6 |      3.14
+  7 |     3.402
+(7 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber WHERE c1 NOT IN (5, 7) ORDER By c1;
+ c1 | to_number 
+----+-----------
+  1 |      1.23
+  2 |     3.141
+  3 |      3.14
+  4 |          
+  6 |      3.14
+(5 rows)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber where c1 = 7 ORDER By c1;
+ c1 | to_number 
+----+-----------
+  7 |     3.402
+(1 row)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber where c1 = 5 ORDER By c1;
+ c1 | to_number 
+----+-----------
+  5 |      3.14
+(1 row)
+
+SELECT c1, TO_NUMBER(c4 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ c1 | to_number 
+----+-----------
+  1 |      1.23
+  2 |     3.141
+  3 |          
+  4 |          
+  5 |          
+  6 |          
+  7 |     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+     12.34
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+     12.34
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+      3.14
+          
+     12.34
+      3.14
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c5 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+          
+          
+     12.34
+          
+     3.402
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT 3.14 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     3.141
+          
+       6.6
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT '3.14' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     3.141
+          
+       6.6
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT '3.14FDW' ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     3.141
+          
+       6.6
+      3.14
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(c6 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;
+ to_number 
+-----------
+      1.23
+     3.141
+     3.141
+          
+       6.6
+          
+     1.797
+(7 rows)
+
+SELECT TO_NUMBER(3.145 DEFAULT 'tomorrow' ON CONVERSION ERROR, '99D999');
+ to_number 
+-----------
+     3.145
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT 3.14 ON CONVERSION ERROR, '99D999');
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT '3.14' ON CONVERSION ERROR, '99D999');
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('3.15today' DEFAULT 3.14 ON CONVERSION ERROR, '99D999');
+ to_number 
+-----------
+      3.15
+(1 row)
+
+SELECT TO_NUMBER('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR, '99D999');
+ to_number 
+-----------
+      6.66
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT 'roll' ON CONVERSION ERROR, '99D999');  -- error： invalid input syntax for type numeric: "roll"
+ERROR:  invalid input syntax for type numeric: " "
+CONTEXT:  referenced column: to_number
+-- test overflow and null
+SELECT TO_NUMBER(1.79769313486231E+100 DEFAULT 3.14 ON CONVERSION ERROR);
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(2.22507485850720E-100 DEFAULT 3.14 ON CONVERSION ERROR);
+                                                      to_number                                                      
+---------------------------------------------------------------------------------------------------------------------
+ .000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507485850720
+(1 row)
+
+SELECT TO_NUMBER('1.79769313486231E+100' DEFAULT 3.14 ON CONVERSION ERROR);
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER('2.22507485850720E-100' DEFAULT 3.14 ON CONVERSION ERROR);
+                                                      to_number                                                      
+---------------------------------------------------------------------------------------------------------------------
+ .000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507485850720
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+310 DEFAULT 3.14 ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+310 DEFAULT 3.14 ON CONVE...
+                         ^
+SELECT TO_NUMBER('1.79769313486231E+310' DEFAULT 3.14 ON CONVERSION ERROR);
+                                                                                                                                                        to_number                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(3.14 DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER(3.14 DEFAULT '1.79769313486231E+100' ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER(3.14 DEFAULT 1.79769313486231E+310 ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER(3.14 DEFAULT 1.79769313486231E+310 ON CONVE...
+                                      ^
+SELECT TO_NUMBER(3.14 DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
+ to_number 
+-----------
+      3.14
+(1 row)
+
+SELECT TO_NUMBER('today' DEFAULT 1.79769313486231E+310 ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER('today' DEFAULT 1.79769313486231E+310 ON CO...
+                                         ^
+SELECT TO_NUMBER('today' DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
+                                                                                                                                                        to_number                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+100 DEFAULT NULL ON CONVERSION ERROR);
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER('1.79769313486231E+100' DEFAULT NULL ON CONVERSION ERROR);
+                                               to_number                                               
+-------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(1.79769313486231E+310 DEFAULT NULL ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER(1.79769313486231E+310 DEFAULT NULL ON CONVE...
+                         ^
+SELECT TO_NUMBER('1.79769313486231E+310' DEFAULT NULL ON CONVERSION ERROR);
+                                                                                                                                                        to_number                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT TO_NUMBER(NULL DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR);
+ to_number 
+-----------
+          
+(1 row)
+
+SELECT TO_NUMBER(NULL DEFAULT '1.79769313486231E+100' ON CONVERSION ERROR);
+ to_number 
+-----------
+          
+(1 row)
+
+SELECT TO_NUMBER(NULL DEFAULT 1.79769313486231E+310 ON CONVERSION ERROR);
+ERROR:  number overflow at or near "1.79769313486231E+310"
+LINE 1: SELECT TO_NUMBER(NULL DEFAULT 1.79769313486231E+310 ON CONVE...
+                                      ^
+SELECT TO_NUMBER(NULL DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
+ to_number 
+-----------
+          
+(1 row)
+
+CREATE TABLE tonumber_exec (c1 int, func_info text, res float4);
+PREPARE default_param_text2(int, text, text) AS
+    INSERT INTO tonumber_exec VALUES ($1, CONCAT('TO_NUMBER(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_NUMBER($2 DEFAULT $3 ON CONVERSION ERROR));
+EXECUTE default_param_text2(1, '3.14', '6.66');
+EXECUTE default_param_text2(2, '3.14#', '6.66');
+EXECUTE default_param_text2(3, '#3.14', '6.66#');   -- error: invalid input syntax for type numeric: "6.66#"
+ERROR:  invalid input syntax for type numeric: "6.66#"
+CONTEXT:  referenced column: res
+EXECUTE default_param_text2(4, '  -3.14  ', '6.66');
+EXECUTE default_param_text2(5, NULL, '6.66');
+EXECUTE default_param_text2(6, '6.66', NULL);
+EXECUTE default_param_text2(7, '1.79769313486231E+100', NULL); -- error: value out of range: overflow
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: res
+EXECUTE default_param_text2(8, NULL, '1.79769313486231E+100');
+EXECUTE default_param_text2(9, '1.79769313486231E+400', NULL); -- error: '1.79769313486231E+400' is out of range for type real
+ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type real
+CONTEXT:  referenced column: res
+EXECUTE default_param_text2(10, NULL, '1.79769313486231E+400');
+PREPARE default_param_num2(int, float8, float8) AS
+    INSERT INTO tonumber_exec VALUES ($1, CONCAT('TO_NUMBER(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_NUMBER($2 DEFAULT $3 ON CONVERSION ERROR));
+EXECUTE default_param_num2(11, 3.14, 6.666666);
+EXECUTE default_param_num2(12, 3.14, NULL);
+EXECUTE default_param_num2(13, NULL, 3.14);
+EXECUTE default_param_text2(14, 1.79769313486231E+100, 3.14); -- error: value out of range: overflow
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: res
+EXECUTE default_param_text2(15, 3.14, 1.79769313486231E+100);
+EXECUTE default_param_text2(16, 1.79769313486231E+400, 3.14); -- error: is out of range for type real
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(16, 1.79769313486231E+400, 3.14)...
+                                        ^
+EXECUTE default_param_text2(17, 3.14, 1.79769313486231E+400);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(17, 3.14, 1.79769313486231E+400)...
+                                              ^
+EXECUTE default_param_text2(18, 1.79769313486231E+400, NULL); -- error: is out of range for type real
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(18, 1.79769313486231E+400, NULL)...
+                                        ^
+EXECUTE default_param_text2(19, NULL, 1.79769313486231E+400);
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text2(19, NULL, 1.79769313486231E+400)...
+                                              ^
+PREPARE default_param_text_num(int, text, float8) AS
+    INSERT INTO tonumber_exec VALUES ($1, CONCAT('TO_NUMBER(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_NUMBER($2 DEFAULT $3 ON CONVERSION ERROR));
+EXECUTE default_param_text_num(20, '3.14', 6.666666);
+EXECUTE default_param_text_num(21, '  +3.14 ', 6.666666);
+EXECUTE default_param_text_num(22, '1.79769313486231E+100', 6.666666); -- error: value out of range: overflow
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: res
+EXECUTE default_param_text_num(23, '6.666666', 1.79769313486231E+100);
+EXECUTE default_param_text_num(24, '1.79769313486231E+400', 6.666666); -- error: is out of range for type real
+ERROR:  "17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type real
+CONTEXT:  referenced column: res
+EXECUTE default_param_text_num(25, '6.666666', 1.79769313486231E+400); -- error: is out of range for type double precision
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_text_num(25, '6.666666', 1.79769313486...
+                                                       ^
+PREPARE default_param_num_text(int, float8, text) AS
+    INSERT INTO tonumber_exec VALUES ($1, CONCAT('TO_NUMBER(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_NUMBER($2 DEFAULT $3 ON CONVERSION ERROR));
+EXECUTE default_param_num_text(26, 1.79769313486231E+100, '6.666666');
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: res
+EXECUTE default_param_num_text(27, 6.666666, '1.79769313486231E+100');
+EXECUTE default_param_num_text(28, 1.79769313486231E+400, '6.666666');
+ERROR:  number overflow at or near "1.79769313486231E+400"
+LINE 1: EXECUTE default_param_num_text(28, 1.79769313486231E+400, '6...
+                                           ^
+EXECUTE default_param_num_text(29, 6.666666, '1.79769313486231E+400');
+SELECT * FROM tonumber_exec ORDER BY c1;
+ c1 |                                                                     func_info                                                                     |   res   
+----+---------------------------------------------------------------------------------------------------------------------------------------------------+---------
+  1 | TO_NUMBER(3.14 DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                  |    3.14
+  2 | TO_NUMBER(3.14# DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                 |    6.66
+  4 | TO_NUMBER(  -3.14   DEFAULT 6.66 ON CONVERSION ERROR)                                                                                             |   -3.14
+  5 | TO_NUMBER( DEFAULT 6.66 ON CONVERSION ERROR)                                                                                                      |        
+  6 | TO_NUMBER(6.66 DEFAULT  ON CONVERSION ERROR)                                                                                                      |    6.66
+  8 | TO_NUMBER( DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                                     |        
+ 10 | TO_NUMBER( DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                                     |        
+ 11 | TO_NUMBER(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                              |    3.14
+ 12 | TO_NUMBER(3.14 DEFAULT  ON CONVERSION ERROR)                                                                                                      |    3.14
+ 13 | TO_NUMBER( DEFAULT 3.14 ON CONVERSION ERROR)                                                                                                      |        
+ 15 | TO_NUMBER(3.14 DEFAULT 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000 ON CONVERSION ERROR) |    3.14
+ 20 | TO_NUMBER(3.14 DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                              |    3.14
+ 21 | TO_NUMBER(  +3.14  DEFAULT 6.666666 ON CONVERSION ERROR)                                                                                          |    3.14
+ 23 | TO_NUMBER(6.666666 DEFAULT 1.79769313486231e+100 ON CONVERSION ERROR)                                                                             | 6.66667
+ 27 | TO_NUMBER(6.666666 DEFAULT 1.79769313486231E+100 ON CONVERSION ERROR)                                                                             | 6.66667
+ 29 | TO_NUMBER(6.666666 DEFAULT 1.79769313486231E+400 ON CONVERSION ERROR)                                                                             | 6.66667
+(16 rows)
+
+DROP TABLE tonumber;
+DROP TABLE tonumber_exec;
+drop schema if exists func_to_number cascade;

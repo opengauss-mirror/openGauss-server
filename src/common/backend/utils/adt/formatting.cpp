@@ -68,6 +68,7 @@
 #include <math.h>
 #include <float.h>
 #include <limits.h>
+#include <cmath>
 
 /*
  * towlower() and friends should be in <wctype.h>, but some pre-C99 systems
@@ -1823,6 +1824,9 @@ static int from_char_seq_search(int* dest, char** src, char** array, int type, i
  */
 static void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec);
 static char* fill_str(char* str, int c, int max);
+static Datum to_numeric_number_internal_with_fmt(text* value, text* fmt, bool withDefault, Oid fncollation, bool *err);
+static Datum to_numeric_number_internal_without_fmt(text* sourceValue, Oid fncollation, bool *err);
+static Datum to_numeric_to_number_internal(text* value, text* fmt, Oid fncollation, bool *resultNull);
 static FormatNode* NUM_cache(int len, NUMDesc* Num, text* pars_str, bool* shouldFree);
 static char* int_to_roman(int number);
 static void NUM_prepare_locale(NUMProc* Np);
@@ -6564,78 +6568,312 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
         SET_VARSIZE(result, len + VARHDRSZ);                                                \
     } while (0)
 
+
+Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool withDefault, 
+    Oid fncollation, bool *resultNull)
+{
+    Datum result;
+    // Number description: fmt
+    NUMDesc numDesc;
+    FormatNode* format = NULL;
+    char* sourceNumstr = NULL;
+    bool shouldFree = false;
+    int len = 0;
+    int valuelen = 0;
+    char* fmtstr = NULL;
+    unsigned int scale;
+    unsigned int precision;
+
+    len = VARSIZE(fmt) - VARHDRSZ;
+    if (len <= 0 || len >= INT_MAX / NUM_MAX_ITEM_SIZ) {
+        *resultNull = true;
+        return 0;
+    }
+
+    fmtstr = (char*)palloc(len + 1);
+    errno_t rc = EOK;
+    // Copy the data part of the fmt value to fmtstr.
+    rc = strncpy_s(fmtstr, len + 1, VARDATA(fmt), len);
+    securec_check(rc, "\0", "\0");
+    fmtstr[len] = '\0';
+
+    // When converting a hexadecimal string to a decimal number, 
+    // characters other than 'x' or 'X' are not allowed in the format string.
+    // otherwise an error will be reported.
+    if (NULL != strchr(fmtstr, 'x') || NULL != strchr(fmtstr, 'X')) {
+        int i = 0;
+        for (i = 0; i < len; i++) {
+            if ('x' != fmtstr[i] && 'X' != fmtstr[i]) {
+                pfree_ext(fmtstr);
+
+                if (withDefault) {
+                    *resultNull = true;
+                    return 0;
+                } else {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number format model")));
+                }
+            }
+        }
+        valuelen = VARSIZE(sourceValue) - VARHDRSZ;
+        if (valuelen > len) {
+            pfree_ext(fmtstr);
+
+            if (withDefault) {
+                    *resultNull = true;
+                    return 0;
+            } else {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number")));
+            }
+        }
+    }
+    pfree_ext(fmtstr);
+
+    format = NUM_cache(len, &numDesc, fmt, &shouldFree);
+
+    sourceNumstr = (char*)palloc((len * NUM_MAX_ITEM_SIZ) + 1);
+
+    (void)NUM_processor(format,
+        &numDesc,
+        VARDATA(sourceValue),
+        sourceNumstr,
+        (len * NUM_MAX_ITEM_SIZ) + 1,
+        VARSIZE(sourceValue) - VARHDRSZ,
+        0,
+        false,
+        fncollation);
+
+    scale = (unsigned int)numDesc.post;
+    precision = Max(0, numDesc.pre) + scale;
+
+    if (shouldFree)
+        pfree_ext(format);
+
+    // empty strings
+    if (*sourceNumstr == '\0' && withDefault) {
+        pfree_ext(sourceNumstr);
+        *resultNull = true;
+        return 0;
+    }
+
+    // into numeric_in func
+    result = DirectFunctionCall3(numeric_in,
+        CStringGetDatum(sourceNumstr),
+        ObjectIdGetDatum(InvalidOid),
+        Int32GetDatum(((precision << 16) | scale) + VARHDRSZ));
+    pfree_ext(sourceNumstr);
+
+    return result;
+}
+
+Datum to_numeric_number_internal_without_fmt(text* sourceValue, Oid fncollation, bool *resultNull)
+{
+    Datum result;
+
+    char* valueNumstr = NULL;
+    int valueLen = VARSIZE(sourceValue) - VARHDRSZ;
+    valueNumstr = (char*)palloc(valueLen + 1);
+    errno_t value_rc = EOK;
+    value_rc = strncpy_s(valueNumstr, valueLen + 1, VARDATA(sourceValue), valueLen);
+    securec_check(value_rc, "\0", "\0");
+
+    // empty strings
+    if (*valueNumstr == '\0') {
+        pfree_ext(valueNumstr);
+        *resultNull = true;
+        return 0;
+    }
+
+    result = DirectFunctionCall3(numeric_in, CStringGetDatum(valueNumstr),
+        // ObjectIdGetDatum(0),
+        ObjectIdGetDatum(InvalidOid),  Int32GetDatum(-1));
+    pfree_ext(valueNumstr);
+
+    return result;
+}
+
+/**
+ * Common implementation of processing value and fmt
+ */
+Datum to_numeric_to_number_internal(text* value, text* fmt, Oid fncollation, bool *resultNull)
+{
+    Datum result = to_numeric_number_internal_with_fmt(value, fmt, false, fncollation, resultNull);
+
+    return result;
+}
+
 /* -------------------
- * NUMERIC to_number() (convert string to numeric)
+ * NUMERIC to_number()(convert string to numeric with fmt)
  * -------------------
  */
 Datum numeric_to_number(PG_FUNCTION_ARGS)
 {
     text* value = PG_GETARG_TEXT_P(0);
     text* fmt = PG_GETARG_TEXT_P(1);
-    NUMDesc Num;
+
+    // NUMDesc Num;
     Datum result;
-    FormatNode* format = NULL;
-    char* numstr = NULL;
-    bool shouldFree = false;
-    int len = 0;
-    int valuelen = 0;
-    char* fmtstr = NULL;
+    bool resultNull = false;
 
-    unsigned int scale;
-    unsigned int precision;
+    PG_TRY();
+    {
+        result = to_numeric_to_number_internal(value, fmt, PG_GET_COLLATION(), &resultNull);
+    }
+    PG_CATCH();
+    {
+        char* msg = Geterrmsg();
+        int errcode = geterrcode();
+        FlushErrorState();
+        ereport(ERROR,  (errcode, errmsg("%s", msg)));
+    }
+    PG_END_TRY();
 
-    len = VARSIZE(fmt) - VARHDRSZ;
-
-    if (len <= 0 || len >= INT_MAX / NUM_MAX_ITEM_SIZ)
+    if (resultNull) {
         PG_RETURN_NULL();
+    } else {
+        return result;
+    }
+}
 
-    fmtstr = (char*)palloc(len + 1);
-    errno_t rc = EOK;
-    rc = strncpy_s(fmtstr, len + 1, VARDATA(fmt), len);
-    securec_check(rc, "\0", "\0");
-    fmtstr[len] = '\0';
-    if (NULL != strchr(fmtstr, 'x') || NULL != strchr(fmtstr, 'X')) {
-        int i = 0;
-        for (i = 0; i < len; i++) {
-            if ('x' != fmtstr[i] && 'X' != fmtstr[i]) {
-                pfree_ext(fmtstr);
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number format model")));
-            }
-        }
-        valuelen = VARSIZE(value) - VARHDRSZ;
-        if (valuelen > len) {
-            pfree_ext(fmtstr);
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number")));
+Datum numeric_to_text_number(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+
+    text* sourceValue = PG_GETARG_TEXT_P(0);
+    bool defaultNumValIsNull = PG_ARGISNULL(1);
+    bool withDefault = PG_GETARG_BOOL(2); 
+    bool fmtIsNull = PG_ARGISNULL(4);
+    text* fmt;
+
+    Datum result;
+    bool resultNull = false;
+
+    PG_TRY();
+    {
+        if (fmtIsNull) {
+            result = to_numeric_number_internal_without_fmt(sourceValue,
+                PG_GET_COLLATION(), &resultNull);
+        } else {
+            fmt = PG_GETARG_TEXT_P(4);
+            result = to_numeric_number_internal_with_fmt(sourceValue, fmt, withDefault,
+                PG_GET_COLLATION(), &resultNull);
         }
     }
-    pfree_ext(fmtstr);
+    PG_CATCH();
+    {
+        if (withDefault) {
+            FlushErrorState();
 
-    format = NUM_cache(len, &Num, fmt, &shouldFree);
+            if (defaultNumValIsNull) {
+                resultNull = true;
+            } else {
+                Numeric defaultNumVal = PG_GETARG_NUMERIC(1); // 1700
 
-    numstr = (char*)palloc((len * NUM_MAX_ITEM_SIZ) + 1);
+                if (!fmtIsNull) {
+                    // Number description: fmt
+                    NUMDesc numDesc;
+                    bool shouldFree = false;
+                    int len = VARSIZE(fmt) - VARHDRSZ;
+                    FormatNode* format = NUM_cache(len, &numDesc, fmt, &shouldFree);
+                    // Integer digits
+                    unsigned int formatPrecision = Max(0, numDesc.pre);
+                    if (shouldFree)
+                        pfree_ext(format);
 
-    (void)NUM_processor(format,
-        &Num,
-        VARDATA(value),
-        numstr,
-        (len * NUM_MAX_ITEM_SIZ) + 1,
-        VARSIZE(value) - VARHDRSZ,
-        0,
-        false,
-        PG_GET_COLLATION());
+                    // Calculate the formatPrecision power of 10.
+                    double powerOfMax = pow(10, formatPrecision);
 
-    scale = (unsigned int)Num.post;
-    precision = Max(0, Num.pre) + scale;
+                    // into numeric_float8 func
+                    double defaultValue = (double)DatumGetFloat8(DirectFunctionCall1(numeric_float8, 
+                        NumericGetDatum(defaultNumVal)));
+                    if (defaultValue > (powerOfMax - 1)) {
+                        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), 
+                            errmsg("Exceeding the maximum value required by fmt")));
+                    }
+                }
 
-    if (shouldFree)
-        pfree_ext(format);
+                result = NumericGetDatum(defaultNumVal);
+            }
+        } else {
+            char* msg = Geterrmsg();
+            int errcode = geterrcode();
+            FlushErrorState();
 
-    result = DirectFunctionCall3(numeric_in,
-        CStringGetDatum(numstr),
-        ObjectIdGetDatum(InvalidOid),
-        Int32GetDatum(((precision << 16) | scale) + VARHDRSZ));
-    pfree_ext(numstr);
-    return result;
+            ereport(ERROR,  (errcode, errmsg("%s", msg)));
+        }
+    }
+    PG_END_TRY();
+
+    if (resultNull) {
+        PG_RETURN_NULL();
+    } else {
+        return result;
+    }
+}
+
+Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+
+    text* sourceValue = PG_GETARG_TEXT_P(0);
+
+    bool defaultNumValIsNull = PG_ARGISNULL(1);
+
+    bool withDefault = PG_GETARG_BOOL(2);
+    bool fmtIsNull = PG_ARGISNULL(4);
+    text* fmt;
+
+    Datum result;
+    bool resultNull = false;
+
+    PG_TRY();
+    {
+        if (fmtIsNull) {
+            result = to_numeric_number_internal_without_fmt(sourceValue, 
+                PG_GET_COLLATION(), &resultNull);
+        } else {
+            fmt = PG_GETARG_TEXT_P(4);
+            result = to_numeric_number_internal_with_fmt(sourceValue, fmt, withDefault, 
+                PG_GET_COLLATION(), &resultNull);
+        }
+    }
+    PG_CATCH();
+    {
+        if (withDefault) {
+            FlushErrorState();
+            if (defaultNumValIsNull) {
+                resultNull = true;
+            } else {
+                // The value of default value is processed here. Is no longer a conversion process under default, so withDefault is set to true.
+                withDefault = false;
+                resultNull = false;
+                text* default_num_val = PG_GETARG_TEXT_P(1); // 25
+
+                if (fmtIsNull) {
+                    result = to_numeric_number_internal_without_fmt(default_num_val,
+						PG_GET_COLLATION(), &resultNull);
+                } else {
+                    result = to_numeric_to_number_internal(default_num_val, fmt,
+						PG_GET_COLLATION(), &resultNull);
+                }
+            }
+        } else {
+            char* msg = Geterrmsg();
+            int errcode = geterrcode();
+            FlushErrorState();
+            ereport(ERROR,  (errcode, errmsg("%s", msg)));
+        }
+    }
+    PG_END_TRY();
+
+    if (resultNull) {
+        PG_RETURN_NULL();
+    } else {
+        return result;
+    }
 }
 
 /* ------------------
