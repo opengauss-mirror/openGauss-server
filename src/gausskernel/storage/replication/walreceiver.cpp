@@ -2540,6 +2540,7 @@ Datum gs_get_recv_locations(PG_FUNCTION_ARGS)
 
     XLogRecPtr rcvRedo;
     XLogRecPtr rcvWrite;
+    XLogRecPtr lastRplReadLsn;
     XLogRecPtr rcvFlush;
     XLogRecPtr rcvReceived;
     XLogRecPtr localMaxLSN;
@@ -2604,7 +2605,10 @@ Datum gs_get_recv_locations(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
     } else {
 
-        rcvRedo = GetXLogReplayRecPtr(NULL, NULL);
+        rcvRedo = GetXLogReplayRecPtr(NULL, &lastRplReadLsn);
+        if (XLByteEQ(lastRplReadLsn, rcvReceived)) {
+            rcvRedo = rcvReceived;
+        }
         /* receiver_received_location */
         if (rcvReceived == 0) {
             localMaxLSN = FindMaxLSN(t_thrd.proc_cxt.DataDir, maxLsnMsg, XLOG_READER_MAX_MSGLENTH, &localMaxLsnCrc,

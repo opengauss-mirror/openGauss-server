@@ -1,1 +1,0 @@
-DROP FUNCTION IF EXISTS pg_catalog.gs_get_recv_locations();

@@ -7,5 +7,5 @@ CREATE FUNCTION pg_catalog.gs_get_recv_locations(
  out write_lsn text,
  out flush_lsn text,
  out replay_lsn text)
-RETURNS record LANGUAGE INTERNAL VOLATILE STRICT as 'gs_get_recv_locations';
+RETURNS  SETOF record LANGUAGE INTERNAL VOLATILE NOT SHIPPABLE ROWS 10 as 'gs_get_recv_locations';
 comment on function pg_catalog.gs_get_recv_locations() is 'statistics: information about currently wal locations';
