@@ -475,7 +475,7 @@ restart:
             else
                 return false; /* deleted before scan started */
         } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),
-            &needSync, false, false, false, false)) {
+            &needSync, false, false, false)) {
             if (NeedSyncXact(needSync, htup->t_tableOid, snapshot)) {
                 needSync = 0;
                 SyncWaitXidEnd(HeapTupleHeaderGetXmin(page, tuple), buffer);
@@ -544,7 +544,7 @@ restart:
     }
 
     needSync = 0;
-    if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(page, tuple), &needSync, false, false, false, false)) {
+    if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(page, tuple), &needSync, false, false, false)) {
         if (NeedSyncXact(needSync, htup->t_tableOid, snapshot)) {
             needSync = 0;
             SyncWaitXidEnd(HeapTupleHeaderGetXmax(page, tuple), buffer);
@@ -744,7 +744,7 @@ restart:
             else
                 return TM_Invisible; /* updated before scan started */
         } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),
-            &needSync, false, false, false, false)) {
+            &needSync, false, false, false)) {
             if (needSync & SNAPSHOT_UPDATE_NEED_SYNC) {
                 needSync = 0;
                 SyncWaitXidEnd(HeapTupleHeaderGetXmin(page, tuple), buffer);

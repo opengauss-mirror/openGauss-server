@@ -728,7 +728,7 @@ bool ConditionalXactLockTableWait(TransactionId xid, const Snapshot snapshot, bo
 
         (void)LockRelease(&tag, ShareLock, false);
 
-        if (!TransactionIdIsInProgress(xid, NULL, false, bcareNextXid))
+        if (!TransactionIdIsInProgress(xid, NULL, bcareNextXid))
             break;
 
         if (!waitparent) {

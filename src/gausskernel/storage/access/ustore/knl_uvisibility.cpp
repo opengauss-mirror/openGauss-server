@@ -1321,7 +1321,7 @@ restart:
                 // skip alreadyLocked check, acquire lock anyway
                 result = TM_Ok;
             }
-        } else if (TransactionIdIsInProgress(locker, NULL, false, false, !isLockerSubXact)) {
+        } else if (TransactionIdIsInProgress(locker, NULL, false, !isLockerSubXact)) {
             *lockerXid = locker;
             result = TM_BeingModified;
         } else { /* if locker xid is commited, just consider previous updater */
@@ -1355,7 +1355,7 @@ restart:
             } else {
                 result = TM_Invisible;
             }
-        } else if (TransactionIdIsInProgress(tdinfo->xid, NULL, false, false, true)) {
+        } else if (TransactionIdIsInProgress(tdinfo->xid, NULL, false, true)) {
             // deleter is still active, caller should wait it until it commits or aborts
             result = TM_BeingModified;
             fetchSubXid = true;
@@ -1379,7 +1379,7 @@ restart:
             } else {
                 result = TM_Ok;
             }
-        } else if (TransactionIdIsInProgress(tdinfo->xid, NULL, false, false, true)) {
+        } else if (TransactionIdIsInProgress(tdinfo->xid, NULL, false, true)) {
             result = TM_BeingModified;
             fetchSubXid = true;
         } else if (UHeapTransactionIdDidCommit(tdinfo->xid)) {
@@ -1406,7 +1406,7 @@ restart:
             } else {
                 result = TM_Ok;
             }
-        } else if (TransactionIdIsInProgress(tdinfo->xid, &needSync, false, false, true, false)) {
+        } else if (TransactionIdIsInProgress(tdinfo->xid, &needSync, false, true, false)) {
             result = TM_Invisible;
             if (needSync) {
                 needSync = 0;
