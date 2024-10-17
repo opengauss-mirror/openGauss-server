@@ -1532,6 +1532,23 @@ static void EncodeSpecialTimestamp(Timestamp dt, char* str)
     }
 }
 
+Datum new_time(PG_FUNCTION_ARGS)
+{
+    if (!DB_IS_CMPT(A_FORMAT)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NEW_TIME is only supported in A compatibility database.")));
+    }
+    Timestamp dt = PG_GETARG_TIMESTAMP(0);
+    text *timezone1 = PG_GETARG_TEXT_PP(1);
+    text *timezone2 = PG_GETARG_TEXT_PP(2);
+    
+    Timestamp result = DirectFunctionCall2(
+        timestamptz_zone, PointerGetDatum(timezone2),
+        TimestampTzGetDatum(DirectFunctionCall2(timestamp_zone, PointerGetDatum(timezone1), TimestampGetDatum(dt))));
+    AdjustTimestampForTypmod(&result, 0);
+    PG_RETURN_TIMESTAMP(result);
+}
+
 Datum now(PG_FUNCTION_ARGS)
 {
     PG_RETURN_TIMESTAMPTZ(GetCurrentTransactionStartTimestamp());
