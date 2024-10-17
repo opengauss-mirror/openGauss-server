@@ -43,6 +43,7 @@
 #include <sys/stat.h>
 #include <string>
 
+#include "access/xlogreader.h"
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"
@@ -62,6 +63,7 @@
 #include "storage/copydir.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
+#include "storage/lock/lwlock.h"
 #include "storage/pmsignal.h"
 #include "storage/copydir.h"
 #include "storage/procarray.h"
@@ -188,6 +190,7 @@ static void ProcessEndXLogMessage(EndXLogMessage *endXLogMessage);
 static void ProcessWalHeaderMessage(WalDataMessageHeader *msghdr);
 static void ProcessWalDataHeaderMessage(WalDataPageMessageHeader *msghdr);
 Datum pg_stat_get_wal_receiver(PG_FUNCTION_ARGS);
+Datum gs_get_recv_locations(PG_FUNCTION_ARGS);
 /* Signal handlers */
 static void WalRcvSigHupHandler(SIGNAL_ARGS);
 static void WalRcvShutdownHandler(SIGNAL_ARGS);
@@ -2509,6 +2512,141 @@ Datum pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
                         remoteport);
         securec_check_ss(rc, "\0", "\0");
         values[14] = CStringGetTextDatum(location);
+    }
+    tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(tupstore);
+
+    return (Datum)0;
+}
+
+/*
+ * Descriptions: Returns activity of walreveiver, including pids and xlog
+ * locations received from primary o  cascading server.
+ */
+Datum gs_get_recv_locations(PG_FUNCTION_ARGS)
+{
+#define GS_STAT_GET_WAL_RECEIVER_COLS 4
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    TupleDesc tupdesc = NULL;
+    Tuplestorestate *tupstore = NULL;
+    MemoryContext per_query_ctx;
+    MemoryContext oldcontext;
+
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    
+    char location[MAXFNAMELEN * 3] = {0};
+
+    XLogRecPtr rcvRedo;
+    XLogRecPtr rcvWrite;
+    XLogRecPtr lastRplReadLsn;
+    XLogRecPtr rcvFlush;
+    XLogRecPtr rcvReceived;
+    XLogRecPtr localMaxLSN;
+    pg_crc32 localMaxLsnCrc = 0;
+    uint32 localMaxLsnLen = 0;
+    char maxLsnMsg[XLOG_READER_MAX_MSGLENTH] = {0};
+    TimeLineID tli = 0;
+   
+    Datum values[GS_STAT_GET_WAL_RECEIVER_COLS];
+    bool nulls[GS_STAT_GET_WAL_RECEIVER_COLS];
+    errno_t rc = EOK;
+
+    /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
+        return (Datum)0;
+    }
+    if (!(rsinfo->allowedModes & SFRM_Materialize)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialize mode required, but it is not allowed in this context")));
+    }
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE){
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
+    }
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+
+    (void)MemoryContextSwitchTo(oldcontext);
+
+     load_server_mode();
+    if (t_thrd.xlog_cxt.server_mode != STANDBY_MODE &&
+        t_thrd.xlog_cxt.server_mode != CASCADE_STANDBY_MODE  &&
+        t_thrd.xlog_cxt.server_mode != MAIN_STANDBY_MODE 
+       ) {
+        return (Datum)0;
+    }
+
+    SpinLockAcquire(&walrcv->mutex);
+    rcvReceived = walrcv->receiver_received_location;
+    rcvWrite = walrcv->receiver_write_location;
+    rcvFlush = walrcv->receiver_flush_location;
+    SpinLockRelease(&walrcv->mutex);
+
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check_c(rc, "\0", "\0");
+
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        /*
+         * Only superusers can see details. Other users only get the pid
+         * value to know it's a receiver, but no details.
+         */
+        rc = memset_s(&nulls[1], PG_STAT_GET_WAL_RECEIVER_COLS - 1, true, PG_STAT_GET_WAL_RECEIVER_COLS - 1);
+        securec_check(rc, "\0", "\0");
+    } else {
+
+        rcvRedo = GetXLogReplayRecPtr(NULL, &lastRplReadLsn);
+        if (XLByteEQ(lastRplReadLsn, rcvReceived)) {
+            rcvRedo = rcvReceived;
+        }
+        /* receiver_received_location */
+        if (rcvReceived == 0) {
+            localMaxLSN = FindMaxLSN(t_thrd.proc_cxt.DataDir, maxLsnMsg, XLOG_READER_MAX_MSGLENTH, &localMaxLsnCrc,
+                             &localMaxLsnLen, &tli);
+            if (XLogRecPtrIsInvalid(localMaxLSN)) {
+                     ereport(WARNING, (errmsg("find local max lsn fail: %s", maxLsnMsg)));
+             }else if (XLByteLT(localMaxLSN, rcvRedo)) {
+                   localMaxLSN = rcvRedo;
+             }
+           rcvReceived = localMaxLSN;  
+        }
+        rc = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(rcvReceived >> 32),
+                        (uint32)rcvReceived);
+        securec_check_ss(rc, "\0", "\0");
+        values[0] = CStringGetTextDatum(location);
+
+        /* receiver_write_location */
+        if (rcvWrite == 0) {
+             rcvWrite = localMaxLSN;
+        }
+        rc = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(rcvWrite >> 32),
+                        (uint32)rcvWrite);
+        securec_check_ss(rc, "\0", "\0");
+        values[1] = CStringGetTextDatum(location);
+
+        /* receiver_flush_location */
+        if (rcvFlush == 0) {
+             rcvFlush = localMaxLSN;
+        }
+        rc = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(rcvFlush >> 32),
+                        (uint32)rcvFlush);
+        securec_check_ss(rc, "\0", "\0");
+        values[2] = CStringGetTextDatum(location);
+        
+        rc = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(rcvRedo >> 32),
+                        (uint32)rcvRedo);
+        securec_check_ss(rc, "\0", "\0");
+        values[3] = CStringGetTextDatum(location);
     }
     tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
