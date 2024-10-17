@@ -501,6 +501,40 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         bool is_all_satisfied = pstate->p_is_td_compatible_truncation &&
             (attrtype == BPCHAROID || attrtype == VARCHAROID) &&
             ((type_mod > 0 && attrtypmod < type_mod) || type_mod < 0);
+         if (true) {
+             if (attrtype == VARCHAROID && IsA(expr, Const)) {
+                 Const* con = (Const*)expr;
+                 Const* newcon = makeNode(Const);
+                 newcon->consttype = VARCHAROID;
+                 newcon->consttypmod = -1;
+                 newcon->constcollid = -1;
+                 newcon->constlen = con->constlen;
+                 newcon->constbyval = con->constbyval;
+                 newcon->constisnull = con->constisnull;
+                 newcon->cursor_data.cur_dno = -1;
+                 newcon->location = con->location;
+                 Datum a = (Datum)DirectFunctionCall3(varcharin, con->constvalue, ObjectIdGetDatum(InvalidOid), Int32GetDatum(100));
+                 newcon->constvalue = a;
+                 return (Expr*)newcon;
+             }
+             else if (attrtype == TIMESTAMPOID && IsA(expr, Const)) {
+                 Const* con = (Const*)expr;
+                 Const* newcon = makeNode(Const);
+        
+                 newcon->consttype = TIMESTAMPOID;
+                 newcon->consttypmod = -1;
+                 newcon->constcollid = -1;
+                 newcon->constlen = con->constlen;
+                 newcon->constbyval = con->constbyval;
+                 newcon->constisnull = con->constisnull;
+                 newcon->cursor_data.cur_dno = -1;
+                 newcon->location = con->location;
+                 Datum a = (Datum)DirectFunctionCall3(timestamp_in, con->constvalue, ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
+                 newcon->constvalue = a;
+                 return (Expr*)newcon;
+            }
+        }
+
         if (is_all_satisfied) {
             expr = (Expr*)coerce_to_target_type(
                 pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_EXPLICIT_CAST, -1);
