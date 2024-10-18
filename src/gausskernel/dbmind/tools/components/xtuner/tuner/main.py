@@ -29,7 +29,7 @@ from .exceptions import OptionError
 from .xtuner import procedure_main
 from . import utils
 
-__version__ = '3.0.5'
+__version__ = '3.0.6'
 __description__ = 'X-Tuner: a self-tuning tool integrated by openGauss.'
 
 
