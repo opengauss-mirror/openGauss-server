@@ -28,6 +28,7 @@
 #include "catalog/gs_package.h"
 #include "catalog/gs_package_fn.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_attrdef.h"
 #include "commands/sqladvisor.h"
 #include "executor/spi.h"
 #include "funcapi.h"
@@ -90,7 +91,7 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
 static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref);
 static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRef* cref, bool error_if_no_field);
 static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location);
-extern PLpgSQL_row* build_row_from_class(Oid class_oid);
+extern PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues);
 static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars);
 static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
     PLpgSQL_func_hashkey* hashkey, bool for_validator);
@@ -675,6 +676,28 @@ static bool CheckPipelinedResIsTuple(Form_pg_type type_struct) {
     return pipelinedResIsTuple;
 }
 
+static void plpgsql_add_param_initdatums(int *newvarnos, int newnum, int** oldvarnos, int oldnum)
+{
+    int i;
+    int n = 0;
+    int *varnos = NULL;
+    errno_t rc = 0;
+    varnos = (int*)palloc(sizeof(int) * (newnum + oldnum));
+
+    if (oldnum > 0) {
+        rc = memcpy_s(varnos, sizeof(int) * oldnum, (int*)(*oldvarnos), sizeof(int) * oldnum);
+        securec_check(rc, "", "");
+    }
+    if (newnum > 0) {
+        rc = memcpy_s(varnos + oldnum, sizeof(int) * newnum, newvarnos, sizeof(int) * newnum);
+        securec_check(rc, "", "");
+    }
+
+    if (*oldvarnos)
+        pfree(*oldvarnos);
+    *oldvarnos = varnos;
+}
+
 /*
  * This is the slow part of plpgsql_compile().
  *
@@ -723,7 +746,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     PLpgSQL_variable** out_arg_variables;
     Oid pkgoid = InvalidOid;
     Oid namespaceOid = InvalidOid;
-
+    int *allvarnos = NULL;
+    int n_varnos = 0;
     Oid* saved_pseudo_current_userId = NULL;
     char* signature = NULL;
 
@@ -1006,6 +1030,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 const int buf_size = 32;
                 char buf[buf_size];
                 Oid arg_type_id = arg_types[i];
+                int attrnum = 0;
                 char arg_mode = arg_modes ? arg_modes[i] : PROARGMODE_IN;
                 PLpgSQL_variable* argvariable = NULL;
                 int arg_item_type;
@@ -1020,6 +1045,9 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
 
                 /* Create datatype info */
                 PLpgSQL_type* argdtype = plpgsql_build_datatype(arg_type_id, -1, func->fn_input_collation);
+                if (arg_mode != PROARGMODE_IN && arg_mode != PROARGMODE_INOUT) {
+                    argdtype->defaultvalues = get_default_plpgsql_expr_from_typeoid(arg_type_id, &attrnum);
+                }
 
                 /* Disallow pseudotype argument */
                 /* (note we already replaced polymorphic types) */
@@ -1033,6 +1061,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                     argvariable = plpgsql_build_variable(buf, 0, argdtype, false, false, argnames[i]);
                 } else {
                     argvariable = plpgsql_build_variable(buf, 0, argdtype, false);
+                }
+                if (argdtype->defaultvalues) {
+                    PLpgSQL_row *row = (PLpgSQL_row *)argvariable;
+                    plpgsql_add_param_initdatums(row->varnos, attrnum, &allvarnos, n_varnos);
+                    n_varnos = n_varnos + attrnum;
                 }
 
                 if (argvariable->dtype == PLPGSQL_DTYPE_VAR) {
@@ -1421,6 +1454,10 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 errmsg("Syntax parsing error, plpgsql parser returned %d", parse_rc)));
     }
     func->action = curr_compile->plpgsql_parse_result;
+    if (n_varnos > 0) {
+        plpgsql_add_param_initdatums(allvarnos, n_varnos, &func->action->initvarnos, func->action->n_initvars);
+        func->action->n_initvars = func->action->n_initvars + n_varnos;
+    }
 
     if (is_dml_trigger && func->action->isAutonomous) {
         ereport(ERROR,
@@ -3929,7 +3966,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             /* Composite type -- build a row variable */
             PLpgSQL_row* row = NULL;
 
-            row = build_row_from_class(dtype->typrelid);
+            row = build_row_from_class(dtype->typrelid, dtype->defaultvalues);
             row->addNamespace = add2namespace;
             row->customErrorCode = 0;
             if (0 == strcmp(format_type_be(row->rowtupdesc->tdtypeid), "exception")) {
@@ -4313,7 +4350,7 @@ void plpgsql_build_synonym(char* typname, char* basetypname)
 /*
  * Build a row-variable data structure given the pg_class OID.
  */
-PLpgSQL_row* build_row_from_class(Oid class_oid)
+PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues)
 {
     /*
      * Open the relation to get info.
@@ -4374,6 +4411,8 @@ PLpgSQL_row* build_row_from_class(Oid class_oid)
              */
             var = plpgsql_build_variable(refname, 0, plpgsql_build_datatype(attr_struct->atttypid, 
                                         attr_struct->atttypmod, attr_struct->attcollation), false);
+            if (defaultvalues != NULL)
+                ((PLpgSQL_var*)var)->default_val = defaultvalues[i];
 
             /* Add the variable to the row */
             row->fieldnames[i] = attname;
@@ -4637,7 +4676,7 @@ PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
                 errmsg("type \"%s\" is only a shell when build data type in PLSQL.", NameStr(type_struct->typname))));
     }
     PLpgSQL_type* typ = (PLpgSQL_type*)palloc(sizeof(PLpgSQL_type));
-
+    typ->defaultvalues = NULL;
     typ->typname = pstrdup(NameStr(type_struct->typname));
     typ->typoid = HeapTupleGetOid(type_tup);
     typ->collectionType = PLPGSQL_COLLECTION_NONE;
@@ -5946,4 +5985,107 @@ void checkArrayTypeInsert(ParseState* pstate, Expr* expr)
             }
         }
     }
+}
+
+Node* get_default_node_from_plpgsql_expr(PLpgSQL_expr *expr)
+{
+    MemoryContext cur = CurrentMemoryContext;
+    MemoryContext temp = NULL;
+    CachedPlanSource* plansource = NULL;
+    SelectStmt* stmt = NULL;
+    Value *val = NULL;
+    _SPI_plan plan;
+    parse_query_func parser = GetRawParser();
+
+    if (expr->query == NULL) {
+        return NULL;
+    }
+
+    SPI_STACK_LOG("connect", NULL, NULL);
+    if (SPI_connect() != SPI_OK_CONNECT) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
+    }
+    SPI_STACK_LOG("begin", expr->query, NULL);
+    if (_SPI_begin_call(true) < 0) {
+        return NULL;
+    }
+
+    int rc = memset_s(&plan, sizeof(_SPI_plan), '\0', sizeof(_SPI_plan));
+    securec_check_c(rc, "\0", "\0");
+    plan.magic = _SPI_PLAN_MAGIC;
+    plan.cursor_options = 0;
+    plan.spi_key = INVALID_SPI_KEY;
+
+    _SPI_prepare_oneshot_plan(expr->query, &plan, parser);
+    plansource = (CachedPlanSource*)lfirst(plan.plancache_list->head);
+    stmt = (SelectStmt*)plansource->raw_parse_tree;
+    if (stmt->targetList) {
+        Node* node  = (Node*)lfirst(stmt->targetList->head);
+        if (IsA(node, ResTarget)) {
+            ResTarget* resTarget = (ResTarget*)node;
+            temp = MemoryContextSwitchTo(cur);
+            val = (Value*)copyObject((void*)resTarget->val);
+            temp = MemoryContextSwitchTo(temp);
+        }
+    }
+
+    if (_SPI_end_call(true) < 0) {
+        return NULL;
+    }
+    SPI_STACK_LOG("finish", NULL, NULL);
+    if (SPI_finish() != SPI_OK_FINISH) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
+    }
+    return (Node*)val;
+}
+
+PLpgSQL_expr** get_default_plpgsql_expr_from_typeoid(Oid typeOid, int* attrnum)
+{
+    PLpgSQL_expr** defaultvalues = NULL;
+    ScanKeyData skey;
+    HeapTuple htup;
+    bool isnull = false;
+    Datum typrelid = typeidTypeRelid(typeOid);
+    if (typrelid != InvalidOid) {
+        ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, typrelid);
+        Relation adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
+        SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
+        List* del_list = NIL;
+        ListCell *lc = NULL;
+        int i = 0, j = 0;
+        while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+            Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
+            Datum val;
+            StringInfoData ds;
+            val = fastgetattr(htup, Anum_pg_attrdef_adsrc, adrel->rd_att, &isnull);
+            char *adsrc_str = isnull ? NULL : TextDatumGetCString(val);
+            initStringInfo(&ds);
+            appendStringInfoString(&ds, "SELECT ");
+            appendStringInfoString(&ds, adsrc_str);
+            del_list = lappend(del_list, ds.data);
+            j++;
+        }
+        *attrnum = j;
+        if (j > 0) {
+            defaultvalues = (PLpgSQL_expr **)palloc0(sizeof(PLpgSQL_expr *) * j);
+            PLpgSQL_expr *exprs = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr) * j);
+            foreach (lc, del_list) {
+                char *query = (char *)lfirst(lc);
+                PLpgSQL_expr *expr = exprs + i;
+                expr->dtype = PLPGSQL_DTYPE_EXPR;
+                expr->query = pstrdup(query);
+                expr->plan = NULL;
+                expr->paramnos = NULL;
+                expr->isouttype = false;
+                expr->idx = UINT32_MAX;
+                expr->out_param_dno = -1;
+                expr->is_have_tableof_index_func = true;
+                defaultvalues[i] = expr;
+                i++;
+            }
+        }
+        systable_endscan(adscan);
+        heap_close(adrel, AccessShareLock);
+    }
+    return defaultvalues;
 }

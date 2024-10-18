@@ -489,6 +489,7 @@ typedef struct { /* openGauss data type */
     PLpgSQL_expr* cursorExpr;
     int cursorDno;
     char typtyp;
+    PLpgSQL_expr** defaultvalues;
 } PLpgSQL_type;
 
 typedef struct {
@@ -1858,6 +1859,8 @@ extern PLpgSQL_datum* plpgsql_lookup_datum(
 extern PLpgSQL_type* plpgsql_get_row_field_type(int dno, const char* fieldname, MemoryContext old_cxt);
 extern PLpgSQL_resolve_option GetResolveOption();
 extern Node* plpgsql_check_match_var(Node* node, ParseState* pstate, ColumnRef* cref);
+extern Node* get_default_node_from_plpgsql_expr(PLpgSQL_expr *expr);
+extern PLpgSQL_expr** get_default_plpgsql_expr_from_typeoid(Oid typeOid, int* attrnum);
 
 /* ----------
  * Functions in pl_handler.c
