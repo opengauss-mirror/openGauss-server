@@ -420,6 +420,8 @@ typedef struct PROC_HDR {
     Latch* pgwrMainThreadLatch;
     /* BCMWriter process's latch */
     Latch* cbmwriterLatch;
+    /* BCMRealWriter process's latch */
+    Latch* cbmrealwriterLatch;
     volatile Latch* ShareStoragexlogCopyerLatch;
     volatile Latch* BarrierPreParseLatch;
     /* Current shared estimate of appropriate spins_per_delay value */

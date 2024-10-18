@@ -27,4 +27,6 @@
 
 extern void CBMWriterMain(void);
 
+extern void CBMReaderMain(void);
+
 #endif /* _CBMWRITER_H */

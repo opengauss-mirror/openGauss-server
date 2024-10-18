@@ -172,6 +172,11 @@ typedef struct {
     PGSemaphoreData	sem;
 } WALSyncRepWaitLock;
 
+typedef struct {
+    LWLock* lock;
+    PGSemaphoreData sem;
+} CBMTaskLock;
+
 #define WAL_NOT_COPIED 0
 #define WAL_COPIED 1
 #define WAL_COPY_SUSPEND (-1)
@@ -231,6 +236,11 @@ struct WALInitSegLockPadded {
 
 struct WALSyncRepWaitLockPadded {
     WALSyncRepWaitLock l;
+    char padding[PG_CACHE_LINE_SIZE];
+};
+
+struct CBMTaskLockPadded {
+    CBMTaskLock l;
     char padding[PG_CACHE_LINE_SIZE];
 };
 

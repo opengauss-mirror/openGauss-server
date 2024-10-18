@@ -216,6 +216,7 @@ static const char *BuiltinTrancheNames[] = {
     "IMCSHashLock",
     "IMCSDescLock",
 #endif
+    "cbmWaitTaskLock"
 };
 
 static void RegisterLWLockTranches(void);

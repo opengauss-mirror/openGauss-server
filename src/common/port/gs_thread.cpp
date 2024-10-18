@@ -337,6 +337,9 @@ static void check_boot_name(char** argv, int argc, char** name_thread)
         case CBMWriterProcess:
             *name_thread = "CBMWriter";
             break;
+        case CBMReaderProcess:
+            *name_thread = "CBMReaderProcess";
+            break;
         case RemoteServiceProcess:
             *name_thread = "RemoteService";
             break;

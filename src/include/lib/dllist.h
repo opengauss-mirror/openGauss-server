@@ -91,6 +91,7 @@ extern Dllist* DLNewList(void);       /* allocate and initialize a list header *
 extern void DLInitList(Dllist* list); /* init a header alloced by caller */
 extern void DLFreeList(Dllist* list); /* free up a list and all the nodes in
                                        * it */
+extern void DLListConcat(Dllist* a, Dllist* b);
 extern Dlelem* DLNewElem(void* val);
 extern void DLInitElem(Dlelem* e, void* val);
 extern void DLFreeElem(Dlelem* e);

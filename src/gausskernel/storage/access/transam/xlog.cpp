@@ -9013,6 +9013,13 @@ void InitWalSemaphores()
                                                                         g_instance.wal_cxt.walSyncRepWaitLock);
     g_instance.wal_cxt.walSyncRepWaitLock->l.lock = LWLockAssign(LWTRANCHE_SYNCREP_WAIT);
 
+    g_instance.wal_cxt.cbmWaitTaskLock = (CBMTaskLockPadded*)palloc(sizeof(CBMTaskLockPadded) * 2);
+    g_instance.wal_cxt.cbmWaitTaskLock = (CBMTaskLockPadded*)TYPEALIGN(sizeof(CBMTaskLockPadded),
+                                                                        g_instance.wal_cxt.cbmWaitTaskLock);
+    g_instance.wal_cxt.cbmWaitTaskLock->l.lock = LWLockAssign(LWTRANCHE_CBM_TASK_WAIT);
+    PGSemaphoreCreate(&g_instance.wal_cxt.cbmWaitTaskLock->l.sem);
+    PGSemaphoreReset(&g_instance.wal_cxt.cbmWaitTaskLock->l.sem);
+
     (void)MemoryContextSwitchTo(old_context);
 }
 
@@ -18811,7 +18818,7 @@ void SetCBMTrackedLSN(XLogRecPtr trackedLSN)
     xlogctl->cbmTrackedLSN = trackedLSN;
     SpinLockRelease(&xlogctl->info_lck);
 
-    ereport(LOG, (errmsg("set CBM tracked LSN point: %08X/%08X ", (uint32)(trackedLSN >> 32), (uint32)trackedLSN)));
+    ereport(DEBUG1, (errmsg("set CBM tracked LSN point: %08X/%08X ", (uint32)(trackedLSN >> 32), (uint32)trackedLSN)));
 }
 
 XLogRecPtr GetCBMTrackedLSN(void)
@@ -18822,7 +18829,7 @@ XLogRecPtr GetCBMTrackedLSN(void)
     SpinLockAcquire(&xlogctl->info_lck);
     trackedLSN = xlogctl->cbmTrackedLSN;
     SpinLockRelease(&xlogctl->info_lck);
-    ereport(DEBUG5, (errmsg("get CBM tracked LSN point: %08X/%08X ", (uint32)(trackedLSN >> 32), (uint32)trackedLSN)));
+    ereport(DEBUG1, (errmsg("get CBM tracked LSN point: %08X/%08X ", (uint32)(trackedLSN >> 32), (uint32)trackedLSN)));
     return trackedLSN;
 }
 

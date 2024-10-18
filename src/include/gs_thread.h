@@ -100,6 +100,7 @@ typedef enum knl_thread_role {
     DATARECIVER,
     DATARECWRITER,
     CBMWRITER,
+    CBMREADER,
     PAGEWRITER_THREAD,
     PAGEREPAIR_THREAD,
     HEARTBEAT,

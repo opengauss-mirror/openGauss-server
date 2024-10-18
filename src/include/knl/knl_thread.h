@@ -838,13 +838,16 @@ typedef struct knl_t_obs_context {
 typedef struct knl_t_cbm_context {
     /* The xlog parsing and bitmap output struct instance */
     struct XlogBitmapStruct* XlogCbmSys;
-
+    struct CBMReaderStatusStruct* CBMReaderSys;
     /* cbmwriter.cpp */
     /* Flags set by interrupt handlers for later service in the main loop. */
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
-    MemoryContext cbmwriter_context;
-    MemoryContext cbmwriter_page_context;
+    CBMReaderWorker* CBMReaderStatus;
+    int CBMReaderIndex;
+    HTAB* cbmPageHash;
+    Dllist pageFreeList;
+    int totalPageNum;
 } knl_t_cbm_context;
 
 /* thread local pointer to the shared memory */

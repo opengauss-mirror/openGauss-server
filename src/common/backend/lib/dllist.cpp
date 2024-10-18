@@ -19,6 +19,14 @@
 #include "lib/dllist.h"
 #include "miscadmin.h"
 
+void DLListConcat(Dllist* a, Dllist* b)
+{
+    Dlelem* curr = NULL;
+    while ((curr = DLRemHead(b)) != NULL) {
+        DLAddTail(a, curr);
+    }
+}
+
 Dllist* DLNewList(void)
 {
     Dllist* l = NULL;

@@ -1213,6 +1213,11 @@ int GetAuxProcEntryIndex(int baseIdx)
             /* thread pool listerner slots follow page redo threads */
             index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
+                     MAX_RECOVERY_THREAD_NUM +
+                     MAX_CBM_READERS_NUMBER;
+        } else if (t_thrd.bootstrap_cxt.MyAuxProcType == CBMReaderProcess) {
+            index += t_thrd.cbm_cxt.CBMReaderIndex +
+                     MAX_PAGE_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM;
         }
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1220,6 +1225,7 @@ int GetAuxProcEntryIndex(int baseIdx)
             index += CompactionWorkerProcess::GetMyCompactionConsumerOrignId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM +
+                     MAX_CBM_READERS_NUMBER +
                      g_instance.shmem_cxt.ThreadPoolGroupNum;
         }
 #endif /* ENABLE_MULTIPLE_NODES */
