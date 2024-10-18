@@ -271,4 +271,20 @@ select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_
 drop function func_get_subpartition_filepath;
 drop table test_func_subpartition_table;
 
+SET datestyle = 'ISO, YMD';
+
+select new_time('2024-07-22', 'EST', 'PST');
+select new_time('2024-07-22 14:00:00', 'EST', 'PST');
+select new_time(to_date('2024-07-22 14:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'EST', 'PST');
+select new_time('2024-09-09 15:27:26.114841 +01:00', 'EST', 'PST');
+select new_time('2024-07-22 14:00:00', '5:00', 'PST');
+select new_time('2024-07-22 14:00:00', 'Europe/Copenhagen', 'PST');
+select new_time(now(), 'EST', 'PST');
+
+create database db_mysql dbcompatibility = 'B';
+\c db_mysql
+select new_time('2024-07-22', 'EST', 'PST');
+\c regression
+drop database db_mysql;
+
 drop schema basefunc cascade;

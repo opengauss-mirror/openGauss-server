@@ -543,4 +543,54 @@ select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_
 
 drop function func_get_subpartition_filepath;
 drop table test_func_subpartition_table;
+SET datestyle = 'ISO, YMD';
+select new_time('2024-07-22', 'EST', 'PST');
+      new_time       
+---------------------
+ 2024-07-21 21:00:00
+(1 row)
+
+select new_time('2024-07-22 14:00:00', 'EST', 'PST');
+      new_time       
+---------------------
+ 2024-07-22 11:00:00
+(1 row)
+
+select new_time(to_date('2024-07-22 14:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'EST', 'PST');
+      new_time       
+---------------------
+ 2024-07-22 11:00:00
+(1 row)
+
+select new_time('2024-09-09 15:27:26.114841 +01:00', 'EST', 'PST');
+      new_time       
+---------------------
+ 2024-09-09 12:27:26
+(1 row)
+
+select new_time('2024-07-22 14:00:00', '5:00', 'PST');
+      new_time       
+---------------------
+ 2024-07-22 11:00:00
+(1 row)
+
+select new_time('2024-07-22 14:00:00', 'Europe/Copenhagen', 'PST');
+      new_time       
+---------------------
+ 2024-07-22 04:00:00
+(1 row)
+
+select new_time(now(), 'EST', 'PST');
+ERROR:  function new_time(timestamp with time zone, unknown, unknown) does not exist
+LINE 1: select new_time(now(), 'EST', 'PST');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_time
+create database db_mysql dbcompatibility = 'B';
+\c db_mysql
+select new_time('2024-07-22', 'EST', 'PST');
+ERROR:  NEW_TIME is only supported in A compatibility database.
+CONTEXT:  referenced column: new_time
+\c regression
+drop database db_mysql;
 drop schema basefunc cascade;
