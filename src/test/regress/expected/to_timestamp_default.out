@@ -1,0 +1,1445 @@
+-- For function TO_TIMESTAMP
+-- float8_timestamptz
+SELECT TO_TIMESTAMP(' Infinity'::float);
+ to_timestamp 
+--------------
+ infinity
+(1 row)
+
+SELECT TO_TIMESTAMP('-Infinity'::float);
+ to_timestamp 
+--------------
+ -infinity
+(1 row)
+
+SELECT TO_TIMESTAMP('NaN'::float);
+ERROR:  timestamp cannot be NaN
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP(-999888762478);
+ERROR:  timestamp out of range: "-9.99889e+11"
+CONTEXT:  referenced column: to_timestamp
+---------------------------------------------
+--------- 12-hour clock(DEFAULT FMT) --------
+---------------------------------------------
+SET nls_timestamp_format = 'YYYY-MM-DD HH:MI:SS.FF AM';
+SHOW nls_timestamp_format;
+   nls_timestamp_format    
+---------------------------
+ YYYY-MM-DD HH:MI:SS.FF AM
+(1 row)
+
+SELECT TO_TIMESTAMP('1998');
+       to_timestamp       
+--------------------------
+ Thu Jan 01 00:00:00 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28');
+       to_timestamp       
+--------------------------
+ Mon Dec 28 00:00:00 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01');
+       to_timestamp       
+--------------------------
+ Mon Dec 28 01:00:00 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02');
+       to_timestamp       
+--------------------------
+ Mon Dec 28 01:02:00 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03');
+       to_timestamp       
+--------------------------
+ Mon Dec 28 01:02:03 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12');
+        to_timestamp         
+-----------------------------
+ Mon Dec 28 01:02:03.12 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12 AM');
+        to_timestamp         
+-----------------------------
+ Mon Dec 28 01:02:03.12 1998
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 11:12:13 PM');
+ERROR:  invalid value "PM" for "FF"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01');
+       to_timestamp       
+--------------------------
+ Mon Jan 01 00:00:00 0001
+(1 row)
+
+SELECT TO_TIMESTAMP('01', 'yyyy-MM-dd'); 
+       to_timestamp       
+--------------------------
+ Mon Jan 01 00:00:00 0001
+(1 row)
+
+-- TO_TIMESTAMP(text)
+SHOW nls_timestamp_format;
+   nls_timestamp_format    
+---------------------------
+ YYYY-MM-DD HH:MI:SS.FF AM
+(1 row)
+
+SELECT TO_TIMESTAMP('01');
+       to_timestamp       
+--------------------------
+ Mon Jan 01 00:00:00 0001
+(1 row)
+
+SELECT TO_TIMESTAMP('01-Sep');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13.12');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13.12 PM');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13 PM');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+-- TO_TIMESTAMP(text, fmt)
+SET DateStyle TO 'ISO, MDY';
+SELECT TO_TIMESTAMP('32-1-1','DD-MM-YYYY');
+ERROR:  invalid data for "day of month =  32" ,value must be between 1 and 31
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('31-1-1','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0001-01-31 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1-1-1','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('0-1-1','DD-MM-YYYY');
+ERROR:  invalid data for "day of month =  0" ,value must be between 1 and 31
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1-0-1','DD-MM-YYYY');
+ERROR:  invalid data for "month =  0" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1-1-1','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1-12-1','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0001-12-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1-13-1','DD-MM-YYYY');
+ERROR:  invalid data for "month =  13" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('28-2-1','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0001-02-28 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('29-2-1','DD-MM-YYYY');
+ERROR:  invalid data for "day of month =  29" ,value must be be fit for current month
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('29-2-4','DD-MM-YYYY');
+    to_timestamp     
+---------------------
+ 0004-02-29 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('0-1','DDD-YYYY');
+ERROR:  invalid data for "days of year =  0" ,value must be between 1 and 366
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('367-1','DDD-YYYY');
+ERROR:  invalid data for "days of year =  367" ,value must be between 1 and 366
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('366-1','DDD-YYYY');
+ERROR:  invalid data for "days of year =  366" ,value must be be fit for current year
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('366-4','DDD-YYYY');
+    to_timestamp     
+---------------------
+ 0004-12-31 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('0','HH12');
+ERROR:  invalid data for "hour =  0" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1','HH12');
+      to_timestamp      
+------------------------
+ 0001-01-01 01:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('12','HH12');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('13','HH12');
+ERROR:  invalid data for "hour =  13" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0','MI');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('59','MI');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:59:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('60','MI');
+      to_timestamp      
+------------------------
+ 0001-01-01 01:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('0','SS');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('59','SS');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:59 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('60','SS');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:01:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('60','DDD-PS');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('366-4','YYYY-P');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('366-4','YYYY-DD-12');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713','YYYY');
+ERROR:  invalid data for "year =  -4713" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712','YYYY');
+ERROR:  invalid data for "year =  -4712" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1','YYYY');
+ERROR:  invalid data for "year =  -1" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('0','YYYY');
+ERROR:  invalid data for "year =  0" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('1','YYYY');
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('9999','YYYY');
+    to_timestamp     
+---------------------
+ 9999-01-01 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('10000','YYYY');
+ERROR:  invalid data for "year =  10000" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 pm', 'yyyymmdd hh:MI pm');
+    to_timestamp     
+---------------------
+ 2012-09-30 21:30:00
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 p.m.', 'yyyymmdd hh:MI p.m.');
+    to_timestamp     
+---------------------
+ 2012-09-30 21:30:00
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 111', 'yyyymmdd hh:MI MS');
+      to_timestamp       
+-------------------------
+ 2012-09-30 09:30:00.111
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 111', 'yyyymmdd hh:MI US');
+      to_timestamp       
+-------------------------
+ 2012-09-30 09:30:00.111
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 11111', 'yyyymmdd hh:MI SSSSS');
+ERROR:   minutes of hour conflicts with seconds in day
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 11111 TZ', 'yyyymmdd hh:MI SSSSS TZ');
+ERROR:  "TZ"/"tz" format patterns are not supported in to_date
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 111 B.C.', 'yyyymmdd hh:MI US B.C.');
+        to_timestamp        
+----------------------------
+ 2012-09-30 09:30:00.111 BC
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 111 BC', 'yyyymmdd hh:MI US BC');
+        to_timestamp        
+----------------------------
+ 2012-09-30 09:30:00.111 BC
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 111 fri', 'yyyymmdd hh:MI US dy');
+      to_timestamp       
+-------------------------
+ 2012-09-30 09:30:00.111
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 111 fri 3', 'yyyymmdd hh:MI US dy Q');
+      to_timestamp       
+-------------------------
+ 2012-09-30 09:30:00.111
+(1 row)
+
+select TO_TIMESTAMP('2012I30 09:30 111 fri 3', 'yyyyRMdd hh:MI US dy Q');
+      to_timestamp       
+-------------------------
+ 2012-01-30 09:30:00.111
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 5 1234', 'yyyymmdd hh:MI W J');
+ERROR:  year conflicts with Julian date
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 pm', 'yyyymmdd hh:MI pm FF');
+    to_timestamp     
+---------------------
+ 2012-09-30 21:30:00
+(1 row)
+
+select TO_TIMESTAMP('20120930 09:30 5555', 'yyyymmdd hh:MI RRRR');
+ERROR:  conflicting values for "RRRR" field in formatting string
+DETAIL:  This value contradicts a previous setting for the same field type.
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 55', 'yyyymmdd hh:MI RR');
+ERROR:  conflicting values for "RR" field in formatting string
+DETAIL:  This value contradicts a previous setting for the same field type.
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('20120930 09:30 55', 'yyyymmdd hh:MI FF');
+      to_timestamp      
+------------------------
+ 2012-09-30 09:30:00.55
+(1 row)
+
+SELECT TO_TIMESTAMP('0000-09-01','YYYYY-MM-DD');
+ERROR:  conflicting values for "Y" field in formatting string
+DETAIL:  This value contradicts a previous setting for the same field type.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0000-09-01','SYYYYY-MM-DD');
+ERROR:  invalid value "0000-" for "SYYYY"
+DETAIL:  Field requires 5 characters, but only 4 could be parsed.
+HINT:  If your source string is not fixed-width, try using the "FM" modifier.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0000-09-01','SYYYY-Y-MM-DD');
+ERROR:  conflicting values for "Y" field in formatting string
+DETAIL:  This value contradicts a previous setting for the same field type.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('25361','SSSSS');
+      to_timestamp      
+------------------------
+ 0001-01-01 07:02:41 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('25361-2','SSSSS-HH12');
+ERROR:  hour conflicts with seconds in day
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('25361-07','SSSSS-HH12');
+      to_timestamp      
+------------------------
+ 0001-01-01 07:02:41 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('25361-2','SSSSS-MI');
+      to_timestamp      
+------------------------
+ 0001-01-01 07:02:41 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('25361-10','SSSSS-MI');
+ERROR:   minutes of hour conflicts with seconds in day
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('25361-2','SSSSS-SS');
+ERROR:   seconds of minute conflicts with seconds in day
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('25361-41','SSSSS-SS');
+      to_timestamp      
+------------------------
+ 0001-01-01 07:02:41 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('2650000','J');
+    to_timestamp     
+---------------------
+ 2543-05-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2650000-2542','J-YYYY');
+ERROR:  year conflicts with Julian date
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2650000-2543','J-YYYY');
+    to_timestamp     
+---------------------
+ 2543-05-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2650000-4','J-MM');
+ERROR:  month conflicts with Julian date
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2650000-5','J-MM');
+    to_timestamp     
+---------------------
+ 2543-05-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2650000-8','J-DD');
+ERROR:  day conflicts with Julian date
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2650000-9','J-DD');
+    to_timestamp     
+---------------------
+ 2543-05-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-245','YYYY-DDD');
+    to_timestamp     
+---------------------
+ 2012-09-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-245-8','YYYY-DDD-MM');
+ERROR:  month conflicts with days of year
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-245-9','YYYY-DDD-MM');
+    to_timestamp     
+---------------------
+ 2012-09-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-245-1','YYYY-DDD-DD');
+    to_timestamp     
+---------------------
+ 2012-09-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-245-2','YYYY-DDD-DD');
+ERROR:  days of month conflicts with days of year
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('2012-11-15','YYYY-MM-DD');
+    to_timestamp     
+---------------------
+ 2012-11-15 00:00:00
+(1 row)
+
+--MS
+SELECT TO_TIMESTAMP('-1','MS');
+ERROR:  invalid data for "millisecond =  -10" ,value must be between 0 and 999
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0','MS');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('256','MS');
+        to_timestamp        
+----------------------------
+ 0001-01-01 00:00:00.256 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('999','MS');
+        to_timestamp        
+----------------------------
+ 0001-01-01 00:00:00.999 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('1000','MS');
+ERROR:  invalid data for "millisecond =  1000" ,value must be between 0 and 999
+CONTEXT:  referenced column: to_timestamp
+--WW
+SELECT TO_TIMESTAMP('0','WW');
+ERROR:  invalid data for "week number of year =  0" ,value must be between 1 and 53
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1','WW');
+ERROR:  cannot calculate day of year without year information
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('10','WW');
+ERROR:  cannot calculate day of year without year information
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('53','WW');
+ERROR:  cannot calculate day of year without year information
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('54','WW');
+ERROR:  invalid data for "week number of year =  54" ,value must be between 1 and 53
+CONTEXT:  referenced column: to_timestamp
+--D
+SELECT TO_TIMESTAMP('0','D');
+ERROR:  invalid data for "day =  0" ,value must be between 1 and 7
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1','D');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('4','D');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('7','D');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('8','D');
+ERROR:  invalid data for "day =  8" ,value must be between 1 and 7
+CONTEXT:  referenced column: to_timestamp
+--WW & D YYYY
+SELECT TO_TIMESTAMP('2012-50-0','YYYY-WW-D');
+ERROR:  invalid data for "day =  0" ,value must be between 1 and 7
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-50-1','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-12-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-50-4','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-12-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-50-7','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-12-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-50-8','YYYY-WW-D');
+ERROR:  invalid data for "day =  8" ,value must be between 1 and 7
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-0-4','YYYY-WW-D');
+ERROR:  invalid data for "week number of year =  0" ,value must be between 1 and 53
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-1-4','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-50-4','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-12-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-53-4','YYYY-WW-D');
+    to_timestamp     
+---------------------
+ 2012-12-30 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2012-54-4','YYYY-WW-D');
+ERROR:  invalid data for "week number of year =  54" ,value must be between 1 and 53
+CONTEXT:  referenced column: to_timestamp
+--US
+SELECT TO_TIMESTAMP('-1','US');
+ERROR:  invalid data for "microsecond =  -10000" ,value must be between 1 and 999999
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0','US');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('99999','US');
+         to_timestamp         
+------------------------------
+ 0001-01-01 00:00:00.99999 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('999999','US');
+         to_timestamp          
+-------------------------------
+ 0001-01-01 00:00:00.999999 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('1000000','US');
+ERROR:  input length of format 'US'/'us'/'FF'/'ff' must between 0 and 6
+CONTEXT:  referenced column: to_timestamp
+--W
+SELECT TO_TIMESTAMP('-1','W');
+ERROR:  invalid data for "week of month  =  -1" ,value must be between 1 and 5
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0','W');
+ERROR:  invalid data for "week of month  =  0" ,value must be between 1 and 5
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1','W');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('5','W');
+      to_timestamp      
+------------------------
+ 0001-01-29 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('6','W');
+ERROR:  invalid data for "week of month  =  6" ,value must be between 1 and 5
+CONTEXT:  referenced column: to_timestamp
+--DCH_check
+select TO_TIMESTAMP('13' ,'HH');
+ERROR:  invalid data for "hour =  13" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('25','HH24');
+ERROR:  invalid data for "hour =  25" ,value must be between 0 and 24
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('62','MI');
+ERROR:  invalid data for "minute =  62" ,value must be between 0 and 60
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('62','SS');
+ERROR:  invalid data for "second =  62" ,value must be between 0 and 60
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('86400','SSSSS');
+      to_timestamp      
+------------------------
+ 0001-01-02 00:00:00 BC
+(1 row)
+
+select TO_TIMESTAMP('8','D');
+ERROR:  invalid data for "day =  8" ,value must be between 1 and 7
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('32','DD');
+ERROR:  invalid data for "day of month =  32" ,value must be between 1 and 31
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('367','DDD');
+ERROR:  invalid data for "days of year =  367" ,value must be between 1 and 366
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('36','MM');
+ERROR:  invalid data for "month =  36" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('1000','MS');
+ERROR:  invalid data for "millisecond =  1000" ,value must be between 0 and 999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('54','WW');
+ERROR:  invalid data for "week number of year =  54" ,value must be between 1 and 53
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('7','W');
+ERROR:  invalid data for "week of month  =  7" ,value must be between 1 and 5
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('5373485','J');
+ERROR:  invalid data for "julian day  =  5373485" ,value must be between 1 and 5373484
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1','US'); 
+ERROR:  invalid data for "microsecond =  -10000" ,value must be between 1 and 999999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('10000','SYYYY');
+ERROR:  invalid data for "year =  10000" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('10000','RR');
+ERROR:  invalid data for "year(RR/RRRR) =  10000" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+SHOW nls_timestamp_format;
+   nls_timestamp_format    
+---------------------------
+ YYYY-MM-DD HH:MI:SS.FF AM
+(1 row)
+
+SELECT TO_TIMESTAMP('0097/Feb/16 --> 08:14:30', 'YYYY/Mon/DD --> HH:MI:SS');
+    to_timestamp     
+---------------------
+ 0097-02-16 08:14:30
+(1 row)
+
+SELECT TO_TIMESTAMP('97/2/16 8:14:30', 'FMYYYY/FMMM/FMDD FMHH:FMMI:FMSS');
+    to_timestamp     
+---------------------
+ 0097-02-16 08:14:30
+(1 row)
+
+SELECT TO_TIMESTAMP('1985 January 12', 'YYYY FMMonth DD');
+    to_timestamp     
+---------------------
+ 1985-01-12 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('My birthday-> Year: 1976, Month: May, Day: 16',
+                    '"My birthday-> Year" YYYY, "Month:" FMMonth, "Day:" DD');
+    to_timestamp     
+---------------------
+ 1976-05-16 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1,582nd VIII 21', 'Y,YYYth FMRM DD');
+    to_timestamp     
+---------------------
+ 1582-08-21 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('15 "text between quote marks" 98 54 45',
+                    E'HH24 "\\text between quote marks\\"" YY MI SS');
+    to_timestamp     
+---------------------
+ 1998-01-01 15:54:45
+(1 row)
+
+SELECT TO_TIMESTAMP('05121445482000', 'MMDDHH24MISSYYYY');
+    to_timestamp     
+---------------------
+ 2000-05-12 14:45:48
+(1 row)
+
+SELECT TO_TIMESTAMP('2000January09Sunday', 'YYYYFMMonthDDFMDay');
+    to_timestamp     
+---------------------
+ 2000-01-09 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('97/Feb/16', 'YYMonDD');
+ERROR:  invalid value "/Fe" for "Mon"
+DETAIL:  The given value did not match any of the allowed values for this field.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('19971116', 'YYYYMMDD');
+    to_timestamp     
+---------------------
+ 1997-11-16 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('20000-1116', 'YYYY-MMDD');
+ERROR:  invalid data for "year =  20000" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('9-1116', 'Y-MMDD');
+    to_timestamp     
+---------------------
+ 2009-11-16 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('95-1116', 'YY-MMDD');
+    to_timestamp     
+---------------------
+ 1995-11-16 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('995-1116', 'YYY-MMDD');
+    to_timestamp     
+---------------------
+ 1995-11-16 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2005426', 'YYYYWWD');
+    to_timestamp     
+---------------------
+ 2005-10-15 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2005300', 'YYYYDDD');
+    to_timestamp     
+---------------------
+ 2005-10-27 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2005527', 'IYYYIWID');
+    to_timestamp     
+---------------------
+ 2006-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('005527', 'IYYIWID');
+    to_timestamp     
+---------------------
+ 2006-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('05527', 'IYIWID');
+    to_timestamp     
+---------------------
+ 2006-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('5527', 'IIWID');
+    to_timestamp     
+---------------------
+ 2006-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2005364', 'IYYYIDDD');
+    to_timestamp     
+---------------------
+ 2006-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('20050302', 'YYYYMMDD');
+    to_timestamp     
+---------------------
+ 2005-03-02 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2005 03 02', 'YYYYMMDD');
+    to_timestamp     
+---------------------
+ 2005-03-02 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP(' 2005 03 02', 'YYYYMMDD');
+    to_timestamp     
+---------------------
+ 2005-03-02 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('  20050302', 'YYYYMMDD');
+    to_timestamp     
+---------------------
+ 2005-03-02 00:00:00
+(1 row)
+
+SHOW nls_timestamp_format;
+   nls_timestamp_format    
+---------------------------
+ YYYY-MM-DD HH:MI:SS.FF AM
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015');  -- error: ERROR:  invalid data for "hour =  13" ,value must be between 1 and 12
+ERROR:  invalid data for "hour =  13" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SHOW nls_timestamp_format;
+   nls_timestamp_format    
+---------------------------
+ YYYY-MM-DD HH:MI:SS.FF AM
+(1 row)
+
+-- with default
+SELECT TO_TIMESTAMP('1,582nd VIII 66' DEFAULT NULL ON CONVERSION ERROR);
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+SELECT TO_TIMESTAMP('1,582nd VIII 66' DEFAULT '1,582nd VIII 21' ON CONVERSION ERROR);
+ERROR:  invalid value "d " for "DD"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015' DEFAULT NULL ON CONVERSION ERROR);
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015' DEFAULT '2012-11-15' ON CONVERSION ERROR);
+    to_timestamp     
+---------------------
+ 2012-11-15 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT NULL ON CONVERSION ERROR);
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT '2012-11-15' ON CONVERSION ERROR);
+    to_timestamp     
+---------------------
+ 2012-11-15 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT 'abc' ON CONVERSION ERROR);
+ERROR:  invalid value "abc" for "YYYY"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-245-2' DEFAULT 3.14 ON CONVERSION ERROR); -- error: ERROR:  invalid data for "month =  14" ,value must be between 1 and 12
+ERROR:  invalid data for "month =  14" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-245-2' DEFAULT '2010-01-01 01:00:00' ON CONVERSION ERROR);
+    to_timestamp     
+---------------------
+ 2010-01-01 01:00:00
+(1 row)
+
+---------------------------------------------
+--------- 24-hour clock(DEFAULT FMT) --------
+---------------------------------------------
+SET nls_timestamp_format = 'YYYY-MM-DD HH:MI:SS';
+SHOW nls_timestamp_format;
+ nls_timestamp_format 
+----------------------
+ YYYY-MM-DD HH:MI:SS
+(1 row)
+
+SELECT TO_TIMESTAMP('1998');
+    to_timestamp     
+---------------------
+ 1998-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28');
+    to_timestamp     
+---------------------
+ 1998-12-28 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01');
+    to_timestamp     
+---------------------
+ 1998-12-28 01:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02');
+    to_timestamp     
+---------------------
+ 1998-12-28 01:02:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03');
+    to_timestamp     
+---------------------
+ 1998-12-28 01:02:03
+(1 row)
+
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12');
+ERROR:  invalid data for match  in date string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12 AM');
+ERROR:  invalid data for match  in date string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1998-12-28 11:12:13 PM');
+ERROR:  invalid data for match  in date string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01');
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('01');
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('01-Sep');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13.12');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13.12 PM');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 11:12:13 PM');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 16:12:13');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 12:55:66');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 24:12:13');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 25:55:66');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 60:12:13');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('01-Sep-1998 12:60:00');
+ERROR:  invalid value "Se" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+---------------------------------------------
+--------- DEFINE FMT --------
+---------------------------------------------
+-- SET DateStyle TO 'ISO, MDY';
+select TO_TIMESTAMP('23  01  01','hh24  mi  ss');
+      to_timestamp      
+------------------------
+ 0001-01-01 23:01:01 BC
+(1 row)
+
+select TO_TIMESTAMP('20150101  232323','yyyymmdd  hh24miss');
+    to_timestamp     
+---------------------
+ 2015-01-01 23:23:23
+(1 row)
+
+select TO_TIMESTAMP('20150101 232323','yyyymmdd          hh24miss');
+    to_timestamp     
+---------------------
+ 2015-01-01 23:23:23
+(1 row)
+
+SELECT TO_TIMESTAMP('0','HH24');
+      to_timestamp      
+------------------------
+ 0001-01-01 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('23','HH24');
+      to_timestamp      
+------------------------
+ 0001-01-01 23:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('24','HH24');
+      to_timestamp      
+------------------------
+ 0001-01-02 00:00:00 BC
+(1 row)
+
+SELECT TO_TIMESTAMP('24','H24');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('10','H24');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('10','H24');
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('1,582nd VIII 21', 'Y,YYYth FMRM DD');
+    to_timestamp     
+---------------------
+ 1582-08-21 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('-2012-2/3,21.15;36:18','YYYY-MM/DD,HH24.MI;SS:FF');
+ERROR:  invalid data for "year =  -2012" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('-1-2/3,21.15;36:18','YYYY-MM/DD,HH24.MI;SS:FF');
+ERROR:  invalid data for "year =  -1" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('0-2/3,21.15;36:18','YYYY-MM/DD,HH24.MI;SS:FF');
+ERROR:  invalid data for "year =  0" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('9999-2/3,21.15;36:18','YYYY-MM/DD,HH24.MI;SS:FF');
+      to_timestamp      
+------------------------
+ 9999-02-03 21:15:36.18
+(1 row)
+
+SELECT TO_TIMESTAMP('10000-2/3,21.15;36:18','YYYY-MM/DD,HH24.MI;SS:FF');
+ERROR:  invalid data for "year =  10000" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'syyyy-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  -4713" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'syyyy-mm-dd hh24:mi:ss.ff');
+         to_timestamp          
+-------------------------------
+ 4712-03-04 13:02:03.234015 BC
+(1 row)
+
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'syyyy-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  0" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'syyyy-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'syyyy-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  10000" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'SYYYY-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  -4713" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'SYYYY-mm-dd hh24:mi:ss.ff');
+         to_timestamp          
+-------------------------------
+ 4712-03-04 13:02:03.234015 BC
+(1 row)
+
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'SYYYY-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  0" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'SYYYY-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'SYYYY-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year =  10000" ,value must be between -4712 and 9999, and not be 0
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4713" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4712" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+ERROR:   RR/RRRR should be between 0 - 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2000-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('1-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2001-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'RR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  10000" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4713" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4712" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+ERROR:   RR/RRRR should be between 0 - 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2000-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('1-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2001-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'RRRR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  10000" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4713" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4712" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+ERROR:   RR/RRRR should be between 0 - 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2000-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('1-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2001-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'rr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  10000" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4713-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4713" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-4712-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  -4712" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('-1-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+ERROR:   RR/RRRR should be between 0 - 9999
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('0-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2000-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('1-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 2001-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015', 'rrrr-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "year(RR/RRRR) =  10000" ,value must be between 0 and 9999
+CONTEXT:  referenced column: to_timestamp
+-- Mixture of date conventions (ISO week and Gregorian):
+SELECT TO_TIMESTAMP('2005527', 'YYYYIWID'); -- error: Do not mix Gregorian and ISO week date conventions in a formatting template.
+ERROR:  invalid combination of date conventions
+HINT:  Do not mix Gregorian and ISO week date conventions in a formatting template.
+CONTEXT:  referenced column: to_timestamp
+-- Insufficient characters in the source string:
+SELECT TO_TIMESTAMP('19971', 'YYYYMMDD'); -- error: Field requires 2 characters, but only 1 remain.
+ERROR:  source string too short for "MM" formatting field
+DETAIL:  Field requires 2 characters, but only 1 remain.
+HINT:  If your source string is not fixed-width, try using the "FM" modifier.
+CONTEXT:  referenced column: to_timestamp
+-- Insufficient digit characters for a single node:
+SELECT TO_TIMESTAMP('19971)24', 'YYYYMMDD'); -- error; invalid value "1)" for "MM"
+ERROR:  invalid value "1)" for "MM"
+DETAIL:  Field requires 2 characters, but only 1 could be parsed.
+HINT:  If your source string is not fixed-width, try using the "FM" modifier.
+CONTEXT:  referenced column: to_timestamp
+-- Value clobbering:
+SELECT TO_TIMESTAMP('1997-11-Jan-16', 'YYYY-MM-Mon-DD'); -- error； conflicting values for "Mon" field in formatting string
+ERROR:  conflicting values for "Mon" field in formatting string
+DETAIL:  This value contradicts a previous setting for the same field type.
+CONTEXT:  referenced column: to_timestamp
+-- Non-numeric input:
+SELECT TO_TIMESTAMP('199711xy', 'YYYYMMDD');  -- error: invalid value "xy" for "DD"
+ERROR:  invalid value "xy" for "DD"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
+-- Input that doesn't fit in an int:
+SELECT TO_TIMESTAMP('10000000000', 'FMYYYY'); -- error: value for "YYYY" in source string is out of range. 
+ERROR:  value for "YYYY" in source string is out of range
+DETAIL:  Value must be in the range -2147483648 to 2147483647.
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2010-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss');
+    to_timestamp     
+---------------------
+ 2010-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1,582nd VIII 66' DEFAULT '1,582nd VIII 21' ON CONVERSION ERROR, 'Y,YYYth FMRM DD');
+    to_timestamp     
+---------------------
+ 1582-08-21 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('1,582nd VIII 66' DEFAULT 'abcdefg' ON CONVERSION ERROR, 'Y,YYYth FMRM DD');
+ERROR:  invalid input string for "Y,YYY"
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2012-245-2' DEFAULT 3.14 ON CONVERSION ERROR,'YYYY-DDD-DD');
+    to_timestamp     
+---------------------
+ 0003-01-14 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('2012-11-15' DEFAULT NULL ON CONVERSION ERROR,'YYYY-MM-DD');
+    to_timestamp     
+---------------------
+ 2012-11-15 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015' DEFAULT '2012-11-15' ON CONVERSION ERROR, 'RR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('9999-3-4 13:2:3.234015' DEFAULT NULL ON CONVERSION ERROR, 'RR-mm-dd hh24:mi:ss.ff');
+        to_timestamp        
+----------------------------
+ 9999-03-04 13:02:03.234015
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT '2012-11-15' ON CONVERSION ERROR, 'RR-mm-dd hh24:mi:ss.ff');
+    to_timestamp     
+---------------------
+ 2012-11-15 00:00:00
+(1 row)
+
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT 3.14 ON CONVERSION ERROR, 'RR-mm-dd hh24:mi:ss.ff');
+ERROR:  invalid data for "month =  14" ,value must be between 1 and 12
+CONTEXT:  referenced column: to_timestamp
+select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT NULL ON CONVERSION ERROR, 'RR-mm-dd hh24:mi:ss.ff');
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+-- USE TO_TIMESTAMP CHECKDAYS
+SELECT (TO_TIMESTAMP('12:59:04', 'hh24:mi:ss') - TO_TIMESTAMP('11:59:04', 'hh24:mi:ss.sssss')) * 24 *3600;
+  ?column?   
+-------------
+ @ 3600 days
+(1 row)
+
+SELECT (TO_TIMESTAMP('18:59:04', 'hh24:mi:ss') - TO_TIMESTAMP('11:59:04', 'hh24:mi:ss.sssss')) + (TO_TIMESTAMP('15:59:04', 'hh24:mi:ss') - TO_TIMESTAMP('11:59:04', 'hh24:mi:ss.sssss'));
+  ?column?  
+------------
+ @ 11 hours
+(1 row)
+
+SELECT (TO_TIMESTAMP('23:59:04', 'hh24:mi:ss') - TO_TIMESTAMP('00:34:04', 'hh24:mi:ss.sssss')) + (TO_TIMESTAMP('22:38:13', 'hh24:mi:ss') - TO_TIMESTAMP('02:45:53', 'hh24:mi:ss.sssss'));
+             ?column?             
+----------------------------------
+ @ 1 day 19 hours 17 mins 20 secs
+(1 row)
+
+--DAY > 0 && TIME < 0
+SELECT (TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-1 23:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-5 22:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-4 02:45:53', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+             ?column?             
+----------------------------------
+ @ 2 days 4 hours 32 mins 40 secs
+(1 row)
+
+SELECT ((TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-1 23:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-5 22:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-2 02:45:53', 'YYYY-MM-DD hh24:mi:ss.sssss'))) * 2;
+         ?column?         
+--------------------------
+ @ 9 hours 5 mins 20 secs
+(1 row)
+
+--DAY < 0 && TIME > 0
+SELECT (TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-5 00:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 22:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-4 20:45:53', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+               ?column?               
+--------------------------------------
+ @ 3 days 2 hours 27 mins 20 secs ago
+(1 row)
+
+SELECT ((TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-5 00:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 22:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-7 20:45:53', 'YYYY-MM-DD hh24:mi:ss.sssss'))) * 2;
+           ?column?            
+-------------------------------
+ @ 4 hours 54 mins 40 secs ago
+(1 row)
+
+--DAY > 0 && TIME > 0
+SELECT (TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-1 00:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) + (TO_TIMESTAMP('2012-8-8 22:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-4 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+             ?column?              
+-----------------------------------
+ @ 9 days 21 hours 51 mins 50 secs
+(1 row)
+
+--DAY = 0 && TIME > 0
+SELECT (TO_TIMESTAMP('2012-8-5 23:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-5 00:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 00:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 23:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+             ?column?             
+----------------------------------
+ @ 1 day 21 hours 58 mins 10 secs
+(1 row)
+
+--DAY < 0 && TIME < 0
+SELECT (TO_TIMESTAMP('2012-8-5 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-5 23:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 23:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-3 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+              ?column?               
+-------------------------------------
+ @ 6 days 22 hours 1 min 50 secs ago
+(1 row)
+
+--DAY = 0 && TIME < 0
+SELECT (TO_TIMESTAMP('2012-8-5 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-5 23:34:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 23:38:13', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+              ?column?              
+------------------------------------
+ @ 1 day 22 hours 1 min 50 secs ago
+(1 row)
+
+--DAY > 0 && TIME = 0
+SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-1 00:59:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) - (TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+ ?column? 
+----------
+ @ 7 days
+(1 row)
+
+--DAY < 0 && TIME = 0
+SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) + (TO_TIMESTAMP('2012-8-3 00:11:23', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+   ?column?   
+--------------
+ @ 5 days ago
+(1 row)
+
+--DAY = 0 && TIME = 0
+SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) + (TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+ ?column? 
+----------
+ @ 0
+(1 row)
+

@@ -1140,3 +1140,5 @@ test: backup_tool_audit
 
 # to_number func
 test: to_number_default
+# to_timestamp func
+test: to_timestamp_default

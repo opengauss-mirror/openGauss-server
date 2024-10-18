@@ -525,7 +525,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <ival>	defacl_privilege_target
 %type <defelt>	DefACLOption
 %type <list>	DefACLOptionList
-%type <node>	opt_default_fmt_clause
+%type <node>	opt_default_fmt_clause opt_default_nls_clause
 
 %type <list>	stmtblock stmtmulti
 				OptTableElementList TableElementList OptInherit definition tsconf_definition
@@ -28773,6 +28773,36 @@ func_application_special:	func_name '(' ')'
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
+			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P ')'
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+						ereport(ERROR,
+						       (errcode(ERRCODE_SYNTAX_ERROR),
+							   errmsg("The syntax or function is not supported. \"%s\"", $4)));
+					}
+
+					FuncCall *n = makeNode(FuncCall);
+                    n->funcname = $1;
+
+                    n->args = lappend($3, $5);
+					// is DEFAULT gramy
+					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					// default expr is column ref
+					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					// fmt constraints is NULL
+                    n->args = lappend(n->args, makeNullAConst(-1));
+					// nls param constraints is NULL
+                    n->args = lappend(n->args, makeNullAConst(-1));
+					
+					n->agg_order = NIL;
+                    n->agg_star = FALSE;
+                    n->agg_distinct = FALSE;
+                    n->func_variadic = FALSE;
+                    n->over = NULL;
+                    n->location = @1;
+                    n->call_func = false;
+                    $$ = (Node *) n;
+				}
 			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P opt_default_fmt_clause ')'
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
@@ -28794,9 +28824,9 @@ func_application_special:	func_name '(' ')'
 					// default expr is column ref
 					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
 					// There may be fmt constraints
-					n->args = lappend(n->args, $9);
-					// There may be nls param constraints
-					n->args = lappend(n->args, makeNullAConst(-1));
+                    n->args = lappend(n->args, $9);
+					// nls param constraints is NULL
+                    n->args = lappend(n->args, makeNullAConst(-1));
 					
 					n->agg_order = NIL;
                     n->agg_star = FALSE;
@@ -28806,6 +28836,12 @@ func_application_special:	func_name '(' ')'
                     n->location = @1;
                     n->call_func = false;
                     $$ = (Node *) n;
+				}
+			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P opt_default_fmt_clause opt_default_nls_clause ')'
+				{
+					ereport(ERROR,
+                               (errcode(ERRCODE_SYNTAX_ERROR),
+                               errmsg("Syntax with nls condition is not supported.")));
 				}
 			| func_name '(' VARIADIC func_arg_expr opt_sort_clause ')'
 				{
@@ -28893,11 +28929,17 @@ func_application_special:	func_name '(' ')'
 				}
 		;
 
+
 opt_default_fmt_clause:
-            ',' a_expr		{ $$ = $2; }
-			| /*EMPTY*/		{
-				$$ = makeNullAConst(-1);
-			}
+            ',' a_expr {
+                $$ = $2;
+            }
+	;
+
+opt_default_nls_clause:
+            ',' a_expr {
+                $$ = $2;
+            }
 	;
 
 /*

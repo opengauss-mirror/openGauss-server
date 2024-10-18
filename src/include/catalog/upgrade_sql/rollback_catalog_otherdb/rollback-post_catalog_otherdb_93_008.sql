@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.to_timestamp(text, text, bool, bool, text, text) CASCADE;
