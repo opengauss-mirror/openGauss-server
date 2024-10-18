@@ -323,6 +323,11 @@ typedef enum {
 /**********************************************************************
  * Node and structure definitions
  **********************************************************************/
+typedef struct PLpgSQL_nest_type { /* Generic datum array item		*/
+    char* typname;
+    int layer;
+    int index;
+} PLpgSQL_nest_type;
 /*
  * PLpgSQL_datum is the common supertype for PLpgSQL_expr, PLpgSQL_var,
  * PLpgSQL_row, PLpgSQL_rec, PLpgSQL_recfield, and PLpgSQL_arrayelem
@@ -400,6 +405,7 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
     int dno;
     bool ispkg;
     char* query;
+    List* nest_typnames;
     SPIPlanPtr plan;
     Bitmapset* paramnos; /* all dnos referenced by this query */
 
@@ -530,6 +536,7 @@ typedef struct PLpgSQL_var { /* Scalar variable */
     struct PLpgSQL_var* nest_table; /* origin nest table type, copy from it when add new nest table */
     HTAB* tableOfIndex = NULL; /* mapping of table of index */
     int nest_layers = 0;
+    List* nest_typnames;
 } PLpgSQL_var;
 
 typedef struct { /* Row variable */
@@ -566,6 +573,7 @@ typedef struct { /* Row variable */
     Oid recordVarTypOid; /* package record var's composite type oid */
     bool hasExceptionInit;
     bool atomically_null_object;
+    List* nest_typnames; 
 } PLpgSQL_row;
 
 typedef struct {
@@ -573,6 +581,8 @@ typedef struct {
     PLpgSQL_type* type;
     bool notnull;
     PLpgSQL_expr* defaultvalue;
+    List* nest_typnames;
+    PLpgSQL_nest_type* cur_ntype;
 } PLpgSQL_rec_attr;
 
 typedef struct {
@@ -595,6 +605,7 @@ typedef struct {
     bool* notnulls;
     bool addNamespace;
     PLpgSQL_expr** defaultvalues;
+    List* nest_typnames; 
 } PLpgSQL_rec_type;
 
 typedef struct { /* Record variable (non-fixed structure) */
@@ -1825,6 +1836,8 @@ extern PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno,
 PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace);
+extern List* search_external_nest_type(char* name, Oid typeOid,
+    int layer, List* nest_typnames, PLpgSQL_nest_type* cur_ntype);
 extern PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc);
 extern void plpgsql_build_synonym(char* typname, char* basetypname);
 extern int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate);

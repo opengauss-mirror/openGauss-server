@@ -54,7 +54,7 @@
 
 #include <limits.h>
 
-
+#define MAX_LAYER 256
 #define LENGTH_OF_BRACKETS_AND_DOT 4
 #define LENGTH_OF_QUOTATION_MARKS 2
 #define IS_ANONYMOUS_BLOCK \
@@ -228,6 +228,8 @@ static char* get_attrname(int tok);
 static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname);
 static void raw_parse_package_function(char* proc_str, int location, int leaderlen);
 static void checkFuncName(List* funcname);
+static void checkTypeName(List* nest_typnames, List* target_typnames);
+static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type);
 static void IsInPublicNamespace(char* varname);
 static void CheckDuplicateCondition (char* name);
 static void SetErrorState();
@@ -1222,6 +1224,7 @@ as_is        : K_IS
 decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_notnull decl_defval
                     {
                         ListCell *lc = NULL;
+                        PLpgSQL_row* row = NULL;
                         if ((list_length($1) > 1) && ($3 && $3->typoid == REFCURSOROID))
 						    ereport(errstate,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1283,6 +1286,14 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
 
                             var = plpgsql_build_variable(varname->name, varname->lineno,
                                                          $3, true);
+                            if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD)
+                            {
+                                row = (PLpgSQL_row*)var;
+                                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                                ntype->index = 1;
+                                List* nest_typnames = NIL;
+                                row->nest_typnames = search_external_nest_type($3->typname, $3->typoid, -1, nest_typnames, ntype);
+                            }
                             if ($2)
                             {
                                 if (var->dtype == PLPGSQL_DTYPE_VAR)
@@ -1315,8 +1326,10 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                     ((PLpgSQL_var *) var)->default_val = $6;
                                 else if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD) {
                                     PLpgSQL_row * row = (PLpgSQL_row *) var;
-                                    if (!(row->atomically_null_object && pg_strcasecmp($6->query, "select null") == 0))
+                                    if (!(row->atomically_null_object && pg_strcasecmp($6->query, "select null") == 0)) {
                                         row->default_val = $6;
+                                        checkTypeName($6->nest_typnames, row->nest_typnames);
+                                    }
                                 } else if (var->dtype == PLPGSQL_DTYPE_CURSORROW) {
                                      ((PLpgSQL_rec *) var)->default_val = $6;
                                 }
@@ -1477,7 +1490,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             u_sess->plsql_cxt.have_error = true;
                         }
 
-                        plpgsql_build_varrayType($2->name, $2->lineno, $9, true);
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_varrayType($2->name, $2->lineno, $9, true);
+                        var->nest_typnames = get_current_type_nest_type(var->nest_typnames, var->refname, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
@@ -1514,11 +1528,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         newp = build_type_from_record_var($9, @9);
                         newp->collectionType = PLPGSQL_COLLECTION_ARRAY;
                         newp->tableOfIndexType = InvalidOid;
-                        plpgsql_build_varrayType($2->name, $2->lineno, newp, true);
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_varrayType($2->name, $2->lineno, newp, true);
+                        PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
+                        var->nest_typnames = get_current_type_nest_type(rec_var->nest_typnames, var->refname, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_ARRAY);
                         } else if (enable_plpgsql_gsdependency()) {
-                            PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
                             int i;
                             for (i = 0; i < rec_var->attrnum; i++) {
                                 gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
@@ -1540,6 +1555,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_varrayType($2->name, $2->lineno, nest_type, true);
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
+                        List *old_nest_typenames = var->nest_table && var->nest_table->nest_typnames ? var->nest_table->nest_typnames : NULL;
+                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true);
                         var->nest_layers = depth;
                         var->isIndexByTblOf = false;
                         pfree_ext($2->name);
@@ -1581,17 +1598,19 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
 
                             PLpgSQL_type *var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$3])->datatype;
                             PLpgSQL_var *varray_type = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$3];
-
                             PLpgSQL_var *newp;
                             PLpgSQL_type *new_var_type;
 
                             new_var_type = build_array_type_from_elemtype(var_type);
                             new_var_type->collectionType = var_type->collectionType;
                             new_var_type->tableOfIndexType = var_type->tableOfIndexType;
-
                             newp = (PLpgSQL_var *)plpgsql_build_variable(varname->name, varname->lineno, new_var_type, true);
                             newp->isconst = $2;
                             newp->default_val = $4;
+                            newp->nest_typnames = varray_type->nest_typnames;
+                            if (newp->default_val != NULL) {
+                                checkTypeName(newp->default_val->nest_typnames, varray_type->nest_typnames);
+                            }
 
                             if (NULL == newp) {
                                 const char* message = "build variable failed";
@@ -1651,7 +1670,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                     erraction("check define of table type")));
                             u_sess->plsql_cxt.have_error = true;
                         }
-                        plpgsql_build_tableType($2->name, $2->lineno, $6, true);
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2->name, $2->lineno, $6, true);
+                        var->nest_typnames = get_current_type_nest_type(var->nest_typnames, var->refname, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
@@ -1672,6 +1692,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2->name, $2->lineno, nest_type, true);
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                        List *old_nest_typenames = var->nest_table && var->nest_table->nest_typnames ? var->nest_table->nest_typnames : NULL;
+                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true);
                         var->nest_layers = depth;
                         var->isIndexByTblOf = false;
                         pfree_ext($2->name);
@@ -1715,11 +1737,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         newp = build_type_from_record_var($6, @6);
                         newp->collectionType = PLPGSQL_COLLECTION_TABLE;
                         newp->tableOfIndexType = InvalidOid;
-                        plpgsql_build_tableType($2->name, $2->lineno, newp, true);
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2->name, $2->lineno, newp, true);
+                        PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                        var->nest_typnames = get_current_type_nest_type(rec_var->nest_typnames, var->refname, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF);
                         } else if (enable_plpgsql_gsdependency()) {
-                            PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
                             int i;
                             for (i = 0; i < rec_var->attrnum; i++) {
                                 gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
@@ -1962,7 +1985,10 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             }
                             newp->isconst = $2;
                             newp->default_val = $4;
-
+                            newp->nest_typnames = table_type->nest_typnames;
+                            if (newp->default_val != NULL) {
+                                checkTypeName(newp->default_val->nest_typnames, table_type->nest_typnames);
+                            }
                             if (table_type->nest_table != NULL) {
                                 newp->nest_table = plpgsql_build_nested_variable(table_type->nest_table, $2, varname->name, varname->lineno);
                                 newp->nest_layers = table_type->nest_layers;
@@ -1977,6 +2003,13 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         PLpgSQL_rec_type	*newp = NULL;
 
                         newp = plpgsql_build_rec_type($2->name, $2->lineno, $6, true);
+
+                        PLpgSQL_nest_type *new_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        new_ntype->typname = pstrdup(newp->typname);
+                        new_ntype->layer = 0;
+                        new_ntype->index = 1;
+                        newp->nest_typnames = lappend(newp->nest_typnames, new_ntype);
+
                         if (NULL == newp) {
                             const char* message = "build variable failed";
                             InsertErrorMessage(message, plpgsql_yylloc);
@@ -2018,7 +2051,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                 u_sess->plsql_cxt.have_error = true;
                             }
                             if ($3 != NULL) {
-                                ((PLpgSQL_row *) newp)->default_val = $3;
+                                PLpgSQL_row* row = (PLpgSQL_row*)newp;
+                                row->default_val = $3;
+                                checkTypeName($3->nest_typnames, row->nest_typnames);
                             }
                             pfree_ext(varname->name);
                         }
@@ -2220,10 +2255,18 @@ opt_subtype_range :
 record_attr_list : record_attr
                    {
                         $$ = list_make1($1);
+                        if ($1->cur_ntype) {
+                            $1->cur_ntype->index = $$->length;
+                            $1->nest_typnames = lappend($1->nest_typnames, $1->cur_ntype);
+                        }
                    }
                  | record_attr_list ',' record_attr
                     {
                         $$ = lappend($1, $3);
+                        if ($3->cur_ntype) {
+                            $3->cur_ntype->index = $$->length;
+                            $3->nest_typnames = lappend($3->nest_typnames, $3->cur_ntype);
+                        }
                     }
                  ;
 
@@ -2247,6 +2290,10 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                         attr->type = $2;
 
                         attr->notnull = $3;
+                        attr->cur_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        attr->cur_ntype->index = -1;
+                        List* nest_typnames = NIL;
+                        attr->nest_typnames = search_external_nest_type(attr->type->typname, attr->type->typoid, 0, nest_typnames, attr->cur_ntype);
                         if ($4 != NULL)
                         {
                             if (attr->type->ttype == PLPGSQL_TTYPE_SCALAR)
@@ -2301,7 +2348,14 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
 
                         attr->attrname = $1;
                         attr->type = build_type_from_record_var($2, @2);
-
+                        PLpgSQL_rec_type *var_type = (PLpgSQL_rec_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$2];
+                        attr->cur_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        attr->cur_ntype->typname = pstrdup(var_type->typname);
+                        attr->cur_ntype->layer = 1;
+                        if (var_type->nest_typnames != NIL) {
+                            attr->nest_typnames = get_current_type_nest_type(var_type->nest_typnames, NULL, false);
+                        }
+                        
                         attr->notnull = $3;
                         if ($4 != NULL)
                         {
@@ -2360,6 +2414,13 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                         new_var_type->tableOfIndexType = var_type->tableOfIndexType;
                         attr->type = new_var_type;
                         attr->notnull = $3;
+                        attr->cur_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        attr->cur_ntype->typname = pstrdup(varray_type->refname);
+                        attr->cur_ntype->layer = 1;
+                        if (varray_type->nest_typnames != NIL) {
+                            attr->nest_typnames = get_current_type_nest_type(varray_type->nest_typnames, NULL, false);
+                        }
+
                         if ($4 != NULL)
                         {
                             if (attr->type->ttype == PLPGSQL_TTYPE_SCALAR)
@@ -2406,6 +2467,13 @@ record_attr		: attr_name decl_datatype decl_notnull decl_rec_defval
                         new_var_type->tableOfIndexType = var_type->tableOfIndexType;
                         attr->type = new_var_type;
                         attr->notnull = $3;
+                        attr->cur_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        attr->cur_ntype->typname = pstrdup(table_type->refname);
+                        attr->cur_ntype->layer = 1;
+                        if (table_type->nest_typnames != NIL) {
+                            attr->nest_typnames = get_current_type_nest_type(table_type->nest_typnames, NULL, false);
+                        }
+
                         if ($4 != NULL)
                         {
                             if (attr->type->ttype == PLPGSQL_TTYPE_SCALAR)
@@ -2970,6 +3038,16 @@ stmt_assign		: assign_var assign_operator expr_until_semi
                         newp->varno = $1;
                         newp->expr  = $3;
                         newp->sqlString = plpgsql_get_curline_query();
+                        if (newp->expr) {
+                            PLpgSQL_var* target = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[newp->varno];
+                            List* nest_typnames = NIL;
+                            if (target->dtype == PLPGSQL_DTYPE_RECORD || target->dtype == PLPGSQL_DTYPE_ROW) {
+                                nest_typnames = ((PLpgSQL_row*)target)->nest_typnames;
+                            } else if (target->dtype == PLPGSQL_DTYPE_VAR) {
+                                nest_typnames = target->nest_typnames;
+                            }
+                            checkTypeName(newp->expr->nest_typnames, nest_typnames);
+                        }
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -8629,6 +8707,92 @@ static bool oid_is_function(Oid funcid, bool* isSystemObj)
     return false;
 }
 
+static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
+{
+    if (!u_sess->attr.attr_sql.enable_pltype_name_check ||
+    nest_typnames == NIL || target_nest_typnames == NIL)
+        return;
+    
+    ListCell* lc = NULL;
+    int i = 0;
+    foreach (lc, nest_typnames) {
+        PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)lfirst(lc);
+        ListCell* target_typnames = target_nest_typnames->head;
+        PLpgSQL_nest_type* target_ntype = (PLpgSQL_nest_type*)lfirst(target_typnames);
+        char* functypname = NULL;
+        char* pkgtypname = NULL;
+        List* found_list = NIL;
+        bool found = false;
+            
+        for (i = 0; i < target_nest_typnames->length; i++) {
+            if (target_ntype->layer == ntype->layer &&
+               (target_ntype->index == -1 || target_ntype->index == ntype->index)) {
+                    found_list = lappend(found_list, target_ntype);
+            }
+            if (target_typnames) {
+                target_typnames = target_typnames->next;
+                if (target_typnames) {
+                    target_ntype = (PLpgSQL_nest_type*)lfirst(target_typnames);
+                }
+            }
+        }
+        if (strchr(ntype->typname, '.') == NULL) {
+            getPkgFuncTypeName(ntype->typname, &functypname, &pkgtypname);
+        }
+        if (found_list != NIL) {
+            ListCell* lcf = NULL;
+            foreach(lcf, found_list) {
+                target_ntype  = (PLpgSQL_nest_type*)lfirst(lcf);
+                bool is_row   = strcasecmp(ntype->typname, "ROW") == 0;
+                bool is_equal = strcmp(ntype->typname, target_ntype->typname) == 0;
+                bool func_name_equal = functypname ? strcmp(functypname, target_ntype->typname) == 0 : false;
+                bool pkg_name_equal  = pkgtypname ? strcmp(pkgtypname, target_ntype->typname) == 0 : false;
+
+                if (is_row || is_equal || func_name_equal || pkg_name_equal) {
+                    found = true;
+                }
+            }
+        }
+        if (!found) {
+            char *mes = NULL;
+            char *report_mes = "Wrong type of expression, should not use type ";
+            int length = strlen(ntype->typname) + strlen(report_mes) + 3;
+            mes = (char*)palloc0(length);
+            errno_t rc = snprintf_s(mes, length, length -1, "%s\"%s\"", report_mes, ntype->typname);
+            securec_check_ss(rc, "", "");
+            InsertErrorMessage(mes, plpgsql_yylloc);
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg(mes)));
+        }
+    }
+}
+
+static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type)
+{
+    List* nest_typnames = NIL;
+    ListCell* lc = NULL;
+    if (old_nest_typenames != NIL) {
+        int i = 0;
+        PLpgSQL_nest_type *new_ntypes = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type) * old_nest_typenames->length);
+        foreach (lc, old_nest_typenames) {
+            PLpgSQL_nest_type *old_ntype = (PLpgSQL_nest_type *)lfirst(lc);
+            PLpgSQL_nest_type *new_ntype = new_ntypes + i;
+            new_ntype->typname = pstrdup(old_ntype->typname);
+            new_ntype->layer = old_ntype->layer + 1;
+            new_ntype->index = old_ntype->index;
+            nest_typnames = lappend(nest_typnames, new_ntype);
+            i++;
+        }
+    }
+    if (add_current_type) {
+        PLpgSQL_nest_type *ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+        ntype->typname = pstrdup(typname);
+        ntype->layer = 0;
+        ntype->index = -1;
+        nest_typnames = lappend(nest_typnames, ntype);
+    }
+    return nest_typnames;
+}
+
 /*
  * @brief is_datatype
  *  check if a given type is a datatype
@@ -8997,6 +9161,9 @@ read_sql_construct6(int until,
     bool				ds_changed = false;
     ArrayParseContext	context;
     List				*idents = 0;
+    List*				nest_typnames = NIL;
+    int					comma_cnt = 0;
+    int					typname_indexs[MAX_LAYER] = {0};
     const char			left_bracket[2] = "[";
     const char			right_bracket[2] = "]";
     const char			left_parentheses[2] = "(";
@@ -9009,7 +9176,7 @@ read_sql_construct6(int until,
     int					right_brace_count = 0;
     bool					stop_count = false;
     int					stop_tok;
-     /* mark if there are 2 table of index by var call functions in an expr */
+    /* mark if there are 2 table of index by var call functions in an expr */
     int tableof_func_dno = -1;
     int tableof_var_dno = -1;
     bool is_have_tableof_index_var = false;
@@ -9037,6 +9204,10 @@ read_sql_construct6(int until,
     {
         prev_tok = tok;
         tok = yylex();
+        if (tok == ',' && (left_brace_count - right_brace_count) > 0 && 
+           (left_brace_count - right_brace_count) < MAX_LAYER) {
+            typname_indexs[left_brace_count - right_brace_count] = typname_indexs[left_brace_count - right_brace_count] + 1;
+        }
         if (tok == '\"' || tok == '\'') {
             if (stop_count && stop_tok == tok) {
                 stop_count = false;
@@ -9617,6 +9788,11 @@ read_sql_construct6(int until,
                 {
                     nest_layers = var->nest_layers;
                 }
+                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                ntype->typname = pstrdup(var->refname);
+                ntype->layer = left_brace_count - right_brace_count;
+                ntype->index = typname_indexs[ntype->layer] + 1;
+                nest_typnames = lappend(nest_typnames, ntype);
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
                 break;
             }
@@ -9642,7 +9818,23 @@ read_sql_construct6(int until,
                 {
                     nest_layers = var->nest_layers;
                 }
+                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                ntype->typname = pstrdup(var->refname);
+                ntype->layer = left_brace_count - right_brace_count;
+                ntype->index = typname_indexs[ntype->layer] + 1;
+                nest_typnames = lappend(nest_typnames, ntype);
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
+                break;
+            }
+            case T_RECORD:
+            {
+                int dno = yylval.wdatum.datum->dno;
+                PLpgSQL_rec_type* rec_type = (PLpgSQL_rec_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                ntype->typname = pstrdup(rec_type->typname);
+                ntype->layer = left_brace_count - right_brace_count;
+                ntype->index = typname_indexs[ntype->layer] + 1;
+                nest_typnames = lappend(nest_typnames, ntype);
                 break;
             }
             case T_DATUM:
@@ -9669,12 +9861,64 @@ read_sql_construct6(int until,
                     }
                 }
             case T_WORD:
+            {
+                char *name = yylval.word.ident;
+                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                ntype->typname = pstrdup(name);
+                ntype->layer = left_brace_count - right_brace_count;
+                ntype->index = typname_indexs[ntype->layer] + 1;
+                nest_typnames = lappend(nest_typnames, ntype);
                 AddNamespaceIfPkgVar(yylval.word.ident, save_IdentifierLookup);
                 ds_changed = construct_word(&ds, &context, &tok, parenlevel, loc);
                 break;
+            }
             case T_CWORD:
+            {
+                List* name_list = yylval.cword.idents;
+                switch(name_list->length) {
+                    case 2:
+                    {
+                        char* packageName =  strVal(linitial(name_list));
+                        char* typeName =  strVal(lsecond(name_list));
+                        Oid namespaceOid = getCurrentNamespace();
+                        Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
+                        if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
+                            Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
+                            if (type_oid != InvalidOid) {
+                                char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
+                                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                                ntype->typname = pstrdup(castTypeName);
+                                ntype->layer = left_brace_count - right_brace_count;
+                                ntype->index = typname_indexs[ntype->layer] + 1;
+                                nest_typnames = lappend(nest_typnames, ntype);
+                            }
+                        }
+                        break;
+                    }
+                    case 3:
+                    {
+                        char* namesapceName =  strVal(linitial(name_list));
+                        char* packageName =  strVal(lsecond(name_list));
+                        char* typeName =  strVal(lthird(name_list));
+                        Oid namespaceOid = namesapceName ? get_namespace_oid(namesapceName, true) : InvalidOid;
+                        Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
+                        if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
+                            Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
+                            if (type_oid != InvalidOid) {
+                                char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
+                                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                                ntype->typname = pstrdup(castTypeName);
+                                ntype->layer = left_brace_count - right_brace_count;
+                                ntype->index = typname_indexs[ntype->layer] + 1;
+                                nest_typnames = lappend(nest_typnames, ntype);
+                            }
+                        }
+                        break;
+                    }
+                }
                 ds_changed = construct_cword(&ds, &context, &tok, parenlevel, loc);
                 break;
+            }
             case T_OBJECT_TYPE_VAR_METHOD:
                 {
                     appendStringInfo(&ds, " %s(", yylval.wdatum.ident);
@@ -9810,6 +10054,7 @@ read_sql_construct6(int until,
     expr->tableof_var_dno = tableof_var_dno;
     expr->is_have_tableof_index_func = tableof_func_dno != -1 ? true : false;
     expr->tableof_func_dno = tableof_func_dno;
+    expr->nest_typnames = nest_typnames ? nest_typnames : NIL;
 
     pfree_ext(ds.data);
 
