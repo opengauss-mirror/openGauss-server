@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-DROP SYNONYM [ IF EXISTS ] synonym_name [ CASCADE | RESTRICT ];
+DROP SYNONYM [ IF EXISTS ] [ PUBLIC ] synonym_name [ CASCADE | RESTRICT ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

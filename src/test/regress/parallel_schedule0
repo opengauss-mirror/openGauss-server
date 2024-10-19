@@ -74,6 +74,7 @@ test: select_into_user_defined_variables
 test: select_into_file
 
 test: gs_dump_package trigger_dump gs_dumpall gs_dump_synonym dump_trigger_definer
+test: public_synonym
 test: out_param_func
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint

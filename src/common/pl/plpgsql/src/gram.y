@@ -13700,6 +13700,7 @@ static void plpgsql_build_package_refcursor_type(const char* typname)
 {
     CreateSynonymStmt stmt;
     stmt.replace = true;
+    stmt.isPublic = false;
     Node* lc = NULL;
     List* synList = NULL;
     List* objList = NULL;

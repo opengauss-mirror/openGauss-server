@@ -6911,6 +6911,9 @@ static CreateSynonymStmt* _copyCreateSynonymStmt(const CreateSynonymStmt* from)
     CreateSynonymStmt* newnode = makeNode(CreateSynonymStmt);
 
     COPY_SCALAR_FIELD(replace);
+    if (t_thrd.proc->workingVersionNum >= PUBLIC_SYNONYM_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(isPublic);
+    }
     COPY_NODE_FIELD(synName);
     COPY_NODE_FIELD(objName);
 
@@ -6924,6 +6927,9 @@ static DropSynonymStmt* _copyDropSynonymStmt(const DropSynonymStmt* from)
     COPY_NODE_FIELD(synName);
     COPY_SCALAR_FIELD(behavior);
     COPY_SCALAR_FIELD(missing);
+    if (t_thrd.proc->workingVersionNum >= PUBLIC_SYNONYM_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(isPublic);
+    }
 
     return newnode;
 }

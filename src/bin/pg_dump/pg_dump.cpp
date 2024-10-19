@@ -22964,8 +22964,8 @@ static void dumpSynonym(Archive* fout)
      */
     appendPQExpBuffer(query,
         "SELECT s.oid, s.tableoid, s.synname, n.nspname, n.oid as nspoid, a.rolname, s.synobjschema, s.synobjname "
-        "FROM pg_synonym s, pg_namespace n, pg_authid a "
-        "WHERE n.oid = s.synnamespace AND s.synowner = a.oid;");
+        "FROM pg_synonym s LEFT JOIN pg_namespace n ON n.oid = s.synnamespace "
+        "LEFT JOIN pg_authid a ON s.synowner = a.oid;");
 
     /* Fetch column attnames */
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -22987,7 +22987,7 @@ static void dumpSynonym(Archive* fout)
 
     for (i = 0; i < ntups; i++) {
         Oid schemaOid = atooid(PQgetvalue(res, i, i_nspoid));
-        if (!simple_oid_list_member(&schema_include_oids, schemaOid)) {
+        if (!simple_oid_list_member(&schema_include_oids, schemaOid) && schemaOid != 0) {
             continue;
         }
         char* synname = NULL;
@@ -23015,13 +23015,22 @@ static void dumpSynonym(Archive* fout)
         q = createPQExpBuffer();
         delq = createPQExpBuffer();
 
-        appendPQExpBuffer(delq, "DROP SYNONYM IF EXISTS %s.", fmtId(nspname));
-        appendPQExpBuffer(delq, "%s;\n", fmtId(synname));
+        if (strcmp(nspname, "") == 0) {
+            appendPQExpBuffer(delq, "DROP PUBLIC SYNONYM IF EXISTS %s;\n", fmtId(synname));
 
-        appendPQExpBuffer(q, "CREATE OR REPLACE SYNONYM %s.", fmtId(nspname));
-        appendPQExpBuffer(q, "%s ", fmtId(synname));
-        appendPQExpBuffer(q, "FOR %s.", fmtId(synobjschema));
-        appendPQExpBuffer(q, "%s;", fmtId(synobjname));
+            appendPQExpBuffer(q, "CREATE OR REPLACE PUBLIC SYNONYM %s ", fmtId(synname));
+            appendPQExpBuffer(q, "FOR %s.", fmtId(synobjschema));
+            appendPQExpBuffer(q, "%s;", fmtId(synobjname));
+        }
+        else {
+            appendPQExpBuffer(delq, "DROP SYNONYM IF EXISTS %s.", fmtId(nspname));
+            appendPQExpBuffer(delq, "%s;\n", fmtId(synname));
+
+            appendPQExpBuffer(q, "CREATE OR REPLACE SYNONYM %s.", fmtId(nspname));
+            appendPQExpBuffer(q, "%s ", fmtId(synname));
+            appendPQExpBuffer(q, "FOR %s.", fmtId(synobjschema));
+            appendPQExpBuffer(q, "%s;", fmtId(synobjname));
+        }
         ArchiveEntry(fout,
             objId,            /* catalog ID */
             createDumpId(),   /* dump ID */

@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93012;
+const uint32 GRAND_VERSION_NUM = 93013;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PUBLIC_SYNONYM_VERSION_NUMBER = 93013;
 const uint32 FETCH_ENHANCE_VERSION_NUM = 93012;
 const uint32 APPLY_JOIN_VERSION_NUMBER = 93011;
 const uint32 CHARBYTE_SEMANTIC_VERSION_NUMBER = 93001;

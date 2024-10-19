@@ -7235,6 +7235,7 @@ bool pg_synonym_ownercheck(Oid synOid, Oid roleId)
 {
     HeapTuple tuple;
     Oid ownerId;
+    Oid synNamespaceOid;
 
     /* Superusers bypass all permission checking */
     if (superuser_arg(roleId) || systemDBA_arg(roleId)) {
@@ -7250,7 +7251,13 @@ bool pg_synonym_ownercheck(Oid synOid, Oid roleId)
     }
 
     ownerId = ((Form_pg_synonym)GETSTRUCT(tuple))->synowner;
+    synNamespaceOid = ((Form_pg_synonym)GETSTRUCT(tuple))->synnamespace;
     ReleaseSysCache(tuple);
+
+    /* Public synonym is not owned by any user */
+    if (!OidIsValid(ownerId) && !OidIsValid(synNamespaceOid)) {
+        return true;
+    }
 
     return has_privs_of_role(roleId, ownerId);
 }

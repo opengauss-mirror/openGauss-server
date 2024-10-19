@@ -83,6 +83,7 @@ void CheckCreateSynonymPrivilege(Oid synNamespace, const char* synName)
 void CreateSynonym(CreateSynonymStmt* stmt)
 {
     Oid synNamespace;
+    Oid ownerId;
     char* synName = NULL;
     char* objSchema = NULL;
     char* objName = NULL;
@@ -94,34 +95,61 @@ void CreateSynonym(CreateSynonymStmt* stmt)
                 errmsg("Using CREATE SYNONYM is forbidden in template database.")));
     }
 
-    /* Convert list of synonym names to a synName and a synNamespace. */
-    synNamespace = QualifiedNameGetCreationNamespace(stmt->synName, &synName);
-    Assert(OidIsValid(synNamespace));
+    if (stmt->isPublic) {
+        if (t_thrd.proc->workingVersionNum < PUBLIC_SYNONYM_VERSION_NUMBER) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Before GRAND VERSION NUM %u, we do not support public synonym.", 
+                    PUBLIC_SYNONYM_VERSION_NUMBER)));
+        }
+        ownerId = InvalidOid;
+        synNamespace = PUB_SYNONYM_NSP_OID;
+        (void)DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
 
-    /* Check we have creation rights in namespace. */
-    aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
-    bool anyResult = false;
-    if (aclResult != ACLCHECK_OK && !IsSysSchema(synNamespace)) {
-        anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_SYNONYM, false);
-    }
-    if (aclResult != ACLCHECK_OK && !anyResult) {
-        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
-    }
+        if (!HasSpecAnyPriv(GetUserId(), CREATE_PUBLIC_SYNONYM, false)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied to create public synonym \"%s\"", synName),
+                    errhint("must granted CREATE_PUBLIC_SYNONYM privilege to create a public synonym.")));
+        }
 
-    CheckCreateSynonymPrivilege(synNamespace, synName);
-    /* Deconstruct the referenced qualified-name. */
-    DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
+        Assert(list_length(stmt->synName) == 1 && "public synonym should not have schema name");
+        synName = strVal(linitial(stmt->synName));
 
-    /* Using the default creation namespace. */
-    if (objSchema == NULL) {
-        objSchema = get_namespace_name(GetOidBySchemaName());
-    }
+        /* Using the default creation namespace. */
+        if (objSchema == NULL) {
+            objSchema = get_namespace_name(GetOidBySchemaName());
+        }
+    } else {
+        /* Convert list of synonym names to a synName and a synNamespace. */
+        synNamespace = QualifiedNameGetCreationNamespace(stmt->synName, &synName);
+        ownerId = GetUserId();
+        Assert(OidIsValid(synNamespace));
 
-    /* 
-     * Check synonym name to ensure that it doesn't conflict with existing view, table, function, and procedure.
-     */
-    if (get_relname_relid(synName, synNamespace) != InvalidOid || get_func_oid(synName, synNamespace, NULL) != InvalidOid) {
-        ereport(ERROR, (errmsg("synonym name is already used by an existing object")));
+        /* Check we have creation rights in namespace. */
+        aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
+        bool anyResult = false;
+        if (aclResult != ACLCHECK_OK && !IsSysSchema(synNamespace)) {
+            anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_SYNONYM, false);
+        }
+        if (aclResult != ACLCHECK_OK && !anyResult) {
+            aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
+        }
+
+        CheckCreateSynonymPrivilege(synNamespace, synName);
+        /* Deconstruct the referenced qualified-name. */
+        DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
+
+        /* Using the default creation namespace. */
+        if (objSchema == NULL) {
+            objSchema = get_namespace_name(GetOidBySchemaName());
+        }
+
+        /* 
+        * Check synonym name to ensure that it doesn't conflict with existing view, table, function, and procedure.
+        */
+        if (get_relname_relid(synName, synNamespace) != InvalidOid || get_func_oid(synName, synNamespace, NULL) != InvalidOid) {
+            ereport(ERROR, (errmsg("synonym name is already used by an existing object")));
+        }
     }
 
     if (IsFullEncryptedRel(objSchema, objName)) {
@@ -130,7 +158,7 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         ereport(ERROR, (errmsg("Unsupport to CREATE SYNONYM for encryption procedure or function.")));
     } else {
         /* Main entry to create a synonym */
-        SynonymCreate(synNamespace, synName, GetUserId(), objSchema, objName, stmt->replace);
+        SynonymCreate(synNamespace, synName, ownerId, objSchema, objName, stmt->replace);
     }
 }
 
@@ -144,13 +172,27 @@ void DropSynonym(DropSynonymStmt* stmt)
     AclResult aclResult;
 
     /* Convert list of synonym names to a synName and a synNamespace. */
-    synNamespace = QualifiedNameGetCreationNamespace(stmt->synName, &synName);
-    Assert(OidIsValid(synNamespace));
+    if (!stmt->isPublic) {
+        synNamespace = QualifiedNameGetCreationNamespace(stmt->synName, &synName);
+        Assert(OidIsValid(synNamespace));
 
-    /* Check we have usage privilege in namespace */
-    aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_USAGE);
-    if (aclResult != ACLCHECK_OK) {
-        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
+        /* Check we have usage privilege in namespace */
+        aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_USAGE);
+        if (aclResult != ACLCHECK_OK) {
+            aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
+        }
+    } else {
+        /* Check user has the privilege to drop a public synonym. */
+        if (!HasSpecAnyPriv(GetUserId(), DROP_PUBLIC_SYNONYM, false)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied to drop public synonym \"%s\"", synName),
+                    errhint("must granted DROP_PUBLIC_SYNONYM privilege to drop a public synonym.")));
+        }
+        
+        Assert(list_length(stmt->synName) == 1 && "public synonym should not have schema name");
+        synNamespace = PUB_SYNONYM_NSP_OID;
+        synName = strVal(linitial(stmt->synName));
     }
 
     SynonymDrop(synNamespace, synName, stmt->behavior, stmt->missing);
@@ -182,8 +224,6 @@ static Oid SynonymCreate(
     bool isUpdate = false;
 
     /* In principle, these values are valid. */
-    Assert(OidIsValid(synNamespace));
-    Assert(OidIsValid(synOwner));
     Assert(objSchema != NULL);
     Assert(objName != NULL);
 
@@ -240,7 +280,7 @@ static Oid SynonymCreate(
     ObjectAddressSet(myself, PgSynonymRelationId, HeapTupleGetOid(tuple));
 
     /* record the dependencies, for the first create. */
-    if (!isUpdate) {
+    if (!isUpdate && synNamespace != PUB_SYNONYM_NSP_OID) {
         /* dependency on namespace of synonym object */
         referenced.classId = NamespaceRelationId;
         referenced.objectId = synNamespace;
@@ -271,8 +311,6 @@ static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, 
     HeapTuple tuple = NULL;
     ObjectAddress object;
 
-    Assert(OidIsValid(synNamespace));
-
     tuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(synName), ObjectIdGetDatum(synNamespace));
     if (!HeapTupleIsValid(tuple)) {
         if (!missing) {
@@ -285,12 +323,17 @@ static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, 
 
     Oid synOid = HeapTupleGetOid(tuple);
     Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(tuple);
-    /* Allow DROP to either synonym owner or schema owner or user having DROP ANY SYNONYM privilege. */
-    bool ownerResult = pg_synonym_ownercheck(synOid, GetUserId()) ||
-        pg_namespace_ownercheck(synForm->synnamespace, GetUserId());
     bool anyResult = false;
-    if (!ownerResult && !IsSysSchema(synForm->synnamespace)) {
-        anyResult = HasSpecAnyPriv(GetUserId(), DROP_ANY_SYNONYM, false);
+    bool ownerResult = pg_synonym_ownercheck(synOid, GetUserId());
+    if (synNamespace != InvalidOid) {
+        /* Allow DROP to either synonym owner or schema owner or user having DROP ANY SYNONYM privilege. */
+        ownerResult |= pg_namespace_ownercheck(synForm->synnamespace, GetUserId());
+        if (!ownerResult && !IsSysSchema(synForm->synnamespace)) {
+            anyResult = HasSpecAnyPriv(GetUserId(), DROP_ANY_SYNONYM, false);
+        }
+    } else {
+        /* If synNamespace is InvalidOid, it implies that this synonym is a PUBLIC SYNONYM */
+        anyResult = HasSpecAnyPriv(GetUserId(), DROP_PUBLIC_SYNONYM, false);
     }
     if (!ownerResult && !anyResult) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, NameStr(synForm->synname));
@@ -485,7 +528,7 @@ static bool IsSynonymExist(const RangeVar* relation)
     synName = relation->relname;
 
     if (SearchSysCacheExists2(SYNONYMNAMENSP, PointerGetDatum(synName), ObjectIdGetDatum(synNamespace))) {
-        return true;
+        return true; 
     }
     return false;
 }
@@ -548,8 +591,6 @@ char* CheckReferencedObject(Oid relOid, RangeVar* objVar, const char* synName)
 Oid GetSynonymOid(const char* synName, Oid synNamespace, bool missing)
 {
     Oid synOid = InvalidOid;
-
-    Assert(OidIsValid(synNamespace));
 
     synOid = GetSysCacheOid2(SYNONYMNAMENSP, PointerGetDatum(synName), ObjectIdGetDatum(synNamespace));
     if (!OidIsValid(synOid) && !missing) {

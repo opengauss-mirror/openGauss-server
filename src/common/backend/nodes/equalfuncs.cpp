@@ -3303,6 +3303,9 @@ static bool _equalDropDirectoryStmt(const DropDirectoryStmt* a, const DropDirect
 static bool _equalCreateSynonymStmt(CreateSynonymStmt* a, CreateSynonymStmt* b)
 {
     COMPARE_SCALAR_FIELD(replace);
+    if (t_thrd.proc->workingVersionNum >= PUBLIC_SYNONYM_VERSION_NUMBER) {
+        COMPARE_SCALAR_FIELD(isPublic);
+    }
     COMPARE_NODE_FIELD(synName);
     COMPARE_NODE_FIELD(objName);
 
@@ -3314,6 +3317,9 @@ static bool _equalDropSynonymStmt(DropSynonymStmt* a, DropSynonymStmt* b)
     COMPARE_NODE_FIELD(synName);
     COMPARE_SCALAR_FIELD(missing);
     COMPARE_SCALAR_FIELD(behavior);
+    if (t_thrd.proc->workingVersionNum >= PUBLIC_SYNONYM_VERSION_NUMBER) {
+        COMPARE_SCALAR_FIELD(isPublic);
+    }
 
     return true;
 }

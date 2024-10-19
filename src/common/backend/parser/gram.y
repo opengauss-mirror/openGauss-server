@@ -474,7 +474,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 %type <ival>	opt_lock lock_type cast_context opt_wait compile_pkg_opt
 %type <ival>	vacuum_option_list vacuum_option_elem opt_verify_options
-%type <boolean>	opt_check opt_force opt_or_replace
+%type <boolean>	opt_check opt_force opt_or_replace opt_public
 				opt_grant_grant_option opt_grant_admin_option
 				opt_nowait opt_if_exists opt_with_data opt_large_seq opt_cancelable
 %type <ival>	opt_nowait_or_skip
@@ -11978,12 +11978,20 @@ row_level_security_cmd:
  *****************************************************************************/
 
 CreateSynonymStmt:
-			CREATE opt_or_replace SYNONYM any_name FOR any_name
+			CREATE opt_or_replace opt_public SYNONYM any_name FOR any_name
 				{
+					bool isPublic = $3;
+					if (isPublic && list_length($5) != 1) {
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("missing or invalid synonym identifier")));
+					}
 					CreateSynonymStmt *n = makeNode(CreateSynonymStmt);
+					List *anyname = $5;
 					n->replace = $2;
-					n->synName = $4;
-					n->objName = $6;
+					n->isPublic = isPublic;
+					n->synName = $5;
+					n->objName = $7;
 					$$ = (Node *)n;
 				}
 		;
@@ -11996,23 +12004,54 @@ CreateSynonymStmt:
  *****************************************************************************/
 
 DropSynonymStmt:
-			DROP SYNONYM any_name  opt_drop_behavior
+			DROP opt_public SYNONYM any_name  opt_drop_behavior
 				{
+					bool isPublic = $3;
+					List *synName = $4;
+					if (isPublic && list_length(synName) != 1) {
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("missing or invalid synonym identifier")));
+					}
 					DropSynonymStmt *n = makeNode(DropSynonymStmt);
-					n->synName = $3;
-					n->behavior = $4;
+					n->isPublic = $2;
+					n->synName = synName;
+					n->behavior = $5;
 					n->missing = false;
 					$$ = (Node *) n;
 				}
-			| DROP SYNONYM IF_P EXISTS any_name  opt_drop_behavior
+			| DROP opt_public SYNONYM IF_P EXISTS any_name  opt_drop_behavior
 				{
+					bool isPublic = $2;
+					List *synName = $6;
+					if (isPublic && list_length(synName) != 1) {
+						ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("missing or invalid synonym identifier")));
+					}
+					
 					DropSynonymStmt *n = makeNode(DropSynonymStmt);
-					n->synName = $5;
-					n->behavior = $6;
+					n->isPublic = isPublic;
+					n->synName = synName;
+					n->behavior = $7;
 					n->missing = true;
 					$$ = (Node *) n;
 				}
 		;
+
+
+opt_public:
+		IDENT
+		{ 
+			if (strcasecmp($1, "public") == 0) {
+				$$ = true;
+			} else {
+				yychar = IDENT;
+				$$ = false;
+			}
+		}
+		| /*EMPTY*/								{ $$ = false; }
+	;
 
 
 /*****************************************************************************
@@ -15467,6 +15506,30 @@ db_privilege: CREATE ANY TABLE
                 n->db_priv_name = pstrdup("drop any synonym");
                 $$ = n;
             }
+            | CREATE IDENT SYNONYM
+            {
+                if (strcasecmp($2, "public") == 0) {
+                    DbPriv *n = makeNode(DbPriv);
+                    n->db_priv_name = pstrdup("create public synonym");
+                    $$ = n;
+                } else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("Syntax error at or near \"%s\"", $2), parser_errposition(@2)));
+                }
+            }
+            | DROP IDENT SYNONYM
+            {
+                if (strcasecmp($2, "public") == 0) {
+                    DbPriv *n = makeNode(DbPriv);
+                    n->db_priv_name = pstrdup("drop public synonym");
+                    $$ = n;
+                } else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("Syntax error at or near \"%s\"", $2), parser_errposition(@2)));
+                }
+                }
             | CREATE ANY TRIGGER
             {
                 DbPriv *n = makeNode(DbPriv);

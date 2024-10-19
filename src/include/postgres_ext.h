@@ -35,6 +35,11 @@ typedef unsigned int Oid;
 #define InvalidOid ((Oid)0)
 #endif
 
+/*
+ * Currently, We use InvalidOid to represent the namespace of a public synonym.
+ */
+#define PUB_SYNONYM_NSP_OID InvalidOid
+
 #define VirtualBktOid     (Oid(1))
 #define VirtualSegmentOid (Oid(2))
 #define InvalidBktId      (-1)
