@@ -23804,11 +23804,7 @@ static PGresult* ExecuteSqlQueryForSingleRow(Archive* fout, const char* query)
     /* Expecting a single result only */
     ntups = PQntuples(res);
     if (ntups != 1)
-        exit_horribly(NULL,
-            ngettext(
-                "query returned %d row instead of one: %s\n", "query returned %d rows instead of one: %s\n", ntups),
-            ntups,
-            query);
+        exit_horribly(nullptr, "query returned %d rows instead of one: %s\n", ntups, query);
 
     return res;
 }
