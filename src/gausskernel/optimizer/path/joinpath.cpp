@@ -1103,6 +1103,28 @@ bool clause_sides_match_join(RestrictInfo* rinfo, RelOptInfo* outerrel, RelOptIn
     return false; /* no good for these input relations */
 }
 
+/* judage if it's parallel path */
+static bool is_parallel_path(RelOptInfo* outerrel, RelOptInfo* innerrel)
+{
+    if (outerrel->cheapest_total_parallel_path != NULL &&
+        innerrel->cheapest_total_parallel_path != NULL) {
+        return true;
+    }
+    return false;
+}
+
+/* judage if it's cheapest path */
+static bool is_cheapest_path(RelOptInfo* outerrel, RelOptInfo* innerrel, Path* outer_path, Path* inner_path)
+{
+    if (outer_path != outerrel->cheapest_total_single_path &&
+        inner_path != innerrel->cheapest_total_single_path &&
+        outer_path != outerrel->cheapest_total_parallel_path &&
+        inner_path != innerrel->cheapest_total_parallel_path) {
+        return false;
+    }
+    return true;
+}
+
 /*
  * sort_inner_and_outer
  *	  Create mergejoin join paths by explicitly sorting both the outer and
@@ -1168,7 +1190,14 @@ static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                 return;
 
             /* we always accept join combination if one of path is cheapest path */
-            if (outer_path != linitial(outerrel->cheapest_total_path) &&
+            if (is_parallel_path(outerrel, innerrel)) {
+                if (!is_cheapest_path(outerrel, innerrel, outer_path, inner_path)) {
+                    if (!join_used[(i - 1) * num_inner + j - 1]) {
+                        j++;
+                        continue;
+                    }
+                }
+            } else if (outer_path != linitial(outerrel->cheapest_total_path) &&
                 inner_path != linitial(innerrel->cheapest_total_path)) {
                 if (!join_used[(i - 1) * num_inner + j - 1]) {
                     j++;
@@ -1372,9 +1401,15 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
         foreach (lc2, innerrel->cheapest_total_path) {
             Path* inner_cheapest_total = (Path*)lfirst(lc2);
             Path* inner_cheapest_total_orig = inner_cheapest_total;
-
             /* we always accept join combination if one of path is cheapest path */
-            if (outer_cheapest_total != linitial(outerrel->cheapest_total_path) &&
+            if (is_parallel_path(outerrel, innerrel)) {
+                if (!is_cheapest_path(outerrel, innerrel, outer_cheapest_total, inner_cheapest_total)) {
+                    if (!join_used[(i - 1) * num_inner + j - 1]) {
+                        j++;
+                        continue;
+                    }
+                }
+            } else if (outer_cheapest_total != linitial(outerrel->cheapest_total_path) &&
                 inner_cheapest_total != linitial(innerrel->cheapest_total_path)) {
                 if (!join_used[(i - 1) * num_inner + j - 1]) {
                     j++;
@@ -1792,9 +1827,15 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                     PATH_PARAM_BY_REL(cheapest_total_inner, outerrel) ||
                     (cheapest_startup_outer != NULL && PATH_PARAM_BY_REL(cheapest_startup_outer, innerrel)))
                     return;
-
                 /* we always accept join combination if one of path is cheapest path */
-                if (cheapest_total_outer != linitial(outerrel->cheapest_total_path) &&
+                if (is_parallel_path(outerrel, innerrel)) {
+                    if (!is_cheapest_path(outerrel, innerrel, cheapest_total_outer, cheapest_total_inner)) {
+                        if (!join_used[(i - 1) * num_inner + j - 1]) {
+                            j++;
+                            continue;
+                        }
+                    }
+                } else if (cheapest_total_outer != linitial(outerrel->cheapest_total_path) &&
                     cheapest_total_inner != linitial(innerrel->cheapest_total_path)) {
                     if (!join_used[(i - 1) * num_inner + j - 1]) {
                         j++;

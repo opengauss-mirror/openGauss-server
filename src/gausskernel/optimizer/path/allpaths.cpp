@@ -1850,6 +1850,7 @@ static void set_append_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rt
                     subpaths_valid = false;
                 } else {
                     subpaths = accumulate_append_subpath(subpaths, l_path);
+                    break;
                 }
             }
         } else {

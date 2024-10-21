@@ -539,13 +539,17 @@ explain (costs off, verbose) select count(*) from hh;                           
 
 set enable_seqscan_dopcost = off;
 explain (costs off, verbose) select count(*) from hh;                                                                                -- should not be a smp query
-           QUERY PLAN            
----------------------------------
+                  QUERY PLAN                  
+----------------------------------------------
  Aggregate
-   Output: count(*)
-   ->  Seq Scan on upserttest.hh
-         Output: h1, h2, h3
-(4 rows)
+   Output: pg_catalog.count(*)
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(*))
+         ->  Aggregate
+               Output: count(*)
+               ->  Seq Scan on upserttest.hh
+                     Output: h1, h2, h3
+(8 rows)
 
 insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                                               -- suc
 explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                  -- subquery is not execute by smp, but there still is a two-level agg.
@@ -564,13 +568,17 @@ explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key upd
 (10 rows)
 
 explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should not be a smp query
-           QUERY PLAN            
----------------------------------
+                  QUERY PLAN                  
+----------------------------------------------
  Aggregate
-   Output: 4, count(*), 4, 4
-   ->  Seq Scan on upserttest.hh
-         Output: h1, h2, h3
-(4 rows)
+   Output: (4), pg_catalog.count(*), (4), (4)
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (4), (count(*))
+         ->  Aggregate
+               Output: 4, count(*)
+               ->  Seq Scan on upserttest.hh
+                     Output: h1, h2, h3
+(8 rows)
 
 set enable_seqscan_dopcost = on;
 explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should be a smp query
@@ -625,10 +633,14 @@ explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on d
    ->  Subquery Scan on "*SELECT*"
          Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
-               Output: 4, count(*), 4, 4
-               ->  Seq Scan on upserttest.hh
-                     Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
-(14 rows)
+               Output: (4), pg_catalog.count(*), (4), (4)
+               ->  Streaming(type: BROADCAST dop: 1/2)
+                     Output: (4), (count(*))
+                     ->  Aggregate
+                           Output: 4, count(*)
+                           ->  Seq Scan on upserttest.hh
+                                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(18 rows)
 
 prepare sub4 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) + $1 from hh);
 execute sub4(1);                                                                                                                     -- suc
@@ -646,10 +658,14 @@ explain (costs off, verbose) execute sub4(1);                                   
    ->  Subquery Scan on "*SELECT*"
          Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
-               Output: 1, count(*), 4, 4
-               ->  Seq Scan on upserttest.hh
-                     Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
-(14 rows)
+               Output: (1), pg_catalog.count(*), (4), (4)
+               ->  Streaming(type: BROADCAST dop: 1/2)
+                     Output: (1), (count(*)), (4)
+                     ->  Aggregate
+                           Output: 1, count(*), 4
+                           ->  Seq Scan on upserttest.hh
+                                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(18 rows)
 
 set enable_seqscan_dopcost = on;
 explain (costs off, verbose) execute sub4(1);                                                                                        -- insert-part is a smp plan, but update-part not

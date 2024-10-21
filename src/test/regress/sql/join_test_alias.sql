@@ -59,7 +59,7 @@ insert into fulljointest values(2,'li','adjani',2000);
 insert into fulljointest values(3,'li','adjani',5000);
 
 set query_dop=1;
-
+analyze fulljointest;
 explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
 when 5000 then 'high'
 when 2000 then 'medium'

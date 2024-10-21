@@ -59,6 +59,7 @@ insert into fulljointest values(1,'li','adjani',100);
 insert into fulljointest values(2,'li','adjani',2000);
 insert into fulljointest values(3,'li','adjani',5000);
 set query_dop=1;
+analyze fulljointest;
 explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
 when 5000 then 'high'
 when 2000 then 'medium'
@@ -73,6 +74,8 @@ order by 1,2,3,4;
  Sort
    Sort Key: t1.c1, t1.c2, t1.c3, t1.c4
    ->  Nested Loop
+         ->  Seq Scan on fulljointest t3
+               Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
          ->  Result
                ->  Append
                      ->  Nested Loop Left Join
@@ -85,10 +88,7 @@ order by 1,2,3,4;
                            ->  Seq Scan on fulljointest t2
                            ->  Materialize
                                  ->  Seq Scan on fulljointest t1
-         ->  Materialize
-               ->  Seq Scan on fulljointest t3
-                     Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
-(18 rows)
+(17 rows)
 
 select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
 when 5000 then 'high'
@@ -123,6 +123,8 @@ order by 1,2,3,4;
  Sort
    Sort Key: t1.c1, t1.c2, t1.c3, t1.c4
    ->  Nested Loop
+         ->  Seq Scan on fulljointest t3
+               Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
          ->  Result
                ->  Append
                      ->  Nested Loop Left Join
@@ -135,10 +137,7 @@ order by 1,2,3,4;
                            ->  Seq Scan on fulljointest t2
                            ->  Materialize
                                  ->  Seq Scan on fulljointest t1
-         ->  Materialize
-               ->  Seq Scan on fulljointest t3
-                     Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
-(18 rows)
+(17 rows)
 
 select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
 when 5000 then 'high'

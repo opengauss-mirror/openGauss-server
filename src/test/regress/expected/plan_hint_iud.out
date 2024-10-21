@@ -579,18 +579,15 @@ deallocate all;
 
 --- Set
 :EXP merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Merge on t1
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
-         ->  Nested Loop Left Join
-               Join Filter: (t1.c1 = t2.c1)
-               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                     ->  Seq Scan on t2
-               ->  Materialize
-                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                           ->  Seq Scan on t1
-(9 rows)
+   ->  Nested Loop Left Join
+         ->  Streaming(type: LOCAL GATHER dop: 1/8)
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = t2.c1)
+(6 rows)
 
 --- Plancache
 prepare merge_g as merge /*+ use_gplan */ into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);

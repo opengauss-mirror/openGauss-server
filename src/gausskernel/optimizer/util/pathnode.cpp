@@ -472,6 +472,10 @@ PathCostComparison compare_path_costs_fuzzily(Path* path1, Path* path2, double f
     else if (path1->hint_value < path2->hint_value)
         return COSTS_BETTER2;
 
+    if (path1->dop != path2->dop && (path1->dop > 1 || path2->dop > 1)) {
+        return COSTS_DIFFERENT;
+    }
+
     PathCostComparison cost_comparison;
 
     /*
@@ -602,7 +606,9 @@ static Path* obtain_cheaper_path(Path* cheapest_path, Path* path, CostSelector c
 void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
 {
     Path* cheapest_startup_path = NULL;
+    Path* cheapest_startup_parallel_path = NULL;
     Path* cheapest_total_path = NULL;
+    Path* cheapest_total_parallel_path = NULL;
     List* cheapest_total_path_list = NIL;
     Path* best_param_path = NULL;
     List* parameterized_paths = NIL;
@@ -624,6 +630,7 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
     if (parent_rel->pathlist == NIL && parent_rel->cheapest_gather_path == NULL)
         elog(ERROR, "could not devise a query plan for the given query");
 
+    cheapest_total_parallel_path = NULL;
     cheapest_startup_path = cheapest_total_path = best_param_path = NULL;
     parameterized_paths = NIL;
 
@@ -693,16 +700,24 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
                 }
             }else {
                 /* Unparameterized path, so consider it for cheapest slots */
-                if (cheapest_total_path == NULL) {
+                if (cheapest_total_parallel_path == NULL && path->dop > 1) {
+                    cheapest_total_parallel_path = path;
+                    continue;
+                }
+
+                if (cheapest_total_path == NULL && path->dop < 2) {
                     cheapest_startup_path = cheapest_total_path = path;
                     if (is_itst_path(root, parent_rel, path))
                         itst_cheapest_path = lappend(itst_cheapest_path, path);
                     continue;
                 }
-
-                cheapest_startup_path = obtain_cheaper_path(cheapest_startup_path, path, STARTUP_COST);
-                cheapest_total_path = obtain_cheaper_path(cheapest_total_path, path, TOTAL_COST);
-
+                if (cheapest_startup_path != NULL && path->dop < 2) {
+                    cheapest_startup_path = obtain_cheaper_path(cheapest_startup_path, path, STARTUP_COST);
+                    cheapest_total_path = obtain_cheaper_path(cheapest_total_path, path, TOTAL_COST);
+                }
+                if (path->dop > 1) {
+                    cheapest_total_parallel_path = obtain_cheaper_path(cheapest_total_parallel_path, path, TOTAL_COST);
+                }
                 /* store cheapest path for different interested distribute key */
                 if (is_itst_path(root, parent_rel, path)) {
                     Path* tmp_path = NULL;
@@ -735,8 +750,18 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
          * redistribute cost, we should abondon it. Else, store it in global cheapest
          * path list
          */
-        if (cheapest_total_path) {
+        if (cheapest_total_path != NULL && cheapest_total_parallel_path != NULL) {
+            if (cheapest_total_path->total_cost > cheapest_total_parallel_path->total_cost) {
+                cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_parallel_path);
+                cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_path);
+            } else {
+                cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_path);
+                cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_parallel_path);
+            }
+        } else if (cheapest_total_path != NULL) {
             cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_path);
+        } else if (cheapest_total_parallel_path != NULL) {
+            cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_parallel_path);
         }
 
         foreach (p, itst_cheapest_path) {
@@ -782,6 +807,8 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
     Assert(cheapest_total_path_list != NULL);
 
     parent_rel->cheapest_startup_path = cheapest_startup_path;
+    parent_rel->cheapest_total_parallel_path = cheapest_total_parallel_path;
+    parent_rel->cheapest_total_single_path = cheapest_total_path;
     parent_rel->cheapest_total_path = cheapest_total_path_list;
     parent_rel->cheapest_unique_path = NULL; /* computed only if needed */
     parent_rel->cheapest_parameterized_paths = parameterized_paths;

@@ -776,6 +776,8 @@ typedef struct RelOptInfo {
     struct Path* cheapest_gather_path;
     struct Path* cheapest_startup_path;
     List* cheapest_total_path; /* contain all cheapest total paths from different distribute key */
+    struct Path* cheapest_total_parallel_path;
+    struct Path* cheapest_total_single_path;
     struct Path* cheapest_unique_path;
     List* cheapest_parameterized_paths;
 
