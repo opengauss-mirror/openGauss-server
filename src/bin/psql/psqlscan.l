@@ -388,9 +388,11 @@ dolqinside		[^$]+
  */
 dquote			\"
 xdstart			{dquote}
+xdescape		[\\]{dquote}
 xdstop			{dquote}
 xddouble		{dquote}{dquote}
-xdinside		[^"]+
+xdinside		[^"\\]+
+xdinside2		[\\][^"]
 
 /* Unicode escapes */
 uescape			[uU][eE][sS][cC][aA][pP][eE]{whitespace}*{quote}[^']{quote}
@@ -774,6 +776,19 @@ other			.
 <xd,xui>{xddouble}	{
 					ECHO;
 				}
+<xd,xui>{xdescape}	{
+					if (cur_state->is_b_format) {
+						ECHO;
+					} else {
+						BEGIN(INITIAL);
+						ECHO;
+						if (cur_state->is_end_state) {
+							RESET_XP_STATUS() ;
+							cur_state->is_end_state = false;
+							return LEXRES_SEMI;
+						}
+					}
+				}
 <xd,xui>{xdinside}	{
 					ECHO;
 					if ((lex_param->begin_state == BEGIN_CURSOR || 
@@ -783,7 +798,15 @@ other			.
 						cur_state->is_end_state = true;
 					}
 				}
-
+<xd,xui>{xdinside2}	{
+					ECHO;
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
+							( !lex_param->declare_encountered && cur_state->paren_depth == 0))
+							&& judge_end_state(yytext))
+					{
+						cur_state->is_end_state = true;
+					}
+				}
 {xufailed}	{
 					/* throw back all but the initial u/U */
 					yyless(1);
