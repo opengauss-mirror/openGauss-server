@@ -501,8 +501,8 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         bool is_all_satisfied = pstate->p_is_td_compatible_truncation &&
             (attrtype == BPCHAROID || attrtype == VARCHAROID) &&
             ((type_mod > 0 && attrtypmod < type_mod) || type_mod < 0);
-         if (IsA(expr, Const)) {
-             if (attrtype == VARCHAROID) {
+         if (true) {
+             if (attrtype == VARCHAROID && IsA(expr, Const)) {
                  Const* con = (Const*)expr;
                  Const* newcon = makeNode(Const);
                  newcon->consttype = VARCHAROID;
@@ -517,7 +517,7 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
                  newcon->constvalue = a;
                  return (Expr*)newcon;
              }
-             else if (attrtype == TIMESTAMPOID) {
+             else if (attrtype == TIMESTAMPOID && IsA(expr, Const)) {
                  Const* con = (Const*)expr;
                  Const* newcon = makeNode(Const);
         
