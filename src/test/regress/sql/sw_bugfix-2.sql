@@ -731,7 +731,5 @@ insert into hier values('China','SHANGHAI');
 insert into hier values('China','AK47');
 insert into hier values('China','天津');
 select child, level, lpad(' ', level*3, ' ')||child c1 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c1;
-ERROR:  Not support refer startwith Pseudo column in order siblings by.
 select child, level, lpad(' ', level*3, ' ')||child c1, level c2 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c2;
-ERROR:  Not support refer startwith Pseudo column in order siblings by.
 drop table hier;
