@@ -20,7 +20,7 @@
 
 #include "postgres_fe.h"
 #include "libpq/libpq-fe.h"
-
+#include <map>
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
@@ -350,8 +350,8 @@ static void do_build_query(void);
 static void display_build_query(const GaussState* state);
 static void display_query(GaussState* state, const char* errormsg);
 static bool is_process_alive(pgpid_t pid);
-static char* get_string_by_mode(ServerMode s_mode);
-static char* get_string_by_state(DbState db_state);
+static const char* get_string_by_mode(ServerMode s_mode);
+static const char* get_string_by_state(DbState db_state);
 void ReadDBStateFile(GaussState* state);
 static void do_failover(uint32 term);
 static void do_switchover(uint32 term);
@@ -381,9 +381,45 @@ extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
 const char *BuildModeToString(BuildMode mode);
 static char* get_gausshome();
-static ServerMode get_mode_by_string(char *str_mode);
-static DbState get_db_state_by_string(char *str_state);
+static ServerMode get_mode_by_string(const char *str_mode);
+static DbState get_db_state_by_string(const char *str_state);
 #define MAXFIELDLEN 64
+
+const std::map<ServerMode, const char*> serverModeMap = {
+    {NORMAL_MODE, "Normal"},
+    {PRIMARY_MODE, "Primary"},
+    {STANDBY_MODE, "Standby"},
+    {CASCADE_STANDBY_MODE, "Cascade Standby"},
+    {MAIN_STANDBY_MODE, "Main Standby"},
+    {PENDING_MODE, "Pending"},
+    {UNKNOWN_MODE, "Unknown"}
+};
+
+const std::map<DbState, const char*> dbStateMap = {
+    {NORMAL_STATE, "Normal"},
+    {UNKNOWN_STATE, "Unknown"},
+    {NEEDREPAIR_STATE, "Need repair"},
+    {STARTING_STATE, "Starting"},
+    {WAITING_STATE, "Wait promoting"},
+    {DEMOTING_STATE, "Demoting"},
+    {PROMOTING_STATE, "Promoting"},
+    {BUILDING_STATE, "Building"},
+    {CATCHUP_STATE, "Catchup"},
+    {COREDUMP_STATE, "Coredump"}
+};
+
+static const std::map<BuildMode, const char*> buildModeMap = {
+    {NONE_BUILD, "none build"},
+    {AUTO_BUILD, "auto build"},
+    {FULL_BUILD, "full build"},
+    {INC_BUILD, "inc build"},
+    {STANDBY_FULL_BUILD, "standby full build"},
+    {COPY_SECURE_FILES_BUILD, "copy secure files build"},
+    {CROSS_CLUSTER_FULL_BUILD, "cross cluster full build"},
+    {CROSS_CLUSTER_INC_BUILD, "cross cluster inc build"},
+    {CROSS_CLUSTER_STANDBY_FULL_BUILD, "cross cluster standby full build"},
+    {BUILD_CHECK, "build check"}
+};
 
 void check_input_for_security(char* input_env_value)
 {
@@ -2913,7 +2949,6 @@ static void display_build_query(const GaussState* state)
     const char* process_opts = "process_schedule";
     const char* remain_time_opts = "estimated_remaining_time";
 
-    char* local_role = NULL;
     char db_state[INFO_LEN] = {0};
     char* dataSize = NULL;
     char* dataSizeTotl = NULL;
@@ -2924,7 +2959,7 @@ static void display_build_query(const GaussState* state)
         pg_log(PG_WARNING, _(" display querybuild failed could not get information from gaussdb.state\n"));
         exit(1);
     }
-    local_role = get_string_by_mode(state->mode);
+    const char* local_role = get_string_by_mode(state->mode);
 
     if (state->build_info.process_schedule == FAIL_PERCENT) {
         tnRet = strncpy_s(db_state, INFO_LEN, "Build failed", INFO_LEN - 1);
@@ -3035,49 +3070,21 @@ static bool is_process_alive(pgpid_t pid)
     return false;
 }
 
-static char* get_string_by_mode(ServerMode s_mode)
-{
-    switch (s_mode) {
-        case NORMAL_MODE:
-            return "Normal";
-        case PRIMARY_MODE:
-            return "Primary";
-        case STANDBY_MODE:
-            return "Standby";
-        case CASCADE_STANDBY_MODE:
-            return "Cascade Standby";
-        case PENDING_MODE:
-            return "Pending";
-        default:
-            return "Unknown";
+static const char* get_string_by_mode(ServerMode s_mode) {
+    auto it = serverModeMap.find(s_mode);
+    if (it != serverModeMap.end()) {
+        return it->second;
     }
+    return "Unknown";
 }
-static char* get_string_by_state(DbState db_state)
-{
-    switch (db_state) {
-        case NORMAL_STATE:
-            return "Normal";
-        case UNKNOWN_STATE:
-            return "Unknown";
-        case NEEDREPAIR_STATE:
-            return "Need repair";
-        case STARTING_STATE:
-            return "Starting";
-        case WAITING_STATE:
-            return "Wait promoting";
-        case DEMOTING_STATE:
-            return "Demoting";
-        case PROMOTING_STATE:
-            return "Promoting";
-        case BUILDING_STATE:
-            return "Building";
-        case CATCHUP_STATE:
-            return "Catchup";
-        case COREDUMP_STATE:
-            return "Coredump";
-        default:
-            return "Unknown";
+
+
+static const char* get_string_by_state(DbState db_state) {
+    auto it = dbStateMap.find(db_state);
+    if (it != dbStateMap.end()) {
+        return it->second;
     }
+    return "Unknown";
 }
 
 static char* get_string_by_sync_mode(bool syncmode)
@@ -5131,42 +5138,13 @@ static void do_overwrite()
     }
 }
 
-const char *BuildModeToString(BuildMode mode)
-{
-    switch (mode) {
-        case NONE_BUILD:
-            return "none build";
-            break;
-        case AUTO_BUILD:
-            return "auto build";
-            break;
-        case FULL_BUILD:
-            return "full build";
-            break;
-        case INC_BUILD:
-            return "inc build";
-            break;
-        case STANDBY_FULL_BUILD:
-            return "standby full build";
-            break;
-        case CROSS_CLUSTER_FULL_BUILD:
-            return "cross cluster full build";
-            break;
-        case CROSS_CLUSTER_INC_BUILD:
-            return "cross cluster inc build";
-            break;
-        case CROSS_CLUSTER_STANDBY_FULL_BUILD:
-            return "cross cluster standby full build";
-            break;
-        case COPY_SECURE_FILES_BUILD:
-            return "copy secure files build";
-        case BUILD_CHECK:
-            return "build check";
-        default:
-            return "unkwon";
-            break;
+const char* BuildModeToString(BuildMode mode) {
+    auto it = buildModeMap.find(mode);
+    if (it != buildModeMap.end()) {
+        return it->second;
+    } else {
+        return "unknown";
     }
-    return "unkwon";
 }
 
 static bool do_actual_build(uint32 term)
@@ -5834,49 +5812,21 @@ void do_gs_stack(void)
     return;
 }
 
-ServerMode get_mode_by_string(char *str_mode)
-{
-    if (!strncmp(str_mode, "Normal", MAXRUNMODE))
-        return NORMAL_MODE;
-    if (!strncmp(str_mode, "Primary", MAXRUNMODE))
-        return PRIMARY_MODE;
-    if (!strncmp(str_mode, "Standby", MAXRUNMODE))
-        return STANDBY_MODE;
-    if (!strncmp(str_mode, "Cascade Standby", MAXRUNMODE))
-        return CASCADE_STANDBY_MODE;
-    if (!strncmp(str_mode, "Main Standby", MAXRUNMODE))
-        return MAIN_STANDBY_MODE;
-    if (!strncmp(str_mode, "Pending", MAXRUNMODE))
-        return PENDING_MODE;
-    if (!strncmp(str_mode, "Unknown", MAXRUNMODE))
-        return UNKNOWN_MODE;
-
+static ServerMode get_mode_by_string(const char* str_mode) {
+    for (const auto& pair : serverModeMap) {
+        if (strcmp(pair.second, str_mode) == 0) {
+            return pair.first;
+        }
+    }
     return UNKNOWN_MODE;
 }
 
-static DbState get_db_state_by_string(char *str_state)
-{
-    if (!strcmp(str_state, "Normal"))
-        return NORMAL_STATE;
-    if (!strcmp(str_state, "Unknown"))
-        return UNKNOWN_STATE;
-    if (!strcmp(str_state, "Need repair"))
-        return NEEDREPAIR_STATE;
-    if (!strcmp(str_state, "Starting"))
-        return STARTING_STATE;
-    if (!strcmp(str_state, "Wait promoting"))
-        return WAITING_STATE;
-    if (!strcmp(str_state, "Demoting"))
-        return DEMOTING_STATE;
-    if (!strcmp(str_state, "Promoting"))
-        return PROMOTING_STATE;
-    if (!strcmp(str_state, "Building"))
-        return BUILDING_STATE;
-    if (!strcmp(str_state, "Catchup"))
-        return CATCHUP_STATE;
-    if (!strcmp(str_state, "Coredump"))
-        return COREDUMP_STATE;
-
+static DbState get_db_state_by_string(const char* str_state) {
+    for (const auto& pair : dbStateMap) {
+        if (strcmp(pair.second, str_state) == 0) {
+            return pair.first;
+        }
+    }
     return UNKNOWN_STATE;
 }
 
@@ -6072,11 +6022,7 @@ static void Help(int argc, const char** argv)
             do_help();
             exit(0);
         } else if ((strcmp(argv[1], "-V") == 0) || (strcmp(argv[1], "--version")) == 0) {
-#ifdef ENABLE_MULTIPLE_NODES
             puts("gs_ctl " DEF_GS_VERSION);
-#else
-            puts("gs_ctl " DEF_GS_VERSION);
-#endif
             exit(0);
         }
     }
@@ -6433,81 +6379,53 @@ void check_num_input(char* input)
     }
 }
 
+void set_file_path(char* file_path, const char* format)
+{
+    int ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, format, pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+}
+
 void SetConfigFilePath()
 {
-    int ret;
     if (pg_data != NULL) {
-        ret = snprintf_s(postopts_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.opts", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.pid", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(backup_file, MAXPGPATH, MAXPGPATH - 1, "%s/backup_label", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(recovery_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.conf", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(recovery_done_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.done", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(failover_file, MAXPGPATH, MAXPGPATH - 1, "%s/failover", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(switchover_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(switchover_timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover_timeout", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(cascade_standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/cascade_standby", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pg_ctl_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_ctl.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(build_pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_build.pid", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(gaussdb_state_file, MAXPGPATH, MAXPGPATH - 1, "%s/gaussdb.state", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(postport_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postport.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_tmp_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd.tmp", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_ret_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.ret", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_stack_ret_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.ret", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_stack_tmp_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.cmd.tmp", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_stack_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.cmd", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
+        set_file_path(postopts_file, "%s/postmaster.opts");
+        set_file_path(pid_file, "%s/postmaster.pid");
+        set_file_path(backup_file, "%s/backup_label");
+        set_file_path(recovery_file, "%s/recovery.conf");
+        set_file_path(recovery_done_file, "%s/recovery.done");
+        set_file_path(failover_file, "%s/failover");
+        set_file_path(switchover_file, "%s/switchover");
+        set_file_path(switchover_timeout_file, "%s/switchover_timeout");
+        set_file_path(primary_file, "%s/primary");
+        set_file_path(standby_file, "%s/standby");
+        set_file_path(cascade_standby_file, "%s/cascade_standby");
+        set_file_path(pg_ctl_lockfile, "%s/pg_ctl.lock");
+        set_file_path(pg_conf_file, "%s/postgresql.conf");
+        set_file_path(build_pid_file, "%s/gs_build.pid");
+        set_file_path(gaussdb_state_file, "%s/gaussdb.state");
+        set_file_path(postport_lock_file, "%s/postport.lock");
+        set_file_path(g_hotpatch_cmd_file, "%s/hotpatch.cmd");
+        set_file_path(g_hotpatch_tmp_cmd_file, "%s/hotpatch.cmd.tmp");
+        set_file_path(g_hotpatch_ret_file, "%s/hotpatch.ret");
+        set_file_path(g_hotpatch_lockfile, "%s/hotpatch.lock");
+        set_file_path(g_stack_ret_file, "%s/gs_stack.ret");
+        set_file_path(g_stack_tmp_cmd_file, "%s/gs_stack.cmd.tmp");
+        set_file_path(g_stack_cmd_file, "%s/gs_stack.cmd");
+
         g_dcfEnabled = GetPaxosValue(pg_conf_file);
         if (g_dcfEnabled) {
-            ret = snprintf_s(add_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/addmember", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(remove_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/removemember", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/timeout", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(switchover_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchoverstatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(change_role_file, MAXPGPATH, MAXPGPATH - 1, "%s/changerole", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(g_changeroleStatusFile, MAXPGPATH, MAXPGPATH - 1, "%s/changerolestatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(start_minority_file, MAXPGPATH, MAXPGPATH - 1, "%s/startminority", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(setrunmode_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/setrunmodestatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
+            set_file_path(add_member_file, "%s/addmember");
+            set_file_path(remove_member_file, "%s/removemember");
+            set_file_path(timeout_file, "%s/timeout");
+            set_file_path(switchover_status_file, "%s/switchoverstatus");
+            set_file_path(change_role_file, "%s/changerole");
+            set_file_path(g_changeroleStatusFile, "%s/changerolestatus");
+            set_file_path(start_minority_file, "%s/startminority");
+            set_file_path(setrunmode_status_file, "%s/setrunmodestatus");
         }
     }
 }
+
 #ifndef ENABLE_LITE_MODE
 static void parse_vgname_args(char* args)
 {
