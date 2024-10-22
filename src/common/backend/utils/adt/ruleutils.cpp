@@ -8915,8 +8915,11 @@ static char* get_variable(
     schemaname = NULL; /* default assumptions */
 
     if (NULL != rte->relname && u_sess->hook_cxt.forTsdbHook) {
-        rte->relname = get_rel_name(rte->relid);
-        rte->eref->aliasname = rte->relname;
+        char *relname = get_rel_name(rte->relid);
+        if (relname != NULL) {
+            rte->relname = pstrdup(relname);
+            rte->eref->aliasname = pstrdup(rte->relname);
+        }
     }
 
     refname = rte->eref->aliasname;

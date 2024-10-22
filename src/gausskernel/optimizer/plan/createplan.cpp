@@ -338,6 +338,10 @@ Plan* create_plan(PlannerInfo* root, Path* best_path)
         find_inlist2join_path(root, best_path);
     }
 
+    if (u_sess->hook_cxt.forTsdbHook && DB_IS_CMPT(PG_FORMAT) && root->minmax_aggs == NIL) {
+        plan->exec_nodes = ng_get_default_computing_group_exec_node();
+    }
+
     return plan;
 }
 
