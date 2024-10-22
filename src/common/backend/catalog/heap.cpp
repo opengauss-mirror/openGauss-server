@@ -8358,3 +8358,57 @@ HeapTuple heaptuple_from_pg_attribute(Relation pg_attribute_rel,
     return heap_form_tuple(RelationGetDescr(pg_attribute_rel), values, nulls);
 }
 #endif
+
+bool GetIndexEnableStateByTuple(HeapTuple indexTuple)
+{
+    bool isnull = false;
+    Datum enableDatum = heap_getattr(indexTuple, Anum_pg_index_indisenable, GetDefaultPgIndexDesc(), &isnull);
+    return isnull || DatumGetBool(enableDatum);
+}
+
+bool relationHasDisableIndex(Relation relation) {
+    auto indexoidlist = RelationGetIndexList(relation);
+    foreach_cell(l, indexoidlist) {
+        auto indexoid = lfirst_oid(l);
+
+        /*
+         * Extract info from the relation descriptor for the index.
+         */
+        auto indexRelation = index_open(indexoid, AccessShareLock);
+        if (IndexIsValid(indexRelation->rd_index) && !GetIndexEnableStateByTuple(indexRelation->rd_indextuple)) {
+            index_close(indexRelation, AccessShareLock);
+            return true;
+        }
+        index_close(indexRelation, AccessShareLock);
+    }
+    return false;
+}
+
+bool resultRelationsHasDisableIndex(PlannedStmt *plannedstmt) {
+    if (nullptr == plannedstmt->resultRelations) {
+        return false;
+    }
+    ListCell *lc = NULL;
+    foreach (lc, (List*)linitial(plannedstmt->resultRelations)) {
+        Index idx = lfirst_int(lc);
+        auto rid = getrelid(idx, plannedstmt->rtable);
+        if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
+            continue;
+        }
+
+        auto rel = heap_open(rid, AccessShareLock);
+        if (relationHasDisableIndex(rel)) {
+            heap_close(rel, AccessShareLock);
+            return true;
+        }
+        heap_close(rel, AccessShareLock);
+    }
+    return false;
+}
+
+void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt) {
+    if (!CommandIsReadOnly(plannedstmt) && resultRelationsHasDisableIndex(plannedstmt)) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATOR_INTERVENTION),
+            errmsg("The relation has no permit to write because it has index in disable state")));
+    }
+}

@@ -694,6 +694,7 @@ static void ATExecUnusableIndexPartition(Relation rel, const char* partition_nam
 static void ATExecUnusableIndex(Relation rel, bool needChangeCsn);
 static void ATUnusableGlobalIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
+static void ATExecEnableIndex(Relation rel, bool enable);
 static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible);
 static void ATExecVisibleIndexDirect(Relation rel, bool visible);
 static void ATExecModifyRowMovement(Relation rel, bool rowMovement);
@@ -877,6 +878,8 @@ inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
         case AT_InvisibleIndex:
         case AT_InvisibleIndexDirect:
         case AT_VisibleIndexDirect:
+        case AT_DisableIndex:
+        case AT_EnableIndex:
             ret = true;
             break;
         default:
@@ -8720,6 +8723,13 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             /* No command-specific prep needed */
             pass = AT_PASS_MISC;
             break;
+        case AT_DisableIndex:
+        case AT_EnableIndex:
+            ATSimplePermissions(rel, ATT_INDEX);
+            /* This command never recurses */
+            /* No command-specific prep needed */
+            pass = AT_PASS_MISC;
+            break;
         case AT_AddInherit: /* INHERIT */
             ATSimplePermissions(rel, ATT_TABLE);
             /* This command never recurses */
@@ -9371,6 +9381,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_VisibleIndexDirect:
             ATExecVisibleIndexDirect(rel, true);
             break;
+        case AT_DisableIndex:
+            ATExecEnableIndex(rel, false);
+            break;
+        case AT_EnableIndex:
+            ATExecEnableIndex(rel, true);
+            break;  
         case AT_AddIndex: /* ADD INDEX */
             address = ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, false, lockmode);
             break;
@@ -26122,6 +26138,93 @@ void ATExecSetIndexUsableState(Oid objclassOid, Oid objOid, bool newState)
     if (dirty) {
         CommandCounterIncrement();
     }
+}
+
+template <typename T>
+void ATExecSetIndexValues(Datum *values, unsigned attribute, T new_state) {
+    Assert(!"not supported");
+}
+
+template <>
+void ATExecSetIndexValues(Datum *values, unsigned attribute, bool new_state) {
+    values[attribute - 1] = DatumGetBool(new_state);
+}
+
+template <typename T>
+void ATExecSetIndexState(Oid obj_oid, unsigned attribute, T new_state) {
+    if (attribute > Natts_pg_index) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("attribute %d is greater than Natts_pg_index(%d)",
+                attribute, Natts_pg_index)));
+        return;
+    }
+
+    bool dirty = false;
+    Relation sys_table = NULL;
+    HeapTuple sys_tuple = NULL;
+    bool is_null = false;
+
+    sys_table = relation_open(IndexRelationId, RowExclusiveLock);
+
+    // update the indisvisible field
+    sys_tuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(obj_oid));
+    if (sys_tuple) {
+        Datum old_state = heap_getattr(sys_tuple, attribute, RelationGetDescr(sys_table), &is_null);
+        dirty = (is_null || BoolGetDatum(old_state) != new_state);
+
+        /* Keep the system catalog indexes current. */
+        if (dirty) {
+            HeapTuple newitup = NULL;
+            Datum values[Natts_pg_index];
+            bool nulls[Natts_pg_index];
+            bool replaces[Natts_pg_index];
+            errno_t rc;
+            rc = memset_s(values, sizeof(values), 0, sizeof(values));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+            securec_check(rc, "\0", "\0");
+
+            replaces[attribute - 1] = true;
+            ATExecSetIndexValues(values, attribute, new_state);
+
+            newitup =
+                (HeapTuple)tableam_tops_modify_tuple(sys_tuple, RelationGetDescr(sys_table), values, nulls, replaces);
+            simple_heap_update(sys_table, &(sys_tuple->t_self), newitup);
+            CatalogUpdateIndexes(sys_table, newitup);
+            tableam_tops_free_tuple(newitup);
+        }
+        tableam_tops_free_tuple(sys_tuple);
+    }
+    relation_close(sys_table, RowExclusiveLock);
+}
+
+void ATExecSetIndexEnableState(Oid obj_oid, bool new_state) {
+    ATExecSetIndexState(obj_oid, Anum_pg_index_indisenable, new_state);
+}
+
+static void ATExecEnableIndex(Relation rel, bool enable) {
+    if (!RelationIsIndex(rel) || !OidIsValid(rel->rd_id)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("can not set enable/disable index for relation %s, as it is not a index",
+                    RelationGetRelationName(rel))));
+    }
+
+    auto index_tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(rel->rd_id));
+    if(!HeapTupleIsValid(index_tuple))
+        elog(ERROR, "cache lookup failed for index %u", rel->rd_id);
+    if (heap_attisnull(index_tuple, Anum_pg_index_indexprs, NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("can not set enable/disable index for relation %s, as it is not a function based index",
+                    RelationGetRelationName(rel))));
+        ReleaseSysCache(index_tuple);
+    }
+    ReleaseSysCache(index_tuple);
+
+    ATExecSetIndexEnableState(rel->rd_id, enable);
 }
 
 void ATExecSetIndexVisibleState(Oid objOid, bool newState)

@@ -60,6 +60,7 @@
 extern void opfusion_executeEnd(PlannedStmt *plannedstmt, const char *queryString, Snapshot snapshot);
 extern bool check_log_statement(List* stmt_list);
 extern int errdetail_params(ParamListInfo params);
+extern void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt);
 #ifndef ENABLE_MULTIPLE_NODES
 static void report_iud_time_for_opfusion(PlannedStmt *plannedstmt)
 {
@@ -334,6 +335,7 @@ void OpFusion::executeInit()
     if (m_local.m_isFirst == true) {
         checkPermission();
     }
+    CheckWriteCommandWithDisableIndex(m_global->m_planstmt);
     if (m_local.m_resOwner == NULL) {
         m_local.m_resOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     }

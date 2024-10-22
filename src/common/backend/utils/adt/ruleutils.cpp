@@ -3875,6 +3875,10 @@ static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *exclud
             appendStringInfo(&buf, " INVISIBLE");
         }
 
+        if (!GetIndexEnableStateByTuple(ht_idx)) {
+            appendStringInfo(&buf, " DISABLE");
+        }
+
         /*
          * If it's a partial index, decompile and append the predicate
          */

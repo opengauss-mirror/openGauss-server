@@ -266,6 +266,7 @@ extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partiti
 extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 
 extern bool GetIndexVisibleStateByTuple(HeapTuple indexTuple);
+extern bool GetIndexEnableStateByTuple(HeapTuple indexTuple);
 
 extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
 extern char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined);
