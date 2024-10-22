@@ -115,6 +115,7 @@ install:
 			echo "SCWS is not installed, skipping chparser build."; \
 		fi \
 	fi
+	@if test -d contrib/gms_lob; then $(MAKE) -C contrib/gms_lob $@; fi
 	+@echo "openGauss installation complete."
 endif
 endif

@@ -1,0 +1,1123 @@
+drop database if exists testlob;
+NOTICE:  database "testlob" does not exist, skipping
+create database testlob;
+\c testlob
+create extension gms_lob;
+create extension gms_output;
+select gms_output.enable(4000);
+ enable 
+--------
+ 
+(1 row)
+
+create or replace function cast_to_raw(strdata varchar2) returns raw
+as 'select encode(cast($1 as bytea), ''hex'')::raw;'LANGUAGE SQL;
+--测试blob类型长度
+CREATE TABLE testblob(id INT, b BLOB);
+--cast_to_raw
+INSERT INTO testblob VALUES(1, cast_to_raw('Blob'));
+INSERT INTO testblob VALUES(2, cast_to_raw('中文测试'));
+INSERT INTO testblob VALUES(3, cast_to_raw(''));
+INSERT INTO testblob VALUES(4, cast_to_raw('test
+test'));
+SELECT id, gms_lob.getlength(b) FROM testblob;
+ id | getlength 
+----+-----------
+  1 |         4
+  2 |        12
+  3 |          
+  4 |         9
+(4 rows)
+
+DROP TABLE testblob;
+--测试clob类型的长度
+CREATE TABLE testclob(id INT, b CLOB);
+INSERT INTO testclob VALUES(1, ('Blob'));
+INSERT INTO testclob VALUES(2, ('中文测试'));
+INSERT INTO testclob VALUES(3, (''));
+INSERT INTO testclob VALUES(4, ('test
+test'));
+SELECT *,gms_lob.getlength(b) FROM testclob;
+ id |    b     | getlength 
+----+----------+-----------
+  1 | Blob     |         4
+  2 | 中文测试 |         4
+  3 |          |          
+  4 | test    +|         9
+    | test     | 
+(4 rows)
+
+DROP TABLE testclob;
+--在函数中调用
+CREATE OR REPLACE FUNCTION fun_blob() RETURNS INTEGER LANGUAGE plpgsql AS $$
+DECLARE
+    lob_object BLOB := cast_to_raw('中文1');
+    offset INTEGER;
+BEGIN
+     RETURN  gms_lob.getlength(lob_object);
+END;
+$$;
+SELECT fun_blob();
+ fun_blob 
+----------
+        7
+(1 row)
+
+CREATE OR REPLACE FUNCTION fun_clob() RETURNS INTEGER LANGUAGE plpgsql AS $$
+DECLARE
+    lob_object CLOB := ('中文1');
+    offset INTEGER;
+BEGIN
+     RETURN  gms_lob.getlength(lob_object);
+END;
+$$;
+SELECT fun_clob();
+ fun_clob 
+----------
+        3
+(1 row)
+
+CREATE OR REPLACE FUNCTION fun_null() RETURNS INTEGER LANGUAGE plpgsql AS $$
+DECLARE
+    lob_object CLOB;
+    offset INTEGER;
+BEGIN
+     RETURN  gms_lob.getlength(lob_object);
+END;
+$$;
+SELECT fun_null();
+ fun_null 
+----------
+         
+(1 row)
+
+DROP FUNCTION fun_blob;
+DROP FUNCTION fun_clob;
+DROP FUNCTION fun_null;
+--测试输入为空的场景
+SELECT gms_lob.getlength();
+ getlength 
+-----------
+ 
+(1 row)
+
+create table tbl_testlob(id int, c_lob clob, b_lob blob);
+insert into tbl_testlob values(1, 'clob', cast_to_raw('blob'));
+insert into tbl_testlob values(2, '中文clobobject测试', cast_to_raw('中文blobobject测试'));
+create or replace function func_clob() returns void 
+AS $$
+DECLARE
+    v_clob1 clob;
+    v_clob2 clob;
+    v_clob3 clob;
+    len1 int;
+    len3 int;
+BEGIN
+    select c_lob into v_clob1 from tbl_testlob where id = 1;
+    gms_lob.open(v_clob1, gms_lob.LOB_READWRITE);
+    gms_lob.append(v_clob1, ' test');
+    len1 := gms_lob.getlength(v_clob1);
+    gms_output.put_line('clob2:' || v_clob2);
+    gms_lob.read(v_clob1, len1, 1, v_clob2);
+    gms_output.put_line('clob1:' || v_clob1);
+    gms_output.put_line('clob2:' || v_clob2);
+
+    select c_lob into v_clob3 from tbl_testlob where id = 2;
+    len3 := gms_lob.getlength(v_clob3);
+
+    gms_output.put_line('clob3:' || v_clob3);
+    --不调用open函数。默认权限为读写
+    gms_lob.write(v_clob3, len1, len3, v_clob1);
+    gms_output.put_line('clob3:' || v_clob3);
+    
+    gms_lob.close(v_clob1);
+    gms_lob.freetemporary(v_clob2);
+END;
+$$LANGUAGE plpgsql;
+create or replace function func_blob() returns void 
+AS $$
+DECLARE
+    v_blob1 blob;
+    v_blob2 blob;
+    v_blob3 blob;
+    len1 int;
+    len3 int;
+BEGIN
+    select b_lob into v_blob1 from tbl_testlob where id = 1;
+    gms_lob.open(v_blob1, gms_lob.LOB_READWRITE);
+
+    len1 := gms_lob.getlength(v_blob1);
+    gms_output.put_line('blob1:' || v_blob1::text);
+    gms_output.put_line('blob2:' || v_blob2::text);
+    gms_lob.read(v_blob1, len1, 1, v_blob2);
+    gms_output.put_line('blob1:' || v_blob1::text);
+    gms_output.put_line('blob2:' || v_blob2::text);
+
+    select b_lob into v_blob3 from tbl_testlob where id = 2;
+    len3 := gms_lob.getlength(v_blob3);
+    --不调用open函数。默认权限为读写
+    gms_output.put_line('blob3:' || v_blob3::text);
+    gms_lob.write(v_blob3, len1, len3, v_blob1);
+    gms_output.put_line('blob3:' || v_blob3::text);
+    
+    gms_lob.close(v_blob1);
+    gms_lob.freetemporary(v_blob2);
+END;
+$$LANGUAGE plpgsql;
+select func_clob();
+clob2:
+clob1:clob test
+clob2:clob test
+clob3:中文clobobject测试
+clob3:中文clobobject测clob test
+ func_clob 
+-----------
+ 
+(1 row)
+
+select func_blob();
+blob1:626C6F62
+blob2:
+blob1:626C6F62
+blob2:626C6F62
+blob3:E4B8ADE69687626C6F626F626A656374E6B58BE8AF95
+blob3:E4B8ADE69687626C6F626F626A656374E6B58BE8AF626C6F62
+ func_blob 
+-----------
+ 
+(1 row)
+
+----------open函数-----------
+--（1）打开无效的lob
+DECLARE
+    v_clob clob;
+BEGIN
+    gms_lob.open(v_clob, gms_lob.LOB_READWRITE);
+    gms_lob.close(v_clob);
+END;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.open(v_clob,gms_lob.LOB_READWRITE)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+--（2）open_mode为数值
+DECLARE
+    v_clob clob;
+BEGIN
+    gms_lob.createtemporary(v_clob, false, 10);
+    gms_lob.open(v_clob, 1);
+    gms_lob.close(v_clob);
+    gms_lob.freetemporary(v_clob);
+END;
+/
+--（3）open_mode为其他值
+DECLARE
+    v_clob clob;
+BEGIN
+    gms_lob.createtemporary(v_clob, false);
+    gms_lob.open(v_clob, 100);
+    gms_lob.close(v_clob);
+    gms_lob.freetemporary(v_clob);
+END;
+/
+ERROR:  invalid open_mode
+CONTEXT:  SQL statement "CALL gms_lob.open(v_clob,100)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+--重复打开
+DECLARE
+    v_clob clob;
+BEGIN
+    gms_lob.createtemporary(v_clob, false);
+    gms_lob.open(v_clob, gms_lob.LOB_READONLY);
+    gms_lob.open(v_clob, gms_lob.LOB_READWRITE);
+    gms_lob.close(v_clob);
+    gms_lob.freetemporary(v_clob);
+END;
+/
+NOTICE:  Lob(v_clob) already opened in the same transaction
+CONTEXT:  SQL statement "CALL gms_lob.open(v_clob,gms_lob.LOB_READWRITE)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+-- 大写名称
+declare
+"MYLOB" CLOB;
+begin
+gms_lob.createtemporary("MYLOB",true);
+gms_lob.open("MYLOB",gms_lob.lob_readwrite);
+"MYLOB":='foo';
+raise notice '%',"MYLOB";
+end;
+/
+NOTICE:  foo
+----------isopen函数-----------
+DECLARE
+    v_clob clob;
+BEGIN
+    gms_lob.createtemporary(v_clob, false);
+    gms_lob.open(v_clob, gms_lob.LOB_READWRITE);
+    gms_output.put_line('isopen: ' || gms_lob.isopen(v_clob));
+    gms_lob.close(v_clob);
+    gms_output.put_line('isopen: ' || gms_lob.isopen(v_clob));
+    gms_lob.freetemporary(v_clob);
+END;
+/
+isopen: 1
+isopen: 0
+-----------freetemporary函数-----------
+DECLARE
+    v_clob CLOB;
+    v_char VARCHAR2(100);
+BEGIN
+    v_char := 'Chinese中国人';
+    gms_lob.createtemporary(v_clob,TRUE,12);
+    gms_lob.append(v_clob,v_char);
+    gms_output.put_line(v_clob||' 字符长度：'||gms_lob.getlength(v_clob));
+    gms_lob.freetemporary(v_clob);
+    gms_output.put_line(' 释放后再输出：'||v_clob);
+END;
+/
+Chinese中国人 字符长度：10
+ 释放后再输出：
+drop table tbl_testlob;
+drop function func_clob;
+drop function func_blob;
+declare
+lob1 clob := '123';
+lob2 clob := '456';
+lob3 clob := '789';
+begin
+gms_lob.open (lob_loc => lob1,open_mode => 1);
+gms_lob.open (lob_loc => lob2,open_mode => gms_lob.lob_readwrite);
+gms_lob.open (lob_loc => lob3,open_mode => gms_lob.lob_readonly);
+raise notice '%,%,%',lob1,lob2,lob3;
+end;
+/
+NOTICE:  123,456,789
+-- 支持GMS_LOB.WRITE/READ/APPEND函数
+-----------read函数-----------
+--gms_lob.gms_lob_read_blob
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+616263
+-- float
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount float :=3.2;
+off_set float :=2.1;
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+616263
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount float :=3.8;
+off_set float :=2.9;
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+62634546
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount float :=3.8;
+off_set float :=2.9;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+43444546
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=8;
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+616263
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=20;
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_lob.read(b1, amount, off_set, b2);
+gms_output.put_line(r1::text);
+end;
+/
+--VALUEERROR
+--lob为空
+declare
+b1 blob;
+amount INTEGER :=3;
+off_set INTEGER :=2;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.read(b1,amount,off_set,r1)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount为空
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER;
+off_set INTEGER :=9;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+end;
+/
+ERROR:  numeric or value error
+CONTEXT:  SQL statement "CALL gms_lob.read(b1,amount,off_set,r1)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset为空
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=3;
+off_set INTEGER;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+end;
+/
+ERROR:  numeric or value error
+CONTEXT:  SQL statement "CALL gms_lob.read(b1,amount,off_set,r1)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob无效
+declare
+amount INTEGER :=3;
+off_set INTEGER :=2;
+r1 raw;
+begin
+gms_lob.read(cast_to_raw('111111'), amount, off_set, r1);
+end;
+/
+--amount大于buffer大小
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=15;
+off_set INTEGER :=2;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+end;
+/
+--offset超出范围
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=3;
+off_set INTEGER :=30;
+r1 raw;
+begin
+gms_lob.read(b1, amount, off_set, r1);
+end;
+/
+ERROR:  no data found
+CONTEXT:  SQL statement "CALL gms_lob.read(b1,amount,off_set,r1)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob只读
+declare
+b1 blob :=cast_to_raw('1111');
+amount INTEGER :=2;
+off_set INTEGER :=2;
+r1 raw;
+begin
+gms_lob.open(b1, gms_lob.LOB_READONLY);
+gms_lob.read(b1, amount, off_set, r1);
+gms_output.put_line(r1::text);
+end;
+/
+3131
+--gms_lob.gms_lob_read_clob
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=3;
+off_set INTEGER :=1;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+clob read: abc
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=3;
+off_set INTEGER :=9;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  no data found
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=10;
+off_set INTEGER :=2;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+clob read: bcdefgh
+--VALUEERROR
+--lob为空
+declare
+c1 clob;
+amount INTEGER :=3;
+off_set INTEGER :=2;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount为空
+declare
+c1 clob :='abcdefgh';
+amount INTEGER;
+off_set INTEGER :=1;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  numeric or value error
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset为空
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=3;
+off_set INTEGER;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  numeric or value error
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob无效
+declare
+c1 clob;
+amount INTEGER :=3;
+off_set INTEGER :=2;
+var_buf varchar2(10);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount大于buffer大小
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=6;
+off_set INTEGER :=2;
+var_buf varchar2(3);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  value too long for type character varying(3)
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset超出范围
+declare
+c1 clob :='abcdefgh';
+amount INTEGER :=2;
+off_set INTEGER :=0;
+var_buf varchar2(3);
+begin
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+ERROR:  offset is invalid or out of range
+CONTEXT:  SQL statement "CALL gms_lob.read(c1,amount,off_set,var_buf)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob只读
+declare
+c1 clob :='1111';
+amount INTEGER :=2;
+off_set INTEGER :=2;
+var_buf varchar2(10);
+begin
+gms_lob.open(c1, gms_lob.LOB_READONLY);
+gms_lob.read(c1, amount, off_set, var_buf);
+gms_output.put_line('clob read: ' || var_buf::text);
+end;
+/
+clob read: 11
+-----------write函数-----------
+--gms_lob.gms_lob_write_blob
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('abc');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+4161626345464748
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=8;
+b2 blob :=cast_to_raw('abc');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+41424344454647616263
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=3;
+off_set INTEGER :=20;
+b2 blob :=cast_to_raw('abc');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+41424344454647482020202020202020202020616263
+--buffer等于destlob
+declare
+b1 blob :=cast_to_raw('1234');
+amount INTEGER :=2;
+off_set INTEGER :=2;
+begin
+gms_lob.write(b1, amount, off_set, b1);
+gms_output.put_line(b1::text);
+end;
+/
+31313234
+--VALUEERROR
+--lob为空
+declare
+b1 blob;
+amount INTEGER :=3;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount为空
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER;
+off_set INTEGER :=9;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  Any of the input parameters are NULL
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount,offset向下取整
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount float :=3.9; -- 3
+off_set float :=5.6; -- 5
+b2 blob :=cast_to_raw('abc');
+r1 raw;
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+4142434461626348
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount float :=2.2; -- 2
+off_set float :=5.1; -- 5
+b2 blob :=cast_to_raw('abc');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+4142434461624748
+declare
+b1 blob :=cast_to_raw('ABCDEFGH');
+amount INTEGER :=4;
+off_set INTEGER :=8;
+b2 blob :=cast_to_raw('abc');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+gms_output.put_line(b1::text);
+end;
+/
+ERROR:  amount is invalid or out of range
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset为空
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=3;
+off_set INTEGER;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  Any of the input parameters are NULL
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob无效
+declare
+amount INTEGER :=3;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(cast_to_raw('111111'), amount, off_set, b2);
+end;
+/
+ERROR:  output parameter not a bind variable
+CONTEXT:  SQL statement "CALL gms_lob.write(cast_to_raw('111111'),amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+--amount大于buffer大小
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=5;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  amount is invalid or out of range
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset超出范围
+declare
+b1 blob :=cast_to_raw('11111111');
+amount INTEGER :=3;
+off_set INTEGER :=0;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  Invalid argument value for dest_offset.
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob只读
+declare
+b1 blob :=cast_to_raw('1111');
+amount INTEGER :=2;
+off_set INTEGER :=2;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.open(b1, gms_lob.LOB_READONLY);
+gms_lob.write(b1, amount, off_set, b2);
+end;
+/
+ERROR:  cannot update a LOB opened in read-only mode.
+CONTEXT:  SQL statement "CALL gms_lob.write(b1,amount,off_set,b2)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+--gms_lob.gms_lob_write_clob
+declare
+c1 clob :='11111111';
+amount INTEGER :=3;
+off_set INTEGER :=1;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+22211111
+-- amount, off_set 不向下取整
+declare
+c1 clob :='11111111';
+amount INTEGER :=3.9;
+off_set INTEGER :=1.8;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+ERROR:  amount is invalid or out of range
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+declare
+c1 clob :='11111111';
+amount INTEGER :=3;
+off_set INTEGER :=1.8;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+12221111
+declare
+c1 clob :='11111111';
+amount INTEGER :=3;
+off_set INTEGER :=9;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+11111111222
+declare
+c1 clob :='11111111';
+amount INTEGER :=3;
+off_set INTEGER :=10;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+11111111 222
+--buffer等于destlob
+declare
+c1 clob :='1234';
+amount INTEGER :=2;
+off_set INTEGER :=2;
+begin
+gms_lob.write(c1, amount, off_set, c1);
+gms_output.put_line(c1::text);
+end;
+/
+1124
+--VALUEERROR
+--lob为空
+declare
+c1 clob;
+amount INTEGER :=3;
+off_set INTEGER :=2;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--amount为空
+declare
+c1 clob :='11111111';
+amount INTEGER;
+off_set INTEGER :=10;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  Any of the input parameters are NULL
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset为空
+declare
+c1 clob :='11111111';
+amount INTEGER :=3;
+off_set INTEGER;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  Any of the input parameters are NULL
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob无效
+declare
+amount INTEGER :=3;
+off_set INTEGER :=2;
+c2 clob :='222';
+begin
+gms_lob.write('11111111', amount, off_set, c2);
+end;
+/
+ERROR:  output parameter not a bind variable
+CONTEXT:  SQL statement "CALL gms_lob.write('11111111',amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+--amount大于buffer大小
+declare
+c1 clob :='11111111';
+amount INTEGER :=5;
+off_set INTEGER :=2;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  amount is invalid or out of range
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--offset超出范围
+declare
+c1 clob :='11111111';
+amount INTEGER :=2;
+off_set INTEGER :=0;
+c2 clob :='222';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  Invalid argument value for dest_offset.
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+--lob只读
+declare
+c1 clob :='1111';
+amount INTEGER :=2;
+off_set INTEGER :=2;
+c2 clob :='222';
+begin
+gms_lob.open(c1, gms_lob.LOB_READONLY);
+gms_lob.write(c1, amount, off_set, c2);
+end;
+/
+ERROR:  cannot update a LOB opened in read-only mode.
+CONTEXT:  SQL statement "CALL gms_lob.write(c1,amount,off_set,c2)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+-----------append函数-----------
+--gms_lob.gms_lob_append_blob
+declare
+b1 blob :=cast_to_raw('11111111');
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.append(b1, b2);
+gms_output.put_line(b1::text);
+end;
+/
+3131313131313131323232
+--VALUEERROR
+--destlob为空
+declare
+b1 blob;
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.append(b1, b2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.append(b1,b2)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+--srclob为空
+declare
+b1 blob :=cast_to_raw('11111111');
+b2 blob;
+begin
+gms_lob.append(b1, b2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.append(b1,b2)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+--lob无效
+declare
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.append(cast_to_raw('1111'), b2);
+end;
+/
+ERROR:  output parameter not a bind variable
+CONTEXT:  SQL statement "CALL gms_lob.append(cast_to_raw('1111'),b2)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+--lob只读
+declare
+b1 blob :=cast_to_raw('1111');
+b2 blob :=cast_to_raw('222');
+begin
+gms_lob.open(b1, gms_lob.LOB_READONLY);
+gms_lob.append(b1, b2);
+end;
+/
+ERROR:  cannot update a LOB opened in read-only mode.
+CONTEXT:  SQL statement "CALL gms_lob.append(b1,b2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+--gms_lob.gms_lob_append_clob
+declare
+c1 clob :='11111111';
+c2 clob :='222';
+begin
+gms_lob.append(c1, c2);
+gms_output.put_line(c1::text);
+end;
+/
+11111111222
+--VALUEERROR
+--destlob为空
+declare
+c1 clob;
+c2 clob :='222';
+begin
+gms_lob.append(c1, c2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.append(c1,c2)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+--srclob为空
+declare
+c1 clob :='11111111';
+c2 clob;
+begin
+gms_lob.append(c1, c2);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.append(c1,c2)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+--lob无效
+declare
+c2 clob :='222';
+begin
+gms_lob.append('1111', c2);
+end;
+/
+ERROR:  output parameter not a bind variable
+CONTEXT:  SQL statement "CALL gms_lob.append('1111',c2)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+--lob只读
+declare
+c1 clob :='1111';
+c2 clob :='222';
+begin
+gms_lob.open(c1, gms_lob.LOB_READONLY);
+gms_lob.append(c1, c2);
+end;
+/
+ERROR:  cannot update a LOB opened in read-only mode.
+CONTEXT:  SQL statement "CALL gms_lob.append(c1,c2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+declare
+b1 blob :=cast_to_raw('ABC123');
+amount INTEGER :=3;
+off_set INTEGER :=100;
+b2 blob :=cast_to_raw('abc');
+c1 int;
+BEGIN
+gms_lob.write(b1,amount,off_set,b2);
+gms_output.put_line(b1::text);
+c1:=gms_lob.getlength(b1);
+gms_output.put_line(c1);
+end;
+/
+414243313233202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020616263
+102
+declare
+c1 clob :='ABC123';
+amount INTEGER :=3;
+off_set INTEGER :=100;
+c2 clob :='abc';
+begin
+gms_lob.write(c1, amount, off_set, c2);
+gms_output.put_line(c1::text);
+end;
+/
+ABC123                                                                                             abc
+declare
+b1 blob :=null;
+b2 blob :=cast_to_raw('abc');
+BEGIN
+gms_lob.append(b1,b2);
+gms_output.put_line(b1::text);
+end;
+/
+ERROR:  invalid LOB object specified
+CONTEXT:  SQL statement "CALL gms_lob.append(b1,b2)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+drop table if exists lob_mvcc;
+NOTICE:  table "lob_mvcc" does not exist, skipping
+create table lob_mvcc(id int, c_lob clob, b_lob blob);
+insert into lob_mvcc values(1, 'clob', cast_to_raw('blob'));
+insert into lob_mvcc values(2, '中文clobobject测试', cast_to_raw('中文blobobject测试'));
+select * from lob_mvcc order by id;
+ id |       c_lob        |                    b_lob                     
+----+--------------------+----------------------------------------------
+  1 | clob               | 626C6F62
+  2 | 中文clobobject测试 | E4B8ADE69687626C6F626F626A656374E6B58BE8AF95
+(2 rows)
+
+declare
+c1 clob;
+c2 clob :='222test';
+begin
+select c_lob into c1 from lob_mvcc where id=1 for update;
+gms_lob.append(c1, c2);
+end;
+/
+select * from lob_mvcc order by id;
+ id |       c_lob        |                    b_lob                     
+----+--------------------+----------------------------------------------
+  1 | clob               | 626C6F62
+  2 | 中文clobobject测试 | E4B8ADE69687626C6F626F626A656374E6B58BE8AF95
+(2 rows)
+
+drop table lob_mvcc;
+create or replace procedure proc_1034970
+as
+b1 clob :='测试';
+b2 clob :='测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试';
+begin
+gms_lob.open(b1,gms_lob.lob_readwrite);
+for i in 1..100 loop
+gms_lob.append(b1,b2);
+end loop;
+end;
+/
+call proc_1034970();
+ proc_1034970 
+--------------
+ 
+(1 row)
+
+drop procedure proc_1034970;
+\c contrib_regression
+drop database if exists testlob;

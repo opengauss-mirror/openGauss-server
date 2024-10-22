@@ -29,6 +29,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/chparser
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_profiler
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_lob
 )
 
 add_subdirectory(hstore)
@@ -62,3 +63,5 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
     add_subdirectory(chparser)
 endif()
 add_subdirectory(gms_profiler)
+
+add_subdirectory(gms_lob)
