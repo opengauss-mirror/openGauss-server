@@ -743,7 +743,7 @@ void free_thread_stack(ThreadId tid)
  * 			  shall not worry on releasing memory associate with.
  * Notes		:
  */
-int gs_thread_create(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, void* argv)
+int gs_thread_create_ex(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, void* argv, cpu_set_t *cpuset)
 {
     ThreadArg* pArg = NULL;
     int error_code = 0;
@@ -802,6 +802,10 @@ int gs_thread_create(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, voi
 
         pthread_attr_setstacksize(&pThreadAttr, size);
         error_code = pthread_attr_setdetachstate(&pThreadAttr, PTHREAD_CREATE_JOINABLE);
+        /* cpu bind */
+        if (cpuset != NULL && error_code == 0) {
+            error_code = pthread_attr_setaffinity_np(&pThreadAttr, sizeof(cpu_set_t), cpuset);
+        }
         /* Create a pthread */
         if (error_code == 0) {
             error_code = pthread_create(&th->thid, &pThreadAttr, ThreadStarterFunc, pArg);
@@ -819,6 +823,11 @@ int gs_thread_create(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, voi
     }
 
     return error_code;
+}
+
+int gs_thread_create(gs_thread_t* th, void* (*taskRoutine)(void*), int argc, void* argv)
+{
+    return gs_thread_create_ex(th, taskRoutine, argc, argv, NULL);
 }
 
 /*

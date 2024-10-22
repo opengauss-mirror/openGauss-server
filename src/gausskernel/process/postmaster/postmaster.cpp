@@ -14189,11 +14189,11 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 /* the order of role must be the same with enum knl_thread_role */
 static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<MASTER_THREAD>, MASTER_THREAD, "main", "main thread" },
-    { GaussDbThreadMain<WORKER>, WORKER, "worker", "woker thread" },
-    { GaussDbThreadMain<THREADPOOL_WORKER>, THREADPOOL_WORKER, "TPLworker", "thread pool worker" },
-    { GaussDbThreadMain<THREADPOOL_LISTENER>, THREADPOOL_LISTENER, "TPLlistener", "thread pool listner" },
-    { GaussDbThreadMain<THREADPOOL_SCHEDULER>, THREADPOOL_SCHEDULER, "TPLscheduler", "thread pool scheduler" },
-    { GaussDbThreadMain<THREADPOOL_STREAM>, THREADPOOL_STREAM, "TPLstream", "thread pool stream" },
+    { GaussDbThreadMain<WORKER>, WORKER, "worker", "woker thread" , false},
+    { GaussDbThreadMain<THREADPOOL_WORKER>, THREADPOOL_WORKER, "TPLworker", "thread pool worker" , false},
+    { GaussDbThreadMain<THREADPOOL_LISTENER>, THREADPOOL_LISTENER, "TPLlistener", "thread pool listner" , false},
+    { GaussDbThreadMain<THREADPOOL_SCHEDULER>, THREADPOOL_SCHEDULER, "TPLscheduler", "thread pool scheduler", false},
+    { GaussDbThreadMain<THREADPOOL_STREAM>, THREADPOOL_STREAM, "TPLstream", "thread pool stream" , false},
     { GaussDbThreadMain<STREAM_WORKER>, STREAM_WORKER, "streamworker", "stream worker" },
     { GaussDbThreadMain<AUTOVACUUM_LAUNCHER>, AUTOVACUUM_LAUNCHER, "AVClauncher", "autovacuum launcher" },
     { GaussDbThreadMain<AUTOVACUUM_WORKER>, AUTOVACUUM_WORKER, "AVCworker", "autovacuum worker" },
@@ -14311,7 +14311,14 @@ ThreadId initialize_thread(ThreadArg* thr_argv)
 {
 
     gs_thread_t thread;
-    int error_code = gs_thread_create(&thread, InternalThreadFunc, 1, (void*)thr_argv);
+    cpu_set_t *cpuSet = NULL;
+    /* g_threadPoolControler only exists in primary normal mode */
+    if (g_instance.attr.attr_network.enable_gazelle_performance_mode && g_threadPoolControler &&
+        GaussdbThreadGate[thr_argv->m_thd_arg.role].bindCpu) {
+        cpuSet = g_threadPoolControler->GetCpuSet();
+    }
+
+    int error_code = gs_thread_create_ex(&thread, InternalThreadFunc, 1, (void*)thr_argv, cpuSet);
     if (error_code != 0) {
         ereport(LOG,
             (errmsg("can not fork thread[%s], errcode:%d, %m",
