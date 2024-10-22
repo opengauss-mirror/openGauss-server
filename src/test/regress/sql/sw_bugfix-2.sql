@@ -717,3 +717,19 @@ SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
 SELECT * FROM RLTEST CONNECT BY PRIOR LEVEL<3;
 DROP TABLE RLTEST;
+
+-- test ORDER SIBLINGS BY clause which contains an expression or alias with a pseudocolumn
+drop table if exists hier;
+create table hier(parent varchar(30),child varchar(30));
+insert into hier values(null,'Asia');
+insert into hier values('Asia','China');
+insert into hier values('Asia','Japan');
+insert into hier values('Asia','ENGLAND');
+insert into hier values('Asia','HONGKONG');
+insert into hier values('China','BEIJING');
+insert into hier values('China','SHANGHAI');
+insert into hier values('China','AK47');
+insert into hier values('China','天津');
+select child, level, lpad(' ', level*3, ' ')||child c1 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c1;
+select child, level, lpad(' ', level*3, ' ')||child c1, level c2 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c2;
+drop table hier;

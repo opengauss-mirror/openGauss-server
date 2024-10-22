@@ -1394,6 +1394,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->lockwait_timeout_active = false;
     storage_cxt->deadlock_state = DS_NOT_YET_CHECKED;
     storage_cxt->cancel_from_timeout = false;
+    storage_cxt->timer_continued = {0, 0};
     storage_cxt->timeout_start_time = 0;
     storage_cxt->statement_fin_time = 0;
     storage_cxt->statement_fin_time2 = 0;

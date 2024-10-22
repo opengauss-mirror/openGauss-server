@@ -503,6 +503,16 @@ static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
                 errmsg("expression with none-var in order siblings is not supported")));
     }
 
+    foreach (lc, vars) {
+        Var* var = (Var *)lfirst(lc);
+        RangeTblEntry *rte = root->simple_rte_array[var->varno];
+        char *raw_cte_alias = (char *)strVal(list_nth(rte->eref->colnames, var->varattno - 1));
+        if (raw_cte_alias != NULL && IsPseudoReturnColumn(raw_cte_alias)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Not support refer startwith Pseudo column in order siblings by.")));
+        }
+    }
+
     /* do not support multi-column refs specified as order sibling's sort entry */
     if (list_length(vars) > 1) {
         ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -513,7 +523,12 @@ static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
     RangeTblEntry *rte = root->simple_rte_array[var->varno];
     char *raw_cte_alias = (char *)strVal(list_nth(rte->eref->colnames, var->varattno - 1));
     resultColName = strrchr(raw_cte_alias, '@');
-    resultColName += 1;   /* fix '@' offset */
+    if (resultColName != NULL) {
+        resultColName += 1;   /* fix '@' offset */
+    } else {
+        ereport(ERROR, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Invalid column name %s in order siblings is found.", raw_cte_alias)));
+    }
 
     return resultColName;
 }
