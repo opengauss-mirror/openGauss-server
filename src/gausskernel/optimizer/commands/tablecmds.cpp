@@ -6217,7 +6217,7 @@ static ObjectAddress RenameTableFeature(RenameStmt* stmt)
         ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Cannot get rename table name and modify name")));
     }
     RenameTableNameData storageTable[stmt->renameTargetList->length];
-    bool tempSchema[stmt->renameTargetList->length] = { false };
+    bool tempSchema[stmt->renameTargetList->length] = { 0 };
     Relation lockRelation[stmt->renameTargetList->length];
     int tableName_Count = 0;
     ListCell* rename_Cell = NULL;
@@ -31221,7 +31221,7 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     }
 
     rel = heap_open(GsGlobalConfigRelationId, RowExclusiveLock);
-    if (!OidIsValid(rel)) {
+    if (rel == NULL) {
         ereport(ERROR, 
             (errcode(ERRCODE_SYSTEM_ERROR),
                 errmsg("could not open gs_global_config")));

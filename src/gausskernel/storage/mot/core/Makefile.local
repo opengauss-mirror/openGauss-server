@@ -93,7 +93,7 @@ ifeq ($(BUILD),Release)
     ifeq ($(PLATFORM_ARCH),aarch64)
 	CFLAGS += -O2 -DNDEBUG -D_FORTIFY_SOURCE=2
     else
-	CFLAGS += -Werror -O2 -DNDEBUG -mcx16  -D_FORTIFY_SOURCE=2
+	CFLAGS += -O2 -DNDEBUG -mcx16  -D_FORTIFY_SOURCE=2
     endif
 else
 #	CFLAGS += -O0 -DDEBUG

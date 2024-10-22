@@ -1687,7 +1687,7 @@ static bool isVectorEngineSupportSetFunc(Oid funcid)
 * init_fcache - initialize a FuncExprState node during first use
 */
 template <bool vectorized>
-static void init_fcache(
+void init_fcache(
    Oid foid, Oid input_collation, FuncExprState* fcache, MemoryContext fcacheCxt, bool allowSRF, bool needDescForSRF)
 {
    AclResult aclresult;

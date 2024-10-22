@@ -1588,8 +1588,8 @@ bool GDS::LineBuffer::GetNextLine(StringInfo output_line)
     int64_t tuplen = ntohl(*(uint32_t*)&(header[0]));
     int64_t nth = ntohl(*(uint32_t*)&(header[4]));
 
-    if (nth < 0 || (unsigned int64_t)nth > PG_UINT32_MAX || tuplen < 0 ||
-        (unsigned int64_t)tuplen > MaxAllocSize + GDS_HEADER_LEN) {
+    if (nth < 0 || (uint64_t)nth > PG_UINT32_MAX || tuplen < 0 ||
+        (uint64_t)tuplen > MaxAllocSize + GDS_HEADER_LEN) {
         parser_log(
             LEVEL_ERROR, "Linebuffer's content is trashed as tuple's ID %lu and length is not valid %lu", nth, tuplen);
     }

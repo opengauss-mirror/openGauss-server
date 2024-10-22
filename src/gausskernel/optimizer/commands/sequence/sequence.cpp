@@ -753,10 +753,10 @@ template<typename T, bool large>
 static Datum GetIntDefVal(TypeName* name, T value)
 {
     if (large) {
-        *name = makeTypeNameFromOid(INT16OID, -1);
+        name = makeTypeNameFromOid(INT16OID, -1);
         return Int128GetDatum(value);
     } else {
-        *name = makeTypeNameFromOid(INT8OID, -1);
+        name = makeTypeNameFromOid(INT8OID, -1);
         return Int64GetDatumFast(value);
     }
 }

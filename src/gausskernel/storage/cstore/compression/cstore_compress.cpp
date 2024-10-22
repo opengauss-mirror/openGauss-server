@@ -2394,10 +2394,10 @@ static void ConvertMixedToBINumeric(char* outPtr, int32* int32Val, int64* int64V
 
 /// Given all the int64[], int32[], numeric[] values, and adjust scale codes,
 /// original Numeric data will be restored and stored in *outBuf*.
-template extern void NumericDecompressRestoreValues<true>(char* outBuf, int typeMode,
+template void NumericDecompressRestoreValues<true>(char* outBuf, int typeMode,
                                                           numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
 
-template extern void NumericDecompressRestoreValues<false>(char* outBuf, int typeMode,
+template void NumericDecompressRestoreValues<false>(char* outBuf, int typeMode,
                                                            numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
 
 template <bool DscaleFlag>

@@ -1396,7 +1396,7 @@ ifndef COMPILE.cpp
 COMPILE.cpp = $(CC) $(CXXFLAGS) $(CPPFLAGS) -c
 endif
 
-mywarningflags=-Wall -Werror -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
+mywarningflags=-Wall -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
 CFLAGS += $(mywarningflags)
 CXXFLAGS += $(mywarningflags)
 

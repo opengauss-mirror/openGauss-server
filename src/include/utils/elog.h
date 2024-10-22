@@ -315,7 +315,7 @@ typedef struct FormatCallStack {
 #define securec_check(errno, charList, ...)                                                                            \
     {                                                                                                                  \
         if (EOK != errno) {                                                                                            \
-            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                        \
+            freeSecurityFuncSpace(const_cast<char*>(charList), ##__VA_ARGS__);                                        \
             switch (errno) {                                                                                           \
                 case EINVAL:                                                                                           \
                     elog(ERROR,                                                                                        \
@@ -360,7 +360,7 @@ typedef struct FormatCallStack {
 #define securec_check(errno, charList, ...)                                                                          \
     {                                                                                                                \
         if (errno == -1) {                                                                                           \
-            freeSecurityFuncSpace_c(static_cast<char*>(charList), ##__VA_ARGS__);                                    \
+            freeSecurityFuncSpace_c(const_cast<char*>(charList), ##__VA_ARGS__);                                    \
             printf("ERROR at %s : %d : The destination buffer or format is a NULL pointer or the invalid parameter " \
                    "handle is invoked..\n",                                                                          \
                 __FILE__,                                                                                            \
@@ -375,7 +375,7 @@ typedef struct FormatCallStack {
 #define securec_check_ss(errno, charList, ...)                                                                     \
     {                                                                                                              \
         if (errno == -1) {                                                                                         \
-            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                    \
+            freeSecurityFuncSpace(const_cast<char*>(charList), ##__VA_ARGS__);                                    \
             elog(ERROR,                                                                                            \
                 "%s : %d : The destination buffer or format is a NULL pointer or the invalid parameter handle is " \
                 "invoked.",                                                                                        \

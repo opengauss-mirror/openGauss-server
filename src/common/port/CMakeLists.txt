@@ -106,7 +106,7 @@ if("${BUILD_TUPLE}" STREQUAL "aarch64")
     add_static_objtarget(pgport_crc32 TGT_crc32_arm_parallel_SRC TGT_pgport_INC "${pgport_DEF_OPTIONS}" "${pgport_crc32_COMPILE_OPTIONS}" "")
     add_dependencies(pgport_static pgport_crc32)
     add_custom_command(TARGET pgport_static POST_BUILD
-        COMMAND /usr/bin/ar rs ${CMAKE_BINARY_DIR}/lib/libpgport.a ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/pgport_crc32.dir/crc32_arm_parallel.S.o
+        COMMAND  ${CMAKE_AR} rs ${CMAKE_BINARY_DIR}/lib/libpgport.a ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/pgport_crc32.dir/crc32_arm_parallel.S.o
     )
 endif()
 enable_language(CXX)
@@ -175,7 +175,7 @@ if("${BUILD_TUPLE}" STREQUAL "aarch64")
     add_static_objtarget(pgport_srv_crc32 TGT_crc32_arm_parallel_srv_SRC TGT_pgport_srv_INC "${port_srv_DEF_OPTIONS}" "${pgport_srv_crc32_COMPILE_OPTIONS}" "")
     add_dependencies(pgport_srv_static pgport_srv_crc32)
     add_custom_command(TARGET pgport_srv_static POST_BUILD
-        COMMAND /usr/bin/ar rs ${CMAKE_BINARY_DIR}/lib/libpgport_srv.a ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/pgport_srv_crc32.dir/port_srv/crc32_arm_parallel.S.o
+        COMMAND ${CMAKE_AR} rs ${CMAKE_BINARY_DIR}/lib/libpgport_srv.a ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/pgport_srv_crc32.dir/port_srv/crc32_arm_parallel.S.o
     )
 endif()
 enable_language(CXX)

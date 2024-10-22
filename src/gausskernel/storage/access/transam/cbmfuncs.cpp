@@ -238,8 +238,8 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         if (IS_UNDO_RELFILENODE(cur_array_entry.cbmTag.rNode)) {
             /* undo file and transaction slot */
-            char file_path[UNDO_FILE_PATH_LEN] = {'\0'};
-            char dir_path[UNDO_FILE_DIR_LEN] = {'\0'};
+            char file_path[UNDO_FILE_PATH_LEN] = {0};
+            char dir_path[UNDO_FILE_DIR_LEN] = {0};
             DECLARE_NODE_COUNT();
             GET_UPERSISTENCE_BY_ZONEID((int)cur_array_entry.cbmTag.rNode.relNode, nodeCount);
             GetUndoFileDirectory(dir_path, UNDO_FILE_DIR_LEN, upersistence);

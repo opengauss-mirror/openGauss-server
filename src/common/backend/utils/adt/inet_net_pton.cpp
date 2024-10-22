@@ -56,7 +56,7 @@ static int inet_cidr_pton_ipv6(const char* src, u_char* dst, size_t size);
  *	the names to reflect their current use.
  *
  */
-int inet_net_pton(int af, const char* src, void* dst, size_t size)
+int inet_net_pton(int af, const char* src, void* dst, size_t size) noexcept
 {
     switch (af) {
         case PGSQL_AF_INET:

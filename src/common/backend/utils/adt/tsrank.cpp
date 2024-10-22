@@ -317,10 +317,10 @@ static float calc_rank(const float* w, TSVector t, TSQuery q, int4 method)
     if (res < 0)
         res = 1e-20f;
 
-    if (((unsigned int4)method & RANK_NORM_LOGLENGTH) && t->size > 0)
+    if (((uint4)method & RANK_NORM_LOGLENGTH) && t->size > 0)
         res /= log((double)(cnt_length(t) + 1)) / log(2.0);
 
-    if ((unsigned int4)method & RANK_NORM_LENGTH) {
+    if ((uint4)method & RANK_NORM_LENGTH) {
         len = cnt_length(t);
         if (len > 0)
             res /= (float)len;
@@ -328,13 +328,13 @@ static float calc_rank(const float* w, TSVector t, TSQuery q, int4 method)
 
     /* RANK_NORM_EXTDIST not applicable */
 
-    if (((unsigned int4)method & RANK_NORM_UNIQ) && t->size > 0)
+    if (((uint4)method & RANK_NORM_UNIQ) && t->size > 0)
         res /= (float)(t->size);
 
-    if (((unsigned int4)method & RANK_NORM_LOGUNIQ) && t->size > 0)
+    if (((uint4)method & RANK_NORM_LOGUNIQ) && t->size > 0)
         res /= log((double)(t->size + 1)) / log(2.0);
 
-    if ((unsigned int4)method & RANK_NORM_RDIVRPLUS1)
+    if ((uint4)method & RANK_NORM_RDIVRPLUS1)
         res /= (res + 1);
 
     return res;

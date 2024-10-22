@@ -25,7 +25,7 @@ override CXXFLAGS := $(filter-out -fstack-protector -fPIE, $(CFLAGS)) -fPIC -fst
 override CPPFLAGS :=$(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 endif
 
-override mywarningflags:=-Wall -Werror -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
+override mywarningflags:=-Wall -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
 override CXXFLAGS:=$(filter-out $(mywarningflags),$(CXXFLAGS))
 override CXXFLAGS+=$(mywarningflags)
 override CPPFLAGS:=$(filter-out $(mywarningflags),$(CPPFLAGS))

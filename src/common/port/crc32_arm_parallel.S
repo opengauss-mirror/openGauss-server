@@ -80,9 +80,11 @@ crc32_arm:
 //	PRFM PLDL1STRM,[X18,#0x1FE0]
 //	PRFM PLDL1STRM,[X19,#0x1FE0]
 crcB3_8160:		
-//	LDR		X5,=mul_table_72  //get the table of base address	
-	LDR		X23,=mul_table_5432
-	LDR		X29,=mul_table_2712
+    //	get the table of base address
+	ADRP		X23, mul_table_5432
+	ADD		X23, X23, :lo12:mul_table_5432
+	ADRP		X29, mul_table_2712
+	ADD		X29, X29, :lo12:mul_table_2712
 	LDR		X6, =2720		 //(2720=8160/3 use tabel 5432,2712)
 //	LDR		X7, =0x1800
 //	LDR		X8, =0x1400   //for 2720
@@ -200,9 +202,11 @@ crcB3_8160_segment_loops:
 	PRFM PLDL1STRM,[X18,#0x780]
 	PRFM PLDL1STRM,[X19,#0x780]	
 crcB3_1920:		
-//	LDR		X5,=mul_table_72  //get the table of base address	
-	LDR		X23,=mul_table_1272
-	LDR		X29,=mul_table_632
+    //	get the table of base address
+	ADRP		X23, mul_table_1272
+	ADD		X23, X23, :lo12:mul_table_1272
+	ADRP		X29, mul_table_632
+	ADD		X29, X29, :lo12:mul_table_632
 	LDR		X6, =640		 //(640=1920/3 use tabel 1280,640)
 //	LDR		X7, =0x1000
 //	LDR		X8, =0x0c00   //for 1920
@@ -327,8 +331,10 @@ crcB3_1920_segment_loops:
 	
 
 crcB3_960:	
-	LDR		X23,=mul_table_632
-	LDR		X29,=mul_table_312
+    ADRP		X23, mul_table_632
+	ADD		X23, X23, :lo12:mul_table_632
+	ADRP		X29, mul_table_312
+	ADD		X29, X29, :lo12:mul_table_312
     LDR		X6, =320	// 320*3 =  960 (Tables  640, 320)
 //	LDR		X7, =0x0c00
 //	LDR		X8, =0x0800
@@ -422,8 +428,10 @@ crcB3_960_segment_loops:
 	        
 
 crcB3_480:	
-	LDR		X23,=mul_table_312
-	LDR		X29,=mul_table_152
+    ADRP		X23, mul_table_312
+	ADD		X23, X23, :lo12:mul_table_312
+	ADRP		X29, mul_table_152
+	ADD		X29, X29, :lo12:mul_table_152
     LDR		X6, =160		// 80*3 =  480 (Tables  160,  80)
 //	LDR		X7, =0x0800
 //	LDR		X8, =0x0400
@@ -516,8 +524,10 @@ crcB3_480_segment_loops:
 	 
 	 
 crcB3_240:	
-	LDR		X23,=mul_table_152
-	LDR		X29,=mul_table_72
+    ADRP		X23, mul_table_152
+	ADD		X23, X23, :lo12:mul_table_152
+	ADRP		X29, mul_table_72
+	ADD		X29, X29, :lo12:mul_table_72
     LDR		X6, =80		// 80*3 =  240 (Tables  160,  80)
 //	LDR		X7, =0x0400
 //	LDR		X8, =0x0000
@@ -615,7 +625,6 @@ bit8:
 	AND		X6, X7, X1, LSR #0x7  
 	CMP		X6, #0
 	B.EQ	bit7
-   .set i, 0
    .rept 8
 	LDP      X25, X26, [X0], #0x10
 	CRC32CX	 W2, W2, X25
@@ -629,7 +638,6 @@ bit7:
 	AND		X6, X7, X1, LSR #0x6
 	CMP		X6, #0
 	B.EQ	bit6
-    .set i, 0
     .rept 4
 	LDP      X25, X26, [X0], #0x10
 	CRC32CX	 W2, W2, X25
@@ -643,7 +651,6 @@ bit6:
 	AND		X6, X7, X1, LSR #0x5
 	CMP		X6, #0
 	B.EQ	bit5
-  .set i, 0
   .rept 2
 	LDP      X25, X26, [X0], #0x10
 	CRC32CX	 W2, W2, X25

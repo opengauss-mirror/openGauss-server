@@ -2132,7 +2132,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
             values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(dummy);
             values[Anum_pg_proc_allargtypesext - 1] = PointerGetDatum(allParameterTypes);
         }
-    } else if (parameterTypes != PointerGetDatum(NULL)) {
+    } else if (parameterTypes != NULL) {
         values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proargtypes - 1];
         values[Anum_pg_proc_allargtypesext - 1] = values[Anum_pg_proc_proargtypesext - 1];
         nulls[Anum_pg_proc_allargtypesext - 1] = nulls[Anum_pg_proc_proargtypesext - 1];

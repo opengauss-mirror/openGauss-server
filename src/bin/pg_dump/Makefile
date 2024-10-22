@@ -28,7 +28,7 @@ ifdef LLT
 	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DGSDUMP_LLT -DHAVE_LIBZ -DHAVE_CE
 else
 	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DHAVE_LIBZ -DHAVE_CE
-	CC = g++
+	CC = clang++
 endif
 else
 ifdef LLT
@@ -37,7 +37,7 @@ ifdef LLT
 	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DGSDUMP_LLT -DHAVE_LIBZ
 else
 	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DHAVE_LIBZ
-	CC = g++
+	CC = clang++
 endif
 endif
 

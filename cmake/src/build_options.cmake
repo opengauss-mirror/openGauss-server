@@ -27,7 +27,7 @@ GET_VERSIONSTR_FROMGIT(GET_PG_VERSION_STR)
 
 #CMake does not allow g++ to compile C files. They are two different languages. You should understand what you are doing.
 #Now because of ROACH, I support it, but It's Very Bad Thing! We should know the difference of C/C++ language, whether compiling or coding, sometime's it's not work.
-SET(BUILD_C_WITH_CXX yes CACHE INTERNAL "Build C with g++")
+SET(BUILD_C_WITH_CXX no CACHE INTERNAL "Build C with g++")
 
 
 #The current OS kernel and glibc library are compiled using low-version gcc. So we usually need to turn on this ability. 

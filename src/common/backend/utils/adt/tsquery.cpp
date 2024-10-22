@@ -73,19 +73,19 @@ static char* get_modifiers(const char* buf, int16* weight, bool* prefix)
         switch (*buf) {
             case 'a':
             case 'A':
-                *weight = (unsigned int16)(*weight) | (1 << 3);
+                *weight = (uint16)(*weight) | (1 << 3);
                 break;
             case 'b':
             case 'B':
-                *weight = (unsigned int16)(*weight) | (1 << 2);
+                *weight = (uint16)(*weight) | (1 << 2);
                 break;
             case 'c':
             case 'C':
-                *weight = (unsigned int16)(*weight) | (1 << 1);
+                *weight = (uint16)(*weight) | (1 << 1);
                 break;
             case 'd':
             case 'D':
-                *weight = (unsigned int16)(*weight) | 1;
+                *weight = (uint16)(*weight) | 1;
                 break;
             case '*':
                 *prefix = true;

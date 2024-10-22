@@ -353,7 +353,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
 static XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
 
 template <bool isGroupInsert>
-static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *proc = NULL);
+void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *proc = NULL);
 
 static bool XLogCheckpointNeeded(XLogSegNo new_segno);
 static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible);
@@ -2338,7 +2338,7 @@ static void XLogArchiveCleanup(const char *xlog)
  * initialized properly.
  */
 template <bool isGroupInsert>
-static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *proc)
+void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *proc)
 {
     XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     int nextidx;
@@ -2451,8 +2451,8 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *p
 #endif
 }
 
-template static void AdvanceXLInsertBuffer<true>(XLogRecPtr, bool, PGPROC *);
-template static void AdvanceXLInsertBuffer<false>(XLogRecPtr, bool, PGPROC *);
+template void AdvanceXLInsertBuffer<true>(XLogRecPtr, bool, PGPROC *);
+template void AdvanceXLInsertBuffer<false>(XLogRecPtr, bool, PGPROC *);
 
 /*
  * Check whether we've consumed enough xlog space that a checkpoint is needed.
