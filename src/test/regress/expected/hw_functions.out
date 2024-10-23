@@ -396,6 +396,144 @@ from varlentype order by col_int;
 drop table type;
 drop table varlentype;
 drop table time;
+-- test function bin_to_num
+select bin_to_num(1,0,0);
+ bin_to_num 
+------------
+          4
+(1 row)
+
+select bin_to_num('1',0,0);
+ bin_to_num 
+------------
+          4
+(1 row)
+
+select bin_to_num('1',2-1,0);
+ bin_to_num 
+------------
+          6
+(1 row)
+
+select bin_to_num(NULL);
+ERROR:  illegal argument for function
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num();
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num('a','b');
+ERROR:  invalid input syntax for type numeric: "a"
+LINE 1: select bin_to_num('a','b');
+                          ^
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-2.9);
+ERROR:  argument -2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-2.1);
+ERROR:  argument -2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-2.0);
+ERROR:  argument -2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-1.9);
+ERROR:  argument -1 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-1.1);
+ERROR:  argument -1 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-1.0);
+ERROR:  argument -1 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-0.9);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(-0.1);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(-0.0);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(0.0);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(0.1);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(0.9);
+ bin_to_num 
+------------
+          0
+(1 row)
+
+select bin_to_num(1.0);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(1.1);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(1.4);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(1.5);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(1.6);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(1.9);
+ bin_to_num 
+------------
+          1
+(1 row)
+
+select bin_to_num(2.0);
+ERROR:  argument 2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(2.1);
+ERROR:  argument 2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(2.9);
+ERROR:  argument 2 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(9999999999000);
+ERROR:  argument 2147483647 is out of range
+CONTEXT:  referenced column: bin_to_num
+select bin_to_num(-9999999999000);
+ERROR:  argument -2147483648 is out of range
+CONTEXT:  referenced column: bin_to_num
 -- tests for repeat
 -- create table at first
 create table test_null_repeat(id int, col2 text); 
