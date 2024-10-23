@@ -248,6 +248,12 @@ extern Datum timestamptz_trunc(PG_FUNCTION_ARGS);
 extern Datum timestamptz_trunc_alias(PG_FUNCTION_ARGS);
 extern Datum timestamptz_part(PG_FUNCTION_ARGS);
 
+extern Datum timestamp_extract_zone(PG_FUNCTION_ARGS);
+extern Datum interval_extract_zone(PG_FUNCTION_ARGS);
+extern Datum time_extract_zone(PG_FUNCTION_ARGS);
+extern Datum timestamptz_extract_zone(PG_FUNCTION_ARGS);
+extern Datum timetz_extract_zone(PG_FUNCTION_ARGS);
+
 extern Datum new_time(PG_FUNCTION_ARGS);
 extern Datum now(PG_FUNCTION_ARGS);
 extern Datum statement_timestamp(PG_FUNCTION_ARGS);

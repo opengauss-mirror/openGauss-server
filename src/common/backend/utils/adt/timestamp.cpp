@@ -4521,6 +4521,120 @@ Datum timestamptz_part(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(result);
 }
 
+/* timestamp_extract_zone()
+ * For A compatibility. Extract timezone information from timestamp types without timezone information
+ * is unsupported. Just report an error.
+ */
+Datum timestamp_extract_zone(PG_FUNCTION_ARGS)
+{
+    text* units = PG_GETARG_TEXT_PP(0);
+    char* lowunits = NULL;
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units), false);
+    ereport(ERROR,
+        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("timestamp units \"%s\" not supported", lowunits)));
+    pfree_ext(lowunits);
+    PG_RETURN_TEXT_P(NULL);
+}
+
+/* interval_extract_zone()
+ * For A compatibility. Extract timezone information from timestamp types without timezone information
+ * is unsupported. Just report an error.
+ */
+Datum interval_extract_zone(PG_FUNCTION_ARGS)
+{
+    text* units = PG_GETARG_TEXT_PP(0);
+    char* lowunits = NULL;
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units), false);
+    ereport(ERROR,
+        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("interval units \"%s\" not supported", lowunits)));
+    pfree_ext(lowunits);
+    PG_RETURN_TEXT_P(NULL);
+}
+
+/* time_extract_zone()
+ * For A compatibility. Extract timezone information from timestamp types without timezone information
+ * is unsupported. Just report an error.
+ */
+Datum time_extract_zone(PG_FUNCTION_ARGS)
+{
+    text* units = PG_GETARG_TEXT_PP(0);
+    char* lowunits = NULL;
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units), false);
+    ereport(ERROR,
+        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("time units \"%s\" not supported", lowunits)));
+    pfree_ext(lowunits);
+    PG_RETURN_TEXT_P(NULL);
+}
+
+/* timestamptz_extract_zone()
+ * For A compatibility. Extract timezone information from timestamp with time zone.
+ * Extract timezone information from timestamp with time zone.
+ */
+Datum timestamptz_extract_zone(PG_FUNCTION_ARGS)
+{
+    text* full_or_abbr = PG_GETARG_TEXT_PP(0);
+    TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(1);
+    text* result = NULL;
+    int tz;
+    char* low_full_or_abbr = downcase_truncate_identifier(
+        VARDATA_ANY(full_or_abbr), VARSIZE_ANY_EXHDR(full_or_abbr), false);
+    fsec_t fsec;
+    struct pg_tm tt, *tm = &tt;
+    const char *tzn;
+    if (TIMESTAMP_NOT_FINITE(timestamp)) {
+        result = cstring_to_text("Unknown");
+        PG_RETURN_TEXT_P(result);
+    }
+    if (timestamp2tm(timestamp, &tz, tm, &fsec, &tzn, NULL) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+    }
+    if (strcmp(low_full_or_abbr, "timezone_region") == 0) {
+        const char *session_tzname = pg_get_timezone_name(session_timezone);
+        if (session_tzname != NULL) {
+            result = cstring_to_text(session_tzname);
+        } else {
+            result = cstring_to_text("Unknown");
+        }
+    } else if (strcmp(low_full_or_abbr, "timezone_abbr") == 0) {
+        if (tzn != NULL) {
+            result = cstring_to_text(tzn);
+        } else {
+            result = cstring_to_text("Unknown");
+        }
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("timestamp with time zone units \"%s\" not recognized, "
+                   "only timezone_region and timezone_abbr are supported",
+                   low_full_or_abbr)));
+    }
+    pfree_ext(low_full_or_abbr);
+    PG_RETURN_TEXT_P(result);
+}
+
+/* timetz_extract_zone()
+ * For A compatibility. Extract timezone information from time with time zone.
+ * Just return `Unknown` because timetz does not contain timezone region information.
+ */
+Datum timetz_extract_zone(PG_FUNCTION_ARGS)
+{
+    text* full_or_abbr = PG_GETARG_TEXT_PP(0);
+    text* result = NULL;
+    char* low_full_or_abbr = downcase_truncate_identifier(
+        VARDATA_ANY(full_or_abbr), VARSIZE_ANY_EXHDR(full_or_abbr), false);
+    if (strcmp(low_full_or_abbr, "timezone_region") == 0 || strcmp(low_full_or_abbr, "timezone_abbr") == 0) {
+        result = cstring_to_text("Unknown");
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("time with time zone units \"%s\" not recognized, "
+                   "only timezone_region and timezone_abbr are supported",
+                   low_full_or_abbr)));
+    }
+    pfree_ext(low_full_or_abbr);
+    PG_RETURN_TEXT_P(result);
+}
+
 static float8 get_interval_by_val(int val, struct pg_tm* tm, fsec_t fsec, char* lowunits)
 {
     float8 result;
