@@ -1013,7 +1013,7 @@ static void UBTRecyleQueueRecordOutput(BlockNumber blkno, uint16 offset, UBTRecy
     }
 
     Assert(cols == UBTREE_RECYCLE_OUTPUT_PARAM_CNT);
-    bool nulls[cols] = {false};
+    bool nulls[cols] = {0};
     Datum values[cols];
     char xidStr[UBTREE_RECYCLE_OUTPUT_XID_STR_LEN] = {'\0'};
     errno_t ret = snprintf_s(xidStr, sizeof(xidStr), sizeof(xidStr) - 1, "%lu", item->xid);

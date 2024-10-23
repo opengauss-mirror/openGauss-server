@@ -1523,7 +1523,7 @@ Datum gs_get_parallel_decode_status(PG_FUNCTION_ARGS)
     entry = (ParallelStatusData *)funcctx->user_fctx;
     if (funcctx->call_cntr < funcctx->max_calls) {
         Datum values[columnNum];
-        bool nulls[columnNum] = {false};
+        bool nulls[columnNum] = {0};
         HeapTuple tuple = NULL;
         errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");

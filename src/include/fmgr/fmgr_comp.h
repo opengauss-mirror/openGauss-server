@@ -194,7 +194,7 @@ extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
 #define PG_RETURN_NULL()       \
     do {                       \
         fcinfo->isnull = true; \
-        return (Datum)0;       \
+        return 0;       \
     } while (0)
 
 /* A few internal functions return void (which is not the same as NULL!) */

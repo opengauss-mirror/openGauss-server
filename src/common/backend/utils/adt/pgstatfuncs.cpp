@@ -6213,7 +6213,7 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
     if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         const int TOP5 = 5;
         Datum values[WLM_SESSION_INFO_ATTRNUM];
-        bool nulls[WLM_SESSION_INFO_ATTRNUM] = {false};
+        bool nulls[WLM_SESSION_INFO_ATTRNUM] = {0};
         HeapTuple tuple = NULL;
         Datum result;
         i = -1;
@@ -9382,7 +9382,7 @@ Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
         const int colNum = 4;
         /* for each row */
         Datum values[colNum];
-        bool nulls[colNum] = {false};
+        bool nulls[colNum] = {0};
         HeapTuple tuple = NULL;
 
         errno_t rc = 0;
@@ -10750,7 +10750,7 @@ Datum set_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int a
     errno_t rc = 0;
     CommStat comm_stat;
     Datum values[argNums];
-    bool nulls[argNums] = {false};
+    bool nulls[argNums] = {0};
     HeapTuple tuple = NULL;
     Datum result;
     int ii = 0;
@@ -11058,7 +11058,7 @@ Datum comm_check_connection_status(PG_FUNCTION_ARGS)
     if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[attNum] = {0};
-        bool nulls[attNum] = {false};
+        bool nulls[attNum] = {0};
 
         fill_values_for_comm_check_connection_status(values, funcctx, conns_entry);
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);

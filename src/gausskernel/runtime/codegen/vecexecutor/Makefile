@@ -36,7 +36,7 @@ OBJS = vecexprcodegen.o vechashaggcodegen.o vechashjoincodegen.o vecsortcodegen.
 
 # append include directory about zlib1.2.7
 override CPPFLAGS += -I$(LIBLLVM_INCLUDE_PATH) -D_DEBUG -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -O2 -fomit-frame-pointer -fvisibility-inlines-hidden -fno-exceptions -fno-rtti  -L$(LIBLLVM_LIB_PATH) -lz -pthread -D_REENTRANT -lncurses -lrt -ldl -lm $(LLVM_LIBS)
-override mywarningflags:=-Wall -Werror -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
+override mywarningflags:=-Wall -Wendif-labels -Wformat-security -Wmissing-format-attribute -Wpointer-arith -Wno-write-strings -Wno-attributes -Wno-unused-but-set-variable
 override CPPFLAGS:=$(filter-out $(mywarningflags),$(CPPFLAGS))
 
 include $(top_srcdir)/src/gausskernel/common.mk

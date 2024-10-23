@@ -263,7 +263,7 @@ static const char* raw_backend_options = "--single "
 
 #define FREE_AND_RESET(ptr)  \
     do {                     \
-        if (NULL != (ptr) && reinterpret_cast<char*>(ptr) != static_cast<char*>("")) { \
+        if (NULL != (ptr) && reinterpret_cast<char*>(ptr) != const_cast<char*>("")) { \
             free(ptr);       \
             (ptr) = NULL;    \
         }                    \

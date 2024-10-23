@@ -394,7 +394,7 @@ typedef unsigned __int128 uint128;
 #endif
 #else
 #ifdef __linux__
-#if __GNUC__ >= 7
+#if __GNUC__ >= 7 || __llvm__
 typedef __int128 int128;
 typedef unsigned __int128 uint128;
 #endif

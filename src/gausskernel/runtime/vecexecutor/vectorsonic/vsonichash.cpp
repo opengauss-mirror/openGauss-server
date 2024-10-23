@@ -391,7 +391,7 @@ void SonicHash::hashInteger8(char* val, uint8* flag, int nval, uint32* res, Fmgr
     for (int i = 0; i < nval; i++) {
         if (likely(NOT_NULL(*flag))) {
             uint32 lohalf = (uint32)(*arrval);
-            uint32 hihalf = (uint32)((unsigned int64)(*arrval) >> 32);
+            uint32 hihalf = (uint32)((uint64)(*arrval) >> 32);
             lohalf ^= (*arrval >= 0) ? hihalf : ~hihalf;
             if (rehash)
                 *res1 = HASH_INT32_CRC(*res1, lohalf);

@@ -446,7 +446,7 @@ FusionType checkFusionAgg(Agg *node, ParamListInfo params)
 
     /* check whether to have order by */
     if (node->aggstrategy != AGG_PLAIN ||
-            node->groupingSets > 0) {
+            node->groupingSets != NULL) {
         return NOBYPASS_NOT_PLAIN_AGG;
     }
 

@@ -97,7 +97,7 @@ void UBTreeVerifyRecordOutput(uint blkType, BlockNumber blkno, int errorCode,
     TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols)
 {
     Assert(cols == UBTREE_VERIFY_OUTPUT_PARAM_CNT);
-    bool nulls[cols] = {false};
+    bool nulls[cols] = {0};
     Datum values[cols];
     values[0] = CStringGetTextDatum(UBTGetVerifiedPageTypeStr(blkType));
     values[1] = UInt32GetDatum(blkno);
