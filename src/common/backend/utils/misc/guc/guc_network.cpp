@@ -366,6 +366,17 @@ static void InitNetworkConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_gazelle_performance_mode",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enables the special branch of the user-space protocol stack"),
+            NULL},
+            &g_instance.attr.attr_network.enable_gazelle_performance_mode,
+            false,
+            NULL,
+            NULL,
+            NULL},
         
         /* End-of-list marker */
         {{NULL,

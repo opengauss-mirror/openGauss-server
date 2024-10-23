@@ -356,6 +356,22 @@ void ThreadPoolControler::ParseBindCpu()
         m_cpuInfo.bindType = CPU_BIND;
         m_cpuInfo.isBindCpuArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
         bindNum = ParseRangeStr(psave, m_cpuInfo.isBindCpuArr, m_cpuInfo.totalCpuNum, "cpubind");
+
+        /*
+         * set m_cpuset specified by thread pool
+         * bind postmasterMain to cpus specified by thread pool */
+        if (g_instance.attr.attr_network.enable_gazelle_performance_mode) {
+            CPU_ZERO(&m_cpuset);
+            for (int i = 0; i < m_cpuInfo.totalCpuNum; i++) {
+                if (m_cpuInfo.isBindCpuArr[i]) {
+                    CPU_SET(i, &m_cpuset);
+                }
+            }
+            int s = pthread_setaffinity_np(PostmasterPid, sizeof(cpu_set_t), &m_cpuset);
+            if (s != 0) {
+                ereport(WARNING, (errmsg("AdjustThreadAffinity fail to bind thread %lu, errno: %d", PostmasterPid, s)));
+            }
+        }
     } else if (strncmp("nodebind", ptoken, strlen("nodebind")) == 0) {
         m_cpuInfo.bindType = NODE_BIND;
         m_cpuInfo.isBindNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalNumaNum);
@@ -883,7 +899,23 @@ int ThreadPoolControler::DispatchSession(Port* port)
         CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(port->sock);
         grp = m_groups[comm_sock->m_group_id];
     } else {
-        grp = FindThreadGroupWithLeastSession();
+        /* in enable_gazelle_performance_mode, fd will be distributed to
+         * the thread group of corresponding numa node */
+#define SO_NUMA_ID 0x100c
+        int numa_id = -1;
+        if (g_instance.attr.attr_network.enable_gazelle_performance_mode) {
+            numa_id = getsockopt(port->sock, 0, SO_NUMA_ID, NULL, NULL);
+        }
+        if (numa_id >= 0) {
+            for (int i = 0; i < m_groupNum; i++) {
+                if (m_groups[i]->GetNumaId() == numa_id) {
+                    grp = m_groups[i];
+                    break;
+                }
+            }
+        } else {
+            grp = FindThreadGroupWithLeastSession();
+        }
     }
 
     if (grp == NULL) {
