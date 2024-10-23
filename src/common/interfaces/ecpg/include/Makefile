@@ -39,4 +39,4 @@ uninstall:
 
 distclean maintainer-clean:
 	rm -f ecpg_config.h stamp-h
-	rm -r '$(DESTDIR)$(includedir_server)/ecpg'
+	rm -rf '$(DESTDIR)$(includedir_server)/ecpg'
