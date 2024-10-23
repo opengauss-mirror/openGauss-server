@@ -1899,7 +1899,7 @@ Datum time_part(PG_FUNCTION_ARGS)
             default:
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("\"time\" units \"%s\" not recognized", lowunits)));
+                        errmsg("\"time\" units \"%s\" not supported", lowunits)));
                 result = 0;
         }
     } else if (type == RESERV && val == DTK_EPOCH) {

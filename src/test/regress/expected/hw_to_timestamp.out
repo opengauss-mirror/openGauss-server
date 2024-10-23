@@ -1092,3 +1092,172 @@ SELECT to_date('202201  ', 'yyyymm');
  2022-01-01 00:00:00
 (1 row)
 
+-- EXTRACT(TIEMZONE_XXX)基本测试
+SET TIMEZONE TO 'Asia/Beijing';
+SELECT EXTRACT(TIMEZONE_HOUR FROM TIMESTAMPTZ '2024-09-02 10:30:00 America/New_York');
+ date_part 
+-----------
+         8
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_HOUR FROM TIMESTAMP '2024-09-02 10:30:00');
+ERROR:  timestamp units "timezone_hour" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_HOUR FROM INTERVAL '10 hours');
+ERROR:  interval units "timezone_hour" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_HOUR FROM DATE '2024-09-02');
+ERROR:  timestamp units "timezone_hour" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_HOUR FROM TIME '10:30:00');
+ERROR:  "time" units "timezone_hour" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_HOUR FROM TIMETZ '10:30:00+03');
+ date_part 
+-----------
+         3
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_MINUTE FROM TIMESTAMPTZ '2024-09-02 10:30:00 America/Los_Angeles');
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_MINUTE FROM TIMESTAMP '2024-09-02 10:30:00');
+ERROR:  timestamp units "timezone_minute" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_MINUTE FROM INTERVAL '10 hours');
+ERROR:  interval units "timezone_minute" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_MINUTE FROM DATE '2024-09-02');
+ERROR:  timestamp units "timezone_minute" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_MINUTE FROM TIME '10:30:00');
+ERROR:  "time" units "timezone_minute" not supported
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_MINUTE FROM TIMETZ '10:30:00+03');
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_REGION FROM TIMESTAMPTZ '2024-09-02 10:30:00 Europe/London');
+ timezone_extract 
+------------------
+ Asia/Beijing
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_REGION FROM TIMESTAMP '2024-09-02 10:30:00');
+ERROR:  timestamp units "timezone_region" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_REGION FROM INTERVAL '10 hours');
+ERROR:  interval units "timezone_region" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_REGION FROM DATE '2024-09-02');
+ERROR:  timestamp units "timezone_region" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_REGION FROM TIME '10:30:00');
+ERROR:  time units "timezone_region" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_REGION FROM TIMETZ '10:30:00+03');
+ timezone_extract 
+------------------
+ Unknown
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIMESTAMPTZ '2024-09-02 10:30:00 Asia/Tokyo');
+ timezone_extract 
+------------------
+ CST
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIMESTAMP '2024-09-02 10:30:00');
+ERROR:  timestamp units "timezone_abbr" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_ABBR FROM INTERVAL '10 hours');
+ERROR:  interval units "timezone_abbr" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_ABBR FROM DATE '2024-09-02');
+ERROR:  timestamp units "timezone_abbr" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIME '10:30:00');
+ERROR:  time units "timezone_abbr" not supported
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIMETZ '10:30:00+03');
+ timezone_extract 
+------------------
+ Unknown
+(1 row)
+
+SET TIMEZONE TO 'UTC';
+SELECT EXTRACT(TIMEZONE_HOUR FROM TIMESTAMPTZ '2024-09-02 10:30:00 America/New_York');
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_MINUTE FROM TIMESTAMPTZ '2024-09-02 10:30:00 America/Los_Angeles');
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_REGION FROM TIMESTAMPTZ '2024-09-02 10:30:00 Europe/London');
+ timezone_extract 
+------------------
+ UTC
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIMESTAMPTZ '2024-09-02 10:30:00 Asia/Tokyo');
+ timezone_extract 
+------------------
+ UTC
+(1 row)
+
+-- EXTRACT(TIEMZONE_XXX)边界条件测试
+SET TIMEZONE TO 'Asia/Beijing';
+SELECT EXTRACT(TIMEZONE_HOUR FROM 'infinity'::timestamptz);
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_MINUTE FROM 'infinity'::timestamptz);
+ date_part 
+-----------
+         0
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_REGION FROM 'infinity'::timestamptz);
+ timezone_extract 
+------------------
+ Unknown
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_ABBR FROM 'infinity'::timestamptz);
+ timezone_extract 
+------------------
+ Unknown
+(1 row)
+
+SELECT EXTRACT(TIMEZONE_HOUR FROM 'invalid_timestamp');
+ERROR:  invalid input syntax for type interval: "invalid_timestamp"
+LINE 1: SELECT EXTRACT(TIMEZONE_HOUR FROM 'invalid_timestamp');
+                                          ^
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_MINUTE FROM 'invalid_timestamp');
+ERROR:  invalid input syntax for type interval: "invalid_timestamp"
+LINE 1: SELECT EXTRACT(TIMEZONE_MINUTE FROM 'invalid_timestamp');
+                                            ^
+CONTEXT:  referenced column: date_part
+SELECT EXTRACT(TIMEZONE_REGION FROM 'invalid_timestamp');
+ERROR:  invalid input syntax for type interval: "invalid_timestamp"
+LINE 1: SELECT EXTRACT(TIMEZONE_REGION FROM 'invalid_timestamp');
+                                            ^
+CONTEXT:  referenced column: timezone_extract
+SELECT EXTRACT(TIMEZONE_ABBR FROM 'invalid_timestamp');
+ERROR:  invalid input syntax for type interval: "invalid_timestamp"
+LINE 1: SELECT EXTRACT(TIMEZONE_ABBR FROM 'invalid_timestamp');
+                                          ^
+CONTEXT:  referenced column: timezone_extract

@@ -983,7 +983,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBCLASS_ORIGIN SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 
-	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
+	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TIMEZONE_HOUR_P TIMEZONE_MINUTE_P TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
@@ -29354,6 +29354,15 @@ func_expr_common_subexpr:
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("date_part");
+					if (list_length($3) > 0) {
+						ListCell *lc = list_head($3);
+						Node *firstElement = (Node *)lfirst(lc);
+						A_Const* con = (A_Const*)firstElement;
+						char *firstElementStr = strVal(&con->val);
+						if (strcmp(firstElementStr, "timezone_abbr") == 0 || strcmp(firstElementStr, "timezone_region") == 0) {
+							n->funcname = SystemFuncName("timezone_extract");
+						}
+					}
 					n->args = $3;
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
@@ -30151,6 +30160,8 @@ extract_arg:
 			| HOUR_P								{ $$ = "hour"; }
 			| MINUTE_P								{ $$ = "minute"; }
 			| SECOND_P								{ $$ = "second"; }
+			| TIMEZONE_HOUR_P						{ $$ = "timezone_hour"; }
+			| TIMEZONE_MINUTE_P						{ $$ = "timezone_minute"; }
 			| Sconst								{ $$ = $1; }
 		;
 
