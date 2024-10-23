@@ -28,7 +28,7 @@
  * remember lwlock to require before entering to lwlock
  * waiting loop.
  */
-void remember_lwlock_acquire(LWLock *lock)
+void remember_lwlock_acquire(LWLock *lock, LWLockMode mode)
 {
     if (t_thrd.shemem_ptr_cxt.MyBEEntry) {
         volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
@@ -38,6 +38,9 @@ void remember_lwlock_acquire(LWLock *lock)
          * because this function maybe called before pgstat_bestart() function.
          */
         beentry->lw_want_lock = lock;
+        beentry->lw_want_mode = mode;
+        beentry->lw_want_start_time = 
+            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     }
 }
 
@@ -53,6 +56,8 @@ void forget_lwlock_acquire(void)
         /*
          * the statement "Assert ( !CHANGECOUNT_IS_EVEN(beentry->lw_count) );" does not hold
          * because this function may be called before pgstat_bestart() function.
+         *
+         * mode and start time does not need to be reset, because it is only meaningful if 'lock' is not null.
          */
         beentry->lw_want_lock = NULL;
     }

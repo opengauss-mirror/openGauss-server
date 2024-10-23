@@ -55,7 +55,7 @@ void InitDmsBufCtrl(void)
             buf_ctrl->pblk_blkno = InvalidBlockNumber;
             buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
             buf_ctrl->been_loaded = false;
-            buf_ctrl->ctrl_lock = LWLockAssign(LWTRANCHE_DMS_BUF_CTRL);
+            buf_ctrl->ctrl_lock = LWLockAssign(LWTRANCHE_DMS_BUF_CTRL, i);
             buf_ctrl->need_check_pincount = false;
             buf_ctrl->pinned_count = 0;
             buf_ctrl->lsn_on_disk = 0;

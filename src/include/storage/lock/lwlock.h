@@ -339,9 +339,10 @@ typedef struct {
 struct PGPROC;
 
 typedef struct LWLock {
-    uint16      tranche;            /* tranche ID */
-    pg_atomic_uint64 state; /* state of exlusive/nonexclusive lockers */
-    dlist_head waiters;     /* list of waiting PGPROCs */
+    uint16 tranche;            /* tranche ID */
+    pg_atomic_uint64 state;    /* state of exlusive/nonexclusive lockers */
+    dlist_head waiters;        /* list of waiting PGPROCs */
+    int tag;                   /* information about the target object we protect, decode by LWLockExplainTag. */
 #ifdef LOCK_DEBUG
     pg_atomic_uint32 nwaiters; /* number of waiters */
     struct PGPROC* owner;      /* last exlusive owner of the lock */
@@ -405,8 +406,8 @@ typedef struct LWLockHandle {
     (&t_thrd.shemem_ptr_cxt.mainLWLockArray[i].lock)
 
 extern void DumpLWLockInfo();
-extern LWLock* LWLockAssign(int trancheId);
-extern void LWLockInitialize(LWLock* lock, int tranche_id);
+extern LWLock* LWLockAssign(int trancheId, int tag = 0);
+extern void LWLockInitialize(LWLock* lock, int tranche_id, int tag = 0);
 extern bool LWLockAcquire(LWLock* lock, LWLockMode mode, bool need_update_lockid = false);
 extern bool LWLockConditionalAcquire(LWLock* lock, LWLockMode mode);
 extern bool LWLockAcquireOrWait(LWLock* lock, LWLockMode mode);
@@ -422,6 +423,8 @@ extern void LWLockDisown(LWLock* lock);
 
 extern bool LWLockWaitForVar(LWLock* lock, uint64* valptr, uint64 oldval, uint64* newval);
 extern void LWLockUpdateVar(LWLock* lock, uint64* valptr, uint64 value);
+
+extern void LWLockExplainTag(LWLock* lock, char* buffer, int buflen);
 
 extern int NumLWLocks(void);
 extern Size LWLockShmemSize(void);
@@ -452,6 +455,7 @@ extern void wakeup_victim(LWLock *lock, ThreadId victim_tid);
 extern int *get_held_lwlocks_num(void);
 extern uint32 get_held_lwlocks_maxnum(void);
 extern void* get_held_lwlocks(void);
+extern void *get_lwlock_held_times(void);
 extern void copy_held_lwlocks(void* heldlocks, lwlock_id_mode* dst, int num_heldlocks);
 extern const char* GetLWLockIdentifier(uint32 classId, uint16 eventId);
 extern LWLockMode GetHeldLWLockMode(LWLock* lock);

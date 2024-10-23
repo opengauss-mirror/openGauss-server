@@ -147,6 +147,8 @@ typedef struct {
         (a)->forkNum = (b)->forkNum,             \
         (a)->blockNum = (b)->blockNum)
 
+extern char* BufferTagToString(const BufferTag* buftag, char* resBuffer=NULL, int len=-1);
+
 /*
  * The shared buffer mapping table is partitioned to reduce contention.
  * To determine which partition lock a given tag requires, compute the tag's

@@ -3177,8 +3177,11 @@ void pgstat_bestart(void)
         beentry->lw_count++;
     } while (CHANGECOUNT_IS_EVEN(beentry->lw_count));
     beentry->lw_want_lock = NULL;
+    beentry->lw_want_mode = LW_SHARED;
+    beentry->lw_want_start_time = (TimestampTz)0;
     beentry->lw_held_num = get_held_lwlocks_num();
     beentry->lw_held_locks = get_held_lwlocks();
+    beentry->lw_held_times = get_lwlock_held_times();
     beentry->st_lw_access_flag = false;
     beentry->st_lw_is_cleanning_flag = false;
 
@@ -3302,6 +3305,7 @@ void pgstat_couple_decouple_session(bool is_couple)
     beentry->st_tid = is_couple ? gettid() : 0;
     beentry->lw_held_num = is_couple ? get_held_lwlocks_num() : NULL;
     beentry->lw_held_locks = is_couple ? get_held_lwlocks() : NULL;
+    beentry->lw_held_times = is_couple ? get_lwlock_held_times() : NULL;
     /* make this count be odd */
     do {
         beentry->lw_count++;
@@ -4793,6 +4797,57 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
     }
     return event_name;
 }
+
+
+void pgstat_report_dms_waitevent(const uint32 waitevent, const DMSWaiteventTarget* target)
+{
+    if (IS_PGSTATE_TRACK_UNDEFINE) {
+        return;
+    }
+
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (waitevent != WAIT_EVENT_END) {
+        /* must set target first and report next */
+        if (target != NULL) {
+            beentry->dms_wait_target = *target;
+        }
+        pgstat_report_waitevent(waitevent);
+    } else {
+        /* no matter to clear dms_wait_info, it is only meaning when waitevent is on */
+        pgstat_report_waitevent(WAIT_EVENT_END);
+    }
+}
+
+void decode_dms_waitevent_target(const uint32 waitevent, const DMSWaiteventTarget target, 
+  _out_ char** object, _out_ char** mode)
+{
+    Assert((waitevent & WAITEVENT_CLASS_MASK) == PG_WAIT_DMS);
+    StringInfoData res_object;
+    StringInfoData res_mode;
+    initStringInfo(&res_object);
+    initStringInfo(&res_mode);
+
+    if (waitevent == WAIT_EVENT_PCR_REQ_HEAP_PAGE) {
+        appendStringInfo(&res_object, "request page (buffer:%d)", target.page.buffer);
+        appendStringInfo(&res_mode, "%s", (target.page.mode == DMS_LOCK_EXCLUSIVE ? "Exclusive" : "Shared"));
+    } else if (waitevent == WAIT_EVENT_DCS_TRANSFER_PAGE) {
+        appendStringInfo(&res_object, "enter local page (buffer:%d)", target.page.buffer);
+        appendStringInfo(&res_mode, "%s", (target.page.mode == DMS_LOCK_EXCLUSIVE ? "Exclusive" : "Shared"));
+    } else if (waitevent == WAIT_EVENT_DCS_INVLDT_SHARE_COPY_REQ) {
+        appendStringInfo(&res_object, "invalid page (buffer:%d)", target.page.buffer);
+        appendStringInfo(&res_mode, "%s", (target.page.mode == DMS_LOCK_EXCLUSIVE ? "Exclusive" : "Shared"));
+    } else {
+        *object = NULL;
+        *mode = NULL;
+        FreeStringInfo(&res_object);
+        FreeStringInfo(&res_mode);
+        return;
+    }
+
+    *object = res_object.data;
+    *mode = res_mode.data;
+}
+
 
 /* ----------
  * pgstat_get_current_active_numbackends() -
@@ -10260,5 +10315,25 @@ void pgstat_release_session_memory_entry()
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
         pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
     }
+}
+
+
+TableDistributionInfo* GetRemoteGsLWLockStatus(TupleDesc tuple_desc)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called.*/
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf, "select * FROM pg_catalog.gs_lwlock_status();");
+
+    /* send sql and parallel fetch distribution info from all data nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    return distribuion_info;
 }
 
