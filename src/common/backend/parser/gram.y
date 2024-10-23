@@ -16327,6 +16327,39 @@ CallFuncStmt:    CALL func_name '(' ')'
 					}
 				|	CALL func_name '(' callfunc_args ')'
 					{
+						ListCell* l = list_head($2);
+						Node* name = (Node*)lfirst(l);
+						if (IsA(name, String) && (strcmp(strVal(name), "gms_lob") == 0)) {
+							ListCell* lc = list_head($4);
+							Node* n1  = (Node*)lfirst(lc);
+							if (IsA(n1, ColumnRef)) {
+								char* lobname = strVal(linitial(((ColumnRef*)n1)->fields));
+								Node* funcname = (Node*)lfirst(list_tail($2));
+								if (strcmp(strVal(funcname), "createtemporary") == 0) {
+									if (list_length($4) == 2) {
+										$4 = lappend($4, makeIntConst(10, -1));
+									}
+								}
+								$4 = lappend($4, makeStringConst(lobname, -1));
+							} else if (IsA(n1, NamedArgExpr)) {
+								Node* n2 = ((Node*)((NamedArgExpr*)n1)->arg);
+								if (IsA(n2, ColumnRef)) {
+									char* lobname = strVal(linitial(((ColumnRef*)n2)->fields));
+									Node* funcname = (Node*)lfirst(list_tail($2));
+									if (strcmp(strVal(funcname), "createtemporary") == 0) {
+										if (list_length($4) == 2) {
+											$4 = lappend($4, makeIntConst(10, -1));
+										}
+									}
+									NamedArgExpr *na = makeNode(NamedArgExpr);
+									na->name = pstrdup("lobname");
+									na->arg = (Expr *)makeStringConst(lobname, -1);
+									na->argnumber = -1;		/* until determined */
+									na->location = @1;
+									$4 = lappend($4, (Node *) na);
+								}
+							}
+						}
 #ifndef ENABLE_MULTIPLE_NODES
 						$$ = makeCallFuncStmt($2, $4, enable_out_param_override());
 #else
@@ -28745,6 +28778,7 @@ func_expr:	func_application within_group_clause filter_clause over_clause
 func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
+					ListCell* l = list_head($1);
 					n->funcname = $1;
 					n->args = $3;
 					n->agg_order = $4;
@@ -28754,6 +28788,38 @@ func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 					n->over = NULL;
 					n->location = @1;
 					n->call_func = false;
+					Node* name = (Node*)lfirst(l);
+					if (IsA(name, String) && (strcmp(strVal(name), "gms_lob") == 0)) {
+						ListCell* lc = list_head($3);
+						Node* n1  = (Node*)lfirst(lc);
+						if (IsA(n1, ColumnRef)) {
+							char* lobname = lobname = strVal(linitial(((ColumnRef*)n1)->fields));
+							Node* funcname = (Node*)lfirst(list_tail($1));
+							if (strcmp(strVal(funcname), "createtemporary") == 0) {
+								if (list_length($4) == 2) {
+									n->args = lappend(n->args, makeIntConst(10, -1));
+								};
+							}
+							n->args = lappend(n->args, makeStringConst(lobname, -1));
+						} else if (IsA(n1, NamedArgExpr)) {
+							Node* n2 = ((Node*)((NamedArgExpr*)n1)->arg);
+							if (IsA(n2, ColumnRef)) {
+								char* lobname = strVal(linitial(((ColumnRef*)$1)->fields));
+								Node* funcname = (Node*)lfirst(list_tail($1));
+								if (strcmp(strVal(funcname), "createtemporary") == 0) {
+									if (list_length(n->args) == 2) {
+										n->args = lappend(n->args, makeIntConst(10, -1));
+									}
+								}
+								NamedArgExpr *na = makeNode(NamedArgExpr);
+								na->name = pstrdup("lobname");
+								na->arg = (Expr *)makeStringConst(lobname, -1);
+								na->argnumber = -1;		/* until determined */
+								na->location = @1;
+								n->args = lappend(n->args, (Node *) na);
+							}
+						}
+					}
 					$$ = (Node *)n;
 				}
 			| func_application_special { $$ = $1; }
@@ -33171,7 +33237,8 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 	if (clist->next)
 	{
 		has_overload_func = true;
-        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false)
+        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false &&
+			(schemaname == NULL || strncmp(schemaname, "gms_lob", strlen("gms_lob")))) 
 		{
 			const char* message = "function isn't exclusive ";
 			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -33280,7 +33347,6 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 					}
 				}
 			}
-
 			i++;
 		}
 

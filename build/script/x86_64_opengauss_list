@@ -123,6 +123,8 @@
 ./share/postgresql/extension/dblink.control
 ./share/postgresql/extension/gms_output--1.0.sql
 ./share/postgresql/extension/gms_output.control
+./share/postgresql/extension/gms_lob--1.0.sql
+./share/postgresql/extension/gms_lob.control
 ./share/postgresql/extension/gms_stats--1.0.sql
 ./share/postgresql/extension/gms_stats.control
 ./share/postgresql/extension/gms_profiler--1.0.sql
@@ -824,6 +826,7 @@
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so
 ./lib/postgresql/dblink.so
+./lib/postgresql/gms_lob.so
 ./lib/postgresql/gms_stats.so
 ./lib/postgresql/pgoutput.so
 ./lib/postgresql/assessment.so

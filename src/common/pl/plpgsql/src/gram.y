@@ -7560,7 +7560,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         } else {
             DeconstructQualifiedName(funcname, &schemaname, &funcStrName, &pkgname);
         }
-        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false)
+        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false &&
+            (schemaname == NULL || strncmp(schemaname, "gms_lob", strlen("gms_lob"))))
         {
             const char* message = "function is not exclusive";
             InsertErrorMessage(message, plpgsql_yylloc);
