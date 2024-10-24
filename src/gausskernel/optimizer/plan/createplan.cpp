@@ -8941,9 +8941,14 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     int width = 0;
     Oid resultRelOid = InvalidOid; /* the relOid is used to cost memory when open relations. */
 #ifdef STREAMPLAN
+    bool is_smp_enable = false;
+    int iud_dop = DEFAULT_DOP;
     ExecNodes* exec_nodes = NULL;
-#endif
 
+    bool support_smp_scenario = (operation == CMD_DELETE || operation == CMD_UPDATE || operation == CMD_INSERT) &&
+                        returningLists == NIL;
+#endif
+    Assert(list_length(subplan) == 1);
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
     Assert(returningLists == NIL || list_length(resultRelations) == list_length(returningLists));
@@ -8963,9 +8968,22 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
      * If the subplan already parallelize,
      * add local gather.
      */
-    if (u_sess->opt_cxt.query_dop > 1) {
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (support_smp_scenario) {
+        Plan* subplan = (Plan*)linitial(subplans);
+        if (subplan->dop > DEFAULT_DOP) {
+            is_smp_enable = true;
+            iud_dop = subplan->dop;
+        }
+    } else {
         deparallelize_modifytable(subplans);
     }
+#else
+    if (u_sess->opt_cxt.query_dop > DEFAULT_DOP) {
+        deparallelize_modifytable(subplans);
+    }
+#endif
 
     foreach (subnode, subplans) {
         Plan* subplan = (Plan*)lfirst(subnode);
@@ -8995,7 +9013,8 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     else
         plan->plan_width = 0;
 
-    node->plan.dop = 1;
+    node->plan.dop = is_smp_enable ? iud_dop : DEFAULT_DOP;
+    node->plan.parallel_enabled = is_smp_enable;
     node->plan.lefttree = NULL;
     node->plan.righttree = NULL;
     node->plan.qual = NIL;
@@ -9139,6 +9158,11 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
                 }
             }
         }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (is_smp_enable) {
+            rtn = create_local_gather(rtn);
+        }
+#endif
         return rtn;
     } else {
         if (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE) {

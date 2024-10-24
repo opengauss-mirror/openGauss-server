@@ -1970,7 +1970,16 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
 #endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+            if (plan->type == T_Stream) {
+                ((ModifyTable*)(plan->lefttree))->isReplace = parse->isReplace;
+            } else {
+                ((ModifyTable*)plan)->isReplace = parse->isReplace;
+            }
+#else
             ((ModifyTable*)plan)->isReplace = parse->isReplace;
+#endif
         }
     }
 

@@ -158,6 +158,8 @@ typedef struct StreamSharedContext {
     bool vectorized;
     struct hash_entry** poll_entrys;
     struct hash_entry*** quota_entrys;
+    
+    int rows;
 } StreamSharedContext;
 
 typedef struct StreamSyncParam {

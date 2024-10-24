@@ -208,9 +208,20 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
      */
     m_plan->planTree = (Plan*)copyObject(m_streamNode->scan.plan.lefttree);
     m_plan->num_streams = 0;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!((m_plan->commandType == CMD_INSERT || m_plan->commandType == CMD_DELETE || m_plan->commandType == CMD_UPDATE) &&
+            IsA(m_plan->planTree, ModifyTable))) {
+        m_plan->commandType = CMD_SELECT;
+        m_plan->hasReturning = false;
+        m_plan->resultRelations = NIL;
+    }
+#else
     m_plan->commandType = CMD_SELECT;
     m_plan->hasReturning = false;
     m_plan->resultRelations = NIL;
+#endif
+
 
     m_databaseName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
     /*  Use the login username but not the current username in stream for inner connection. */
@@ -1826,6 +1837,24 @@ void StreamProducer::initSharedContext()
         }
     }
     m_sharedContextInit = true;
+}
+
+/*
+ * @Description: send IUD rows through shared memory.
+ *
+ * @return: void
+ */
+void StreamProducer::stream_send_rows_to_consumer(int rows)
+{
+    if (u_sess->stream_cxt.producer_obj &&
+        u_sess->stream_cxt.producer_obj->isLocalStream() &&
+        u_sess->stream_cxt.producer_obj->m_plan->commandType != CMD_SELECT) {
+        StringInfoData msgbuf;
+        StreamSharedContext* sharedContext = u_sess->stream_cxt.producer_obj->getSharedContext();
+        sharedContext->rows = rows;
+        pq_beginmessage(&msgbuf, 'R');
+        gs_message_by_memory(&msgbuf, u_sess->stream_cxt.producer_obj->getSharedContext(), u_sess->stream_cxt.producer_obj->getNth());
+    }
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
