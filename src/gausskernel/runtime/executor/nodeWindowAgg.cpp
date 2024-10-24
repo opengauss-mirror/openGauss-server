@@ -50,6 +50,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "utils/sortsupport_gs.h"
 #include "windowapi.h"
 #include "executor/node/nodeAgg.h"
 
@@ -98,6 +99,111 @@ static void initialize_windowaggregate(
     peraggstate->transValueIsNull = peraggstate->initValueIsNull;
     peraggstate->noTransValue = peraggstate->initValueIsNull;
     peraggstate->resultValueIsNull = true;
+    peraggstate->keep_init = false;
+}
+
+void updateAggregateState(WindowStatePerAgg peraggstate, Datum *values, bool *isnulls)
+{
+    for (int i = 0; i < peraggstate->numKeepCols; i++) {
+        KeepRank *keep_data = &peraggstate->keepRank[i];
+        
+        if (!keep_data->keeptypeByVal && DatumGetPointer(values[i]) != DatumGetPointer(keep_data->keepValue)
+            && !keep_data->keepValueIsNull) {
+            pfree(DatumGetPointer(keep_data->keepValue));
+        }
+
+        keep_data->keepValue = values[i];
+        keep_data->keepValueIsNull = isnulls[i];
+    }
+
+    if (!peraggstate->transValueIsNull && !peraggstate->transtypeByVal) {
+        pfree(DatumGetPointer(peraggstate->transValue));
+    }
+}
+void initialize_peraggstate(WindowStatePerAgg peraggstate)
+{
+    if (peraggstate->initValueIsNull) {
+        peraggstate->transValue = peraggstate->initValue;
+    } else {
+        peraggstate->transValue =
+            datumCopy(peraggstate->initValue, peraggstate->transtypeByVal, peraggstate->transtypeLen);
+    }
+    
+    peraggstate->transValueIsNull = peraggstate->initValueIsNull;
+    peraggstate->noTransValue = peraggstate->initValueIsNull;
+}
+
+void checkAndUpdateNeedAggregate(
+    int* needAgregate, WindowStatePerAgg peraggstate, KeepRank* rank_data, Datum curValue, bool curIsNull)
+{
+    if (rank_data->keepSort.abbrev_converter)
+        *needAgregate = ApplySortAbbrevFullComparator(rank_data->keepValue,
+            rank_data->keepValueIsNull, curValue, curIsNull, &rank_data->keepSort);
+    else
+        *needAgregate = ApplySortComparator(rank_data->keepValue,
+                                            rank_data->keepValueIsNull, curValue, curIsNull, &rank_data->keepSort);
+}
+static int keep_rank_windowaggregate(
+    WindowAggState* winstate, WindowStatePerAgg peraggstate, WindowFuncExprState* wfuncstate)
+{
+    int     i = 0;
+    Datum   curValue;
+    bool    curIsNull;
+    int    needAgregate = 0;
+    ListCell*       lc;
+    ExprContext*    econtext = winstate->tmpcontext;
+
+    if (peraggstate->numKeepCols <= 0) {
+        return 0;
+    }
+    Datum* values = (Datum*) palloc0(sizeof(Datum) * peraggstate->numKeepCols);
+    bool* isnulls = (bool*) palloc0(sizeof(bool) * peraggstate->numKeepCols);
+    MemoryContext old_context = MemoryContextSwitchTo(winstate->aggcontext);
+    /* copy value */
+    foreach(lc, wfuncstate->keep_args)
+    {
+        ExprState* arg_state = (ExprState*)lfirst(lc);
+        KeepRank* rank_data = &peraggstate->keepRank[i];
+        curValue = ExecEvalExpr(arg_state, econtext, &curIsNull, NULL);
+        values[i] = datumCopy(curValue, rank_data->keeptypeByVal, rank_data->keeptypeLen);
+        isnulls[i] = curIsNull;
+        if (needAgregate == 0 && peraggstate->keep_init) {
+            checkAndUpdateNeedAggregate(&needAgregate, peraggstate, rank_data, curValue, curIsNull);
+        }
+        i++;
+    }
+    MemoryContextSwitchTo(old_context);
+    if (!peraggstate->keep_init) {
+        for (i = 0; i <peraggstate->numKeepCols; i++) {
+            KeepRank* keep_data = &peraggstate->keepRank[i];
+            /* set keep value */
+            keep_data->keepValue = values[i];
+            keep_data->keepValueIsNull = isnulls[i];
+        }
+        peraggstate->keep_init = true;
+    }
+    if (needAgregate == 0) {
+        pfree(values);
+        pfree(isnulls);
+        return 0;
+    }
+    /*
+     * keep value < current value, dense_rank last, replace keep value
+     * keep value > current value, denase_rank first, replace keep value
+     */
+    if ((needAgregate < 0) != wfuncstate->keep_first) {
+        updateAggregateState(peraggstate, values, isnulls);
+        /* reset transValue */
+        old_context = MemoryContextSwitchTo(winstate->aggcontext);
+        initialize_peraggstate(peraggstate);
+        MemoryContextSwitchTo(old_context);
+        needAgregate = 0;
+    } else {
+        needAgregate = 1;
+    }
+    pfree(values);
+    pfree(isnulls);
+    return needAgregate;
 }
 
 /*
@@ -116,6 +222,10 @@ static void advance_windowaggregate(
     int i;
     MemoryContext old_context;
     ExprContext* econtext = winstate->tmpcontext;
+
+    if (keep_rank_windowaggregate(winstate, peraggstate, wfuncstate)) {
+        return;
+    }
 
     old_context = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
 
@@ -1144,6 +1254,39 @@ restart:
     return result;
 }
 
+/* setup sort op for keep order */
+static void initialize_peragg_keep(WindowFunc* wfunc, WindowStatePerAgg peraggstate)
+{
+    int i = 0;
+    int numKeepCols;
+    ListCell *sort_lc;
+    ListCell *arg_lc;
+
+    numKeepCols = peraggstate->numKeepCols = list_length(wfunc->keep_args);
+
+    Assert(list_length(wfunc->winkporder) == numKeepCols);
+
+    peraggstate->keepRank = (KeepRank*)palloc0(sizeof(KeepRank) * numKeepCols);
+    forboth(sort_lc, wfunc->winkporder, arg_lc, wfunc->keep_args) {
+        const Node *arg = (Node*)lfirst(arg_lc);
+        SortGroupClause *sortcl = lfirst_node(SortGroupClause, sort_lc);
+        KeepRank*  rank_data = &peraggstate->keepRank[i];
+        SortSupport sortKey = &rank_data->keepSort;
+
+        /* the parser should have made sure of this */
+        Assert(OidIsValid(sortcl->sortop));
+
+        sortKey->ssup_attno = 0; /* unused */
+        sortKey->ssup_collation = exprCollation(arg);
+        sortKey->ssup_nulls_first = sortcl->nulls_first;
+        sortKey->abbreviate = false;
+        sortKey->ssup_cxt = CurrentMemoryContext;
+        PrepareSortSupportFromOrderingOp(sortcl->sortop, sortKey);
+        get_typlenbyval(exprType(arg), &rank_data->keeptypeLen, &rank_data->keeptypeByVal);
+        i++;
+    }
+}
+
 /* -----------------
  * ExecInitWindowAgg
  *
@@ -1338,6 +1481,7 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
             peraggstate = &winstate->peragg[aggno];
             initialize_peragg(winstate, wfunc, peraggstate);
             peraggstate->wfuncno = wfuncno;
+            initialize_peragg_keep(wfunc, peraggstate);
         } else {
             WindowObject winobj = makeNode(WindowObjectData);
 

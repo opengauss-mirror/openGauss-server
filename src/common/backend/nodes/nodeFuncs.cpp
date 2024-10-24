@@ -1818,6 +1818,14 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (expression_tree_walker((Node*)expr->args, walker, context)) {
                 return true;
             }
+            /* recurse directly on List */
+            if (expression_tree_walker((Node*)expr->keep_args, walker, context)) {
+                return true;
+            }
+            /* recurse directly on List */
+            if (expression_tree_walker((Node*)expr->winkporder, walker, context)) {
+                return true;
+            }
         } break;
         case T_ArrayRef: {
             ArrayRef* aref = (ArrayRef*)node;
@@ -2426,6 +2434,8 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
 
             FLATCOPY(newnode, wfunc, WindowFunc, isCopy);
             MUTATE(newnode->args, wfunc->args, List*);
+            MUTATE(newnode->keep_args, wfunc->keep_args, List*);
+            MUTATE(newnode->winkporder, wfunc->winkporder, List*);
             return (Node*)newnode;
         } break;
         case T_ArrayRef: {
@@ -3412,6 +3422,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(fcall->agg_filter, context)) {
                 return true;
             }
+            if (p2walker(fcall->aggKeep, context)) {
+                return true;
+            }
             if (p2walker(fcall->over, context)) {
                 return true;
             }
@@ -3598,6 +3611,12 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->aliaList, context))
                 return true;
             if (p2walker(stmt->unrotateInExpr, context))
+                return true;
+        } break;
+        case T_KeepClause: {
+            KeepClause *kp = (KeepClause *) node;
+
+            if (p2walker(kp->keep_order, context))
                 return true;
         } break;
         case T_UpsertClause:

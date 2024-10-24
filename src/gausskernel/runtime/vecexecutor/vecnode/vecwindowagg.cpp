@@ -191,6 +191,11 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
         WindowFunc* wfunc = (WindowFunc*)wfuncstate->xprstate.expr;
         WindowStatePerFunc perfuncstate;
         AclResult aclresult;
+        if (list_length(wfunc->keep_args) > 0)
+            ereport(ERROR,
+                (errmodule(MOD_VEC_EXECUTOR),
+                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("keep feature for vector executor is not implemented")));
 
         if (wfunc->winref != node->winref) /* planner screwed up? */
             ereport(ERROR,

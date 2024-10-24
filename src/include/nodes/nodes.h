@@ -915,7 +915,8 @@ typedef enum NodeTag {
     T_RotateClause = 6000,
     T_UnrotateClause,
     T_RotateInCell,
-    T_UnrotateInCell
+    T_UnrotateInCell,
+    T_KeepClause
 
 } NodeTag;
 

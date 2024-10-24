@@ -94,6 +94,13 @@ typedef struct WindowStatePerFuncData {
 
 } WindowStatePerFuncData;
 
+typedef struct KeepRank {
+    bool        keeptypeByVal;
+    bool        keepValueIsNull;
+    int16       keeptypeLen;
+    Datum       keepValue;
+    SortSupportData keepSort;
+} KeepRank;
 /*
  * For plain aggregate window functions, we also have one of these.
  */
@@ -136,6 +143,10 @@ typedef struct WindowStatePerAggData {
     bool transValueIsNull;
 
     bool noTransValue; /* true if transValue not set yet */
+    int         numKeepCols;
+    bool        keep_first;
+    bool        keep_init;
+    KeepRank* keepRank;
 } WindowStatePerAggData;
 
 #define PG_WINDOW_OBJECT() ((WindowObject)fcinfo->context)

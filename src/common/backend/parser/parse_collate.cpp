@@ -701,6 +701,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 case T_WindowFunc: {
                     /* We nned handle the aggfilter clause for WindowFunc */
                     (void)assign_collations_walker((Node*)((WindowFunc*)node)->args, &loccontext);
+                    (void)assign_collations_walker((Node*)((WindowFunc*)node)->keep_args, &loccontext);
                 } break;
                 default:
                     /* All child expressions contribute equally to loccontext. */

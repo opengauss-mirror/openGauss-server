@@ -243,6 +243,10 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_SCALAR_FIELD(aggvariadic);
     COMPARE_SCALAR_FIELD(aggkind);
     COMPARE_SCALAR_FIELD(agglevelsup);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COMPARE_SCALAR_FIELD(aggiskeep);
+        COMPARE_SCALAR_FIELD(aggkpfirst);
+    }
     COMPARE_LOCATION_FIELD(location);
     COMPARE_NODE_FIELD(aggargtypes);
     COMPARE_SCALAR_FIELD(aggsplit);
@@ -274,6 +278,11 @@ static bool _equalWindowFunc(const WindowFunc* a, const WindowFunc* b)
     COMPARE_SCALAR_FIELD(winref);
     COMPARE_SCALAR_FIELD(winstar);
     COMPARE_SCALAR_FIELD(winagg);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COMPARE_NODE_FIELD(keep_args);
+        COMPARE_NODE_FIELD(winkporder);
+        COMPARE_SCALAR_FIELD(winkpfirst);
+    }
     COMPARE_LOCATION_FIELD(location);
 
     return true;
@@ -2669,6 +2678,9 @@ static bool _equalFuncCall(const FuncCall* a, const FuncCall* b)
     COMPARE_NODE_FIELD(args);
     COMPARE_NODE_FIELD(agg_order);
     COMPARE_NODE_FIELD(agg_filter);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COMPARE_NODE_FIELD(aggKeep);
+    }
     COMPARE_SCALAR_FIELD(agg_within_group);
     COMPARE_SCALAR_FIELD(agg_star);
     COMPARE_SCALAR_FIELD(agg_distinct);
@@ -3619,6 +3631,14 @@ static bool _equalCleanConnStmt(const CleanConnStmt* a, const CleanConnStmt* b)
     return true;
 }
 
+static bool _equalKeepClause(const KeepClause* a, const KeepClause* b)
+{
+    COMPARE_SCALAR_FIELD(rank_first);
+    COMPARE_NODE_FIELD(keep_order);
+    COMPARE_LOCATION_FIELD(location);
+
+    return true;
+}
 #endif
 
 bool _equalSimpleVar(void* va, void* vb)
@@ -4618,6 +4638,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_UnrotateInCell:
             retval = _equalUnrotateInCell((UnrotateInCell*)a, (UnrotateInCell*)b);
+            break;
+        case T_KeepClause:
+            retval = _equalKeepClause((KeepClause*)a, (KeepClause*)b);
             break;
         case T_UpsertClause:
             retval = _equalUpsertClause((UpsertClause*)a, (UpsertClause*)b);

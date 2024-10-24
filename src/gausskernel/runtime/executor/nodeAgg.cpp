@@ -146,6 +146,7 @@
 #include "utils/tuplesort.h"
 #include "utils/datum.h"
 #include "utils/memprot.h"
+#include "utils/sortsupport_gs.h"
 #include "workload/workload.h"
 
 static TupleTableSlot* ExecAgg(PlanState* state);
@@ -332,7 +333,7 @@ static TupleTableSlot* fetch_input_tuple(AggState* aggstate)
 static void initialize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, AggStatePerGroup pergroupstate)
 {
     Plan* plan = aggstate->ss.ps.plan;
-    int64 local_work_mem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
+    int64 localWorkMem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
     int64 max_mem = (plan->operatorMaxMem > 0) ? SET_NODEMEM(plan->operatorMaxMem, plan->dop) : 0;
 
     /*
@@ -357,7 +358,7 @@ static void initialize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate,
                     peraggstate->sortOperators[0],
                     peraggstate->sortCollations[0],
                     peraggstate->sortNullsFirst[0],
-                    local_work_mem,
+                    localWorkMem,
                     false);
         } else {
             peraggstate->sortstates[aggstate->current_set] = tuplesort_begin_heap(peraggstate->sortdesc,
@@ -366,7 +367,7 @@ static void initialize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate,
                 peraggstate->sortOperators,
                 peraggstate->sortCollations,
                 peraggstate->sortNullsFirst,
-                local_work_mem,
+                localWorkMem,
                 false,
                 max_mem,
                 plan->plan_node_id,
@@ -430,6 +431,8 @@ static void initialize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate,
      */
     pergroupstate->noCollectValue = peraggstate->initCollectValueIsNull;
 #endif /* PGXC */
+    if (peraggstate->keep_slot)
+        ExecClearTuple(peraggstate->keep_slot[aggstate->current_set]);
 }
 
 /*
@@ -677,6 +680,138 @@ static void advance_collection_function(
 }
 #endif /* PGXC */
 
+static bool ExecKeepDatum(AggState* aggstate, AggStatePerAgg peraggstate, int setno, TupleTableSlot *cur_slot)
+{
+    TupleTableSlot *preSlot;
+    int     inputoff = peraggstate->inputoff;
+    bool    replace = false;
+    bool    keep = false;
+
+    if (!peraggstate->is_keep) {
+        return true;
+    }
+    Plan* plan = aggstate->ss.ps.plan;
+    int64 localWorkMem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
+    SortSupport sortKey = (SortSupport)TuplesortGetSortkeys(peraggstate->sortstates[setno]);
+
+    preSlot = peraggstate->keep_slot[setno];
+    if (TupIsNull(preSlot)) {
+        keep = replace = true;
+    } else {
+        int compare;
+        if (sortKey->abbrev_converter) {
+            compare = ApplySortAbbrevFullComparator(preSlot->tts_values[0], preSlot->tts_isnull[0],
+                                                    cur_slot->tts_values[inputoff], cur_slot->tts_isnull[inputoff],
+                                                    sortKey);
+        } else {
+            compare = ApplySortComparator(preSlot->tts_values[0], preSlot->tts_isnull[0],
+                                          cur_slot->tts_values[inputoff], cur_slot->tts_isnull[inputoff], sortKey);
+        }
+ 
+        if (compare == 0) {
+            keep = true;
+        } else if ((compare > 0) == peraggstate->aggref->aggkpfirst) {
+            tuplesort_end(peraggstate->sortstates[setno]);
+            peraggstate->sortstates[aggstate->current_set] =
+                tuplesort_begin_datum(peraggstate->sortdesc->attrs[0].atttypid,
+                    peraggstate->sortOperators[0], peraggstate->sortCollations[0], peraggstate->sortNullsFirst[0],
+                    localWorkMem, false);
+            replace = keep = true;
+        }
+    }
+
+    if (replace) {
+        int errorno;
+        ExecClearTuple(preSlot);
+        errorno = memcpy_s(preSlot->tts_values, peraggstate->numInputs * sizeof(Datum),
+                           &cur_slot->tts_values[inputoff], peraggstate->numInputs * sizeof(Datum));
+        securec_check(errorno, "\0", "\0");
+        errorno = memcpy_s(preSlot->tts_isnull, peraggstate->numInputs * sizeof(bool),
+                           &cur_slot->tts_isnull[inputoff], peraggstate->numInputs * sizeof(bool));
+        securec_check(errorno, "\0", "\0");
+        preSlot->tts_nvalid = peraggstate->numInputs;
+        ExecStoreVirtualTuple(preSlot);
+    }
+    return keep;
+}
+
+static bool ExecKeepTuple(AggState* aggstate, AggStatePerAgg peraggstate, int setno, TupleTableSlot *cur_slot)
+{
+    TupleTableSlot *preSlot;
+    int         i, result;
+    Datum       datum1, datum2;
+    bool        isNull1, isNull2;
+    bool        replace = false;
+    bool        keep = false;
+
+    if (!peraggstate->is_keep) {
+        return true;
+    }
+    Plan* plan = aggstate->ss.ps.plan;
+    int64 localWorkMem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
+    int64 max_mem = (plan->operatorMaxMem > 0) ? SET_NODEMEM(plan->operatorMaxMem, plan->dop) : 0;
+    SortSupport sortKey = (SortSupport)TuplesortGetSortkeys(peraggstate->sortstates[setno]);
+    int nSortKey = TuplesortGetNsortkey(peraggstate->sortstates[setno]);
+    preSlot = peraggstate->keep_slot[setno];
+    if (TupIsNull(preSlot)) {
+        keep = replace = true;
+    } else {
+        for (i = 0; i < nSortKey; i++, sortKey++) {
+            datum1 = tableam_tslot_getattr(preSlot, sortKey->ssup_attno, &isNull1);
+            datum2 = tableam_tslot_getattr(cur_slot, sortKey->ssup_attno, &isNull2);
+            if (sortKey->abbrev_converter) {
+                result = ApplySortAbbrevFullComparator(datum1, isNull1, datum2, isNull2, sortKey);
+            } else {
+                result = ApplySortComparator(datum1, isNull1, datum2, isNull2, sortKey);
+            }
+            if (result != 0) {
+                break;
+            }
+        }
+        if (result == 0) {
+            keep = true;
+        } else if ((result > 0) == peraggstate->aggref->aggkpfirst) {
+            tuplesort_end(peraggstate->sortstates[setno]);
+            peraggstate->sortstates[setno] = tuplesort_begin_heap(peraggstate->sortdesc,
+                peraggstate->numSortCols, peraggstate->sortColIdx, peraggstate->sortOperators,
+                peraggstate->sortCollations, peraggstate->sortNullsFirst, localWorkMem, false, max_mem,
+                plan->plan_node_id, SET_DOP(plan->dop));
+            replace = keep = true;
+        }
+    }
+    if (replace) {
+        ExecCopySlot(preSlot, cur_slot);
+    }
+    return keep;
+}
+
+void processTuples(
+    AggState *aggstate, AggStatePerAgg peraggstate, int numGroupingSets, TupleTableSlot *slot, int inputoff)
+{
+    for (int setno = 0; setno < numGroupingSets; setno++) {
+                /* OK, put the tuple into the tuplesort object */
+                if (peraggstate->numInputs == 1) {
+                    if (ExecKeepDatum(aggstate, peraggstate, setno, slot)) {
+                    tuplesort_putdatum(peraggstate->sortstates[setno], slot->tts_values[inputoff],
+                                       slot->tts_isnull[inputoff]);
+                    }
+                } else {
+                    errno_t errorno = EOK;
+                    if (ExecKeepTuple(aggstate, peraggstate, setno, slot)) {
+                        ExecClearTuple(peraggstate->sortslot);
+                        errorno = memcpy_s(peraggstate->sortslot->tts_values, peraggstate->numInputs * sizeof(Datum),
+                                           &slot->tts_values[inputoff], peraggstate->numInputs * sizeof(Datum));
+                        securec_check(errorno, "\0", "\0");
+                        errorno = memcpy_s(peraggstate->sortslot->tts_isnull, peraggstate->numInputs * sizeof(bool),
+                                           &slot->tts_isnull[inputoff], peraggstate->numInputs * sizeof(bool));
+                        securec_check(errorno, "\0", "\0");
+                        peraggstate->sortslot->tts_nvalid = peraggstate->numInputs;
+                        ExecStoreVirtualTuple(peraggstate->sortslot);
+                        tuplesort_puttupleslot(peraggstate->sortstates[setno], peraggstate->sortslot);
+                    }
+                }
+    }
+}
 /*
  * Advance all the aggregates for one input tuple.	The input tuple
  * has been stored in tmpcontext->ecxt_outertuple, so that it is accessible
@@ -726,30 +861,10 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
                     if (slot->tts_isnull[i + inputoff])
                         break;
                 }
-                if (i < numTransInputs)
+                if (i < numTransInputs && !peraggstate->is_keep)
                     continue;
             }
-
-            for (setno = 0; setno < numGroupingSets; setno++) {
-
-                /* OK, put the tuple into the tuplesort object */
-                if (peraggstate->numInputs == 1)
-                    tuplesort_putdatum(peraggstate->sortstates[setno], slot->tts_values[inputoff],
-                                       slot->tts_isnull[inputoff]);
-                else {
-                    errno_t errorno = EOK;
-                    ExecClearTuple(peraggstate->sortslot);
-                    errorno = memcpy_s(peraggstate->sortslot->tts_values, peraggstate->numInputs * sizeof(Datum),
-                                       &slot->tts_values[inputoff], peraggstate->numInputs * sizeof(Datum));
-                    securec_check(errorno, "\0", "\0");
-                    errorno = memcpy_s(peraggstate->sortslot->tts_isnull, peraggstate->numInputs * sizeof(bool),
-                                       &slot->tts_isnull[inputoff], peraggstate->numInputs * sizeof(bool));
-                    securec_check(errorno, "\0", "\0");
-                    peraggstate->sortslot->tts_nvalid = peraggstate->numInputs;
-                    ExecStoreVirtualTuple(peraggstate->sortslot);
-                    tuplesort_puttupleslot(peraggstate->sortstates[setno], peraggstate->sortslot);
-                }
-            }
+            processTuples(aggstate, peraggstate, numGroupingSets, slot, inputoff);
         } else {
             /* We can apply the transition function immediately */
             FunctionCallInfo fcinfo = &peraggstate->transfn_fcinfo;
@@ -2396,6 +2511,18 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
         eflags &= ~EXEC_FLAG_REWIND;
     outerPlan = outerPlan(node);
 
+    foreach (l, aggstate->aggs) {
+            AggrefExprState* aggrefstate = (AggrefExprState*)lfirst(l);
+            Aggref* aggref = (Aggref*)aggrefstate->xprstate.expr;
+
+            if (aggref->aggiskeep && (nodeTag(outerPlan) == T_VecToRow
+                || u_sess->attr.attr_sql.vectorEngineStrategy == FORCE_VECTOR_ENGINE)) {
+                ereport(ERROR,
+                    (errmodule(MOD_VEC_EXECUTOR),
+                        errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("keep feature for vector executor is not implemented")));
+            }
+    }
     outerPlanState(aggstate) = ExecInitNode(outerPlan, estate, eflags);
     if (node->aggstrategy == AGG_SORT_GROUP) {
         SortGroupState* srotGroup = (SortGroupState*) outerPlanState(aggstate);
@@ -2447,7 +2574,7 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
         Agg* aggnode = NULL;
         Sort* sortnode = NULL;
         SortGroup* sortGroupNode = NULL;
-        int num_sets;
+        int numSets = 0;
 
         if (phase > 0) {
             aggnode = (Agg*)list_nth(node->chain, phase - 1);
@@ -2462,11 +2589,11 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
             aggnode = node;
         }
 
-        phasedata->numsets = num_sets = list_length(aggnode->groupingSets);
+        phasedata->numsets = numSets = list_length(aggnode->groupingSets);
 
-        if (num_sets) {
-            phasedata->gset_lengths = (int*)palloc(num_sets * sizeof(int));
-            phasedata->grouped_cols = (Bitmapset**)palloc(num_sets * sizeof(Bitmapset*));
+        if (numSets) {
+            phasedata->gset_lengths = (int*)palloc(numSets * sizeof(int));
+            phasedata->grouped_cols = (Bitmapset**)palloc(numSets * sizeof(Bitmapset*));
 
             i = 0;
             foreach (l, aggnode->groupingSets) {
@@ -3239,7 +3366,7 @@ static void initialize_aggregate_flattened(AggState *aggstate, AggStatePerTrans 
                                            AggStatePerGroup pergroupstate)
 {
     Plan *plan = aggstate->ss.ps.plan;
-    int64 local_work_mem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
+    int64 localWorkMem = SET_NODEMEM(plan->operatorMemKB[0], plan->dop);
     int64 max_mem = (plan->operatorMaxMem > 0) ? SET_NODEMEM(plan->operatorMaxMem, plan->dop) : 0;
 
     if (pertrans->numSortCols > 0) {
@@ -3250,12 +3377,12 @@ static void initialize_aggregate_flattened(AggState *aggstate, AggStatePerTrans 
         if (pertrans->numInputs == 1) {
             pertrans->sortstates[aggstate->current_set] =
                 tuplesort_begin_datum(pertrans->sortdesc->attrs[0].atttypid, pertrans->sortOperators[0],
-                                      pertrans->sortCollations[0], pertrans->sortNullsFirst[0], local_work_mem, false);
+                                      pertrans->sortCollations[0], pertrans->sortNullsFirst[0], localWorkMem, false);
         } else {
             pertrans->sortstates[aggstate->current_set] =
                 tuplesort_begin_heap(pertrans->sortdesc, pertrans->numSortCols, pertrans->sortColIdx,
                                      pertrans->sortOperators, pertrans->sortCollations, pertrans->sortNullsFirst,
-                                     local_work_mem, false, max_mem, plan->plan_node_id, SET_DOP(plan->dop));
+                                     localWorkMem, false, max_mem, plan->plan_node_id, SET_DOP(plan->dop));
         }
     }
 
@@ -4125,6 +4252,15 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
             peraggstate->sortdesc = ExecTypeFromTL(aggref->args, false);
             peraggstate->sortslot = ExecInitExtraTupleSlot(estate);
             ExecSetSlotDescriptor(peraggstate->sortslot, peraggstate->sortdesc);
+
+            if (aggref->aggiskeep) {
+                peraggstate->is_keep = true;
+                peraggstate->keep_slot = (TupleTableSlot**)palloc0(sizeof(TupleTableSlot*) * numGroupingSets);
+                for (int i = 0; i < numGroupingSets; i++) {
+                    peraggstate->keep_slot[i] = ExecInitExtraTupleSlot(estate);
+                    ExecSetSlotDescriptor(peraggstate->keep_slot[i], peraggstate->sortdesc);
+                }
+            }
             /*
              * We don't implement DISTINCT or ORDER BY aggs in the HASHED case
              * (yet)

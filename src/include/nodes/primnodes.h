@@ -295,6 +295,8 @@ typedef struct Aggref {
     List* args;            /* arguments and sort expressions */
     List* aggorder;        /* ORDER BY (list of SortGroupClause) */
     List* aggdistinct;     /* DISTINCT (list of SortGroupClause) */
+    bool aggiskeep;
+    bool aggkpfirst;
     bool aggstar;          /* TRUE if argument list was really '*' */
     bool aggvariadic;      /* true if variadic arguments have been
                             * combined into an array last argument */
@@ -359,6 +361,9 @@ typedef struct WindowFunc {
     bool winstar;    /* TRUE if argument list was really '*' */
     bool winagg;     /* is function a simple aggregate? */
     int location;    /* token location, or -1 if unknown */
+    List* keep_args;
+    List* winkporder;
+    bool winkpfirst;
 #ifdef USE_SPQ
     bool windistinct;	/* TRUE if it's agg(DISTINCT ...) */
 #endif

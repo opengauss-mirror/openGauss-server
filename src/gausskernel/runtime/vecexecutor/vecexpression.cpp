@@ -2576,6 +2576,8 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 if (wfunc->winagg)
                     winstate->numaggs++;
 
+                wfstate->keep_args = (List*)ExecInitExpr((Expr*)wfunc->keep_args, parent);
+                wfstate->keep_first = wfunc->winkpfirst;
                 wfstate->args = (List*)ExecInitVecExpr((Expr*)wfunc->args, parent);
 
                 /*

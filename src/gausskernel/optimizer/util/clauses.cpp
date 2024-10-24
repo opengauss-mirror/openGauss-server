@@ -2594,6 +2594,11 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             newexpr->winref = expr->winref;
             newexpr->winstar = expr->winstar;
             newexpr->winagg = expr->winagg;
+            newexpr->keep_args = (List*)expression_tree_mutator(
+                (Node*)expr->keep_args, (Node* (*)(Node*, void*)) eval_const_expressions_mutator, (void*)context);
+            newexpr->winkporder = (List*)expression_tree_mutator(
+                (Node*)expr->winkporder, (Node* (*)(Node*, void*)) eval_const_expressions_mutator, (void*)context);
+            newexpr->winkpfirst = expr->winkpfirst;
             newexpr->location = expr->location;
 
             return (Node*)newexpr;

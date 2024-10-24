@@ -909,6 +909,8 @@ typedef struct WindowFuncExprState {
     // Vectorized aggregation fields
     //
     ScalarVector* m_resultVector;
+    List *keep_args;
+    bool keep_first;
 } WindowFuncExprState;
 
 

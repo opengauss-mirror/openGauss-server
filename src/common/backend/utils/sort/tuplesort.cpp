@@ -546,6 +546,14 @@ struct Tuplesortstate {
 #define WORKER(state) ((state)->shared && (state)->worker != -1)
 #define LEADER(state) ((state)->shared && (state)->worker == -1)
 
+void* TuplesortGetSortkeys(Tuplesortstate* state)
+{
+    return (state->onlyKey ? state->onlyKey : state->sortKeys);
+}
+int TuplesortGetNsortkey(Tuplesortstate* state)
+{
+    return state->nKeys;
+}
 /* Check if system in status of lacking memory */
 static bool LACKMEM(Tuplesortstate* state)
 {

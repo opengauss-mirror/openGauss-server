@@ -390,7 +390,11 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
         Expr* finalfnexpr = NULL;
         Datum text_init_val;
         ListCell* lc = NULL;
-
+        if (aggref->aggiskeep)
+            ereport(ERROR,
+                (errmodule(MOD_VEC_EXECUTOR),
+                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("keep feature for vector executor is not implemented")));
         /* Planner should have assigned aggregate to correct level */
         Assert(aggref->agglevelsup == 0);
 
