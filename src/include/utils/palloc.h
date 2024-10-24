@@ -28,6 +28,8 @@
 #ifndef PALLOC_H
 #define PALLOC_H
 #ifndef FRONTEND_PARSER
+#include <iostream>
+#include <memory>
 #include "postgres.h"
 #include "c.h"
 #include "nodes/nodes.h"
@@ -99,6 +101,21 @@ typedef struct McxtOperationMethods {
     void (*mcxt_check)(MemoryContext context, bool own_by_session);
 #endif
 } McxtOperationMethods;
+/*
+ * A memory context can have callback functions registered on it.  Any such
+ * function will be called once just before the context is next reset or
+ * deleted.  The MemoryContextCallback struct describing such a callback
+ * typically would be allocated within the context itself, thereby avoiding
+ * any need to manage it explicitly (the reset/delete action will free it).
+ */
+
+typedef void (*MemoryContextCallbackFunction) (std::shared_ptr<void> arg);
+
+typedef struct MemoryContextCallback {
+    MemoryContextCallbackFunction func; /* function to call */
+    std::shared_ptr<void> arg;            /* argument to pass it */
+    struct MemoryContextCallback *next; /* next in list of callbacks */
+} MemoryContextCallback;
 
 typedef struct MemoryContextData {
     NodeTag type;                  /* identifies exact kind of context */
@@ -114,6 +131,7 @@ typedef struct MemoryContextData {
     MemoryContext prevchild;       /* previous child of same parent */
     MemoryContext nextchild;       /* next child of same parent */
     char* name;                    /* context name (just for debugging) */
+    MemoryContextCallback *resetCbs;   /* list of reset/delete callbacks */
     pthread_rwlock_t lock;         /* lock to protect members if the context is shared */
     int level;                     /* context level */
     uint64 session_id;             /* session id of context owner */
@@ -140,6 +158,7 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 const uint64 BlkMagicNum = 0xDADADADADADADADA;
 const uint32 PremagicNum = 0xBABABABA;
 #endif
+
 /*
  * Flags for MemoryContextAllocExtended.
  */
@@ -307,6 +326,10 @@ static inline MemoryContext MemoryContextSwitchTo(MemoryContext context)
 
 extern MemoryContext MemoryContextSwitchTo(MemoryContext context);
 #endif /* USE_INLINE && !FRONTEND */
+
+/* Registration of memory context reset/delete callbacks */
+extern void MemoryContextRegisterResetCallback(MemoryContext context,
+    MemoryContextCallback *cb);
 
 /*
  * These are like standard strdup() except the copied string is

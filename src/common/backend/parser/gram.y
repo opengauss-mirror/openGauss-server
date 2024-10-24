@@ -17239,6 +17239,34 @@ CreateProcedureStmt:
 					$$ = (Node *)n;
 				}
 
+			| CREATE opt_or_replace definer_user PROCEDURE func_name_opt_arg proc_args
+                       LANGUAGE ColId_or_Sconst AS func_as opt_createproc_opt_list
+                               {
+                                       CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+                                       int count = get_outarg_num($6);
+                                       n->isOraStyle = false;
+                                       n->isPrivate = false;
+                                       n->replace = $2;
+                                       n->definer = $3;
+                                       if (n->replace && NULL != n->definer) {
+                                               parser_yyerror("not support DEFINER function");
+                                       }                       
+                                       n->funcname = $5;
+                                       n->parameters = $6;
+                                       n->returnType = NULL;
+                                       if (0 == count)
+                                       {
+                                               n->returnType = makeTypeName("void");
+                                               n->returnType->typmods = NULL;
+                                               n->returnType->arrayBounds = NULL;
+                                       }
+                                       n->options = $11;
+                                       n->options = lappend(n->options, makeDefElem("language", (Node *)makeString($8)));
+                                       n->options = lappend(n->options, makeDefElem("as", (Node *)$10));
+                                       n->withClause = NIL;
+                                       n->isProcedure = true;
+                                       $$ = (Node *)n;
+                               }
 		;
 
 CreatePackageStmt:

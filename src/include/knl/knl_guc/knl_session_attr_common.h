@@ -102,6 +102,7 @@ typedef struct knl_session_attr_common {
     int tcp_keepalives_count;
     int tcp_user_timeout;
     int GinFuzzySearchLimit;
+    int maxOpenCursorCount;
     int server_version_num;
     int log_temp_files;
     int transaction_sync_naptime;
