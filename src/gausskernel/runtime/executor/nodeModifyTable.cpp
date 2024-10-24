@@ -3799,6 +3799,12 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
             }
         }
 
+        if (u_sess->hook_cxt.forTsdbHook &&
+                DB_IS_CMPT(PG_FORMAT) &&
+                estate->es_result_relation_info->ri_projectReturning == NULL) {
+            estate->es_result_relation_info->ri_projectReturning = node->resultRelInfo->ri_projectReturning;
+        }
+
 #ifdef ENABLE_MULTIPLE_NODES
         estate->es_result_remoterel = remote_rel_state;
         estate->es_result_insert_remoterel = insert_remote_rel_state;
