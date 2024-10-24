@@ -715,8 +715,6 @@ void PartitionClearPartition(Partition partition, bool rebuild)
 
         if (NULL == newpart) {
             /* Should only get here if partition was deleted */
-            PartitionIdCacheDeleteLocal(partition);
-            PartitionDestroyPartition(partition);
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_IN_USE), errmsg("partition %u deleted while still in use", save_partid)));
         }

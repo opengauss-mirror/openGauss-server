@@ -3376,7 +3376,7 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
         return;
     }
 
-    partition = partitionOpen(partitionedRelation, partOid, ShareLock);
+    partition = partitionOpen(partitionedRelation, partOid, ShareUpdateExclusiveLock);
     pg_partition_rel = heap_open(PartitionRelationId, RowExclusiveLock);
 
     foreach (cell, indelist) {
@@ -3479,7 +3479,7 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
 #ifndef ENABLE_MULTIPLE_NODES
         if (RelationIsCUFormat(partitionedRelation) && indexForm->indisunique) {
             if (!PointerIsValid(partitionDelta)) {
-                partitionDelta = heap_open(partition->pd_part->reldeltarelid, ShareLock);
+                partitionDelta = heap_open(partition->pd_part->reldeltarelid, ShareUpdateExclusiveLock);
             }
             char partDeltaIdxName[NAMEDATALEN] = {0};
             error_t ret = snprintf_s(partDeltaIdxName, sizeof(partDeltaIdxName),

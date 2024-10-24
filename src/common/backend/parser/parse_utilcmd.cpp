@@ -5748,10 +5748,10 @@ Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tem
     ret = DefineIndex(RelationGetRelid(source_relation),
         index_stmt,
         InvalidOid, /* no predefined OID */
-        false,      /* is_alter_table */
+        true,      /* is_alter_table */
         true,       /* check_rights */
         skip_build, /* skip_build */
-        false);     /* quiet */
+        true);     /* quiet */
     (void)pgstat_report_waitstatus(oldStatus);
 
     /* clean up */

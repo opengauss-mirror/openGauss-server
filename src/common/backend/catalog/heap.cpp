@@ -5081,6 +5081,7 @@ void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, Partit
      * We know that no xacts older than RecentXmin are still running, so
      * that will do.
      */
+    /* relfrozenxid is aborted, we use relfrozenxid64 instead */
     new_part_tup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
     /* Now build and insert the tuple */

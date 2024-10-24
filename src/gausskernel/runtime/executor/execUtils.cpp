@@ -1423,6 +1423,8 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
     if (!RelationIsUstoreFormat(heapRelation))
         return;
 
+    AcceptInvalidationMessages();
+
     /*
      * for each index, form and insert the index tuple
      */
@@ -1443,6 +1445,10 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
         /* If the index is marked as read-only, ignore it */
         /* XXXX: ???? */
         if (!indexInfo->ii_ReadyForInserts) {
+            continue;
+        }
+
+        if (!IndexIsUsable(indexRelation->rd_index)) {
             continue;
         }
 
