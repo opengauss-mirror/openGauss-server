@@ -233,7 +233,7 @@ void cluster(ClusterStmt* stmt, bool isTopLevel)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("table is not partitioned")));
             }
 
-            partOid = partitionNameGetPartitionOid(tableOid,
+            partOid = PartitionNameGetPartitionOid(tableOid,
                 stmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 ExclusiveLock,

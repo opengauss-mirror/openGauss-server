@@ -38,6 +38,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
 extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
 extern const uint32 SQL_PATCH_VERSION_NUM;

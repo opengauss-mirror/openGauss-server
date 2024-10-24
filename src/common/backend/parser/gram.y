@@ -383,7 +383,7 @@ static int errstate;
 %type <ival>	OptNoLog
 
 %type <node>	alter_table_cmd alter_partition_cmd alter_type_cmd opt_collate_clause exchange_partition_cmd move_partition_cmd
-				modify_column_cmd
+				modify_column_cmd reset_partition_cmd
 				replica_identity
 %type <list>	alter_table_cmds alter_partition_cmds alter_table_or_partition alter_type_cmds add_column_cmds modify_column_cmds
 
@@ -2852,6 +2852,7 @@ alter_partition_cmds:
 			| alter_partition_cmds ',' alter_partition_cmd { $$ = lappend($1, $3); }
 			| move_partition_cmd                           { $$ = list_make1($1); }
 			| exchange_partition_cmd                       { $$ = list_make1($1); }
+			| reset_partition_cmd                          { $$ = list_make1($1); }
 		;
 
 alter_partition_cmd:
@@ -3467,6 +3468,18 @@ exchange_partition_cmd:
 				n->missing_ok = FALSE;
 				n->alterGPI = $11;
 				$$ = (Node *)n;
+			}
+		;
+
+reset_partition_cmd:
+		RESET PARTITION
+			{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+
+				n->subtype = AT_ResetPartitionno;
+				n->missing_ok = FALSE;
+				$$ = (Node *) n;
+
 			}
 		;
 

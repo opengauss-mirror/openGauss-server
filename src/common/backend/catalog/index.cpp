@@ -1280,14 +1280,12 @@ Oid partition_index_create(const char* partIndexName, /* the name of partition i
     partitionIndex->pd_part->relallvisible = 0;
     partitionIndex->pd_part->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     /* insert into pg_partition */
 #ifndef ENABLE_MULTIPLE_NODES
-    insertPartitionEntry(pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, indexRelOptions,
-                         PART_OBJ_TYPE_INDEX_PARTITION);
-#else
-    insertPartitionEntry(
-        pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, 0, PART_OBJ_TYPE_INDEX_PARTITION);
+    partTupleInfo.reloptions = indexRelOptions;
 #endif
+    insertPartitionEntry(pg_partition_rel, partitionIndex, partitionIndex->pd_id, &partTupleInfo);
     /* Make the above change visible */
     CommandCounterIncrement();
 

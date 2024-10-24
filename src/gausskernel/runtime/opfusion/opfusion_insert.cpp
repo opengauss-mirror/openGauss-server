@@ -25,6 +25,7 @@
 #include "opfusion/opfusion_insert.h"
 
 #include "access/tableam.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
@@ -200,8 +201,10 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
-        partOid = heapTupleGetPartitionId(rel, tuple);
-        part = partitionOpen(rel, partOid, RowExclusiveLock);
+        int partitionno = INVALID_PARTITION_NO;
+        partOid =
+            heapTupleGetPartitionId(rel, tuple, &partitionno);
+        part = PartitionOpenWithPartitionno(rel, partOid, partitionno, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
     }
 

@@ -23,6 +23,7 @@
 #include "access/relscan.h"
 #include "access/transam.h"
 #include "catalog/index.h"
+#include "catalog/pg_partition_fn.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "utils/acl.h"
@@ -598,6 +599,14 @@ static bool GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, Memo
     HTAB* fakeRels = gpiScan->fakeRelationTable;
     Relation parentRel = gpiScan->parentRelation;
     Oid parentPartOid = partid_get_parentid(gpiScan->currPartOid);
+    if (!OidIsValid(parentPartOid)) {
+        if (PartitionGetMetadataStatus(gpiScan->currPartOid, false) != PART_METADATA_INVISIBLE) {
+            return false;
+        }
+        Oid newpartOid = InvisiblePartidGetNewPartid(gpiScan->currPartOid);
+        parentPartOid = partid_get_parentid(newpartOid);
+    }
+
     if (OidIsValid(parentPartOid) && parentPartOid != parentRel->rd_id) {
         PartRelIdCacheKey fakeRelKey = {parentPartOid, InvalidBktId};
         Partition parentPartition = NULL;
@@ -606,8 +615,8 @@ static bool GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, Memo
             /* add current parentRel into fakeRelationTable */
             Oid baseRelOid = partid_get_parentid(parentPartOid);
             Relation baseRel = relation_open(baseRelOid, lmode);
-            res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, baseRel, parentPartOid, &parentRel,
-                &parentPartition, lmode);
+            res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, baseRel, parentPartOid, INVALID_PARTITION_NO,
+                &parentRel, &parentPartition, lmode);
             relation_close(baseRel, NoLock);
         }
         if (res) {
@@ -631,8 +640,8 @@ static bool GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMO
 
     Relation parentRel = gpiScan->parentRelation;
     /* Save search fake relation in gpiScan->fakeRelation */
-    res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, parentRel, currPartOid, &gpiScan->fakePartRelation,
-        &partition, lmode);
+    res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, parentRel, currPartOid, INVALID_PARTITION_NO,
+        &gpiScan->fakePartRelation, &partition, lmode);
 
     if (res) {
         /* save partition */

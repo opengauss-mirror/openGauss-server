@@ -841,10 +841,10 @@ explain(verbose on, costs off) select a from test_exchange_index_ht where a=1;
    ->  Partitioned Bitmap Heap Scan on public.test_exchange_index_ht
          Output: a
          Recheck Cond: (test_exchange_index_ht.a = 1)
-         Selected Partitions:  1
+         Selected Partitions:  2
          ->  Partitioned Bitmap Index Scan on test_exchange_index_ht_a
                Index Cond: (test_exchange_index_ht.a = 1)
-               Selected Partitions:  1
+               Selected Partitions:  2
 (10 rows)
 
 select a from test_exchange_index_ht where a=1;
@@ -896,10 +896,10 @@ explain(verbose on, costs off) select a from test_exchange_index_ht where a=3;
    ->  Partitioned Bitmap Heap Scan on public.test_exchange_index_ht
          Output: a
          Recheck Cond: (test_exchange_index_ht.a = 3)
-         Selected Partitions:  2
+         Selected Partitions:  1
          ->  Partitioned Bitmap Index Scan on test_exchange_index_ht_a
                Index Cond: (test_exchange_index_ht.a = 3)
-               Selected Partitions:  2
+               Selected Partitions:  1
 (10 rows)
 
 select a from test_exchange_index_ht where a=3;
@@ -1140,10 +1140,10 @@ explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) sel
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_exchange_verbose_ht
          Recheck Cond: (b = 5)
-         Selected Partitions:  1
+         Selected Partitions:  3
          ->  Partitioned Bitmap Index Scan on test_exchange_verbose_ht_index
                Index Cond: (b = 5)
-               Selected Partitions:  1
+               Selected Partitions:  3
 (8 rows)
 
 select b from test_exchange_verbose_ht where b=5 order by 1;
@@ -1170,10 +1170,10 @@ explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) sel
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_exchange_verbose_ht
          Recheck Cond: (b = 1)
-         Selected Partitions:  3
+         Selected Partitions:  1
          ->  Partitioned Bitmap Index Scan on test_exchange_verbose_ht_index
                Index Cond: (b = 1)
-               Selected Partitions:  3
+               Selected Partitions:  1
 (8 rows)
 
 select b from test_exchange_verbose_ht where b=1 order by 1;
@@ -1209,10 +1209,10 @@ explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) sel
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_exchange_verbose_ht
          Recheck Cond: (b = 5)
-         Selected Partitions:  1
+         Selected Partitions:  3
          ->  Partitioned Bitmap Index Scan on test_exchange_verbose_ht_index
                Index Cond: (b = 5)
-               Selected Partitions:  1
+               Selected Partitions:  3
 (8 rows)
 
 select b from test_exchange_verbose_ht where b=5 order by 1;
@@ -1245,10 +1245,10 @@ explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) sel
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_exchange_verbose_ht
          Recheck Cond: (b = 3)
-         Selected Partitions:  1
+         Selected Partitions:  3
          ->  Partitioned Bitmap Index Scan on test_exchange_verbose_ht_index
                Index Cond: (b = 3)
-               Selected Partitions:  1
+               Selected Partitions:  3
 (8 rows)
 
 select b from test_exchange_verbose_ht where b=3 order by 1;
@@ -1263,10 +1263,10 @@ explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) sel
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_exchange_verbose_ht
          Recheck Cond: (b = 4)
-         Selected Partitions:  3
+         Selected Partitions:  1
          ->  Partitioned Bitmap Index Scan on test_exchange_verbose_ht_index
                Index Cond: (b = 4)
-               Selected Partitions:  3
+               Selected Partitions:  1
 (8 rows)
 
 select b from test_exchange_verbose_ht where b=4 order by 1;
@@ -1709,8 +1709,8 @@ select * from test_exchange_func_ord;
 select * from test_exchange_func_ht;
  a 
 ---
- 2
  3
+ 2
 (2 rows)
 
 select * from test_exchange_func_ht partition (p1);

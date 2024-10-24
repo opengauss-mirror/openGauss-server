@@ -469,6 +469,9 @@ Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* ps
         return InvalidOid;
     }
 
+    /* cannot lock heap in case deadlock, we need process invalid messages here */
+    AcceptInvalidationMessages();
+
     /* relation is not partitioned table. */
     if (!rte->ispartrel || rte->relkind != RELKIND_RELATION) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
@@ -477,10 +480,10 @@ Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* ps
     } else {
         /* relation is partitioned table, from clause is partition (partition_name). */
         if (PointerIsValid(relation->partitionname)) {
-            partitionOid = partitionNameGetPartitionOid(rte->relid,
+            partitionOid = PartitionNameGetPartitionOid(rte->relid,
                 relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
-                AccessShareLock,
+                NoLock,
                 true,
                 false,
                 NULL,
@@ -523,7 +526,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
 
         rte->plist = listPartDef->boundary;
 
-        partitionOid = partitionValuesGetPartitionOid(rel, listPartDef->boundary, AccessShareLock, true, true, false);
+        partitionOid = PartitionValuesGetPartitionOid(rel, listPartDef->boundary, NoLock, true, true, false);
 
         pfree_ext(listPartDef);
     } else if (rel->partMap->type == PART_TYPE_HASH) {
@@ -536,7 +539,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
 
         rte->plist = hashPartDef->boundary;
 
-        partitionOid = partitionValuesGetPartitionOid(rel, hashPartDef->boundary, AccessShareLock, true, true, false);
+        partitionOid = PartitionValuesGetPartitionOid(rel, hashPartDef->boundary, NoLock, true, true, false);
 
         pfree_ext(hashPartDef);
     } else if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
@@ -551,7 +554,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
 
         rte->plist = rangePartDef->boundary;
 
-        partitionOid = partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
+        partitionOid = PartitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
 
         pfree_ext(rangePartDef);
     } else {
@@ -646,6 +649,9 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
         return InvalidOid;
     }
 
+    /* cannot lock heap in case deadlock, we need process invalid messages here */
+    AcceptInvalidationMessages();
+
     /* relation is not partitioned table. */
     if (!rte->ispartrel || rte->relkind != RELKIND_RELATION || !RelationIsSubPartitioned(rel)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
@@ -654,10 +660,10 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
     } else {
         /* relation is partitioned table, from clause is subpartition (subpartition_name). */
         if (PointerIsValid(relation->subpartitionname)) {
-            subPartitionOid = partitionNameGetPartitionOid(rte->relid,
+            subPartitionOid = SubPartitionNameGetSubPartitionOid(rte->relid,
                 relation->subpartitionname,
-                PART_OBJ_TYPE_TABLE_SUB_PARTITION,
-                AccessShareLock,
+                NoLock,
+                NoLock,
                 true,
                 false,
                 NULL,

@@ -1167,6 +1167,8 @@ static bool _equalRangePartitionDefState(const RangePartitionDefState* a, const 
     COMPARE_STRING_FIELD(tablespacename);
     COMPARE_SCALAR_FIELD(curStartVal);
     COMPARE_STRING_FIELD(partitionInitName);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }
@@ -1176,6 +1178,8 @@ static bool _equalListPartitionDefState(const ListPartitionDefState* a, const Li
     COMPARE_STRING_FIELD(partitionName);
     COMPARE_NODE_FIELD(boundary);
     COMPARE_STRING_FIELD(tablespacename);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }
@@ -1185,6 +1189,8 @@ static bool _equalHashPartitionDefState(const HashPartitionDefState* a, const Ha
     COMPARE_STRING_FIELD(partitionName);
     COMPARE_NODE_FIELD(boundary);
     COMPARE_STRING_FIELD(tablespacename);
+    COMPARE_NODE_FIELD(subPartitionDefState);
+    COMPARE_SCALAR_FIELD(partitionno);
 
     return true;
 }

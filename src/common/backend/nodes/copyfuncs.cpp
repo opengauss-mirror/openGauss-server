@@ -3193,6 +3193,7 @@ static RangePartitionDefState* _copyRangePartitionDefState(const RangePartitionD
     COPY_SCALAR_FIELD(curStartVal);
     COPY_STRING_FIELD(partitionInitName);
     COPY_NODE_FIELD(subPartitionDefState);
+    COPY_SCALAR_FIELD(partitionno);
 
     return newnode;
 }
@@ -3205,6 +3206,7 @@ static HashPartitionDefState* _copyHashPartitionDefState(const HashPartitionDefS
     COPY_NODE_FIELD(boundary);
     COPY_STRING_FIELD(tablespacename);
     COPY_NODE_FIELD(subPartitionDefState);
+    COPY_SCALAR_FIELD(partitionno);
 
     return newnode;
 }
@@ -3217,6 +3219,7 @@ static ListPartitionDefState* _copyListPartitionDefState(const ListPartitionDefS
     COPY_NODE_FIELD(boundary);
     COPY_STRING_FIELD(tablespacename);
     COPY_NODE_FIELD(subPartitionDefState);
+    COPY_SCALAR_FIELD(partitionno);
 
     return newnode;
 }
@@ -6726,6 +6729,8 @@ static SubPartitionPruningResult *_copySubPartitionPruningResult(const SubPartit
     COPY_SCALAR_FIELD(partSeq);
     COPY_BITMAPSET_FIELD(bm_selectedSubPartitions);
     COPY_NODE_FIELD(ls_selectedSubPartitions);
+    COPY_SCALAR_FIELD(partitionno);
+    COPY_NODE_FIELD(ls_selectedSubPartitionnos);
     return newnode;
 }
 

@@ -964,6 +964,8 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->num_bufs_in_block = 0;
     storage_cxt->total_bufs_allocated = 0;
     storage_cxt->LocalBufferContext = NULL;
+    storage_cxt->partition_dml_oids = NIL;
+    storage_cxt->partition_ddl_oids = NIL;
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)

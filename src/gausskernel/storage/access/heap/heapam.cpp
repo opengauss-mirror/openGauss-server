@@ -9965,6 +9965,41 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
 }
 
 /*
+ * Search the partition with partitionno retry.
+ * If the partition entry has already been removed by DDL operations, we use partitionno to research the new entry.
+ * Must make sure the partitionno is of the old partition entry, otherwise a wrong entry may be found!
+ * If the partitionno is invalid, this function is degenerated into partitionOpen.
+ */
+Partition PartitionOpenWithPartitionno(Relation relation, Oid partition_id, int partitionno, LOCKMODE lockmode)
+{
+    Partition part = NULL;
+    bool issubpartition = false;
+    char parttype;
+    Oid newpartOid = InvalidOid;
+
+    /* first try open the partition */
+    part = tryPartitionOpen(relation, partition_id, lockmode);
+    if (likely(PartitionIsValid(part))) {
+        return part;
+    }
+
+    if (!PARTITIONNO_IS_VALID(partitionno)) {
+        ReportPartitionOpenError(relation, partition_id);
+    }
+
+    PARTITION_LOG(
+        "partition %u does not exist on relation \"%s\", we will try to use partitionno %d to search the new partition",
+        partition_id, RelationGetRelationName(relation), partitionno);
+
+    /* if not found, search the new partition with partitionno */
+    issubpartition = RelationIsPartitionOfSubPartitionTable(relation);
+    parttype = issubpartition ? PART_OBJ_TYPE_TABLE_SUB_PARTITION : PART_OBJ_TYPE_TABLE_PARTITION;
+    newpartOid = GetPartOidWithPartitionno(RelationGetRelid(relation), partitionno, parttype);
+
+    return partitionOpen(relation, newpartOid, lockmode);
+}
+
+/*
  * @brief: close the partiiton
  * If lockmode is not "NoLock", we then release the specified lock.
  * Notes: it is often sensible to hold a lock beyond partitionClose; in that case,

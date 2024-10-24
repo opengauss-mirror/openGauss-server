@@ -841,14 +841,15 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
     Relation partRelation = NULL;
     Partition partition = NULL;
     Oid partitionOid;
+    int partitionno = INVALID_PARTITION_NO;
     Tuple tuple = tableam_tslot_get_tuple_from_slot(rel, slot);
     switch (rel->rd_rel->parttype) {
         case PARTTYPE_NON_PARTITIONED_RELATION:
         case PARTTYPE_VALUE_PARTITIONED_RELATION:
             break;
         case PARTTYPE_PARTITIONED_RELATION:
-            partitionOid = heapTupleGetPartitionId(rel, tuple);
-            searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid,
+            partitionOid = heapTupleGetPartitionId(rel, tuple, &partitionno);
+            searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid, partitionno,
                 partRelation, partition, RowExclusiveLock);
             relAndPart->partRel = partRelation;
             relAndPart->part = partition;
@@ -858,12 +859,13 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
             Relation subPartRel = NULL;
             Partition subPart = NULL;
             Oid subPartOid;
-            partitionOid = heapTupleGetPartitionId(rel, tuple);
-            searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid,
+            int subpartitionno = INVALID_PARTITION_NO;
+            partitionOid = heapTupleGetPartitionId(rel, tuple, &partitionno);
+            searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid, partitionno,
                 partRelation, partition, RowExclusiveLock);
-            subPartOid = heapTupleGetPartitionId(partRelation, tuple);
+            subPartOid = heapTupleGetPartitionId(partRelation, tuple, &subpartitionno);
             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRelation, subPartOid,
-                subPartRel, subPart, RowExclusiveLock);
+                subpartitionno, subPartRel, subPart, RowExclusiveLock);
 
             relAndPart->partRel = subPartRel;
             relAndPart->part = subPart;

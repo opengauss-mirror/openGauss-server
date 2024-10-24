@@ -335,59 +335,62 @@ void constCompare(Const* value1, Const* value2, int& compare)
     }
 }
 
-#define BuildRangeElement(range, type, typelen, relid, attrno, tuple, desc, isInter) \
-    do {                                                                             \
-        Assert(PointerIsValid(range));                                               \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                      \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                       \
-        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                               \
-        Assert((attrno)->dim1 == (typelen));                                         \
-        unserializePartitionStringAttribute((range)->boundary,                       \
-            RANGE_PARTKEYMAXNUM,                                                     \
-            (type),                                                                  \
-            (typelen),                                                               \
-            (relid),                                                                 \
-            (attrno),                                                                \
-            (tuple),                                                                 \
-            Anum_pg_partition_boundaries,                                            \
-            (desc));                                                                 \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                              \
-        (range)->len = (typelen);                                                    \
-        (range)->isInterval = (isInter);                                             \
+#define BuildRangeElement(range, type, typelen, relid, attrno, tuple, partitionno, desc, isInter) \
+    do {                                                                                          \
+        Assert(PointerIsValid(range));                                                            \
+        Assert(PointerIsValid(type) && PointerIsValid(attrno));                                   \
+        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                                    \
+        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                                            \
+        Assert((attrno)->dim1 == (typelen));                                                      \
+        unserializePartitionStringAttribute((range)->boundary,                                    \
+            RANGE_PARTKEYMAXNUM,                                                                  \
+            (type),                                                                               \
+            (typelen),                                                                            \
+            (relid),                                                                              \
+            (attrno),                                                                             \
+            (tuple),                                                                              \
+            Anum_pg_partition_boundaries,                                                         \
+            (desc));                                                                              \
+        (range)->partitionOid = HeapTupleGetOid(tuple);                                           \
+        (range)->partitionno = (partitionno);                                                     \
+        (range)->len = (typelen);                                                                 \
+        (range)->isInterval = (isInter);                                                          \
     } while (0)
 
-#define buildListElement(range, type, typelen, relid, attrno, tuple, desc)  \
-    do {                                                                    \
-        Assert(PointerIsValid(range));                                      \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));             \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));              \
-        Assert((attrno)->dim1 == (typelen));                                \
-        unserializeListPartitionAttribute(&((range)->len),                  \
-            &((range)->boundary),                                           \
-            (type),                                                         \
-            (typelen),                                                      \
-            (relid),                                                        \
-            (attrno),                                                       \
-            (tuple),                                                        \
-            Anum_pg_partition_boundaries,                                   \
-            (desc));                                                        \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                     \
+#define buildListElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
+    do {                                                                                \
+        Assert(PointerIsValid(range));                                                  \
+        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
+        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
+        Assert((attrno)->dim1 == (typelen));                                            \
+        unserializeListPartitionAttribute(&((range)->len),                              \
+            &((range)->boundary),                                                       \
+            (type),                                                                     \
+            (typelen),                                                                  \
+            (relid),                                                                    \
+            (attrno),                                                                   \
+            (tuple),                                                                    \
+            Anum_pg_partition_boundaries,                                               \
+            (desc));                                                                    \
+        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
+        (range)->partitionno = (partitionno);                                           \
     } while (0)
 
-#define buildHashElement(range, type, typelen, relid, attrno, tuple, desc)  \
-    do {                                                                    \
-        Assert(PointerIsValid(range));                                      \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));             \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));              \
-        Assert((attrno)->dim1 == (typelen));                                \
-        unserializeHashPartitionAttribute((range)->boundary,              \
-            RANGE_PARTKEYMAXNUM,                                            \
-            (relid),                                                        \
-            (attrno),                                                       \
-            (tuple),                                                        \
-            Anum_pg_partition_boundaries,                                   \
-            (desc));                                                        \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                     \
+#define buildHashElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
+    do {                                                                                \
+        Assert(PointerIsValid(range));                                                  \
+        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
+        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
+        Assert((attrno)->dim1 == (typelen));                                            \
+        unserializeHashPartitionAttribute((range)->boundary,                            \
+            RANGE_PARTKEYMAXNUM,                                                        \
+            (relid),                                                                    \
+            (attrno),                                                                   \
+            (tuple),                                                                    \
+            Anum_pg_partition_boundaries,                                               \
+            (desc));                                                                    \
+        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
+        (range)->partitionno = (partitionno);                                           \
     } while (0)
 
 static void RebuildListPartitionMap(ListPartitionMap* oldMap, ListPartitionMap* newMap);
@@ -1589,12 +1592,31 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
 
+        bool isNull;
+        Datum datum = heap_getattr(partition_tuple,
+                                   RelationIsPartitionOfSubPartitionTable(relation) ? Anum_pg_partition_subpartitionno :
+                                                                                      Anum_pg_partition_partitionno,
+                                   RelationGetDescr(pg_partition),
+                                   &isNull);
+        int partitionno = INVALID_PARTITION_NO;
+        if (!isNull) {
+            partitionno = DatumGetInt32(datum);
+            if (partitionno <= 0) {
+                ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
+                    errdetail("Incorrect partitionno %d for partition %u", partitionno,
+                    HeapTupleGetOid(partition_tuple))));
+            }
+        }
+        PARTITIONNO_VALID_ASSERT(partitionno);
+
         buildListElement(&(list_eles[list_itr]),
             list_map->partitionKeyDataType,
             list_map->partitionKey->dim1,
             rootPartitionOid,
             list_map->partitionKey,
             partition_tuple,
+            partitionno,
             RelationGetDescr(pg_partition));
 
         list_itr++;
@@ -1630,7 +1652,7 @@ bool CheckHashPartitionMap(HashPartElement* hash_eles, int len)
     }
     // Constvalue must be in reverse order due to design issues.
     for (int i = 0; i < len; i++) {
-        if (DatumGetInt32(hash_eles[len - 1 - i].boundary[0]->constvalue) != i) {
+        if (DatumGetInt32(hash_eles[i].boundary[0]->constvalue) != i) {
             return false;
         }
     }
@@ -1700,12 +1722,31 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
 
+        bool isNull;
+        Datum datum = heap_getattr(partition_tuple,
+                                   RelationIsPartitionOfSubPartitionTable(relation) ? Anum_pg_partition_subpartitionno :
+                                                                                      Anum_pg_partition_partitionno,
+                                   RelationGetDescr(pg_partition),
+                                   &isNull);
+        int partitionno = INVALID_PARTITION_NO;
+        if (!isNull) {
+            partitionno = DatumGetInt32(datum);
+            if (partitionno <= 0) {
+                ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
+                    errdetail("Incorrect partitionno %d for partition %u", partitionno,
+                    HeapTupleGetOid(partition_tuple))));
+            }
+        }
+        PARTITIONNO_VALID_ASSERT(partitionno);
+
         buildHashElement(&(hash_eles[hash_itr]),
             hash_map->partitionKeyDataType,
             hash_map->partitionKey->dim1,
             rootPartitionOid,
             hash_map->partitionKey,
             partition_tuple,
+            partitionno,
             RelationGetDescr(pg_partition));
 
         hash_itr++;
@@ -1805,12 +1846,31 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
 
+        bool isNull;
+        Datum datum = heap_getattr(partition_tuple,
+                                   RelationIsPartitionOfSubPartitionTable(relation) ? Anum_pg_partition_subpartitionno :
+                                                                                      Anum_pg_partition_partitionno,
+                                   RelationGetDescr(pg_partition),
+                                   &isNull);
+        int partitionno = INVALID_PARTITION_NO;
+        if (!isNull) {
+            partitionno = DatumGetInt32(datum);
+            if (partitionno <= 0) {
+                ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
+                    errdetail("Incorrect partitionno %d for partition %u", partitionno,
+                    HeapTupleGetOid(partition_tuple))));
+            }
+        }
+        PARTITIONNO_VALID_ASSERT(partitionno);
+
         BuildRangeElement(&(range_eles[range_itr]),
             range_map->partitionKeyDataType,
             range_map->partitionKey->dim1,
             rootPartitionOid,
             range_map->partitionKey,
             partition_tuple,
+            partitionno,
             RelationGetDescr(pg_partition),
             partition_form->partstrategy == PART_STRATEGY_INTERVAL);
         range_itr++;
@@ -2155,6 +2215,7 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
     }
 
     hit = hash_value % (uint32)(hashPartMap->hashElementsNum);
+    hit = hashPartMap->hashElementsNum - hit - 1;
 
     if (PointerIsValid(partSeq)) {
         *partSeq = hit;
@@ -2628,9 +2689,9 @@ int HashElementCmp(const void* a, const void* b)
     int32 constvalue1 = DatumGetInt32((Const*)rea->boundary[0]->constvalue);
     int32 constvalue2 = DatumGetInt32((Const*)reb->boundary[0]->constvalue);
     if (constvalue1 < constvalue2) {
-        return 1;
-    } else if (constvalue1 > constvalue2) {
         return -1;
+    } else if (constvalue1 > constvalue2) {
+        return 1;
     } else {
         return 0;
     }
@@ -2667,6 +2728,9 @@ int GetSubPartitionNumber(Relation rel)
     int result = getPartitionNumber(map);
     Oid partOid = InvalidOid;
     int subPartNum = 0;
+
+    AcceptInvalidationMessages();
+
     for (int conuter = 0; conuter < result; ++conuter) {
         if (map->type == PART_TYPE_LIST) {
             partOid = ((ListPartitionMap *)map)->listElements[conuter].partitionOid;
@@ -2675,11 +2739,11 @@ int GetSubPartitionNumber(Relation rel)
         } else {
             partOid = ((RangePartitionMap *)map)->rangeElements[conuter].partitionOid;
         }
-        Partition part = partitionOpen(rel, partOid, AccessShareLock);
+        Partition part = partitionOpen(rel, partOid, NoLock);
         Relation partRel = partitionGetRelation(rel, part);
         subPartNum += getPartitionNumber(partRel->partMap);
         releaseDummyRelation(&partRel);
-        partitionClose(rel, part, AccessShareLock);
+        partitionClose(rel, part, NoLock);
     }
 
     return subPartNum;
@@ -2767,7 +2831,7 @@ Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid)
     return InvalidOid;
 }
 
-bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid, int partitionno,
     Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart)
 {
     PartRelIdCacheKey _key = {partOid, -1};
@@ -2776,18 +2840,29 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
     if (PointerIsValid(*partition)) {
         return false;
     }
-    if (checkSubPart && RelationIsSubPartitioned(rel) && !RelationIsIndex(rel)) {
-        Oid parentOid = partid_get_parentid(partOid);
-        if (!OidIsValid(parentOid)) {
+
+    Oid parentOid = partid_get_parentid(partOid);
+    if (!OidIsValid(parentOid)) {
+        if (PartitionGetMetadataStatus(partOid, false) != PART_METADATA_INVISIBLE) {
             ereport(ERROR,
                 (errcode(ERRCODE_RELATION_OPEN_ERROR),
                 errmsg("partition %u does not exist", partOid),
                 errdetail("this partition may have already been dropped")));
         }
+
+        /* this partOid has just been dropped, we try to search the new partOid, if not found, just return */
+        partOid = InvisiblePartidGetNewPartid(partOid);
+        parentOid = partid_get_parentid(partOid);
+        if (!OidIsValid(parentOid)) {
+            return false;
+        }
+    }
+
+    if (checkSubPart && RelationIsSubPartitioned(rel) && !RelationIsIndex(rel)) {
         if (parentOid != rel->rd_id) {
             Partition partForSubPart = NULL;
-            bool res = trySearchFakeReationForPartitionOid(fakeRels, cxt, rel, parentOid, &partRelForSubPart,
-                                                           &partForSubPart, lmode, false);
+            bool res = trySearchFakeReationForPartitionOid(fakeRels, cxt, rel, parentOid, INVALID_PARTITION_NO,
+                &partRelForSubPart, &partForSubPart, lmode, false);
             if (!res) {
                 return false;
             }
@@ -2802,14 +2877,7 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
     if (PointerIsValid(*fakeRels)) {
         FakeRelationIdCacheLookup((*fakeRels), _key, *fakeRelation, *partition);
         if (!RelationIsValid(*fakeRelation)) {
-            *partition = tryPartitionOpen(partParentRel, partOid, lmode);
-            if (*partition == NULL) {
-                PartStatus currStatus = PartitionGetMetadataStatus(partOid, false);
-                if (currStatus != PART_METADATA_INVISIBLE) {
-                    ReportPartitionOpenError(partParentRel, partOid);
-                }
-                return false;
-            }
+            *partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);
             *fakeRelation = partitionGetRelation(partParentRel, *partition);
             FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
         }
@@ -2824,14 +2892,7 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
         ctl.hcxt = cxt;
         *fakeRels = hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,
                                 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-        *partition = tryPartitionOpen(partParentRel, partOid, lmode);
-        if (*partition == NULL) {
-            PartStatus currStatus = PartitionGetMetadataStatus(partOid, false);
-            if (currStatus != PART_METADATA_INVISIBLE) {
-                ReportPartitionOpenError(partParentRel, partOid);
-            }
-            return false;
-        }
+        *partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);
         *fakeRelation = partitionGetRelation(partParentRel, *partition);
         FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
     }

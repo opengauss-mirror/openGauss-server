@@ -2104,7 +2104,7 @@ explain (verbose on, costs off)
    ->  Partitioned Seq Scan on fvt_compress.test_explain_format_on_part_table
          Output: id
          Filter: ((test_explain_format_on_part_table.id = 5) OR (test_explain_format_on_part_table.id = 25) OR (test_explain_format_on_part_table.id = 45) OR (test_explain_format_on_part_table.id = 65) OR (test_explain_format_on_part_table.id = 85))
-         Selected Partitions:  3,5..7
+         Selected Partitions:  3..5,7
 (7 rows)
 
 -- two continous segments, non-text formast
@@ -2155,7 +2155,7 @@ explain (verbose on, costs off, FORMAT JSON)
            "Alias": "test_explain_format_on_part_table",                                                                                                                                                                                                        +
            "Output": ["id"],                                                                                                                                                                                                                                    +
            "Filter": "((test_explain_format_on_part_table.id = 5) OR (test_explain_format_on_part_table.id = 25) OR (test_explain_format_on_part_table.id = 45) OR (test_explain_format_on_part_table.id = 65) OR (test_explain_format_on_part_table.id = 85))",+
-           "Selected Partitions": "3,5..7"                                                                                                                                                                                                                      +
+           "Selected Partitions": "3..5,7"                                                                                                                                                                                                                      +
          }                                                                                                                                                                                                                                                      +
        ]                                                                                                                                                                                                                                                        +
      }                                                                                                                                                                                                                                                          +

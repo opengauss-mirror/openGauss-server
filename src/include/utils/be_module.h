@@ -149,6 +149,7 @@ enum ModuleId {
     MOD_SQLPATCH,
 
     MOD_GPI, /* debug info for global partition index */
+    MOD_PARTITION,
     MOD_LWLOCK, /* debug info for lwlock held longer than a threshold*/
 
     MOD_ENCODING_CHECK, /* debug info for encoding check */

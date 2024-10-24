@@ -822,7 +822,9 @@ typedef enum AlterTableType {
     AT_SplitSubPartition,
     /* this will be in a more natural position in 9.3: */
     AT_ReAddConstraint, /* internal to commands/tablecmds.c */
-    AT_AddIntoCBI
+    AT_AddIntoCBI,
+    AT_ConvertCharset,
+    AT_ResetPartitionno
 } AlterTableType;
 
 typedef enum AlterTableStatProperty { /* Additional Property for AlterTableCmd */
@@ -1013,18 +1015,27 @@ typedef struct ColumnDef {
 } ColumnDef;
 
 /*
+ * PartitionDefState is a basic struct of all different partition types.
+ * NEVER create a new node with this struct!
+ */
+typedef struct PartitionDefState {
+    NodeTag type;
+    char* partitionName;  /* name of partition */
+    List* boundary;       /* the boundary of a partition */
+    char* tablespacename; /* table space to use, or NULL */
+    List* subPartitionDefState;
+    int4 partitionno; /* the partition no of current partition */
+} PartitionDefState;
+
+
+/*
  * definition of a range partition.
  * range partition pattern: PARTITION [partitionName] LESS THAN [boundary]
  *
  */
-typedef struct RangePartitionDefState {
-    NodeTag type;
-    char *partitionName;  /* name of range partition */
-    List *boundary;       /* the boundary of a range partition */
-    char *tablespacename; /* table space to use, or NULL */
+typedef struct RangePartitionDefState : PartitionDefState {
     Const *curStartVal;
     char *partitionInitName;
-    List* subPartitionDefState;
 } RangePartitionDefState;
 
 typedef struct RangePartitionStartEndDefState {
@@ -1036,20 +1047,10 @@ typedef struct RangePartitionStartEndDefState {
     char *tableSpaceName; /* table space to use, or NULL */
 } RangePartitionStartEndDefState;
 
-typedef struct ListPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of list partition */
-    List* boundary;       /* the boundary of a list partition */
-    char* tablespacename; /* table space to use, or NULL */
-    List* subPartitionDefState;
+typedef struct ListPartitionDefState : PartitionDefState {
 } ListPartitionDefState;
 
-typedef struct HashPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of hash partition */
-    List* boundary;       /* the boundary of a hash partition */
-    char* tablespacename; /* table space to use, or NULL */
-    List* subPartitionDefState;
+typedef struct HashPartitionDefState : PartitionDefState {
 } HashPartitionDefState;
 
 typedef struct RangePartitionindexDefState {

@@ -92,17 +92,22 @@ static void CollectSubpartitionPruningResults(PruningResult* resPartition, Relat
     }
 
     int partSeq;
-    ListCell *cell = NULL;
+    int partitionno;
+    ListCell *cell1 = NULL;
+    ListCell *cell2 = NULL;
     Oid partitionOid = InvalidOid;
-    foreach (cell, resPartition->ls_rangeSelectedPartitions) {
-        partSeq = lfirst_int(cell);
-        partitionOid = getPartitionOidFromSequence(current_relation, partSeq, resPartition->partMap);
+    Assert(list_length(resPartition->ls_rangeSelectedPartitions) == list_length(resPartition->ls_selectedPartitionnos));
+    forboth (cell1, resPartition->ls_rangeSelectedPartitions, cell2, resPartition->ls_selectedPartitionnos) {
+        partSeq = lfirst_int(cell1);
+        partitionno = lfirst_int(cell2);
+        partitionOid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
         SubPartitionPruningResult *subPartPruningRes =
             PreGetSubPartitionFullPruningResult(current_relation, partitionOid);
         if (subPartPruningRes == NULL) {
             continue;
         }
         subPartPruningRes->partSeq = partSeq;
+        subPartPruningRes->partitionno = partitionno;
         resPartition->ls_selectedSubPartitions = lappend(resPartition->ls_selectedSubPartitions, subPartPruningRes);
     }
 }
@@ -124,9 +129,6 @@ PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation 
     context.rte = NULL;
     context.estate = estate;
     context.relation = current_relation;
-    /* if the partmap which copied before static pruning exists, it will replace the rel->partMap, seen in
-     * GetPartitionMap */
-    context.partmap = result->partMap;
 
     if (current_relation->partMap->type == PART_TYPE_LIST || current_relation->partMap->type == PART_TYPE_HASH) {
         resPartition = partitionEqualPruningWalker(current_relation->partMap->type, result->expr, &context);
@@ -142,7 +144,7 @@ PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation 
         return resPartition;
     }
     if (PointerIsValid(resPartition) && !PruningResultIsFull(resPartition))
-        generateListFromPruningBM(resPartition);
+        generateListFromPruningBM(resPartition, current_relation->partMap);
 
     CollectSubpartitionPruningResults(resPartition, current_relation);
 
@@ -170,7 +172,7 @@ PruningResult* copyPruningResult(PruningResult* srcPruningResult)
         newpruningInfo->expr = (Expr *)copyObject(srcPruningResult->expr);
         newpruningInfo->exprPart = (OpExpr *)copyObject(srcPruningResult->exprPart);
         newpruningInfo->isPbeSinlePartition = srcPruningResult->isPbeSinlePartition;
-        newpruningInfo->partMap = (PartitionMap *)CopyPartitionMap(srcPruningResult->partMap);
+        newpruningInfo->ls_selectedPartitionnos = (List*)copyObject(srcPruningResult->ls_selectedPartitionnos);
 
         return newpruningInfo;
     } else {
@@ -178,13 +180,15 @@ PruningResult* copyPruningResult(PruningResult* srcPruningResult)
     }
 }
 
-void generateListFromPruningBM(PruningResult* result)
+void generateListFromPruningBM(PruningResult* result, PartitionMap *partmap)
 {
     int partitions = 0;
     int i = 0;
     int tmpcheck = 0;
+    int partitionno = INVALID_PARTITION_NO;
     Bitmapset* tmpset = NULL;
     result->ls_rangeSelectedPartitions = NULL;
+    result->ls_selectedPartitionnos = NULL;
 
     tmpset = bms_copy(result->bm_rangeSelectedPartitions);
     partitions = bms_num_members(result->bm_rangeSelectedPartitions);
@@ -194,6 +198,12 @@ void generateListFromPruningBM(PruningResult* result)
         AssertEreport(-1 != tmpcheck, MOD_OPT, "");
         if (-1 != tmpcheck) {
             result->ls_rangeSelectedPartitions = lappend_int(result->ls_rangeSelectedPartitions, tmpcheck);
+
+            if (PointerIsValid(partmap)) {
+                partitionno = GetPartitionnoFromSequence(partmap, tmpcheck);
+                PARTITIONNO_VALID_ASSERT(partitionno);
+            }
+            result->ls_selectedPartitionnos = lappend_int(result->ls_selectedPartitionnos, partitionno);
         }
     }
     bms_free_ext(tmpset);
@@ -222,10 +232,12 @@ static List* restrictInfoListToExprList(List* restrictInfoList)
  * return value:  non-eliminated partitions.
  */
 PruningResult* partitionPruningForRestrictInfo(
-    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList, PartitionMap *partmap)
+    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList)
 {
     PruningResult* result = NULL;
     Expr* expr = NULL;
+
+    incre_partmap_refcount(rel->partMap);
 
     if (0 == list_length(restrictInfoList)) {
         result = getFullPruningResult(rel);
@@ -248,28 +260,25 @@ PruningResult* partitionPruningForRestrictInfo(
     }
 
     if (PointerIsValid(result) && !PruningResultIsFull(result)) {
-        generateListFromPruningBM(result);
+        generateListFromPruningBM(result, rel->partMap);
     }
 
     if (RelationIsSubPartitioned(rel) && PointerIsValid(result)) {
         Bitmapset *partIdx = NULL;
         List* part_seqs = result->ls_rangeSelectedPartitions;
-        ListCell *cell = NULL;
+        List* partitionnos = result->ls_selectedPartitionnos;
+        ListCell *cell1 = NULL;
+        ListCell *cell2 = NULL;
         RangeTblEntry *partRte = (RangeTblEntry *)copyObject(rte);
 
-        foreach (cell, part_seqs)
+        forboth(cell1, part_seqs, cell2, partitionnos)
         {
-            int part_seq = lfirst_int(cell);
-            Oid partOid = getPartitionOidFromSequence(rel, part_seq, partmap);
-            Partition partTable = tryPartitionOpen(rel, partOid, AccessShareLock);
-            if (!partTable) {
-                PartStatus currStatus = PartitionGetMetadataStatus(partOid, false);
-                if (currStatus != PART_METADATA_INVISIBLE) {
-                    ReportPartitionOpenError(rel, partOid);
-                }
-                continue;
-            }
+            int part_seq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
+            Oid partOid = getPartitionOidFromSequence(rel, part_seq, partitionno);
+            Partition partTable = PartitionOpenWithPartitionno(rel, partOid, partitionno, NoLock);
             Relation partRel = partitionGetRelation(rel, partTable);
+            incre_partmap_refcount(partRel->partMap);
             PruningResult *subResult = NULL;
             partRte->relid = partOid;
 
@@ -280,29 +289,33 @@ PruningResult* partitionPruningForRestrictInfo(
             }
 
             if (PointerIsValid(subResult) && !PruningResultIsEmpty(subResult)) {
-                generateListFromPruningBM(subResult);
+                generateListFromPruningBM(subResult, partRel->partMap);
                 if (bms_num_members(subResult->bm_rangeSelectedPartitions) > 0) {
                     SubPartitionPruningResult *subPruning = makeNode(SubPartitionPruningResult);
                     subPruning->partSeq = part_seq;
+                    subPruning->partitionno = partitionno;
                     subPruning->bm_selectedSubPartitions = subResult->bm_rangeSelectedPartitions;
                     subPruning->ls_selectedSubPartitions = subResult->ls_rangeSelectedPartitions;
+                    subPruning->ls_selectedSubPartitionnos = subResult->ls_selectedPartitionnos;
                     result->ls_selectedSubPartitions = lappend(result->ls_selectedSubPartitions,
                                                             subPruning);
                     partIdx = bms_add_member(partIdx, part_seq);
                 }
             }
 
+            decre_partmap_refcount(partRel->partMap);
             releaseDummyRelation(&partRel);
-            partitionClose(rel, partTable, AccessShareLock);
+            partitionClose(rel, partTable, NoLock);
         }
 
         // adjust
         if (!bms_equal(result->bm_rangeSelectedPartitions, partIdx)) {
             result->bm_rangeSelectedPartitions = partIdx;
-            generateListFromPruningBM(result);
+            generateListFromPruningBM(result, rel->partMap);
         }
     }
 
+    decre_partmap_refcount(rel->partMap);
     return result;
 }
 
@@ -339,6 +352,8 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
     if (!OidIsValid(partitionOid) && rel->partMap->type != PART_TYPE_INTERVAL) {
         return NULL;
     }
+
+    incre_partmap_refcount(rel->partMap);
 
     pruningRes = makeNode(PruningResult);
     pruningRes->state = PRUNING_RESULT_SUBSET;
@@ -404,15 +419,18 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
 
     pruningRes->bm_rangeSelectedPartitions = bms_make_singleton(partitionSeq);
 
-    generateListFromPruningBM(pruningRes);
+    generateListFromPruningBM(pruningRes, rel->partMap);
     if (RelationIsSubPartitioned(rel)) {
         SubPartitionPruningResult *subPartPruningRes = PreGetSubPartitionFullPruningResult(rel, partitionOid);
         if (subPartPruningRes == NULL) {
+            decre_partmap_refcount(rel->partMap);
             return pruningRes;
         }
         subPartPruningRes->partSeq = partitionSeq;
+        subPartPruningRes->partitionno = GetPartitionnoFromSequence(rel->partMap, partitionSeq);
         pruningRes->ls_selectedSubPartitions = lappend(pruningRes->ls_selectedSubPartitions, subPartPruningRes);
     }
+    decre_partmap_refcount(rel->partMap);
     return pruningRes;
 }
 
@@ -427,6 +445,8 @@ PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Rel
 {
     int partitionSeq = 0;
     int subPartitionSeq = 0;
+    int partitionno = INVALID_PARTITION_NO;
+    int subpartitionno = INVALID_PARTITION_NO;
     PruningResult* pruningRes = NULL;
 
     if (!PointerIsValid(rel) || !OidIsValid(subPartitionOid) || !OidIsValid(partOid)) {
@@ -442,7 +462,9 @@ PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Rel
     pruningRes = makeNode(PruningResult);
     pruningRes->state = PRUNING_RESULT_SUBSET;
 
+    incre_partmap_refcount(rel->partMap);
     partitionSeq = getPartitionElementsIndexByOid(rel, partOid);
+    partitionno = GetPartitionnoFromSequence(rel->partMap, partitionSeq);
     /* In normal condition, it should never happen.
      * But if the Query is from a view/rule contains a subpartition, this case may happen if the parent partition of
      * this subpartition is dropped by DDL operation, such as DROP/TRUNCATE (UPDATE GLOBAL INDEX) */
@@ -457,7 +479,9 @@ PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Rel
 
     Partition part = partitionOpen(rel, partOid, NoLock);
     Relation partRel = partitionGetRelation(rel, part);
+    incre_partmap_refcount(partRel->partMap);
     subPartitionSeq = getPartitionElementsIndexByOid(partRel, subPartitionOid);
+    subpartitionno = GetPartitionnoFromSequence(partRel->partMap, subPartitionSeq);
     /* In normal condition, it should never happen.
      * But if the Query is from a view/rule contains a subpartition, this case may happen if the subpartition is dropped
      * by DDL operation, such as DROP/SPLIT/MERGE/TRUNCATE (UPDATE GLOBAL INDEX)/EXCHANGE (UPDATE GLOBAL INDEX) */
@@ -469,6 +493,7 @@ PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Rel
             errhint("Check if this query contains a view that refrences the target subpartition. "
                 "If so, REBUILD this view.")));
     }
+    decre_partmap_refcount(partRel->partMap);
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, NoLock);
 
@@ -477,11 +502,16 @@ PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Rel
         bms_add_member(subPartPruningRes->bm_selectedSubPartitions, subPartitionSeq);
     subPartPruningRes->ls_selectedSubPartitions =
         lappend_int(subPartPruningRes->ls_selectedSubPartitions, subPartitionSeq);
+    subPartPruningRes->ls_selectedSubPartitionnos =
+        lappend_int(subPartPruningRes->ls_selectedSubPartitionnos, subpartitionno);
     subPartPruningRes->partSeq = partitionSeq;
+    subPartPruningRes->partitionno = GetPartitionnoFromSequence(rel->partMap, partitionSeq);
     pruningRes->ls_selectedSubPartitions = lappend(pruningRes->ls_selectedSubPartitions, subPartPruningRes);
     pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, partitionSeq);
+    pruningRes->ls_selectedPartitionnos = lappend_int(pruningRes->ls_selectedPartitionnos, partitionno);
     pruningRes->bm_rangeSelectedPartitions = bms_make_singleton(partitionSeq);
 
+    decre_partmap_refcount(rel->partMap);
     return pruningRes;
 }
 
@@ -2353,6 +2383,10 @@ void destroyPruningResult(PruningResult* pruningResult)
         list_free_ext(pruningResult->ls_rangeSelectedPartitions);
         pruningResult->ls_rangeSelectedPartitions = NIL;
     }
+    if (PointerIsValid(pruningResult->ls_selectedPartitionnos)) {
+        list_free_ext(pruningResult->ls_selectedPartitionnos);
+        pruningResult->ls_selectedPartitionnos = NIL;
+    }
     if (PointerIsValid(pruningResult->expr)) {
         pfree(pruningResult->expr);
         pruningResult->expr = NULL;
@@ -2364,10 +2398,6 @@ void destroyPruningResult(PruningResult* pruningResult)
     if (PointerIsValid(pruningResult->paramArg)) {
         pfree(pruningResult->paramArg);
         pruningResult->paramArg = NULL;
-    }
-    if (PointerIsValid(pruningResult->partMap)) {
-        DestroyPartitionMap(pruningResult->partMap);
-        pruningResult->partMap = NULL;
     }
 
     pfree_ext(pruningResult);
@@ -2390,6 +2420,50 @@ static void destroyPruningResultList(List* resultList)
     return;
 }
 
+static Oid GetPartitionOidFromPartitionno(Relation relation, int partitionno)
+{
+    int totalnum;
+    int i;
+    Oid result = InvalidOid;
+    int resultno;
+    PartitionMap *partmap = relation->partMap;
+
+    if (partitionno <= 0) {
+        return InvalidOid;
+    }
+
+    if (partmap->type == PART_TYPE_RANGE || partmap->type == PART_TYPE_INTERVAL) {
+        totalnum = ((RangePartitionMap*)partmap)->rangeElementsNum;
+        for (i = 0; i < totalnum; i++) {
+            resultno = ((RangePartitionMap*)partmap)->rangeElements[i].partitionno;
+            if (partitionno == resultno) {
+                result = ((RangePartitionMap*)partmap)->rangeElements[i].partitionOid;
+                break;
+            }
+        }
+    } else if (partmap->type == PART_TYPE_LIST) {
+        totalnum = ((ListPartitionMap*)partmap)->listElementsNum;
+        for (i = 0; i < totalnum; i++) {
+            resultno = ((ListPartitionMap*)partmap)->listElements[i].partitionno;
+            if (partitionno == resultno) {
+                result = ((ListPartitionMap*)partmap)->listElements[i].partitionOid;
+                break;
+            }
+        }
+    } else if (partmap->type == PART_TYPE_HASH) {
+        totalnum = ((HashPartitionMap*)partmap)->hashElementsNum;
+        for (i = 0; i < totalnum; i++) {
+            resultno = ((HashPartitionMap*)partmap)->hashElements[i].partitionno;
+            if (partitionno == resultno) {
+                result = ((HashPartitionMap*)partmap)->hashElements[i].partitionOid;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -2397,73 +2471,63 @@ static void destroyPruningResultList(List* resultList)
  * Description	:
  * Notes		: start with 0
  */
-Oid getPartitionOidFromSequence(Relation relation, int partSeq, PartitionMap *oldmap)
+Oid getPartitionOidFromSequence(Relation relation, int partSeq, int partitionno)
 {
-    /* if the partmap which copied before static pruning exists, it will replace the rel->partMap */
-    PartitionMap *partmap = oldmap ? oldmap : relation->partMap;
+#define ReportPartseqOutRange()                                                                               \
+    do {                                                                                                      \
+        PARTITION_LOG(                                                                                        \
+            "partSeq: %d out range of current relation partMap element num: %d. partitionno %d will be used", \
+            partSeq, elementsNum, partitionno);                                                               \
+    } while (0)
 
     Oid result = InvalidOid;
+    int resultno = 0;
+    int elementsNum;
     AssertEreport(PointerIsValid(relation), MOD_OPT, "Unexpected NULL pointer for relation.");
-    AssertEreport(PointerIsValid(partmap), MOD_OPT, "Unexpected NULL pointer for relation->partMap.");
-    if (partmap->type == PART_TYPE_RANGE || partmap->type == PART_TYPE_INTERVAL) {
-        int rangeElementsNum = ((RangePartitionMap*)partmap)->rangeElementsNum;
-        if (partSeq < rangeElementsNum) {
-            result = ((RangePartitionMap*)partmap)->rangeElements[partSeq].partitionOid;
+    AssertEreport(PointerIsValid(relation->partMap), MOD_OPT, "Unexpected NULL pointer for relation->partMap.");
+    if (relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL) {
+        elementsNum = ((RangePartitionMap*)relation->partMap)->rangeElementsNum;
+        if (partSeq < elementsNum) {
+            result = ((RangePartitionMap*)relation->partMap)->rangeElements[partSeq].partitionOid;
+            resultno = ((RangePartitionMap*)relation->partMap)->rangeElements[partSeq].partitionno;
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-                    errmsg("partSeq: %d out range of current relation partMap element num: %d.",
-                        partSeq,
-                        rangeElementsNum)));
+            ReportPartseqOutRange();
         }
-        /* do simple check, as rangeElements already be sorted */
-        if (partSeq > 0 &&
-            result == ((RangePartitionMap*)partmap)->rangeElements[partSeq - 1].partitionOid) {
-            ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_OBJECT),
-                    errmsg("Duplicate range partition map oids: %u, please try again.", result)));
-        }
-    } else if (PART_TYPE_LIST == partmap->type) {
-        int listElementsNum = ((ListPartitionMap*)partmap)->listElementsNum;
-        if (partSeq < listElementsNum) {
-            result = ((ListPartitionMap*)partmap)->listElements[partSeq].partitionOid;
+    } else if (relation->partMap->type == PART_TYPE_LIST) {
+        elementsNum = ((ListPartitionMap*)relation->partMap)->listElementsNum;
+        if (partSeq < elementsNum) {
+            result = ((ListPartitionMap*)relation->partMap)->listElements[partSeq].partitionOid;
+            resultno = ((ListPartitionMap*)relation->partMap)->listElements[partSeq].partitionno;
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-                    errmsg("partSeq: %d out range of current relation partMap element num: %d.",
-                        partSeq,
-                        listElementsNum)));
+            ReportPartseqOutRange();
         }
-        /* do simple check, as rangeElements already be sorted */
-        if (partSeq > 0 &&
-            result == ((ListPartitionMap*)partmap)->listElements[partSeq - 1].partitionOid) {
-            ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_OBJECT),
-                    errmsg("Duplicate range partition map oids: %u, please try again.", result)));
-        }        
-    } else if (PART_TYPE_HASH == partmap->type) {
-        int hashElementsNum = ((HashPartitionMap*)partmap)->hashElementsNum;
-        if (partSeq < hashElementsNum) {
-            result = ((HashPartitionMap*)partmap)->hashElements[partSeq].partitionOid;
+    } else if (relation->partMap->type == PART_TYPE_HASH) {
+        elementsNum = ((HashPartitionMap*)relation->partMap)->hashElementsNum;
+        if (partSeq < elementsNum) {
+            result = ((HashPartitionMap*)relation->partMap)->hashElements[partSeq].partitionOid;
+            resultno = ((HashPartitionMap*)relation->partMap)->hashElements[partSeq].partitionno;
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-                    errmsg("partSeq: %d out range of current relation partMap element num: %d.",
-                        partSeq,
-                        hashElementsNum)));
+            ReportPartseqOutRange();
         }
-        /* do simple check, as rangeElements already be sorted */
-        if (partSeq > 0 &&
-            result == ((HashPartitionMap*)partmap)->hashElements[partSeq - 1].partitionOid) {
-            ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_OBJECT),
-                    errmsg("Duplicate range partition map oids: %u, please try again.", result)));
-        }    
-    } else {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Unupport partition strategy \"%d\"", partmap->type)));
+    }
+
+    /* if partSeq is out of range, or partitionno does not match */
+    if (!OidIsValid(result) && partitionno > 0) {
+        result = GetPartitionOidFromPartitionno(relation, partitionno);
+    } else if (partitionno > 0 && partitionno != resultno) {
+        PARTITION_LOG("partitionno does not match, src is %d, dest is %u. src partitionno will be used",
+            partitionno, resultno);
+        result = GetPartitionOidFromPartitionno(relation, partitionno);
+    }
+
+    if (!OidIsValid(result) && partitionno > 0) {
+        bool issubpartition = RelationIsPartitionOfSubPartitionTable(relation);
+        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("could not find %s oid from %s %d for relation \"%s\"",
+            issubpartition ? "subpartition" : "partition",
+            issubpartition ? "subpartitionno" : "partitionno",
+            partitionno,
+            RelationGetRelationName(relation))));
     }
 
     return result;
@@ -2503,12 +2567,17 @@ void ConstructConstFromValues(Datum* datums, const bool* nulls, Oid* attrs, cons
     return;
 }
 
-SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq)
+SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq, int partitionno)
 {
     ListCell* cell = NULL;
     foreach (cell, selectedSubPartitions) {
         SubPartitionPruningResult* subPartPruningResult = (SubPartitionPruningResult*)lfirst(cell);
         if (subPartPruningResult->partSeq == partSeq) {
+            if (subPartPruningResult->partitionno != partitionno) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR), errmsg("the partitionno does not match, src is %d, dest is %u",
+                    partitionno, subPartPruningResult->partitionno)));
+            }
             return subPartPruningResult;
         }
     }

@@ -3378,6 +3378,12 @@ static SubPartitionPruningResult* _readSubPartitionPruningResult(SubPartitionPru
     READ_INT_FIELD(partSeq);
     READ_BITMAPSET_FIELD(bm_selectedSubPartitions);
     READ_NODE_FIELD(ls_selectedSubPartitions);
+    IF_EXIST(partitionno) {
+        READ_NODE_FIELD(partitionno);
+    }
+    IF_EXIST(ls_selectedSubPartitionnos) {
+        READ_NODE_FIELD(ls_selectedSubPartitionnos);
+    }
 
     READ_DONE();
 }
@@ -5509,6 +5515,18 @@ static RangePartitionDefState* _readRangePartitionDefState()
     READ_STRING_FIELD(partitionName);
     READ_NODE_FIELD(boundary);
     READ_STRING_FIELD(tablespacename);
+    IF_EXIST(subPartitionDefState) {
+        READ_NODE_FIELD(subPartitionDefState);
+    }
+    IF_EXIST(partitionno) {
+        READ_NODE_FIELD(partitionno);
+    }
+    IF_EXIST(curStartVal) {
+        READ_NODE_FIELD(curStartVal);
+    }
+    IF_EXIST(partitionInitName) {
+        READ_NODE_FIELD(partitionInitName);
+    }
 
     READ_DONE();
 }
@@ -5520,6 +5538,12 @@ static ListPartitionDefState* _readListPartitionDefState()
     READ_STRING_FIELD(partitionName);
     READ_NODE_FIELD(boundary);
     READ_STRING_FIELD(tablespacename);
+    IF_EXIST(subPartitionDefState) {
+        READ_NODE_FIELD(subPartitionDefState);
+    }
+    IF_EXIST(partitionno) {
+        READ_NODE_FIELD(partitionno);
+    }
 
     READ_DONE();
 }
@@ -5531,6 +5555,12 @@ static HashPartitionDefState* _readHashPartitionDefState()
     READ_STRING_FIELD(partitionName);
     READ_NODE_FIELD(boundary);
     READ_STRING_FIELD(tablespacename);
+    IF_EXIST(subPartitionDefState) {
+        READ_NODE_FIELD(subPartitionDefState);
+    }
+    IF_EXIST(partitionno) {
+        READ_NODE_FIELD(partitionno);
+    }
 
     READ_DONE();
 }

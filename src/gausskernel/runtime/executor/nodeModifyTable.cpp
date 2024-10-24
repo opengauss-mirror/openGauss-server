@@ -660,11 +660,13 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
 
     RangeTblEntry *rte = exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate);
     if (RelationIsPartitioned(resultRelationDesc)) {
-        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+        int partitionno = INVALID_PARTITION_NO;
+        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno);
         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
             partitionid,
+            partitionno,
             &heaprel,
             &partition,
             RowExclusiveLock);
@@ -674,11 +676,13 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         CheckPartitionOidForSpecifiedPartition(rte, partitionid);
 
         if (RelationIsSubPartitioned(resultRelationDesc)) {
-            subPartitionId = heapTupleGetPartitionId(heaprel, tuple);
+            int subpartitionno = INVALID_PARTITION_NO;
+            subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
             searchFakeReationForPartitionOid(estate->esfRelations,
                 estate->es_query_cxt,
                 heaprel,
                 subPartitionId,
+                subpartitionno,
                 subPartRel,
                 subPart,
                 RowExclusiveLock);
@@ -987,7 +991,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     if (RelationIsSubPartitioned(result_relation_desc)) {
                         targetOid = heapTupleGetSubPartitionId(result_relation_desc, tuple);
                     } else {
-                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple, NULL);
                     }
                 } else {
                     targetOid = RelationGetRelid(result_relation_desc);
@@ -1101,11 +1105,12 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
-                        partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        int partitionno = INVALID_PARTITION_NO;
+                        partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno);
                         CheckPartitionOidForSpecifiedPartition(rte, partition_id);
 
                         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            result_relation_desc, partition_id, &heap_rel, &partition, RowExclusiveLock);
+                            result_relation_desc, partition_id, partitionno, &heap_rel, &partition, RowExclusiveLock);
                         if (!res) {
                             return NULL;
                         }
@@ -1135,27 +1140,29 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     case PARTTYPE_SUBPARTITIONED_RELATION: {
                         Oid partitionId = InvalidOid;
                         Oid subPartitionId = InvalidOid;
+                        int partitionno = INVALID_PARTITION_NO;
+                        int subpartitionno = INVALID_PARTITION_NO;
                         Relation partRel = NULL;
                         Partition part = NULL;
                         Relation subPartRel = NULL;
                         Partition subPart = NULL;
 
                         /* get partititon oid for insert the record */
-                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno);
                         CheckPartitionOidForSpecifiedPartition(rte, partitionId);
 
                         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            result_relation_desc, partitionId, &partRel, &part, RowExclusiveLock);
+                            result_relation_desc, partitionId, partitionno, &partRel, &part, RowExclusiveLock);
                         if (!res) {
                             return NULL;
                         }
 
                         /* get subpartititon oid for insert the record */
-                        subPartitionId = heapTupleGetPartitionId(partRel, tuple);
+                        subPartitionId = heapTupleGetPartitionId(partRel, tuple, &subpartitionno);
                         CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
 
                         res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
-                            partRel, subPartitionId, &subPartRel, &subPart, RowExclusiveLock);
+                            partRel, subPartitionId, subpartitionno, &subPartRel, &subPart, RowExclusiveLock);
                         if (!res) {
                             partitionClose(result_relation_desc, part, RowExclusiveLock);
                             return NULL;
@@ -1392,6 +1399,7 @@ ldelete:
                     estate->es_query_cxt,
                     result_relation_desc,
                     deletePartitionOid,
+                    INVALID_PARTITION_NO,
                     part_relation,
                     partition,
                     RowExclusiveLock);
@@ -1713,6 +1721,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     Relation fake_part_rel = NULL;
     Relation parent_relation = NULL;
     Oid new_partId = InvalidOid;
+    int partitionno = INVALID_PARTITION_NO;
     uint64 res_hash;
     uint64 hash_del = 0;
     bool is_record = false;
@@ -2081,13 +2090,16 @@ lreplace:
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
+                        partitionno = GetCurrentPartitionNo(new_partId);
                         if (RelationIsSubPartitioned(result_relation_desc)) {
-                            Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
+                            Partition part = PartitionOpenWithPartitionno(result_relation_desc, new_partId,
+                                partitionno, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
 
                             partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route);
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
+                                partitionno = GetCurrentSubPartitionNo(new_partId);
                             } else {
                                 ereport(ERROR, (errmodule(MOD_EXECUTOR),
                                                 (errcode(ERRCODE_PARTITION_ERROR),
@@ -2148,6 +2160,7 @@ lreplace:
                         estate->es_query_cxt,
                         result_relation_desc,
                         new_partId,
+                        partitionno,
                         fake_part_rel,
                         partition,
                         RowExclusiveLock);
@@ -2336,6 +2349,7 @@ lreplace:
                                 estate->es_query_cxt,
                                 result_relation_desc,
                                 oldPartitionOid,
+                                partitionno,
                                 old_fake_relation,
                                 old_partition,
                                 RowExclusiveLock);
@@ -2518,15 +2532,15 @@ ldelete:
                         {
                             Partition insert_partition = NULL;
                             Relation fake_insert_relation = NULL;
-
                             if (need_create_file) {
-                                new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
+                                new_partId = AddNewIntervalPartition(result_relation_desc, tuple, &partitionno);
                             }
 
                             bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
                                 estate->es_query_cxt,
                                 result_relation_desc,
                                 new_partId,
+                                partitionno,
                                 &fake_part_rel,
                                 &insert_partition,
                                 RowExclusiveLock);

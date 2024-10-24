@@ -650,6 +650,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
       PARTTYPE_SUBPARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
      (RELKIND_RELATION == (relation)->rd_rel->relkind))
 
+#define RELATION_IS_INTERVAL_PARTITIONED(relation)                                     \
+    (RELATION_IS_PARTITIONED(relation) && PartitionMapIsInterval((relation)->partMap))
+
 #define RELATION_IS_VALUE_PARTITIONED(relation)                               \
     ((PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
         (RELKIND_RELATION == (relation)->rd_rel->relkind))

@@ -1450,36 +1450,51 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
             index_state->ss.part_id = 0;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
-        foreach (cell, part_seqs) {
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
+        StringInfo partNameInfo = makeStringInfo();
+        StringInfo partOidInfo = makeStringInfo();
+
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
             Oid indexpartitionid = InvalidOid;
             List* partitionIndexOidList = NIL;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
 
             /* get table partition and add it to a list for following scan */
-            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->scan.pruningInfo->partMap);
-            table_partition = partitionOpen(current_relation, tablepartitionid, lock);
+            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
+            table_partition = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lock);
             index_state->ss.partitions = lappend(index_state->ss.partitions, table_partition);
 
+            appendStringInfo(partNameInfo, "%s ", table_partition->pd_part->relname.data);
+            appendStringInfo(partOidInfo, "%u ", tablepartitionid);
+
             if (RelationIsSubPartitioned(current_relation)) {
-                ListCell *lc = NULL;
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
                 SubPartitionPruningResult* subPartPruningResult =
-                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq, partitionno);
                 if (subPartPruningResult == NULL) {
                     continue;
                 }
                 List *subpartList = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
+                Assert(list_length(subpartList) == list_length(subpartitionnos));
                 List *subIndexList = NULL;
                 List *subRelationList = NULL;
 
-                foreach (lc, subpartList)
+                forboth (lc1, subpartList, lc2, subpartitionnos)
                 {
-                    int subpartSeq = lfirst_int(lc);
+                    int subpartSeq = lfirst_int(lc1);
+                    int subpartitionno = lfirst_int(lc2);
                     Relation tablepartrel = partitionGetRelation(current_relation, table_partition);
-                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq);
-                    Partition subpart = partitionOpen(tablepartrel, subpartitionid, AccessShareLock);
+                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq, subpartitionno);
+                    Partition subpart =
+                        PartitionOpenWithPartitionno(tablepartrel, subpartitionid, subpartitionno, AccessShareLock);
 
                     partitionIndexOidList = PartitionGetPartIndexList(subpart);
 
