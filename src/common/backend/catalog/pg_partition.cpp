@@ -24,6 +24,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "access/sysattr.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_partition.h"
@@ -35,6 +36,7 @@
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/inval.h"
+#include "utils/knl_relcache.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "access/genam.h"
@@ -45,9 +47,8 @@
 #include "utils/snapmgr.h"
 #include "utils/lsyscache.h"
 
-void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
-    const oidvector* tablespaces, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions,
-    char parttype)
+void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id,
+    PartitionTupleInfo *partTupleInfo)
 {
     Datum values[Natts_pg_partition];
     bool nulls[Natts_pg_partition];
@@ -56,9 +57,10 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
     errno_t errorno = EOK;
 
     pd_part = new_part_desc->pd_part;
-    Assert(pd_part->parttype == PART_OBJ_TYPE_PARTED_TABLE || pd_part->parttype == PART_OBJ_TYPE_TOAST_TABLE ||
-           pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION || pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION ||
-           pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+    char parttype = pd_part->parttype;
+    Assert(parttype == PART_OBJ_TYPE_PARTED_TABLE || parttype == PART_OBJ_TYPE_TOAST_TABLE ||
+           parttype == PART_OBJ_TYPE_TABLE_PARTITION || parttype == PART_OBJ_TYPE_INDEX_PARTITION ||
+           parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
 
     /* This is a tad tedious, but way cleaner than what we used to do... */
     errorno = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -68,7 +70,7 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
     securec_check_c(errorno, "\0", "\0");
 
     values[Anum_pg_partition_relname - 1] = NameGetDatum(&pd_part->relname);
-    values[Anum_pg_partition_parttype - 1] = CharGetDatum(pd_part->parttype);
+    values[Anum_pg_partition_parttype - 1] = CharGetDatum(parttype);
     values[Anum_pg_partition_parentid - 1] = ObjectIdGetDatum(pd_part->parentid);
     values[Anum_pg_partition_rangenum - 1] = UInt32GetDatum(pd_part->rangenum);
     values[Anum_pg_partition_intervalnum - 1] = UInt32GetDatum(pd_part->intervalnum);
@@ -89,15 +91,15 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
     values[Anum_pg_partition_relfrozenxid - 1] = ShortTransactionIdGetDatum(pd_part->relfrozenxid);
 
     /* partition key */
-    if (pkey != NULL) {
-        values[Anum_pg_partition_partkey - 1] = PointerGetDatum(pkey);
+    if (partTupleInfo->pkey != NULL) {
+        values[Anum_pg_partition_partkey - 1] = PointerGetDatum(partTupleInfo->pkey);
     } else {
         nulls[Anum_pg_partition_partkey - 1] = true;
     }
 
     /* interval tablespaces */
-    if (tablespaces != NULL) {
-        values[Anum_pg_partition_intablespace - 1] = PointerGetDatum(tablespaces);
+    if (partTupleInfo->intablespace != NULL) {
+        values[Anum_pg_partition_intablespace - 1] = PointerGetDatum(partTupleInfo->intablespace);
     } else {
         nulls[Anum_pg_partition_intablespace - 1] = true;
     }
@@ -105,28 +107,28 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
     nulls[Anum_pg_partition_intspnum - 1] = true;
 
     /* interval */
-    if (interval != (Datum)0) {
-        values[Anum_pg_partition_interval - 1] = interval;
+    if (partTupleInfo->interval != (Datum)0) {
+        values[Anum_pg_partition_interval - 1] = partTupleInfo->interval;
     } else {
         nulls[Anum_pg_partition_interval - 1] = true;
     }
 
     /* maxvalue */
-    if (maxValues != (Datum)0) {
-        values[Anum_pg_partition_boundaries - 1] = maxValues;
+    if (partTupleInfo->boundaries != (Datum)0) {
+        values[Anum_pg_partition_boundaries - 1] = partTupleInfo->boundaries;
     } else {
         nulls[Anum_pg_partition_boundaries - 1] = true;
     }
 
     /* transit point */
-    if (transitionPoint != (Datum)0) {
-        values[Anum_pg_partition_transit - 1] = transitionPoint;
+    if (partTupleInfo->transitionPoint != (Datum)0) {
+        values[Anum_pg_partition_transit - 1] = partTupleInfo->transitionPoint;
     } else {
         nulls[Anum_pg_partition_transit - 1] = true;
     }
 
-    if (reloptions != (Datum)0) {
-        values[Anum_pg_partition_reloptions - 1] = reloptions;
+    if (partTupleInfo->reloptions != (Datum)0) {
+        values[Anum_pg_partition_reloptions - 1] = partTupleInfo->reloptions;
         nulls[Anum_pg_partition_reloptions - 1] = false;
     } else {
         nulls[Anum_pg_partition_reloptions - 1] = true;
@@ -140,7 +142,7 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
         values[Anum_pg_partition_relfrozenxid64 - 1] = u_sess->utils_cxt.RecentXmin;
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (!is_cstore_option(RELKIND_RELATION, reloptions)) {
+        if (!is_cstore_option(RELKIND_RELATION, partTupleInfo->reloptions)) {
             values[Anum_pg_partition_relminmxid - 1] = GetOldestMultiXactId();
         } else {
             values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
@@ -151,6 +153,17 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
 #ifndef ENABLE_MULTIPLE_NODES
         values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
 #endif
+    }
+
+    if (partTupleInfo->partitionno != INVALID_PARTITION_NO) {
+        values[Anum_pg_partition_partitionno - 1] = Int32GetDatum(partTupleInfo->partitionno);
+    } else {
+        nulls[Anum_pg_partition_partitionno - 1] = true;
+    }
+    if (partTupleInfo->subpartitionno != INVALID_PARTITION_NO) {
+        values[Anum_pg_partition_subpartitionno - 1] = Int32GetDatum(partTupleInfo->subpartitionno);
+    } else {
+        nulls[Anum_pg_partition_subpartitionno - 1] = true;
     }
 
     /* form a tuple using values and null array, and insert it */
@@ -181,7 +194,7 @@ typedef struct {
 
 void ExceptionHandlerForPartition(GetPartitionOidArgs *args, Oid partitionOid, bool missingOk)
 {
-    // For subpartition, we'll deal with it in subPartitionGetSubPartitionOid
+    // For subpartition, we'll deal with it in SubPartitionGetSubPartitionOid
     if (args->objectType != PART_OBJ_TYPE_TABLE_SUB_PARTITION && !OidIsValid(partitionOid)) {
         if (!missingOk) {
             if (args->partitionName != NULL) {
@@ -205,7 +218,7 @@ void ExceptionHandlerForPartition(GetPartitionOidArgs *args, Oid partitionOid, b
  * @Return: partition oid
  * @See also:
  */
-static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode, bool missingOk, bool noWait)
+static Oid PartitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode, bool missingOk, bool noWait)
 {
     Oid partitionOid = InvalidOid;
     Oid partitionOldOid = InvalidOid;
@@ -349,23 +362,26 @@ static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode
     return partitionOid;
 }
 
-Oid SubPartitionGetSubPartitionOid(GetPartitionOidArgs *args, Oid partitionedRelationOid, Oid *partOidForSubPart,
-                                   LOCKMODE lockMode, bool missingOk, bool noWait)
+static Oid SubPartitionGetSubPartitionOid(GetPartitionOidArgs *args, Oid partitionedRelationOid, Oid *partOidForSubPart,
+    LOCKMODE partlock, LOCKMODE subpartlock, bool missingOk, bool noWait)
 {
-    Relation rel = relation_open(partitionedRelationOid, lockMode);
+    Relation rel = relation_open(partitionedRelationOid, AccessShareLock);
     List *partOidList = relationGetPartitionOidList(rel);
     ListCell *cell = NULL;
     Oid partitionOid = InvalidOid;
     foreach (cell, partOidList) {
         Oid partOid = lfirst_oid(cell);
         args->partitionedRelOid = partOid;
-        partitionOid = partitionGetPartitionOid(args, lockMode, missingOk, noWait);
+        partitionOid = PartitionGetPartitionOid(args, subpartlock, missingOk, noWait);
         if (OidIsValid(partitionOid)) {
+            if (partlock != NoLock) {
+                LockPartitionOid(partitionedRelationOid, partOid, partlock);
+            }
             *partOidForSubPart = partOid;
             break;
         }
     }
-    relation_close(rel, lockMode);
+    relation_close(rel, AccessShareLock);
 
     if (!OidIsValid(partitionOid)) {
         if (!missingOk) {
@@ -392,9 +408,9 @@ Oid SubPartitionGetSubPartitionOid(GetPartitionOidArgs *args, Oid partitionedRel
  *
  *                If nowait = true, throw an error if we'd have to wait for a lock.
  */
-Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partitionName, char objectType,
+Oid PartitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partitionName, char objectType,
     LOCKMODE lockMode, bool missingOk, bool noWait, PartitionNameGetPartidCallback callback, void* callback_arg,
-    LOCKMODE callbackobj_lockMode, Oid *partOidForSubPart)
+    LOCKMODE callbackobj_lockMode)
 {
     if (!OidIsValid(partitionedRelationOid) || !PointerIsValid(partitionName)) {
         return InvalidOid;
@@ -416,17 +432,43 @@ Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partiti
 
     Relation partitionRelRelation = relation_open(PartitionRelationId, AccessShareLock);
 
-    Oid partitionOid = InvalidOid;
-    if (objectType == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
-        partitionOid = SubPartitionGetSubPartitionOid(&args, partitionedRelationOid, partOidForSubPart, lockMode,
-                                                      missingOk, noWait);
-    } else {
-        partitionOid = partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
-    }
+    Oid partitionOid = PartitionGetPartitionOid(&args, lockMode, missingOk, noWait);
 
     relation_close(partitionRelRelation, AccessShareLock);
 
     return partitionOid;
+}
+
+Oid SubPartitionNameGetSubPartitionOid(Oid partitionedRelationOid, const char* subpartitionName, LOCKMODE partlock,
+    LOCKMODE subpartlock, bool missingOk, bool noWait, PartitionNameGetPartidCallback callback, void* callback_arg,
+    LOCKMODE callbackobj_lockMode, Oid *partOidForSubPart)
+{
+    if (!OidIsValid(partitionedRelationOid) || !PointerIsValid(subpartitionName)) {
+        return InvalidOid;
+    }
+
+    GetPartitionOidArgs args;
+    /* get partition oid from given name */
+    args.givenPartitionName = true;
+    args.partitionedRelOid = partitionedRelationOid;
+    args.partitionName = subpartitionName;
+    args.objectType = PART_OBJ_TYPE_TABLE_SUB_PARTITION;
+    args.callback = callback;
+    args.callbackArgs = callback_arg;
+    args.callbackObjLockMode = callbackobj_lockMode;
+    /* the following arguments is not used. */
+    args.partitionedRel = NULL;
+    args.partKeyValueList = NULL;
+    args.topClosed = false;
+
+    Relation partitionRelRelation = relation_open(PartitionRelationId, AccessShareLock);
+
+    Oid subpartitionOid = SubPartitionGetSubPartitionOid(&args, partitionedRelationOid, partOidForSubPart, partlock,
+        subpartlock, missingOk, noWait);
+
+    relation_close(partitionRelRelation, AccessShareLock);
+
+    return subpartitionOid;
 }
 
 /*
@@ -439,9 +481,9 @@ Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partiti
  * @Param[IN] rel: partitioned relation
  * @Param[IN] topClosed:
  * @Return: partition oid
- * @See also: partitionNameGetPartitionOid()
+ * @See also: PartitionNameGetPartitionOid()
  */
-Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMODE lockMode, bool topClosed,
+Oid PartitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMODE lockMode, bool topClosed,
     bool missingOk, bool noWait)
 {
     GetPartitionOidArgs args;
@@ -459,11 +501,11 @@ Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMOD
     args.callbackArgs = NULL;
     args.callbackObjLockMode = NoLock;
 
-    return partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+    return PartitionGetPartitionOid(&args, lockMode, missingOk, noWait);
 }
 
-Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, List *subpartKeyValueList,
-    LOCKMODE lockMode, bool topClosed, bool missingOk, bool noWait, Oid *partOidForSubPart)
+Oid SubPartitionValuesGetSubPartitionOid(Relation rel, List *partKeyValueList, List *subpartKeyValueList,
+    LOCKMODE partlock, LOCKMODE subpartlock, bool topClosed, bool missingOk, bool noWait, Oid *partOidForSubPart)
 {
     GetPartitionOidArgs args;
     /* get partition oid from given values */
@@ -479,7 +521,7 @@ Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, L
     args.callbackArgs = NULL;
     args.callbackObjLockMode = NoLock;
 
-    *partOidForSubPart = partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+    *partOidForSubPart = PartitionGetPartitionOid(&args, partlock, missingOk, noWait);
     if (!OidIsValid(*partOidForSubPart)) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition which owns the subpartition is missing"),
@@ -488,9 +530,10 @@ Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, L
             erraction("Check system table 'pg_partition' for more information")));
     }
 
-    Partition part = partitionOpen(rel, *partOidForSubPart, lockMode);
+    Partition part = partitionOpen(rel, *partOidForSubPart, NoLock);
     Relation partrel = partitionGetRelation(rel, part);
-    Oid subpartOid = partitionValuesGetPartitionOid(partrel, subpartKeyValueList, lockMode, true, true, false);
+    Oid subpartOid =
+        PartitionValuesGetPartitionOid(partrel, subpartKeyValueList, subpartlock, topClosed, missingOk, noWait);
     releaseDummyRelation(&partrel);
     partitionClose(rel, part, NoLock);
 
@@ -1489,41 +1532,470 @@ Oid GetBaseRelOidOfParition(Relation relation)
     return relation->parentId;
 }
 
-/* NB: all operations on ADD_PARTITION_ACTION sequence lock must use TopTransactionResourceOwner. */
-void LockRelationForAddIntervalPartition(Relation rel)
+/* Set PARTITION OBJECT_LOCK */
+void LockPartitionObject(Oid relOid, PartitionObjectLock object, PartitionObjectLockType type)
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-    LockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
-        AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
+    LockDatabaseObject(relOid, object, 0, type);
     t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+
+    const char* objectname = (object == PARTITION_OBJECT_LOCK_SDEQUENCE) ? "partition": "interval";
+    PARTITION_LOG("Successfully obtain %s object lock: relid %u locklevel %d", objectname, relOid, type);
 }
 
-void LockRelationForAccessIntervalPartitionTab(Relation rel)
+/* Release PARTITION OBJECT_LOCK */
+void UnlockPartitionObject(Oid relOid, PartitionObjectLock object, PartitionObjectLockType type)
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-    LockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
-        AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    UnlockDatabaseObject(relOid, object, 0, type);
     t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+
+    const char* objectname = (object == PARTITION_OBJECT_LOCK_SDEQUENCE) ? "partition": "interval";
+    PARTITION_LOG("Successfully release %s object lock: relid %u locklevel %d", objectname, relOid, type);
 }
 
-void UnlockRelationForAccessIntervalPartTabIfHeld(Relation rel)
+bool ConditionalLockPartitionObject(Oid relOid, PartitionObjectLock object, PartitionObjectLockType type)
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-
-    UnlockPartitionSeqIfHeld(RelationGetRelid(rel), ADD_PARTITION_ACTION, AccessShareLock);
+    bool flag = ConditionalLockDatabaseObject(relOid, object, 0, type);
     t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+
+    if (flag) {
+        const char* objectname = (object == PARTITION_OBJECT_LOCK_SDEQUENCE) ? "partition": "interval";
+        PARTITION_LOG("Successfully obtain %s object lock: relid %u locklevel %d", objectname, relOid, type);
+    }
+    return flag;
 }
 
-void UnlockRelationForAddIntervalPartition(Relation rel)
+#ifndef ENABLE_MULTIPLE_NODES
+/* Set DML tag for a partitioned table */
+void AddPartitionDMLInfo(Oid relOid)
 {
-    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+    MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    u_sess->storage_cxt.partition_dml_oids = lappend_oid(u_sess->storage_cxt.partition_dml_oids, relOid);
+    MemoryContextSwitchTo(old_cxt);
+}
 
-    UnlockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
-        AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
-    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+/* Set DDL tag for a partitioned table */
+void AddPartitionDDLInfo(Oid relOid)
+{
+    MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    u_sess->storage_cxt.partition_ddl_oids = lappend_oid(u_sess->storage_cxt.partition_ddl_oids, relOid);
+    MemoryContextSwitchTo(old_cxt);
+}
+
+/* Add AccessExclusiveLock for all partitioned tables added in AddPartitionDDLInfo */
+void LockPartitionDDLOperation()
+{
+    ListCell *cell;
+    foreach(cell, u_sess->storage_cxt.partition_ddl_oids) {
+        Oid relid = lfirst_oid(cell);
+        LockPartitionObject(relid, PARTITION_OBJECT_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+    }
+}
+#endif
+
+HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot)
+{
+    HeapTuple pg_partition_tuple;
+    Relation pg_partition_desc;
+    SysScanDesc pg_partition_scan;
+    ScanKeyData key[1];
+
+    /*
+     * If something goes wrong during backend startup, we might find ourselves
+     * trying to read pg_partition before we've selected a database.  That ain't
+     * gonna work, so bail out with a useful error message.  If this happens,
+     * it probably means a partcache entry that needs to be nailed isn't.
+     */
+    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+        ereport(FATAL,
+            (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("cannot read pg_class without having selected a database")));
+    }
+
+    if (snapshot == NULL) {
+        snapshot = GetCatalogSnapshot();
+    }
+
+    /*
+     * form a scan key
+     */
+    ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(targetPartId));
+
+    /*
+     * Open pg_partition and fetch a tuple.  Force heap scan if we haven't yet
+     * built the critical partcache entries (this includes initdb and startup
+     * without a pg_internal.init file).  The caller can also force a heap
+     * scan by setting indexOK == false.
+     */
+    pg_partition_desc = heap_open(PartitionRelationId, AccessShareLock);
+    pg_partition_scan = systable_beginscan(pg_partition_desc,
+        PartitionOidIndexId,
+        indexOK && LocalRelCacheCriticalRelcachesBuilt(),
+        snapshot,
+        1,
+        key);
+
+    pg_partition_tuple = systable_getnext(pg_partition_scan);
+
+    /*
+     * Must copy tuple before releasing buffer.
+     */
+    if (HeapTupleIsValid(pg_partition_tuple)) {
+        pg_partition_tuple = heap_copytuple(pg_partition_tuple);
+    }
+
+    /* all done */
+    systable_endscan(pg_partition_scan);
+    heap_close(pg_partition_desc, AccessShareLock);
+
+    return pg_partition_tuple;
+}
+
+/* get the oid of pg_partition entry from a partitioned table's oid */
+Oid RelOidGetPartitionTupleid(Oid relOid)
+{
+    Relation pg_partition;
+    HeapTuple tup;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    Oid partOid;
+
+    pg_partition = heap_open(PartitionRelationId, AccessShareLock);
+    ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+        CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relOid));
+
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
+    if (!HeapTupleIsValid((tup = systable_getnext(scan)))) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("cache lookup failed for relation %u", relOid)));
+    }
+
+    partOid = HeapTupleGetOid(tup);
+    systable_endscan(scan);
+    heap_close(pg_partition, AccessShareLock);
+
+    return partOid;
+}
+
+/* get the partitionno of a pg_partition entry */
+int GetCurrentPartitionNo(Oid partOid)
+{
+    HeapTuple tup;
+    Datum datum;
+    bool isNull;
+    int partitionno;
+
+    tup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(tup)) {
+        return INVALID_PARTITION_NO;
+    }
+    datum = SysCacheGetAttr(PARTRELID, tup, Anum_pg_partition_partitionno, &isNull);
+    if (isNull) {
+        partitionno = INVALID_PARTITION_NO;
+    } else {
+        partitionno = DatumGetInt32(datum);
+        Assert(partitionno != INVALID_PARTITION_NO);
+    }
+    ReleaseSysCache(tup);
+
+    return partitionno;
+}
+
+/* get the subpartitionno of a pg_partition entry */
+int GetCurrentSubPartitionNo(Oid partOid)
+{
+    HeapTuple tup;
+    Datum datum;
+    bool isNull;
+    int subpartitionno;
+
+    tup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(tup)) {
+        return INVALID_PARTITION_NO;
+    }
+    datum = SysCacheGetAttr(PARTRELID, tup, Anum_pg_partition_subpartitionno, &isNull);
+    if (isNull) {
+        subpartitionno = INVALID_PARTITION_NO;
+    } else {
+        subpartitionno = DatumGetInt32(datum);
+        Assert(subpartitionno != INVALID_PARTITION_NO);
+    }
+    ReleaseSysCache(tup);
+
+    return subpartitionno;
+}
+
+/* update the partitionno to new value */
+void UpdateCurrentPartitionNo(Oid partOid, int partitionno, bool inplace)
+{
+    Relation pg_partition;
+    HeapTuple tup;
+    HeapTuple ntup;
+    Datum values[Natts_pg_partition] = {0};
+    bool nulls[Natts_pg_partition] = {false};
+    bool replaces[Natts_pg_partition] = {false};
+
+    if (GetCurrentPartitionNo(partOid) == partitionno) {
+        return;
+    }
+
+    int absno = DatumGetInt32(DirectFunctionCall1(int4abs, Int32GetDatum(partitionno)));
+    if (absno > MAX_PARTITION_NO) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("current partitionno %d is out of range", partitionno)));
+    }
+
+    pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
+    tup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("cache lookup failed for partition %u", partOid)));
+    }
+
+    replaces[Anum_pg_partition_partitionno - 1] = true;
+    if (partitionno == INVALID_PARTITION_NO) {
+        nulls[Anum_pg_partition_partitionno - 1] = true;
+    } else {
+        values[Anum_pg_partition_partitionno - 1] = Int32GetDatum(partitionno);
+    }
+    ntup = heap_modify_tuple(tup, RelationGetDescr(pg_partition), values, nulls, replaces);
+
+    /* Only the tuple of partitioned table can use inplace-update! Since wait_clean_cpi is set inplace-update, we keep
+       consistent. Because the partitionno of partitioned table is only used to mask the max value, rollback will not
+       violate it. */
+    if (inplace) {
+        heap_inplace_update(pg_partition, ntup);
+    } else {
+        simple_heap_update(pg_partition, &ntup->t_self, ntup);
+        CatalogUpdateIndexes(pg_partition, ntup);
+    }
+
+    heap_freetuple_ext(ntup);
+    ReleaseSysCache(tup);
+    heap_close(pg_partition, RowExclusiveLock);
+
+    CommandCounterIncrement();
+}
+
+/* update the subpartitionno to new value */
+void UpdateCurrentSubPartitionNo(Oid partOid, int subpartitionno)
+{
+    Relation pg_partition;
+    HeapTuple tup;
+    HeapTuple ntup;
+    Datum values[Natts_pg_partition] = {0};
+    bool nulls[Natts_pg_partition] = {false};
+    bool replaces[Natts_pg_partition] = {false};
+
+    if (GetCurrentSubPartitionNo(partOid) == subpartitionno) {
+        return;
+    }
+
+    int absno = DatumGetInt32(DirectFunctionCall1(int4abs, Int32GetDatum(subpartitionno)));
+    if (absno > MAX_PARTITION_NO) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+            errmsg("current subpartitionno %d is out of range", subpartitionno)));
+    }
+
+    pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
+    tup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("cache lookup failed for subpartition %u", partOid)));
+    }
+
+    replaces[Anum_pg_partition_subpartitionno - 1] = true;
+    if (subpartitionno == INVALID_PARTITION_NO) {
+        nulls[Anum_pg_partition_subpartitionno - 1] = true;
+    } else {
+        values[Anum_pg_partition_subpartitionno - 1] = Int32GetDatum(subpartitionno);
+    }
+    ntup = heap_modify_tuple(tup, RelationGetDescr(pg_partition), values, nulls, replaces);
+
+    simple_heap_update(pg_partition, &ntup->t_self, ntup);
+    CatalogUpdateIndexes(pg_partition, ntup);
+
+    heap_freetuple_ext(ntup);
+    ReleaseSysCache(tup);
+    heap_close(pg_partition, RowExclusiveLock);
+
+    CommandCounterIncrement();
+    CacheInvalidatePartcacheByPartid(partOid);
+}
+
+Oid GetPartOidWithPartitionno(Oid parentid, int partitionno, char parttype)
+{
+    SysScanDesc scan;
+    ScanKeyData key[2];
+    Relation partition = NULL;
+    HeapTuple tuple = NULL;
+    Oid newpartOid = InvalidOid;
+    int newpartno;
+    Datum datum;
+    bool isNull = false;
+
+    Assert(parttype == PART_OBJ_TYPE_TABLE_PARTITION || parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+    bool issubpartition = (parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+
+    Assert(PARTITIONNO_IS_VALID(partitionno));
+
+    ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(parttype));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentid));
+    partition = heap_open(PartitionRelationId, AccessShareLock);
+    scan = systable_beginscan(partition, PartitionParentOidIndexId, true, NULL, 2, key);
+    while (HeapTupleIsValid((tuple = systable_getnext(scan)))) {
+        if (issubpartition) {
+            datum = heap_getattr(tuple, Anum_pg_partition_subpartitionno, RelationGetDescr(partition), &isNull);
+        } else {
+            datum = heap_getattr(tuple, Anum_pg_partition_partitionno, RelationGetDescr(partition), &isNull);
+        }
+        newpartno = isNull ? INVALID_PARTITION_NO : DatumGetInt32(datum);
+        if (newpartno == partitionno) {
+            newpartOid = HeapTupleGetOid(tuple);
+            break;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(partition, AccessShareLock);
+
+    return newpartOid;
+}
+
+Oid InvisiblePartidGetNewPartid(Oid partOid)
+{
+    HeapTuple partTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    Relation partition = NULL;
+    char parttype;
+    Oid parentid = InvalidOid;
+    Datum datum;
+    bool isNull = false;
+    int partitionno;
+
+    partTuple = ScanPgPartition(partOid, false, SnapshotAny);
+    if (!HeapTupleIsValid(partTuple)) {
+        return InvalidOid;
+    }
+
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    parttype = partForm->parttype;
+    parentid = partForm->parentid;
+    partition = heap_open(PartitionRelationId, AccessShareLock);
+    if (partForm->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
+        datum = heap_getattr(partTuple, Anum_pg_partition_partitionno, RelationGetDescr(partition), &isNull);
+    } else if (partForm->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        datum = heap_getattr(partTuple, Anum_pg_partition_subpartitionno, RelationGetDescr(partition), &isNull);
+    } else {
+        pfree_ext(partTuple);
+        heap_close(partition, AccessShareLock);
+        return InvalidOid;
+    }
+    partitionno = isNull ? INVALID_PARTITION_NO : DatumGetInt32(datum);
+    pfree_ext(partTuple);
+    heap_close(partition, AccessShareLock);
+
+    if (!PARTITIONNO_IS_VALID(partitionno)) {
+        return InvalidOid;
+    }
+    return GetPartOidWithPartitionno(parentid, partitionno, parttype);
+}
+
+/* init all partitionno/subpartitionno for a partition definition */
+void SetPartitionnoForPartitionState(PartitionState *partTableState)
+{
+    ListCell* cell = NULL;
+    ListCell* subcell = NULL;
+    int partitionno = 0;
+    foreach (cell, partTableState->partitionList) {
+        partitionno++;
+        PartitionDefState* partitionDefState = (PartitionDefState*)lfirst(cell);
+        partitionDefState->partitionno = partitionno;
+        int subpartitionno = 0;
+        foreach(subcell, partitionDefState->subPartitionDefState) {
+            subpartitionno++;
+            PartitionDefState* subpartitionDefState = (PartitionDefState*)lfirst(subcell);
+            subpartitionDefState->partitionno = subpartitionno;
+        }
+    }
+}
+
+/* reset all partitionno/subpartitionno to an ordered format */
+void RelationResetPartitionno(Oid relOid, LOCKMODE relationlock)
+{
+    Relation rel = heap_open(relOid, relationlock);
+    if (!RELATION_IS_PARTITIONED(rel)) {
+        heap_close(rel, relationlock);
+        return;
+    }
+
+    bool issubpartition = RelationIsSubPartitioned(rel);
+    List *partidList = relationGetPartitionOidList(rel);
+    ListCell *cell = NULL;
+    int partitionno = 0;
+    foreach (cell, partidList) {
+        Oid partid = lfirst_oid(cell);
+        partitionno++;
+        UpdateCurrentPartitionNo(partid, partitionno, false);
+
+        if (issubpartition) {
+            Partition part = partitionOpen(rel, partid, relationlock);
+            Relation partrel = partitionGetRelation(rel, part);
+            List *subpartidList = relationGetPartitionOidList(partrel);
+            ListCell *subcell = NULL;
+            int subpartitionno = 0;
+            foreach (subcell, subpartidList) {
+                Oid subpartid = lfirst_oid(subcell);
+                subpartitionno++;
+                UpdateCurrentSubPartitionNo(subpartid, subpartitionno);
+            }
+            releasePartitionOidList(&subpartidList);
+            releaseDummyRelation(&partrel);
+            partitionClose(rel, part, NoLock);
+
+            UpdateCurrentSubPartitionNo(partid, -subpartitionno);
+        }
+    }
+    releasePartitionOidList(&partidList);
+
+    UpdateCurrentPartitionNo(RelOidGetPartitionTupleid(relOid), -partitionno, false);
+
+    CacheInvalidateRelcache(rel);
+    CommandCounterIncrement();
+    heap_close(rel, NoLock);
+}
+
+/* get partitionno from partseq */
+int GetPartitionnoFromSequence(PartitionMap *partmap, int partseq)
+{
+    if (partseq < 0) {
+        return INVALID_PARTITION_NO;
+    }
+
+    incre_partmap_refcount(partmap);
+    int partitionno = INVALID_PARTITION_NO;
+    if (partmap->type == PART_TYPE_RANGE || partmap->type == PART_TYPE_INTERVAL) {
+        RangePartitionMap *partitionmap = (RangePartitionMap *)partmap;
+        if (partseq < partitionmap->rangeElementsNum) {
+            partitionno = partitionmap->rangeElements[partseq].partitionno;
+        }
+    } else if (partmap->type == PART_TYPE_LIST) {
+        ListPartitionMap *partitionmap = (ListPartitionMap *)partmap;
+        if (partseq < partitionmap->listElementsNum) {
+            partitionno = partitionmap->listElements[partseq].partitionno;
+        }
+    } else if (partmap->type == PART_TYPE_HASH) {
+        HashPartitionMap *partitionmap = (HashPartitionMap *)partmap;
+        if (partseq < partitionmap->hashElementsNum) {
+            partitionno = partitionmap->hashElements[partseq].partitionno;
+        }
+    }
+    decre_partmap_refcount(partmap);
+
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        Assert(partitionno > 0);
+    }
+    return partitionno;
 }
 

@@ -1409,11 +1409,11 @@ Datum pg_partition_size_name(PG_FUNCTION_ARGS)
     names = stringToQualifiedNameList(partTableName);
     partTableOid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
 
-    partOid = partitionNameGetPartitionOid(
+    partOid = PartitionNameGetPartitionOid(
         partTableOid, partName, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, true, false, NULL, NULL, NoLock);
 
     if (!OidIsValid(partOid)) {
-        partOid = partitionNameGetPartitionOid(partTableOid, partName, PART_OBJ_TYPE_TABLE_SUB_PARTITION, NoLock, true,
+        partOid = SubPartitionNameGetSubPartitionOid(partTableOid, partName, NoLock, NoLock, true,
             false, NULL, NULL, NoLock, &subparentOid);
     }
 
@@ -1540,11 +1540,11 @@ Datum pg_partition_indexes_size_name(PG_FUNCTION_ARGS)
     names = stringToQualifiedNameList(partTableName);
     partTableOid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
 
-    partOid = partitionNameGetPartitionOid(
+    partOid = PartitionNameGetPartitionOid(
         partTableOid, partName, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, true, false, NULL, NULL, NoLock);
 
     if (!OidIsValid(partOid)) {
-        partOid = partitionNameGetPartitionOid(partTableOid, partName, PART_OBJ_TYPE_TABLE_SUB_PARTITION, NoLock, true,
+        partOid = SubPartitionNameGetSubPartitionOid(partTableOid, partName, NoLock, NoLock, true,
             false, NULL, NULL, NoLock, &subparentOid);
     }
 

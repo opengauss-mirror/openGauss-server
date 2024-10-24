@@ -165,7 +165,7 @@ static void checkConstraint(CreateStmtContext* cxt, Node* node);
 static void setMemCheckFlagForIdx(List* IndexList);
 
 /* check partition name */
-static void check_partition_name_less_than(List* partitionList, bool isPartition);
+static void check_partition_name_internal(List* partitionList, bool isPartition);
 static void check_partition_name_start_end(List* partitionList, bool isPartition);
 
 /* for range partition: start/end syntax */
@@ -603,6 +603,7 @@ Oid *namespaceid, bool isFirstNode)
 #else
         checkPartitionName(stmt->partTableState->partitionList);
 #endif
+        SetPartitionnoForPartitionState(stmt->partTableState);
     }
 
     /* like clause-including reloptions: cxt.reloptions is produced by like including reloptions clause */
@@ -4828,42 +4829,15 @@ NodeTag GetPartitionStateType(char type)
 
 char* GetPartitionDefStateName(Node *partitionDefState)
 {
-    char* partitionName = NULL;
-    switch (nodeTag(partitionDefState)) {
-        case T_RangePartitionDefState:
-            partitionName = ((RangePartitionDefState *)partitionDefState)->partitionName;
-            break;
-        case T_ListPartitionDefState:
-            partitionName = ((ListPartitionDefState *)partitionDefState)->partitionName;
-            break;
-        case T_HashPartitionDefState:
-            partitionName = ((HashPartitionDefState *)partitionDefState)->partitionName;
-            break;
-        default:
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unsupported subpartition type")));
-            break;
-    }
-    return partitionName;
+    return ((PartitionDefState *)partitionDefState)->partitionName;
 }
 
 List* GetSubPartitionDefStateList(Node *partitionDefState)
 {
-    List* subPartitionList = NIL;
-    switch (nodeTag(partitionDefState)) {
-        case T_RangePartitionDefState:
-            subPartitionList = ((RangePartitionDefState *)partitionDefState)->subPartitionDefState;
-            break;
-        case T_ListPartitionDefState:
-            subPartitionList = ((ListPartitionDefState *)partitionDefState)->subPartitionDefState;
-            break;
-        case T_HashPartitionDefState:
-            subPartitionList = ((HashPartitionDefState *)partitionDefState)->subPartitionDefState;
-            break;
-        default:
-            subPartitionList = NIL;
-            break;
+    if (IsA(partitionDefState, RangePartitionStartEndDefState)) {
+        return NIL;
     }
-    return subPartitionList;
+    return ((PartitionDefState *)partitionDefState)->subPartitionDefState;
 }
 
 /*
@@ -5082,14 +5056,14 @@ static void checkPartitionValue(CreateStmtContext* cxt, CreateStmt* stmt)
 }
 
 /*
- * check_partition_name_less_than
+ * check_partition_name_internal
  *  check partition name with less/than stmt.
  *
  * [IN] partitionList: partition list
  *
  * RETURN: void
  */
-static void check_partition_name_less_than(List* partitionList, bool isPartition)
+static void check_partition_name_internal(List* partitionList, bool isPartition)
 {
     ListCell* cell = NULL;
     ListCell* lc = NULL;
@@ -5098,10 +5072,10 @@ static void check_partition_name_less_than(List* partitionList, bool isPartition
 
     foreach (cell, partitionList) {
         lc = cell;
-        ref_partname = ((RangePartitionDefState*)lfirst(cell))->partitionName;
+        ref_partname = ((PartitionDefState*)lfirst(cell))->partitionName;
 
         while (NULL != (lc = lnext(lc))) {
-            cur_partname = ((RangePartitionDefState*)lfirst(lc))->partitionName;
+            cur_partname = ((PartitionDefState*)lfirst(lc))->partitionName;
 
             if (!strcmp(ref_partname, cur_partname)) {
                 ereport(ERROR,
@@ -5159,46 +5133,28 @@ void checkPartitionName(List* partitionList, bool isPartition)
     if (cell != NULL) {
         Node* state = (Node*)lfirst(cell);
 
-        if (IsA(state, RangePartitionDefState))
-            check_partition_name_less_than(partitionList, isPartition);
-        else
+        if (IsA(state, RangePartitionStartEndDefState)) {
             check_partition_name_start_end(partitionList, isPartition);
+        } else {
+            check_partition_name_internal(partitionList, isPartition);
+        }
     }
 }
 
-List* GetPartitionNameList(List* partitionList)
+List* GetPartitionNameList(List *partitionList)
 {
-    ListCell* cell = NULL;
-    ListCell* lc = NULL;
-    List* subPartitionDefStateList = NIL;
-    List* partitionNameList = NIL;
+    ListCell *cell = NULL;
+    ListCell *lc = NULL;
+    List *subPartitionDefStateList = NIL;
+    List *partitionNameList = NIL;
 
     foreach (cell, partitionList) {
-        if (IsA((Node*)lfirst(cell), RangePartitionDefState)) {
-            RangePartitionDefState* partitionDefState = (RangePartitionDefState*)lfirst(cell);
-            subPartitionDefStateList = partitionDefState->subPartitionDefState;
-            partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-        } else if (IsA((Node*)lfirst(cell), ListPartitionDefState)) {
-            ListPartitionDefState* partitionDefState = (ListPartitionDefState*)lfirst(cell);
-            subPartitionDefStateList = partitionDefState->subPartitionDefState;
-            partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-        } else {
-            HashPartitionDefState* partitionDefState = (HashPartitionDefState*)lfirst(cell);
-            subPartitionDefStateList = partitionDefState->subPartitionDefState;
-            partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-        }
-
+        PartitionDefState *partitionDefState = (PartitionDefState *)lfirst(cell);
+        subPartitionDefStateList = partitionDefState->subPartitionDefState;
+        partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
         foreach (lc, subPartitionDefStateList) {
-            if (IsA((Node *)lfirst(lc), RangePartitionDefState)) {
-                RangePartitionDefState *partitionDefState = (RangePartitionDefState *)lfirst(lc);
-                partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-            } else if (IsA((Node *)lfirst(lc), ListPartitionDefState)) {
-                ListPartitionDefState *partitionDefState = (ListPartitionDefState *)lfirst(lc);
-                partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-            } else {
-                HashPartitionDefState *partitionDefState = (HashPartitionDefState *)lfirst(lc);
-                partitionNameList = lappend(partitionNameList, partitionDefState->partitionName);
-            }
+            PartitionDefState *subpartitionDefState = (PartitionDefState *)lfirst(lc);
+            partitionNameList = lappend(partitionNameList, subpartitionDefState->partitionName);
         }
     }
 
@@ -5589,7 +5545,7 @@ List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needC
                 (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("Partition key value can not be null"),
                     errdetail("partition bound element must be one of: string, datetime or interval literal, number, "
-                              "or MAXVALUE, and not null")));
+                              "or MAXVALUE(for range partition)/DEFAULT(for list partition), and not null")));
         }
         newValueList = lappend(newValueList, result);
     }
@@ -5600,7 +5556,7 @@ List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needC
     return newValueList;
 }
 
-void transformRangeSubPartitionValue(ParseState* pstate, List* subPartitionDefStateList)
+void transformSubPartitionValue(ParseState* pstate, List* subPartitionDefStateList)
 {
     if (subPartitionDefStateList == NIL) {
         return;
@@ -5621,7 +5577,7 @@ void transformPartitionValue(ParseState* pstate, Node* rangePartDef, bool needCh
             RangePartitionDefState* state = (RangePartitionDefState*)rangePartDef;
             /* only one boundary need transform */
             state->boundary = transformRangePartitionValueInternal(pstate, state->boundary, needCheck, true);
-            transformRangeSubPartitionValue(pstate, state->subPartitionDefState);
+            transformSubPartitionValue(pstate, state->subPartitionDefState);
             break;
         }
         case T_RangePartitionStartEndDefState: {
@@ -5636,14 +5592,14 @@ void transformPartitionValue(ParseState* pstate, Node* rangePartDef, bool needCh
         case T_ListPartitionDefState: {
             ListPartitionDefState* state = (ListPartitionDefState*)rangePartDef;
             state->boundary = transformListPartitionValue(pstate, state->boundary, needCheck, true);
-            transformRangeSubPartitionValue(pstate, state->subPartitionDefState);
+            transformSubPartitionValue(pstate, state->subPartitionDefState);
             break;
         }
         case T_HashPartitionDefState: {
             HashPartitionDefState* state = (HashPartitionDefState*)rangePartDef;
             /* only one boundary need transform */
             state->boundary = transformListPartitionValue(pstate, state->boundary, needCheck, true);
-            transformRangeSubPartitionValue(pstate, state->subPartitionDefState);
+            transformSubPartitionValue(pstate, state->subPartitionDefState);
             break;
         }
 
@@ -6092,11 +6048,11 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
     partMap = (RangePartitionMap*)partTableRel->partMap;
 
     if (PointerIsValid(splitState->src_partition_name)) {
-        srcPartOid = partitionNameGetPartitionOid(RelationGetRelid(partTableRel),
+        srcPartOid = PartitionNameGetPartitionOid(RelationGetRelid(partTableRel),
             splitState->src_partition_name,
             PART_OBJ_TYPE_TABLE_PARTITION,
             AccessExclusiveLock,
-            true,
+            false,
             false,
             NULL,
             NULL,
@@ -6105,9 +6061,8 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
         Assert(PointerIsValid(splitState->partition_for_values));
         splitState->partition_for_values = transformConstIntoTargetType(
             partTableRel->rd_att->attrs, partMap->partitionKey, splitState->partition_for_values);
-        srcPartOid = partitionValuesGetPartitionOid(
-            partTableRel, splitState->partition_for_values, AccessExclusiveLock, true, true, false);
-    }
+        srcPartOid = PartitionValuesGetPartitionOid(
+            partTableRel, splitState->partition_for_values, AccessExclusiveLock, true, false, false);    }
 
     return srcPartOid;
 }

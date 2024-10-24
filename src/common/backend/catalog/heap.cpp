@@ -190,8 +190,6 @@ static HashPartitionDefState *MakeHashDefaultSubpartition(PartitionState *partit
     char *tablespacename);
 static void MakeDefaultSubpartitionName(PartitionState *partitionState, char **subPartitionName,
     const char *partitionName);
-static void getSubPartitionInfo(char partitionStrategy, Node *partitionDefState, List **subPartitionDefState,
-    char **partitionName, char **tablespacename);
 /* ----------------------------------------------------------------
  *				XXX UGLY HARD CODED BADNESS FOLLOWS XXX
  *
@@ -5066,8 +5064,7 @@ static Datum BuildInterval(Node* partInterval)
  * Description	: Insert a entry to pg_partition. The entry is for partitioned-table or partition.
  * Notes		:
  */
-void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2vector* pkey, oidvector* intablespace,
-    Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions)
+void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, PartitionTupleInfo *partTupleInfo)
 {
     Form_pg_partition new_part_tup = new_part_desc->pd_part;
     /*
@@ -5087,16 +5084,7 @@ void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2ve
     new_part_tup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
     /* Now build and insert the tuple */
-    insertPartitionEntry(pg_part_desc,
-        new_part_desc,
-        new_part_desc->pd_id,
-        pkey,
-        intablespace,
-        interval,
-        maxValues,
-        transitionPoint,
-        reloptions,
-        new_part_tup->parttype);
+    insertPartitionEntry(pg_part_desc, new_part_desc, new_part_desc->pd_id, partTupleInfo);
 }
 
 static void deletePartitionTuple(Oid part_id)
@@ -5823,21 +5811,22 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
         reloptions);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     if (isSubpartition) {
         InitSubPartitionDef(newPartition, partTableOid, PART_STRATEGY_RANGE);
+        partTupleInfo.partitionno = INVALID_PARTITION_NO;
+        partTupleInfo.subpartitionno = newPartDef->partitionno;
     } else {
         InitPartitionDef(newPartition, partTableOid, PART_STRATEGY_RANGE);
+        partTupleInfo.partitionno = newPartDef->partitionno;
+        partTupleInfo.subpartitionno = -list_length(newPartDef->subPartitionDefState);
     }
+    partTupleInfo.pkey = subpartition_key;
+    partTupleInfo.boundaries = boundaryValue;
+    partTupleInfo.reloptions = reloptions;
 
     /* step 3: insert into pg_partition tuple */
-    addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
-        newPartition,               /* PartitionData pointer for partition */
-        subpartition_key,                       /* */
-        NULL,
-        (Datum)0,      /* interval*/
-        boundaryValue, /* max values */
-        (Datum)0,      /* transition point */
-        reloptions);
+    addNewPartitionTuple(pgPartRel, newPartition, &partTupleInfo);
 
     if (isSubpartition) {
         PartitionCloseSmgr(newPartition);
@@ -5930,7 +5919,7 @@ char* GenIntervalPartitionName(Relation rel)
         suffix = (suffix % MAX_PARTITION_NUM == 0 ? MAX_PARTITION_NUM : suffix % MAX_PARTITION_NUM);
         rc = snprintf_s(partName, NAMEDATALEN, NAMEDATALEN - 1, INTERVAL_PARTITION_NAME_PREFIX_FMT, suffix);
         securec_check_ss(rc, "\0", "\0");
-        existingPartOid = partitionNameGetPartitionOid(
+        existingPartOid = PartitionNameGetPartitionOid(
             rel->rd_id, partName, PART_OBJ_TYPE_TABLE_PARTITION, AccessShareLock, true, false, NULL, NULL, NoLock);
         if (!OidIsValid(existingPartOid)) {
             return partName;
@@ -6033,17 +6022,27 @@ Oid HeapAddIntervalPartition(Relation pgPartRel, Relation rel, Oid partTableOid,
     pfree(partName);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
+
+    /* the partitionno on relation tuple is negative */
+    int partitionno = -GetCurrentPartitionNo(RelOidGetPartitionTupleid(partTableOid));
+    if (!PARTITIONNO_IS_VALID(partitionno)) {
+        RelationResetPartitionno(partTableOid, RowExclusiveLock);
+        partitionno = -GetCurrentPartitionNo(RelOidGetPartitionTupleid(partTableOid));
+        Assert(PARTITIONNO_IS_VALID(partitionno));
+    }
+
     InitPartitionDef(newPartition, partTableOid, PART_STRATEGY_INTERVAL);
 
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
+    partTupleInfo.boundaries = boundaryValue;
+    partTupleInfo.reloptions = reloptions;
+    partTupleInfo.partitionno = ++partitionno;
+    partTupleInfo.subpartitionno = INVALID_PARTITION_NO;
+
     /* step 3: insert into pg_partition tuple*/
-    addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
-        newPartition,               /* PartitionData pointer for partition */
-        NULL,
-        NULL,
-        (Datum)0,      /* interval */
-        boundaryValue, /* max values */
-        (Datum)0,      /* transition point */
-        reloptions);
+    addNewPartitionTuple(pgPartRel, newPartition, &partTupleInfo);
+    /* inplace update on partitioned table, because we can't cover the wait_clean_gpi info, which is inplace updated */
+    UpdateCurrentPartitionNo(RelOidGetPartitionTupleid(partTableOid), -partitionno, true);
 
     relation = relation_open(partTableOid, NoLock);
     PartitionCloseSmgr(newPartition);
@@ -6121,22 +6120,22 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
         reloptions);
 
     Assert(newListPartitionOid == PartitionGetPartid(newListPartition));
-
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     if (isSubpartition) {
         InitSubPartitionDef(newListPartition, partTableOid, PART_STRATEGY_LIST);
+        partTupleInfo.partitionno = INVALID_PARTITION_NO;
+        partTupleInfo.subpartitionno = newListPartDef->partitionno;
     } else {
         InitPartitionDef(newListPartition, partTableOid, PART_STRATEGY_LIST);
+        partTupleInfo.partitionno = newListPartDef->partitionno;
+        partTupleInfo.subpartitionno = -list_length(newListPartDef->subPartitionDefState);
     }
+    partTupleInfo.pkey = subpartition_key;
+    partTupleInfo.boundaries = boundaryValue;
+    partTupleInfo.reloptions = reloptions;
 
     /* step 3: insert into pg_partition tuple */
-    addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
-        newListPartition,               /* PartitionData pointer for partition */
-        subpartition_key,                       /* */
-        NULL,
-        (Datum)0,      /* interval*/
-        boundaryValue, /* max values */
-        (Datum)0,      /* transition point */
-        reloptions);
+    addNewPartitionTuple(pgPartRel, newListPartition, &partTupleInfo);
 
     if (isSubpartition) {
         PartitionCloseSmgr(newListPartition);
@@ -6237,7 +6236,7 @@ Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
     return Timestamp2Boundarys(rel, Align2UpBoundary(value, partMap->intervalValue, boundaryTs));
 }
 
-Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL)
+Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partitionno, bool isDDL)
 {
     Relation pgPartRel = NULL;
     Oid newPartOid = InvalidOid;
@@ -6252,21 +6251,17 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL)
         CacheInvalidateRelcache(rel);
     }
 
-    /*
-     * to avoid dead lock, we should release AccessShareLock on ADD_PARTITION_ACTION
-     * locked by the transaction before aquire AccessExclusiveLock.
-     */
-    UnlockRelationForAccessIntervalPartTabIfHeld(rel);
-    /* it will accept invalidation messages generated by other sessions in lockRelationForAddIntervalPartition. */
-    LockRelationForAddIntervalPartition(rel);
+    /* it will accept invalidation messages */
+    LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     partitionRoutingForTuple(rel, insertTuple, u_sess->catalog_cxt.route);
 
-    /* if the partition exists, return partition's oid */
+    /* if the partition exists, return partition's oid. This may occur if another session do the same work. */
     if (u_sess->catalog_cxt.route->fileExist) {
         Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
-        /* we should take AccessShareLock again before release AccessExclusiveLock for consistency. */
-        LockRelationForAccessIntervalPartitionTab(rel);
-        UnlockRelationForAddIntervalPartition(rel);
+        UnlockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+        if (PointerIsValid(partitionno)) {
+            *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
+        }
         return u_sess->catalog_cxt.route->partitionId;
     }
 
@@ -6340,6 +6335,17 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL)
      */
     if (!isDDL) {
         UpdatePgObjectChangecsn(RelationGetRelid(rel), rel->rd_rel->relkind);
+    }
+
+    /* take ExclusiveLock to avoid PARTITION DDL COMMIT until we finish the InitPlan. Oid info will be masked here, and
+     * be locked in CommitTransaction. */
+#ifndef ENABLE_MULTIPLE_NODES
+    AddPartitionDDLInfo(RelationGetRelid(rel));
+#endif
+
+    if (PointerIsValid(partitionno)) {
+        *partitionno = GetCurrentPartitionNo(newPartOid);
+        PARTITIONNO_VALID_ASSERT(*partitionno);
     }
 
     return newPartOid;
@@ -6424,21 +6430,22 @@ Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
                                            reloptions);
 
     Assert(newHashPartitionOid == PartitionGetPartid(newHashPartition));
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     if (isSubpartition) {
         InitSubPartitionDef(newHashPartition, partTableOid, PART_STRATEGY_HASH);
+        partTupleInfo.partitionno = INVALID_PARTITION_NO;
+        partTupleInfo.subpartitionno = newHashPartDef->partitionno;
     } else {
         InitPartitionDef(newHashPartition, partTableOid, PART_STRATEGY_HASH);
+        partTupleInfo.partitionno = newHashPartDef->partitionno;
+        partTupleInfo.subpartitionno = -list_length(newHashPartDef->subPartitionDefState);
     }
+    partTupleInfo.pkey = subpartition_key;
+    partTupleInfo.boundaries = boundaryValue;
+    partTupleInfo.reloptions = reloptions;
 
     /* step 3: insert into pg_partition tuple */
-    addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
-        newHashPartition,               /* PartitionData pointer for partition */
-        subpartition_key,                       /* */
-        NULL,
-        (Datum)0,      /* interval*/
-        boundaryValue, /* max values */
-        (Datum)0,      /* transition point */
-        reloptions);
+    addNewPartitionTuple(pgPartRel, newHashPartition, &partTupleInfo);
 
     if (isSubpartition) {
         PartitionCloseSmgr(newHashPartition);
@@ -6618,26 +6625,24 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
     /* Update reloptions with wait_clean_gpi=n */
     newOptions = SetWaitCleanGpiRelOptions(reloptions, false);
 
+    PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
+    partTupleInfo.pkey = partition_key_attr_no; /* number array for partition key column of partitioned table */
+    partTupleInfo.intablespace = interval_talespace;
+    partTupleInfo.interval = interval;
+    partTupleInfo.boundaries = (Datum)0;
+    partTupleInfo.transitionPoint = transition_point;
+    partTupleInfo.reloptions = newOptions;
+    partTupleInfo.partitionno = -list_length(partTableState->partitionList);
+    partTupleInfo.subpartitionno = INVALID_PARTITION_NO;
+
     /*step 2: insert into pg_partition tuple*/
-    addNewPartitionTuple(pg_partition_rel, /* RelationData pointer for pg_partition */
-        new_partition,                     /* Local PartitionData pointer for new partition */
-        partition_key_attr_no,             /* number array for partition key column of partitioned table*/
-        interval_talespace,
-        interval,         /* interval partitioned table's interval*/
-        (Datum)0,         /* partitioned table's boundary value is empty in pg_partition */
-        transition_point, /* interval's partitioned table's transition point*/
-        newOptions);
+    addNewPartitionTuple(pg_partition_rel, new_partition, &partTupleInfo);
     relation = relation_open(reloid, NoLock);
     partitionClose(relation, new_partition, NoLock);
     relation_close(relation, NoLock);
 
-    if (partition_key_attr_no != NULL) {
-        pfree(partition_key_attr_no);
-    }
-
-    if (interval_talespace != NULL) {
-        pfree(interval_talespace);
-    }
+    pfree_ext(partition_key_attr_no);
+    pfree_ext(interval_talespace);
 
     if (interval != 0) {
         pfree(DatumGetPointer(interval));
@@ -6737,46 +6742,27 @@ static RangePartitionDefState *MakeRangeDefaultSubpartition(PartitionState *part
     return subPartitionDefState;
 }
 
-static void getSubPartitionInfo(char partitionStrategy, Node *partitionDefState,
-                         List **subPartitionDefState, char **partitionName, char **tablespacename)
-{
-    if (partitionStrategy == PART_STRATEGY_LIST) {
-        *subPartitionDefState = ((ListPartitionDefState *)partitionDefState)->subPartitionDefState;
-        *partitionName = ((ListPartitionDefState *)partitionDefState)->partitionName;
-        *tablespacename = ((ListPartitionDefState *)partitionDefState)->tablespacename;
-    } else if (partitionStrategy == PART_STRATEGY_HASH) {
-        *subPartitionDefState = ((HashPartitionDefState *)partitionDefState)->subPartitionDefState;
-        *partitionName = ((HashPartitionDefState *)partitionDefState)->partitionName;
-        *tablespacename = ((HashPartitionDefState *)partitionDefState)->tablespacename;
-    } else {
-        *subPartitionDefState = ((RangePartitionDefState *)partitionDefState)->subPartitionDefState;
-        *partitionName = ((RangePartitionDefState *)partitionDefState)->partitionName;
-        *tablespacename = ((RangePartitionDefState *)partitionDefState)->tablespacename;
-    }
-}
-
-Node *MakeDefaultSubpartition(PartitionState *partitionState, Node *partitionDefState)
+Node *MakeDefaultSubpartition(PartitionState *partitionState, PartitionDefState *partitionDefState)
 {
     PartitionState *subPartitionState = partitionState->subPartitionState;
-    List *subPartitionDefStateList = NIL;
-    char *partitionName = NULL;
-    char *tablespacename = NULL;
-    char partitionStrategy = partitionState->partitionStrategy;
     char subPartitionStrategy = subPartitionState->partitionStrategy;
+    char *partitionName = partitionDefState->partitionName;
+    char *tablespacename = partitionDefState->tablespacename;
 
-    getSubPartitionInfo(partitionStrategy, partitionDefState, &subPartitionDefStateList, &partitionName,
-                        &tablespacename);
     if (subPartitionStrategy == PART_STRATEGY_LIST) {
         ListPartitionDefState *subPartitionDefState =
             MakeListDefaultSubpartition(partitionState, partitionName, tablespacename);
+        subPartitionDefState->partitionno = 1;
         return (Node *)subPartitionDefState;
     } else if (subPartitionStrategy == PART_STRATEGY_HASH) {
         HashPartitionDefState *subPartitionDefState =
             MakeHashDefaultSubpartition(partitionState, partitionName, tablespacename);
+        subPartitionDefState->partitionno = 1;
         return (Node *)subPartitionDefState;
     } else {
         RangePartitionDefState *subPartitionDefState =
             MakeRangeDefaultSubpartition(partitionState, partitionName, tablespacename);
+        subPartitionDefState->partitionno = 1;
         return (Node *)subPartitionDefState;
     }
     return NULL;
@@ -6794,15 +6780,11 @@ List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid,
     }
 
     PartitionState *subPartitionState = partitionState->subPartitionState;
-    List *subPartitionDefStateList = NIL;
-    char *partitionName = NULL;
-    char *tablespacename = NULL;
     ListCell *lc = NULL;
     Oid subpartOid = InvalidOid;
-    char partitionStrategy = partitionState->partitionStrategy;
     char subPartitionStrategy = subPartitionState->partitionStrategy;
-    getSubPartitionInfo(partitionStrategy, partitionDefState, &subPartitionDefStateList, &partitionName,
-                        &tablespacename);
+    List *subPartitionDefStateList = ((PartitionDefState *)partitionDefState)->subPartitionDefState;
+
     foreach (lc, subPartitionDefStateList) {
         if (subPartitionStrategy == PART_STRATEGY_LIST) {
             ListPartitionDefState *subPartitionDefState = (ListPartitionDefState *)lfirst(lc);
@@ -6918,7 +6900,8 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
         if (strategy == PART_STRATEGY_LIST) {
             ListPartitionDefState* partitionDefState = (ListPartitionDefState*)lfirst(cell);
             if (partTableState->subPartitionState != NULL && partitionDefState->subPartitionDefState == NULL) {
-                Node *subPartitionDefState = MakeDefaultSubpartition(partTableState, (Node *)partitionDefState);
+                Node *subPartitionDefState =
+                    MakeDefaultSubpartition(partTableState, (PartitionDefState *)partitionDefState);
                 partitionDefState->subPartitionDefState =
                     lappend(partitionDefState->subPartitionDefState, subPartitionDefState);
             }
@@ -6944,7 +6927,8 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
         } else if (strategy == PART_STRATEGY_HASH) {
             HashPartitionDefState* partitionDefState = (HashPartitionDefState*)lfirst(cell);
             if (partTableState->subPartitionState != NULL && partitionDefState->subPartitionDefState == NULL) {
-                Node *subPartitionDefState = MakeDefaultSubpartition(partTableState, (Node *)partitionDefState);
+                Node *subPartitionDefState =
+                    MakeDefaultSubpartition(partTableState, (PartitionDefState *)partitionDefState);
                 partitionDefState->subPartitionDefState =
                     lappend(partitionDefState->subPartitionDefState, subPartitionDefState);
             }
@@ -6970,7 +6954,8 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
         } else {
             RangePartitionDefState* partitionDefState = (RangePartitionDefState*)lfirst(cell);
             if (partTableState->subPartitionState != NULL && partitionDefState->subPartitionDefState == NULL) {
-                Node *subPartitionDefState = MakeDefaultSubpartition(partTableState, (Node *)partitionDefState);
+                Node *subPartitionDefState =
+                    MakeDefaultSubpartition(partTableState, (PartitionDefState *)partitionDefState);;
                 partitionDefState->subPartitionDefState =
                     lappend(partitionDefState->subPartitionDefState, subPartitionDefState);
             }
@@ -7126,7 +7111,7 @@ int lookupHBucketid(oidvector *buckets, int low, int2 bktId)
  * Description	:
  * Notes		:
  */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
+Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL)
 {
     Oid partitionid = InvalidOid;
 
@@ -7137,6 +7122,9 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
     if (u_sess->catalog_cxt.route->fileExist) {
         Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
         partitionid = u_sess->catalog_cxt.route->partitionId;
+        if (PointerIsValid(partitionno)) {
+            *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
+        }
         return partitionid;
     }
 
@@ -7153,7 +7141,7 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
         case PART_AREA_INTERVAL: {
-            return AddNewIntervalPartition(rel, tuple, isDDL);
+            return AddNewIntervalPartition(rel, tuple, partitionno, isDDL);
         } break;
         case PART_AREA_LIST: {
             ereport(ERROR,
@@ -7179,14 +7167,15 @@ Oid heapTupleGetSubPartitionId(Relation rel, void *tuple)
 {
     Oid partitionId = InvalidOid;
     Oid subPartitionId = InvalidOid;
+    int partitionno = INVALID_PARTITION_NO;
     Partition part = NULL;
     Relation partRel = NULL;
     /* get partititon oid for the record */
-    partitionId = heapTupleGetPartitionId(rel, tuple);
-    part = partitionOpen(rel, partitionId, RowExclusiveLock);
+    partitionId = heapTupleGetPartitionId(rel, tuple, &partitionno);
+    part = PartitionOpenWithPartitionno(rel, partitionId, partitionno, RowExclusiveLock);
     partRel = partitionGetRelation(rel, part);
     /* get subpartititon oid for the record */
-    subPartitionId = heapTupleGetPartitionId(partRel, tuple);
+    subPartitionId = heapTupleGetPartitionId(partRel, tuple, NULL);
 
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, RowExclusiveLock);

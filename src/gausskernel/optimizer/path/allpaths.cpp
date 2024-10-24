@@ -912,10 +912,6 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
         Relation relation = heap_open(rte->relid, NoLock);
         double pruningRatio = 1.0;
 
-        /* Before static pruning, we save the partmap in pruning_result, which will used in dynamic pruning and
-         * executor, seen in GetPartitionInfo and getPartitionOidFromSequence */
-        PartitionMap *partmap = CopyPartitionMap(relation->partMap);
-
         /* get pruning result */
         if (rte->isContainPartition) {
             rel->pruning_result = singlePartitionPruningForRestrictInfo(rte->partitionOid, relation);
@@ -923,11 +919,10 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
             rel->pruning_result =
                 SingleSubPartitionPruningForRestrictInfo(rte->subpartitionOid, relation, rte->partitionOid);
         } else {
-            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo, partmap);
+            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo);
         }
 
         Assert(rel->pruning_result);
-        rel->pruning_result->partMap = partmap;
 
         if (IsPbeSinglePartition(relation, rel)) {
             rel->partItrs = 1;

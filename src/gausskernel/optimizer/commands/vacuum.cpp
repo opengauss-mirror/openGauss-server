@@ -582,9 +582,9 @@ static vacuum_object *GetVacuumObjectOfSubpartition(VacuumStmt* vacstmt, Oid rel
     MemoryContext oldcontext = NULL;
     vacuum_object* vacObj = NULL;
 
-    subpartitionid = partitionNameGetPartitionOid(relationid,
+    subpartitionid = SubPartitionNameGetSubPartitionOid(relationid,
         vacstmt->relation->subpartitionname,
-        PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+        AccessShareLock,
         AccessShareLock,
         true,
         false,
@@ -736,7 +736,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
         /* 1.a partition */
         if (PointerIsValid(vacstmt->relation->partitionname)) {
 
-            partitionid = partitionNameGetPartitionOid(relationid,
+            partitionid = PartitionNameGetPartitionOid(relationid,
                 vacstmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 AccessShareLock,
@@ -2748,6 +2748,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         pgstat_report_waitstatus_relname(STATE_VACUUM_FULL, get_nsp_relname(relid));
         GpiVacuumFullMainPartiton(relid);
         CBIVacuumFullMainPartiton(relid);
+        RelationResetPartitionno(relid, AccessExclusiveLock);
         pgstat_report_vacuum(relid, InvalidOid, false, 0);
 
         /* Record changecsn when VACUUM FULL occur */
@@ -4163,6 +4164,7 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     long secs = 0;
     OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
+    bool lockInterval = false;
 
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = VERBOSEMESSAGE;
@@ -4171,11 +4173,13 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     }
 
     /* Get invisable parts */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (ConditionalLockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK)) {
+        PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
+        lockInterval = true;
     }
-    
+
     /* In rbtree, rb_leftmost will return NULL if rbtree is empty. */
     if (rb_leftmost(invisibleParts) == NULL) {
         DestroyOidRBTree(&invisibleParts);
@@ -4216,17 +4220,19 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     heap_close(classRel, RowExclusiveLock);
 
     /*
-     * Before clearing the global partition index of a partition table,
-     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
-     * creation process will not be performed concurrently.
+     * Before clearing the global partition index of a partition table, acquire a AccessShareLock on
+     * INTERVAL_PARTITION_LOCK_SDEQUENCE, and make sure that the interval partition creation process will not be
+     * performed concurrently.
      */
     OidRBTree* cleanedParts = CreateOidRBTree();
     OidRBTreeUnionOids(cleanedParts, invisibleParts);
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (lockInterval) {
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
+        UnlockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
     } else {
-        /* Updates reloptions of cleanedParts in pg_partition after GPI vacuum is executed */
+        /* Updates reloptions of cleanedParts in pg_partition after gpi lazy_vacuum is executed */
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);
     }
 
@@ -4253,6 +4259,7 @@ static void GPIVacuumMainPartition(
     OidRBTree* cleanedParts = CreateOidRBTree();
     OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
+    bool lockInterval = false;
 
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = VERBOSEMESSAGE;
@@ -4261,13 +4268,15 @@ static void GPIVacuumMainPartition(
     }
 
     /*
-     * Before clearing the global partition index of a partition table,
-     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
-     * creation process will not be performed concurrently.
+     * Before clearing the global partition index of a partition table, acquire a AccessShareLock on
+     * INTERVAL_PARTITION_LOCK_SDEQUENCE, and make sure that the interval partition creation process will not be
+     * performed concurrently.
      */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (ConditionalLockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK)) {
+        PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
+        lockInterval = true;
     }
 
     vac_strategy = bstrategy;
@@ -4293,9 +4302,11 @@ static void GPIVacuumMainPartition(
      * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
      * creation process will not be performed concurrently.
      */
-    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+    if (!RELATION_IS_INTERVAL_PARTITIONED(onerel)) {
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
-        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else if (lockInterval) {
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
+        UnlockPartitionObject(onerel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_SHARE_LOCK);
     } else {
         /* Updates reloptions of cleanedParts in pg_partition after gpi lazy_vacuum is executed */
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);

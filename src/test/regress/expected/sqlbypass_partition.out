@@ -2851,7 +2851,7 @@ explain(costs off, verbose on) select *from test_hash_ht where a = 2000 and b = 
          Output: a, b, c
          Index Cond: (test_hash_ht.b = 1)
          Filter: (test_hash_ht.a = 2000)
-         Selected Partitions:  5
+         Selected Partitions:  4
 (9 rows)
 
 prepare p1 as  select *from test_hash_ht where a = $1 and b = $2 order by c;

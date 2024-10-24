@@ -684,6 +684,9 @@ static void _outPruningResult(StringInfo str, PruningResult* node)
     if (t_thrd.proc->workingVersionNum >= PBESINGLEPARTITION_VERSION_NUM) {
         WRITE_BOOL_FIELD(isPbeSinlePartition);
     }
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(ls_selectedPartitionnos);
+    }
 }
 
 static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningResult* node)
@@ -693,6 +696,10 @@ static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningRes
     WRITE_INT_FIELD(partSeq);
     WRITE_BITMAPSET_FIELD(bm_selectedSubPartitions);
     WRITE_NODE_FIELD(ls_selectedSubPartitions);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_INT_FIELD(partitionno);
+        WRITE_NODE_FIELD(ls_selectedSubPartitionnos);
+    }
 }
 
 /*
@@ -3463,6 +3470,12 @@ static void _outRangePartitionDefState(StringInfo str, RangePartitionDefState* n
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+        WRITE_NODE_FIELD(curStartVal);
+        WRITE_STRING_FIELD(partitionInitName);
+    }
 }
 
 static void _outListPartitionDefState(StringInfo str, ListPartitionDefState* node)
@@ -3472,6 +3485,10 @@ static void _outListPartitionDefState(StringInfo str, ListPartitionDefState* nod
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+    }
 }
 
 static void _outHashPartitionDefState(StringInfo str, HashPartitionDefState* node)
@@ -3481,6 +3498,10 @@ static void _outHashPartitionDefState(StringInfo str, HashPartitionDefState* nod
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+    }
 }
 
 static void _outIntervalPartitionDefState(StringInfo str, IntervalPartitionDefState* node)

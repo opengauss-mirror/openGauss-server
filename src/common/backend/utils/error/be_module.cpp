@@ -135,6 +135,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MODE_REPSYNC, "REPSYNC"},
     {MOD_SQLPATCH, "SQLPATCH"},
     {MOD_GPI, "GPI"},
+    {MOD_PARTITION, "PARTITION"},
     {MOD_LWLOCK, "LWLOCK"},
     {MOD_ENCODING_CHECK, "ENCODING_CHECK"},
 

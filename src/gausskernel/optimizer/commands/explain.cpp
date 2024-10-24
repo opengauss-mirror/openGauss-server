@@ -1630,8 +1630,6 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
     RangeTblEntry* rte = rt_fetch(scanplan->scanrelid, rtable);
     Relation rel = heap_open(rte->relid, NoLock);
     List* subpartList = RelationGetSubPartitionOidListList(rel);
-    /* Concurrent DDL may change the partition map. Do not check for 'ALL' if it is known to be misarranged */
-    bool checkAll = (pr->partMap != NULL) && (getPartitionNumber(pr->partMap) == list_length(subpartList));
 
     int idx = 0;
     foreach (lc, pr->ls_selectedSubPartitions) {
@@ -1642,7 +1640,10 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
         SubPartitionPruningResult* spr = (SubPartitionPruningResult*)lfirst(lc);
         /* check if all subpartition is selected */
         int selected = list_length(spr->ls_selectedSubPartitions);
-        if (checkAll) {
+        /* the partseq may be dislocationed if parallel DDL commits, even out of range */
+        if (spr->partSeq >= list_length(subpartList)) {
+            all = false;
+        } else {
             int count = list_length((List*)list_nth(subpartList, spr->partSeq));
             all &= (selected == count);
         }
@@ -1653,7 +1654,7 @@ static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
         }
     }
 
-    if (checkAll && all) {
+    if (all) {
         resetStringInfo(strif);
         appendStringInfo(strif, "ALL");
     }

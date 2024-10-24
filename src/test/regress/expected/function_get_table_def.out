@@ -505,33 +505,33 @@ select * from pg_get_tabledef('list_hash_2');
  CREATE INDEX list_hash_2_idx3 ON list_hash_2 USING btree (col_4) TABLESPACE pg_default;     +
  CREATE INDEX list_hash_2_idx2 ON list_hash_2 USING btree (col_3, col_1) LOCAL(              +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_1_3_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_1_1_col_3_col_1_idx,                                            +
          SUBPARTITION p_hash_1_2_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_1_1_col_3_col_1_idx                                             +
+         SUBPARTITION p_hash_1_3_col_3_col_1_idx                                             +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_2_subpartdefault1_col_3_col_1_idx                               +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_3_2_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_3_1_col_3_col_1_idx                                             +
+         SUBPARTITION p_hash_3_1_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_3_2_col_3_col_1_idx                                             +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_4_5_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_4_4_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_4_3_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_4_1_col_3_col_1_idx,                                            +
          SUBPARTITION p_hash_4_2_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_4_1_col_3_col_1_idx                                             +
+         SUBPARTITION p_hash_4_3_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_4_4_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_4_5_col_3_col_1_idx                                             +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_5_subpartdefault1_col_3_col_1_idx                               +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_6_5_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_6_4_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_6_3_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_6_1_col_3_col_1_idx,                                            +
          SUBPARTITION p_hash_6_2_col_3_col_1_idx,                                            +
-         SUBPARTITION p_hash_6_1_col_3_col_1_idx                                             +
+         SUBPARTITION p_hash_6_3_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_6_4_col_3_col_1_idx,                                            +
+         SUBPARTITION p_hash_6_5_col_3_col_1_idx                                             +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_7_subpartdefault1_col_3_col_1_idx                               +
@@ -539,33 +539,33 @@ select * from pg_get_tabledef('list_hash_2');
  )  TABLESPACE pg_default;                                                                   +
  CREATE UNIQUE INDEX list_hash_2_idx1 ON list_hash_2 USING btree (col_2, col_3, col_4) LOCAL(+
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_1_3_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_1_1_col_2_col_3_col_4_idx,                                      +
          SUBPARTITION p_hash_1_2_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_1_1_col_2_col_3_col_4_idx                                       +
+         SUBPARTITION p_hash_1_3_col_2_col_3_col_4_idx                                       +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_2_subpartdefault1_col_2_col_3_col_4_idx                         +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_3_2_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_3_1_col_2_col_3_col_4_idx                                       +
+         SUBPARTITION p_hash_3_1_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_3_2_col_2_col_3_col_4_idx                                       +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_4_5_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_4_4_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_4_3_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_4_1_col_2_col_3_col_4_idx,                                      +
          SUBPARTITION p_hash_4_2_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_4_1_col_2_col_3_col_4_idx                                       +
+         SUBPARTITION p_hash_4_3_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_4_4_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_4_5_col_2_col_3_col_4_idx                                       +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_5_subpartdefault1_col_2_col_3_col_4_idx                         +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
-         SUBPARTITION p_hash_6_5_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_6_4_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_6_3_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_6_1_col_2_col_3_col_4_idx,                                      +
          SUBPARTITION p_hash_6_2_col_2_col_3_col_4_idx,                                      +
-         SUBPARTITION p_hash_6_1_col_2_col_3_col_4_idx                                       +
+         SUBPARTITION p_hash_6_3_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_6_4_col_2_col_3_col_4_idx,                                      +
+         SUBPARTITION p_hash_6_5_col_2_col_3_col_4_idx                                       +
      ),                                                                                      +
      PARTITION partition_name(                                                               +
          SUBPARTITION p_list_7_subpartdefault1_col_2_col_3_col_4_idx                         +

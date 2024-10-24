@@ -2233,23 +2233,23 @@ insert into partition_hash values(40,'forty-three',43);
 select rownum,* from partition_hash;
  rownum | id |     name     | age 
 --------+----+--------------+-----
-      1 | 30 | thirty       |  30
-      2 | 30 | Thirty-three |  33
-      3 | 40 | forty        |  40
-      4 | 40 | forty-three  |  43
-      5 | 20 | twenty       |  20
-      6 | 20 | twenty-three |  23
-      7 | 10 | ten          |  10
-      8 | 10 | thirteen     |  13
+      1 | 10 | ten          |  10
+      2 | 10 | thirteen     |  13
+      3 | 20 | twenty       |  20
+      4 | 20 | twenty-three |  23
+      5 | 30 | thirty       |  30
+      6 | 30 | Thirty-three |  33
+      7 | 40 | forty        |  40
+      8 | 40 | forty-three  |  43
 (8 rows)
 
 select * from partition_hash where rownum < 5;
  id |     name     | age 
 ----+--------------+-----
- 30 | thirty       |  30
- 30 | Thirty-three |  33
- 40 | forty        |  40
- 40 | forty-three  |  43
+ 10 | ten          |  10
+ 10 | thirteen     |  13
+ 20 | twenty       |  20
+ 20 | twenty-three |  23
 (4 rows)
 
 drop table partition_hash;

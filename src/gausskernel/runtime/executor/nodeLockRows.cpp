@@ -23,6 +23,7 @@
 
 #include "access/xact.h"
 #include "access/ustore/knl_uheap.h"
+#include "catalog/pg_partition_fn.h"
 #include "executor/executor.h"
 #include "executor/node/nodeLockRows.h"
 #ifdef PGXC
@@ -156,7 +157,7 @@ lnext:
             /* if it is a partition */
             if (tblid != erm->relation->rd_id) {
                 searchFakeReationForPartitionOid(estate->esfRelations,
-                    estate->es_query_cxt, erm->relation, tblid, target_rel,
+                    estate->es_query_cxt, erm->relation, tblid, INVALID_PARTITION_NO, target_rel,
                     target_part, RowShareLock);
                 Assert(tblid == target_rel->rd_id);
             }
@@ -353,6 +354,7 @@ lnext:
                         estate->es_query_cxt,
                         erm->relation,
                         tblid,
+                        INVALID_PARTITION_NO,
                         target_rel,
                         target_part,
                         RowShareLock);

@@ -3637,13 +3637,18 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
 
     /* step 1: open PARTITION relation */
     if (isPartitional) {
-        searchFakeReationForPartitionOid(estate->esfRelations,
+        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
             bulk->partOid,
-            heaprel,
-            partition,
+            RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
+                                                           GetCurrentPartitionNo(bulk->partOid),
+            &heaprel,
+            &partition,
             RowExclusiveLock);
+        if (!res) {
+            return;
+        }
         estate->esCurrentPartition = heaprel;
         insertRel = heaprel;
     }
@@ -4621,7 +4626,7 @@ static uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
                         }
                     } else {
                         targetOid = RelationGetRelid(resultRelationDesc);
@@ -4674,7 +4679,7 @@ static uint64 CopyFrom(CopyState cstate)
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
                             targetPartOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
                         } else {
-                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple, NULL);
                         }
                         partitionList = list_append_unique_oid(partitionList, targetPartOid);
                     }
@@ -4686,19 +4691,22 @@ static uint64 CopyFrom(CopyState cstate)
                     Partition subPart = NULL;
                     if (isPartitionRel) {
                         /* get partititon oid to insert the record */
-                        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                        int partitionno = INVALID_PARTITION_NO;
+                        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno);
                         searchFakeReationForPartitionOid(estate->esfRelations,
                             estate->es_query_cxt,
                             resultRelationDesc,
                             partitionid,
+                            partitionno,
                             heaprel,
                             partition,
                             RowExclusiveLock);
 
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
-                            partitionid = heapTupleGetPartitionId(heaprel, tuple);
+                            int subpartitionno = INVALID_PARTITION_NO;
+                            partitionid = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno);
                             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, heaprel,
-                                                             partitionid, subPartRel, subPart, RowExclusiveLock);
+                                partitionid, subpartitionno, subPartRel, subPart, RowExclusiveLock);
                             heaprel = subPartRel;
                             partition = subPart;
                         }

@@ -1848,6 +1848,8 @@ typedef struct knl_u_storage_context {
     int num_bufs_in_block;
     int total_bufs_allocated;
     MemoryContext LocalBufferContext;
+    List *partition_dml_oids; /* list of partitioned table's oid which is on dml operations */
+    List *partition_ddl_oids; /* list of partitioned table's oid which is on ddl operations */
 } knl_u_storage_context;
 
 

@@ -77,7 +77,7 @@ ALTER TABLE range_range_sales MODIFY PARTITION customer4 ADD SUBPARTITION custom
 ERROR:  upper boundary of adding partition MUST overtop last existing partition
 --fail, invalid format
 ALTER TABLE range_range_sales MODIFY PARTITION customer2 ADD SUBPARTITION customer2_temp1 VALUES ('2015-01-01');
-ERROR:  can not add none-range partition to range partition table
+ERROR:  can not add none-range subpartition to range subpartition table
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -357,7 +357,7 @@ ALTER TABLE range_list_sales MODIFY PARTITION customer3 ADD SUBPARTITION custome
 ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
 --fail, invalid format
 ALTER TABLE range_list_sales MODIFY PARTITION customer4 ADD SUBPARTITION customer4_temp1 VALUES LESS THAN ('X');
-ERROR:  can not add none-list partition to list partition table
+ERROR:  can not add none-list subpartition to list subpartition table
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -630,7 +630,7 @@ LINE 1: ...MODIFY PARTITION customer1 ADD SUBPARTITION customer1_temp1;
                                                                       ^
 --fail, invalid format
 ALTER TABLE range_hash_sales MODIFY PARTITION customer4 ADD SUBPARTITION customer4_temp1 VALUES LESS THAN ('X');
-ERROR:  can not add hash partition
+ERROR:  can not add hash subpartition
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -893,7 +893,7 @@ ALTER TABLE list_range_sales MODIFY PARTITION channel3 ADD SUBPARTITION channel3
 ERROR:  upper boundary of adding partition MUST overtop last existing partition
 --fail, invalid format
 ALTER TABLE list_range_sales MODIFY PARTITION channel4 ADD SUBPARTITION channel4_temp1 VALUES (1500);
-ERROR:  can not add none-range partition to range partition table
+ERROR:  can not add none-range subpartition to range subpartition table
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -1169,7 +1169,7 @@ ALTER TABLE list_list_sales MODIFY PARTITION channel3 ADD SUBPARTITION channel3_
 ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
 --fail, invalid format
 ALTER TABLE list_list_sales MODIFY PARTITION channel4 ADD SUBPARTITION channel4_temp1 VALUES LESS THAN (1500);
-ERROR:  can not add none-list partition to list partition table
+ERROR:  can not add none-list subpartition to list subpartition table
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -1442,7 +1442,7 @@ LINE 1: ...s MODIFY PARTITION channel1 ADD SUBPARTITION channel1_temp1;
                                                                       ^
 --fail, invalid format
 ALTER TABLE list_hash_sales MODIFY PARTITION channel4 ADD SUBPARTITION channel4_temp1 VALUES LESS THAN (1500);
-ERROR:  can not add hash partition
+ERROR:  can not add hash subpartition
 --check for ok after add
 SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
     FROM pg_class c1, pg_partition p1, pg_namespace n1
@@ -1699,7 +1699,7 @@ ALTER TABLE hash_range_sales MODIFY PARTITION product2 ADD SUBPARTITION product2
 ERROR:  upper boundary of adding partition MUST overtop last existing partition
 --fail, invalid format
 ALTER TABLE hash_range_sales MODIFY PARTITION product4 ADD SUBPARTITION product4_temp1 VALUES (DEFAULT);
-ERROR:  can not add none-range partition to range partition table
+ERROR:  can not add none-range subpartition to range subpartition table
 --success, add 1 subpartition
 ALTER TABLE hash_range_sales MODIFY PARTITION product4 ADD SUBPARTITION product4_customer2 VALUES LESS THAN (MAXVALUE);
 --check for ok after add
@@ -1956,7 +1956,7 @@ ALTER TABLE hash_list_sales MODIFY PARTITION product3 ADD SUBPARTITION product3_
 ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
 --fail, invalid format
 ALTER TABLE hash_list_sales MODIFY PARTITION product4 ADD SUBPARTITION product4_temp1 VALUES LESS THAN (MAXVALUE);
-ERROR:  can not add none-list partition to list partition table
+ERROR:  can not add none-list subpartition to list subpartition table
 --success, add 1 subpartition
 ALTER TABLE hash_list_sales MODIFY PARTITION product4 ADD SUBPARTITION product4_channel2 VALUES (DEFAULT);
 --check for ok after add

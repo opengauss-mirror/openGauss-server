@@ -1475,6 +1475,7 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
                                              estate->es_query_cxt,
                                              indexRelation,
                                              indexpartitionid,
+                                             INVALID_PARTITION_NO,
                                              actualindex,
                                              indexpartition,
                                              RowExclusiveLock);
@@ -1721,6 +1722,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualIndex,
                 indexpartition,
                 RowExclusiveLock);
@@ -1915,6 +1917,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 estate->es_query_cxt,
                 indexRelation,
                 indexpartitionid,
+                INVALID_PARTITION_NO,
                 actualindex,
                 indexpartition,
                 RowExclusiveLock);

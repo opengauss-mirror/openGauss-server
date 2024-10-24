@@ -9210,6 +9210,9 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
         case AT_ReAddConstraint:
             tag = "RE ADD CONSTRAINT";
             break;
+        case AT_ResetPartitionno:
+            tag = "RESET PARTITIONNO";
+            break;
 
         default:
             tag = "?\?\?";

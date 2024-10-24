@@ -62,37 +62,30 @@ typedef struct PartitionIdentifier {
     Oid partitionId;
 } PartitionIdentifier;
 
-/**
- *partition map is used to  find which partition a record is mapping to.
- *and  pruning the unused partition when querying.the map has two part:
- *and  range part and interval part.
- *range part is a array of RangeElement which is sorted by RangeElement.boundary
- *interval part is array of IntervalElement which is sorted by IntervalElement.sequenceNum
- *binary search is used to routing in  range part of map , and in interval part
- *we use (recordValue-lowBoundary_of_interval)/interval to get the sequenceNum of
- *a interval partition
- *
+/*
+ * partition map is used to  find which partition a record is mapping to.
+ * and  pruning the unused partition when querying.the map has two part:
+ * and  range part and interval part.
+ * range part is a array of RangeElement which is sorted by RangeElement
  */
 typedef struct RangeElement {
-    Oid partitionOid;                     /*the oid of partition*/
-    int len;                              /*the length of partition key number*/
-    Const* boundary[RANGE_PARTKEYMAXNUM]; /*upper bond of partition */
-    bool isInterval;                      /* is interval partition */
+    Oid partitionOid;                        /* the oid of partition */
+    int partitionno;                         /* the partitionno of partition */
+    int len;                                 /* the length of partition key number */
+    Const* boundary[RANGE_PARTKEYMAXNUM];    /* upper bond of partition */
+    bool isInterval;                         /* is interval partition */
 } RangeElement;
-
-typedef struct IntervalElement {
-    Oid partitionOid; /* the oid of partition */
-    int sequenceNum;  /* the logic number of interval partition. */
-} IntervalElement;
 
 typedef struct ListPartElement {
     Oid partitionOid;                     /* the oid of partition */
+    int partitionno;                      /* the partitionno of partition */
     int len;                              /* the length of values */
     Const** boundary;                      /* list values */
 } ListPartElement;
 
 typedef struct HashPartElement {
     Oid partitionOid;                     /* the oid of partition */
+    int partitionno;                      /* the partitionno of partition */
     Const* boundary[1];                   /* hash bucket */
 } HashPartElement;
 
@@ -319,7 +312,9 @@ void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation 
                                           Relation *fakeRelation, Partition *partition, LOCKMODE lmode);
 
 
-#define searchFakeReationForPartitionOid(fakeRels, cxt, rel, partOid, fakeRelation, partition, lmode)              \
+/* search fake relation with partOid. The partitionno is used to retry search. In some cases we don't need partitionno,
+ * such as index search/ddl operation, just input INVALID_PARTITION_NO */
+#define searchFakeReationForPartitionOid(fakeRels, cxt, rel, partOid, partitionno, fakeRelation, partition, lmode) \
     do {                                                                                                           \
         PartRelIdCacheKey _key = {partOid, -1};                                                                    \
         Relation partParentRel = rel;                                                                              \
@@ -329,10 +324,17 @@ void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation 
         }                                                                                                          \
         if (RelationIsSubPartitioned(rel) && !RelationIsIndex(rel)) {                                              \
             Oid parentOid = partid_get_parentid(partOid);                                                          \
+            if (!OidIsValid(parentOid)) {                                                                          \
+                ereport(ERROR,                                                                                     \
+                        (errcode(ERRCODE_PARTITION_ERROR),                                                         \
+                         errmsg("partition %u does not exist on relation \"%s\" when search the fake relation",    \
+                                partOid, RelationGetRelationName(rel)),                                            \
+                         errdetail("this partition may have already been dropped")));                              \
+            }                                                                                                      \
             if (parentOid != rel->rd_id) {                                                                         \
                 Partition partForSubPart = NULL;                                                                   \
-                getFakeReationForPartitionOid(&fakeRels, cxt, rel, parentOid, &partRelForSubPart, &partForSubPart, \
-                                              lmode);                                                              \
+                getFakeReationForPartitionOid                                                                      \
+                    (&fakeRels, cxt, rel, parentOid, &partRelForSubPart, &partForSubPart, lmode);                  \
                 partParentRel = partRelForSubPart;                                                                 \
             }                                                                                                      \
         }                                                                                                          \
@@ -344,7 +346,7 @@ void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation 
         if (PointerIsValid(fakeRels)) {                                                                            \
             FakeRelationIdCacheLookup(fakeRels, _key, fakeRelation, partition);                                    \
             if (!RelationIsValid(fakeRelation)) {                                                                  \
-                partition = partitionOpen(partParentRel, partOid, lmode);                                          \
+                partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);              \
                 fakeRelation = partitionGetRelation(partParentRel, partition);                                     \
                 FakeRelationCacheInsert(fakeRels, fakeRelation, partition, -1);                                    \
             }                                                                                                      \
@@ -359,7 +361,7 @@ void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation 
             ctl.hcxt = cxt;                                                                                        \
             fakeRels = hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,                        \
                                    HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);                                      \
-            partition = partitionOpen(partParentRel, partOid, lmode);                                              \
+            partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);                  \
             fakeRelation = partitionGetRelation(partParentRel, partition);                                         \
             FakeRelationCacheInsert(fakeRels, fakeRelation, partition, -1);                                        \
         }                                                                                                          \
@@ -460,8 +462,10 @@ void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation 
 typedef struct SubPartitionPruningResult {
     NodeTag type;
     int partSeq;
+    int partitionno;
     Bitmapset* bm_selectedSubPartitions;
     List* ls_selectedSubPartitions;
+    List* ls_selectedSubPartitionnos;
 } SubPartitionPruningResult;
 
 typedef struct PruningResult {
@@ -473,13 +477,13 @@ typedef struct PruningResult {
                         /*if interval partitions is empty, intervalOffset=-1*/
     Bitmapset* intervalSelectedPartitions;
     List* ls_rangeSelectedPartitions;
+    List* ls_selectedPartitionnos;
     List* ls_selectedSubPartitions;
     Param* paramArg;
     OpExpr* exprPart;
     Expr* expr;
     /* This variable applies only to single-partition key range partition tables in PBE mode. */
     bool isPbeSinlePartition = false;
-    PartitionMap* partMap;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
@@ -511,7 +515,8 @@ extern void DestroyListElements(ListPartElement* src, int elementNum);
 extern void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);
 extern void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen);
 extern void DestroyPartitionMap(PartitionMap* partMap);
+/* search fake relation with partOid, if no need partitionno, just input 0 */
 extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
-    Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
+    int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
 
 #endif /* PARTITIONMAP_GS_H_ */

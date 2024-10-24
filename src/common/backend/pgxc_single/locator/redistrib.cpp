@@ -876,7 +876,7 @@ void get_redis_rel_ctid(const char* rel_name, const char* partition_name, RedisC
 
     if (partition_name != NULL) {
         /* For partitioned table, */
-        part_oid = partitionNameGetPartitionOid(
+        part_oid = PartitionNameGetPartitionOid(
             relid, partition_name, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, false, false, NULL, NULL, NoLock);
     }
 

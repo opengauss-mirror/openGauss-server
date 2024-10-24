@@ -1849,7 +1849,7 @@ bool ATTraverseSrcPartitions(Relation relation, List* srcPartitions, char* destP
         partName = strVal(lfirst(cell));
 
         /* from name to partition oid */
-        srcPartOid = partitionNameGetPartitionOid(relation->rd_id,
+        srcPartOid = PartitionNameGetPartitionOid(relation->rd_id,
                                                 partName,
                                                 PART_OBJ_TYPE_TABLE_PARTITION,
                                                 ExclusiveLock,  // get ExclusiveLock lock on src partitions
@@ -1922,7 +1922,7 @@ void ATCreateTempTableForMerge(
         partedTableRelOptions = (Datum)0;
     }
 
-    /* open the dest partition, it was already locked by partitionNameGetPartitionOid() call */
+    /* open the dest partition, it was already locked by PartitionNameGetPartitionOid() call */
     destPart = partitionOpen(partTableRel, destPartOid, NoLock);
     destPartRel = partitionGetRelation(partTableRel, destPart);
 

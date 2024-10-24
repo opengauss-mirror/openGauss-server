@@ -88,7 +88,6 @@
  *
  *non-export function prototypes
  */
-static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot);
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
 static void PartitionFlushPartition(Partition partition);
 static bool CheckOidIsLiveInPgClass(Oid targetOId);
@@ -98,64 +97,6 @@ bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid);
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
 static Partition PartitionBuildDescExtended(Oid targetPartId, StorageType storage_type, bool buildPartMap);
 static void PartitionReloadIndexInfoExtended(Partition part);
-
-static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot)
-{
-    HeapTuple pg_partition_tuple;
-    Relation pg_partition_desc;
-    SysScanDesc pg_partition_scan;
-    ScanKeyData key[1];
-
-    /*
-     * If something goes wrong during backend startup, we might find ourselves
-     * trying to read pg_partition before we've selected a database.  That ain't
-     * gonna work, so bail out with a useful error message.  If this happens,
-     * it probably means a partcache entry that needs to be nailed isn't.
-     */
-    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
-        ereport(FATAL,
-            (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("cannot read pg_class without having selected a database")));
-    }
-
-    if (snapshot == NULL) {
-        snapshot = GetCatalogSnapshot();
-    }
-
-    /*
-     * form a scan key
-     */
-    ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(targetPartId));
-
-    /*
-     * Open pg_partition and fetch a tuple.  Force heap scan if we haven't yet
-     * built the critical partcache entries (this includes initdb and startup
-     * without a pg_internal.init file).  The caller can also force a heap
-     * scan by setting indexOK == false.
-     */
-    /*u_sess->relcache_cxt.criticalRelcachesBuilt--->criticalPartcachesBuilt*/
-    pg_partition_desc = heap_open(PartitionRelationId, AccessShareLock);
-    pg_partition_scan = systable_beginscan(pg_partition_desc,
-        PartitionOidIndexId,
-        indexOK && LocalRelCacheCriticalRelcachesBuilt(),
-        snapshot,
-        1,
-        key);
-
-    pg_partition_tuple = systable_getnext(pg_partition_scan);
-
-    /*
-     * Must copy tuple before releasing buffer.
-     */
-    if (HeapTupleIsValid(pg_partition_tuple)) {
-        pg_partition_tuple = heap_copytuple(pg_partition_tuple);
-    }
-
-    /* all done */
-    systable_endscan(pg_partition_scan);
-    heap_close(pg_partition_desc, AccessShareLock);
-
-    return pg_partition_tuple;
-}
 
 static Partition AllocatePartitionDesc(Form_pg_partition partp)
 {
@@ -2360,7 +2301,7 @@ bool PartitionParentOidIsLive(Datum parentDatum)
  *
  * Notes: This function is called only when a partition table is lazy vacuumed,
  * and cannot be executed in parallel with PartitionSetWaitCleanGpi, Currently,
- * the AccessShareLock lock of ADD_PARTITION_ACTION is used to ensure that no concurrent
+ * the AccessShareLock lock of INTERVAL_PARTITION_LOCK_SDEQUENCE is used to ensure that no concurrent
  * operations are performed.
  */
 void PartitionedSetEnabledClean(Oid parentOid)
@@ -2499,7 +2440,7 @@ void PartitionSetAllEnabledClean(Oid parentOid)
  *
  * Notes: Before calling the function, you must ensure that a lock with parentOid
  * is already held (to prevent parallelism with any ALTER table partition process)
- * and AccessShareLock for ADD_PARTITION_ACTION (to prevent parallelism with the
+ * and AccessShareLock for INTERVAL_PARTITION_LOCK_SDEQUENCE (to prevent parallelism with the
  * process of automatically creating partitions in any interval partition)
  */
 void PartitionGetAllInvisibleParts(Oid parentOid, OidRBTree** invisibleParts)

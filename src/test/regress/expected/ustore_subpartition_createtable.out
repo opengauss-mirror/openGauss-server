@@ -69,8 +69,8 @@ insert into list_hash values('201903', '5', '1', 1);
 select * from list_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201902     | 2         | 1       |         1
  201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
  201903     | 4         | 1       |         1
  201903     | 5         | 1       |         1
 (4 rows)
@@ -140,11 +140,11 @@ insert into hash_list values('201903', '1', '1', 1);
 select * from hash_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_list;
@@ -176,11 +176,11 @@ insert into hash_hash values('201903', '1', '1', 1);
 select * from hash_hash;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
- 201901     | 1         | 1       |         1
- 201901     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_hash;
@@ -212,11 +212,11 @@ insert into hash_range values('201903', '1', '1', 1);
 select * from hash_range;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 1         | 1       |         1
  201901     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
 (5 rows)
 
 drop table hash_range;
