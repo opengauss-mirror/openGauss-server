@@ -1467,7 +1467,12 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
 
             /* get table partition and add it to a list for following scan */
             tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
-            table_partition = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lock);
+            table_partition =
+                PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lock, true);
+            /* Skip concurrent dropped partitions */
+            if (table_partition == NULL) {
+                continue;
+            }
             index_state->ss.partitions = lappend(index_state->ss.partitions, table_partition);
 
             appendStringInfo(partNameInfo, "%s ", table_partition->pd_part->relname.data);
@@ -1493,8 +1498,12 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
                     int subpartitionno = lfirst_int(lc2);
                     Relation tablepartrel = partitionGetRelation(current_relation, table_partition);
                     Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq, subpartitionno);
-                    Partition subpart =
-                        PartitionOpenWithPartitionno(tablepartrel, subpartitionid, subpartitionno, AccessShareLock);
+                    Partition subpart = PartitionOpenWithPartitionno(tablepartrel, subpartitionid, subpartitionno,
+                                                                     AccessShareLock, true);
+                    /* Skip concurrent dropped partitions */
+                    if (subpart == NULL) {
+                        continue;
+                    }
 
                     partitionIndexOidList = PartitionGetPartIndexList(subpart);
 
@@ -1550,6 +1559,19 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
                 }
                 index_state->iss_IndexPartitionList = lappend(index_state->iss_IndexPartitionList, index_partition);
             }
+        }
+        /*
+         * Set the total scaned num of partition from level 1 partition, subpartition
+         * list is drilled down into node->subpartitions for each node_partition entry;
+         *
+         * Note: we do not set is value from select partittins from pruning-result as some of
+         *       pre-pruned partitions could be dropped from conecurrent DDL, node->partitions
+         *       is refreshed partition list to be scanned;
+         */
+        if (index_state->ss.partitions != NULL) {
+            index_state->ss.part_id = list_length(index_state->ss.partitions);
+        } else {
+            index_state->ss.part_id = 0;
         }
     }
 }

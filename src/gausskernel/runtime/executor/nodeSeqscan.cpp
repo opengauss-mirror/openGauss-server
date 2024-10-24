@@ -524,6 +524,27 @@ static PruningResult *GetPartitionPruningResultInInitScanRelation(SeqScan *plan,
     return resultPlan;
 }
 
+static void TraverseSubpartitions(Relation partRelation, LOCKMODE lockmode, List **subpartition,
+    List *subpart_seqs, List *subpartitionnos)
+{
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
+    forboth (lc1, subpart_seqs, lc2, subpartitionnos) {
+        Oid subpartitionid = InvalidOid;
+        int subpartSeq = lfirst_int(lc1);
+        int subpartitionno = lfirst_int(lc2);
+
+        subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq, subpartitionno);
+        Partition subpart =
+            PartitionOpenWithPartitionno(partRelation, subpartitionid, subpartitionno, lockmode, true);
+        /* Skip concurrent dropped partitions */
+        if (subpart == NULL) {
+            continue;
+        }
+        *subpartition = lappend(*subpartition, subpart);
+    }
+}
+
 /* ----------------------------------------------------------------
  *		InitScanRelation
  *
@@ -618,7 +639,12 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
                 List* subpartition = NIL;
 
                 tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, partitionno);
-                part = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lockmode);
+                part = PartitionOpenWithPartitionno(current_relation, tablepartitionid, partitionno, lockmode, true);
+                /* Skip concurrent dropped partitions */
+                if (part == NULL) {
+                    continue;
+                }
+
                 node->partitions = lappend(node->partitions, part);
                 if (resultPlan->ls_selectedSubPartitions != NIL) {
                     Relation partRelation = partitionGetRelation(current_relation, part);
@@ -630,25 +656,22 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
                     List *subpart_seqs = subPartPruningResult->ls_selectedSubPartitions;
                     List *subpartitionnos = subPartPruningResult->ls_selectedSubPartitionnos;
                     Assert(list_length(subpart_seqs) == list_length(subpartitionnos));
-                    ListCell *lc1 = NULL;
-                    ListCell *lc2 = NULL;
-                    forboth (lc1, subpart_seqs, lc2, subpartitionnos) {
-                        Oid subpartitionid = InvalidOid;
-                        int subpartSeq = lfirst_int(lc1);
-                        int subpartitionno = lfirst_int(lc2);
-
-                        subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq, subpartitionno);
-                        Partition subpart =
-                            PartitionOpenWithPartitionno(partRelation, subpartitionid, subpartitionno, lockmode);
-                        subpartition = lappend(subpartition, subpart);
-                    }
+                    TraverseSubpartitions(partRelation, lockmode, &subpartition, subpart_seqs, subpartitionnos);
                     releaseDummyRelation(&(partRelation));
                     node->subPartLengthList = lappend_int(node->subPartLengthList, list_length(subpartition));
                     node->subpartitions = lappend(node->subpartitions, subpartition);
                 }
             }
-            if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-                node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            /*
+             * Set the total scaned num of partition from level 1 partition, subpartition
+             * list is drilled down into node->subpartitions for each node_partition entry;
+             *
+             * Note: we do not set is value from select partittins from pruning-result as some of
+             *       pre-pruned partitions could be dropped from conecurrent DDL, node->partitions
+             *       is refreshed partition list to be scanned;
+             */
+            if (node->partitions != NULL) {
+                node->part_id = list_length(node->partitions);
             } else {
                 node->part_id = 0;
             }
