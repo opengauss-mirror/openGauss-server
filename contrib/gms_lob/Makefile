@@ -5,6 +5,9 @@ OBJS	= gms_lob.o
 EXTENSION = gms_lob
 DATA = gms_lob--1.0.sql
 
+exclude_option = -fPIE
+override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))
+
 REGRESS = gms_lob
 
 ifdef USE_PGXS
