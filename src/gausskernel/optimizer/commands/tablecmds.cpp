@@ -5871,6 +5871,11 @@ void RenameConstraint(RenameStmt* stmt)
 void RenameRelation(RenameStmt* stmt)
 {
     Oid relid;
+    ObjectAddress address;
+    HeapTuple tuple;
+    Datum name;
+    bool isnull = false;
+    char *relname = NULL;
 
     /*
      * Grab an exclusive lock on the target table, index, sequence or view,
@@ -5893,6 +5898,19 @@ void RenameRelation(RenameStmt* stmt)
         return;
     }
 
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
+    }
+    name = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_relname, &isnull);
+    Assert(!isnull);
+    relname = DatumGetName(name)->data;
+    if (ISMLOG(relname) || ISMATMAP(relname)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("Un-support feature"),
+            errdetail("%s table doesn't support this ALTER yet.", ISMLOG(relname) ? "mlog" : "matviewmap"))));
+    }
+    ReleaseSysCache(tuple);
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
     /* If table has history table, we need rename corresponding history table */
     if (is_ledger_usertable(relid)) {
@@ -6257,6 +6275,11 @@ void renamePartition(RenameStmt* stmt)
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_TABLE),
                 errmsg("partition \"%s\" of relation \"%s\" already exists", stmt->newname, stmt->relation->relname)));
+    }
+
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
+        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     }
 
     /* Do the work */
@@ -15034,6 +15057,12 @@ static void ATExecSetTableSpaceForPartitionP2(AlteredTableInfo* tab, Relation re
     if (!OidIsValid(partOid)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition number is invalid or out-of-range")));
     }
+
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
+        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+    }
+
     tab->partid = partOid;
 }
 
@@ -20246,6 +20275,11 @@ static void ATExecDropPartition(Relation rel, AlterTableCmd *cmd)
     /* getting the dropping partition's oid, and lock partition */
     partOid = GetPartOidByATcmd(rel, cmd, "DROP PARTITION");
 
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
+        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+    }
+
     /* check 1: check validity of partition oid */
     if (!OidIsValid(partOid)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition number is invalid or out-of-range")));
@@ -21099,6 +21133,11 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition number is invalid or out-of-range")));
     }
 
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
+        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+    }
+
     if (RelationIsSubPartitioned(rel)) {
         ATExecTruncatePartitionForSubpartitionTable(rel, partOid, cmd, hasGPI);
         return;
@@ -21676,11 +21715,6 @@ static void mergePartitionHeapData(Relation partTableRel, Relation tempTableRel,
         mergeHeapBlocks += srcPartHeapBlocks;
     }
 
-    if (RelationIsUstoreFormat(tempTableRel)) {
-        /* for ustore tables, all the tuples in dest rel are frozen above in mergeHeapBlock */
-        FreezeXid = GetCurrentTransactionId();
-    }
-
     pfree_ext(srcPartsHasVM);
 
     if (freezexid != NULL)
@@ -21832,7 +21866,7 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         srcPartOid = PartitionNameGetPartitionOid(partTableRel->rd_id,
             partName,
             PART_OBJ_TYPE_TABLE_PARTITION,
-            ExclusiveLock,  // get ExclusiveLock lock on src partitions
+            AccessExclusiveLock,  // get AccessExclusiveLock lock on src partitions
             false,          // no missing
             false,          // wait
             NULL,
@@ -21899,6 +21933,11 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         }
 
         renameTargetPart = true;
+    }
+
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
+        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     }
 
     if (cmd->alterGPI) {
@@ -22371,6 +22410,11 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     if (!OidIsValid(partOid)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("Specified partition does not exist")));
+    }
+
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
+        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     }
 
     Assert(OidIsValid(ordTableOid));
@@ -23817,15 +23861,6 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
     partKeyNum = partMap->partitionKey->dim1;
     partTableOid = RelationGetRelid(partTableRel);
 
-    // check final partition num
-    targetPartNum = getNumberOfPartitions(partTableRel) + list_length(destPartDefList) - 1;
-    if (targetPartNum > MAX_PARTITION_NUM) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("too many partitions for partitioned table"),
-                errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
-    }
-
     // get src partition oid
     if (PointerIsValid(splitPart->src_partition_name)) {
         srcPartOid = PartitionNameGetPartitionOid(RelationGetRelid(partTableRel),
@@ -23842,6 +23877,20 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
             partTableRel->rd_att->attrs, partMap->partitionKey, splitPart->partition_for_values);
         srcPartOid = PartitionValuesGetPartitionOid(
             partTableRel, splitPart->partition_for_values, AccessExclusiveLock, true, true, false);
+    }
+
+    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
+    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
+        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+    }
+
+    // check final partition num
+    targetPartNum = getNumberOfPartitions(partTableRel) + list_length(destPartDefList) - 1;
+    if (targetPartNum > MAX_PARTITION_NUM) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                errmsg("too many partitions for partitioned table"),
+                errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
     }
 
     /* check src partition exists */
@@ -24891,6 +24940,7 @@ static Oid AddTemporaryRangePartitionForAlterPartitions(const AlterTableCmd* cmd
     }
     partDef->boundary = getRangePartitionBoundaryList(partTableRel, sequence);
     partDef->tablespacename = pstrdup(cmd->target_partition_tablespace);
+    partDef->partitionno = GetPartitionnoFromSequence(partTableRel->partMap, sequence);
     partDef->curStartVal = NULL;
     partDef->partitionInitName = NULL;
     newPartOid = AddTemporaryPartition(partTableRel, (Node*)partDef);
@@ -24931,6 +24981,7 @@ static Oid AddTemporaryListPartitionForAlterPartitions(const AlterTableCmd* cmd,
     }
     partDef->boundary = getListPartitionBoundaryList(partTableRel, sequence);
     partDef->tablespacename = pstrdup(cmd->target_partition_tablespace);
+    partDef->partitionno = GetPartitionnoFromSequence(partTableRel->partMap, sequence);
     newPartOid = AddTemporaryPartition(partTableRel, (Node*)partDef);
     pfree_ext(partDef->partitionName);
     pfree_ext(partDef->tablespacename);
@@ -24969,6 +25020,7 @@ static Oid AddTemporaryHashPartitionForAlterPartitions(const AlterTableCmd* cmd,
     }
     partDef->boundary = getHashPartitionBoundaryList(partTableRel, sequence);
     partDef->tablespacename = pstrdup(cmd->target_partition_tablespace);
+    partDef->partitionno = GetPartitionnoFromSequence(partTableRel->partMap, sequence);
     newPartOid = AddTemporaryPartition(partTableRel, (Node*)partDef);
     pfree_ext(partDef->partitionName);
     pfree_ext(partDef->tablespacename);

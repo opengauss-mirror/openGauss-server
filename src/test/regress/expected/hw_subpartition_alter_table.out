@@ -224,13 +224,16 @@ Command:     ALTER TABLE SUBPARTITION
 Description: change the definition of a subpartition
 Syntax:
 ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
-    action [, ... ];
+    { action [, ... ] | reset_clause };
 
 where action can be:
+    row_clause    |
     add_clause    |
     drop_clause   |
     split_clause  |
     truncate_clause
+where row_clause can be:
+{ ENABLE | DISABLE } ROW MOVEMENT
 where add_clause can be:
 ADD { partition_less_than_item | partition_list_item } [ ( subpartition_definition_list ) ]
 MODIFY PARTITION partition_name ADD subpartition_definition
@@ -250,5 +253,6 @@ AT ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tab
 VALUES ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] , SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] )
 where truncate_clause can be:
 TRUNCATE SUBPARTITION { subpartition_name } [ UPDATE GLOBAL INDEX ]
-NOTICE: 'ALTER TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+where reset_clause can be:
+RESET PARTITION;
 

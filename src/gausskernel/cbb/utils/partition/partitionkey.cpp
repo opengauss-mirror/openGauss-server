@@ -554,7 +554,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
 
         rte->plist = rangePartDef->boundary;
 
-        partitionOid = PartitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
+        partitionOid = PartitionValuesGetPartitionOid(rel, rangePartDef->boundary, NoLock, true, true, false);
 
         pfree_ext(rangePartDef);
     } else {
@@ -687,13 +687,13 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
             SplitValuesList(relation->partitionKeyValuesList, &partitionKeyValuesList, &subPartitionKeyValuesList, rel);
             *partOid = GetPartitionOidFromPartitionKeyValuesList(rel, partitionKeyValuesList, pstate, rte);
             tmpList = rte->plist;
-            Partition part = partitionOpen(rel, *partOid, AccessShareLock);
+            Partition part = partitionOpen(rel, *partOid, NoLock);
             Relation partRel = partitionGetRelation(rel, part);
             CheckPartitionValuesList(partRel, subPartitionKeyValuesList);
             subPartitionOid =
                 GetPartitionOidFromPartitionKeyValuesList(partRel, subPartitionKeyValuesList, pstate, rte);
             releaseDummyRelation(&partRel);
-            partitionClose(rel, part, AccessShareLock);
+            partitionClose(rel, part, NoLock);
             rte->plist = list_concat(tmpList, rte->plist);
         }
     }

@@ -346,21 +346,31 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
     BlockNumber partIndexPages = 0;
     BlockNumber indexrelPartPages = 0; /* analyzed pages, stored in pg_partition->relpages */
     int partitionNum = getNumberOfPartitions(relation);
+    int samplePartitions = 0;
     foreach (cell, sampledPartitionIds) {
         Oid partOid = lfirst_oid(cell);
         Oid partIndexOid = getPartitionIndexOid(indexRelation->rd_id, partOid);
-        Partition partIndex = partitionOpen(indexRelation, partIndexOid, AccessShareLock);
+        if (!ConditionalLockPartition(indexRelation->rd_id, partIndexOid, AccessShareLock, PARTITION_LOCK)) {
+            continue;
+        }
+        samplePartitions++;
+        Partition partIndex = partitionOpen(indexRelation, partIndexOid, NoLock);
         partIndexPages += PartitionGetNumberOfBlocks(indexRelation, partIndex);
         indexrelPartPages += partIndex->pd_part->relpages;
         partitionClose(indexRelation, partIndex, AccessShareLock);
     }
-    indexPages = partIndexPages * (partitionNum / sampledPartitionIds->length);
+
+    /* if all partition is locked, just use relpages in index relation */
+    if (samplePartitions == 0) {
+        return indexRelation->rd_rel->relpages;
+    }
+
+    indexPages = partIndexPages * (partitionNum / samplePartitions);
 
     if (!RelationIsSubPartitioned(relation)) {
-        indexPages = partIndexPages * (partitionNum / sampledPartitionIds->length);
         if (indexrelPartPages > 0 && partitionNum > ESTIMATE_PARTITION_NUMBER &&
             partIndexPages < indexRelation->rd_rel->relpages / ESTIMATE_PARTPAGES_THRESHOLD) {
-            if (sampledPartitionIds->length > ESTIMATE_PARTITION_NUMBER_THRESHOLD) {
+            if (samplePartitions  > ESTIMATE_PARTITION_NUMBER_THRESHOLD) {
                 indexPages = partIndexPages * (indexRelation->rd_rel->relpages / (double)indexrelPartPages);
             } else {
                 indexPages = indexRelation->rd_rel->relpages;

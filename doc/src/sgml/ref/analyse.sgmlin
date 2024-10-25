@@ -14,7 +14,7 @@
     [ table_name [ ( column_name [, ...] ) ] ];
 {ANALYZE | ANALYSE} [ VERBOSE ]
     [ table_name [ ( column_name [, ...] ) ] ]
-    PARTITION patrition_name;
+    PARTITION (partition_name);
 {ANALYZE | ANALYSE} [ VERBOSE ]
     { foreign_table_name | FOREIGN TABLES };
 {ANALYZE | ANALYSE} [ VERBOSE ]
@@ -23,7 +23,7 @@
 {ANALYZE | ANALYSE} VERIFY {FAST|COMPLETE}
     table_name|index_name [CASCADE];
 {ANALYZE | ANALYSE} VERIFY {FAST|COMPLETE}
-    table_name PARTITION (patrition_name) [CASCADE];
+    table_name PARTITION (partition_name) [CASCADE];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

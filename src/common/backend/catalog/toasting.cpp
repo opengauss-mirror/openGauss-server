@@ -441,7 +441,7 @@ bool CreateToastTableForSubPartition(Relation partRel, Oid subPartOid, Datum rel
         create_toast_table(subPartRel, InvalidOid, InvalidOid, reloptions, true, (partLockMode == AccessShareLock));
 
     releaseDummyRelation(&subPartRel);
-    partitionClose(partRel, partition, partLockMode);
+    partitionClose(partRel, partition, NoLock);
 
     return result;
 }
@@ -450,7 +450,8 @@ bool CreateToastTableForPartitioneOfSubpartTable(Relation rel, Oid partOid, Datu
 {
     bool result = false;
     ListCell *cell = NULL;
-    Partition part = partitionOpen(rel, partOid, partLockMode);
+    LOCKMODE partlock = partLockMode > ShareUpdateExclusiveLock ? ShareUpdateExclusiveLock : partLockMode;
+    Partition part = partitionOpen(rel, partOid, partlock);
     Relation partRel = partitionGetRelation(rel, part);
 
     List *partitionList = relationGetPartitionOidList(partRel);
@@ -460,7 +461,7 @@ bool CreateToastTableForPartitioneOfSubpartTable(Relation rel, Oid partOid, Datu
     }
 
     releaseDummyRelation(&partRel);
-    partitionClose(rel, part, partLockMode);
+    partitionClose(rel, part, NoLock);
 
     return result;
 }

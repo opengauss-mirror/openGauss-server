@@ -11,9 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
-    action [, ... ];
-ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
-    RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
+    { action [, ... ] | rename_clause | reset_clause };
 
 where action can be:
     move_clause  |
@@ -30,16 +28,16 @@ MOVE PARTITION { partion_name | FOR ( partition_value [, ...] ) } TABLESPACE tab
 where exchange_clause can be:
 EXCHANGE PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } 
     WITH TABLE {[ ONLY ] ordinary_table_name | ordinary_table_name * | ONLY ( ordinary_table_name )} 
-    [ { WITH | WITHOUT } VALIDATION ] [ VERBOSE ]
+    [ { WITH | WITHOUT } VALIDATION ] [ VERBOSE ] [ UPDATE GLOBAL INDEX ]
 where row_clause can be:
 { ENABLE | DISABLE } ROW MOVEMENT
 where merge_clause can be:
 MERGE PARTITIONS { partition_name } [, ...] INTO PARTITION partition_name
-    [ TABLESPACE tablespacename ]
+    [ TABLESPACE tablespacename ] [ UPDATE GLOBAL INDEX ]
 where modify_clause can be:
 MODIFY PARTITION partition_name { UNUSABLE LOCAL INDEXES | REBUILD UNUSABLE LOCAL INDEXES }
 where split_clause can be:
-SPLIT PARTITION { partition_name | FOR ( partition_value [, ...] ) } { split_point_clause | no_split_point_clause }
+SPLIT PARTITION { partition_name | FOR ( partition_value [, ...] ) } { split_point_clause | no_split_point_clause } [ UPDATE GLOBAL INDEX ]
 where split_point_clause can be:
 AT ( partition_value ) INTO ( PARTITION partition_name [ TABLESPACE tablespacename ] , PARTITION partition_name [ TABLESPACE tablespacename ] )
 where no_split_point_clause can be:
@@ -60,10 +58,13 @@ PARTITION partition_name {
 	{END({partition_value | MAXVALUE})}
 } [TABLESPACE tablespace_name]
 where drop_clause can be:
-DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  }
+DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  } [ UPDATE GLOBAL INDEX ]
 where truncate_clause can be:
 TRUNCATE PARTITION  { partition_name | FOR (  partition_value [, ...] )  } [ UPDATE GLOBAL INDEX ]
-NOTICE: 'truncate_clause' is only avaliable in CENTRALIZED mode!
+where rename_clause can be:
+RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
+where reset_clause can be:
+RESET PARTITION;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

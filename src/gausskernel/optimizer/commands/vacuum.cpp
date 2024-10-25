@@ -3295,6 +3295,7 @@ static void CalculateSubPartitionedRelStats(_in_ Relation partitionRel, _in_ Rel
             pages += (uint32) partForm->relpages;
             allVisiblePages += partForm->relallvisible;
             tuples += partForm->reltuples;
+
         }
         systable_endscan(subpartScan);
     }
@@ -3348,7 +3349,7 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
             minMultiXid);
         return;
     }
- 
+
     if (partitionRel->rd_rel->relkind == RELKIND_RELATION) {
         ScanKeyInit(&partKey[0],
             Anum_pg_partition_parttype,

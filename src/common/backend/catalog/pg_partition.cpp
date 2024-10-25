@@ -1062,6 +1062,31 @@ void freeSubPartList(List* plist)
     }
 }
 
+static int PartOidGetPartitionNo(PartitionMap *map, Oid partOid)
+{
+    Oid partitionId = InvalidOid;
+    int partitionno = INVALID_PARTITION_NO;
+    int sumtotal = getPartitionNumber(map);
+
+    for (int conuter = 0; conuter < sumtotal; ++conuter) {
+        if (map->type == PART_TYPE_LIST) {
+            partitionId = ((ListPartitionMap*)map)->listElements[conuter].partitionOid;
+            partitionno = ((ListPartitionMap*)map)->listElements[conuter].partitionno;
+        } else if (map->type == PART_TYPE_HASH) {
+            partitionId = ((HashPartitionMap*)map)->hashElements[conuter].partitionOid;
+            partitionno = ((HashPartitionMap*)map)->hashElements[conuter].partitionno;
+        } else {
+            partitionId = ((RangePartitionMap*)map)->rangeElements[conuter].partitionOid;
+            partitionno = ((RangePartitionMap*)map)->rangeElements[conuter].partitionno;
+        }
+        if (partitionId == partOid) {
+            return partitionno;
+        }
+    }
+
+    return INVALID_PARTITION_NO;
+}
+
 /* IMPORTANT: This function will case invalidation message process,  the relation may
               be rebuild,  and the relation->partMap may be changed.
               After call this founction,  should not call getNumberOfRangePartitions/getNumberOfPartitions,
@@ -1071,22 +1096,35 @@ List* relationGetPartitionList(Relation relation, LOCKMODE lockmode)
 {
     List* partitionOidList = NIL;
     List* partitionList = NIL;
+    ListCell* cell = NULL;
+    Oid partitionId = InvalidOid;
+    Partition partition = NULL;
 
+    incre_partmap_refcount(relation->partMap);
     partitionOidList = relationGetPartitionOidList(relation);
-    if (PointerIsValid(partitionOidList)) {
-        ListCell* cell = NULL;
-        Oid partitionId = InvalidOid;
-        Partition partition = NULL;
+    if (!PointerIsValid(partitionOidList)) {
+        decre_partmap_refcount(relation->partMap);
+        return NIL;
+    }
 
-        foreach (cell, partitionOidList) {
-            partitionId = lfirst_oid(cell);
-            Assert(OidIsValid(partitionId));
-            partition = partitionOpen(relation, partitionId, lockmode);
-            partitionList = lappend(partitionList, partition);
+    foreach (cell, partitionOidList) {
+        partitionId = lfirst_oid(cell);
+        Assert(OidIsValid(partitionId));
+        partition = tryPartitionOpen(relation, partitionId, lockmode);
+        if (!PartitionIsValid(partition)) {
+            PARTITION_LOG("could not open partition with partition oid %u, partitionno will be used to search the "
+                          "new partition", partitionId);
+            int partitionno = PartOidGetPartitionNo(relation->partMap, partitionId);
+            if (!PARTITIONNO_IS_VALID(partitionno)) {
+                continue;
+            }
+            partition = PartitionOpenWithPartitionno(relation, partitionId, partitionno, lockmode);
         }
 
-        list_free_ext(partitionOidList);
+        partitionList = lappend(partitionList, partition);
     }
+    list_free_ext(partitionOidList);
+    decre_partmap_refcount(relation->partMap);
 
     return partitionList;
 }
@@ -1095,26 +1133,40 @@ List* RelationGetSubPartitionList(Relation relation, LOCKMODE lockmode)
 {
     List* partitionOidList = NIL;
     List* subPartList = NIL;
+    ListCell* cell = NULL;
+    Oid partitionId = InvalidOid;
+    Partition partition = NULL;
 
+    incre_partmap_refcount(relation->partMap);
     partitionOidList = relationGetPartitionOidList(relation);
-    if (PointerIsValid(partitionOidList)) {
-        ListCell* cell = NULL;
-        Oid partitionId = InvalidOid;
-        Partition partition = NULL;
+    if (!PointerIsValid(partitionOidList)) {
+        decre_partmap_refcount(relation->partMap);
+        return NIL;
+    }
 
-        foreach (cell, partitionOidList) {
-            partitionId = lfirst_oid(cell);
-            Assert(OidIsValid(partitionId));
-            partition = partitionOpen(relation, partitionId, lockmode);
-            Relation partRel = partitionGetRelation(relation, partition);
-            List* subPartListTmp = relationGetPartitionList(partRel, lockmode);
-            subPartList = list_concat(subPartList, subPartListTmp);
-            releaseDummyRelation(&partRel);
-            partitionClose(relation, partition, lockmode);
+    foreach (cell, partitionOidList) {
+        partitionId = lfirst_oid(cell);
+        Assert(OidIsValid(partitionId));
+        partition = tryPartitionOpen(relation, partitionId, lockmode);
+        if (!PartitionIsValid(partition)) {
+            PARTITION_LOG("could not open partition with partition oid %u, partitionno will be used to search the "
+                          "new partition", partitionId);
+            int partitionno = PartOidGetPartitionNo(relation->partMap, partitionId);
+            if (!PARTITIONNO_IS_VALID(partitionno)) {
+                continue;
+            }
+            partition = PartitionOpenWithPartitionno(relation, partitionId, partitionno, lockmode);
         }
 
-        list_free_ext(partitionOidList);
+        Relation partRel = partitionGetRelation(relation, partition);
+        List* subPartListTmp = relationGetPartitionList(partRel, lockmode);
+        subPartList = list_concat(subPartList, subPartListTmp);
+        releaseDummyRelation(&partRel);
+        partitionClose(relation, partition, lockmode);
     }
+
+    list_free_ext(partitionOidList);
+    decre_partmap_refcount(relation->partMap);
 
     return subPartList;
 }
@@ -1297,8 +1349,12 @@ Relation SubPartitionGetRelation(Relation heap, Partition subPart, LOCKMODE lock
 
 Partition SubPartitionOidGetPartition(Relation rel, Oid subPartOid, LOCKMODE lockmode)
 {
+    /* this function is used for partitionOpen(relOid, subpartOid). Do not use it as much as possible.
+     * We cannot add high lock on the partOid in case of deadlock. */
+    LOCKMODE partlock = lockmode > ShareUpdateExclusiveLock ? ShareUpdateExclusiveLock : lockmode;
+
     Oid parentOid = partid_get_parentid(subPartOid);
-    Partition part = partitionOpen(rel, parentOid, lockmode);
+    Partition part = partitionOpen(rel, parentOid, partlock);
     Relation partRel = partitionGetRelation(rel, part);
     Partition subPart = partitionOpen(partRel, subPartOid, lockmode);
     releaseDummyRelation(&partRel);
