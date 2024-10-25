@@ -637,8 +637,12 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
      * In order to ensure the integrity of the message(T-C-Z), regardless of the value of
      * u_sess->exec_cxt.executor_stop_flag, the 'T' message should be sent.
      */
-    if (send_tuples)
+    if (send_tuples) {
+        if ((dest->mydest == DestRemote || dest->mydest == DestRemoteExecute)) {
+            ((DR_printtup *)dest)->target_list = queryDesc->plannedstmt->planTree->targetlist;
+        }
         (*dest->rStartup)(dest, operation, queryDesc->tupDesc);
+    }
 
     if (queryDesc->plannedstmt->bucketMap[0] != NULL) {
         u_sess->exec_cxt.global_bucket_map = queryDesc->plannedstmt->bucketMap[0];
