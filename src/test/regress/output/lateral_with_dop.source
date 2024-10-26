@@ -1,0 +1,2669 @@
+drop schema if exists lateral_with_dop_test;
+NOTICE:  schema "lateral_with_dop_test" does not exist, skipping
+create schema lateral_with_dop_test;
+set search_path=lateral_with_dop_test;
+SET query_dop = 4;
+CREATE TABLE tenk1 (
+    unique1     int4,
+    unique2     int4,
+    two         int4,
+    four        int4,
+    ten         int4,
+    twenty      int4,
+    hundred     int4,
+    thousand    int4,
+    twothousand int4,
+    fivethous   int4,
+    tenthous    int4,
+    odd         int4,
+    even        int4,
+    stringu1    name,
+    stringu2    name,
+    string4     name
+);
+COPY tenk1 FROM '@abs_srcdir@/data/tenk.data';
+CREATE TABLE INT4_TBL(f1 int4);
+INSERT INTO INT4_TBL(f1) VALUES
+  ('   0  '),
+  ('123456     '),
+  ('    -123456'),
+  ('2147483647'),  -- largest and smallest values
+  ('-2147483647');
+VACUUM INT4_TBL;
+CREATE TABLE INT8_TBL(q1 int8, q2 int8);
+INSERT INTO INT8_TBL VALUES
+  ('  123   ','  456'),
+  ('123   ','4567890123456789'),
+  ('4567890123456789','123'),
+  (+4567890123456789,'4567890123456789'),
+  ('+4567890123456789','-4567890123456789');
+VACUUM INT8_TBL;
+CREATE TABLE INT2_TBL(f1 int2);
+INSERT INTO INT2_TBL(f1) VALUES
+  ('0   '),
+  ('  1234 '),
+  ('    -1234'),
+  ('32767'),  -- largest and smallest values
+  ('-32767');
+VACUUM INT2_TBL;
+--
+-- Test LATERAL
+--
+select unique2, x.*
+from tenk1 a, lateral (select * from int4_tbl b where f1 = a.unique1) x;
+ unique2 | f1 
+---------+----
+    9998 |  0
+(1 row)
+
+explain (costs off)
+  select unique2, x.*
+  from tenk1 a, lateral (select * from int4_tbl b where f1 = a.unique1) x;
+             QUERY PLAN             
+------------------------------------
+ Hash Join
+   Hash Cond: (a.unique1 = b.f1)
+   ->  Seq Scan on tenk1 a
+   ->  Hash
+         ->  Seq Scan on int4_tbl b
+(5 rows)
+
+select unique2, x.*
+from int4_tbl x, lateral (select unique2 from tenk1 where f1 = unique1) ss;
+ unique2 | f1 
+---------+----
+    9998 |  0
+(1 row)
+
+explain (costs off)
+  select unique2, x.*
+  from int4_tbl x, lateral (select unique2 from tenk1 where f1 = unique1) ss;
+             QUERY PLAN              
+-------------------------------------
+ Hash Join
+   Hash Cond: (tenk1.unique1 = x.f1)
+   ->  Seq Scan on tenk1
+   ->  Hash
+         ->  Seq Scan on int4_tbl x
+(5 rows)
+
+explain (costs off)
+  select unique2, x.*
+  from int4_tbl x cross join lateral (select unique2 from tenk1 where f1 = unique1) ss;
+             QUERY PLAN              
+-------------------------------------
+ Hash Join
+   Hash Cond: (tenk1.unique1 = x.f1)
+   ->  Seq Scan on tenk1
+   ->  Hash
+         ->  Seq Scan on int4_tbl x
+(5 rows)
+
+select unique2, x.*
+from int4_tbl x left join lateral (select unique1, unique2 from tenk1 where f1 = unique1) ss on true;
+ unique2 |     f1      
+---------+-------------
+    9998 |           0
+         |      123456
+         | -2147483647
+         |  2147483647
+         |     -123456
+(5 rows)
+
+explain (costs off)
+  select unique2, x.*
+  from int4_tbl x left join lateral (select unique1, unique2 from tenk1 where f1 = unique1) ss on true;
+             QUERY PLAN              
+-------------------------------------
+ Hash Right Join
+   Hash Cond: (tenk1.unique1 = x.f1)
+   ->  Seq Scan on tenk1
+   ->  Hash
+         ->  Seq Scan on int4_tbl x
+(5 rows)
+
+-- check scoping of lateral versus parent references
+-- the first of these should return int8_tbl.q2, the second int8_tbl.q1
+select *, (select r from (select q1 as q2) x, (select q2 as r) y) from int8_tbl;
+        q1        |        q2         |         r         
+------------------+-------------------+-------------------
+              123 |               456 |               456
+              123 |  4567890123456789 |  4567890123456789
+ 4567890123456789 |               123 |               123
+ 4567890123456789 |  4567890123456789 |  4567890123456789
+ 4567890123456789 | -4567890123456789 | -4567890123456789
+(5 rows)
+
+select *, (select r from (select q1 as q2) x, lateral (select q2 as r) y) from int8_tbl;
+        q1        |        q2         |        r         
+------------------+-------------------+------------------
+              123 |               456 |              123
+              123 |  4567890123456789 |              123
+ 4567890123456789 |               123 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789
+(5 rows)
+
+-- lateral with function in FROM
+select count(*) from tenk1 a, lateral generate_series(1,two) g;
+ count 
+-------
+  5000
+(1 row)
+
+explain (costs off)
+  select count(*) from tenk1 a, lateral generate_series(1,two) g;
+                   QUERY PLAN                   
+------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         ->  Seq Scan on tenk1 a
+         ->  Function Scan on generate_series g
+(4 rows)
+
+explain (costs off)
+  select count(*) from tenk1 a cross join lateral generate_series(1,two) g;
+                   QUERY PLAN                   
+------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         ->  Seq Scan on tenk1 a
+         ->  Function Scan on generate_series g
+(4 rows)
+
+-- don't need the explicit LATERAL keyword for functions
+explain (costs off)
+  select count(*) from tenk1 a, generate_series(1,two) g;
+                   QUERY PLAN                   
+------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         ->  Seq Scan on tenk1 a
+         ->  Function Scan on generate_series g
+(4 rows)
+
+-- lateral with UNION ALL subselect
+explain (costs off)
+  select * from generate_series(100,200) g,
+    lateral (select * from int8_tbl a where g = q1 union all
+             select * from int8_tbl b where g = q2) ss;
+                QUERY PLAN                
+------------------------------------------
+ Nested Loop
+   ->  Function Scan on generate_series g
+   ->  Append
+         ->  Seq Scan on int8_tbl a
+               Filter: (g.g = q1)
+         ->  Seq Scan on int8_tbl b
+               Filter: (g.g = q2)
+(7 rows)
+
+select * from generate_series(100,200) g,
+  lateral (select * from int8_tbl a where g = q1 union all
+           select * from int8_tbl b where g = q2) ss;
+  g  |        q1        |        q2        
+-----+------------------+------------------
+ 123 |              123 |              456
+ 123 |              123 | 4567890123456789
+ 123 | 4567890123456789 |              123
+(3 rows)
+
+-- lateral with VALUES
+explain (costs off)
+  select count(*) from tenk1 a,
+    tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Hash Join
+         Hash Cond: ("*VALUES*".column1 = b.unique2)
+         ->  Nested Loop
+               ->  Seq Scan on tenk1 a
+               ->  Values Scan on "*VALUES*"
+         ->  Hash
+               ->  Seq Scan on tenk1 b
+(8 rows)
+
+select count(*) from tenk1 a,
+  tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
+ count 
+-------
+ 10000
+(1 row)
+
+-- lateral with VALUES, no flattening possible
+explain (costs off)
+  select count(*) from tenk1 a,
+    tenk1 b join lateral (values(a.unique1),(-1)) ss(x) on b.unique2 = ss.x;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/4)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ("*VALUES*".column1 = b.unique2)
+                     ->  Streaming(type: BROADCAST dop: 4/1)
+                           ->  Nested Loop
+                                 ->  Seq Scan on tenk1 a
+                                 ->  Values Scan on "*VALUES*"
+                     ->  Hash
+                           ->  Seq Scan on tenk1 b
+(11 rows)
+
+select count(*) from tenk1 a,
+  tenk1 b join lateral (values(a.unique1),(-1)) ss(x) on b.unique2 = ss.x;
+ count 
+-------
+ 10000
+(1 row)
+
+-- lateral injecting a strange outer join condition
+explain (costs off)
+  select * from int8_tbl a,
+    int8_tbl x left join lateral (select a.q1 from int4_tbl y) ss(z)
+      on x.q2 = ss.z
+  order by a.q1, a.q2, x.q1, x.q2, ss.z;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: a.q1, a.q2, x.q1, x.q2, ($0)
+   ->  Nested Loop
+         ->  Seq Scan on int8_tbl a
+         ->  Hash Left Join
+               Hash Cond: (x.q2 = ($0))
+               ->  Seq Scan on int8_tbl x
+               ->  Hash
+                     ->  Seq Scan on int4_tbl y
+(9 rows)
+
+select * from int8_tbl a,
+  int8_tbl x left join lateral (select a.q1 from int4_tbl y) ss(z)
+    on x.q2 = ss.z
+  order by a.q1, a.q2, x.q1, x.q2, ss.z;
+        q1        |        q2         |        q1        |        q2         |        z         
+------------------+-------------------+------------------+-------------------+------------------
+              123 |               456 |              123 |               456 |                 
+              123 |               456 |              123 |  4567890123456789 |                 
+              123 |               456 | 4567890123456789 | -4567890123456789 |                 
+              123 |               456 | 4567890123456789 |               123 |              123
+              123 |               456 | 4567890123456789 |               123 |              123
+              123 |               456 | 4567890123456789 |               123 |              123
+              123 |               456 | 4567890123456789 |               123 |              123
+              123 |               456 | 4567890123456789 |               123 |              123
+              123 |               456 | 4567890123456789 |  4567890123456789 |                 
+              123 |  4567890123456789 |              123 |               456 |                 
+              123 |  4567890123456789 |              123 |  4567890123456789 |                 
+              123 |  4567890123456789 | 4567890123456789 | -4567890123456789 |                 
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123
+              123 |  4567890123456789 | 4567890123456789 |  4567890123456789 |                 
+ 4567890123456789 | -4567890123456789 |              123 |               456 |                 
+ 4567890123456789 | -4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789 | -4567890123456789 |                 
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |               123 |                 
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |               456 |                 
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 | 4567890123456789 | -4567890123456789 |                 
+ 4567890123456789 |               123 | 4567890123456789 |               123 |                 
+ 4567890123456789 |               123 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 |              123 |               456 |                 
+ 4567890123456789 |  4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 |              123 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | -4567890123456789 |                 
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |               123 |                 
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+(57 rows)
+
+-- lateral reference to a join alias variable
+select * from (select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
+  lateral (select x) ss2(y);
+ x | f1 | y 
+---+----+---
+ 0 |  0 | 0
+(1 row)
+
+select * from (select f1 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
+  lateral (values(x)) ss2(y);
+      x      |     f1      |      y      
+-------------+-------------+-------------
+           0 |           0 |           0
+      123456 |      123456 |      123456
+     -123456 |     -123456 |     -123456
+  2147483647 |  2147483647 |  2147483647
+ -2147483647 | -2147483647 | -2147483647
+(5 rows)
+
+select * from ((select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1) j,
+  lateral (select x) ss2(y);
+ x | f1 | y 
+---+----+---
+ 0 |  0 | 0
+(1 row)
+
+-- lateral references requiring pullup
+select * from (values(1)) x(lb),
+  lateral generate_series(lb,4) x4;
+ lb | x4 
+----+----
+  1 |  1
+  1 |  2
+  1 |  3
+  1 |  4
+(4 rows)
+
+select * from (select f1/1000000000 from int4_tbl) x(lb),
+  lateral generate_series(lb,4) x4;
+      lb      | x4 
+--------------+----
+            0 |  0
+            0 |  1
+            0 |  2
+            0 |  3
+            0 |  4
+   .000123456 |  0
+   .000123456 |  1
+   .000123456 |  2
+   .000123456 |  3
+   .000123456 |  4
+  -.000123456 |  0
+  -.000123456 |  1
+  -.000123456 |  2
+  -.000123456 |  3
+  -.000123456 |  4
+  2.147483647 |  2
+  2.147483647 |  3
+  2.147483647 |  4
+ -2.147483647 | -2
+ -2.147483647 | -1
+ -2.147483647 |  0
+ -2.147483647 |  1
+ -2.147483647 |  2
+ -2.147483647 |  3
+ -2.147483647 |  4
+(25 rows)
+
+select * from (values(1)) x(lb),
+  lateral (values(lb)) y(lbcopy);
+ lb | lbcopy 
+----+--------
+  1 |      1
+(1 row)
+
+select * from (values(1)) x(lb),
+  lateral (select lb from int4_tbl) y(lbcopy);
+ lb | lbcopy 
+----+--------
+  1 |      1
+  1 |      1
+  1 |      1
+  1 |      1
+  1 |      1
+(5 rows)
+
+select * from
+  int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1,
+  lateral (values(x.q1,y.q1,y.q2)) v(xq1,yq1,yq2);
+        q1        |        q2         |        q1        |        q2         |       xq1        |       yq1        |        yq2        
+------------------+-------------------+------------------+-------------------+------------------+------------------+-------------------
+              123 |               456 |                  |                   |              123 |                  |                  
+              123 |  4567890123456789 | 4567890123456789 | -4567890123456789 |              123 | 4567890123456789 | -4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |  4567890123456789 |              123 | 4567890123456789 |  4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123 | 4567890123456789 |               123
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789 |              123 |  4567890123456789
+ 4567890123456789 |               123 |              123 |               456 | 4567890123456789 |              123 |               456
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789 | 4567890123456789 | -4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 |  4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789 | 4567890123456789 |               123
+ 4567890123456789 | -4567890123456789 |                  |                   | 4567890123456789 |                  |                  
+(10 rows)
+
+select * from
+  int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1,
+  lateral (select x.q1,y.q1,y.q2) v(xq1,yq1,yq2);
+        q1        |        q2         |        q1        |        q2         |       xq1        |       yq1        |        yq2        
+------------------+-------------------+------------------+-------------------+------------------+------------------+-------------------
+              123 |               456 |                  |                   |              123 |                  |                  
+              123 |  4567890123456789 | 4567890123456789 | -4567890123456789 |              123 | 4567890123456789 | -4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |  4567890123456789 |              123 | 4567890123456789 |  4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |               123 |              123 | 4567890123456789 |               123
+ 4567890123456789 |               123 |              123 |  4567890123456789 | 4567890123456789 |              123 |  4567890123456789
+ 4567890123456789 |               123 |              123 |               456 | 4567890123456789 |              123 |               456
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789 | 4567890123456789 | -4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 |  4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789 | 4567890123456789 |               123
+ 4567890123456789 | -4567890123456789 |                  |                   | 4567890123456789 |                  |                  
+(10 rows)
+
+select x.* from
+  int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1,
+  lateral (select x.q1,y.q1,y.q2) v(xq1,yq1,yq2);
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+              123 |  4567890123456789
+              123 |  4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+ 4567890123456789 |  4567890123456789
+ 4567890123456789 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+(10 rows)
+
+select v.* from
+  (int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1)
+  left join int4_tbl z on z.f1 = x.q2,
+  lateral (select x.q1,y.q1 union all select x.q2,y.q2) v(vx,vy);
+        vx         |        vy         
+-------------------+-------------------
+               123 |                  
+               456 |                  
+               123 |  4567890123456789
+  4567890123456789 | -4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |  4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |               123
+               123 |  4567890123456789
+  4567890123456789 |               123
+               123 |               456
+  4567890123456789 |  4567890123456789
+  4567890123456789 | -4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |                  
+ -4567890123456789 |                  
+(20 rows)
+
+select v.* from
+  (int8_tbl x left join (select q1,(select coalesce(q2,0)) q2 from int8_tbl) y on x.q2 = y.q1)
+  left join int4_tbl z on z.f1 = x.q2,
+  lateral (select x.q1,y.q1 union all select x.q2,y.q2) v(vx,vy);
+        vx         |        vy         
+-------------------+-------------------
+               123 |                  
+               456 |                  
+               123 |  4567890123456789
+  4567890123456789 | -4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |  4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |               123
+               123 |  4567890123456789
+  4567890123456789 |               123
+               123 |               456
+  4567890123456789 |  4567890123456789
+  4567890123456789 | -4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |                  
+ -4567890123456789 |                  
+(20 rows)
+
+explain (verbose, costs off)
+select * from
+  int8_tbl a left join
+  lateral (select *, a.q2 as x from int8_tbl b) ss on a.q2 = ss.q1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Nested Loop Left Join
+   Output: a.q1, a.q2, b.q1, b.q2, ($0)
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl a
+         Output: a.q1, a.q2
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl b
+         Output: b.q1, b.q2, a.q2
+         Filter: (a.q2 = b.q1)
+(7 rows)
+
+select * from
+  int8_tbl a left join
+  lateral (select *, a.q2 as x from int8_tbl b) ss on a.q2 = ss.q1;
+        q1        |        q2         |        q1        |        q2         |        x         
+------------------+-------------------+------------------+-------------------+------------------
+              123 |               456 |                  |                   |                 
+              123 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+              123 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |               456 |              123
+ 4567890123456789 |               123 |              123 |  4567890123456789 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |                  |                   |                 
+(10 rows)
+
+explain (verbose, costs off)
+select * from
+  int8_tbl a left join
+  lateral (select *, coalesce(a.q2, 42) as x from int8_tbl b) ss on a.q2 = ss.q1;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Nested Loop Left Join
+   Output: a.q1, a.q2, b.q1, b.q2, (COALESCE($0, 42::bigint))
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl a
+         Output: a.q1, a.q2
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl b
+         Output: b.q1, b.q2, COALESCE(a.q2, 42::bigint)
+         Filter: (a.q2 = b.q1)
+(7 rows)
+
+select * from
+  int8_tbl a left join
+  lateral (select *, coalesce(a.q2, 42) as x from int8_tbl b) ss on a.q2 = ss.q1;
+        q1        |        q2         |        q1        |        q2         |        x         
+------------------+-------------------+------------------+-------------------+------------------
+              123 |               456 |                  |                   |                 
+              123 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789
+              123 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+              123 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789
+ 4567890123456789 |               123 |              123 |               456 |              123
+ 4567890123456789 |               123 |              123 |  4567890123456789 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |               123 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | -4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |                  |                   |                 
+(10 rows)
+
+-- lateral can result in join conditions appearing below their
+-- real semantic level
+explain (verbose, costs off)
+select * from int4_tbl i left join
+  lateral (select * from int2_tbl j where i.f1 = j.f1) k on true;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Hash Left Join
+   Output: i.f1, j.f1
+   Hash Cond: (i.f1 = j.f1)
+   ->  Seq Scan on lateral_with_dop_test.int4_tbl i
+         Output: i.f1
+   ->  Hash
+         Output: j.f1
+         ->  Seq Scan on lateral_with_dop_test.int2_tbl j
+               Output: j.f1
+(9 rows)
+
+select * from int4_tbl i left join
+  lateral (select * from int2_tbl j where i.f1 = j.f1) k on true;
+     f1      | f1 
+-------------+----
+           0 |  0
+      123456 |   
+     -123456 |   
+  2147483647 |   
+ -2147483647 |   
+(5 rows)
+
+explain (verbose, costs off)
+select * from int4_tbl i left join
+  lateral (select coalesce(i) from int2_tbl j where i.f1 = j.f1) k on true;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Nested Loop Left Join
+   Output: i.f1, (COALESCE($0))
+   ->  Seq Scan on lateral_with_dop_test.int4_tbl i
+         Output: i.f1, i.*
+   ->  Seq Scan on lateral_with_dop_test.int2_tbl j
+         Output: j.f1, COALESCE(i.*)
+         Filter: (i.f1 = j.f1)
+(7 rows)
+
+select * from int4_tbl i left join
+  lateral (select coalesce(i) from int2_tbl j where i.f1 = j.f1) k on true;
+     f1      | coalesce 
+-------------+----------
+           0 | (0)
+      123456 | 
+     -123456 | 
+  2147483647 | 
+ -2147483647 | 
+(5 rows)
+
+explain (verbose, costs off)
+select * from int4_tbl a,
+  lateral (
+    select * from int4_tbl b left join int8_tbl c on (b.f1 = q1 and a.f1 = q2)
+  ) ss;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop
+   Output: a.f1, b.f1, c.q1, c.q2
+   ->  Seq Scan on lateral_with_dop_test.int4_tbl a
+         Output: a.f1
+   ->  Hash Left Join
+         Output: b.f1, c.q1, c.q2
+         Hash Cond: (b.f1 = c.q1)
+         ->  Seq Scan on lateral_with_dop_test.int4_tbl b
+               Output: b.f1
+         ->  Hash
+               Output: c.q1, c.q2
+               ->  Seq Scan on lateral_with_dop_test.int8_tbl c
+                     Output: c.q1, c.q2
+                     Filter: (a.f1 = c.q2)
+(14 rows)
+
+select * from int4_tbl a,
+  lateral (
+    select * from int4_tbl b left join int8_tbl c on (b.f1 = q1 and a.f1 = q2)
+  ) ss;
+     f1      |     f1      | q1 | q2 
+-------------+-------------+----+----
+           0 |           0 |    |   
+           0 |      123456 |    |   
+           0 |     -123456 |    |   
+           0 |  2147483647 |    |   
+           0 | -2147483647 |    |   
+      123456 |           0 |    |   
+      123456 |      123456 |    |   
+      123456 |     -123456 |    |   
+      123456 |  2147483647 |    |   
+      123456 | -2147483647 |    |   
+     -123456 |           0 |    |   
+     -123456 |      123456 |    |   
+     -123456 |     -123456 |    |   
+     -123456 |  2147483647 |    |   
+     -123456 | -2147483647 |    |   
+  2147483647 |           0 |    |   
+  2147483647 |      123456 |    |   
+  2147483647 |     -123456 |    |   
+  2147483647 |  2147483647 |    |   
+  2147483647 | -2147483647 |    |   
+ -2147483647 |           0 |    |   
+ -2147483647 |      123456 |    |   
+ -2147483647 |     -123456 |    |   
+ -2147483647 |  2147483647 |    |   
+ -2147483647 | -2147483647 |    |   
+(25 rows)
+
+-- lateral reference in a PlaceHolderVar evaluated at join level
+explain (verbose, costs off)
+select * from
+  int8_tbl a left join lateral
+  (select b.q1 as bq1, c.q1 as cq1, least(a.q1,b.q1,c.q1) from
+   int8_tbl b cross join int8_tbl c) ss
+  on a.q2 = ss.bq1;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop Left Join
+   Output: a.q1, a.q2, b.q1, c.q1, (LEAST($0, b.q1, c.q1))
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl a
+         Output: a.q1, a.q2
+   ->  Nested Loop
+         Output: b.q1, c.q1, LEAST(a.q1, b.q1, c.q1)
+         Join Filter: (a.q2 = b.q1)
+         ->  Seq Scan on lateral_with_dop_test.int8_tbl b
+               Output: b.q1, b.q2
+         ->  Materialize
+               Output: c.q1
+               ->  Seq Scan on lateral_with_dop_test.int8_tbl c
+                     Output: c.q1
+(13 rows)
+
+select * from
+  int8_tbl a left join lateral
+  (select b.q1 as bq1, c.q1 as cq1, least(a.q1,b.q1,c.q1) from
+   int8_tbl b cross join int8_tbl c) ss
+  on a.q2 = ss.bq1;
+        q1        |        q2         |       bq1        |       cq1        |      least       
+------------------+-------------------+------------------+------------------+------------------
+              123 |               456 |                  |                  |                 
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |                  |                  |                 
+(42 rows)
+
+-- case requiring nested PlaceHolderVars
+explain (verbose, costs off)
+select * from
+  int8_tbl c left join (
+    int8_tbl a left join (select q1, coalesce(q2,42) as x from int8_tbl b) ss1
+      on a.q2 = ss1.q1
+    cross join
+    lateral (select q1, coalesce(ss1.x,q2) as y from int8_tbl d) ss2
+  ) on c.q2 = ss2.q1,
+  lateral (select ss2.y offset 0) ss3;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: c.q1, c.q2, a.q1, a.q2, b.q1, (COALESCE(b.q2, 42::bigint)), d.q1, (COALESCE(COALESCE(b.q2, 42::bigint), d.q2)), ($0)
+   ->  Hash Right Join
+         Output: c.q1, c.q2, a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+         Hash Cond: (d.q1 = c.q2)
+         ->  Nested Loop
+               Output: a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+               ->  Hash Left Join
+                     Output: a.q1, a.q2, b.q1, (COALESCE(b.q2, 42::bigint))
+                     Hash Cond: (a.q2 = b.q1)
+                     ->  Seq Scan on lateral_with_dop_test.int8_tbl a
+                           Output: a.q1, a.q2
+                     ->  Hash
+                           Output: b.q1, (COALESCE(b.q2, 42::bigint))
+                           ->  Seq Scan on lateral_with_dop_test.int8_tbl b
+                                 Output: b.q1, COALESCE(b.q2, 42::bigint)
+               ->  Materialize
+                     Output: d.q1, (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+                     ->  Seq Scan on lateral_with_dop_test.int8_tbl d
+                           Output: d.q1, COALESCE(COALESCE(b.q2, 42::bigint), d.q2)
+         ->  Hash
+               Output: c.q1, c.q2
+               ->  Seq Scan on lateral_with_dop_test.int8_tbl c
+                     Output: c.q1, c.q2
+   ->  Limit
+         Output: ($0)
+         ->  Result
+               Output: (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+(28 rows)
+
+-- case that breaks the old ph_may_need optimization
+explain (verbose, costs off)
+select c.*,a.*,ss1.q1,ss2.q1,ss3.* from
+  int8_tbl c left join (
+    int8_tbl a left join
+      (select q1, coalesce(q2,f1) as x from int8_tbl b, int4_tbl b2
+       where q1 < f1) ss1
+      on a.q2 = ss1.q1
+    cross join
+    lateral (select q1, coalesce(ss1.x,q2) as y from int8_tbl d) ss2
+  ) on c.q2 = ss2.q1,
+  lateral (select * from int4_tbl i where ss2.y > f1) ss3;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Hash Right Join
+   Output: c.q1, c.q2, a.q1, a.q2, b.q1, d.q1, i.f1
+   Hash Cond: (d.q1 = c.q2)
+   Filter: ((COALESCE($0, d.q2)) > i.f1)
+   ->  Nested Loop
+         Output: a.q1, a.q2, b.q1, d.q1, (COALESCE($0, d.q2))
+         ->  Hash Right Join
+               Output: a.q1, a.q2, b.q1, (COALESCE(b.q2, (b2.f1)::bigint))
+               Hash Cond: (b.q1 = a.q2)
+               ->  Nested Loop
+                     Output: b.q1, COALESCE(b.q2, (b2.f1)::bigint)
+                     Join Filter: (b.q1 < b2.f1)
+                     ->  Seq Scan on lateral_with_dop_test.int8_tbl b
+                           Output: b.q1, b.q2
+                     ->  Materialize
+                           Output: b2.f1
+                           ->  Seq Scan on lateral_with_dop_test.int4_tbl b2
+                                 Output: b2.f1
+               ->  Hash
+                     Output: a.q1, a.q2
+                     ->  Seq Scan on lateral_with_dop_test.int8_tbl a
+                           Output: a.q1, a.q2
+         ->  Seq Scan on lateral_with_dop_test.int8_tbl d
+               Output: d.q1, COALESCE((COALESCE(b.q2, (b2.f1)::bigint)), d.q2)
+   ->  Hash
+         Output: c.q1, c.q2, i.f1
+         ->  Nested Loop
+               Output: c.q1, c.q2, i.f1
+               ->  Seq Scan on lateral_with_dop_test.int8_tbl c
+                     Output: c.q1, c.q2
+               ->  Materialize
+                     Output: i.f1
+                     ->  Seq Scan on lateral_with_dop_test.int4_tbl i
+                           Output: i.f1
+(34 rows)
+
+-- check processing of postponed quals (bug #9041)
+explain (verbose, costs off)
+select * from
+  (select 1 as x offset 0) x cross join (select 2 as y offset 0) y
+  left join lateral (
+    select * from (select 3 as z offset 0) z where z.z = x.x
+  ) zz on zz.z = y.y;
+                  QUERY PLAN                  
+----------------------------------------------
+ Nested Loop Left Join
+   Output: (1), (2), (3)
+   Join Filter: (((3) = (1)) AND ((3) = (2)))
+   ->  Nested Loop
+         Output: (1), (2)
+         ->  Limit
+               Output: (1)
+               ->  Result
+                     Output: 1
+         ->  Limit
+               Output: (2)
+               ->  Result
+                     Output: 2
+   ->  Limit
+         Output: (3)
+         ->  Result
+               Output: 3
+(17 rows)
+
+-- a new postponed-quals issue (bug #17768)
+explain (costs off)
+select * from int4_tbl t1,
+  lateral (select * from int4_tbl t2 inner join int4_tbl t3 on t1.f1 = 1
+           inner join (int4_tbl t4 left join int4_tbl t5 on true) on true) ss;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Nested Loop
+               ->  Nested Loop
+                     ->  Seq Scan on int4_tbl t1
+                           Filter: (f1 = 1)
+                     ->  Seq Scan on int4_tbl t2
+               ->  Materialize
+                     ->  Seq Scan on int4_tbl t3
+         ->  Materialize
+               ->  Seq Scan on int4_tbl t4
+   ->  Materialize
+         ->  Seq Scan on int4_tbl t5
+(13 rows)
+
+-- check dummy rels with lateral references (bug #15694)
+explain (verbose, costs off)
+select * from int8_tbl i8 left join lateral
+  (select *, i8.q2 from int4_tbl where false) ss on true;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Nested Loop Left Join
+   Output: i8.q1, i8.q2, int4_tbl.f1, ($0)
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl i8
+         Output: i8.q1, i8.q2
+   ->  Result
+         Output: int4_tbl.f1, ($0)
+         One-Time Filter: false
+         ->  Seq Scan on lateral_with_dop_test.int4_tbl
+               Output: int4_tbl.f1, i8.q2
+(9 rows)
+
+explain (verbose, costs off)
+select * from int8_tbl i8 left join lateral
+  (select *, i8.q2 from int4_tbl i1, int4_tbl i2 where false) ss on true;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Nested Loop Left Join
+   Output: i8.q1, i8.q2, i1.f1, i2.f1, i8.q2
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl i8
+         Output: i8.q1, i8.q2
+   ->  Result
+         Output: i1.f1, i2.f1, i8.q2
+         One-Time Filter: false
+(7 rows)
+
+-- check handling of nested appendrels inside LATERAL
+select * from
+  ((select 2 as v) union all (select 3 as v)) as q1
+  cross join lateral
+  ((select * from
+      ((select 4 as v) union all (select 5 as v)) as q3)
+   union all
+   (select q1.v)
+  ) as q2;
+ v | v 
+---+---
+ 2 | 4
+ 2 | 5
+ 2 | 2
+ 3 | 4
+ 3 | 5
+ 3 | 3
+(6 rows)
+
+-- check the number of columns specified
+SELECT * FROM (int8_tbl i cross join int4_tbl j) ss(a,b,c,d);
+ERROR:  column alias list for "ss" has too many entries
+-- check we don't try to do a unique-ified semijoin with LATERAL
+explain (verbose, costs off)
+select * from
+  (values (0,9998), (1,1000)) v(id,x),
+  lateral (select f1 from int4_tbl
+           where f1 = any (select unique1 from tenk1
+                           where unique2 = v.x offset 0)) ss;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Nested Loop
+   Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
+   ->  Values Scan on "*VALUES*"
+         Output: "*VALUES*".column1, "*VALUES*".column2
+   ->  Hash Right Semi Join
+         Output: int4_tbl.f1
+         Hash Cond: (tenk1.unique1 = int4_tbl.f1)
+         ->  Limit
+               Output: tenk1.unique1
+               ->  Seq Scan on lateral_with_dop_test.tenk1
+                     Output: tenk1.unique1
+                     Filter: (tenk1.unique2 = "*VALUES*".column2)
+         ->  Hash
+               Output: int4_tbl.f1
+               ->  Seq Scan on lateral_with_dop_test.int4_tbl
+                     Output: int4_tbl.f1
+(16 rows)
+
+select * from
+  (values (0,9998), (1,1000)) v(id,x),
+  lateral (select f1 from int4_tbl
+           where f1 = any (select unique1 from tenk1
+                           where unique2 = v.x offset 0)) ss;
+ id |  x   | f1 
+----+------+----
+  0 | 9998 |  0
+(1 row)
+
+-- check proper extParam/allParam handling (this isn't exactly a LATERAL issue,
+-- but we can make the test case much more compact with LATERAL)
+explain (verbose, costs off)
+select * from (values (0), (1)) v(id),
+lateral (select * from int8_tbl t1,
+         lateral (select * from
+                    (select * from int8_tbl t2
+                     where q1 = any (select q2 from int8_tbl t3
+                                     where q2 = (select greatest(t1.q1,t2.q2))
+                                       and (select v.id=0)) offset 0) ss2) ss
+         where t1.q1 = ss.q2) ss0;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Nested Loop
+   Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
+   ->  Seq Scan on lateral_with_dop_test.int8_tbl t1
+         Output: t1.q1, t1.q2
+   ->  Nested Loop
+         Output: "*VALUES*".column1, ss2.q1, ss2.q2
+         ->  Values Scan on "*VALUES*"
+               Output: "*VALUES*".column1
+         ->  Subquery Scan on ss2
+               Output: ss2.q1, ss2.q2
+               Filter: (t1.q1 = ss2.q2)
+               ->  Limit
+                     Output: t2.q1, t2.q2
+                     ->  Seq Scan on lateral_with_dop_test.int8_tbl t2
+                           Output: t2.q1, t2.q2
+                           Filter: (SubPlan 3)
+                           SubPlan 3
+                             ->  Result
+                                   Output: t3.q2
+                                   One-Time Filter: $4
+                                   InitPlan 1 (returns $2)
+                                     ->  Result
+                                           Output: GREATEST($0, t2.q2)
+                                   InitPlan 2 (returns $4)
+                                     ->  Result
+                                           Output: ($3 = 0)
+                                   ->  Seq Scan on lateral_with_dop_test.int8_tbl t3
+                                         Output: t3.q1, t3.q2
+                                         Filter: (t3.q2 = $2)
+(29 rows)
+
+select * from (values (0), (1)) v(id),
+lateral (select * from int8_tbl t1,
+         lateral (select * from
+                    (select * from int8_tbl t2
+                     where q1 = any (select q2 from int8_tbl t3
+                                     where q2 = (select greatest(t1.q1,t2.q2))
+                                       and (select v.id=0)) offset 0) ss2) ss
+         where t1.q1 = ss.q2) ss0;
+ id |        q1        |        q2         |        q1        |        q2        
+----+------------------+-------------------+------------------+------------------
+  0 | 4567890123456789 |               123 | 4567890123456789 | 4567890123456789
+  0 | 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789
+  0 | 4567890123456789 | -4567890123456789 | 4567890123456789 | 4567890123456789
+(3 rows)
+
+-- test some error cases where LATERAL should have been used but wasn't
+select f1,g from int4_tbl a, (select f1 as g) ss;
+ERROR:  column "f1" does not exist
+LINE 1: select f1,g from int4_tbl a, (select f1 as g) ss;
+                                             ^
+HINT:  There is a column named "f1" in table "a", but it cannot be referenced from this part of the query.
+CONTEXT:  referenced column: g
+select f1,g from int4_tbl a, (select a.f1 as g) ss;
+ERROR:  invalid reference to FROM-clause entry for table "a"
+LINE 1: select f1,g from int4_tbl a, (select a.f1 as g) ss;
+                                             ^
+HINT:  There is an entry for table "a", but it cannot be referenced from this part of the query.
+CONTEXT:  referenced column: g
+select f1,g from int4_tbl a cross join (select f1 as g) ss;
+ERROR:  column "f1" does not exist
+LINE 1: select f1,g from int4_tbl a cross join (select f1 as g) ss;
+                                                       ^
+HINT:  There is a column named "f1" in table "a", but it cannot be referenced from this part of the query.
+CONTEXT:  referenced column: g
+select f1,g from int4_tbl a cross join (select a.f1 as g) ss;
+ERROR:  invalid reference to FROM-clause entry for table "a"
+LINE 1: select f1,g from int4_tbl a cross join (select a.f1 as g) ss...
+                                                       ^
+HINT:  There is an entry for table "a", but it cannot be referenced from this part of the query.
+CONTEXT:  referenced column: g
+-- SQL:2008 says the left table is in scope but illegal to access here
+select f1,g from int4_tbl a right join lateral generate_series(0, a.f1) g on true;
+ERROR:  invalid reference to FROM-clause entry for table "a"
+LINE 1: ... int4_tbl a right join lateral generate_series(0, a.f1) g on...
+                                                             ^
+DETAIL:  The combining JOIN type must be INNER or LEFT for a LATERAL reference.
+select f1,g from int4_tbl a full join lateral generate_series(0, a.f1) g on true;
+ERROR:  invalid reference to FROM-clause entry for table "a"
+LINE 1: ...m int4_tbl a full join lateral generate_series(0, a.f1) g on...
+                                                             ^
+DETAIL:  The combining JOIN type must be INNER or LEFT for a LATERAL reference.
+-- check we complain about ambiguous table references
+select * from
+  int8_tbl x cross join (int4_tbl x cross join lateral (select x.f1) ss);
+ERROR:  table reference "x" is ambiguous
+LINE 2: ...cross join (int4_tbl x cross join lateral (select x.f1) ss);
+                                                             ^
+CONTEXT:  referenced column: f1
+-- LATERAL can be used to put an aggregate into the FROM clause of its query
+select 1 from tenk1 a, lateral (select max(a.unique1) from int4_tbl b) ss;
+ERROR:  aggregates not allowed in FROM clause
+LINE 1: select 1 from tenk1 a, lateral (select max(a.unique1) from i...
+                                               ^
+CONTEXT:  referenced column: max
+-- check behavior of LATERAL in UPDATE/DELETE
+create temp table xx1 as select f1 as x1, -f1 as x2 from int4_tbl;
+-- error, can't do this:
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = x1) ss;
+ERROR:  column "x1" does not exist
+LINE 1: ... set x2 = f1 from (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+HINT:  There is a column named "x1" in table "xx1", but it cannot be referenced from this part of the query.
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = xx1.x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...t x2 = f1 from (select * from int4_tbl where f1 = xx1.x1) ss...
+                                                             ^
+HINT:  There is an entry for table "xx1", but it cannot be referenced from this part of the query.
+-- can't do it even with LATERAL:
+update xx1 set x2 = f1 from lateral (select * from int4_tbl where f1 = x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...= f1 from lateral (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+DETAIL:  The combining JOIN type must be INNER or LEFT for a LATERAL reference.
+-- we might in future allow something like this, but for now it's an error:
+update xx1 set x2 = f1 from xx1, lateral (select * from int4_tbl where f1 = x1) ss;
+ERROR:  table name "xx1" specified more than once
+-- also errors:
+delete from xx1 using (select * from int4_tbl where f1 = x1) ss;
+ERROR:  column "x1" does not exist
+LINE 1: ...te from xx1 using (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+HINT:  There is a column named "x1" in table "xx1", but it cannot be referenced from this part of the query.
+delete from xx1 using (select * from int4_tbl where f1 = xx1.x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...from xx1 using (select * from int4_tbl where f1 = xx1.x1) ss...
+                                                             ^
+HINT:  There is an entry for table "xx1", but it cannot be referenced from this part of the query.
+delete from xx1 using lateral (select * from int4_tbl where f1 = x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...xx1 using lateral (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+DETAIL:  The combining JOIN type must be INNER or LEFT for a LATERAL reference.
+--
+-- test LATERAL reference propagation down a multi-level inheritance hierarchy
+-- produced for a multi-level partitioned table hierarchy.
+--
+create table join_pt1 (a int, b int, c varchar) partition by range(a)(
+PARTITION P1 VALUES LESS THAN(100), PARTITION P2 VALUES LESS THAN(200), PARTITION P3 VALUES LESS THAN(MAXVALUE));
+insert into join_pt1 values (1, 1, 'x'), (101, 101, 'y');
+create table join_ut1 (a int, b int, c varchar);
+insert into join_ut1 values (101, 101, 'y'), (2, 2, 'z');
+explain (verbose, costs off)
+select t1.b, ss.phv from join_ut1 t1 left join lateral
+              (select t2.a as t2a, t3.a t3a, least(t1.a, t2.a, t3.a) phv
+					  from join_pt1 t2 join join_ut1 t3 on t2.a = t3.b) ss
+              on t1.a = ss.t2a order by t1.a;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Sort
+   Output: t1.b, (LEAST($2, t2.a, t3.a)), t1.a
+   Sort Key: t1.a
+   ->  Nested Loop Left Join
+         Output: t1.b, (LEAST($2, t2.a, t3.a)), t1.a
+         ->  Seq Scan on lateral_with_dop_test.join_ut1 t1
+               Output: t1.a, t1.b, t1.c
+         ->  Hash Join
+               Output: t2.a, LEAST(t1.a, t2.a, t3.a)
+               Hash Cond: (t2.a = t3.b)
+               Join Filter: (t1.a = t2.a)
+               ->  Partition Iterator
+                     Output: t2.a, t2.b, t2.c
+                     Iterations: 3
+                     ->  Partitioned Seq Scan on lateral_with_dop_test.join_pt1 t2
+                           Output: t2.a, t2.b, t2.c
+                           Selected Partitions:  1..3
+               ->  Hash
+                     Output: t3.b, t3.a
+                     ->  Seq Scan on lateral_with_dop_test.join_ut1 t3
+                           Output: t3.b, t3.a
+(21 rows)
+
+select t1.b, ss.phv from join_ut1 t1 left join lateral
+              (select t2.a as t2a, t3.a t3a, least(t1.a, t2.a, t3.a) phv
+					  from join_pt1 t2 join join_ut1 t3 on t2.a = t3.b) ss
+              on t1.a = ss.t2a order by t1.a;
+  b  | phv 
+-----+-----
+   2 |    
+ 101 | 101
+(2 rows)
+
+-- cross apply
+create table departments(department_name varchar(50), department_id int);
+create table employees(employee_id int, department_id int, last_name varchar(50));
+insert into departments values ('Marketing', 1);
+insert into departments values ('Public Relations', 2);
+insert into departments values ('Operations', 3);
+insert into departments values ('Develop', 4);
+insert into departments values ('Research', 5);
+insert into departments values ('CEO', 6);
+insert into departments values ('CFO', 7);
+insert into employees values(1, 1, 'zhangsan1');
+insert into employees values(2, 1, 'zhangsan2');
+insert into employees values(3, 1, 'zhangsan3');
+insert into employees values(4, 1, 'zhangsan4');
+insert into employees values(5, 2, 'lisi1');
+insert into employees values(6, 2, 'lisi2');
+insert into employees values(7, 2, 'lisi3');
+insert into employees values(8, 2, 'lisi4');
+insert into employees values(9,  3, 'wangwu1');
+insert into employees values(10, 3, 'wangwu2');
+insert into employees values(11, 3, 'wangwu3');
+insert into employees values(12, 3, 'wangwu4');
+insert into employees values(13, 4, 'heliu1');
+insert into employees values(14, 4, 'heliu2');
+insert into employees values(15, 4, 'heliu3');
+insert into employees values(16, 4, 'heliu4');
+insert into employees values(17, 5, 'chenqi1');
+insert into employees values(18, 5, 'chenqi2');
+insert into employees values(19, 5, 'chenqi3');
+insert into employees values(20, 5, 'chenqi4');
+create function fn_salar (departmentid int) returns table (employee_id int, department_id int, last_name varchar) language sql as 'select employee_id, department_id, concat(last_name,last_name) as last_name2 from employees WHERE department_id = departmentid';
+select* from departments d cross apply employees e where e.department_id = d.department_id;
+ department_name  | department_id | employee_id | department_id | last_name 
+------------------+---------------+-------------+---------------+-----------
+ Marketing        |             1 |           4 |             1 | zhangsan4
+ Marketing        |             1 |           3 |             1 | zhangsan3
+ Marketing        |             1 |           2 |             1 | zhangsan2
+ Marketing        |             1 |           1 |             1 | zhangsan1
+ Public Relations |             2 |           8 |             2 | lisi4
+ Public Relations |             2 |           7 |             2 | lisi3
+ Public Relations |             2 |           6 |             2 | lisi2
+ Public Relations |             2 |           5 |             2 | lisi1
+ Operations       |             3 |          12 |             3 | wangwu4
+ Operations       |             3 |          11 |             3 | wangwu3
+ Operations       |             3 |          10 |             3 | wangwu2
+ Operations       |             3 |           9 |             3 | wangwu1
+ Develop          |             4 |          16 |             4 | heliu4
+ Develop          |             4 |          15 |             4 | heliu3
+ Develop          |             4 |          14 |             4 | heliu2
+ Develop          |             4 |          13 |             4 | heliu1
+ Research         |             5 |          20 |             5 | chenqi4
+ Research         |             5 |          19 |             5 | chenqi3
+ Research         |             5 |          18 |             5 | chenqi2
+ Research         |             5 |          17 |             5 | chenqi1
+(20 rows)
+
+select* from departments d cross apply (select d.department_id from employees x) e where e.department_id = d.department_id;
+ department_name  | department_id | department_id 
+------------------+---------------+---------------
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+(140 rows)
+
+SELECT * FROM employees AS e CROSS APPLY fn_Salar(e.department_id) AS f;
+ employee_id | department_id | last_name | employee_id | department_id |     last_name      
+-------------+---------------+-----------+-------------+---------------+--------------------
+           1 |             1 | zhangsan1 |           1 |             1 | zhangsan1zhangsan1
+           1 |             1 | zhangsan1 |           2 |             1 | zhangsan2zhangsan2
+           1 |             1 | zhangsan1 |           3 |             1 | zhangsan3zhangsan3
+           1 |             1 | zhangsan1 |           4 |             1 | zhangsan4zhangsan4
+           2 |             1 | zhangsan2 |           1 |             1 | zhangsan1zhangsan1
+           2 |             1 | zhangsan2 |           2 |             1 | zhangsan2zhangsan2
+           2 |             1 | zhangsan2 |           3 |             1 | zhangsan3zhangsan3
+           2 |             1 | zhangsan2 |           4 |             1 | zhangsan4zhangsan4
+           3 |             1 | zhangsan3 |           1 |             1 | zhangsan1zhangsan1
+           3 |             1 | zhangsan3 |           2 |             1 | zhangsan2zhangsan2
+           3 |             1 | zhangsan3 |           3 |             1 | zhangsan3zhangsan3
+           3 |             1 | zhangsan3 |           4 |             1 | zhangsan4zhangsan4
+           4 |             1 | zhangsan4 |           1 |             1 | zhangsan1zhangsan1
+           4 |             1 | zhangsan4 |           2 |             1 | zhangsan2zhangsan2
+           4 |             1 | zhangsan4 |           3 |             1 | zhangsan3zhangsan3
+           4 |             1 | zhangsan4 |           4 |             1 | zhangsan4zhangsan4
+           5 |             2 | lisi1     |           5 |             2 | lisi1lisi1
+           5 |             2 | lisi1     |           6 |             2 | lisi2lisi2
+           5 |             2 | lisi1     |           7 |             2 | lisi3lisi3
+           5 |             2 | lisi1     |           8 |             2 | lisi4lisi4
+           6 |             2 | lisi2     |           5 |             2 | lisi1lisi1
+           6 |             2 | lisi2     |           6 |             2 | lisi2lisi2
+           6 |             2 | lisi2     |           7 |             2 | lisi3lisi3
+           6 |             2 | lisi2     |           8 |             2 | lisi4lisi4
+           7 |             2 | lisi3     |           5 |             2 | lisi1lisi1
+           7 |             2 | lisi3     |           6 |             2 | lisi2lisi2
+           7 |             2 | lisi3     |           7 |             2 | lisi3lisi3
+           7 |             2 | lisi3     |           8 |             2 | lisi4lisi4
+           8 |             2 | lisi4     |           5 |             2 | lisi1lisi1
+           8 |             2 | lisi4     |           6 |             2 | lisi2lisi2
+           8 |             2 | lisi4     |           7 |             2 | lisi3lisi3
+           8 |             2 | lisi4     |           8 |             2 | lisi4lisi4
+           9 |             3 | wangwu1   |           9 |             3 | wangwu1wangwu1
+           9 |             3 | wangwu1   |          10 |             3 | wangwu2wangwu2
+           9 |             3 | wangwu1   |          11 |             3 | wangwu3wangwu3
+           9 |             3 | wangwu1   |          12 |             3 | wangwu4wangwu4
+          10 |             3 | wangwu2   |           9 |             3 | wangwu1wangwu1
+          10 |             3 | wangwu2   |          10 |             3 | wangwu2wangwu2
+          10 |             3 | wangwu2   |          11 |             3 | wangwu3wangwu3
+          10 |             3 | wangwu2   |          12 |             3 | wangwu4wangwu4
+          11 |             3 | wangwu3   |           9 |             3 | wangwu1wangwu1
+          11 |             3 | wangwu3   |          10 |             3 | wangwu2wangwu2
+          11 |             3 | wangwu3   |          11 |             3 | wangwu3wangwu3
+          11 |             3 | wangwu3   |          12 |             3 | wangwu4wangwu4
+          12 |             3 | wangwu4   |           9 |             3 | wangwu1wangwu1
+          12 |             3 | wangwu4   |          10 |             3 | wangwu2wangwu2
+          12 |             3 | wangwu4   |          11 |             3 | wangwu3wangwu3
+          12 |             3 | wangwu4   |          12 |             3 | wangwu4wangwu4
+          13 |             4 | heliu1    |          13 |             4 | heliu1heliu1
+          13 |             4 | heliu1    |          14 |             4 | heliu2heliu2
+          13 |             4 | heliu1    |          15 |             4 | heliu3heliu3
+          13 |             4 | heliu1    |          16 |             4 | heliu4heliu4
+          14 |             4 | heliu2    |          13 |             4 | heliu1heliu1
+          14 |             4 | heliu2    |          14 |             4 | heliu2heliu2
+          14 |             4 | heliu2    |          15 |             4 | heliu3heliu3
+          14 |             4 | heliu2    |          16 |             4 | heliu4heliu4
+          15 |             4 | heliu3    |          13 |             4 | heliu1heliu1
+          15 |             4 | heliu3    |          14 |             4 | heliu2heliu2
+          15 |             4 | heliu3    |          15 |             4 | heliu3heliu3
+          15 |             4 | heliu3    |          16 |             4 | heliu4heliu4
+          16 |             4 | heliu4    |          13 |             4 | heliu1heliu1
+          16 |             4 | heliu4    |          14 |             4 | heliu2heliu2
+          16 |             4 | heliu4    |          15 |             4 | heliu3heliu3
+          16 |             4 | heliu4    |          16 |             4 | heliu4heliu4
+          17 |             5 | chenqi1   |          17 |             5 | chenqi1chenqi1
+          17 |             5 | chenqi1   |          18 |             5 | chenqi2chenqi2
+          17 |             5 | chenqi1   |          19 |             5 | chenqi3chenqi3
+          17 |             5 | chenqi1   |          20 |             5 | chenqi4chenqi4
+          18 |             5 | chenqi2   |          17 |             5 | chenqi1chenqi1
+          18 |             5 | chenqi2   |          18 |             5 | chenqi2chenqi2
+          18 |             5 | chenqi2   |          19 |             5 | chenqi3chenqi3
+          18 |             5 | chenqi2   |          20 |             5 | chenqi4chenqi4
+          19 |             5 | chenqi3   |          17 |             5 | chenqi1chenqi1
+          19 |             5 | chenqi3   |          18 |             5 | chenqi2chenqi2
+          19 |             5 | chenqi3   |          19 |             5 | chenqi3chenqi3
+          19 |             5 | chenqi3   |          20 |             5 | chenqi4chenqi4
+          20 |             5 | chenqi4   |          17 |             5 | chenqi1chenqi1
+          20 |             5 | chenqi4   |          18 |             5 | chenqi2chenqi2
+          20 |             5 | chenqi4   |          19 |             5 | chenqi3chenqi3
+          20 |             5 | chenqi4   |          20 |             5 | chenqi4chenqi4
+(80 rows)
+
+ 
+SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+  
+select* from departments d outer apply employees e where e.department_id = d.department_id;
+ department_name  | department_id | employee_id | department_id | last_name 
+------------------+---------------+-------------+---------------+-----------
+ Marketing        |             1 |           4 |             1 | zhangsan4
+ Marketing        |             1 |           3 |             1 | zhangsan3
+ Marketing        |             1 |           2 |             1 | zhangsan2
+ Marketing        |             1 |           1 |             1 | zhangsan1
+ Public Relations |             2 |           8 |             2 | lisi4
+ Public Relations |             2 |           7 |             2 | lisi3
+ Public Relations |             2 |           6 |             2 | lisi2
+ Public Relations |             2 |           5 |             2 | lisi1
+ Operations       |             3 |          12 |             3 | wangwu4
+ Operations       |             3 |          11 |             3 | wangwu3
+ Operations       |             3 |          10 |             3 | wangwu2
+ Operations       |             3 |           9 |             3 | wangwu1
+ Develop          |             4 |          16 |             4 | heliu4
+ Develop          |             4 |          15 |             4 | heliu3
+ Develop          |             4 |          14 |             4 | heliu2
+ Develop          |             4 |          13 |             4 | heliu1
+ Research         |             5 |          20 |             5 | chenqi4
+ Research         |             5 |          19 |             5 | chenqi3
+ Research         |             5 |          18 |             5 | chenqi2
+ Research         |             5 |          17 |             5 | chenqi1
+(20 rows)
+
+select* from departments d cross apply (select d.department_id from employees x) e where e.department_id = d.department_id;
+ department_name  | department_id | department_id 
+------------------+---------------+---------------
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Marketing        |             1 |             1
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Public Relations |             2 |             2
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Operations       |             3 |             3
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Develop          |             4 |             4
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ Research         |             5 |             5
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CEO              |             6 |             6
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+ CFO              |             7 |             7
+(140 rows)
+
+SELECT * FROM employees AS e outer APPLY fn_Salar(e.department_id) AS f;
+ employee_id | department_id | last_name | employee_id | department_id |     last_name      
+-------------+---------------+-----------+-------------+---------------+--------------------
+           1 |             1 | zhangsan1 |           1 |             1 | zhangsan1zhangsan1
+           1 |             1 | zhangsan1 |           2 |             1 | zhangsan2zhangsan2
+           1 |             1 | zhangsan1 |           3 |             1 | zhangsan3zhangsan3
+           1 |             1 | zhangsan1 |           4 |             1 | zhangsan4zhangsan4
+           2 |             1 | zhangsan2 |           1 |             1 | zhangsan1zhangsan1
+           2 |             1 | zhangsan2 |           2 |             1 | zhangsan2zhangsan2
+           2 |             1 | zhangsan2 |           3 |             1 | zhangsan3zhangsan3
+           2 |             1 | zhangsan2 |           4 |             1 | zhangsan4zhangsan4
+           3 |             1 | zhangsan3 |           1 |             1 | zhangsan1zhangsan1
+           3 |             1 | zhangsan3 |           2 |             1 | zhangsan2zhangsan2
+           3 |             1 | zhangsan3 |           3 |             1 | zhangsan3zhangsan3
+           3 |             1 | zhangsan3 |           4 |             1 | zhangsan4zhangsan4
+           4 |             1 | zhangsan4 |           1 |             1 | zhangsan1zhangsan1
+           4 |             1 | zhangsan4 |           2 |             1 | zhangsan2zhangsan2
+           4 |             1 | zhangsan4 |           3 |             1 | zhangsan3zhangsan3
+           4 |             1 | zhangsan4 |           4 |             1 | zhangsan4zhangsan4
+           5 |             2 | lisi1     |           5 |             2 | lisi1lisi1
+           5 |             2 | lisi1     |           6 |             2 | lisi2lisi2
+           5 |             2 | lisi1     |           7 |             2 | lisi3lisi3
+           5 |             2 | lisi1     |           8 |             2 | lisi4lisi4
+           6 |             2 | lisi2     |           5 |             2 | lisi1lisi1
+           6 |             2 | lisi2     |           6 |             2 | lisi2lisi2
+           6 |             2 | lisi2     |           7 |             2 | lisi3lisi3
+           6 |             2 | lisi2     |           8 |             2 | lisi4lisi4
+           7 |             2 | lisi3     |           5 |             2 | lisi1lisi1
+           7 |             2 | lisi3     |           6 |             2 | lisi2lisi2
+           7 |             2 | lisi3     |           7 |             2 | lisi3lisi3
+           7 |             2 | lisi3     |           8 |             2 | lisi4lisi4
+           8 |             2 | lisi4     |           5 |             2 | lisi1lisi1
+           8 |             2 | lisi4     |           6 |             2 | lisi2lisi2
+           8 |             2 | lisi4     |           7 |             2 | lisi3lisi3
+           8 |             2 | lisi4     |           8 |             2 | lisi4lisi4
+           9 |             3 | wangwu1   |           9 |             3 | wangwu1wangwu1
+           9 |             3 | wangwu1   |          10 |             3 | wangwu2wangwu2
+           9 |             3 | wangwu1   |          11 |             3 | wangwu3wangwu3
+           9 |             3 | wangwu1   |          12 |             3 | wangwu4wangwu4
+          10 |             3 | wangwu2   |           9 |             3 | wangwu1wangwu1
+          10 |             3 | wangwu2   |          10 |             3 | wangwu2wangwu2
+          10 |             3 | wangwu2   |          11 |             3 | wangwu3wangwu3
+          10 |             3 | wangwu2   |          12 |             3 | wangwu4wangwu4
+          11 |             3 | wangwu3   |           9 |             3 | wangwu1wangwu1
+          11 |             3 | wangwu3   |          10 |             3 | wangwu2wangwu2
+          11 |             3 | wangwu3   |          11 |             3 | wangwu3wangwu3
+          11 |             3 | wangwu3   |          12 |             3 | wangwu4wangwu4
+          12 |             3 | wangwu4   |           9 |             3 | wangwu1wangwu1
+          12 |             3 | wangwu4   |          10 |             3 | wangwu2wangwu2
+          12 |             3 | wangwu4   |          11 |             3 | wangwu3wangwu3
+          12 |             3 | wangwu4   |          12 |             3 | wangwu4wangwu4
+          13 |             4 | heliu1    |          13 |             4 | heliu1heliu1
+          13 |             4 | heliu1    |          14 |             4 | heliu2heliu2
+          13 |             4 | heliu1    |          15 |             4 | heliu3heliu3
+          13 |             4 | heliu1    |          16 |             4 | heliu4heliu4
+          14 |             4 | heliu2    |          13 |             4 | heliu1heliu1
+          14 |             4 | heliu2    |          14 |             4 | heliu2heliu2
+          14 |             4 | heliu2    |          15 |             4 | heliu3heliu3
+          14 |             4 | heliu2    |          16 |             4 | heliu4heliu4
+          15 |             4 | heliu3    |          13 |             4 | heliu1heliu1
+          15 |             4 | heliu3    |          14 |             4 | heliu2heliu2
+          15 |             4 | heliu3    |          15 |             4 | heliu3heliu3
+          15 |             4 | heliu3    |          16 |             4 | heliu4heliu4
+          16 |             4 | heliu4    |          13 |             4 | heliu1heliu1
+          16 |             4 | heliu4    |          14 |             4 | heliu2heliu2
+          16 |             4 | heliu4    |          15 |             4 | heliu3heliu3
+          16 |             4 | heliu4    |          16 |             4 | heliu4heliu4
+          17 |             5 | chenqi1   |          17 |             5 | chenqi1chenqi1
+          17 |             5 | chenqi1   |          18 |             5 | chenqi2chenqi2
+          17 |             5 | chenqi1   |          19 |             5 | chenqi3chenqi3
+          17 |             5 | chenqi1   |          20 |             5 | chenqi4chenqi4
+          18 |             5 | chenqi2   |          17 |             5 | chenqi1chenqi1
+          18 |             5 | chenqi2   |          18 |             5 | chenqi2chenqi2
+          18 |             5 | chenqi2   |          19 |             5 | chenqi3chenqi3
+          18 |             5 | chenqi2   |          20 |             5 | chenqi4chenqi4
+          19 |             5 | chenqi3   |          17 |             5 | chenqi1chenqi1
+          19 |             5 | chenqi3   |          18 |             5 | chenqi2chenqi2
+          19 |             5 | chenqi3   |          19 |             5 | chenqi3chenqi3
+          19 |             5 | chenqi3   |          20 |             5 | chenqi4chenqi4
+          20 |             5 | chenqi4   |          17 |             5 | chenqi1chenqi1
+          20 |             5 | chenqi4   |          18 |             5 | chenqi2chenqi2
+          20 |             5 | chenqi4   |          19 |             5 | chenqi3chenqi3
+          20 |             5 | chenqi4   |          20 |             5 | chenqi4chenqi4
+(80 rows)
+
+SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d outer APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+-- view
+create view v1 as SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+create view v2 as SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d outer APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+create view v3 as select v.* from
+  (int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1)
+  left join int4_tbl z on z.f1 = x.q2,
+  lateral (select x.q1,y.q1 union all select x.q2,y.q2) v(vx,vy);
+  
+create view v4 as select count(*) from tenk1 a, lateral generate_series(1,two) g;
+select * from v1;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+select * from v2;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+select * from v3;
+        vx         |        vy         
+-------------------+-------------------
+               123 |                  
+               456 |                  
+               123 |  4567890123456789
+  4567890123456789 | -4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |  4567890123456789
+               123 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |               123
+               123 |  4567890123456789
+  4567890123456789 |               123
+               123 |               456
+  4567890123456789 |  4567890123456789
+  4567890123456789 | -4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |  4567890123456789
+  4567890123456789 |               123
+  4567890123456789 |                  
+ -4567890123456789 |                  
+(20 rows)
+
+select * from v4;
+ count 
+-------
+  5000
+(1 row)
+
+-- plsql
+create or replace procedure plpgsql_1 (param1 varchar, param2 varchar, param3 varchar, param4 varchar ) 
+IS
+ BEGIN 
+    create table tt1 as SELECT d.department_name, v.employee_id, v.last_name
+    FROM departments d CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+    WHERE d.department_name IN (param1, param2, param3)
+    ORDER BY d.department_name, v.employee_id;
+END;
+/
+create or replace procedure plpgsql_2 (param1 varchar, param2 varchar, param3 varchar, param4 varchar) 
+IS
+ BEGIN 
+    create table tt2 as SELECT d.department_name, v.employee_id, v.last_name
+    FROM departments d OUTER APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+    WHERE d.department_name IN (param1, param2, param3)
+    ORDER BY d.department_name, v.employee_id;
+END;
+/
+create or replace procedure plpgsql_3 (param1 varchar, param2 varchar, param3 varchar, param4 varchar) 
+IS
+ BEGIN 
+    create table tt3 as select id from (values (0), (1)) v(id),
+         lateral (select * from int8_tbl t1,
+         lateral (select * from
+                    (select * from int8_tbl t2
+                     where q1 = any (select q2 from int8_tbl t3
+                                     where q2 = (select greatest(t1.q1,t2.q2))
+                                       and (select v.id=0)) offset 0) ss2) ss
+         where t1.q1 = ss.q2) ss0;
+END;
+/
+create or replace procedure plpgsql_4 (param1 varchar, param2 varchar, param3 varchar, param4 varchar) 
+IS
+ BEGIN 
+    create table tt4 as select * from
+      int8_tbl a left join lateral
+      (select b.q1 as bq1, c.q1 as cq1, least(a.q1,b.q1,c.q1) from
+      int8_tbl b cross join int8_tbl c) ss
+      on a.q2 = ss.bq1;
+END;
+/
+call plpgsql_1(param1:='Marketing', param2:='Operations', param3:='Public Relations', param4:='CEO');
+ plpgsql_1 
+-----------
+ 
+(1 row)
+
+call plpgsql_2(param1:='Marketing', param2:='Operations', param3:='Public Relations', param4:='CEO');
+ plpgsql_2 
+-----------
+ 
+(1 row)
+
+call plpgsql_3(param1:='Marketing', param2:='Operations', param3:='Public Relations', param4:='CEO');
+ plpgsql_3 
+-----------
+ 
+(1 row)
+
+call plpgsql_4(param1:='Marketing', param2:='Operations', param3:='Public Relations', param4:='CEO');
+ plpgsql_4 
+-----------
+ 
+(1 row)
+
+select * from tt1;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+select * from tt2;
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
+select * from tt3;
+ id 
+----
+  0
+  0
+  0
+(3 rows)
+
+select * from tt4;
+        q1        |        q2         |       bq1        |       cq1        |      least       
+------------------+-------------------+------------------+------------------+------------------
+              123 |               456 |                  |                  |                 
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 |              123 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+              123 |  4567890123456789 | 4567890123456789 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 |              123 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |               123 |              123 | 4567890123456789 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 |              123 |              123
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 |  4567890123456789 | 4567890123456789 | 4567890123456789 | 4567890123456789
+ 4567890123456789 | -4567890123456789 |                  |                  |                 
+(42 rows)
+
+drop PROCEDURE plpgsql_1;
+drop PROCEDURE plpgsql_2;
+drop PROCEDURE plpgsql_3;
+drop PROCEDURE plpgsql_4;
+-- cursor expression
+create or replace procedure test_cursor_1 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.last_name, CURSOR(SELECT d.department_name FROM departments d CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations') ORDER BY d.department_name, v.employee_id) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+call test_cursor_1();
+NOTICE:  company_name : zhangsan1  <unnamed portal 2>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan2  <unnamed portal 3>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan3  <unnamed portal 4>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan4  <unnamed portal 5>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi1  <unnamed portal 6>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi2  <unnamed portal 7>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi3  <unnamed portal 8>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi4  <unnamed portal 9>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu1  <unnamed portal 10>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu2  <unnamed portal 11>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu3  <unnamed portal 12>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu4  <unnamed portal 13>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu1  <unnamed portal 14>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu2  <unnamed portal 15>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu3  <unnamed portal 16>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu4  <unnamed portal 17>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi1  <unnamed portal 18>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi2  <unnamed portal 19>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi3  <unnamed portal 20>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi4  <unnamed portal 21>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+ test_cursor_1 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_1;
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.last_name, CURSOR(SELECT d.department_name FROM departments d outer APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations') ORDER BY d.department_name, v.employee_id) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  company_name : zhangsan1  <unnamed portal 23>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan2  <unnamed portal 24>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan3  <unnamed portal 25>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : zhangsan4  <unnamed portal 26>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi1  <unnamed portal 27>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi2  <unnamed portal 28>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi3  <unnamed portal 29>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : lisi4  <unnamed portal 30>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu1  <unnamed portal 31>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu2  <unnamed portal 32>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu3  <unnamed portal 33>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : wangwu4  <unnamed portal 34>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu1  <unnamed portal 35>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu2  <unnamed portal 36>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu3  <unnamed portal 37>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : heliu4  <unnamed portal 38>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi1  <unnamed portal 39>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi2  <unnamed portal 40>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi3  <unnamed portal 41>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:  company_name : chenqi4  <unnamed portal 42>
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Marketing
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Operations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+NOTICE:       last_name_name : Public Relations
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_3 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT CURSOR(select xq1::varchar from int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1, lateral (select x.q1,y.q1,y.q2) v(xq1,yq1,yq2)) abc;
+ begin 
+    OPEN c1;
+    loop
+        fetch c1 into my_cur;
+        exit when c1%notfound;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+call test_cursor_3();
+NOTICE:       last_name_name : 123
+NOTICE:       last_name_name : 123
+NOTICE:       last_name_name : 123
+NOTICE:       last_name_name : 123
+NOTICE:       last_name_name : 4567890123456789
+NOTICE:       last_name_name : 4567890123456789
+NOTICE:       last_name_name : 4567890123456789
+NOTICE:       last_name_name : 4567890123456789
+NOTICE:       last_name_name : 4567890123456789
+NOTICE:       last_name_name : 4567890123456789
+ test_cursor_3 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_3;
+drop table tt1;
+drop table tt2;
+drop table tt3;
+drop table tt4;
+drop function fn_salar;
+drop view v1;
+drop view v2;
+drop view v3;
+drop view v4;
+drop table tenk1;
+drop table INT4_TBL;
+drop table INT8_TBL;
+drop table INT2_TBL;
+drop table departments;
+drop table employees;
+set query_dop = 1;
+-- clean
+drop schema if exists lateral_with_dop_test cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table join_pt1
+drop cascades to table join_ut1

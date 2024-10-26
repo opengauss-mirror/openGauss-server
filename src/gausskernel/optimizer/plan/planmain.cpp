@@ -186,12 +186,6 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
     process_security_clause_appendrel(root);
 
     /*
-     * Create the LateralJoinInfo list now that we have finalized
-     * PlaceHolderVar eval levels.
-     */
-    create_lateral_join_info(root);
-
-    /*
      * Reconsider any postponed outer-join quals now that we have built up
      * equivalence classes.  (This could result in further additions or
      * mergings of classes.)
@@ -236,6 +230,12 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
      * placeholder is evaluatable at a base rel.
      */
     add_placeholders_to_base_rels(root);
+
+    /*
+     * Construct the lateral reference sets now that we have finalized
+     * PlaceHolderVar eval levels.
+     */
+    create_lateral_join_info(root);
 
     /*
      * Look for join OR clauses that we can extract single-relation

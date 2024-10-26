@@ -1415,6 +1415,7 @@ typedef struct JoinExpr {
     Alias* alias;      /* user-written alias clause, if any */
     int rtindex;       /* RT index assigned for join, or 0 */
     bool is_straight_join; /* set true if straight_join */
+    bool is_apply_join;    /* set true when on cross apply or outer apply join */
 } JoinExpr;
 
 /* ----------

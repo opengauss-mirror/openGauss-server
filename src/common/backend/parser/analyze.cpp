@@ -1337,12 +1337,14 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
     if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
         /* grab the namespace item made by setTargetTable */
         nsitem = (ParseNamespaceItem *)llast(pstate->p_relnamespace);
-        /* subqueries in USING can see the result relation only via LATERAL */
+        /* subqueries in USING cannot access the result relation */
         nsitem->p_lateral_only = true;
+        nsitem->p_lateral_ok = false;
 
         transformFromClause(pstate, stmt->usingClause);
-        /* remaining clauses can see the result relation normally */
+        /* remaining clauses can reference the result relation normally */
         nsitem->p_lateral_only = false;
+        nsitem->p_lateral_ok = true;
     }
 
 
@@ -4531,6 +4533,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     foreach(l, pstate->p_varnamespace) {
         nsitem = (ParseNamespaceItem *)lfirst(l);
         nsitem->p_lateral_only = true;
+        nsitem->p_lateral_ok = false;
     }
 
     CheckUDRelations(pstate, stmt->sortClause, stmt->limitClause, stmt->returningList, false);
@@ -4550,6 +4553,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
         }
         nsitem = (ParseNamespaceItem *)lfirst(l);
         nsitem->p_lateral_only = false;
+        nsitem->p_lateral_ok = true;
         nsitem_count--;
     }
 

@@ -154,15 +154,15 @@ explain WITH max_table as (
 ) DELETE FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f2 desc limit 5;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
- Delete on sytc_t1  (cost=2575.48..2575.49 rows=5 width=14)
+ Delete on sytc_t1  (cost=2575.48..2575.49 rows=5 width=10)
    CTE max_table
      ->  Limit  (cost=0.00..28.72 rows=20 width=12)
            ->  GroupAggregate  (cost=0.00..287.15 rows=200 width=12)
                  Group By Key: sytc_t2.f1
                  ->  Index Scan Backward using sytc_t2_idx on sytc_t2  (cost=0.00..257.93 rows=5445 width=8)
-   ->  Sort  (cost=2546.76..2546.83 rows=27 width=14)
+   ->  Sort  (cost=2546.76..2546.83 rows=27 width=10)
          Sort Key: sytc_t1.f2 DESC
-         ->  Seq Scan on sytc_t1  (cost=0.00..2546.31 rows=27 width=14)
+         ->  Seq Scan on sytc_t1  (cost=0.00..2546.31 rows=27 width=10)
                Filter: (f1 = (SubPlan 2))
                SubPlan 2
                  ->  CTE Scan on max_table  (cost=0.00..0.45 rows=1 width=4)

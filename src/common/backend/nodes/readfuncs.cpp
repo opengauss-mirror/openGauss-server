@@ -3172,6 +3172,9 @@ static JoinExpr* _readJoinExpr(void)
     IF_EXIST(is_straight_join) {
         READ_BOOL_FIELD(is_straight_join);
     }
+    IF_EXIST(is_apply_join) {
+        READ_BOOL_FIELD(is_apply_join);
+    }
 
     READ_DONE();
 }

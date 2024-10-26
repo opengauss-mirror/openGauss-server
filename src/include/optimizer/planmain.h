@@ -67,7 +67,7 @@ extern Plan* optimize_minmax_aggregates(
  */
 extern void set_plan_rows(Plan* plan, double globalRows, double multiple = 1.0);
 extern Plan* create_plan(PlannerInfo* root, Path* best_path);
-extern void disuse_physical_tlist(Plan* plan, Path* path);
+extern void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path);
 extern void copy_plan_costsize(Plan* dest, Plan* src);
 extern SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Plan* subplan);
 extern ForeignScan* make_foreignscan(List* qptlist, List* qpqual, Index scanrelid, List* fdw_exprs, List* fdw_private,
@@ -157,7 +157,7 @@ extern void build_base_rel_tlists(PlannerInfo* root, List* final_tlist);
 extern void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_needed, bool create_new_ph);
 extern void find_lateral_references(PlannerInfo *root);
 extern void create_lateral_join_info(PlannerInfo *root);
-extern void add_lateral_info(PlannerInfo *root, Index rhs, Relids lhs);
+extern void add_lateral_info(PlannerInfo *root, Relids lhs, Relids rhs);
 extern List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved = NULL);
 extern void distribute_restrictinfo_to_rels(PlannerInfo* root, RestrictInfo* restrictinfo);
 extern void process_security_clause_appendrel(PlannerInfo *root);

@@ -2390,7 +2390,7 @@ Plan* ng_agg_force_shuffle(PlannerInfo* root, List* groupcls, Plan* subplan, Lis
     if (is_execute_on_datanodes(subplan) && (!root->is_correlated) && CNG_MODE_FORCE == cng_mode &&
         !ng_is_same_group(distribution, target_distribution)) {
         if (subpath != NULL)
-            disuse_physical_tlist(subplan, subpath);
+            disuse_physical_tlist(root, subplan, subpath);
 
         double multiple_force = 1.0;
         List* distribute_keys =

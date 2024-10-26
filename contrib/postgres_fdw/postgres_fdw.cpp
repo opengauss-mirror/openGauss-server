@@ -759,7 +759,7 @@ static void postgresGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid 
         RestrictInfo *rinfo = (RestrictInfo *)lfirst(lc);
 
         /* Check if clause can be moved to this rel */
-        if (!join_clause_is_movable_to(rinfo, baserel->relid)) {
+        if (!join_clause_is_movable_to(rinfo, baserel)) {
             continue;
         }
 

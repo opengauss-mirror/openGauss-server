@@ -50,12 +50,14 @@
 
 static void copy_JoinCostWorkspace(JoinCostWorkspace* to, JoinCostWorkspace* from);
 static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
-    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra, Relids param_source_rels);
+    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra,
+    Relids param_source_rels, Relids extra_lateral_rels);
 static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
-    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra, Relids param_source_rels);
+    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra,
+    Relids param_source_rels, Relids extra_lateral_rels);
 static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
     List* restrictlist, JoinType jointype, JoinPathExtraData* extra,
-    Relids param_source_rels);
+    Relids param_source_rels, Relids extra_lateral_rels);
 static List* select_mergejoin_clauses(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel,
     RelOptInfo* innerrel, List* restrictlist, JoinType jointype, bool* mergejoin_allowed);
 static bool checkForPWJ(PlannerInfo* root, Path* outer_path, Path* inner_path, JoinType jointype, List* joinrestrict);
@@ -125,6 +127,7 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
     List* mergeclause_list = NIL;
     bool mergejoin_allowed = true;
     Relids param_source_rels = NULL;
+    Relids extra_lateral_rels = NULL;
     ListCell* lc = NULL;
     List *mergejoin_hint = u_sess->attr.attr_sql.enable_mergejoin
                                 ? NIL
@@ -274,10 +277,47 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
     {
         LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(lc);
 
-        if (bms_is_member(ljinfo->lateral_rhs, joinrel->relids)) {
+        if (bms_is_subset(ljinfo->lateral_rhs, joinrel->relids)) {
             param_source_rels = bms_join(param_source_rels,
                 bms_difference(ljinfo->lateral_lhs, joinrel->relids));
         }
+    }
+
+    /*
+     * Another issue created by LATERAL references is that PlaceHolderVars
+     * that need to be computed at this join level might contain lateral
+     * references to rels not in the join, meaning that the paths for the join
+     * would need to be marked as parameterized by those rels, independently
+     * of all other considerations.  Set extra_lateral_rels to the set of such
+     * rels.  This will not affect our decisions as to which paths to
+     * generate; we merely add these rels to their required_outer sets.
+     */
+    foreach(lc, root->placeholder_list) {
+        PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(lc);
+
+        /* PHVs without lateral refs can be skipped over quickly */
+        if (phinfo->ph_lateral == NULL)
+            continue;
+        /* Is it due to be evaluated at this join, and not in either input? */
+        if (bms_is_subset(phinfo->ph_eval_at, joinrel->relids) &&
+            !bms_is_subset(phinfo->ph_eval_at, outerrel->relids) &&
+            !bms_is_subset(phinfo->ph_eval_at, innerrel->relids)) {
+            /* Yes, remember its lateral rels */
+            extra_lateral_rels = bms_add_members(extra_lateral_rels,
+                                                 phinfo->ph_lateral);
+        }
+    }
+    
+    /*
+     * Make sure extra_lateral_rels doesn't list anything within the join, and
+     * that it's NULL if empty.  (This allows us to use bms_add_members to add
+     * it to required_outer below, while preserving the property that
+     * required_outer is exactly NULL if empty.)
+     */
+    extra_lateral_rels = bms_del_members(extra_lateral_rels, joinrel->relids);
+    if (bms_is_empty(extra_lateral_rels)) {
+        bms_free(extra_lateral_rels);
+        extra_lateral_rels = NULL;
     }
 
     /*
@@ -286,7 +326,8 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
      */
     if (mergejoin_allowed)
         sort_inner_and_outer(
-            root, joinrel, outerrel, innerrel, restrictlist, mergeclause_list, jointype, &extra, param_source_rels);
+            root, joinrel, outerrel, innerrel, restrictlist, mergeclause_list, jointype,
+            &extra, param_source_rels, extra_lateral_rels);
 
     /*
      * 2. Consider paths where the outer relation need not be explicitly
@@ -304,7 +345,8 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
             mergeclause_list,
             jointype,
             &extra,
-            param_source_rels);
+            param_source_rels,
+            extra_lateral_rels);
 
 #ifdef NOT_USED
 
@@ -329,7 +371,8 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
             jointype,
             sjinfo,
             &semifactors,
-            param_source_rels);
+            param_source_rels,
+            extra_lateral_rels);
 #endif
 
     /*
@@ -339,7 +382,7 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
      */
     if (u_sess->attr.attr_sql.enable_hashjoin || jointype == JOIN_FULL || hashjoin_hint != NIL)
         hash_inner_and_outer(
-            root, joinrel, outerrel, innerrel, restrictlist, jointype, &extra, param_source_rels);
+            root, joinrel, outerrel, innerrel, restrictlist, jointype, &extra, param_source_rels, extra_lateral_rels);
 
 #ifdef PGXC
     /*
@@ -572,7 +615,7 @@ static void TryNestLoopPathSingle(PlannerInfo* root, RelOptInfo* joinrel, JoinTy
  *	  the joinrel's pathlist via add_path().
  */
 static void try_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    JoinPathExtraData* extra, Relids param_source_rels, Path* outer_path,
+    JoinPathExtraData* extra, Relids param_source_rels, Relids extra_lateral_rels, Path* outer_path,
     Path* inner_path, List* restrict_clauses, List* pathkeys)
 {
     bool execOnCoords = false;
@@ -596,6 +639,12 @@ static void try_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
         bms_free_ext(required_outer);
         return;
     }
+
+    /*
+     * Independently of that, add parameterization needed for any
+     * PlaceHolderVars that need to be computed at the join.
+     */
+    required_outer = bms_add_members(required_outer, extra_lateral_rels);
 
     /*
      * Do a precheck to quickly eliminate obviously-inferior paths.  We
@@ -788,8 +837,9 @@ static bool TryMergeJoinPreCheck(PlannerInfo* root, Relids paramSourceRels,
  *	  the joinrel's pathlist via add_path().
  */
 static void try_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    JoinPathExtraData *extra, Relids param_source_rels, Path* outer_path, Path* inner_path, List* restrict_clauses,
-    List* pathkeys, List* mergeclauses, List* outersortkeys, List* innersortkeys)
+    JoinPathExtraData *extra, Relids param_source_rels, Relids extra_lateral_rels, Path* outer_path,
+    Path* inner_path, List* restrict_clauses, List* pathkeys, List* mergeclauses, List* outersortkeys,
+    List* innersortkeys)
 {
     bool execOnCoords = false;
     Relids required_outer;
@@ -798,6 +848,12 @@ static void try_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     if (!TryMergeJoinPreCheck(root, param_source_rels, outer_path, inner_path, &required_outer)) {
         return;
     }
+
+    /*
+     * Independently of that, add parameterization needed for any
+     * PlaceHolderVars that need to be computed at the join.
+     */
+    required_outer = bms_add_members(required_outer, extra_lateral_rels);
 
     /*
      * If the given paths are already well enough ordered, we can skip doing
@@ -955,7 +1011,7 @@ static void TryHashJoinPathSingle(PlannerInfo* root, RelOptInfo* joinrel, JoinTy
  *	  the joinrel's pathlist via add_path().
  */
 static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
-    JoinPathExtraData* extra, Relids param_source_rels, Path* outer_path,
+    JoinPathExtraData* extra, Relids param_source_rels, Relids extra_lateral_rels, Path* outer_path,
     Path* inner_path, List* restrict_clauses, List* hashclauses)
 {
     bool execOnCoords = false;
@@ -977,6 +1033,12 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
         bms_free_ext(required_outer);
         return;
     }
+
+    /*
+     * Independently of that, add parameterization needed for any
+     * PlaceHolderVars that need to be computed at the join.
+     */
+    required_outer = bms_add_members(required_outer, extra_lateral_rels);
 
     /*
      * See comments in try_nestloop_path().  Also note that hashjoin paths
@@ -1142,7 +1204,8 @@ static bool is_cheapest_path(RelOptInfo* outerrel, RelOptInfo* innerrel, Path* o
  * 'param_source_rels' are OK targets for parameterization of result paths
  */
 static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
-    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData *extra, Relids param_source_rels)
+    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData *extra, Relids param_source_rels,
+    Relids extra_lateral_rels)
 {
     JoinType save_jointype = jointype;
     List* all_pathkeys = NIL;
@@ -1286,6 +1349,7 @@ static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                     save_jointype,
                     extra,
                     param_source_rels,
+                    extra_lateral_rels,
                     outer_path,
                     inner_path,
                     restrictlist,
@@ -1339,7 +1403,8 @@ static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
  * 'param_source_rels' are OK targets for parameterization of result paths
  */
 static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
-    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra, Relids param_source_rels)
+    List* restrictlist, List* mergeclause_list, JoinType jointype, JoinPathExtraData* extra, Relids param_source_rels,
+    Relids extra_lateral_rels)
 {
     JoinType save_jointype = jointype;
     bool nestjoinOK = false;
@@ -1501,6 +1566,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                         save_jointype,
                         extra,
                         param_source_rels,
+                        extra_lateral_rels,
                         outerpath,
                         inner_cheapest_total,
                         restrictlist,
@@ -1525,6 +1591,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             save_jointype,
                             extra,
                             param_source_rels,
+                            extra_lateral_rels,
                             outerpath,
                             innerpath,
                             restrictlist,
@@ -1541,6 +1608,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             save_jointype,
                             extra,
                             param_source_rels,
+                            extra_lateral_rels,
                             outerpath,
                             matpath,
                             restrictlist,
@@ -1591,6 +1659,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                     save_jointype,
                     extra,
                     param_source_rels,
+                    extra_lateral_rels,
                     outerpath,
                     inner_cheapest_total,
                     restrictlist,
@@ -1673,6 +1742,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             save_jointype,
                             extra,
                             param_source_rels,
+                            extra_lateral_rels,
                             outerpath,
                             innerpath,
                             restrictlist,
@@ -1707,6 +1777,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                                 save_jointype,
                                 extra,
                                 param_source_rels,
+                                extra_lateral_rels,
                                 outerpath,
                                 innerpath,
                                 restrictlist,
@@ -1750,7 +1821,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
  */
 static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel, RelOptInfo* innerrel,
     List* restrictlist, JoinType jointype, JoinPathExtraData* extra,
-    Relids param_source_rels)
+    Relids param_source_rels, Relids extra_lateral_rels)
 {
     JoinType save_jointype = jointype;
     bool isouterjoin = IS_OUTER_JOIN((uint32)jointype);
@@ -1856,6 +1927,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                         save_jointype,
                         extra,
                         param_source_rels,
+                        extra_lateral_rels,
                         cheapest_total_outer,
                         cheapest_total_inner,
                         restrictlist,
@@ -1871,6 +1943,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                         save_jointype,
                         extra,
                         param_source_rels,
+                        extra_lateral_rels,
                         cheapest_total_outer,
                         cheapest_total_inner,
                         restrictlist,
@@ -1883,6 +1956,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             save_jointype,
                             extra,
                             param_source_rels,
+                            extra_lateral_rels,
                             cheapest_startup_outer,
                             cheapest_total_inner,
                             restrictlist,
@@ -1905,6 +1979,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                         save_jointype,
                         extra,
                         param_source_rels,
+                        extra_lateral_rels,
                         cheapest_total_outer,
                         cheapest_total_inner,
                         restrictlist,
@@ -1919,6 +1994,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             save_jointype,
                             extra,
                             param_source_rels,
+                            extra_lateral_rels,
                             cheapest_startup_outer,
                             cheapest_total_inner,
                             restrictlist,
@@ -1956,6 +2032,7 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                                 save_jointype,
                                 extra,
                                 param_source_rels,
+                                extra_lateral_rels,
                                 outerpath,
                                 innerpath,
                                 restrictlist,

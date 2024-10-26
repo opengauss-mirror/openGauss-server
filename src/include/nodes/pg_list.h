@@ -400,6 +400,21 @@ extern List* list_insert_nth_oid(List *list, int pos, Oid datum);
 
 #define listCopy(list) list_copy(list)
 
+
+/*
+ * foreach_delete_current -
+ * delete the current list element from the List associated with a
+ * surrounding foreach() loop, returning the new List pointer.
+ *
+ * This is equivalent to list_delete_cell(), but it also adjusts the foreach
+ * loop's state so that no list elements will be missed.  Do not delete
+ * elements from an active foreach loop's list in any other way!
+ */
+#define foreach_delete_current(lst, cell)  \
+    (cell##__state.i--,                    \
+     (List *) (cell##__state.l = list_delete_cell(lst, cell)))
+
+
 extern int length(List* list);
 #endif /* ENABLE_LIST_COMPAT */
 

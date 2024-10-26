@@ -781,6 +781,11 @@ typedef struct RelOptInfo {
     struct Path* cheapest_unique_path;
     List* cheapest_parameterized_paths;
 
+    
+    /* parameterization information needed for both base rels and join rels */
+    /* (see also lateral_vars and lateral_referencers) */
+    Relids direct_lateral_relids; /* rels directly laterally referenced */
+
     /* information about a base rel (not set for join rels!) */
     Index relid;
     Oid reltablespace;   /* containing tablespace */
@@ -791,6 +796,7 @@ typedef struct RelOptInfo {
     int32* attr_widths;  /* array indexed [min_attr .. max_attr] */
     List* lateral_vars;  /* LATERAL Vars and PHVs referenced by rel */
     Relids lateral_relids; /* minimum parameterization of rel */
+    Relids lateral_referencers; /* rels that reference me laterally */
     List* indexlist;     /* list of IndexOptInfo */
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1977,9 +1983,9 @@ typedef struct SpecialJoinInfo {
  */
 typedef struct LateralJoinInfo
 {
-   NodeTag     type;
-   Index       lateral_rhs;    /* a baserel containing lateral refs */
-   Relids      lateral_lhs;    /* some base relids it references */
+    NodeTag     type;
+    Relids      lateral_lhs;    /* some base relids it references */
+    Relids      lateral_rhs;    /* some base relids it references */
 } LateralJoinInfo;
 
 
@@ -2099,6 +2105,7 @@ typedef struct PlaceHolderInfo {
     Index phid;             /* ID for PH (unique within planner run) */
     PlaceHolderVar* ph_var; /* copy of PlaceHolderVar tree */
     Relids ph_eval_at;      /* lowest level we can evaluate value at */
+    Relids ph_lateral;      /* relids of contained lateral refs, if any */
     Relids ph_needed;       /* highest level the value is needed at */
     int32 ph_width;         /* estimated attribute width */
 } PlaceHolderInfo;
