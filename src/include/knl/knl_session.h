@@ -1258,6 +1258,7 @@ typedef struct knl_u_proc_context {
     char* TblspcMapFile;
     bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
     bool check_auth;
+    bool nextQuery; /* for B-cmpt protocal */
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */

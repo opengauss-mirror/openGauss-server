@@ -619,6 +619,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
     proc_cxt->registerExclusiveHandlerdone = false;
     proc_cxt->check_auth = false;
+    proc_cxt->nextQuery = false;
 }
 
 static void knl_u_time_init(knl_u_time_context* time_cxt)
