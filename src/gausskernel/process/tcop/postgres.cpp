@@ -3080,6 +3080,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             CommandCounterIncrement();
         }
 
+        u_sess->proc_cxt.nextQuery = lnext(parsetree_item) != NULL;
+
         /*
          * Tell client that we're done with this query.  Note we emit exactly
          * one EndCommand report for each raw parsetree, thus one for each SQL
