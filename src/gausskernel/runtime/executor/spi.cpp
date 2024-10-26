@@ -1496,6 +1496,29 @@ void *SPI_palloc(Size size)
     return pointer;
 }
 
+Datum SPI_datumTransfer(Datum value, bool typByVal, int typLen)
+{
+    MemoryContext old_ctx = NULL;
+    Datum       result;
+
+    if (u_sess->SPI_cxt._curid + 1 == u_sess->SPI_cxt._connected) { /* connected */
+        if (u_sess->SPI_cxt._current != &(u_sess->SPI_cxt._stack[u_sess->SPI_cxt._curid + 1])) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("SPI stack corrupted when allocate, connected level: %d", u_sess->SPI_cxt._connected)));
+        }
+
+        old_ctx = MemoryContextSwitchTo(u_sess->SPI_cxt._current->savedcxt);
+    }
+
+    result = datumCopy(value, typByVal, typLen);
+
+    if (old_ctx) {
+        (void)MemoryContextSwitchTo(old_ctx);
+    }
+
+    return result;
+}
+
 void *SPI_repalloc(void *pointer, Size size)
 {
     /* No longer need to worry which context chunk was in... */

@@ -144,6 +144,8 @@ extern void SPI_pfree(void* pointer);
 extern void SPI_freetuple(HeapTuple pointer);
 extern void SPI_freetuptable(SPITupleTable* tuptable);
 
+extern Datum SPI_datumTransfer(Datum value, bool typByVal, int typLen);
+
 extern Portal SPI_cursor_open(const char* name, SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only);
 extern Portal SPI_cursor_open_with_args(const char* name, const char* src, int nargs, Oid* argtypes, Datum* Values,
     const char* Nulls, bool read_only, int cursorOptions, parse_query_func parser = GetRawParser());

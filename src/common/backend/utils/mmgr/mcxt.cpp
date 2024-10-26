@@ -64,6 +64,7 @@ THR_LOCAL MemoryContext AlignMemoryContext = NULL;
 
 static void MemoryContextStatsInternal(MemoryContext context, int level);
 static void FreeMemoryContextList(List* context_list);
+static void MemoryContextCallResetCallbacks(MemoryContext context);
 
 #ifdef PGXC
 void* allocTopCxt(size_t s);
@@ -264,6 +265,7 @@ void std_MemoryContextReset(MemoryContext context)
     /* Nothing to do if no pallocs since startup or last reset */
     if (!context->isReset) {
         RemoveMemoryContextInfo(context);
+        MemoryContextCallResetCallbacks(context);
         (*context->methods->reset)(context);
         context->isReset = true;
     }
@@ -335,6 +337,13 @@ static void MemoryContextDeleteInternal(MemoryContext context, bool parent_locke
     MemoryContextCheck(context, context->session_id > 0);
 #endif
 
+     /*
+      * It's not entirely clear whether 'tis better to do this before or after
+      * delinking the context; but an error in a callback will likely result in
+      * leaking the whole context (if it's not a root context) if we do it
+      * after, so let's do it before.
+      */
+    MemoryContextCallResetCallbacks(context);
     MemoryContext parent = context->parent;
 
 
@@ -449,6 +458,52 @@ void std_MemoryContextDeleteChildren(MemoryContext context, List* context_list)
     }
 }
 
+/*
+ * MemoryContextRegisterResetCallback
+ *      Register a function to be called before next context reset/delete.
+ *      Such callbacks will be called in reverse order of registration.
+ *
+ * The caller is responsible for allocating a MemoryContextCallback struct
+ * to hold the info about this callback request, and for filling in the
+ * "func" and "arg" fields in the struct to show what function to call with
+ * what argument.  Typically the callback struct should be allocated within
+ * the specified context, since that means it will automatically be freed
+ * when no longer needed.
+ *
+ * There is no API for deregistering a callback once registered.  If you
+ * want it to not do anything anymore, adjust the state pointed to by its
+ * "arg" to indicate that.
+ */
+void MemoryContextRegisterResetCallback(MemoryContext context,
+    MemoryContextCallback *cb)
+{
+    AssertArg(MemoryContextIsValid(context));
+
+    /* Push onto head so this will be called before older registrants. */
+    cb->next = context->resetCbs;
+    context->resetCbs = cb;
+    /* Mark the context as non-reset (it probably is already). */
+    context->isReset = false;
+}
+
+/*
+ * MemoryContextCallResetCallbacks
+ *      Internal function to call all registered callbacks for context.
+ */
+static void MemoryContextCallResetCallbacks(MemoryContext context)
+{
+    MemoryContextCallback *cb;
+
+    /*
+     * We pop each callback from the list before calling.  That way, if an
+     * error occurs inside the callback, we won't try to call it a second time
+     * in the likely event that we reset or delete the context later.
+     */
+    while ((cb = context->resetCbs) != NULL) {
+        context->resetCbs = cb->next;
+        (*cb->func)(cb->arg);
+    }
+}
 /*
  * std_MemoryContextResetAndDeleteChildren
  *		Release all space allocated within a context and delete all
