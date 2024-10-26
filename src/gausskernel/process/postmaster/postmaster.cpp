@@ -4419,7 +4419,7 @@ static int ServerLoop(void)
 
         /* If we have lost the full sql flush thread, try to start a new one */
         if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY)
-            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
+            && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
         if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&

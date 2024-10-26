@@ -466,7 +466,6 @@ static void assign_syslog_ident(const char* newval, void* extra);
 static void assign_session_replication_role(int newval, void* extra);
 static bool check_client_min_messages(int* newval, void** extra, GucSource source);
 static bool check_default_transaction_isolation(int* newval, void** extra, GucSource source);
-static bool check_enable_stmt_track(bool* newval, void** extra, GucSource source);
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source);
 static void process_set_global_transation(Oid databaseid, Oid roleid, VariableSetStmt* setstmt);
 static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action);
@@ -1159,7 +1158,7 @@ static void InitConfigureNamesBool()
             gettext_noop("Enable full/slow sql feature"), NULL},
             &u_sess->attr.attr_common.enable_stmt_track,
             true,
-            check_enable_stmt_track,
+            NULL,
             NULL,
             NULL},
         {{"track_stmt_parameter",
@@ -11683,13 +11682,6 @@ static bool check_default_transaction_isolation(int *newval, void **extra, GucSo
     return true;
 }
 
-static bool check_enable_stmt_track(bool *newval, void **extra, GucSource source)
-{
-    if (ENABLE_DMS && !SS_OFFICIAL_PRIMARY) {
-        *newval = false;
-    }
-    return true;
-}
 
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source)
 {
