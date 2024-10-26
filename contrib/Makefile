@@ -57,6 +57,7 @@ SUBDIRS = \
 		vacuumlo	\
 		security_plugin	\
 		ndpplugin       \
+		gms_utility		\
 		gms_profiler    \
 		gms_inaddr  \
 		gms_output      \

@@ -1069,7 +1069,7 @@ enum ValidateDependResult {
     
 };
 
-static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list)
+static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list, bool force)
 {
     bool isValid = true;
     bool existTable = false;
@@ -1078,7 +1078,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     List* originEvAction = NIL;
     List* freshedEvAction = NIL;
     // 1. filter the valid view
-    if (GetPgObjectValid(view_oid, objType)) {
+    if (!force && GetPgObjectValid(view_oid, objType)) {
         return ValidateDependValid;
     }
 
@@ -1157,8 +1157,9 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
             }
         } else if (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) {
             char type = relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW;
-            ValidateDependResult result = ValidateDependView(dep_objid, type, list);
+            ValidateDependResult result = ValidateDependView(dep_objid, type, list, force);
             if (result == ValidateDependCircularDepend) {
+                list_free(*list);
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                         errmsg(
@@ -1241,7 +1242,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
 
 bool ValidateDependView(Oid view_oid, char objType) {
     List * list = NIL;
-    ValidateDependResult result = ValidateDependView(view_oid, objType, &list);
+    ValidateDependResult result = ValidateDependView(view_oid, objType, &list, false);
     list_free_ext(list);
     if (result == ValidateDependCircularDepend) {
         ereport(ERROR,
@@ -1249,6 +1250,26 @@ bool ValidateDependView(Oid view_oid, char objType) {
                 errmsg(
                     "infinite recursion detected in rules for relation: \"%s\"", get_rel_name(view_oid))));
     }
+    return result != ValidateDependInvalid;
+}
+
+bool ValidateDependViewDetectRecursion(Oid viewOid, char objType, bool force, List* records)
+{
+    ListCell* lc;
+    List* list = NIL;
+    if (records != NIL && list_member_oid(records, viewOid)) {
+        return true;
+    }
+    ValidateDependResult result = ValidateDependView(viewOid, objType, &list, force);
+    if (result == ValidateDependCircularDepend) {
+        list_free(list);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                        errmsg("infinite recursion detected in rules for relation: \"%s\"", get_rel_name(viewOid))));
+    }
+    foreach (lc, list) {
+        records = list_append_unique_oid(records, lfirst_oid(lc));
+    }
+    list_free(list);
     return result != ValidateDependInvalid;
 }
 
@@ -1410,7 +1431,7 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
     
     if (RelationGetRelkind(rel) == RELKIND_VIEW &&
         RelationGetRelid(rel) >= FirstNormalObjectId) {
-        if (ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW) == ValidateDependInvalid) {
+        if (!ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW)) {
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("The view %s is invalid, please make it valid before operation.",

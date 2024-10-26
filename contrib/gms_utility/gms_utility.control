@@ -1,0 +1,5 @@
+# gms_utility extension
+comment = 'collection of gms_utility for PL/SQL applications'
+default_version = '1.0'
+module_pathname = '$libdir/gms_utility'
+relocatable = true

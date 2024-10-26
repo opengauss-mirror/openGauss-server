@@ -59,6 +59,7 @@ extern Oid attnumCollationId(Relation rd, int attid);
 extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern bool ValidateDependView(Oid view_oid, char obj_type);
+extern bool ValidateDependViewDetectRecursion(Oid viewOid, char objType, bool force, List* records);
 #ifdef PGXC
 extern int specialAttNum(const char* attname);
 #endif

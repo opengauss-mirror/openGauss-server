@@ -236,7 +236,7 @@ static inline void clear_plsql_ctx_line_info()
     u_sess->plsql_cxt.package_as_line = 0;
 }
 
-static void RecompileSinglePackage(Oid package_oid, bool is_spec)
+void RecompileSinglePackage(Oid package_oid, bool is_spec)
 {
     Oid* save_pseudo_current_user_id = u_sess->misc_cxt.Pseudo_CurrentUserId;
     _PG_init();

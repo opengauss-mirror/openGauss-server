@@ -105,6 +105,7 @@ install:
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec clean; fi
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec $@; fi
 	@if test -d contrib/gms_compress; then $(MAKE) -C contrib/gms_compress $@; fi
+	@if test -d contrib/gms_utility; then $(MAKE) -C contrib/gms_utility $@; fi
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_tcp; then $(MAKE) -C contrib/gms_tcp $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi

@@ -97,6 +97,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "hdfs_fdw",
         "age",
         "gms_compress",
+        "gms_utility",
         "gms_stats",
         "gms_output",
         "gms_inaddr",
