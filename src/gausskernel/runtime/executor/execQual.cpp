@@ -5918,17 +5918,9 @@ static Datum ExecEvalCursorExpression(CursorExpressionState* state, ExprContext*
              
     PortalStart(portal, econtext->ecxt_param_list_info, 0, GetActiveSnapshot());
 
-    int plan_param_number = ((PlannedStmt*)(cursor_expression->plan))->nParamExec;
     int state_param_number = list_length(state->param);
 
-    if (unlikely(plan_param_number > state_param_number)) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmodule(MOD_EXECUTOR),
-            errmsg("The expected number of parameters is %d, but actual is %d.", plan_param_number, state_param_number)));
-    }
-
-    for (int i = 0; i < plan_param_number; i++) {
+    for (int i = 0; i < state_param_number; i++) {
         bool expr_is_null = false;
         ParamExecData* prm = &(portal->queryDesc->estate->es_param_exec_vals[i]);
         ExprState* expr_state = (ExprState*)list_nth(state->param, i);

@@ -175,7 +175,7 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     } while (0)
 
 
-#define PARSE_CURSOR_PARENTHESES_AS_FUNCTION()               \
+#define SET_LOOKAHEAD_2_TOKEN()               \
     do {                                                     \
         yyextra->lookahead_token[1] = next_token_1;          \
         yyextra->lookahead_yylval[1] = core_yystype_2;       \
@@ -783,7 +783,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 } else if (is_prefer_parse_cursor_parentheses_as_expr() && !is_cursor_function_exist()) {
                     PARSE_CURSOR_PARENTHESES_AS_EXPR();
                 } else {
-                    PARSE_CURSOR_PARENTHESES_AS_FUNCTION();
+                    SET_LOOKAHEAD_2_TOKEN();
                 }
                 if (t_thrd.proc->workingVersionNum < CURSOR_EXPRESSION_VERSION_NUMBER &&
                     cur_token == CURSOR_EXPR) {
@@ -792,6 +792,28 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 }
             }
             break;
+        case LATERAL_P:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;  // the value of cursor
+            cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
+            next_token_1 = next_token;    // the token after curosr
+            if (next_token_1 != IDENT) {
+                /* save the lookahead token for next time */
+                SET_LOOKAHEAD_TOKEN();
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+            } else {
+                GET_NEXT_TOKEN();
+                core_yystype_2 = cur_yylval;   // the value after cursor
+                cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
+                next_token_2 = next_token;   // the token after after curosr
+                if (next_token_1 == IDENT && next_token == '(') {
+                    cur_token = LATERAL_EXPR;
+                }
+                SET_LOOKAHEAD_2_TOKEN();
+        }
+        break;
         case STATIC_P:
             GET_NEXT_TOKEN();
             switch (next_token) {

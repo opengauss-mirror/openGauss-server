@@ -12171,13 +12171,22 @@ static void get_from_clause_item(Node* jtnode, Query* query, deparse_context* co
         } else {
             switch (j->jointype) {
                 case JOIN_INNER:
-                    if (j->quals)
+                    if (j->quals) {
                         appendContextKeyword(context, " JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
-                    else
-                        appendContextKeyword(context, " CROSS JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 1);
+                    } else {
+                        if (j->is_apply_join) {
+                            appendContextKeyword(context, " CROSS APPLY ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 1);
+                        } else {
+                            appendContextKeyword(context, " CROSS JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 1);
+                        }
+                    }
                     break;
                 case JOIN_LEFT:
-                    appendContextKeyword(context, " LEFT JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
+                    if (j->is_apply_join) {
+                        appendContextKeyword(context, " OUTER APPLY ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
+                    } else {
+                        appendContextKeyword(context, " LEFT JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);
+                    }
                     break;
                 case JOIN_FULL:
                     appendContextKeyword(context, " FULL JOIN ", -PRETTYINDENT_JOIN, PRETTYINDENT_JOIN, 2);

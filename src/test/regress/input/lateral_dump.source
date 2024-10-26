@@ -1,0 +1,132 @@
+create database lateral_dump;
+\c lateral_dump
+create schema lateral_dump;
+set search_path to lateral_dump;
+
+
+CREATE TABLE tenk1 (
+    unique1     int4,
+    unique2     int4,
+    two         int4,
+    four        int4,
+    ten         int4,
+    twenty      int4,
+    hundred     int4,
+    thousand    int4,
+    twothousand int4,
+    fivethous   int4,
+    tenthous    int4,
+    odd         int4,
+    even        int4,
+    stringu1    name,
+    stringu2    name,
+    string4     name
+);
+
+
+CREATE TABLE INT4_TBL(f1 int4);
+
+INSERT INTO INT4_TBL(f1) VALUES
+  ('   0  '),
+  ('123456     '),
+  ('    -123456'),
+  ('2147483647'),  -- largest and smallest values
+  ('-2147483647');
+VACUUM INT4_TBL;
+
+
+CREATE TABLE INT8_TBL(q1 int8, q2 int8);
+
+INSERT INTO INT8_TBL VALUES
+  ('  123   ','  456'),
+  ('123   ','4567890123456789'),
+  ('4567890123456789','123'),
+  (+4567890123456789,'4567890123456789'),
+  ('+4567890123456789','-4567890123456789');
+VACUUM INT8_TBL;
+
+CREATE TABLE INT2_TBL(f1 int2);
+
+INSERT INTO INT2_TBL(f1) VALUES
+  ('0   '),
+  ('  1234 '),
+  ('    -1234'),
+  ('32767'),  -- largest and smallest values
+  ('-32767');
+VACUUM INT2_TBL;
+
+create table departments(department_name varchar(50), department_id int);
+create table employees(employee_id int, department_id int, last_name varchar(50));
+
+
+insert into departments values ('Marketing', 1);
+insert into departments values ('Public Relations', 2);
+insert into departments values ('Operations', 3);
+insert into departments values ('Develop', 4);
+insert into departments values ('Research', 5);
+insert into departments values ('CEO', 6);
+insert into departments values ('CFO', 7);
+
+
+insert into employees values(1, 1, 'zhangsan1');
+insert into employees values(2, 1, 'zhangsan2');
+insert into employees values(3, 1, 'zhangsan3');
+insert into employees values(4, 1, 'zhangsan4');
+
+
+insert into employees values(5, 2, 'lisi1');
+insert into employees values(6, 2, 'lisi2');
+insert into employees values(7, 2, 'lisi3');
+insert into employees values(8, 2, 'lisi4');
+
+insert into employees values(9,  3, 'wangwu1');
+insert into employees values(10, 3, 'wangwu2');
+insert into employees values(11, 3, 'wangwu3');
+insert into employees values(12, 3, 'wangwu4');
+
+insert into employees values(13, 4, 'heliu1');
+insert into employees values(14, 4, 'heliu2');
+insert into employees values(15, 4, 'heliu3');
+insert into employees values(16, 4, 'heliu4');
+
+insert into employees values(17, 5, 'chenqi1');
+insert into employees values(18, 5, 'chenqi2');
+insert into employees values(19, 5, 'chenqi3');
+insert into employees values(20, 5, 'chenqi4');
+
+
+create view v1 as SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+
+
+create view v2 as SELECT d.department_name, v.employee_id, v.last_name
+  FROM departments d outer APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
+  WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
+  ORDER BY d.department_name, v.employee_id;
+
+
+create view v3 as select v.* from
+  (int8_tbl x left join (select q1,coalesce(q2,0) q2 from int8_tbl) y on x.q2 = y.q1)
+  left join int4_tbl z on z.f1 = x.q2,
+  lateral (select x.q1,y.q1 union all select x.q2,y.q2) v(vx,vy);
+  
+
+create view v4 as select count(*) from tenk1 a, lateral generate_series(1,two) g;
+
+
+\! @abs_bindir@/gs_dump lateral_dump -p @portstring@ -f @abs_bindir@/lateral_dump.sql -n lateral_dump -w >/dev/null 2>&1; echo $?
+drop schema lateral_dump cascade;
+\! @abs_bindir@/gsql -dlateral_dump -p @portstring@ -f "@abs_bindir@/lateral_dump.sql";
+
+-- lateral dump check
+
+select * from v1;
+select * from v2;
+select * from v3;
+select * from v4;
+
+drop schema lateral_dump cascade;
+\c postgres
+drop database lateral_dump;

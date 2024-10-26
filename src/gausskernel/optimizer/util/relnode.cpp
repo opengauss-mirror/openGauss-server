@@ -217,6 +217,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     /* min_attr, max_attr, attr_needed, attr_widths are set below */
     rel->lateral_vars = NIL;
     rel->lateral_relids = NULL;
+    rel->lateral_referencers = NULL;
     rel->indexlist = NIL;
     rel->pages = 0;
     rel->tuples = 0;
@@ -713,6 +714,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->attr_widths = NULL;
     joinrel->lateral_vars = NIL;
     joinrel->lateral_relids = NULL;
+    joinrel->lateral_referencers = NULL;
     joinrel->indexlist = NIL;
     joinrel->pages = 0.0;
     joinrel->tuples = 0;

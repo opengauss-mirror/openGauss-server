@@ -57,6 +57,8 @@ typedef struct pullup_replace_vars_context {
     PlannerInfo* root;
     List* targetlist;          /* tlist of subquery being pulled up */
     RangeTblEntry* target_rte; /* RTE of subquery */
+    Relids relids;             /* relids within subquery, as numbered after
+                                * pullup (set only if target_rte->lateral) */
     bool* outer_hasSubLinks;   /* -> outer query's hasSubLinks */
     int varno;                 /* varno of subquery */
     bool need_phvs;            /* do we need PlaceHolderVars? */
@@ -1244,6 +1246,11 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
     rvcontext.root = root;
     rvcontext.targetlist = subquery->targetList;
     rvcontext.target_rte = rte;
+    if (rte->lateral)
+        rvcontext.relids = get_relids_in_jointree((Node *) subquery->jointree,
+                                                  true);
+    else    /* won't need relids */
+        rvcontext.relids = NULL;
     rvcontext.outer_hasSubLinks = &parse->hasSubLinks;
     rvcontext.varno = varno;
     rvcontext.need_phvs = (lowest_nulling_outer_join  != NULL || containing_appendrel != NULL);
@@ -2213,7 +2220,16 @@ static Node* pullup_replace_vars_callback(Var* var, replace_rte_variables_contex
             bool wrap = false;
 
             if (newnode && IsA(newnode, Var) && ((Var*)newnode)->varlevelsup == 0) {
-                /* Simple Vars always escape being wrapped */
+            /*
+             * Simple Vars always escape being wrapped, unless they are
+             * lateral references to something outside the subquery being
+             * pulled up.  (Even then, we could omit the PlaceHolderVar if
+             * the referenced rel is under the same lowest outer join, but
+             * it doesn't seem worth the trouble to check that.)
+             */
+            if (rcon->target_rte->lateral && !bms_is_member(((Var *) newnode)->varno, rcon->relids))
+                wrap = true;
+            else
                 wrap = false;
             } else if (newnode && IsA(newnode, PlaceHolderVar) && ((PlaceHolderVar*)newnode)->phlevelsup == 0) {
                 /* No need to wrap a PlaceHolderVar with another one, either */
@@ -2222,20 +2238,28 @@ static Node* pullup_replace_vars_callback(Var* var, replace_rte_variables_contex
                 /* Wrap all non-Vars in a PlaceHolderVar */
                 wrap = true;
             } else {
-                /*
-                 * If it contains a Var of current level, and does not contain
-                 * any non-strict constructs, then it's certainly nullable so
-                 * we don't need to insert a PlaceHolderVar.
-                 *
-                 * This analysis could be tighter: in particular, a non-strict
-                 * construct hidden within a lower-level PlaceHolderVar is not
-                 * reason to add another PHV.  But for now it doesn't seem
-                 * worth the code to be more exact.
-                 *
-                 * Note: in future maybe we should insert a PlaceHolderVar
-                 * anyway, if the tlist item is expensive to evaluate?
-                 */
-                if (contain_vars_of_level((Node*)newnode, 0) && !contain_nonstrict_functions((Node*)newnode)) {
+            /*
+             * If it contains a Var of the subquery being pulled up, and
+             * does not contain any non-strict constructs, then it's
+             * certainly nullable so we don't need to insert a
+             * PlaceHolderVar.
+             *
+             * This analysis could be tighter: in particular, a non-strict
+             * construct hidden within a lower-level PlaceHolderVar is not
+             * reason to add another PHV.  But for now it doesn't seem
+             * worth the code to be more exact.
+             *
+             * Note: in future maybe we should insert a PlaceHolderVar
+             * anyway, if the tlist item is expensive to evaluate?
+             *
+             * For a LATERAL subquery, we have to check the actual var
+             * membership of the node, but if it's non-lateral then any
+             * level-zero var must belong to the subquery.
+             */
+            if ((rcon->target_rte->lateral ?
+                 bms_overlap(pull_varnos((Node *) newnode), rcon->relids) :
+                 contain_vars_of_level((Node *) newnode, 0)) &&
+                !contain_nonstrict_functions((Node *) newnode)) {
                     /* No wrap needed */
                     wrap = false;
                 } else {

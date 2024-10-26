@@ -483,6 +483,8 @@ test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_
 # test for empty string in A format database
 test: accept_empty_str not_accept_empty_str pg_empty_str accept_empty_copy not_accept_empty_copy
 
+test: lateral lateral_with_dop lateral_dump
+
 #test: gin/cgin
 test: cgin_select ignore_keyword_list
 test: gin_select

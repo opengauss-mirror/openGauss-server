@@ -588,21 +588,29 @@ void extract_actual_join_clauses(List* restrictinfo_list, List** joinquals, List
  * Also there must not be an outer join below the clause that would null the
  * Vars coming from the target relation.  Otherwise the clause might give
  * results different from what it would give at its normal semantic level.
+  *
+ * Also, the join clause must not use any relations that have LATERAL
+ * references to the target relation, since we could not put such rels on
+ * the outer side of a nestloop with the target relation.
  */
-bool join_clause_is_movable_to(RestrictInfo* rinfo, Index baserelid)
+bool join_clause_is_movable_to(RestrictInfo* rinfo, RelOptInfo *baserel)
 {
     /* Clause must physically reference target rel */
-    if (!bms_is_member(baserelid, rinfo->clause_relids))
+    if (!bms_is_member(baserel->relid, rinfo->clause_relids))
         return false;
-
+    
     /* Cannot move an outer-join clause into the join's outer side */
-    if (bms_is_member(baserelid, rinfo->outer_relids))
+    if (bms_is_member(baserel->relid, rinfo->outer_relids))
         return false;
-
+    
     /* Target rel must not be nullable below the clause */
-    if (bms_is_member(baserelid, rinfo->nullable_relids))
+    if (bms_is_member(baserel->relid, rinfo->nullable_relids))
         return false;
-
+    
+    /* Clause must not use any rels with LATERAL references to this rel */
+    if (bms_overlap(baserel->lateral_referencers, rinfo->clause_relids))
+        return false;
+    
     return true;
 }
 

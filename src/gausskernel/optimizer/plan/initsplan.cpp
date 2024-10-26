@@ -152,6 +152,8 @@ void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_needed, 
             Var* var = (Var*)node;
             RelOptInfo* rel = find_base_rel(root, var->varno);
             int attno = var->varattno;
+            if (bms_is_subset(where_needed, rel->relids))
+                continue;
 
             AssertEreport(attno >= rel->min_attr && attno <= rel->max_attr, MOD_OPT, "attno is out of range");
             attno -= rel->min_attr;
@@ -310,90 +312,153 @@ extract_lateral_references(PlannerInfo *root, RelOptInfo *brel, Index rtindex)
 void
 create_lateral_join_info(PlannerInfo *root)
 {
-   int       rti;
+    int rti;
+    ListCell *lc = NULL;
 
-   /* We need do nothing if the query contains no LATERAL RTEs */
-   if (!root->hasLateralRTEs)
-       return;
+    /* We need do nothing if the query contains no LATERAL RTEs */
+    if (!root->hasLateralRTEs)
+        return;
 
-   /*
-    * Examine all baserels (the rel array has been set up by now).
-    */
-   for (rti = 1; rti < root->simple_rel_array_size; rti++)
-   {
-       RelOptInfo *brel = root->simple_rel_array[rti];
-       Relids      lateral_relids;
-       ListCell *lc = NULL;
+    /*
+     * Examine all baserels (the rel array has been set up by now).
+     */
+    for (rti = 1; rti < root->simple_rel_array_size; rti++) {
+        RelOptInfo *brel = root->simple_rel_array[rti];
+        Relids      lateral_relids;
 
-       /* there may be empty slots corresponding to non-baserel RTEs */
+        /* there may be empty slots corresponding to non-baserel RTEs */
        if (brel == NULL)
-           continue;
+            continue;
 
-       Assert(brel->relid == (Index)rti);     /* sanity check on array */
+        Assert(brel->relid == (Index)rti);     /* sanity check on array */
 
-       /* ignore RTEs that are "other rels" */
-       if (brel->reloptkind != RELOPT_BASEREL)
-           continue;
+        /* ignore RTEs that are "other rels" */
+        if (brel->reloptkind != RELOPT_BASEREL)
+            continue;
 
-       lateral_relids = NULL;
+        lateral_relids = NULL;
 
        /* consider each laterally-referenced Var or PHV */
-       foreach(lc, brel->lateral_vars)
-       {
-           Node   *node = (Node *) lfirst(lc);
+        foreach(lc, brel->lateral_vars) {
+            Node   *node = (Node *) lfirst(lc);
 
-           if (IsA(node, Var))
-           {
-               Var    *var = (Var *) node;
+            if (IsA(node, Var)) {
+                Var *var = (Var *) node;
+                add_lateral_info(root, bms_make_singleton(var->varno), brel->relids);
+                lateral_relids = bms_add_member(lateral_relids, var->varno);
+            } else if (IsA(node, PlaceHolderVar)) {
+                PlaceHolderVar *phv = (PlaceHolderVar *) node;
+                PlaceHolderInfo *phinfo = find_placeholder_info(root, phv, false);
 
-               add_lateral_info(root, rti, bms_make_singleton(var->varno));
-               lateral_relids = bms_add_member(lateral_relids,
-                                               var->varno);
-           }
-           else if (IsA(node, PlaceHolderVar))
-           {
-               PlaceHolderVar *phv = (PlaceHolderVar *) node;
-               PlaceHolderInfo *phinfo = find_placeholder_info(root, phv,
-                                                               false);
-
-               add_lateral_info(root, rti, bms_copy(phinfo->ph_eval_at));
-               lateral_relids = bms_add_members(lateral_relids,
+                add_lateral_info(root, phinfo->ph_eval_at, brel->relids);
+                lateral_relids = bms_add_members(lateral_relids,
                                                 phinfo->ph_eval_at);
-           }
-           else
-               Assert(false);
-       }
+            } else {
+                Assert(false);
+            }
+        }
 
-       /* We now know all the relids needed for lateral refs in this rel */
-       if (bms_is_empty(lateral_relids))
-           continue;           /* ensure lateral_relids is NULL if empty */
-       brel->lateral_relids = lateral_relids;
+        /* We now know all the relids needed for lateral refs in this rel */
+        if (bms_is_empty(lateral_relids))
+            continue;           /* ensure lateral_relids is NULL if empty */
+        brel->lateral_relids = lateral_relids;
 
-       /*
-        * If it's an appendrel parent, copy its lateral_relids to each child
-        * rel.  We intentionally give each child rel the same minimum
-        * parameterization, even though it's quite possible that some don't
-        * reference all the lateral rels.  This is because any append path
-        * for the parent will have to have the same parameterization for
-        * every child anyway, and there's no value in forcing extra
-        * reparameterize_path() calls.
-        */
-       if (root->simple_rte_array[rti]->inh)
-       {
-           foreach(lc, root->append_rel_list)
-           {
-               AppendRelInfo *appinfo = (AppendRelInfo *) lfirst(lc);
-               RelOptInfo *childrel = NULL;
-
-               if (appinfo->parent_relid != (Index)rti)
-                   continue;
-               childrel = root->simple_rel_array[appinfo->child_relid];
-               Assert(childrel->reloptkind == RELOPT_OTHER_MEMBER_REL);
-               Assert(childrel->lateral_relids == NULL);
-               childrel->lateral_relids = lateral_relids;
-           }
-       }
-   }
+        /*
+         * Now check for lateral references within PlaceHolderVars, and make
+         * LateralJoinInfos describing each such reference.  Unlike references in
+         * unflattened LATERAL RTEs, the referencing location could be a join.
+         */
+        foreach(lc, root->placeholder_list) {
+            PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(lc);
+            Relids      eval_at = phinfo->ph_eval_at;
+       
+            if (phinfo->ph_lateral != NULL) {
+                List *vars = pull_var_clause((Node *) phinfo->ph_var->phexpr,
+                    PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+                ListCell   *lc2;
+       
+                foreach(lc2, vars) {
+                    Node       *node = (Node *) lfirst(lc2);
+                    if (IsA(node, Var)) {
+                        Var        *var = (Var *) node;
+                        if (!bms_is_member(var->varno, eval_at))
+                            add_lateral_info(root,
+                                             bms_make_singleton(var->varno),
+                                             eval_at);
+                    } else if (IsA(node, PlaceHolderVar)) {
+                        PlaceHolderVar *other_phv = (PlaceHolderVar *) node;
+                        PlaceHolderInfo *other_phi;
+       
+                        other_phi = find_placeholder_info(root, other_phv,
+                                                          false);
+                        if (!bms_is_subset(other_phi->ph_eval_at, eval_at))
+                            add_lateral_info(root, other_phi->ph_eval_at, eval_at);
+                    } else {
+                        Assert(false);
+                    }
+                }
+                list_free(vars);
+            }
+        }
+       
+        /* If we found no lateral references, we're done. */
+        if (root->lateral_info_list == NIL)
+            return;
+       
+        /*
+         * Now that we've identified all lateral references, make a second pass in
+         * which we mark each baserel with the set of relids of rels that
+         * reference it laterally (essentially, the inverse mapping of
+         * lateral_relids).  We'll need this for join_clause_is_movable_to().
+         *
+         * Also, propagate lateral_relids and lateral_referencers from appendrel
+         * parent rels to their child rels.  We intentionally give each child rel
+         * the same minimum parameterization, even though it's quite possible that
+         * some don't reference all the lateral rels.  This is because any append
+         * path for the parent will have to have the same parameterization for
+         * every child anyway, and there's no value in forcing extra
+         * reparameterize_path() calls.  Similarly, a lateral reference to the
+         * parent prevents use of otherwise-movable join rels for each child.
+         */
+        for (rti = 1; rti < root->simple_rel_array_size; rti++) {
+            RelOptInfo *brel = root->simple_rel_array[rti];
+            Relids      lateral_referencers;
+       
+            if (brel == NULL)
+                continue;
+            if (brel->reloptkind != RELOPT_BASEREL)
+                continue;
+       
+            /* Compute lateral_referencers using the finished lateral_info_list */
+            lateral_referencers = NULL;
+            foreach(lc, root->lateral_info_list) {
+                LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(lc);
+                if (bms_is_member(brel->relid, ljinfo->lateral_lhs))
+                    lateral_referencers = bms_add_members(lateral_referencers,
+                                                         ljinfo->lateral_rhs);
+            }
+            brel->lateral_referencers = lateral_referencers;
+       
+            /*
+             * If it's an appendrel parent, copy its lateral_relids and
+             * lateral_referencers to each child rel.
+             */
+            if (root->simple_rte_array[rti]->inh) {
+                foreach(lc, root->append_rel_list) {
+                    AppendRelInfo *appinfo = (AppendRelInfo *) lfirst(lc);
+                    RelOptInfo *childrel;
+                    if (appinfo->parent_relid != rti)
+                        continue;
+                    childrel = root->simple_rel_array[appinfo->child_relid];
+                    Assert(childrel->reloptkind == RELOPT_OTHER_MEMBER_REL);
+                    Assert(childrel->lateral_relids == NULL);
+                    childrel->lateral_relids = brel->lateral_relids;
+                    Assert(childrel->lateral_referencers == NULL);
+                    childrel->lateral_referencers = brel->lateral_referencers;
+                }
+            }
+        }
+    }
 }
 
 /*
@@ -403,34 +468,38 @@ create_lateral_join_info(PlannerInfo *root)
  * We suppress redundant list entries.  The passed lhs set must be freshly
  * made; we free it if not used in a new list entry.
  */
-void add_lateral_info(PlannerInfo *root, Index rhs, Relids lhs)
+void add_lateral_info(PlannerInfo *root, Relids lhs, Relids rhs)
 {
-   LateralJoinInfo *ljinfo = NULL;
-   ListCell *l = NULL;
-
-   Assert(!bms_is_member(rhs, lhs));
-
-   /*
-    * If an existing list member has the same RHS and an LHS that is a subset
-    * of the new one, it's redundant, but we don't trouble to get rid of it.
-    * The only case that is really worth worrying about is identical entries,
-    * and we handle that well enough with this simple logic.
-    */
-   foreach(l, root->lateral_info_list) {
-       ljinfo = (LateralJoinInfo *) lfirst(l);
-       if (rhs == ljinfo->lateral_rhs &&
-           bms_is_subset(lhs, ljinfo->lateral_lhs)) {
-           bms_free(lhs);
-           return;
-       }
-   }
-
-   /* Not there, so make a new entry */
-   ljinfo = makeNode(LateralJoinInfo);
-   ljinfo->lateral_rhs = rhs;
-   ljinfo->lateral_lhs = lhs;
-   root->lateral_info_list = lappend(root->lateral_info_list, ljinfo);
+    LateralJoinInfo *ljinfo;
+    ListCell   *lc;
+    
+    /* Sanity-check the input */
+    Assert(!bms_is_empty(lhs));
+    Assert(!bms_is_empty(rhs));
+    Assert(!bms_overlap(lhs, rhs));
+    
+    /*
+     * The input is redundant if it has the same RHS and an LHS that is a
+     * subset of an existing entry's.  If an existing entry has the same RHS
+     * and an LHS that is a subset of the new one, it's redundant, but we
+     * don't trouble to get rid of it.  The only case that is really worth
+     * worrying about is identical entries, and we handle that well enough
+     * with this simple logic.
+     */
+    foreach(lc, root->lateral_info_list) {
+        ljinfo = (LateralJoinInfo *) lfirst(lc);
+        if (bms_equal(rhs, ljinfo->lateral_rhs) &&
+            bms_is_subset(lhs, ljinfo->lateral_lhs))
+            return;
+    }
+    
+    /* Not there, so make a new entry */
+    ljinfo = makeNode(LateralJoinInfo);
+    ljinfo->lateral_lhs = bms_copy(lhs);
+    ljinfo->lateral_rhs = bms_copy(rhs);
+    root->lateral_info_list = lappend(root->lateral_info_list, ljinfo);
 }
+
 
 
 /*****************************************************************************
@@ -871,6 +940,7 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
         Relids left_inners, right_inners, nonnullable_rels, ojscope;
         List* leftjoinlist = NIL;
         List* rightjoinlist = NIL;
+        List* my_quals;
         SpecialJoinInfo* sjinfo = NULL;
         ListCell* l = NULL;
 
@@ -955,6 +1025,29 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
         }
 
         /*
+         * Try to process any quals postponed by children.  If they need
+         * further postponement, add them to my output postponed_qual_list.
+         * Quals that can be processed now must be included in my_quals, so
+         * that they'll be handled properly in make_outerjoininfo.
+         */
+        my_quals = NIL;
+        foreach(l, child_postponed_quals) {
+            PostponedQual *pq = (PostponedQual *) lfirst(l);
+            
+            if (bms_is_subset(pq->relids, *qualscope)) {
+                my_quals = lappend(my_quals, pq->qual);
+            } else {
+                /*
+                 * We should not be postponing any quals past an outer join.
+                 * If this Assert fires, pull_up_subqueries() messed up.
+                 */
+                Assert(j->jointype == JOIN_INNER);
+                *postponed_qual_list = lappend(*postponed_qual_list, pq);
+            }
+        }
+        my_quals = list_concat(my_quals, (List *) j->quals);
+
+        /*
          * For an OJ, form the SpecialJoinInfo now, because we need the OJ's
          * semantic scope (ojscope) to pass to distribute_qual_to_rels.  But
          * we mustn't add it to join_info_list just yet, because we don't want
@@ -965,7 +1058,7 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
          */
         if (j->jointype != JOIN_INNER) {
             sjinfo = make_outerjoininfo(root, leftids, rightids, *inner_join_rels,
-                                        j->jointype, (List*)j->quals);
+                                        j->jointype, my_quals);
             if (j->jointype == JOIN_SEMI)
                 ojscope = NULL;
             else
@@ -975,33 +1068,8 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             ojscope = NULL;
         }
 
-        /*
-         * Try to process any quals postponed by children.  If they need
-         * further postponement, add them to my output postponed_qual_list.
-         */
-        foreach(l, child_postponed_quals)
-        {
-            PostponedQual *pq = (PostponedQual *) lfirst(l);
-        
-            if (bms_is_subset(pq->relids, *qualscope))
-                distribute_qual_to_rels(root, pq->qual,
-                                        false, below_outer_join, j->jointype,
-                                         root->qualSecurityLevel, *qualscope,
-                                        ojscope, nonnullable_rels, NULL,
-                                        NULL);
-            else
-            {
-                /*
-                 * We should not be postponing any quals past an outer join.
-                 * If this Assert fires, pull_up_subqueries() messed up.
-                 */
-                Assert(j->jointype == JOIN_INNER);
-                *postponed_qual_list = lappend(*postponed_qual_list, pq);
-            }
-        }
-
         /* Process the JOIN's qual clauses */
-        foreach (l, (List*)j->quals) {
+        foreach (l, my_quals) {
             Node* qual = (Node*)lfirst(l);
 
             distribute_qual_to_rels(root,

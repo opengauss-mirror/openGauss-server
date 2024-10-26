@@ -3219,6 +3219,9 @@ static void _outJoinExpr(StringInfo str, JoinExpr* node)
     if (t_thrd.proc->workingVersionNum >= STRAIGHT_JOIN_VERSION_NUMBER) {
         WRITE_BOOL_FIELD(is_straight_join);
     }
+    if (t_thrd.proc->workingVersionNum >= APPLY_JOIN_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_apply_join);
+    }
 }
 
 static void _outFromExpr(StringInfo str, FromExpr* node)
@@ -3642,6 +3645,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_INT_FIELD(max_attr);
     WRITE_NODE_FIELD(lateral_vars);
     WRITE_BITMAPSET_FIELD(lateral_relids);
+    if (t_thrd.proc->workingVersionNum >= APPLY_JOIN_VERSION_NUMBER) {
+        WRITE_BITMAPSET_FIELD(lateral_referencers);
+    }
     WRITE_NODE_FIELD(indexlist);
 #ifndef ENABLE_MULTIPLE_NODES
     WRITE_NODE_FIELD(statlist);
@@ -3866,10 +3872,10 @@ static void _outSpecialJoinInfo(StringInfo str, SpecialJoinInfo* node)
 static void
 _outLateralJoinInfo(StringInfo str, const LateralJoinInfo *node)
 {
-   WRITE_NODE_TYPE("LATERALJOININFO");
+    WRITE_NODE_TYPE("LATERALJOININFO");
 
-   WRITE_UINT_FIELD(lateral_rhs);
-   WRITE_BITMAPSET_FIELD(lateral_lhs);
+    WRITE_BITMAPSET_FIELD(lateral_lhs);
+    WRITE_BITMAPSET_FIELD(lateral_rhs);
 }
 
 static void _outAppendRelInfo(StringInfo str, AppendRelInfo* node)
@@ -3894,6 +3900,9 @@ static void _outPlaceHolderInfo(StringInfo str, PlaceHolderInfo* node)
     WRITE_UINT_FIELD(phid);
     WRITE_NODE_FIELD(ph_var);
     WRITE_BITMAPSET_FIELD(ph_eval_at);
+    if (t_thrd.proc->workingVersionNum >= APPLY_JOIN_VERSION_NUMBER) {
+        WRITE_BITMAPSET_FIELD(ph_lateral);
+    }
     WRITE_BITMAPSET_FIELD(ph_needed);
     WRITE_INT_FIELD(ph_width);
 }

@@ -479,7 +479,7 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     }
 
     /* We don't want any excess columns when streaming */
-    disuse_physical_tlist(subplan, best_path->subpath);
+    disuse_physical_tlist(root, subplan, best_path->subpath);
 
     /*
      * If there has stream path for replication node,
@@ -647,19 +647,11 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
             tlist = build_physical_tlist(root, rel);
             /* if fail because of dropped cols, use regular method */
             if (tlist == NIL) {
-                tlist = build_relation_tlist(rel);
+                tlist = build_path_tlist(root, best_path);
             }
         }
     } else {
-        tlist = build_relation_tlist(rel);
-        /*
-         * If it's a parameterized otherrel, there might be lateral references
-         * in the tlist, which need to be replaced with Params.  This cannot
-         * happen for regular baserels, though.  Note use_physical_tlist()
-         * always fails for otherrels, so we don't need to check this above.
-         */
-        if (rel->reloptkind != RELOPT_BASEREL && best_path->param_info)
-            tlist = (List *) replace_nestloop_params(root, (Node *) tlist);
+        tlist = build_path_tlist(root, best_path);
     }
 
     /*
@@ -1018,7 +1010,7 @@ static Path* wipe_dummy_path(Plan* plan, Path* path)
  * undo the decision made by use_physical_tlist().	Currently, Hash, Sort,
  * and Material nodes want this, so they don't have to store useless columns.
  */
-void disuse_physical_tlist(Plan* plan, Path* path)
+void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     /* StreamPath may not create stream plan, but it already do this step, so just return. */
@@ -1065,7 +1057,7 @@ void disuse_physical_tlist(Plan* plan, Path* path)
             }
             List* tarList = NULL;
             if (path->parent != NULL)
-                tarList = build_relation_tlist(path->parent);
+                tarList = build_path_tlist(root, path);
             if (tarList != NULL)
                 plan->targetlist = tarList;
             break;
@@ -1081,7 +1073,7 @@ void disuse_physical_tlist(Plan* plan, Path* path)
                 case T_BitmapHeapScan:
                 case T_CStoreIndexHeapScan:
                 case T_TidScan: {
-                    List* sub_parList = build_relation_tlist(piPath->subPath->parent);
+                    List* sub_parList = build_path_tlist(root, path);
                     if (sub_parList != NULL) {
                         subPlan->targetlist = sub_parList;
                         plan->targetlist = sub_parList;
@@ -1270,7 +1262,7 @@ static Plan* create_join_plan(PlannerInfo* root, JoinPath* best_path)
 static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
 {
     Append* plan = NULL;
-    List* tlist = build_relation_tlist(best_path->path.parent);
+    List* tlist = build_path_tlist(root, &best_path->path);
     List* subplans = NIL;
     ListCell* subpaths = NULL;
 
@@ -1347,7 +1339,7 @@ static Plan* create_merge_append_plan(PlannerInfo* root, MergeAppendPath* best_p
 {
     MergeAppend* node = makeNode(MergeAppend);
     Plan* plan = &node->plan;
-    List* tlist = build_relation_tlist(best_path->path.parent);
+    List* tlist = build_path_tlist(root, &best_path->path);
     List* pathkeys = best_path->path.pathkeys;
     List* subplans = NIL;
     ListCell* subpaths = NULL;
@@ -1666,7 +1658,7 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
     subplan = create_plan_recurse(root, best_path->subpath);
 
     /* We don't want any excess columns in the materialized tuples */
-    disuse_physical_tlist(subplan, best_path->subpath);
+    disuse_physical_tlist(root, subplan, best_path->subpath);
 
     plan = make_material(subplan, best_path->materialize_all);
 
@@ -1740,7 +1732,7 @@ static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path)
     uniq_exprs = best_path->uniq_exprs;
 
     /* initialize modified subplan tlist as just the "required" vars */
-    newtlist = build_relation_tlist(best_path->path.parent);
+    newtlist = build_path_tlist(root, &best_path->path);
     nextresno = list_length(newtlist) + 1;
     itemChange = false;
 
@@ -1824,7 +1816,7 @@ static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path)
     if (best_path->umethod == UNIQUE_PATH_HASH) {
         long numGroups[2];
         Oid* groupOperators = NULL;
-        List* tlist = build_relation_tlist(best_path->path.parent);
+        List* tlist = build_path_tlist(root, &best_path->path);
 
         numGroups[0] = (long)Min(PATH_LOCAL_ROWS(&best_path->path), (double)LONG_MAX);
         numGroups[1] = (long)Min(best_path->path.rows, (double)LONG_MAX);
@@ -4149,7 +4141,7 @@ static ExtensiblePlan* create_extensible_plan(
 static NestLoop* create_nestloop_plan(PlannerInfo* root, NestPath* best_path, Plan* outer_plan, Plan* inner_plan)
 {
     NestLoop* join_plan = NULL;
-    List* tlist = build_relation_tlist(best_path->path.parent);
+    List* tlist = build_path_tlist(root, &best_path->path);
     List* joinrestrictclauses = best_path->joinrestrictinfo;
     List* joinclauses = NIL;
     List* otherclauses = NIL;
@@ -4246,7 +4238,7 @@ static NestLoop* create_nestloop_plan(PlannerInfo* root, NestPath* best_path, Pl
 
 static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path, Plan* outer_plan, Plan* inner_plan)
 {
-    List* tlist = build_relation_tlist(best_path->jpath.path.parent);
+    List* tlist = build_path_tlist(root, &best_path->jpath.path);
     List* joinclauses = NIL;
     List* otherclauses = NIL;
     List* mergeclauses = NIL;
@@ -4307,7 +4299,7 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
      * Make sure there are no excess columns in the inputs if sorting.
      */
     if (best_path->outersortkeys) {
-        disuse_physical_tlist(outer_plan, best_path->jpath.outerjoinpath);
+        disuse_physical_tlist(root, outer_plan, best_path->jpath.outerjoinpath);
         outer_plan = (Plan*)make_sort_from_pathkeys(root, outer_plan, best_path->outersortkeys, -1.0);
         copy_mem_info(&((Sort*)outer_plan)->mem_info, &best_path->outer_mem_info);
 
@@ -4327,7 +4319,7 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
     }
 
     if (best_path->innersortkeys) {
-        disuse_physical_tlist(inner_plan, best_path->jpath.innerjoinpath);
+        disuse_physical_tlist(root, inner_plan, best_path->jpath.innerjoinpath);
         inner_plan = (Plan*)make_sort_from_pathkeys(root, inner_plan, best_path->innersortkeys, -1.0);
         copy_mem_info(&((Sort*)inner_plan)->mem_info, &best_path->inner_mem_info);
 
@@ -4881,7 +4873,7 @@ static void set_bloomfilter(PlannerInfo* root, Relids lefttree_relids, HashJoin*
  */
 static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Plan* outer_plan, Plan* inner_plan)
 {
-    List* tlist = build_relation_tlist(best_path->jpath.path.parent);
+    List* tlist = build_path_tlist(root, &best_path->jpath.path);
     List* joinclauses = NIL;
     List* otherclauses = NIL;
     List* hashclauses = NIL;
@@ -4931,14 +4923,14 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     hashclauses = get_switched_clauses(best_path->path_hashclauses, best_path->jpath.outerjoinpath->parent->relids);
 
     /* We don't want any excess columns in the hashed tuples */
-    disuse_physical_tlist(inner_plan, best_path->jpath.innerjoinpath);
+    disuse_physical_tlist(root, inner_plan, best_path->jpath.innerjoinpath);
 
     /* If we expect batching, suppress excess columns in outer tuples too */
     if (best_path->num_batches > 1 ||
         (u_sess->attr.attr_sql.enable_vector_engine && 
          u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE && 
          u_sess->attr.attr_sql.enable_vector_targetlist))
-        disuse_physical_tlist(outer_plan, best_path->jpath.outerjoinpath);
+        disuse_physical_tlist(root, outer_plan, best_path->jpath.outerjoinpath);
 
     /*
      * If there is a single join clause and we can identify the outer variable
@@ -5070,15 +5062,36 @@ static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root)
         Assert(phv->phlevelsup == 0);
 
         /*
-         * If not to be replaced, just return the PlaceHolderVar unmodified.
-         * We use bms_overlap as a cheap/quick test to see if the PHV might be
-         * evaluated in the outer rels, and then grab its PlaceHolderInfo to
-         * tell for sure.
+         * Check whether we need to replace the PHV.  We use bms_overlap as a
+         * cheap/quick test to see if the PHV might be evaluated in the outer
+         * rels, and then grab its PlaceHolderInfo to tell for sure.
          */
-        if (!bms_overlap(phv->phrels, root->curOuterRels))
-            return node;
-        if (!bms_is_subset(find_placeholder_info(root, phv, false)->ph_eval_at, root->curOuterRels))
-            return node;
+        if (!bms_overlap(phv->phrels, root->curOuterRels) ||
+            !bms_is_subset(find_placeholder_info(root, phv, false)->ph_eval_at,
+                            root->curOuterRels)) {
+            /*
+             * We can't replace the whole PHV, but we might still need to
+             * replace Vars or PHVs within its expression, in case it ends up
+             * actually getting evaluated here.  (It might get evaluated in
+             * this plan node, or some child node; in the latter case we don't
+             * really need to process the expression here, but we haven't got
+             * enough info to tell if that's the case.)  Flat-copy the PHV
+             * node and then recurse on its expression.
+             *
+             * Note that after doing this, we might have different
+             * representations of the contents of the same PHV in different
+             * parts of the plan tree.  This is OK because equal() will just
+             * match on phid/phlevelsup, so setrefs.c will still recognize an
+             * upper-level reference to a lower-level copy of the same PHV.
+             */
+            PlaceHolderVar *newphv = makeNode(PlaceHolderVar);
+            
+            errno_t rc = memcpy_s(newphv, sizeof(PlaceHolderVar), phv, sizeof(PlaceHolderVar));
+            securec_check_c(rc, "\0", "\0");
+            newphv->phexpr = (Expr *)
+                replace_nestloop_params_mutator((Node *) phv->phexpr, root);
+            return (Node *) newphv;
+        }
         /* Create a Param representing the PlaceHolderVar */
         param = assign_nestloop_param_placeholdervar(root, phv);
         /* Is this param already listed in root->curOuterParams? */

@@ -751,6 +751,7 @@ static bool _equalJoinExpr(const JoinExpr* a, const JoinExpr* b)
     COMPARE_NODE_FIELD(alias);
     COMPARE_SCALAR_FIELD(rtindex);
     COMPARE_SCALAR_FIELD(is_straight_join);
+    COMPARE_SCALAR_FIELD(is_apply_join);
 
     return true;
 }
@@ -832,20 +833,23 @@ static bool _equalRestrictInfo(const RestrictInfo* a, const RestrictInfo* b)
 static bool _equalPlaceHolderVar(const PlaceHolderVar* a, const PlaceHolderVar* b)
 {
     /*
-     * We intentionally do not compare phexpr.	Two PlaceHolderVars with the
+     * We intentionally do not compare phexpr.  Two PlaceHolderVars with the
      * same ID and levelsup should be considered equal even if the contained
-     * expressions have managed to mutate to different states.	One way in
-     * which that can happen is that initplan sublinks would get replaced by
-     * differently-numbered Params when sublink folding is done.  (The end
-     * result of such a situation would be some unreferenced initplans, which
-     * is annoying but not really a problem.)
+     * expressions have managed to mutate to different states.  This will
+     * happen during final plan construction when there are nested PHVs, since
+     * the inner PHV will get replaced by a Param in some copies of the outer
+     * PHV.  Another way in which it can happen is that initplan sublinks
+     * could get replaced by differently-numbered Params when sublink folding
+     * is done.  (The end result of such a situation would be some
+     * unreferenced initplans, which is annoying but not really a problem.) On
+     * the same reasoning, there is no need to examine phrels.
      *
      * COMPARE_NODE_FIELD(phexpr);
+     *
+     * COMPARE_BITMAPSET_FIELD(phrels);
      */
-    COMPARE_BITMAPSET_FIELD(phrels);
     COMPARE_SCALAR_FIELD(phid);
     COMPARE_SCALAR_FIELD(phlevelsup);
-
     return true;
 }
 
@@ -867,10 +871,9 @@ static bool _equalSpecialJoinInfo(const SpecialJoinInfo* a, const SpecialJoinInf
 static bool
 _equalLateralJoinInfo(const LateralJoinInfo *a, const LateralJoinInfo *b)
 {
-   COMPARE_SCALAR_FIELD(lateral_rhs);
-   COMPARE_BITMAPSET_FIELD(lateral_lhs);
-
-   return true;
+    COMPARE_BITMAPSET_FIELD(lateral_lhs);
+    COMPARE_BITMAPSET_FIELD(lateral_rhs);
+    return true;
 }
 
 static bool _equalAppendRelInfo(const AppendRelInfo* a, const AppendRelInfo* b)
@@ -888,11 +891,11 @@ static bool _equalAppendRelInfo(const AppendRelInfo* a, const AppendRelInfo* b)
 static bool _equalPlaceHolderInfo(const PlaceHolderInfo* a, const PlaceHolderInfo* b)
 {
     COMPARE_SCALAR_FIELD(phid);
-    COMPARE_NODE_FIELD(ph_var);
+    COMPARE_NODE_FIELD(ph_var); /* should be redundant */
     COMPARE_BITMAPSET_FIELD(ph_eval_at);
+    COMPARE_BITMAPSET_FIELD(ph_lateral);
     COMPARE_BITMAPSET_FIELD(ph_needed);
     COMPARE_SCALAR_FIELD(ph_width);
-
     return true;
 }
 

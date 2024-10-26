@@ -2360,7 +2360,7 @@ static bool collect_lateral_vars_walker(Node *node, void *context)
         {
             rel->lateral_relids = bms_add_member(rel->lateral_relids, var->varno);
             rel->lateral_vars = lappend(rel->lateral_vars, var);
-            add_lateral_info(root, rel->relid, bms_make_singleton(var->varno));
+            add_lateral_info(root, bms_make_singleton(var->varno), rel->relids);
         }
 
         return false;

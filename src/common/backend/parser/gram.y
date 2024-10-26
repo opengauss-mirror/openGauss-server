@@ -902,7 +902,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 /* ordinary key words in alphabetical order */
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER, SLICE, DATANODE */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
-	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND ARCHIVE ARRAY AS ASC
+	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND APPLY ARCHIVE ARRAY AS ASC
         ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS
@@ -947,7 +947,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	KEY KILL KEY_PATH KEY_STORE
 
-	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
+	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_ON LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE
@@ -1028,6 +1028,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
 			FORCE_INDEX USE_INDEX IGNORE_INDEX
 			CURSOR_EXPR
+			LATERAL_EXPR
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -1055,6 +1056,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %nonassoc   INDEX
 %nonassoc   ROTATE
 %nonassoc   higher_than_rotate
+%nonassoc   LATERAL_P
 %left       ','
 /*
  * To support target_el without AS, we must give IDENT an explicit priority
@@ -1107,7 +1109,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
  * They wouldn't be given a precedence at all, were it not that we need
  * left-associativity among the JOIN rules themselves.
  */
-%left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED
+%left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED APPLY OUTER_P
 /* kluge to keep xml_whitespace_option from causing shift/reduce conflicts */
 %right		PRESERVE STRIP_P
 %token <keyword> CONSTRUCTOR FINAL MAP MEMBER RESULT SELF STATIC_P UNDER
@@ -25760,6 +25762,16 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					$1->indexhints = $3;
 					$$ = (Node *) $1;
 				}
+			
+			| LATERAL_EXPR func_table alias_clause
+				{
+					RangeFunction *n = makeNode(RangeFunction);
+					n->funccallnode = $2;
+					n->alias = $3;
+					n->coldeflist = NIL;
+					n->lateral = true;
+					$$ = (Node *) n;
+				}
 			| relation_expr index_hint_list
 				{
 					$1->indexhints = $2;
@@ -26040,6 +26052,35 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					n->rotate = $3;
 					$$ = (Node *) n;
 				}
+
+			| LATERAL_P select_with_parens opt_alias_clause  %prec LATERAL_P
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+
+					n->lateral = true;
+					n->subquery = $2;
+					n->alias = $3;
+					/* same comment as above */
+					if ($3 == NULL)
+					{
+						if (IsA($2, SelectStmt) &&
+							((SelectStmt *) $2)->valuesLists)
+						{
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("VALUES in FROM must have an alias"),
+									 errhint("For example, FROM (VALUES ...) [AS] foo."),
+									 parser_errposition(@2)));
+						}
+						else
+						{
+							Alias *a = makeNode(Alias);
+							a->aliasname = pstrdup("__unnamed_subquery__");
+							n->alias = a;
+						}
+					}
+					$$ = (Node *) n;
+				}
 			| joined_table
 				{
 					$$ = (Node *) $1;
@@ -26134,6 +26175,38 @@ joined_table:
 					n->rarg = $4;
 					n->usingClause = NIL; /* figure out which columns later... */
 					n->quals = NULL; /* fill later */
+					$$ = n;
+				}
+			| table_ref CROSS APPLY table_ref
+				{
+					/* CROSS JOIN is same as unqualified inner join */
+					JoinExpr *n = makeNode(JoinExpr);
+					n->jointype = JOIN_INNER;
+					n->isNatural = FALSE;
+					n->is_apply_join = TRUE;
+					n->larg = $1;
+					n->rarg = $4;
+					if (IsA(n->rarg, RangeSubselect)) {
+						((RangeSubselect*)n->rarg)->lateral = true;
+					}
+					n->usingClause = NIL;
+					n->quals = NULL;
+					$$ = n;
+				}
+			| table_ref OUTER_P APPLY table_ref
+				{
+					/* CROSS JOIN is same as unqualified inner join */
+					JoinExpr *n = makeNode(JoinExpr);
+					n->jointype = JOIN_LEFT;
+					n->isNatural = FALSE;
+					n->is_apply_join = TRUE;
+					n->larg = $1;
+					n->rarg = $4;
+					if (IsA(n->rarg, RangeSubselect)) {
+						((RangeSubselect*)n->rarg)->lateral = true;
+					}
+					n->usingClause = NIL;
+					n->quals = NULL;
 					$$ = n;
 				}
 		;
@@ -31306,6 +31379,7 @@ unreserved_keyword:
 			| LANGUAGE
 			| LARGE_P
 			| LAST_P
+			| LATERAL_P
 			| LC_COLLATE_P
 			| LC_CTYPE_P
 			| LEAKPROOF

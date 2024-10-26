@@ -29,7 +29,7 @@ extern List* get_actual_clauses(List* restrictinfo_list);
 extern List* get_all_actual_clauses(List* restrictinfo_list);
 extern List* extract_actual_clauses(List* restrictinfo_list, bool pseudoconstant);
 extern void extract_actual_join_clauses(List* restrictinfo_list, List** joinquals, List** otherquals);
-extern bool join_clause_is_movable_to(RestrictInfo* rinfo, Index baserelid);
+extern bool join_clause_is_movable_to(RestrictInfo* rinfo, RelOptInfo *baserel);
 extern bool join_clause_is_movable_into(RestrictInfo* rinfo, Relids currentrelids, Relids current_and_outer);
 extern void initialize_bucket_size(RestrictInfo* info);
 #endif /* RESTRICTINFO_H */

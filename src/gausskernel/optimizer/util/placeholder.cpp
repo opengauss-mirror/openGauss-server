@@ -68,6 +68,7 @@ PlaceHolderVar* make_placeholder_expr(PlannerInfo* root, Expr* expr, Relids phre
 PlaceHolderInfo* find_placeholder_info(PlannerInfo* root, PlaceHolderVar* phv, bool create_new_ph)
 {
     PlaceHolderInfo* phinfo = NULL;
+    Relids rels_used;
     ListCell* lc = NULL;
 
     /* if this ever isn't true, we'd need to be able to look in parent lists */
@@ -90,7 +91,23 @@ PlaceHolderInfo* find_placeholder_info(PlannerInfo* root, PlaceHolderVar* phv, b
 
     phinfo->phid = phv->phid;
     phinfo->ph_var = (PlaceHolderVar*)copyObject(phv);
-    phinfo->ph_eval_at = pull_varnos((Node*)phv);
+    /*
+     * Any referenced rels that are outside the PHV's syntactic scope are
+     * LATERAL references, which should be included in ph_lateral but not in
+     * ph_eval_at.  If no referenced rels are within the syntactic scope,
+     * force evaluation at the syntactic location.
+     */
+    rels_used = pull_varnos((Node *) phv->phexpr);
+    phinfo->ph_lateral = bms_difference(rels_used, phv->phrels);
+    /* make it exactly NULL if empty */
+    if (bms_is_empty(phinfo->ph_lateral))
+        phinfo->ph_lateral = NULL;
+    phinfo->ph_eval_at = bms_int_members(rels_used, phv->phrels);
+    /* If no contained vars, force evaluation at syntactic location */
+    if (bms_is_empty(phinfo->ph_eval_at)) {
+        phinfo->ph_eval_at = bms_copy(phv->phrels);
+        AssertEreport(!bms_is_empty(phinfo->ph_eval_at), MOD_OPT, "");
+    }
     /* ph_eval_at may change later, see update_placeholder_eval_levels */
     phinfo->ph_needed = NULL; /* initially it's unused */
     /* for the moment, estimate width using just the datatype info */
@@ -112,8 +129,11 @@ PlaceHolderInfo* find_placeholder_info(PlannerInfo* root, PlaceHolderVar* phv, b
  * find_placeholders_in_jointree
  *		Search the jointree for PlaceHolderVars, and build PlaceHolderInfos
  *
- * We don't need to look at the targetlist because build_base_rel_tlists()
- * will already have made entries for any PHVs in the tlist.
+ * This is called before we begin deconstruct_jointree.  Once we begin
+ * deconstruct_jointree, all active placeholders must be present in
+ * root->placeholder_list, because make_outerjoininfo and
+ * update_placeholder_eval_levels require this info to be available
+ * while we crawl up the join tree.
  */
 void find_placeholders_in_jointree(PlannerInfo* root)
 {
@@ -210,7 +230,7 @@ static void find_placeholders_in_expr(PlannerInfo *root, Node *expr)
  * The initial eval_at level set by find_placeholder_info was the set of
  * rels used in the placeholder's expression (or the whole subselect below
  * the placeholder's syntactic location, if the expr is variable-free).
- * If the subselect contains any outer joins that can null any of those rels,
+ * If the query contains any outer joins that can null any of those rels,
  * we must delay evaluation to above those joins.
  *
  * We repeat this operation each time we add another outer join to
@@ -279,6 +299,9 @@ void update_placeholder_eval_levels(PlannerInfo* root, SpecialJoinInfo* new_sjin
             }
         } while (found_some);
 
+        /* Can't move the PHV's eval_at level to above its syntactic level */
+        AssertEreport(bms_is_subset(eval_at, syn_level), MOD_OPT, "");
+
         phinfo->ph_eval_at = eval_at;
     }
 }
@@ -289,28 +312,25 @@ void update_placeholder_eval_levels(PlannerInfo* root, SpecialJoinInfo* new_sjin
  *
  * This is called after we've finished determining the eval_at levels for
  * all placeholders.  We need to make sure that all vars and placeholders
- * needed to evaluate each placeholder will be available at the join level
- * where the evaluation will be done.  Note that this loop can have
- * side-effects on the ph_needed sets of other PlaceHolderInfos; that's okay
- * because we don't examine ph_needed here, so there are no ordering issues
- * to worry about.
+ * needed to evaluate each placeholder will be available at the scan or join
+ * level where the evaluation will be done.  (It might seem that scan-level
+ * evaluations aren't interesting, but that's not so: a LATERAL reference
+ * within a placeholder's expression needs to cause the referenced var or
+ * placeholder to be marked as needed in the scan where it's evaluated.)
+ * Note that this loop can have side-effects on the ph_needed sets of other
+ * PlaceHolderInfos; that's okay because we don't examine ph_needed here, so
+ * there are no ordering issues to worry about.
  */
 void fix_placeholder_input_needed_levels(PlannerInfo* root)
 {
     ListCell* lc = NULL;
 
     foreach (lc, root->placeholder_list) {
-        PlaceHolderInfo* phinfo = (PlaceHolderInfo*)lfirst(lc);
-        Relids eval_at = phinfo->ph_eval_at;
-
-        /* No work unless it'll be evaluated above baserel level */
-        if (bms_membership(eval_at) == BMS_MULTIPLE) {
-            List* vars =
-                pull_var_clause((Node*)phinfo->ph_var->phexpr, PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
-
-            add_vars_to_targetlist(root, vars, eval_at, false);
-            list_free_ext(vars);
-        }
+        PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(lc);
+        List *vars = pull_var_clause((Node *) phinfo->ph_var->phexpr, PVC_RECURSE_AGGREGATES,
+            PVC_INCLUDE_PLACEHOLDERS);
+        add_vars_to_targetlist(root, vars, phinfo->ph_eval_at, false);
+        list_free(vars);
     }
 }
 
@@ -329,17 +349,40 @@ void add_placeholders_to_base_rels(PlannerInfo* root)
 {
     ListCell* lc = NULL;
 
-    foreach (lc, root->placeholder_list) {
-        PlaceHolderInfo* phinfo = (PlaceHolderInfo*)lfirst(lc);
-        Relids eval_at = phinfo->ph_eval_at;
-
-        if (bms_membership(eval_at) == BMS_SINGLETON &&
-            bms_nonempty_difference(phinfo->ph_needed, eval_at)) {
+    foreach(lc, root->placeholder_list) {
+        PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(lc);
+        Relids      eval_at = phinfo->ph_eval_at;
+    
+        if (bms_membership(eval_at) == BMS_SINGLETON) {
             int varno = bms_singleton_member(eval_at);
-            RelOptInfo* rel = find_base_rel(root, varno);
-
-            rel->reltarget->exprs = lappend(rel->reltarget->exprs, copyObject(phinfo->ph_var));
-            /* reltarget's cost and width fields will be updated later */
+            RelOptInfo *rel = find_base_rel(root, varno);
+    
+            /* add it to reltargetlist if needed above the rel scan level */
+            if (bms_nonempty_difference(phinfo->ph_needed, eval_at))
+                rel->reltarget->exprs = lappend(rel->reltarget->exprs, copyObject(phinfo->ph_var));
+            /* if there are lateral refs in it, add them to lateral_vars */
+            if (phinfo->ph_lateral != NULL) {
+                List *vars = pull_var_clause((Node *) phinfo->ph_var->phexpr,
+                    PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+                ListCell   *lc2;
+                foreach(lc2, vars) {
+                    Node *node = (Node *) lfirst(lc2);
+                    if (IsA(node, Var)) {
+                        Var *var = (Var *) node;
+                        if (var->varno != varno)
+                            rel->lateral_vars = lappend(rel->lateral_vars, var);
+                    } else if (IsA(node, PlaceHolderVar)) {
+                        PlaceHolderVar *other_phv = (PlaceHolderVar *) node;
+                        PlaceHolderInfo *other_phi;
+    
+                        other_phi = find_placeholder_info(root, other_phv, false);
+                        if (!bms_is_subset(other_phi->ph_eval_at, eval_at))
+                                rel->lateral_vars = lappend(rel->lateral_vars, other_phv);
+                    } else
+                        Assert(false);
+                }
+                list_free(vars);
+            }
         }
     }
 }
@@ -355,47 +398,60 @@ void add_placeholders_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel,
                                  RelOptInfo* outer_rel, RelOptInfo* inner_rel)
 {
     Relids relids = joinrel->relids;
-    ListCell* lc = NULL;
-
-    foreach (lc, root->placeholder_list) {
-        PlaceHolderInfo* phinfo = (PlaceHolderInfo*)lfirst(lc);
-
-        /* Is it still needed above this joinrel? */
-        if (bms_nonempty_difference(phinfo->ph_needed, relids)) {
-            /* Is it computable here? */
-            if (bms_is_subset(phinfo->ph_eval_at, relids)) {
+    ListCell   *lc;
+    
+    foreach(lc, root->placeholder_list) {
+        PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(lc);
+        
+        /* Is it computable here? */
+        if (bms_is_subset(phinfo->ph_eval_at, relids)) {
+            /* Is it still needed above this joinrel? */
+            if (bms_nonempty_difference(phinfo->ph_needed, relids)) {
                 /* Yup, add it to the output */
-                joinrel->reltarget->exprs = lappend(joinrel->reltarget->exprs, phinfo->ph_var);
-                /* Vars have cost zero, so no need to adjust reltarget->cost */
+                joinrel->reltarget->exprs = lappend(joinrel->reltarget->exprs,
+                                                    phinfo->ph_var);
                 joinrel->reltarget->width += phinfo->ph_width;
-
-                if (root->parse->is_flt_frame) {
-                    /*
-                    * Charge the cost of evaluating the contained expression if
-                    * the PHV can be computed here but not in either input.  This
-                    * is a bit bogus because we make the decision based on the
-                    * first pair of possible input relations considered for the
-                    * joinrel.  With other pairs, it might be possible to compute
-                    * the PHV in one input or the other, and then we'd be double
-                    * charging the PHV's cost for some join paths.  For now, live
-                    * with that; but we might want to improve it later by
-                    * refiguring the reltarget costs for each pair of inputs.
-                    */
-                    if (!bms_is_subset(phinfo->ph_eval_at, outer_rel->relids) &&
-                        !bms_is_subset(phinfo->ph_eval_at, inner_rel->relids)) {
-                        QualCost cost;
-
-                        cost_qual_eval_node(&cost, (Node *)phinfo->ph_var->phexpr, root);
-                        joinrel->reltarget->cost.startup += cost.startup;
-                        joinrel->reltarget->cost.per_tuple += cost.per_tuple;
-                    }
-                }
-
-                if (root->glob->vectorized) {
-                    joinrel->encodedwidth += columnar_get_col_width(exprType((Node*)phinfo->ph_var), phinfo->ph_width);
-                    joinrel->encodednum++;
+                
+                /*
+                 * Charge the cost of evaluating the contained expression if
+                 * the PHV can be computed here but not in either input.  This
+                 * is a bit bogus because we make the decision based on the
+                 * first pair of possible input relations considered for the
+                 * joinrel.  With other pairs, it might be possible to compute
+                 * the PHV in one input or the other, and then we'd be double
+                 * charging the PHV's cost for some join paths.  For now, live
+                 * with that; but we might want to improve it later by
+                 * refiguring the reltarget costs for each pair of inputs.
+                 */
+                if (!bms_is_subset(phinfo->ph_eval_at, outer_rel->relids) &&
+                    !bms_is_subset(phinfo->ph_eval_at, inner_rel->relids)) {
+                    QualCost cost;
+                
+                    cost_qual_eval_node(&cost, (Node *) phinfo->ph_var->phexpr,
+                                        root);
+                    joinrel->reltarget->cost.startup += cost.startup;
+                    joinrel->reltarget->cost.per_tuple += cost.per_tuple;
                 }
             }
+            
+            /*
+             * Also adjust joinrel's direct_lateral_relids to include the
+             * PHV's source rel(s).  We must do this even if we're not
+             * actually going to emit the PHV, otherwise join_is_legal() will
+             * reject valid join orderings.  (In principle maybe we could
+             * instead remove the joinrel's lateral_relids dependency; but
+             * that's complicated to get right, and cases where we're not
+             * going to emit the PHV are too rare to justify the work.)
+             *
+             * In principle we should only do this if the join doesn't yet
+             * include the PHV's source rel(s).  But our caller
+             * build_join_rel() will clean things up by removing the join's
+             * own relids from its direct_lateral_relids, so we needn't
+             * account for that here.
+             */
+            joinrel->direct_lateral_relids =
+                bms_add_members(joinrel->direct_lateral_relids,
+                                phinfo->ph_lateral);
         }
     }
 }
