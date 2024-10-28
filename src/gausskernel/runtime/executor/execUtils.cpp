@@ -1669,8 +1669,11 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
         autoinc = datum2autoinc(cons_autoinc, datum);
         modify_tuple = (autoinc == 0);
     }
-    /* When datum is NULL/0, auto increase */
-    if (autoinc == 0) {
+
+    /* By default, when datum is NULL/0, auto increase;
+     * If NO_AUTO_VALUE_ON_ZERO is set, auto increase only when datum is NULL.
+     */
+    if (is_null || (autoinc == 0 && !CheckPluginNoAutoValueOnZero())) {
         if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
             autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
         } else {

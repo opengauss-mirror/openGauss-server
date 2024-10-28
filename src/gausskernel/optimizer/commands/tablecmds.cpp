@@ -33380,8 +33380,11 @@ static int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber att
         autoinc = datum2autoinc(cons_autoinc, *value);
         modify_value = (autoinc == 0);
     }
-    /* When datum is NULL/0, auto increase */
-    if (autoinc == 0) {
+     /*
+      * By default, when datum is NULL/0, auto increase;
+      * If NO_AUTO_VALUE_ON_ZERO is set, auto increase only when datum is NULL.
+      */
+    if (*is_null || (autoinc == 0 && !CheckPluginNoAutoValueOnZero())) {
         if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
             autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
         } else {
