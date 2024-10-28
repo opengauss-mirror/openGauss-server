@@ -95,6 +95,8 @@ static void DropExtensionInListIsSupported(List* objname)
         "db_pg_parser",
         "hdfs_fdw",
         "age",
+        "gms_stats",
+        "gms_output",
         "gms_profiler"
 #endif
     };
