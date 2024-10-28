@@ -97,7 +97,9 @@ static void DropExtensionInListIsSupported(List* objname)
         "age",
         "gms_stats",
         "gms_output",
-        "gms_profiler"
+        "gms_profiler",
+        "gms_lob",
+        "gms_sql"
 #endif
     };
     int len = lengthof(supportList);
