@@ -1685,6 +1685,16 @@ static Limit* _copyLimit(const Limit* from)
      */
     COPY_NODE_FIELD(limitOffset);
     COPY_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isPercent);
+        COPY_SCALAR_FIELD(withTies);
+        COPY_SCALAR_FIELD(numCols);
+        if (from->numCols > 0) {
+            COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
+            COPY_POINTER_FIELD(equalOperators, from->numCols * sizeof(Oid));
+            COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
+        }
+    }
 
     return newnode;
 }
@@ -2111,6 +2121,16 @@ static VecLimit* _copyVecLimit(const VecLimit* from)
      */
     COPY_NODE_FIELD(limitOffset);
     COPY_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isPercent);
+        COPY_SCALAR_FIELD(withTies);
+        COPY_SCALAR_FIELD(numCols);
+        if (from->numCols > 0) {
+            COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
+            COPY_POINTER_FIELD(equalOperators, from->numCols * sizeof(Oid));
+            COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
+        }
+    }
 
     return newnode;
 }
@@ -4957,6 +4977,10 @@ static Query* _copyQuery(const Query* from)
     COPY_NODE_FIELD(sortClause);
     COPY_NODE_FIELD(limitOffset);
     COPY_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(limitIsPercent);
+        COPY_SCALAR_FIELD(limitWithTies);
+    }
     COPY_NODE_FIELD(rowMarks);
     COPY_NODE_FIELD(setOperations);
     COPY_NODE_FIELD(constraintDeps);
@@ -5141,6 +5165,10 @@ static SelectStmt* _copySelectStmt(const SelectStmt* from)
     COPY_NODE_FIELD(sortClause);
     COPY_NODE_FIELD(limitOffset);
     COPY_NODE_FIELD(limitCount);
+    if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(limitIsPercent);
+        COPY_SCALAR_FIELD(limitWithTies);
+    }
     COPY_NODE_FIELD(lockingClause);
     COPY_NODE_FIELD(hintState);
     COPY_SCALAR_FIELD(op);

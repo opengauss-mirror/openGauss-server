@@ -8457,6 +8457,90 @@ Limit* make_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* li
     return node;
 }
 
+Limit *make_limit_with_ties(PlannerInfo* root, Plan* lefttree, Query *parse, int64 offset_est,
+    int64 count_est, bool enable_parallel) 
+{
+    Limit *node = make_limit(root, lefttree, parse->limitOffset, parse->limitCount, offset_est, count_est, enable_parallel);
+    AttrNumber *sortColIdx_s = NULL;
+    Oid *srcCollations = NULL;
+    Oid *srcSortOprs = NULL;
+    Oid *srcEqualOprs = NULL;
+    int numCols = 0;
+    node->isPercent = parse->limitIsPercent;
+    node->withTies = parse->limitWithTies;
+    ListCell *lc = NULL;
+    bool vectorized = false;
+    errno_t rc;
+
+    /* check if query contain column oriented table */
+    foreach (lc, parse->rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+
+        if (rte->rtekind == RTE_RELATION) {
+            /* use glob.vectorized here to mark if we contain hdfs table */
+            if (REL_COL_ORIENTED == rte->orientation)
+                vectorized = true;
+        }
+    }
+
+    if (vectorized && (node->isPercent || node->withTies)) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Percent or with ties syntax is not supported in vectorized plan yet.")));
+    }
+
+    if (parse->limitWithTies) {
+        if (IsA(lefttree, Sort)) {
+            Sort *sort = (Sort *)lefttree;
+            numCols = sort->numCols;
+            sortColIdx_s = sort->sortColIdx;
+            srcCollations = sort->collations;
+            srcSortOprs = sort->sortOperators;
+        } else if (IsA(lefttree, WindowAgg)) {
+            WindowAgg *window = (WindowAgg *)lefttree;
+            numCols = window->ordNumCols;
+            sortColIdx_s = window->ordColIdx;
+            srcCollations = window->ord_collations;
+            srcEqualOprs = window->ordOperators;
+        } else {
+            bool* nullsFirst = NULL;
+            prepare_sort_from_pathkeys(root,
+                lefttree,
+                root->sort_pathkeys,
+                NULL,
+                NULL,
+                false,
+                &numCols,
+                &sortColIdx_s,
+                &srcSortOprs,
+                &srcCollations,
+                &nullsFirst);
+            pfree(nullsFirst);
+        }
+        node->numCols = numCols;
+        node->sortColIdx = (AttrNumber *)palloc(sizeof(AttrNumber) * numCols);
+        node->collations = (Oid *)palloc(sizeof(Oid) * numCols);
+        node->equalOperators = (Oid *)palloc(sizeof(Oid) * numCols);
+
+        node->numCols = numCols;
+        rc = memcpy_s(node->sortColIdx, sizeof(AttrNumber) * numCols, sortColIdx_s, sizeof(AttrNumber) * numCols);
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(node->collations, sizeof(Oid) * numCols, srcCollations, sizeof(Oid) * numCols);
+        securec_check(rc, "\0", "\0");
+        if (srcEqualOprs != NULL) {
+            rc = memcpy_s(node->equalOperators, sizeof(Oid) * numCols, srcEqualOprs, sizeof(Oid) * numCols);
+            securec_check(rc, "\0", "\0");
+        } else {
+            for (size_t i = 0; i < node->numCols; i++) {
+                node->equalOperators[i] = get_equality_op_for_ordering_op(srcSortOprs[i], NULL);
+            }
+        }
+    }
+
+    return node;
+}
+
 /*
  * @Description: create parallel plan for sort + limit.
  *
@@ -8690,15 +8774,18 @@ Plan* add_sort_for_correlated_replicate_limit_plan(PlannerInfo* root,
  * we are asumming the rows for broadcast is not huge.
  *
  */
-Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est,
+Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Query *parse, int64 offset_est,
     int64 count_est, double limit_tuples, bool needs_sort)
 {
+    Node* limitOffset = parse->limitOffset;
+    Node* limitCount = parse->limitCount;
+
     if (is_execute_on_coordinator(lefttree))
-        return (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est);
+        return (Plan*)make_limit_with_ties(root, lefttree, parse, offset_est, count_est, true);
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (lefttree->dop == 1) {
-        return (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est);
+        return (Plan*)make_limit_with_ties(root, lefttree, parse, offset_est, count_est, true);
     }
 #endif
 

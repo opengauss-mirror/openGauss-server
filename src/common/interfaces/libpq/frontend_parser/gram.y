@@ -103,6 +103,14 @@
 # define YYLEX yylex (&yylval, &yylloc, yyscanner)
 #endif
 
+typedef struct FetchLimit
+{
+	Node *limitOffset;
+	Node *limitCount;
+	bool isPercent;
+	bool isWithTies;
+} FetchLimit;
+
 /* ConstraintAttributeSpec yields an integer bitmask of these flags: */
 #define CAS_NOT_DEFERRABLE			0x01
 #define CAS_DEFERRABLE				0x02
@@ -142,7 +150,7 @@ static List *check_setting_name(List *names, core_yyscan_t yyscanner);
 static List *check_indirection(List *indirection, core_yyscan_t yyscanner);
 static void insertSelectOptions(SelectStmt *stmt,
 								List *sortClause, List *lockingClause,
-								Node *limitOffset, Node *limitCount,
+								FetchLimit *limitClause,
 								WithClause *withClause,
 								core_yyscan_t yyscanner);
 static Node *makeSetOp(SetOperation op, bool all, Node *larg, Node *rarg);
@@ -212,6 +220,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	struct PrivTarget	*privtarget;
 	InsertStmt			*istmt;
     VariableSetStmt     *vsetstmt;
+	struct FetchLimit   *fetchlimit;
 /* PGXC_BEGIN */
 	DistributeBy		*distby;
 	PGXCSubCluster		*subclus;
@@ -286,13 +295,16 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				target_list insert_column_list set_target_list
 				set_clause_list set_clause multiple_set_clause
 				ctext_expr_list ctext_row indirection opt_indirection
-				reloption_list group_clause select_limit
-				opt_select_limit opt_delete_limit
+				reloption_list group_clause
+				opt_delete_limit
 				TableFuncElementList opt_type_modifiers
 				prep_type_clause
 				using_clause returning_clause
 				create_generic_options alter_generic_options
 				merge_values_clause dostmt_opt_list
+
+%type <fetchlimit> select_limit opt_select_limit limit_clause
+%type <boolean> opt_percent only_or_ties
 
 %type <list>	group_by_list
 %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
@@ -330,7 +342,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <boolean> copy_from
 
 %type <ival>	opt_column cursor_options opt_hold opt_set_data
-%type <node>	limit_clause select_limit_value
+%type <node>	select_limit_value
 				offset_clause select_offset_value
 				select_offset_value2 opt_select_fetch_first_value
 %type <ival>	row_or_rows first_or_next
@@ -592,7 +604,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBCLASS_ORIGIN SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING SWLEVEL SWNOCYCLE SWROWNUM
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 	
-	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TIMEZONE_HOUR_P TIMEZONE_MINUTE_P TINYINT
+	TABLE TABLE_NAME TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIES TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TIMEZONE_HOUR_P TIMEZONE_MINUTE_P TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
@@ -7423,22 +7435,19 @@ select_no_parens:
 			| select_clause sort_clause
 				{
 					insertSelectOptions((SelectStmt *) $1, $2, NIL,
-										NULL, NULL, NULL,
+										NULL, NULL,
 										yyscanner);
 					$$ = $1;
 				}
 			| select_clause opt_sort_clause for_locking_clause opt_select_limit
 				{
-					insertSelectOptions((SelectStmt *) $1, $2, $3,
-										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
-										NULL,
-										yyscanner);
+					insertSelectOptions((SelectStmt *) $1, $3, NIL, $4, NULL, yyscanner);
 					$$ = $1;
 				}
 			| select_clause opt_sort_clause select_limit opt_for_locking_clause
 				{
 					insertSelectOptions((SelectStmt *) $1, $2, $4,
-										(Node*)list_nth($3, 0), (Node*)list_nth($3, 1),
+										$3,
 										NULL,
 										yyscanner);
 					$$ = $1;
@@ -7446,7 +7455,7 @@ select_no_parens:
 			| with_clause select_clause
 				{
 					insertSelectOptions((SelectStmt *) $2, NULL, NIL,
-										NULL, NULL,
+										NULL,
 										$1,
 										yyscanner);
 					$$ = $2;
@@ -7454,7 +7463,7 @@ select_no_parens:
 			| with_clause select_clause sort_clause
 				{
 					insertSelectOptions((SelectStmt *) $2, $3, NIL,
-										NULL, NULL,
+										NULL,
 										$1,
 										yyscanner);
 					$$ = $2;
@@ -7462,7 +7471,7 @@ select_no_parens:
 			| with_clause select_clause opt_sort_clause for_locking_clause opt_select_limit
 				{
 					insertSelectOptions((SelectStmt *) $2, $3, $4,
-										(Node*)list_nth($5, 0), (Node*)list_nth($5, 1),
+										$5,
 										$1,
 										yyscanner);
 					$$ = $2;
@@ -7470,7 +7479,7 @@ select_no_parens:
 			| with_clause select_clause opt_sort_clause select_limit opt_for_locking_clause
 				{
 					insertSelectOptions((SelectStmt *) $2, $3, $5,
-										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1),
+										$4,
 										$1,
 										yyscanner);
 					$$ = $2;
@@ -7753,15 +7762,35 @@ sortby:		a_expr USING qual_all_Op opt_nulls_order
 
 
 select_limit:
-			limit_clause offset_clause			{ $$ = list_make2($2, $1); }
-			| offset_clause limit_clause		{ $$ = list_make2($1, $2); }
-			| limit_clause						{ $$ = list_make2(NULL, $1); }
-			| offset_clause						{ $$ = list_make2($1, NULL); }
+			limit_clause offset_clause
+				{ 
+					FetchLimit *limitClause = $1;
+					if (limitClause) {
+						limitClause->limitOffset = $2;
+					}
+					$$ = limitClause;
+				}
+			| offset_clause limit_clause
+				{ 
+					FetchLimit *limitClause = $2;
+					if (limitClause) {
+						limitClause->limitOffset = $1;
+					}
+					$$ = limitClause;
+				}
+			| limit_clause						{ $$ = $1; }
+			| offset_clause
+				{ 
+					FetchLimit *limitClause = (FetchLimit *)feparser_malloc0(sizeof(FetchLimit));
+					limitClause->limitOffset = $1;
+					$$ = limitClause;
+				}
 		;
+
 
 opt_select_limit:
 			select_limit						{ $$ = $1; }
-			| /* EMPTY */						{ $$ = list_make2(NULL,NULL); }
+			| /* EMPTY */						{ $$ = NULL; }
 		;
 opt_delete_limit:
                        LIMIT a_expr                                            { $$ = list_make2(NULL, $2); }
@@ -7769,7 +7798,11 @@ opt_delete_limit:
 
 limit_clause:
 			LIMIT select_limit_value
-				{ $$ = $2; }
+				{
+					FetchLimit *result = (FetchLimit *)feparser_malloc0(sizeof(FetchLimit));
+					result->limitCount = $2;
+					$$ = result;
+				}
 			| LIMIT select_limit_value ',' select_offset_value
 				{
 					ereport(ERROR,
@@ -7779,8 +7812,15 @@ limit_clause:
 							 parser_errposition(@1)));
 				}
 			/* SQL:2008 syntax */
-			| FETCH first_or_next opt_select_fetch_first_value row_or_rows ONLY
-				{ $$ = $3; }
+			| FETCH first_or_next opt_select_fetch_first_value opt_percent row_or_rows only_or_ties
+				{
+					FetchLimit *result = (FetchLimit *)feparser_malloc0(sizeof(FetchLimit));
+					result->limitOffset = NULL;
+					result->limitCount = $3;
+					result->isPercent = $4;
+					result->isWithTies = $6;
+					$$ = result;
+				}
 		;
 
 offset_clause:
@@ -7812,6 +7852,7 @@ select_offset_value:
  */
 opt_select_fetch_first_value:
 			SignedIconst						{ $$ = makeIntConst($1, @1); }
+			| FCONST         					{ $$ = makeFloatConst($1, @1); }
 			| '(' a_expr ')'					{ $$ = $2; }
 			| /*EMPTY*/							{ $$ = makeIntConst(1, -1); }
 		;
@@ -7824,6 +7865,11 @@ select_offset_value2:
 			c_expr									{ $$ = $1; }
 		;
 
+opt_percent:
+			PERCENT								{ $$ = true; }
+			| /*EMPTY*/							{ $$ = false; }
+		;
+
 /* noise words */
 row_or_rows: ROW									{ $$ = 0; }
 			| ROWS									{ $$ = 0; }
@@ -7831,6 +7877,11 @@ row_or_rows: ROW									{ $$ = 0; }
 
 first_or_next: FIRST_P								{ $$ = 0; }
 			| NEXT									{ $$ = 0; }
+		;
+
+only_or_ties:
+			ONLY									{ $$ = false; }
+			| WITH TIES									{ $$ = true; }
 		;
 
 /*
@@ -12078,6 +12129,7 @@ unreserved_keyword:
 			| TERMINATED
 			| TEXT_P
 			| THAN
+            | TIES
 			| TIME_FORMAT_P
 			| TIMESTAMP_FORMAT_P
 			| TRANSACTION
@@ -12636,7 +12688,7 @@ check_indirection(List *indirection, core_yyscan_t yyscanner)
 static void
 insertSelectOptions(SelectStmt *stmt,
 					List *sortClause, List *lockingClause,
-					Node *limitOffset, Node *limitCount,
+					FetchLimit* limitClause,
 					WithClause *withClause,
 					core_yyscan_t yyscanner)
 {
@@ -12654,18 +12706,21 @@ insertSelectOptions(SelectStmt *stmt,
 	}
 	/* We can handle multiple locking clauses, though */
 	stmt->lockingClause = list_concat(stmt->lockingClause, lockingClause);
-	if (limitOffset)
+	if (limitClause && limitClause->limitOffset)
 	{
 		if (stmt->limitOffset)
 		    feparser_printf("multiple ORDER BY clauses not allowed - limit offset\n");
-		stmt->limitOffset = limitOffset;
+		stmt->limitOffset = limitClause->limitCount;
 	}
-	if (limitCount)
+	if (limitClause && limitClause->limitCount)
 	{
 		if (stmt->limitCount)
 		    feparser_printf("multiple ORDER BY clauses not allowed - limit count\n");
-			stmt->limitCount = limitCount;
+			stmt->limitCount = limitClause->limitCount;
 	}
+	stmt->limitIsPercent = limitClause && limitClause->isPercent;
+	stmt->limitWithTies = limitClause && limitClause->isWithTies;
+
 	if (withClause)
 	{
 		if (stmt->withClause)

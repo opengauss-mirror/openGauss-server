@@ -2925,7 +2925,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
          * If we have a known LIMIT, and don't have an unknown OFFSET, we can
          * estimate the effects of using a bounded sort.
          */
-        if (count_est > 0 && offset_est >= 0)
+        if (count_est > 0 && offset_est >= 0 && !parse->limitIsPercent && !parse->limitWithTies)
             limit_tuples = (double)count_est + (double)offset_est;
     }
 
@@ -4754,8 +4754,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
 
             result_plan = (Plan*)make_stream_limit(root,
                 result_plan,
-                parse->limitOffset,
-                parse->limitCount,
+                parse,
                 offset_est,
                 count_est,
                 limit_tuples,
@@ -4765,7 +4764,8 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
         } else
 #endif
             result_plan =
-                (Plan*)make_limit(root, result_plan, parse->limitOffset, parse->limitCount, offset_est, count_est);
+                (Plan*)make_limit_with_ties(root, result_plan, parse, offset_est, 
+                            count_est, /* enable_parallel */ true);
 #ifdef PGXC
         /* See if we can push LIMIT or OFFSET clauses to Datanodes */
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !IS_STREAM)
@@ -5662,8 +5662,8 @@ void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* co
     }
     if (parse->limitCount) {
         est = estimate_expression_value(root, parse->limitCount);
-        if (est && IsA(est, Const)) {
-            if (((Const*)est)->constisnull) {
+        if (est && IsA(est, Const) && !parse->limitWithTies) {
+            if (((Const*)est)->constisnull || parse->limitIsPercent) {
                 /* NULL indicates LIMIT ALL, ie, no limit */
                 *count_est = 0; /* treat as not present */
             } else {

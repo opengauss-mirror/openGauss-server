@@ -1567,6 +1567,10 @@ static Query* _readQuery(void)
     READ_NODE_FIELD(sortClause);
     READ_NODE_FIELD(limitOffset);
     READ_NODE_FIELD(limitCount);
+    IF_EXIST(limitIsPercent) {
+        READ_BOOL_FIELD(limitIsPercent);
+        READ_BOOL_FIELD(limitWithTies);
+    }
     READ_NODE_FIELD(rowMarks);
     READ_NODE_FIELD(setOperations);
     READ_NODE_FIELD(constraintDeps);
@@ -3619,6 +3623,16 @@ static Limit* _readLimit(Limit* local_node)
 
     READ_NODE_FIELD(limitOffset);
     READ_NODE_FIELD(limitCount);
+    IF_EXIST(isPercent) {
+        READ_BOOL_FIELD(isPercent);
+        READ_BOOL_FIELD(withTies);
+        READ_INT_FIELD(numCols);
+        if (local_node->numCols > 0) {
+            READ_ATTR_ARRAY(sortColIdx, numCols);
+            READ_OPERATOROID_ARRAY(equalOperators, numCols);
+            READ_OPERATOROID_ARRAY(collations, numCols);
+        }
+    }
 
     READ_DONE();
 }
@@ -5542,6 +5556,17 @@ static VecLimit* _readVecLimit(VecLimit* local_node)
 
     READ_NODE_FIELD(limitOffset);
     READ_NODE_FIELD(limitCount);
+    IF_EXIST(isPercent) {
+        READ_BOOL_FIELD(isPercent);
+        READ_BOOL_FIELD(withTies);
+        READ_INT_FIELD(numCols);
+        if (local_node->numCols > 0) {
+            READ_ATTR_ARRAY(sortColIdx, numCols);
+            READ_OID_ARRAY(equalOperators, numCols);
+            READ_OID_ARRAY(collations, numCols);
+            READ_OID_ARRAY_BYCONVERT(collations, numCols);
+        }
+    }
 
     READ_DONE();
 }

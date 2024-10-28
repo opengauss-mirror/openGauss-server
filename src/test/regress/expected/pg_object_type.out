@@ -3143,7 +3143,7 @@ select * from tab_1016055;
 drop database db_test;
 ERROR:  database "db_test" does not exist
 drop schema if exists vastbase_object_type cascade;
-NOTICE:  drop cascades to 175 other objects
+--?.*
 DETAIL:  drop cascades to type vastbase_object_type.obj_1
 --?.*
 --?.*

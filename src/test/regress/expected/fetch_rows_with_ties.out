@@ -1,0 +1,814 @@
+CREATE DATABASE frwt_db;
+\c frwt_db
+-- With Ties功能测试
+-- 数据库初始化：创建测试表并插入数据
+CREATE TABLE test_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50),
+    score INT,
+    group_id INT
+);
+NOTICE:  CREATE TABLE will create implicit sequence "test_table_id_seq" for serial column "test_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_table_pkey" for table "test_table"
+-- 插入数据
+INSERT INTO test_table (name, score, group_id) VALUES
+('Alice', 95, 1),
+('Bob', 95, 1),
+('Charlie', 90, 2),
+('David', 85, 2),
+('Eve', 80, 3),
+('Frank', 80, 3),
+('Grace', 75, 4),
+('Heidi', 70, 4),
+('Ivan', 65, 5),
+('Judy', 60, 5);
+-- 测试用例 1: 基本功能测试
+-- 1.1 无 WITH TIES
+SELECT * FROM test_table ORDER BY score FETCH NEXT 3 ROWS ONLY;
+ id | name  | score | group_id 
+----+-------+-------+----------
+ 10 | Judy  |    60 |        5
+  9 | Ivan  |    65 |        5
+  8 | Heidi |    70 |        4
+(3 rows)
+
+-- 测试用例 2: ORDER BY 列的影响
+-- 2.1 单列排序
+SELECT * FROM test_table ORDER BY score FETCH NEXT 3 ROWS WITH TIES;
+ id | name  | score | group_id 
+----+-------+-------+----------
+ 10 | Judy  |    60 |        5
+  9 | Ivan  |    65 |        5
+  8 | Heidi |    70 |        4
+(3 rows)
+
+-- 2.2 多列排序
+SELECT * FROM test_table ORDER BY score DESC, name FETCH NEXT 3 ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    95 |        1
+  3 | Charlie |    90 |        2
+(3 rows)
+
+SELECT * FROM test_table ORDER BY score, name FETCH NEXT 3 ROWS WITH TIES;
+ id | name  | score | group_id 
+----+-------+-------+----------
+ 10 | Judy  |    60 |        5
+  9 | Ivan  |    65 |        5
+  8 | Heidi |    70 |        4
+(3 rows)
+
+-- 2.3 NULL 值排序
+-- 添加一些包含 NULL 值的数据
+INSERT INTO test_table (name, score, group_id) VALUES
+('Ken', NULL, 6),
+('Laura', NULL, 6);
+SELECT * FROM test_table ORDER BY score DESC FETCH NEXT 3 ROWS WITH TIES;
+ id | name  | score | group_id 
+----+-------+-------+----------
+ 12 | Laura |       |        6
+ 11 | Ken   |       |        6
+  1 | Alice |    95 |        1
+  2 | Bob   |    95 |        1
+(4 rows)
+
+-- 测试用例 3: 边界情况测试
+-- 3.1 没有 ORDER BY
+SELECT * FROM test_table FETCH NEXT 3 ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    95 |        1
+  3 | Charlie |    90 |        2
+(3 rows)
+
+-- 3.2 返回 0 行
+SELECT * FROM test_table ORDER BY score FETCH NEXT 0 ROWS WITH TIES;
+ id | name | score | group_id 
+----+------+-------+----------
+(0 rows)
+
+-- 3.3 FETCH FIRST 0 ROWS WITH TIES
+SELECT * FROM test_table ORDER BY score DESC FETCH FIRST 0 ROWS WITH TIES;
+ id | name | score | group_id 
+----+------+-------+----------
+(0 rows)
+
+-- 测试用例 4: 百分比和 WITH TIES 结合
+-- 4.1 百分比限制和 WITH TIES
+SELECT * FROM test_table ORDER BY score FETCH NEXT 3 PERCENT ROWS WITH TIES;
+ id | name | score | group_id 
+----+------+-------+----------
+(0 rows)
+
+-- 测试用例 5: 复杂查询
+-- 5.1 联合查询中的 WITH TIES
+SELECT * FROM (
+    SELECT * FROM test_table WHERE group_id IN (1, 2) 
+    UNION ALL 
+    SELECT * FROM test_table WHERE group_id IN (3, 4)
+) AS combined ORDER BY score DESC FETCH NEXT 3 ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    95 |        1
+  3 | Charlie |    90 |        2
+(3 rows)
+
+-- 5.2 子查询中的 WITH TIES
+-- 不支持在子查询中使用 FETCH NEXT ... ROWS WITH TIES
+SELECT * FROM (
+    SELECT * FROM test_table WHERE group_id IN (1, 2) ORDER BY group_id FETCH NEXT 3 ROWS WITH TIES
+    UNION ALL 
+    SELECT * FROM test_table WHERE group_id IN (3, 4) ORDER BY group_id FETCH NEXT 3 ROWS WITH TIES
+) AS combined;
+ERROR:  syntax error at or near "UNION"
+LINE 3:     UNION ALL 
+            ^
+-- 5.3 WITH TIES 与 UNION ALL 结合
+-- 不支持在 UNION ALL 中使用 FETCH NEXT ... ROWS WITH TIES
+SELECT * FROM test_table WHERE group_id IN (1, 2) ORDER BY group_id FETCH NEXT 3 ROWS WITH TIES
+UNION ALL 
+SELECT * FROM test_table WHERE group_id IN (3, 4) ORDER BY group_id FETCH NEXT 3 ROWS WITH TIES;
+ERROR:  syntax error at or near "UNION"
+LINE 2: UNION ALL 
+        ^
+-- 5.4 WITH TIES 与 CTE
+WITH cte1 AS (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS row_num
+    FROM test_table
+    WHERE group_id IN (1, 2)
+    FETCH NEXT 3 ROWS WITH TIES
+),
+cte2 AS (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS row_num
+    FROM test_table
+    WHERE group_id IN (3, 4)
+    OFFSET 2 ROWS FETCH NEXT 3 ROWS WITH TIES
+)
+SELECT * FROM cte1
+UNION ALL
+SELECT * FROM cte2;
+ id |  name   | score | group_id | row_num 
+----+---------+-------+----------+---------
+  1 | Alice   |    95 |        1 |       1
+  2 | Bob     |    95 |        1 |       2
+  3 | Charlie |    90 |        2 |       3
+  7 | Grace   |    75 |        4 |       3
+  8 | Heidi   |    70 |        4 |       4
+(5 rows)
+
+-- 测试用例 6: WITH TIES 与其他功能结合
+-- 6.1 WITH TIES 与 OFFSET
+SELECT * FROM test_table ORDER BY score DESC LIMIT 6;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+ 12 | Laura   |       |        6
+ 11 | Ken     |       |        6
+  1 | Alice   |    95 |        1
+  2 | Bob     |    95 |        1
+  3 | Charlie |    90 |        2
+  4 | David   |    85 |        2
+(6 rows)
+
+SELECT * FROM test_table ORDER BY score DESC FETCH NEXT 3 ROWS WITH TIES OFFSET 2;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    95 |        1
+  3 | Charlie |    90 |        2
+(3 rows)
+
+-- 6.2 WITH TIES 与 rownum
+SELECT name, score, ROW_NUMBER() OVER(ORDER BY score DESC) AS row_num 
+FROM test_table ORDER BY score DESC FETCH NEXT 3 ROWS WITH TIES;
+ name  | score | row_num 
+-------+-------+---------
+ Laura |       |       1
+ Ken   |       |       2
+ Alice |    95 |       3
+(3 rows)
+
+SELECT name, score FROM test_table WHERE rownum <= 3 ORDER BY score DESC FETCH NEXT 5 ROWS WITH TIES;
+  name   | score 
+---------+-------
+ Alice   |    95
+ Bob     |    95
+ Charlie |    90
+(3 rows)
+
+SELECT name, score FROM test_table WHERE rownum <= 5 ORDER BY score DESC FETCH NEXT 3 ROWS WITH TIES;
+  name   | score 
+---------+-------
+ Alice   |    95
+ Bob     |    95
+ Charlie |    90
+(3 rows)
+
+-- 测试用例 7：物化视图
+-- 7.1 创建源表并插入数据
+CREATE TABLE employees (
+    id INT,
+    name VARCHAR2(50),
+    department VARCHAR2(50),
+    salary NUMBER
+);
+-- 插入数据
+INSERT INTO employees (id, name, department, salary) VALUES (1, 'Alice', 'HR', 5000);
+INSERT INTO employees (id, name, department, salary) VALUES (2, 'Bob', 'Finance', 6000);
+INSERT INTO employees (id, name, department, salary) VALUES (3, 'Charlie', 'IT', 7000);
+INSERT INTO employees (id, name, department, salary) VALUES (4, 'David', 'HR', 5500);
+INSERT INTO employees (id, name, department, salary) VALUES (5, 'Eve', 'Finance', 6200);
+INSERT INTO employees (id, name, department, salary) VALUES (6, 'Frank', 'IT', 7100);
+INSERT INTO employees (id, name, department, salary) VALUES (7, 'Eve', 'Finance', 6200);
+INSERT INTO employees (id, name, department, salary) VALUES (8, 'Eve1', 'Finance', 8000);
+INSERT INTO employees (id, name, department, salary) VALUES (9, 'Eve2', 'Finance', 8000);
+-- 7.1 : 创建包含 ROW LIMITING CLAUSE 的增量更新物化视图
+-- Unsupport Feature
+CREATE INCREMENTAL MATERIALIZED VIEW emp_mv
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+FETCH FIRST 3 ROWS ONLY;
+ERROR:  Feature not supported
+DETAIL:  sort clause
+-- 7.2 : 创建包含 ROW LIMITING CLAUSE 的物化视图
+CREATE MATERIALIZED VIEW emp_mv
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+OFFSET 2 ROWS
+FETCH FIRST 3 ROWS ONLY;
+-- 7.3 : 创建包含 ROW LIMITING CLAUSE 的普通视图
+CREATE VIEW emp_view_only
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+OFFSET 2 ROWS
+FETCH FIRST 3 ROWS ONLY;
+CREATE VIEW emp_view_ties
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+OFFSET 2 ROWS
+FETCH FIRST 3 ROWS WITH TIES;
+CREATE VIEW emp_view_percent
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+OFFSET 2 ROWS
+FETCH FIRST 33.4 PERCENT ROWS ONLY;
+CREATE VIEW emp_view_percent_ties
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+OFFSET 2 ROWS
+FETCH FIRST 45.8 PERCENT ROWS WITH TIES;
+SELECT COUNT(*) FROM emp_mv;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_only;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_ties;
+ count 
+-------
+     4
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_percent;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_percent_ties;
+ count 
+-------
+     4
+(1 row)
+
+INSERT INTO employees (id, name, department, salary) VALUES (10, 'Eve', 'Finance', 6200);
+-- 7.4 : 更新视图
+REFRESH MATERIALIZED VIEW emp_mv;
+SELECT COUNT(*) FROM emp_mv;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_only;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_ties;
+ count 
+-------
+     5
+(1 row)
+
+SELECT COUNT(*) FROM emp_view_percent_ties;
+ count 
+-------
+     5
+(1 row)
+
+-- 测试用例 8：PL/pgSQL 函数
+DO $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN 
+        SELECT COUNT(*) AS count
+        FROM (
+          SELECT * 
+          FROM test_table 
+          ORDER BY score DESC 
+          FETCH FIRST 33.4 PERCENT ROWS WITH TIES
+        )
+    LOOP
+        RAISE NOTICE 'Total: %', rec.count;
+    END LOOP;
+END $$;
+NOTICE:  Total: 4
+-- 测试用例 9: SMP支持
+SET query_dop=1002;
+DELETE FROM test_table;
+INSERT INTO test_table SELECT generate_series(1, 100000), 'Alice', RANDOM() % 100, RANDOM() % 10;
+CREATE INDEX ON test_table (score);
+SELECT DISTINCT score FROM (
+  SELECT t1.id AS id, t1.score AS score 
+  FROM test_table AS t1 
+  JOIN test_table AS t2 ON t1.id = t2.id
+  ORDER BY t1.score DESC
+  FETCH FIRST 10 ROWS WITH TIES
+) AS t;
+ score 
+-------
+     1
+(1 row)
+
+SET query_dop=1;
+DROP TABLE test_table CASCADE;
+-- PERCENT 功能测试
+-- 创建测试表
+CREATE TABLE percent_test_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50),
+    score INT,
+    group_id INT
+);
+NOTICE:  CREATE TABLE will create implicit sequence "percent_test_table_id_seq" for serial column "percent_test_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "percent_test_table_pkey" for table "percent_test_table"
+-- 插入测试数据
+INSERT INTO percent_test_table (name, score, group_id) VALUES
+('Alice', 95, 1),
+('Bob', 90, 1),
+('Charlie', 85, 2),
+('David', 80, 2),
+('Eve', 75, 3),
+('Frank', 70, 3),
+('Grace', 65, 4),
+('Heidi', 60, 4),
+('Ivan', 55, 5),
+('Judy', 50, 5),
+('Ken', 45, 6),
+('Laura', 40, 6),
+('Mike', 35, 7),
+('Nancy', 30, 7),
+('Oscar', 25, 8),
+('Peggy', 20, 8),
+('Quincy', 15, 9),
+('Ruth', 10, 9);
+-- 用例 1: 未排序查询使用 FETCH NEXT N PERCENT
+SELECT * FROM percent_test_table FETCH NEXT 50 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+(9 rows)
+
+-- 用例 2: FETCH NEXT N PERCENT 与 ORDER BY 结合
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+(9 rows)
+
+-- 用例 3: FETCH NEXT N PERCENT 与 OFFSET 结合
+SELECT * FROM percent_test_table ORDER BY score DESC OFFSET 5 FETCH NEXT 30 PERCENT ROWS ONLY;
+ id | name  | score | group_id 
+----+-------+-------+----------
+  6 | Frank |    70 |        3
+  7 | Grace |    65 |        4
+  8 | Heidi |    60 |        4
+  9 | Ivan  |    55 |        5
+ 10 | Judy  |    50 |        5
+(5 rows)
+
+-- 用例 4: 使用不同百分比值的测试
+-- 获取 10% 的行
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 10 PERCENT ROWS ONLY;
+ id | name  | score | group_id 
+----+-------+-------+----------
+  1 | Alice |    95 |        1
+(1 row)
+
+-- 获取 75% 的行
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 75 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+ 10 | Judy    |    50 |        5
+ 11 | Ken     |    45 |        6
+ 12 | Laura   |    40 |        6
+ 13 | Mike    |    35 |        7
+(13 rows)
+
+-- 用例 5: 超过 100% 的百分比测试
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 110 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+ 10 | Judy    |    50 |        5
+ 11 | Ken     |    45 |        6
+ 12 | Laura   |    40 |        6
+ 13 | Mike    |    35 |        7
+ 14 | Nancy   |    30 |        7
+ 15 | Oscar   |    25 |        8
+ 16 | Peggy   |    20 |        8
+ 17 | Quincy  |    15 |        9
+ 18 | Ruth    |    10 |        9
+(18 rows)
+
+-- 用例 6: FETCH NEXT N PERCENT WITH TIES
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50 PERCENT ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+(9 rows)
+
+-- 用例 7: FETCH NEXT 0 PERCENT
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 0 PERCENT ROWS ONLY;
+ id | name | score | group_id 
+----+------+-------+----------
+(0 rows)
+
+-- 用例 8：FETCH NEXT N ROWS 使用浮点数
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50.5 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+(9 rows)
+
+SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50.5 PERCENT ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+(9 rows)
+
+-- 用例 9: 空数据集测试
+CREATE TABLE empty_table (
+    id SERIAL PRIMARY KEY,
+    value INT
+);
+NOTICE:  CREATE TABLE will create implicit sequence "empty_table_id_seq" for serial column "empty_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "empty_table_pkey" for table "empty_table"
+-- 尝试从空表中获取数据
+SELECT * FROM empty_table FETCH NEXT 0 PERCENT ROWS ONLY;
+ id | value 
+----+-------
+(0 rows)
+
+SELECT * FROM empty_table FETCH NEXT 50 PERCENT ROWS ONLY;
+ id | value 
+----+-------
+(0 rows)
+
+SELECT * FROM empty_table FETCH NEXT NULL PERCENT ROWS WITH TIES; 
+ERROR:  syntax error at or near "NULL"
+LINE 1: SELECT * FROM empty_table FETCH NEXT NULL PERCENT ROWS WITH ...
+                                             ^
+-- 用例 10: 多列排序测试
+SELECT * FROM percent_test_table ORDER BY group_id ASC, score DESC FETCH NEXT 30 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+(5 rows)
+
+-- 用例 11: 含有 NULL 值的数据处理
+-- 插入包含 NULL 的数据
+INSERT INTO percent_test_table (name, score, group_id) VALUES
+('Tom', NULL, 10),
+('Jerry', NULL, 11);
+-- 按 score 排序并获取 50% 的行，处理 NULL
+SELECT * FROM percent_test_table ORDER BY score DESC NULLS LAST FETCH NEXT 50 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+  1 | Alice   |    95 |        1
+  2 | Bob     |    90 |        1
+  3 | Charlie |    85 |        2
+  4 | David   |    80 |        2
+  5 | Eve     |    75 |        3
+  6 | Frank   |    70 |        3
+  7 | Grace   |    65 |        4
+  8 | Heidi   |    60 |        4
+  9 | Ivan    |    55 |        5
+ 10 | Judy    |    50 |        5
+(10 rows)
+
+-- 用例 12：分区表支持
+CREATE TABLE percent_partitioned_table (
+    id int,
+    name VARCHAR2(50),
+    score NUMBER,
+    group_id NUMBER
+)
+PARTITION BY RANGE (group_id) (
+    PARTITION percent_partition_1 VALUES LESS THAN (3),
+    PARTITION percent_partition_2 VALUES LESS THAN (5),
+    PARTITION percent_partition_3 VALUES LESS THAN (7),
+    PARTITION percent_partition_4 VALUES LESS THAN (9),
+    PARTITION percent_partition_5 VALUES LESS THAN (11)
+);
+INSERT INTO percent_partitioned_table (name, score, group_id) VALUES
+('Alice', 95, 1),
+('Bob', 90, 1),
+('Charlie', 85, 2),
+('David', 80, 2),
+('Eve', 75, 3),
+('Frank', 70, 3),
+('Peter', 70, 3),
+('Grace', 65, 4),
+('Heidi', 60, 4),
+('Ivan', 55, 5),
+('Judy', 50, 5),
+('Ken', 45, 6),
+('Laura', 40, 6),
+('Mike', 35, 7),
+('Nancy', 30, 7),
+('Oscar', 25, 8),
+('Peggy', 20, 8),
+('Quincy', 15, 9),
+('Ruth', 10, 9);
+-- 分区表用例 1: 未排序查询使用 FETCH NEXT N PERCENT
+SELECT * FROM percent_partitioned_table FETCH FIRST 50 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+    | Alice   |    95 |        1
+    | Bob     |    90 |        1
+    | Charlie |    85 |        2
+    | David   |    80 |        2
+    | Eve     |    75 |        3
+    | Frank   |    70 |        3
+    | Peter   |    70 |        3
+    | Grace   |    65 |        4
+    | Heidi   |    60 |        4
+(9 rows)
+
+-- 分区表用例 2: FETCH NEXT N PERCENT 与 ORDER BY 结合
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 50 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+    | Alice   |    95 |        1
+    | Bob     |    90 |        1
+    | Charlie |    85 |        2
+    | David   |    80 |        2
+    | Eve     |    75 |        3
+    | Frank   |    70 |        3
+    | Peter   |    70 |        3
+    | Grace   |    65 |        4
+    | Heidi   |    60 |        4
+(9 rows)
+
+-- 分区表用例 3: FETCH NEXT N PERCENT 与 OFFSET 结合
+SELECT * FROM percent_partitioned_table ORDER BY score DESC OFFSET 5 ROWS FETCH NEXT 30 PERCENT ROWS ONLY;
+ id | name  | score | group_id 
+----+-------+-------+----------
+    | Frank |    70 |        3
+    | Peter |    70 |        3
+    | Grace |    65 |        4
+    | Heidi |    60 |        4
+    | Ivan  |    55 |        5
+(5 rows)
+
+-- 分区表用例 4: 使用不同百分比值的测试
+-- 获取 10% 的行
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 10 PERCENT ROWS ONLY;
+ id | name  | score | group_id 
+----+-------+-------+----------
+    | Alice |    95 |        1
+(1 row)
+
+-- 获取 75% 的行
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 75 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+    | Alice   |    95 |        1
+    | Bob     |    90 |        1
+    | Charlie |    85 |        2
+    | David   |    80 |        2
+    | Eve     |    75 |        3
+    | Frank   |    70 |        3
+    | Peter   |    70 |        3
+    | Grace   |    65 |        4
+    | Heidi   |    60 |        4
+    | Ivan    |    55 |        5
+    | Judy    |    50 |        5
+    | Ken     |    45 |        6
+    | Laura   |    40 |        6
+    | Mike    |    35 |        7
+(14 rows)
+
+-- 分区表用例 5: 超过 100% 的百分比测试
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 110 PERCENT ROWS ONLY;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+    | Alice   |    95 |        1
+    | Bob     |    90 |        1
+    | Charlie |    85 |        2
+    | David   |    80 |        2
+    | Eve     |    75 |        3
+    | Frank   |    70 |        3
+    | Peter   |    70 |        3
+    | Grace   |    65 |        4
+    | Heidi   |    60 |        4
+    | Ivan    |    55 |        5
+    | Judy    |    50 |        5
+    | Ken     |    45 |        6
+    | Laura   |    40 |        6
+    | Mike    |    35 |        7
+    | Nancy   |    30 |        7
+    | Oscar   |    25 |        8
+    | Peggy   |    20 |        8
+    | Quincy  |    15 |        9
+    | Ruth    |    10 |        9
+(19 rows)
+
+-- 分区表用例 6: FETCH NEXT N PERCENT WITH TIES
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 50 PERCENT ROWS WITH TIES;
+ id |  name   | score | group_id 
+----+---------+-------+----------
+    | Alice   |    95 |        1
+    | Bob     |    90 |        1
+    | Charlie |    85 |        2
+    | David   |    80 |        2
+    | Eve     |    75 |        3
+    | Frank   |    70 |        3
+    | Peter   |    70 |        3
+    | Grace   |    65 |        4
+    | Heidi   |    60 |        4
+(9 rows)
+
+-- 分区表用例 7: FETCH NEXT 0 PERCENT
+SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 0 PERCENT ROWS ONLY;
+ id | name | score | group_id 
+----+------+-------+----------
+(0 rows)
+
+-- 列存支持测试
+CREATE TABLE customer_test2
+(
+  state_ID   CHAR(2),
+  state_NAME VARCHAR2(40),
+  num    NUMBER
+)
+WITH (ORIENTATION = COLUMN);
+INSERT INTO customer_test2 VALUES ('CA', 'California', 1);
+INSERT INTO customer_test2 VALUES ('TX', 'Texas', 2);
+INSERT INTO customer_test2 VALUES ('NY', 'New York', 3);
+INSERT  INTO customer_test2 VALUES ('FL', 'Florida', 3);
+INSERT INTO customer_test2 VALUES ('FL', 'Florida', 4);
+INSERT INTO customer_test2 VALUES ('IL', 'Illinois', 4);
+INSERT INTO customer_test2 VALUES ('IL', 'Illinois', 5);
+SELECT * FROM customer_test2 ORDER BY num DESC FETCH FIRST 50 PERCENT ROWS ONLY;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+SELECT * FROM customer_test2 ORDER BY num DESC FETCH FIRST 50 PERCENT ROWS WITH TIES;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+-- 测试用例 13: 列存表
+CREATE TABLE customer_test3
+(
+  state_ID   CHAR(2),
+  state_NAME VARCHAR2(40),
+  num    NUMBER
+) WITH (ORIENTATION = COLUMN);
+INSERT INTO customer_test3 VALUES ('CA', 'California', 1);
+INSERT INTO customer_test3 VALUES ('TX', 'Texas', 2);
+-- 用例 13.1: 正常执行
+SELECT * FROM customer_test3 ORDER BY num DESC FETCH FIRST 5 ROWS ONLY;
+ state_id | state_name | num 
+----------+------------+-----
+ TX       | Texas      |   2
+ CA       | California |   1
+(2 rows)
+
+-- 用例 13.2: WITH TIES
+-- NOT SUPPORTED
+SELECT * FROM customer_test3 ORDER BY num DESC FETCH FIRST 50 PERCENT ROWS ONLY;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+-- NOT SUPPORTED
+SELECT * FROM customer_test3 ORDER BY num DESC FETCH FIRST 5 ROWS WITH TIES;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+-- NOT SUPPORTED
+SELECT * FROM customer_test3 ORDER BY num DESC FETCH FIRST 50 PERCENT ROWS WITH TIES;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+-- 用例 14：存储过程
+CREATE OR REPLACE PROCEDURE fetch_rows_with_ties_procedure
+IS
+BEGIN
+    FOR rec IN 
+        SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 33.4 PERCENT ROWS WITH TIES
+    LOOP
+        RAISE NOTICE 'Name: %, Score: %', rec.name, rec.score;
+    END LOOP;
+END;
+/
+CALL fetch_rows_with_ties_procedure();
+NOTICE:  Name: Alice, Score: 95
+NOTICE:  Name: Bob, Score: 90
+NOTICE:  Name: Charlie, Score: 85
+NOTICE:  Name: David, Score: 80
+NOTICE:  Name: Eve, Score: 75
+NOTICE:  Name: Frank, Score: 70
+NOTICE:  Name: Peter, Score: 70
+ fetch_rows_with_ties_procedure 
+--------------------------------
+ 
+(1 row)
+
+\c postgres
+DROP DATABASE frwt_db;

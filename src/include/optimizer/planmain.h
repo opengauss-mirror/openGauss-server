@@ -102,8 +102,10 @@ extern Unique* make_unique(Plan* lefttree, List* distinctList);
 extern LockRows* make_lockrows(PlannerInfo* root, Plan* lefttree);
 extern Limit* make_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est,
     int64 count_est, bool enable_parallel = true);
+extern Limit* make_limit_with_ties(PlannerInfo* root, Plan* lefttree, Query *parse, int64 offset_est, 
+    int64 count_est, bool enable_parallel);
 extern void pick_single_node_plan_for_replication(Plan* plan);
-extern Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est,
+extern Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Query *parse, int64 offset_est,
     int64 count_est, double limit_tuples, bool needs_sort);
 extern Plan* make_stream_sort(PlannerInfo* root, Plan* lefttree);
 extern SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* distinctList,
