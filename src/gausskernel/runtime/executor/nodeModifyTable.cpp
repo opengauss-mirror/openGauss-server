@@ -3306,27 +3306,21 @@ uint64 GetDeleteLimitCount(ExprContext* econtext, PlanState* scan, Limit *limitP
     return (uint64)iCount;
 }
 
-static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, TupleTableSlot* slot,
-    TupleTableSlot* plan_slot, int2 bucketid, int hi_options, List* partition_list, char* partExprKeyStr,
-    bool replaceNull)
+/* REPLACE INTO not support sequence, check columns to report ERROR */
+static void checkSequenceForReplace(Relation rel)
 {
     Form_pg_attribute att_tup;
     Oid seqOid = InvalidOid;
-    Relation rel = estate->es_result_relation_info->ri_RelationDesc;
-    TupleTableSlot* (*ExecInsert)(
-        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*, bool) = NULL;
+    static int tableNameSize = NAMEDATALEN * 2 + 2;
+    char tableName[tableNameSize] = {0};
 
-    ExecInsert = ExecInsertT<false>;
-
-    /* REPLACE INTO not support sequence, check columns to report ERROR */
-    for (int attrno=1; attrno<=rel->rd_att->natts; ++attrno) {
+    for (int attrno = 1; attrno <= rel->rd_att->natts; ++attrno) {
         att_tup = &rel->rd_att->attrs[attrno-1];
         errno_t rc;
         char *nspname = get_namespace_name(rel->rd_rel->relnamespace);
-        char tableName[NAMEDATALEN*2+2] = {0};
         text *tbname;
         text *attname;
-        rc = memset_s(tableName, NAMEDATALEN*2, 0, NAMEDATALEN*2);
+        rc = memset_s(tableName, tableNameSize, 0, tableNameSize);
         securec_check(rc, "\0", "\0");
 
         if (nspname != NULL) {
@@ -3334,13 +3328,13 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
             int nspnameLen = strlen(nspname);
             int symLen = strlen(sym);
             int tbnameLen = strlen(rel->rd_rel->relname.data);
-            rc = memcpy_s(&tableName[0], NAMEDATALEN*2+2, nspname, nspnameLen);
-            securec_check(rc, "\0","\0");
-            rc = memcpy_s(&tableName[nspnameLen], NAMEDATALEN*2+2, sym, symLen);
-            securec_check(rc, "\0","\0");
-            rc = memcpy_s(&tableName[nspnameLen+symLen], NAMEDATALEN*2+2, rel->rd_rel->relname.data, tbnameLen);
-            securec_check(rc, "\0","\0");
-            tableName[nspnameLen+symLen+tbnameLen] = 0;
+            rc = memcpy_s(&tableName[0], tableNameSize, nspname, nspnameLen);
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&tableName[nspnameLen], tableNameSize, sym, symLen);
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&tableName[nspnameLen + symLen], tableNameSize, rel->rd_rel->relname.data, tbnameLen);
+            securec_check(rc, "\0", "\0");
+            tableName[nspnameLen + symLen + tbnameLen] = 0;
             tbname = cstring_to_text(&tableName[0]);
         } else {
             tbname = cstring_to_text(rel->rd_rel->relname.data);
@@ -3348,11 +3342,20 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
 
         attname = cstring_to_text(att_tup->attname.data);
         seqOid = pg_get_serial_sequence_oid(tbname, attname);
-
-        if (OidIsValid(seqOid))
+        if (OidIsValid(seqOid)) {
             elog(ERROR, "REPLACE can not work on sequence!");
+        }
     }
+}
 
+static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, TupleTableSlot* slot,
+    TupleTableSlot* plan_slot, int2 bucketid, int hi_options, List* partition_list, char* partExprKeyStr,
+    bool replaceNull)
+{
+    TupleTableSlot* (*ExecInsert)(
+        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*, bool) = NULL;
+
+    ExecInsert = ExecInsertT<false>;
     /* set flag to start loop */
     node->isConflict = true;
 
@@ -3582,6 +3585,11 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 
     subPlanState->state->es_skip_early_free = true;
     subPlanState->state->es_skip_early_deinit_consumer = true;
+
+    if (node->isReplace) {
+        checkSequenceForReplace(estate->es_result_relation_info->ri_RelationDesc);
+    }
+
     /*
      * Fetch rows from subplan(s), and execute the required table modification
      * for each row.
