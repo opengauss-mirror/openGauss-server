@@ -800,7 +800,8 @@ char* RelnameGetRelidExtended(const char* relname, Oid* relOid, Oid* refSynOid, 
     recomputeNamespacePath();
 
     tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
-
+    /* Search for PUBLIC SYNONYM */
+    tempActiveSearchPath = lappend_oid(tempActiveSearchPath, PUB_SYNONYM_NSP_OID);
     foreach (l, tempActiveSearchPath) {
         Oid namespaceId = lfirst_oid(l);
         errDetail = get_relname_relid_extend(relname, namespaceId, relOid, true, refSynOid);
@@ -937,6 +938,15 @@ Oid TypenameGetTypidExtended(const char* typname, bool temp_ok)
             typid = TryLookForSynonymType(typname, namespaceId);
         }
 
+        if (OidIsValid(typid)) {
+            list_free_ext(tempActiveSearchPath);
+            return typid;
+        }
+    }
+
+    /* If not found in path, try to look for a PUBLIC SYNONYM in pg_synonym */
+    if (!OidIsValid(typid)) {
+        typid = TryLookForSynonymType(typname, PUB_SYNONYM_NSP_OID);
         if (OidIsValid(typid)) {
             list_free_ext(tempActiveSearchPath);
             return typid;
@@ -1787,6 +1797,9 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             } else {
                 tempActiveSearchPath = list_make1_oid(namespaceId);
             }
+
+            /* search PUBLIC namespace if we can't find any candidate in the search_path */
+            tempActiveSearchPath = lappend_oid(tempActiveSearchPath, PUB_SYNONYM_NSP_OID);
             foreach (l, tempActiveSearchPath) {
                 Oid tempnamespaceId = lfirst_oid(l);
                 synTuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(funcname),

@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE [ OR REPLACE ] SYNONYM synonym_name
+CREATE [ OR REPLACE ] [ PUBLIC ] SYNONYM synonym_name
     FOR object_name;
 </synopsis>
 </refsynopsisdiv>

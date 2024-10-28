@@ -76,6 +76,8 @@ extern void DropDbPrivByOid(Oid roleID);
 #define DROP_ANY_INDEX       "drop any index"
 #define CREATE_ANY_SYNONYM   "create any synonym"
 #define DROP_ANY_SYNONYM     "drop any synonym"
+#define CREATE_PUBLIC_SYNONYM   "create public synonym"
+#define DROP_PUBLIC_SYNONYM     "drop public synonym"
 #define CREATE_ANY_TRIGGER   "create any trigger"
 #define ALTER_ANY_TRIGGER    "alter any trigger"
 #define DROP_ANY_TRIGGER     "drop any trigger"

@@ -129,6 +129,8 @@ Oid PackageNameGetOid(const char* pkgname, Oid namespaceId)
         recomputeNamespacePath();
 
         tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
+        /* Search for PUBLIC SYNONYM */
+        tempActiveSearchPath = lappend_oid(tempActiveSearchPath, PUB_SYNONYM_NSP_OID);
         foreach (l, tempActiveSearchPath) {
             Oid namespaceId = lfirst_oid(l);
 

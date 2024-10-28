@@ -1,0 +1,316 @@
+CREATE DATABASE public_syndb;
+\c public_syndb
+-- 普通表同义词测试
+CREATE TABLE my_table1 (a INT);
+CREATE TABLE my_table2 (a INT);
+INSERT INTO my_table1 VALUES (1);
+INSERT INTO my_table2 VALUES (2);
+CREATE PUBLIC SYNONYM tbl_syn1 FOR my_table1;
+CREATE SYNONYM tbl_syn1 FOR my_table2;
+SELECT * FROM tbl_syn1;
+ a 
+---
+ 2
+(1 row)
+
+SET search_path TO '';
+SELECT * FROM tbl_syn1;
+ a 
+---
+ 1
+(1 row)
+
+SET search_path TO default;
+SELECT * FROM tbl_syn1;
+ a 
+---
+ 2
+(1 row)
+
+DROP PUBLIC SYNONYM public.tbl_syn1; -- should failed
+ERROR:  missing or invalid synonym identifier
+DROP PUBLIC SYNONYM IF EXISTS public.tbl_syn1; -- should failed
+ERROR:  missing or invalid synonym identifier
+DROP PUBLIC SYNONYM tbl_syn1;
+DROP SYNONYM tbl_syn1;
+CREATE PUBLIC SYNONYM tbl_syn1 FOR my_table1;
+DROP PUBLIC SYNONYM IF EXISTS tbl_syn1;
+SELECT * FROM tbl_syn1;  -- should fail: object not found
+ERROR:  relation "tbl_syn1" does not exist on datanode1
+LINE 1: SELECT * FROM tbl_syn1;
+                      ^
+CREATE PUBLIC SYNONYM public.tbl_syn1 FOR my_table1; -- should failed
+ERROR:  missing or invalid synonym identifier
+CREATE PUBLIC SYNONYM tbl_syn1 FOR my_table1;
+DROP TABLE tbl_syn1;
+ERROR:  table "tbl_syn1" does not exist
+-- 权限测试
+-- 创建新用户
+CREATE USER test_user PASSWORD 'test123!';
+-- should be empty
+select * from gs_db_privilege where roleid=(select oid from pg_authid where rolname='test_user');
+ roleid | privilege_type | admin_option 
+--------+----------------+--------------
+(0 rows)
+
+-- should fail: no privilege
+--?.*
+ERROR:  permission denied to create public synonym "(null)"
+HINT:  must granted CREATE_PUBLIC_SYNONYM privilege to create a public synonym.
+CREATE PUBLIC SYNONYM test_syn FOR my_table1;
+-- should fail: no privilege
+--?.*
+ERROR:  permission denied to drop public synonym "(null)"
+HINT:  must granted DROP_PUBLIC_SYNONYM privilege to drop a public synonym.
+DROP PUBLIC SYNONYM test_syn;
+GRANT CREATE PUBLIC SYNONYM TO test_user;
+GRANT DROP PUBLIC SYNONYM TO test_user;
+select * from gs_db_privilege where roleid=(select oid from pg_authid where rolname='test_user');
+ roleid |    privilege_type     | admin_option 
+--------+-----------------------+--------------
+--?.*
+--?.*
+(2 rows)
+
+--?.*
+CREATE SYNONYM
+-- should fail: no privilege to access my_table1
+--?.*
+ERROR:  permission denied for relation my_table1
+DETAIL:  N/A
+GRANT SELECT ON my_table1 TO test_user;
+--?.*
+ a 
+---
+ 1
+(1 row)
+
+--?.*
+ a 
+---
+ 1
+(1 row)
+
+REVOKE ALL PRIVILEGES FROM test_user;
+-- should fail: no privilege
+--?.*
+ a 
+---
+ 1
+(1 row)
+
+--?.*
+DROP SYNONYM
+REVOKE CREATE PUBLIC SYNONYM FROM test_user;
+REVOKE DROP PUBLIC SYNONYM FROM test_user;
+select * from gs_db_privilege where roleid=(select oid from pg_authid where rolname='test_user');
+ roleid | privilege_type | admin_option 
+--------+----------------+--------------
+(0 rows)
+
+-- should fail: no privilege
+--?.*
+ERROR:  permission denied to create public synonym "(null)"
+HINT:  must granted CREATE_PUBLIC_SYNONYM privilege to create a public synonym.
+-- should fail: no privilege
+--?.*
+ERROR:  permission denied to drop public synonym "(null)"
+HINT:  must granted DROP_PUBLIC_SYNONYM privilege to drop a public synonym.
+-- 临时表同义词测试
+CREATE TEMP TABLE my_temp_table1 (a INT);
+-- should fail: cannot create public synonym for temporary table
+CREATE PUBLIC SYNONYM temp_tbl_syn1 FOR my_temp_table1; 
+-- 分区表同义词测试
+CREATE TABLE my_part_table1 (a INT) PARTITION BY RANGE (a) (
+  PARTITION p1 VALUES LESS THAN (10),
+  PARTITION p2 VALUES LESS THAN (20)
+);
+CREATE TABLE my_part_table2 (a INT) PARTITION BY RANGE (a) (
+  PARTITION p1 VALUES LESS THAN (10),
+  PARTITION p2 VALUES LESS THAN (20)
+);
+CREATE PUBLIC SYNONYM part_tbl_syn1 FOR my_part_table1;
+CREATE SYNONYM part_tbl_syn1 FOR my_part_table2;
+INSERT INTO part_tbl_syn1 VALUES (1);
+INSERT INTO part_tbl_syn1 VALUES (2);
+SELECT * FROM part_tbl_syn1;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+SET search_path TO '';
+SELECT * FROM part_tbl_syn1;
+ a 
+---
+(0 rows)
+
+SET search_path TO default;
+SELECT * FROM part_tbl_syn1;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+DROP PUBLIC SYNONYM part_tbl_syn1;
+DROP SYNONYM part_tbl_syn1;
+SELECT * FROM part_tbl_syn1;  -- should fail: object not found
+ERROR:  relation "part_tbl_syn1" does not exist on datanode1
+LINE 1: SELECT * FROM part_tbl_syn1;
+                      ^
+-- 存储过程同义词测试
+CREATE OR REPLACE PROCEDURE create_syn AS
+BEGIN
+  CREATE PUBLIC SYNONYM proc_syn1 FOR my_part_table1;
+END create_syn;
+/
+CALL create_syn();
+ create_syn 
+------------
+ 
+(1 row)
+
+INSERT INTO proc_syn1 VALUES (3);
+SELECT * FROM proc_syn1;
+ a 
+---
+ 3
+(1 row)
+
+CREATE OR REPLACE PROCEDURE drop_syn AS 
+BEGIN
+  DROP PUBLIC SYNONYM proc_syn1;
+END drop_syn;
+/
+CALL drop_syn();
+ drop_syn 
+----------
+ 
+(1 row)
+
+SELECT * FROM proc_syn1;  -- should fail: object not found
+ERROR:  relation "proc_syn1" does not exist on datanode1
+LINE 1: SELECT * FROM proc_syn1;
+                      ^
+-- package 同义词测试
+CREATE OR REPLACE PACKAGE my_package1 AS
+  FUNCTION get_greeting(name IN VARCHAR2) RETURN VARCHAR2;
+END my_package1;
+/
+CREATE OR REPLACE PACKAGE BODY my_package1 AS
+  FUNCTION get_greeting(name IN VARCHAR2) RETURN VARCHAR2 IS
+  BEGIN
+    RETURN 'Hi, ' || name || '!';
+  END get_greeting;
+END my_package1;
+/
+CREATE OR REPLACE PACKAGE my_package2 AS
+  FUNCTION get_greeting(name IN VARCHAR2) RETURN VARCHAR2;
+END my_package2;
+/
+CREATE OR REPLACE PACKAGE BODY my_package2 AS
+  FUNCTION get_greeting(name IN VARCHAR2) RETURN VARCHAR2 IS
+  BEGIN
+    RETURN 'Hello, ' || name || '!';
+  END get_greeting;
+END my_package2;
+/
+CREATE PUBLIC SYNONYM pkg_syn1 FOR my_package1;
+CREATE SYNONYM pkg_syn1 FOR my_package2;
+SET search_path TO default;
+SELECT pkg_syn1.get_greeting('Alice');
+ get_greeting  
+---------------
+ Hello, Alice!
+(1 row)
+
+set search_path to '';
+SELECT pkg_syn1.get_greeting('Alice');
+ get_greeting 
+--------------
+ Hi, Alice!
+(1 row)
+
+SET search_path TO default;
+SELECT pkg_syn1.get_greeting('Alice');
+ get_greeting  
+---------------
+ Hello, Alice!
+(1 row)
+
+DROP SYNONYM pkg_syn1;
+SELECT pkg_syn1.get_greeting('Alice');
+ get_greeting 
+--------------
+ Hi, Alice!
+(1 row)
+
+DROP PUBLIC SYNONYM pkg_syn1;
+SELECT pkg_syn1.get_greeting('Alice');  -- should fail: object not found
+ERROR:  schema "pkg_syn1" does not exist
+CONTEXT:  referenced column: get_greeting
+-- function 同义词测试
+CREATE OR REPLACE FUNCTION add_numbers(a NUMBER, b NUMBER) RETURN NUMBER IS
+BEGIN
+  RETURN a + b;
+END add_numbers;
+/
+CREATE OR REPLACE FUNCTION minus_numbers(a NUMBER, b NUMBER) RETURN NUMBER IS
+BEGIN
+  RETURN a - b;
+END minus_numbers;
+/
+CREATE PUBLIC SYNONYM do_something FOR add_numbers;
+CREATE OR REPLACE SYNONYM do_something FOR minus_numbers;
+SET search_path TO default;
+SELECT do_something(1, 2);  -- should failed: multiple functions with the same name
+ERROR:  function do_something(integer, integer) is not unique
+LINE 1: SELECT do_something(1, 2);
+               ^
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.
+CONTEXT:  referenced column: do_something
+SET search_path TO '';
+SELECT do_something(1, 2);
+ do_something 
+--------------
+            3
+(1 row)
+
+SET search_path TO default;
+DROP SYNONYM do_something;
+SELECT do_something(1, 2);
+ do_something 
+--------------
+            3
+(1 row)
+
+DROP PUBLIC SYNONYM do_something;
+SELECT do_something(1, 2);  -- should fail: object not found
+ERROR:  function do_something(integer, integer) does not exist
+LINE 1: SELECT do_something(1, 2);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: do_something
+-- gs_dump/gs_restore 测试
+create database restore_synonym_db;
+create table test1(col1 int);
+create or replace PUBLIC synonym syn1 for test1;
+--?.*
+0
+--?.*
+0
+\c restore_synonym_db
+select synname from pg_synonym;
+    synname    
+---------------
+ tbl_syn1
+ temp_tbl_syn1
+ syn1
+(3 rows)
+
+\c postgres
+DROP DATABASE restore_synonym_db;
+DROP DATABASE public_syndb;
+DROP ROLE test_user;

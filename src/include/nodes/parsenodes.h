@@ -1036,6 +1036,7 @@ typedef struct DropUserMappingStmt {
 typedef struct CreateSynonymStmt {
     NodeTag type;
     bool replace;  /* T => replace if already exists */
+    bool isPublic; /* T => public synonym */
     List* synName; /* qualified name of synonym */
     List* objName; /* referenced object name, eg. relation, view, function, procedure. */
 } CreateSynonymStmt;
@@ -1049,6 +1050,7 @@ typedef struct DropSynonymStmt {
     List* synName;         /* qualified name of synonym */
     DropBehavior behavior; /* RESTRICT or CASCADE behavior */
     bool missing;          /* skip error if a synonym is missing? */
+    bool isPublic;          /* T => public synonym */
 } DropSynonymStmt;
 
 /* ----------------------
