@@ -90,6 +90,9 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecVecSort),
     reinterpret_cast<VectorEngineFunc>(ExecVecForeignScan),
     reinterpret_cast<VectorEngineFunc>(ExecCStoreScan),
+#ifdef ENABLE_HTAP
+    reinterpret_cast<VectorEngineFunc>(ExecCStoreScan),
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     reinterpret_cast<VectorEngineFunc>(ExecTsStoreScan),
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -231,6 +234,9 @@ void ExecVecMarkPos(PlanState* node)
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -282,6 +288,9 @@ void ExecVecRestrPos(PlanState* node)
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

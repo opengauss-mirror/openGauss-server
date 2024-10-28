@@ -56,6 +56,9 @@ extern bool add_path_precheck(
 extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop = 1);
 extern Path *create_resultscan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
+#ifdef ENABLE_HTAP
+extern Path* create_imcstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 extern Path *create_tsstorescan_path(PlannerInfo * root,RelOptInfo * rel, int dop = 1);
 #endif   /* ENABLE_MULTIPLE_NODES */

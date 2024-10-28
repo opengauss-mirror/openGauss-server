@@ -1094,6 +1094,24 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             }
             plan_type = IO_OP;
             break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned IMCStore Scan";
+                } else {
+                    pname = "IMCStore Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned InMemory VecSample Scan";
+                } else {
+                    pname = "InMemory VecSample Scan";
+                }
+            }
+            plan_type = IO_OP;
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             if (!((Scan*)plan)->tablesample) {
@@ -1427,6 +1445,9 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

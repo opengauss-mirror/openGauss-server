@@ -29,6 +29,9 @@
 #include "utils/palloc.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
@@ -197,6 +200,10 @@ void InitBufferPool(void)
 
     /* Init Vector Buffer management stuff */
     DataCacheMgr::NewSingletonInstance();
+
+#ifdef ENABLE_HTAP
+    IMCUDataCacheMgr::NewSingletonInstance();
+#endif
 
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);

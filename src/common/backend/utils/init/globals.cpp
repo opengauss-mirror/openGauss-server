@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93014;
+const uint32 GRAND_VERSION_NUM = 93015;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 HTAP_VERSION_NUMBER = 93015;
 const uint32 KEEP_FUNC_VERSION_NUMBER = 93014;
 const uint32 PUBLIC_SYNONYM_VERSION_NUMBER = 93013;
 const uint32 FETCH_ENHANCE_VERSION_NUM = 93012;

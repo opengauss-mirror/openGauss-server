@@ -139,6 +139,9 @@
 #include "vecexecutor/vecappend.h"
 #include "vecexecutor/veclimit.h"
 #include "vecexecutor/vecsetop.h"
+#ifdef ENABLE_HTAP
+#include "vecexecutor/vecnodeimcstorescan.h"
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 #include "vecexecutor/vectsstorescan.h"
 #include "tsdb/cache/tags_cachemgr.h"
@@ -209,6 +212,9 @@ bool NeedStubExecution(Plan* plan)
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif
@@ -395,6 +401,10 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecStream((Stream*)node, estate, eflags);
         case T_CStoreScan:
             return (PlanState*)ExecInitCStoreScan((CStoreScan*)node, NULL, estate, eflags);
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            return (PlanState*)ExecInitIMCStoreScan((IMCStoreScan*)node, NULL, estate, eflags);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             return (PlanState*)ExecInitTsStoreScan((TsStoreScan *)node, NULL, estate, eflags);
@@ -1142,6 +1152,11 @@ static void ExecEndNodeByType(PlanState* node)
         case T_CStoreScanState:
             ExecEndCStoreScan((CStoreScanState*)node, false);
             break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScanState:
+            ExecEndCStoreScan((IMCStoreScanState*)node, false);
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
             ExecEndTsStoreScan((TsStoreScanState *)node, false);

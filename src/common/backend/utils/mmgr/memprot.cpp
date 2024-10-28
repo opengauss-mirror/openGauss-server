@@ -996,6 +996,9 @@ void gs_memprot_init(Size size)
 #endif
         /* remove cstore buffer */
         int avail_mem = g_instance.attr.attr_memory.max_process_memory - g_instance.attr.attr_storage.cstore_buffers -
+#ifdef ENABLE_HTAP
+                        g_instance.attr.attr_memory.max_imcs_cache -
+#endif
                         udf_memory - (size >> BITS_IN_KB);
 
         if (avail_mem < MIN_PROCESS_LIMIT) {

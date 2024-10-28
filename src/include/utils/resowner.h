@@ -138,6 +138,13 @@ extern void ResourceOwnerEnlargeDataCacheSlot(ResourceOwner owner);
 extern void ResourceOwnerRememberDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
 extern void ResourceOwnerForgetDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
 
+#ifdef ENABLE_HTAP
+/* support for imcs data cache refcount management */
+extern void ResourceOwnerEnlargeIMCSDataCacheSlot(ResourceOwner owner);
+extern void ResourceOwnerRememberIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
+extern void ResourceOwnerForgetIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
+#endif
+
 /* support for meta cache refcount management */
 extern void ResourceOwnerEnlargeMetaCacheSlot(ResourceOwner owner);
 extern void ResourceOwnerRememberMetaCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);

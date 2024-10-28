@@ -6029,6 +6029,19 @@ static void _outCStoreScan(StringInfo str, CStoreScan* node)
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
     WRITE_BOOL_FIELD(is_replica_table);
 }
+#ifdef ENABLE_HTAP
+static void _outIMCStoreScan(StringInfo str, IMCStoreScan* node)
+{
+    WRITE_NODE_TYPE("IMCSTORESCAN");
+
+    _outScanInfo(str, (Scan*)node);
+
+    WRITE_NODE_FIELD(cstorequal);
+    WRITE_NODE_FIELD(minMaxInfo);
+    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
+    WRITE_BOOL_FIELD(is_replica_table);
+}
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
 static void
@@ -7309,6 +7322,12 @@ static void _outNode(StringInfo str, const void* obj)
             case T_CStoreScan:
                 _outCStoreScan(str, (CStoreScan*)obj);
                 break;
+
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+                _outIMCStoreScan(str, (IMCStoreScan*)obj);
+                break;
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:

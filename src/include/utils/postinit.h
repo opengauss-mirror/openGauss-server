@@ -112,6 +112,8 @@ public:
 
     void InitStreamSession();
 
+    void InitHTAPImcsVacuum();
+
     void InitUndoLauncher();
 
     bool InitUndoWorker();

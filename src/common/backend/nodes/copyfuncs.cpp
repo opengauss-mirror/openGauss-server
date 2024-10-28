@@ -1826,6 +1826,25 @@ static CStoreScan* _copyCStoreScan(const CStoreScan* from)
 
     return newnode;
 }
+#ifdef ENABLE_HTAP
+static IMCStoreScan* _copyIMCStoreScan(const IMCStoreScan* from)
+{
+    IMCStoreScan* newnode = makeNode(IMCStoreScan);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyScanFields((const Scan*)from, (Scan*)newnode);
+
+    COPY_LOCATION_FIELD(selectionRatio);
+    COPY_NODE_FIELD(cstorequal);
+    COPY_NODE_FIELD(minMaxInfo);
+    COPY_LOCATION_FIELD(relStoreLocation);
+    COPY_SCALAR_FIELD(is_replica_table);
+
+    return newnode;
+}
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan*
@@ -8207,6 +8226,11 @@ void* copyObject(const void* from)
         case T_CStoreScan:
             retval = _copyCStoreScan((CStoreScan*)from);
             break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            retval = _copyIMCStoreScan((IMCStoreScan*)from);
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             retval = _copyTsStoreScan((TsStoreScan *)from);

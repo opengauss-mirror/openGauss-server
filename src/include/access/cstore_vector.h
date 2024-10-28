@@ -258,6 +258,11 @@ struct bulkload_rows : public BaseObject {
 
     bool m_has_dropped_column;
 
+#ifdef ENABLE_HTAP
+    bool isImcs;
+    int2vector* imcsAttsNum;
+    int relNatts;
+#endif
     /* constructor and deconstructor */
     bulkload_rows(TupleDesc tuple_desc, int rows_maxnum, bool to_init = true);
     ~bulkload_rows()
@@ -274,6 +279,9 @@ struct bulkload_rows : public BaseObject {
     }
 
     void init(TupleDesc tup_desc, int rows_maxnum);
+#ifdef ENABLE_HTAP
+    void EnableImcs(int2vector* imcsAtts, int relationNatts);
+#endif
     void reset(bool reuse_blocks);
     bool append_one_vector(TupleDesc tup_desc, VectorBatch *p_batch, int *start_idx, MemInfoArg *m_memInfo = NULL);
     bool append_one_tuple(Datum *values, const bool *isnull, TupleDesc tup_desc);

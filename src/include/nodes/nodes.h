@@ -721,6 +721,9 @@ typedef enum NodeTag {
     T_VecRecursiveUnion,
     T_VecScan,
     T_CStoreScan,
+#ifdef ENABLE_HTAP
+    T_IMCStoreScan,
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScan,
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -770,6 +773,9 @@ typedef enum NodeTag {
     T_VecSortState,
     T_VecForeignScanState,
     T_CStoreScanState,
+#ifdef ENABLE_HTAP
+    T_IMCStoreScanState,
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScanState,
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -792,6 +798,7 @@ typedef enum NodeTag {
     T_VecMaterialState,
     T_VecMergeJoinState,
     T_VecWindowAggState,
+
 
     // this must put last for vector engine runtime state
     T_VecEndState,
@@ -909,6 +916,7 @@ typedef enum NodeTag {
     T_GatherPath,
     T_ForeignKeyCacheInfo,
     T_Gather,
+
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h), the area above where such information is placed is full.
      */

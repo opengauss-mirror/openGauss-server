@@ -414,6 +414,22 @@ static void InitMemoryConfigureNamesInt()
             NULL,
             NULL},
 
+#ifdef ENABLE_HTAP
+        {{"max_imcs_cache",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum size of imcs memory used by the process."),
+            NULL,
+            GUC_UNIT_KB},
+            &g_instance.attr.attr_memory.max_imcs_cache,
+            100 * 1024,
+            100 * 1024,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

@@ -1521,6 +1521,13 @@ typedef struct knl_t_vacuum_context {
 
 } knl_t_vacuum_context;
 
+#ifdef ENABLE_HTAP
+typedef struct knl_t_imcstore_vacuum_context {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t got_SIGTERM;
+} knl_t_imcstore_vacuum_context;
+#endif
+
 typedef struct knl_t_autovacuum_context {
     /* Flags set by signal handlers */
     volatile sig_atomic_t got_SIGHUP;
@@ -2704,6 +2711,10 @@ typedef struct knl_t_storage_context {
     /* remember global block slot in progress */
     CacheSlotId_t CacheBlockInProgressIO;
     CacheSlotId_t CacheBlockInProgressUncompress;
+#ifdef ENABLE_HTAP
+    CacheSlotId_t IMCSCacheBlockInProgressIO;
+    CacheSlotId_t IMCSCacheBlockInProgressUncompress;
+#endif
     CacheSlotId_t MetaBlockInProgressIO;
 
     HTAB* RecoveryLockList;
@@ -3592,6 +3603,10 @@ typedef struct knl_thrd_context {
     knl_t_csnmin_sync_context csnminsync_cxt;
 #ifdef ENABLE_MOT
     knl_t_mot_context mot_cxt;
+#endif
+
+#ifdef ENABLE_HTAP
+    knl_t_imcstore_vacuum_context imcstore_vacuum_cxt;
 #endif
 
     knl_t_gstat_context gstat_cxt;

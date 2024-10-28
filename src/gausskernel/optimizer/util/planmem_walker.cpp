@@ -371,6 +371,15 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
                 return true;
             break;
 
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            if (walk_scan_node_fields((Scan*)node, walker, context))
+                return true;
+            if (p2walker((Node*)((CStoreScan*)node)->cstorequal, context))
+                return true;
+            break;
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))

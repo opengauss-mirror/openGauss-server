@@ -104,10 +104,6 @@ static inline int str_to_uint64(const char* str, uint64* val)
     return 0;
 }
 
-/* index of m_formCUFuncArray[] calls */
-#define FORMCU_IDX_NONE_NULL 0
-#define FORMCU_IDX_HAVE_NULL 1
-
 /*
  * @Description: compute the max number of keys within all index relation.
  * @IN rel: result relation info
@@ -143,6 +139,7 @@ CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _
                            _in_ MemInfoArg* ArgmemInfo)
     : m_fullCUSize(RelationGetMaxBatchRows(relation)), m_delta_rows_threshold(RelationGetDeltaRowsThreshold(relation))
 {
+    m_isImcstore = false;
     m_insert_end_flag = false;
     m_relation = relation;
     m_resultRelInfo = args.es_result_relations;
@@ -1494,7 +1491,7 @@ bool CStoreInsert::TryEncodeNumeric(int col, bulkload_rows* batchRowPtr, CUDesc*
     int exact_size = 0;
     int rc = 0;
 
-    if (COMPRESS_NO == heaprel_get_compression_from_modes(m_compress_modes)) {
+    if (!m_isImcstore && COMPRESS_NO == heaprel_get_compression_from_modes(m_compress_modes)) {
         // nothing to do if compression level is NO.
         return false;
     }
@@ -1730,7 +1727,7 @@ bool CStoreInsert::TryFormNumberStringCU(
     bool ret = false;
     FuncSetMinMax func = *(this->m_setMinMaxFuncs + col);
 
-    if (COMPRESS_NO == heaprel_get_compression_from_modes(this->m_compress_modes)) {
+    if (!m_isImcstore && COMPRESS_NO == heaprel_get_compression_from_modes(this->m_compress_modes)) {
         return ret;
     }
 

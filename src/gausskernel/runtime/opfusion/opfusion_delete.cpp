@@ -25,6 +25,9 @@
 #include "opfusion/opfusion_delete.h"
 
 #include "access/tableam.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "commands/matview.h"
 #include "opfusion/opfusion_indexscan.h"
 #include "executor/node/nodeSeqscan.h"
@@ -158,6 +161,11 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
                 break;
 
             case TM_Ok:
+#ifdef ENABLE_HTAP
+                if (HAVE_HTAP_TABLES) {
+                    IMCStoreDeleteHook(RelationGetRelid(fake_relation), tableam_tops_get_t_self(fake_relation, oldtup));
+                }
+#endif
                 if (!RELATION_IS_PARTITIONED(rel)) {
                     /* Here Do the thing for Matview. */
                     execMatview = (rel != NULL && rel->rd_mlogoid != InvalidOid);

@@ -34,13 +34,17 @@
 
 typedef enum { BTREE_INDEX, BTREE_INDEX_ONLY, PSORT_INDEX, PSORT_INDEX_ONLY } IndexType;
 
+extern bool CodeGenThreadObjectReady();
+extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
+extern void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Relation parent_rel);
 extern CStoreScanState* ExecInitCStoreScan(CStoreScan* node, Relation parentHeapRel, EState* estate, int eflags,
     bool indexFlag = false, bool codegenInUplevel = false);
 extern VectorBatch* ExecCStoreScan(CStoreScanState* node);
 extern void ExecEndCStoreScan(CStoreScanState* node, bool indexFlag);
 extern void ExecReSetRuntimeKeys(CStoreScanState* node);
 extern void ExecReScanCStoreScan(CStoreScanState* node);
-extern void ExecCStoreBuildScanKeys(CStoreScanState* state, List* quals, CStoreScanKey* scankeys, int* numScanKeys);
+extern void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys,
+    int* num_scan_keys, CStoreScanRunTimeKeyInfo** runtime_key_info, int* runtime_keys_num);
 extern void ExecReScanCStoreIndexScan(CStoreIndexScanState* node);
 
 extern void OptimizeProjectionAndFilter(CStoreScanState* node);

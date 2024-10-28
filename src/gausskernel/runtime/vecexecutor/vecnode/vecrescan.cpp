@@ -54,6 +54,9 @@
 #include "vecexecutor/vecnodecstoreindexand.h"
 #include "vecexecutor/vecnodecstoreindexor.h"
 #include "vecexecutor/vecnodevectorow.h"
+#ifdef ENABLE_HTAP
+#include "vecexecutor/vecnodeimcstorescan.h"
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 #include "vecexecutor/vectsstorescan.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -132,6 +135,11 @@ void VecExecReScan(PlanState* node)
         case T_CStoreScanState:
             ExecReScanCStoreScan((CStoreScanState*)node);
             break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScanState:
+            ExecReScanCStoreScan((IMCStoreScanState*)node);
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
             ExecReScanTsStoreScan((TsStoreScanState*)node);

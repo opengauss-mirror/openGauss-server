@@ -99,6 +99,9 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
 static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path);
 static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
+#ifdef ENABLE_HTAP
+static IMCStoreScan* create_imcstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* create_tsstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -133,6 +136,9 @@ static void copy_path_costsize(Plan* dest, Path* src);
 static void copy_generic_path_info(Plan *dest, Path *src);
 static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid);
 static CStoreScan* make_cstorescan(List* qptlist, List* qpqual, Index scanrelid);
+#ifdef ENABLE_HTAP
+static IMCStoreScan* make_imcstorescan(List* qptlist, List* qpqual, Index scanrelid);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* make_tsstorescan(List* qptlist, List* qpqual, Index scanrelid);
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -197,7 +203,7 @@ static bool isHoldUniqueOperator(OpExpr* expr);
 static bool isHoldUniqueness(Node* node);
 
 static List* build_one_column_tlist(PlannerInfo* root, RelOptInfo* rel);
-static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan);
+static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan, bool isImcstore);
 static bool find_var_from_targetlist(Expr* expr, List* targetList);
 static Plan* parallel_limit_sort(
     PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est, int64 count_est);
@@ -358,6 +364,9 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
 
     switch (best_path->pathtype) {
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -678,6 +687,12 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
         case T_CStoreScan:
             plan = (Plan*)create_cstorescan_plan(root, best_path, tlist, scan_clauses);
             break;
+
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            plan = (Plan*)create_imcstorescan_plan(root, best_path, tlist, scan_clauses);
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             plan = (Plan*)create_tsstorescan_plan(root, best_path, tlist, scan_clauses);
@@ -2269,7 +2284,7 @@ static bool setMinMaxInfo(Aggref* agg, List* scan_targetlist, int16* MaxOrMin, i
  * @in scan_plan - StoreScan plan
  * @in tlist - Final targetlist
  */
-static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan)
+static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan, bool isImcstore)
 {
     Query* parse = root->parse;
     List* tlist = parse->targetList;
@@ -2306,8 +2321,12 @@ static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan)
         return;
     }
 
-    /* It must be column table. */
-    Assert(rte->rtekind == RTE_RELATION && rte->orientation == REL_COL_ORIENTED);
+    /* In cstore, it must be column table. but in imcstore, it is row table */
+    if (isImcstore) {
+        Assert(rte->rtekind == RTE_RELATION && rte->orientation == REL_ROW_ORIENTED);
+    } else {
+        Assert(rte->rtekind == RTE_RELATION && rte->orientation == REL_COL_ORIENTED);
+    }
 
     MaxOrMin = (int16*)palloc0(sizeof(int16) * list_length(scan_targetlist));
 
@@ -2378,7 +2397,7 @@ static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, Li
 
     rte = planner_rt_fetch(scan_relid, root);
     if (rte->tablesample == NULL) {
-        min_max_optimization(root, scan_plan);
+        min_max_optimization(root, scan_plan, false);
     } else {
         Assert(rte->rtekind == RTE_RELATION);
         scan_plan->tablesample = rte->tablesample;
@@ -2408,6 +2427,71 @@ static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, Li
 
     return scan_plan;
 }
+
+#ifdef ENABLE_HTAP
+/*
+ * create_imcstorescan_plan
+ *	 Returns a imcstorescan plan for the column store scanned by 'best_path'
+ *	 with restriction clauses 'scan_clauses' and targetlist 'tlist'.
+ */
+static IMCStoreScan* create_imcstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses)
+{
+    IMCStoreScan* scan_plan = NULL;
+    Index scan_relid = best_path->parent->relid;
+    RangeTblEntry* rte = NULL;
+
+    /* it should be a base rel... */
+    Assert(scan_relid > 0);
+    Assert(best_path->parent->rtekind == RTE_RELATION);
+
+    /* build cstore scan tlist, should only contain columns referenced, one column at least */
+    if (tlist != NIL)
+        list_free_ext(tlist);
+    tlist = build_relation_tlist(best_path->parent);
+    if (tlist == NIL)
+        tlist = build_one_column_tlist(root, best_path->parent);
+
+    /* Sort clauses into best execution order */
+    scan_clauses = order_qual_clauses(root, scan_clauses);
+
+    /* Reduce RestrictInfo list to bare expressions; ignore pseudoconstants */
+    scan_clauses = extract_actual_clauses(scan_clauses, false);
+
+    scan_plan = make_imcstorescan(tlist, scan_clauses, scan_relid);
+
+    rte = planner_rt_fetch(scan_relid, root);
+    if (rte->tablesample == NULL) {
+        min_max_optimization(root, scan_plan, true);
+    } else {
+        Assert(rte->rtekind == RTE_RELATION);
+        scan_plan->tablesample = rte->tablesample;
+    }
+
+    scan_plan->relStoreLocation = best_path->parent->relStoreLocation;
+
+#ifdef STREAMPLAN
+    add_distribute_info(root, &scan_plan->plan, scan_relid, best_path, scan_clauses);
+#endif
+
+    // set replica info.
+    if (IsExecNodesReplicated(scan_plan->plan.exec_nodes))
+        scan_plan->is_replica_table = true;
+
+    copy_path_costsize(&scan_plan->plan, best_path);
+
+    // Add some hints for better performance
+    //
+    scan_plan->selectionRatio = scan_plan->plan.plan_rows / best_path->parent->tuples;
+
+    /* Fix the qual to support pushing predicate down to cstore scan. */
+    if (u_sess->attr.attr_sql.enable_csqual_pushdown)
+        scan_plan->cstorequal = fix_cstore_scan_qual(root, scan_clauses);
+    else
+        scan_plan->cstorequal = NIL;
+
+    return scan_plan;
+}
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
 /*
@@ -3349,6 +3433,9 @@ static void ModifyWorktableWtParam(Node* planNode, int oldWtParam, int newWtPara
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -5744,6 +5831,28 @@ static CStoreScan* make_cstorescan(List* qptlist, List* qpqual, Index scanrelid)
 
     return node;
 }
+
+#ifdef ENABLE_HTAP
+static IMCStoreScan* make_imcstorescan(List* qptlist, List* qpqual, Index scanrelid)
+{
+    IMCStoreScan* node = makeNode(IMCStoreScan);
+    Plan* plan = &node->plan;
+
+    /* cost should be inserted by caller */
+    plan->targetlist = qptlist;
+    plan->qual = qpqual;
+    plan->lefttree = NULL;
+    plan->righttree = NULL;
+    plan->vec_output = true;
+
+    node->scanrelid = scanrelid;
+    node->cstorequal = NIL;
+    node->minMaxInfo = NIL;
+    node->is_replica_table = false;
+
+    return node;
+}
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* make_tsstorescan(List* qptlist, List* qpqual, Index scanrelid)
@@ -9547,6 +9656,9 @@ bool is_projection_capable_plan(Plan* plan)
             switch (nodeTag(plan->lefttree)) {
                 case T_SeqScan:
                 case T_CStoreScan:
+#ifdef ENABLE_HTAP
+                case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
                 case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -9630,6 +9742,9 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
         switch (plan->type) {
             case T_SeqScan:
             case T_CStoreScan:
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -9674,6 +9789,9 @@ static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
         switch (plan->type) {
             case T_SeqScan:
             case T_CStoreScan:
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+#endif
             case T_IndexScan:
             case T_IndexOnlyScan:
             case T_BitmapHeapScan:

@@ -34,6 +34,10 @@
 #include "storage/cstore/cstore_compress.h"
 #include "storage/spin.h"
 
+/* index of m_formCUFuncArray[] calls */
+#define FORMCU_IDX_NONE_NULL 0
+#define FORMCU_IDX_HAVE_NULL 1
+
 struct InsertArg {
     /* map to CStoreInsert::m_tmpBatchRows.
      *
@@ -80,6 +84,7 @@ struct InsertArg {
  */
 class CStoreInsert : public BaseObject {
 public:
+    CStoreInsert() {};
     CStoreInsert(_in_ Relation relation, _in_ const InsertArg &args, _in_ bool is_update_cu, _in_ Plan *plan,
                  _in_ MemInfoArg *ArgmemInfo);
 
@@ -136,6 +141,46 @@ public:
     /* memory info for memory adjustment */
     MemInfoArg *m_cstorInsertMem;
 
+protected: // inherited by imcstore_insert
+    // Compress batch rows into CU
+    // Get min/max of CU
+    //
+    virtual CU *FormCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr);
+    Size FormCUTInitMem(CU *cuPtr, bulkload_rows *batchRowPtr, int col, bool hasNull);
+    void FormCUTCopyMem(CU *cuPtr, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, Size dtSize, int col, bool hasNull);
+    template <bool hasNull>
+    void FormCUT(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
+    template <bool hasNull>
+    void FormCUTNumeric(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
+    template <bool hasNull>
+    void FormCUTNumString(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
+
+    template <bool bpcharType, bool hasNull, bool has_MinMax_func>
+    bool FormNumberStringCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
+
+    template <bool hasNull>
+    bool TryFormNumberStringCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr, uint32 atttypid);
+    bool TryEncodeNumeric(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr, bool hasNull);
+    void InitFuncPtr();
+
+    CUDesc **m_cuDescPPtr;                 /* The cudesc of all columns of m_relation */
+    /* temp batchrows for fetching values from sort processor */
+    bulkload_rows *m_tmpBatchRows;
+    /* compression options. */
+    int16 m_compress_modes;
+    compression_options *m_cuCmprsOptions; /* compression filter */
+    cu_tmp_compress_info m_cuTempInfo;     /* temp info for CU compression */
+    inline void SetFormCUFuncArray(Form_pg_attribute attr, int col);
+    typedef void (CStoreInsert::*m_formCUFunc)(int, bulkload_rows *, CUDesc *, CU *);
+    struct FormCUFuncArray {
+        m_formCUFunc colFormCU[2];
+    };
+    /* Function Pointer Array Area */
+    FuncSetMinMax *m_setMinMaxFuncs;    /* min/max value function */
+    FormCUFuncArray *m_formCUFuncArray; /* Form CU function pointer */
+
+    bool m_isImcstore = false;
+
 private:
     void FreeMemAllocateByAdio();
     // Whether need partial clustering when load
@@ -151,25 +196,6 @@ private:
 
     void CUWrite(int attno, int col);
     void CUListWrite();
-
-    // Compress batch rows into CU
-    // Get min/max of CU
-    // 
-    CU *FormCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr);
-    Size FormCUTInitMem(CU *cuPtr, bulkload_rows *batchRowPtr, int col, bool hasNull);
-    void FormCUTCopyMem(CU *cuPtr, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, Size dtSize, int col, bool hasNull);
-    template <bool hasNull>
-    void FormCUT(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
-    template <bool hasNull>
-    void FormCUTNumeric(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
-    template <bool hasNull>
-    void FormCUTNumString(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
-
-    template <bool bpcharType, bool hasNull, bool has_MinMax_func>
-    bool FormNumberStringCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr);
-
-    template <bool hasNull>
-    bool TryFormNumberStringCU(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr, uint32 atttypid);
 
     void InitIndexColId(int which_index);
 
@@ -188,37 +214,20 @@ private:
 
     void FlushIndexDataIfNeed();
 
-    void InitFuncPtr();
-
     void InitColSpaceAlloc();
 
-    bool TryEncodeNumeric(int col, bulkload_rows *batchRowPtr, CUDesc *cuDescPtr, CU *cuPtr, bool hasNull);
     void DoBatchInsert(int options);
-    typedef void (CStoreInsert::*m_formCUFunc)(int, bulkload_rows *, CUDesc *, CU *);
-    struct FormCUFuncArray {
-        m_formCUFunc colFormCU[2];
-    };
-    inline void SetFormCUFuncArray(Form_pg_attribute attr, int col);
 
     bool m_isUpdate;
-    /* Function Pointer Array Area */
-    FuncSetMinMax *m_setMinMaxFuncs;    /* min/max value function */
-    FormCUFuncArray *m_formCUFuncArray; /* Form CU function pointer */
 
     /* If relation has cluster key, it will work for partial sort */
     CStorePSort *m_sorter;
 
-    CUDesc **m_cuDescPPtr;                 /* The cudesc of all columns of m_relation */
     CU **m_cuPPtr;                         /* The CU of all columns of m_relation; */
     CUStorage **m_cuStorage;               /* CU storage */
-    compression_options *m_cuCmprsOptions; /* compression filter */
-    cu_tmp_compress_info m_cuTempInfo;     /* temp info for CU compression */
 
     /* buffered batchrows for many VectorBatch values */
     bulkload_rows *m_bufferedBatchRows;
-
-    /* temp batchrows for fetching values from sort processor */
-    bulkload_rows *m_tmpBatchRows;
 
     /* memory context for avoiding memory leaks during bulk-insert */
     MemoryContext m_tmpMemCnxt;
@@ -254,9 +263,6 @@ private:
 
     /* the number delta threshold */
     int m_delta_rows_threshold;
-
-    /* compression options. */
-    int16 m_compress_modes;
 
     /* indicate the end of insert or not */
     bool m_insert_end_flag;

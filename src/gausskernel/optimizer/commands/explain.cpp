@@ -1929,6 +1929,14 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
                 flag = 1;
             }
             break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            if (((IMCStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+        break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             if (((TsStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
@@ -1974,6 +1982,9 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
         case T_BitmapIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
         case T_TidScan: {
             PruningResult* pr = ((Scan*)curPlan->lefttree)->pruningInfo;
             if (pr == NULL || pr->ls_selectedSubPartitions == NIL || pr->expr != NULL) {
@@ -2153,6 +2164,9 @@ static void ExplainNode(
         case T_SpqBitmapHeapScan:
 #endif
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -2796,6 +2810,9 @@ static void ExplainNode(
             break;
 
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -3173,6 +3190,9 @@ static void ExplainNode(
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -3416,6 +3436,9 @@ static void CalculateProcessedRows(
             }
             break;
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -8441,6 +8464,9 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es, bool multi
         } break;
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

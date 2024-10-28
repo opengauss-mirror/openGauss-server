@@ -50,6 +50,9 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
     switch (nodeTag(result_plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

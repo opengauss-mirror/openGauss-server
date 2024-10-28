@@ -978,6 +978,9 @@ List* PlanAnalyzerOperator(QueryDesc* querydesc, PlanState* planstate)
                 issueResults = issueResultsItem != NULL ? lappend(issueResults, issueResultsItem) : issueResults;
                 break;
             }
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+#endif
             case T_CStoreScan: {
                 /* Check unsuitable seq scan for cstore */
                 issueResultsItem = CheckUnsuitableScanMethod(ps, dn_num, total_tuples, totalFiltereds, false, true);

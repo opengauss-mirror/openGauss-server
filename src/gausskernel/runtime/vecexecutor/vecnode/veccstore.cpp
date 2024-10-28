@@ -59,15 +59,13 @@
 #include "pgxc/redistrib.h"
 #include "optimizer/pruning.h"
 
-
-extern bool CodeGenThreadObjectReady();
-extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
+#ifdef ENABLE_HTAP
+#include "vecexecutor/vecnodeimcstorescan.h"
+#endif /* ENABLE_HTAP */
 
 static CStoreStrategyNumber GetCStoreScanStrategyNumber(Oid opno);
 static Datum GetParamExternConstValue(Oid left_type, Expr* expr, PlanState* ps, uint16* flag);
 static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node);
-static void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
-    CStoreScanRunTimeKeyInfo** runtime_key_info, int* runtime_keys_num);
 static void ExecCStoreScanEvalRuntimeKeys(
     ExprContext* expr_ctx, CStoreScanRunTimeKeyInfo* runtime_keys, int num_runtime_keys);
 
@@ -361,8 +359,10 @@ restart:
     }
 
     if (node->m_CStore->IsEndScan() && p_scan_batch->m_rows == 0) {
-        // scan delta store table if has data
-        ScanDeltaStore(node, p_scan_batch, NULL);
+        // scan cstore delta store table if has data
+        if (!node->m_isImcstore) {
+            ScanDeltaStore(node, p_scan_batch, NULL);
+        }
         if (p_scan_batch->m_rows == 0)
             return p_out_batch;
     }
@@ -396,6 +396,93 @@ void ReScanDeltaRelation(CStoreScanState* node)
     }
     node->ss_deltaScan = false;
     node->ss_deltaScanEnd = false;
+}
+
+void InitCStorePatitions(CStoreScanState* node, PruningResult* resultPlan, Relation curRelation, LOCKMODE lockMode)
+{
+    ListCell* cell = NULL;
+    Partition part = NULL;
+    List* partSeqs = resultPlan->ls_rangeSelectedPartitions;
+    foreach (cell, partSeqs) {
+        Oid tbl_part_id = InvalidOid;
+        int part_seq = lfirst_int(cell);
+
+        tbl_part_id = getPartitionOidFromSequence(curRelation, part_seq, INVALID_PARTITION_NO);
+        part = partitionOpen(curRelation, tbl_part_id, lockMode);
+        node->partitions = lappend(node->partitions, part);
+    }
+}
+
+#ifdef ENABLE_HTAP
+void InitIMCStorePatitions(IMCStoreScanState* node, PruningResult* resultPlan, Relation curRelation, LOCKMODE lockMode)
+{
+    ListCell* cell1 = NULL;
+    ListCell* cell2 = NULL;
+    List* partSeqs = resultPlan->ls_rangeSelectedPartitions;
+    List* partitionnos = resultPlan->ls_selectedPartitionnos;
+    Assert(list_length(partSeqs) == list_length(partitionnos));
+
+    forboth (cell1, partSeqs, cell2, partitionnos) {
+        Oid tbl_part_id = InvalidOid;
+        Partition tbl_part = NULL;
+        Relation tbl_part_rel = NULL;
+        int part_seq = lfirst_int(cell1);
+        int partitionno = lfirst_int(cell2);
+
+        tbl_part_id = getPartitionOidFromSequence(curRelation, part_seq, partitionno);
+        tbl_part = PartitionOpenWithPartitionno(curRelation, tbl_part_id, partitionno, lockMode);
+        if (!PartitionIsValid(tbl_part)) {
+            continue;
+        }
+        node->partitions = lappend(node->partitions, tbl_part);
+
+        if (RelationIsSubPartitioned(curRelation)) {
+            ListCell *lc1 = NULL;
+            ListCell *lc2 = NULL;
+            List* subpartition = NIL;
+            tbl_part_rel = partitionGetRelation(curRelation, tbl_part);
+            SubPartitionPruningResult *sub_part_pruning =
+                GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, part_seq, partitionno);
+            List* subpart_list = sub_part_pruning->ls_selectedSubPartitions;
+            List* subpartitionnos = sub_part_pruning->ls_selectedSubPartitionnos;
+            Assert(list_length(subpart_list) == list_length(subpartitionnos));
+            forboth (lc1, subpart_list, lc2, subpartitionnos) {
+                int subpart_seq = lfirst_int(lc1);
+                int subpartitionno = lfirst_int(lc2);
+                Oid subpartitionid = getPartitionOidFromSequence(tbl_part_rel, subpart_seq, subpartitionno);
+                Partition subpart =
+                    PartitionOpenWithPartitionno(tbl_part_rel, subpartitionid, subpartitionno, lockMode);
+                if (!PartitionIsValid(subpart)) {
+                    continue;
+                }
+                subpartition = lappend(subpartition, subpart);
+                partitionClose(tbl_part_rel, subpart, lockMode);
+            }
+            releaseDummyRelation(&tbl_part_rel);
+            if (list_length(subpartition) > 0) {
+                node->subPartLengthList = lappend_int(node->subPartLengthList, list_length(subpartition));
+                node->subpartitions = lappend(node->subpartitions, subpartition);
+            } else {
+                node->partitions = list_delete_ptr(node->partitions, tbl_part);
+                partitionClose(tbl_part_rel, tbl_part, lockMode);
+            }
+        }
+    }
+}
+#endif /* ENABLE_HTAP */
+
+void InitNodePartitions(CStoreScanState* node, PruningResult* resultPlan, Relation curRelation, LOCKMODE lockMode)
+{
+#ifdef ENABLE_HTAP
+    if (node->m_isImcstore) {
+        InitIMCStorePatitions((IMCStoreScanState*)node, resultPlan, curRelation, lockMode);
+    } else {
+        InitCStorePatitions(node, resultPlan, curRelation, lockMode);
+    }
+#else
+    Assert(!node->m_isImcstore);
+    InitCStorePatitions(node, resultPlan, curRelation, lockMode);
+#endif /* ENABLE_HTAP */
 }
 
 void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Relation parent_rel)
@@ -477,15 +564,8 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                 } else {
                     resultPlan = plan->pruningInfo;
                 }
-                List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
-                foreach (cell, part_seqs) {
-                    Oid tbl_part_id = InvalidOid;
-                    int part_seq = lfirst_int(cell);
+                InitNodePartitions(node, resultPlan, curr_rel, lock_mode);
 
-                    tbl_part_id = getPartitionOidFromSequence(curr_rel, part_seq, INVALID_PARTITION_NO);
-                    part = partitionOpen(curr_rel, tbl_part_id, lock_mode);
-                    node->partitions = lappend(node->partitions, part);
-                }
                 if (resultPlan->ls_rangeSelectedPartitions != NULL) {
                     node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
                 } else {
@@ -519,6 +599,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                 }
             } else {
                 Assert(parent_rel);
+                Assert(!node->m_isImcstore);
 
                 // Now curr_rel is the index relation of logical table (parent relation)
                 // parent_rel is the logical heap relation
@@ -842,7 +923,7 @@ void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
     (void)ExecClearTuple(node->ss_ScanTupleSlot);
 
     /*
-     * release CStoreScan
+     * release CStoreScan/IMCStoreScan
      */
     if (node->m_CStore) {
         DELETE_EX(node->m_CStore);
@@ -880,11 +961,13 @@ void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
      */
     ExecCloseScanRelation(relation);
 
-    EndScanDeltaRelation(node);
+    if (!node->m_isImcstore) {
+        EndScanDeltaRelation(node);
+    }
 }
 
 /* Build the cstore scan keys from the qual. */
-static void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
+void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
     CStoreScanRunTimeKeyInfo** runtime_key_info, int* runtime_keys_num)
 {
     ListCell* lc = NULL;
@@ -1164,7 +1247,9 @@ void ExecReScanCStoreScan(CStoreScanState* node)
         if (PointerIsValid(node->partitions)) {
             /* end scan the prev partition first, */
             tableam_scan_end(scan);
-            EndScanDeltaRelation(node);
+            if (!node->m_isImcstore) {
+                EndScanDeltaRelation(node);
+            }
 
             /* finally init Scan for the next partition */
             ExecInitNextPartitionForCStoreScan(node);
@@ -1172,7 +1257,9 @@ void ExecReScanCStoreScan(CStoreScanState* node)
     }
 
     ExecReCStoreSeqScan(node);
-    ReScanDeltaRelation(node);
+    if (!node->m_isImcstore) {
+        ReScanDeltaRelation(node);
+    }
 }
 
 static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node)
@@ -1196,8 +1283,29 @@ static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node)
     curr_part_rel = partitionGetRelation(node->ss_partition_parent, curr_part);
 
     releaseDummyRelation(&(node->ss_currentPartition));
-    node->ss_currentPartition = curr_part_rel;
-    node->ss_currentRelation = curr_part_rel;
+    if (node->m_isImcstore && RelationIsPartitioned(curr_part_rel)) {
+        Partition curr_sub_part = NULL;
+        Relation curr_sub_part_rel = NULL;
+        List* curr_sub_part_list = NULL;
+        int sub_part_param_no = -1;
+        ParamExecData* sub_part_param = NULL;
+
+        /* get sub partition sequnce */
+        sub_part_param_no = plan->plan.subparamno;
+        sub_part_param = &(node->ps.state->es_param_exec_vals[sub_part_param_no]);
+        curr_sub_part_list = (List *)list_nth(node->subpartitions, node->currentSlot);
+
+        curr_sub_part = (Partition)list_nth(curr_sub_part_list, (int)sub_part_param->value);
+        curr_sub_part_rel = partitionGetRelation(curr_part_rel, curr_sub_part);
+
+        releaseDummyRelation(&(curr_part_rel));
+
+        node->ss_currentPartition = curr_sub_part_rel;
+        node->ss_currentRelation = curr_sub_part_rel;
+    } else {
+        node->ss_currentPartition = curr_part_rel;
+        node->ss_currentRelation = curr_part_rel;
+    }
 
     /* add qual for redis */
     if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_part_rel)) {
@@ -1208,15 +1316,17 @@ static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node)
     }
 
     if (!node->isSampleScan) {
-        curr_scan_desc = tableam_scan_begin(curr_part_rel, node->ps.state->es_snapshot, 0, NULL);
+        curr_scan_desc = tableam_scan_begin(node->ss_currentRelation, node->ps.state->es_snapshot, 0, NULL);
     } else {
-        curr_scan_desc = InitSampleScanDesc((ScanState*)node, curr_part_rel);
+        curr_scan_desc = InitSampleScanDesc((ScanState*)node, node->ss_currentRelation);
     }
 
     /* update partition scan-related fileds in SeqScanState  */
     node->ss_currentScanDesc = curr_scan_desc;
     node->m_CStore->InitPartReScan(node->ss_currentRelation);
 
-    /* reinit delta scan */
-    InitScanDeltaRelation(node, node->ps.state->es_snapshot);
+    /* reinit cstore delta scan */
+    if (!node->m_isImcstore) {
+        InitScanDeltaRelation(node, node->ps.state->es_snapshot);
+    }
 }

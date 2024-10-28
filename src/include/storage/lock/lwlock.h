@@ -297,6 +297,10 @@ enum BuiltinTrancheIds
     LWTRANCHE_DMS_BUF_CTRL,
     LWTRANCHE_SYNCREP_WAIT,
     LWTRANCHE_SCANNING_XLOG_TRACK,
+#ifdef ENABLE_HTAP
+    LWTRANCHE_IMCS_HASH_LOCK,
+    LWTRANCHE_IMCS_DESC_LOCK,
+#endif
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

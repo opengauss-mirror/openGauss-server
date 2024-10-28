@@ -122,6 +122,13 @@ static bool InitVecscanPartition(VecPartIteratorState* node, int partitionScan)
         }
     }
 
+#ifdef ENABLE_HTAP
+    if (IsA(node->ps.lefttree, IMCStoreScanState)) {
+        noden = (PlanState*)node->ps.lefttree;
+        subPartLengthList = ((ScanState *)noden)->subPartLengthList;
+    }
+#endif
+
     /* if there is no partition to scan, return false */
     if (node->currentItr + 1 >= partitionScan) {
         if (subPartLengthList != NIL) {

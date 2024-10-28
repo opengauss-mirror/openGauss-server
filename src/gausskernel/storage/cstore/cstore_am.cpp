@@ -68,6 +68,9 @@
 #include "commands/tablespace.h"
 #include "workload/workload.h"
 #include "executor/executor.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
 
 #ifdef PGXC
     #include "pgxc/pgxc.h"
@@ -132,6 +135,7 @@ CStore::CStore()
       m_rowCursorInCU(0),
       m_startCUID(0),
       m_endCUID(0),
+      m_cuDelMask(NULL),
       m_hasDeadRow(false),
       m_needRCheck(false),
       m_onlyConstCol(false),
@@ -248,7 +252,7 @@ void CStore::InitFillVecEnv(CStoreScanState* state)
             // m_colIdx[] start from zero
             Assert(lfirst_int(cell) > 0);
             int colId = lfirst_int(cell) - 1;
-            if (colId >= m_relation->rd_att->natts) {
+            if ((m_isImcstore && colId > m_relation->rd_att->natts) || colId >= m_relation->rd_att->natts) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
                     errmsg("column %d does not exist", colId)));
             }
@@ -282,6 +286,9 @@ void CStore::InitFillVecEnv(CStoreScanState* state)
 
         BindingFp(state);
     }
+
+    int cuDelMaskSize = m_isImcstore ? MAX_IMCSTORE_DEL_BITMAP_SIZE : MaxDelBitmapSize;
+    m_cuDelMask = (unsigned char*)palloc0(sizeof(unsigned char) * cuDelMaskSize);
 
     // Init sys columns
     if (proj->pi_sysAttrList != NIL) {
@@ -706,6 +713,9 @@ void CStoreAbortCU()
     /* Don't support columnar table in single node mode */
     if (!IS_SINGLE_NODE) {
         CUCache->TerminateCU(true);
+#ifdef ENABLE_HTAP
+        IMCU_CACHE->TerminateCU(true);
+#endif
         CUListPrefetchAbort();
     }
 }
@@ -878,6 +888,10 @@ void CStore::CStoreScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatch
     CSTORESCAN_TRACE_START(MIN_MAX_CHECK);
     RoughCheckIfNeed(state);
     CSTORESCAN_TRACE_END(MIN_MAX_CHECK);
+
+    if (m_isImcstore && ImcstoreFillByDeltaScan(state, vecBatchOut)) {
+        return;
+    }
 
     // step3: Have CU hitted
     // we will not fill vector because no CU is hitted
@@ -1249,7 +1263,8 @@ void CStore::RoughCheckIfNeed(_in_ CStoreScanState* state)
         if (planstate->instrument) {
             RCInfo* rcPtr = &(planstate->instrument->rcInfo);
 
-            if (!hitCU) {
+            /* only for cstore, not for imcstore */
+            if (!m_isImcstore && !hitCU) {
                 int seq = scanKey[0].cs_attno;
                 CUDesc *cudesc = &(m_CUDescInfo[seq]->cuDescArray[i]);
                 planstate->instrument->nfiltered1 += cudesc->row_count;
@@ -2584,7 +2599,7 @@ int CStore::FillVector(_in_ int seq, _in_ CUDesc* cuDescPtr, _out_ ScalarVector*
 
     if (IsValidCacheSlotID(slotId)) {
         // CU is pinned
-        CUCache->UnPinDataBlock(slotId);
+        UnPinCUDataBlock(slotId);
     } else
         Assert(false);
 
@@ -2705,9 +2720,15 @@ void CStore::FillVectorLateRead(
     // Case 1: It is full of NULL value
     if (cuDescPtr->IsNullCU()) {
         for (int rowCnt = 0; rowCnt < tids->m_rows; ++rowCnt) {
-            tidPtr = (ItemPointer)(tidVals + rowCnt);
-            tmpCuId = ItemPointerGetBlockNumber(tidPtr);
-            tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            if (m_isImcstore) {
+                uint32* cuOffsetPtr = (uint32*)(tidVals + rowCnt);
+                tmpOffset = *cuOffsetPtr - 1;
+            } else {
+                tidPtr = (ItemPointer)(tidVals + rowCnt);
+                tmpCuId = ItemPointerGetBlockNumber(tidPtr);
+                tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            }
+
             if (this->IsDeadRow(cuDescPtr->cu_id, tmpOffset)) {
                 continue;
             }
@@ -2722,9 +2743,14 @@ void CStore::FillVectorLateRead(
     // Case 2: It is full of the same value
     if (cuDescPtr->IsSameValCU()) {
         for (int rowCnt = 0; rowCnt < tids->m_rows; ++rowCnt) {
-            tidPtr = (ItemPointer)(tidVals + rowCnt);
-            tmpCuId = ItemPointerGetBlockNumber(tidPtr);
-            tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            if (m_isImcstore) {
+                uint32* cuOffsetPtr = (uint32*)(tidVals + rowCnt);
+                tmpOffset = *cuOffsetPtr - 1;
+            } else {
+                tidPtr = (ItemPointer)(tidVals + rowCnt);
+                tmpCuId = ItemPointerGetBlockNumber(tidPtr);
+                tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            }
             if (this->IsDeadRow(cuDescPtr->cu_id, tmpOffset)) {
                 continue;
             }
@@ -2774,7 +2800,7 @@ void CStore::FillVectorLateRead(
 
     if (IsValidCacheSlotID(slotId)) {
         // CU is pinned
-        CUCache->UnPinDataBlock(slotId);
+        UnPinCUDataBlock(slotId);
     } else {
         Assert(false);
     }
@@ -2821,7 +2847,7 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
                 // switch to new cu. so at first unpin the
                 // previous cu cache as earlier as possible.
                 Assert(slot != CACHE_BLOCK_INVALID_IDX);
-                CUCache->UnPinDataBlock(slot);
+                UnPinCUDataBlock(slot);
 
                 // reset after unpin action.
                 lastCU = NULL;
@@ -3075,7 +3101,7 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
     if (lastCU != NULL) {
         // Unpin the last used cu cache.
         Assert(slot != CACHE_BLOCK_INVALID_IDX);
-        CUCache->UnPinDataBlock(slot);
+        UnPinCUDataBlock(slot);
     }
 
     vec->m_rows = pos;
@@ -3133,10 +3159,15 @@ int CStore::FillTidForLateRead(_in_ CUDesc* cuDescPtr, _out_ ScalarVector* vec)
             // because sizeof(*itemPtr) is not the same to
             // sizeof(vec->m_vals[0]), so zero it at first.
             vec->m_vals[pos] = 0;
-            ItemPointer itemPtr = (ItemPointer)&vec->m_vals[pos];
-
-            // Note that itemPtr->offset start from 1
-            ItemPointerSet(itemPtr, cur_cuid, i + m_rowCursorInCU + 1);
+            if (m_isImcstore) {
+                uint32* cuOffset = (uint32*)&vec->m_vals[pos];
+                // Note that itemPtr->offset start from 1
+                *cuOffset = i + m_rowCursorInCU + 1;
+            } else {
+                ItemPointer itemPtr = (ItemPointer)&vec->m_vals[pos];
+                // Note that itemPtr->offset start from 1
+                ItemPointerSet(itemPtr, cur_cuid, i + m_rowCursorInCU + 1);
+            }
             ++pos;
         }
     }
@@ -3494,8 +3525,6 @@ void CStore::CheckConsistenceOfCUData(CUDesc* cuDescPtr, CU* cu, AttrNumber col)
                                     cuDescPtr->magic)));
     }
 }
-
-#define GetUncompressErrMsg(ret_code) ((CU_ERR_CRC == (ret_code)) ? "incorrect checksum" : "incorrect magic")
 
 // Put the CU in the cache and return a pointer to the CU data.
 // The CU is returned pinned, callers must unpin it when finished.
@@ -4359,6 +4388,24 @@ void CStore::IncLoadCuDescCursor()
     return;
 }
 
+void CStore::UnPinCUDataBlock(int slotId)
+{
+#ifdef ENABLE_HTAP
+    if (m_isImcstore) {
+        IMCU_CACHE->UnPinDataBlock(slotId);
+    } else {
+        CUCache->UnPinDataBlock(slotId);
+    }
+#else
+    CUCache->UnPinDataBlock(slotId);
+#endif
+}
+
+bool CStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatchOut)
+{
+    return false;
+}
+
 /*
  * Init the things needed by delta scan
  *
@@ -4434,7 +4481,7 @@ static void FillDeltaSysColumn(int sysIdx, VectorBatch* outBatch, TupleTableSlot
  * @in tmpContext: the context which is used for per tuple
  * @Return true if outBatch is full, else return false.
  */
-static bool FillOneDeltaTuple(
+bool FillOneDeltaTuple(
     CStoreScanState* node, VectorBatch* outBatch, TupleTableSlot* slot, MemoryContext tmpContext)
 {
     int sysIndex = 0;

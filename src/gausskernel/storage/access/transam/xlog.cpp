@@ -148,6 +148,11 @@
 #ifndef ENABLE_MULTIPLE_NODES
 #include "dcf_interface.h"
 #endif
+
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
+
 /* just for libpqrcv_connect_for_TLI and ha_set_rebuild_connerror */
 #include "replication/libpqwalreceiver.h"
 /* Used for barrier preparse */
@@ -10445,6 +10450,10 @@ void StartupXLOG(void)
             knl_g_set_redo_finish_status(0);
             ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false when starting redo")));
 
+#ifdef ENABLE_HTAP
+            /* for imcstore populate, current xlog lsn is recorded every 10000 times. */
+            int imcsXlogCnt = 0;
+#endif
             do {
                 TermFileData term_file;
 
@@ -10572,6 +10581,13 @@ void StartupXLOG(void)
                 CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_4]);
                 /* Remember this record as the last-applied one */
                 t_thrd.xlog_cxt.LastRec = t_thrd.xlog_cxt.ReadRecPtr;
+
+#ifdef ENABLE_HTAP
+                imcsXlogCnt++;
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && imcsXlogCnt > 10000) {
+                    pg_atomic_write_u64(&IMCU_CACHE->m_xlog_latest_lsn, xlogreader->ReadRecPtr);
+                }
+#endif
 
                 /* Exit loop if we reached inclusive recovery target */
                 if (!recoveryContinue &&

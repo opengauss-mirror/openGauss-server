@@ -225,6 +225,8 @@ public:
     void CopyCacheBlockTag(CacheSlotId_t slotId, CacheTag* outTag);
 
     char* m_CacheSlots;
+    /* only true when ImcuCacheMgr init */
+    bool isImcs = false;
 
 #ifndef ENABLE_UT
 private:
@@ -235,6 +237,9 @@ private:
     /* internal block operate */
     CacheSlotId_t EvictCacheBlock(int size, int retryNum);
     CacheSlotId_t GetFreeCacheBlock(int size);
+#ifdef ENABLE_HTAP
+    void EvictCacheCUIntoDisk(CacheSlotId_t slotId);
+#endif
 
     /* memory operate */
     bool ReserveCacheMem(int size);

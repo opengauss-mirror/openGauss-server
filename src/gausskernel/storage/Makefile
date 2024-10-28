@@ -31,4 +31,8 @@ ifeq ($(enable_mot), yes)
 SUBDIRS     += mot
 endif
 
+ifeq ($(enable_htap), yes)
+SUBDIRS     += htap
+endif
+
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -729,6 +729,9 @@ void setPlanBucketId(Plan* plan, ParamListInfo params, MemoryContext cxt)
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:

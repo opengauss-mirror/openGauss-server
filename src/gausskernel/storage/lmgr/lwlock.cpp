@@ -95,6 +95,9 @@
 #include "instruments/instr_statement.h"
 #include "tsan_annotation.h"
 #include "storage/cfs/cfs_buffers.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
 
 #ifndef MAX
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
@@ -205,7 +208,11 @@ static const char *BuiltinTrancheNames[] = {
     "SSSnapshotXminCachePartLock",
     "DmsBufCtrlLock",
     "WalSyncRepWaitLock",
-    "ScaningXLogTrackLock"
+    "ScaningXLogTrackLock",
+#ifdef ENABLE_HTAP
+    "IMCSHashLock",
+    "IMCSDescLock",
+#endif
 };
 
 static void RegisterLWLockTranches(void);
@@ -389,6 +396,11 @@ int NumLWLocks(void)
 
     /* cucache_mgr.cpp CU Cache calculates its own requirements */
     numLocks += DataCacheMgrNumLocks();
+
+#ifdef ENABLE_HTAP
+    /* imcucache_mgr.cpp CU Cache calculates its own requirements */
+    numLocks += IMCUDataCacheMgrNumLocks();
+#endif
 
     /* proc.c needs one for each backend or auxiliary process. For prepared xacts,
      * backendLock is actually not allocated. */

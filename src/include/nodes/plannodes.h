@@ -682,6 +682,10 @@ typedef struct CStoreScan : public Scan {
     bool is_replica_table;         /* Is a replication table? */
 } CStoreScan;
 
+#ifdef ENABLE_HTAP
+typedef CStoreScan IMCStoreScan;
+#endif
+
 /*
  * ==========
  * Time Series Store Scan nodes

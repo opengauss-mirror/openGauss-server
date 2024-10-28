@@ -194,6 +194,7 @@ enable_ut	= @enable_ut@
 enable_qunit      = @enable_qunit@
 enable_gstrace  = @enable_gstrace@
 enable_libnet  = @enable_libnet@
+enable_htap  = @enable_htap@
 
 python_includespec	= @python_includespec@
 python_libdir		= @python_libdir@
@@ -753,6 +754,10 @@ endif
 
 ifeq ($(enable_mot), yes)
   override CPPFLAGS := $(CPPFLAGS) -I$(MASSTREE_INCLUDE_PATH)
+endif
+
+ifeq ($(enable_htap), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DENABLE_HTAP
 endif
 
 ifeq ($(with_openeuler_os), yes)

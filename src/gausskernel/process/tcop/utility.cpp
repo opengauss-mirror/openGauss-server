@@ -147,6 +147,9 @@
 #include "workload/workload.h"
 #include "streaming/init.h"
 #include "replication/archive_walreceiver.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#endif
 
 /* local function declarations */
 static void ProcessUtilitySlow(Node *parsetree,
@@ -7660,6 +7663,14 @@ static ObjectAddress doRenameStmt(RenameStmt*parse_tree, const char* query_strin
                             errmsg("Un-support feature"),
                             errdetail("RENAME operation is not supported for DFS table.")));
                 }
+#ifdef ENABLE_HTAP
+                if (RelHasImcs(rel_id)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Un-support feature"),
+                            errdetail("RENAME operation is not supported for IMCS table. please unimcs first.")));
+                }
+#endif
                 relation_close(rel, NoLock);
 
                 UnlockRelationOid(rel_id, AccessShareLock);
@@ -7730,7 +7741,15 @@ static ObjectAddress doRenameStmt(RenameStmt*parse_tree, const char* query_strin
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								errmsg("Un-support feature"),
 								errdetail("internal relation doesn't allow ALTER")));
-			
+
+#ifdef ENABLE_HTAP
+                    if (RelHasImcs(rel_id)) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Un-support feature"),
+                                errdetail("RENAME operation is not supported for IMCS table. please unimcs first.")));
+                    }
+#endif
                     relation_close(rel, NoLock);
                     UnlockRelationOid(rel_id, AccessShareLock);
                 }

@@ -603,6 +603,9 @@ typedef enum {
     WalRcvWriterProcess,
     DataReceiverProcess,
     DataRcvWriterProcess,
+#ifdef ENABLE_HTAP
+    IMCStoreVacuumProcess,
+#endif
     HeartbeatProcess,
 #ifdef PGXC
     TwoPhaseCleanerProcess,

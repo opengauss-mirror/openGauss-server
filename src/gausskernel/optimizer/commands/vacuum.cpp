@@ -84,6 +84,9 @@
 #include "pgxc/redistrib.h"
 #include "catalog/catalog.h"
 #endif
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#endif
 
 const int ROW_COUNT_SQL_TEMPLATE = 0;
 const int MERGE_SQL_TEMPLATE = 1;
@@ -1993,6 +1996,13 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * way, we can be sure that no other backend is vacuuming the same table.
      */
     if (vacstmt->options & VACOPT_FULL) {
+#ifdef ENABLE_HTAP
+        if (RelHasImcs(relid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Rel: %d, FULL VACUUM not support for IMCS table, please unpopulate first.", relid)));
+        }
+#endif
         lmode = ExclusiveLock;
         lmodePartTable = ExclusiveLock;
     } else {

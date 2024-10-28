@@ -28,6 +28,10 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/dss
 )
 
+if("${ENABLE_HTAP}" STREQUAL "ON")
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/htap)
+endif()
+
 if("${ENABLE_MOT}" STREQUAL "ON")
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/mot)
 endif()
@@ -57,6 +61,10 @@ add_subdirectory(tcap)
 add_subdirectory(xlog_share_storage)
 add_subdirectory(dorado_operation)
 add_subdirectory(dss)
+
+if("${ENABLE_HTAP}" STREQUAL "ON")
+    add_subdirectory(htap)
+endif()
 
 if("${ENABLE_MOT}" STREQUAL "ON")
     add_subdirectory(mot)

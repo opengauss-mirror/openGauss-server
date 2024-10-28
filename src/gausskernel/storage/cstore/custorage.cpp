@@ -53,6 +53,16 @@
  */
 const uint64 MAX_FILE_SIZE = (uint64)RELSEG_SIZE * BLCKSZ;
 
+/*
+ * for imcstore
+ */
+CUStorage::CUStorage(const CFileNode& cFileNode, File fd)
+    : m_cnode(cFileNode), m_fd(fd)
+{
+    m_fileName[0] = '\0';  // empty string
+    m_freespace = NULL;
+}
+
 CUStorage::CUStorage(const CFileNode& cFileNode, CStoreAllocateStrategy strategy)
     : m_cnode(cFileNode), m_fd(FILE_INVALID), m_strategy(strategy), append_only(false), is_2byte_align(false)
 {
@@ -251,7 +261,7 @@ void CUStorage::InitFileNamePrefix(_in_ const CFileNode& cFileNode)
     }
 }
 
-static void SaveCUReportIOError(
+void SaveCUReportIOError(
     const char* fileName, uint64 writeOffset, int writtenBtyes, int expectedBytes, int expectedTotalBytes, int align_size)
 {
     if (writtenBtyes > 0) {
@@ -291,7 +301,7 @@ static void SaveCUReportIOError(
     }
 }
 
-static void LoadCUReportIOError(
+void LoadCUReportIOError(
     const char* fileName, uint64 readOffset, int readBytes, int expectedBytes, int expectedTotalBytes)
 {
     if (errno == ENOENT) {

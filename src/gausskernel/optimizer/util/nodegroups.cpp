@@ -1220,6 +1220,9 @@ unsigned int ng_get_dest_num_data_nodes(Path* path)
     if (ng_is_all_in_installation_nodegroup_scenario()) {
         switch (path->pathtype) {
             case T_CStoreScan:
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -1264,6 +1267,9 @@ unsigned int ng_get_dest_num_data_nodes(Plan* plan)
         switch (plan->type) {
             case T_SeqScan:
             case T_CStoreScan:
+#ifdef ENABLE_HTAP
+            case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

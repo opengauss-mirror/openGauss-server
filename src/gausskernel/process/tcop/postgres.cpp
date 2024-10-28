@@ -198,6 +198,10 @@ extern int optreset; /* might not be declared by system headers */
 #include "replication/walreceiver.h"
 #include "libpq/libpq-int.h"
 #include "tcop/autonomoustransaction.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#endif
+
 
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
@@ -676,6 +680,7 @@ int SocketBackend(StringInfo inBuf)
         case 'y': /* sequence from cn 2 dn */
         case 'T': /* consistency point */
         case 'o': /* role name */
+        case 'x': /* imcs populate query */
             break;
 #endif
 
@@ -10675,6 +10680,56 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_flush();
             }
             break;
+#endif
+#ifdef ENABLE_HTAP
+            case 'x': /* imcs query */
+            {
+                int type = 0;
+                errno_t rc = EOK;
+                rc = memcpy_s(&type, sizeof(int),
+                              pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
+                securec_check(rc,"\0","\0");
+
+                Oid relOid = InvalidOid;
+                rc = memcpy_s(&relOid, sizeof(Oid),
+                              pq_getmsgbytes(&input_message, sizeof(Oid)),
+                              sizeof(Oid));
+                securec_check(rc, "\0", "\0");
+
+                Oid partOid = InvalidOid;
+                rc = memcpy_s(&partOid, sizeof(Oid),
+                              pq_getmsgbytes(&input_message, sizeof(Oid)),
+                              sizeof(Oid));
+                securec_check(rc, "\0", "\0");
+                ereport(DEBUG1, (errmsg("Received relOid for HTAP population.")));
+
+                switch (type) {
+                    case TYPE_IMCSTORED: {
+                        PopulateImcsOnStandby(relOid, &input_message);
+                        break;
+                    }
+                    case TYPE_UNIMCSTORED:{
+                        pq_getmsgend(&input_message);
+                        UnPopulateImcsOnStandby(relOid);
+                        break;
+                    }
+                    case TYPE_PARTITION_IMCSTORED: {
+                        PopulateImcsForPartitionOnStandby(relOid, partOid, &input_message);
+                        break;
+                    }
+                    case TYPE_PARTITION_UNIMCSTORED:{
+                        pq_getmsgend(&input_message);
+                        UnPopulateImcsForPartitionOnStandby(relOid, partOid);
+                        break;
+                    }
+                    default:
+                        ereport(ERROR,
+                                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                        errmsg("unrecognized populate type: %d", type)));
+                        break;
+                }
+
+            } break;
 #endif
             default:
                 ereport(FATAL,

@@ -197,6 +197,26 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+            *pt_operation = "TABLE ACCESS";
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned IMCStore Scan";
+                } else {
+                    *pname = *sname = *pt_options = "IMCStore Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned InMemory VecSample Scan";
+                } else {
+                    *pname = *sname = *pt_options = "InMemory VecSample Scan";
+                }
+            }
+            break;
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             *pt_operation = "TABLE ACCESS";

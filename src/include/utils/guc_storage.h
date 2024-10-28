@@ -18,4 +18,7 @@ extern bool check_enable_gtm_free(bool* newval, void** extra, GucSource source);
 extern void InitializeNumLwLockPartitions(void);
 extern bool need_check_repl_uuid(GucContext ctx);
 
+#ifdef ENABLE_HTAP
+extern ReplConnInfo* GetReplConnInfo(const char* ConnInfoList, int* InfoLength);
+#endif
 #endif /* GUC_STORAGE_H */

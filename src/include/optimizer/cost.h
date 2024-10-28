@@ -87,6 +87,9 @@ extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, Par
 extern void cost_resultscan(Path *path, PlannerInfo *root, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
+#ifdef ENABLE_HTAP
+extern void cost_imcstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 extern void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
 #endif   /* ENABLE_MULTIPLE_NODES */

@@ -456,7 +456,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <ival>	OptNoLog
 
 %type <node>	alter_table_cmd alter_partition_cmd alter_type_cmd opt_collate_clause exchange_partition_cmd move_partition_cmd
-				modify_column_cmd reset_partition_cmd
+				modify_column_cmd reset_partition_cmd modify_partition_cmd
 				replica_identity add_column_first_after event_from_clause 
 %type <list>	alter_table_cmds alter_partition_cmds alter_table_or_partition alter_type_cmds add_column_cmds modify_column_cmds
 
@@ -504,7 +504,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 %type <str>		copy_file_name definer_opt user ev_body ev_where_body event_where_clause
 				database_name access_method_clause access_method access_method_clause_without_keyword attr_name
-				name namedata_string fdwName cursor_name file_name
+				name namedata_string fdwName cursor_name file_name imcs_partition_name
 				index_name cluster_index_specification
 				pgxcnode_name pgxcgroup_name resource_pool_name workload_group_name
 				application_name password_string hint_string
@@ -893,6 +893,9 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 /* MATVIEW */
 %type <boolean> build_deferred
 
+/* IMCS */
+%type <node>    imcstored_clause
+
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -951,7 +954,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
-	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
+	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE IMCSTORED
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INFINITE_P INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
@@ -1001,7 +1004,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
-	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLIMITED UNLISTEN UNLOCK UNLOGGED
+	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLIMITED UNLISTEN UNLOCK UNLOGGED UNIMCSTORED
 	UNTIL UNUSABLE UPDATE USEEOF USER USING
 
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
@@ -4100,6 +4103,7 @@ alter_partition_cmds:
 			| move_partition_cmd                           { $$ = list_make1($1); }
 			| exchange_partition_cmd                       { $$ = list_make1($1); }
 			| reset_partition_cmd                          { $$ = list_make1($1); }
+			| modify_partition_cmd                         { $$ = list_make1($1); }
 		;
 
 alter_partition_cmd:
@@ -4589,6 +4593,32 @@ alter_partition_cmd:
 				n->missing_ok = FALSE;
 				$$ = (Node *) n;
 
+			}
+		;
+
+modify_partition_cmd:
+		/* ALTER TABLE <name> MODIFY PARTITION <part_name> IMCSTORED */
+		MODIFY_PARTITION imcs_partition_name IMCSTORED
+		{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				n->subtype = AT_ModifyPartitionImcstored;
+				n->name = $2;
+				$$ = (Node *)n;
+			}
+		| MODIFY_PARTITION imcs_partition_name IMCSTORED '(' name_list ')'
+			{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				n->subtype = AT_ModifyPartitionImcstored;
+				n->name = $2;
+				n->def = (Node *)$5;
+				$$ = (Node *)n;
+			}
+		| MODIFY_PARTITION imcs_partition_name UNIMCSTORED
+			{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				n->subtype = AT_ModifyPartitionUnImcstored;
+				n->name = $2;
+				$$ = (Node *)n;
 			}
 		;
 
@@ -5308,6 +5338,10 @@ alter_table_cmd:
 					n->subtype = AT_GenericOptions;
 					n->def = (Node *)$1;
 					$$ = (Node *) n;
+				}
+				| imcstored_clause
+				{
+					$$ = $1;
 				}
 
 /* PGXC_BEGIN */
@@ -30882,6 +30916,33 @@ connect_by_root_expr:   a_expr IDENT '.' IDENT
 
 /*****************************************************************************
  *
+ *	ALTER TALBE FOR IMCSTORE
+ *
+ *****************************************************************************/
+imcstored_clause:
+			IMCSTORED
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_Imcstored;
+					$$ = (Node *) n;
+				}
+			| IMCSTORED '(' name_list ')'
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_Imcstored;
+					n->def = (Node *)$3;
+					$$ = (Node *) n;
+				}
+			| UNIMCSTORED
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_UnImcstored;
+					$$ = (Node *) n;
+				}
+		;
+
+/*****************************************************************************
+ *
  *	Names and constants
  *
  *****************************************************************************/
@@ -30996,6 +31057,9 @@ name_list:	name
 name:		ColId									{ $$ = $1; };
 
 database_name:
+			ColId									{ $$ = $1; };
+
+imcs_partition_name:
 			ColId									{ $$ = $1; };
 
 access_method:
@@ -32083,6 +32147,7 @@ reserved_keyword:
 			| GROUP_P
 			| GROUPPARENT
 			| HAVING
+			| IMCSTORED
 			| IN_P
 			| INITIALLY
 			| INTERSECT
@@ -32123,6 +32188,7 @@ reserved_keyword:
 			| TO
 			| TRAILING
 			| TRUE_P
+			| UNIMCSTORED
 			| UNION
 			| UNIQUE
 			| USER
