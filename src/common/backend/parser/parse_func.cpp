@@ -77,6 +77,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
     bool agg_distinct = (fn ? fn->agg_distinct : false);
     bool func_variadic = (fn ? fn->func_variadic : false);
     WindowDef* over = (fn ? fn->over : NULL);
+    KeepClause *aggKeep = (fn ? fn->aggKeep : NULL);
     Oid rettype;
     int rettype_orig = -1;
     Oid funcid;
@@ -371,6 +372,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("%s is not an ordered-set aggregate, so it cannot have WITHIN GROUP", name_string),
                         parser_errposition(pstate, location)));
+             if (aggKeep != NULL && over != NULL && over->orderClause != NIL)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("ORDER BY of OVER clause is prohibited in function %s with keep", name_string),
+                        parser_errposition(pstate, location)));
         }
     } else if (fdresult == FUNCDETAIL_WINDOWFUNC) {
         /*
@@ -575,7 +581,13 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("aggregates cannot use named arguments"),
                     parser_errposition(pstate, location)));
-
+        if (aggKeep != NULL) {
+            aggref->aggiskeep = true;
+            agg_order = aggKeep->keep_order;
+            aggref->aggkpfirst = aggKeep->rank_first;
+        } else {
+            aggref->aggiskeep = false;
+        }
         /* parse_agg.c does additional aggregate-specific processing */
         transformAggregateCall(pstate, aggref, fargs, agg_order, agg_distinct);
 
@@ -679,6 +691,26 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
         if (over->orderClause == NIL)
             over->orderClause = agg_order;
 
+        if (aggKeep != NULL) {
+            ListCell* lc = NULL;
+            List* tlist = NIL;
+
+            wfunc->winkpfirst = aggKeep->rank_first;
+            
+            foreach (lc, aggKeep->keep_order) {
+                SortBy* arg = (SortBy*)lfirst(lc);
+                wfunc->keep_args = lappend(wfunc->keep_args, transformExprRecurse(pstate, arg->node));
+            }
+            int save_next_resno = pstate->p_next_resno;
+            wfunc->winkporder = transformSortClause(pstate,
+                                                    aggKeep->keep_order,
+                                                    &tlist,
+                                                    EXPR_KIND_ORDER_BY,
+                                                    true,
+                                                    true);
+            pstate->p_next_resno = save_next_resno;
+            list_free_deep(tlist);
+        }
         /* parse_agg.c does additional window-func-specific processing */
         transformWindowFuncCall(pstate, wfunc, over);
 

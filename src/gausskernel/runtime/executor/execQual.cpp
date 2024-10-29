@@ -1233,6 +1233,10 @@ static void find_uservar_in_expr(ExprState *root, char *return_name, bool *if_us
                 ExprState* child =(ExprState*)lfirst(arg);
                 find_uservar_in_expr(child, return_name, if_use);
             }
+            foreach(arg, parent->keep_args) {
+                ExprState* child =(ExprState*)lfirst(arg);
+                find_uservar_in_expr(child, return_name, if_use);
+            }
         } break;
         case T_BoolExprState: {
             BoolExprState* parent = (BoolExprState*)root;
@@ -6131,7 +6135,9 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
                if (wfunc->winagg)
                    winstate->numaggs++;
 
-               wfstate->args = (List*)ExecInitExprByRecursion((Expr*)wfunc->args, parent);
+                wfstate->keep_args = (List*)ExecInitExprByRecursion((Expr*)wfunc->keep_args, parent);
+                wfstate->keep_first = wfunc->winkpfirst;
+                wfstate->args = (List*)ExecInitExprByRecursion((Expr*)wfunc->args, parent);
 
                /*
                 * Complain if the windowfunc's arguments contain any

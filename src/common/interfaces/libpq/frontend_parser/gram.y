@@ -209,6 +209,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	DefElem				*defelt;
 	SortBy				*sortby;
 	WindowDef			*windef;
+        KeepClause                      *keep;
 	JoinExpr			*jexpr;
 	IndexElem			*ielem;
 	Alias				*alias;
@@ -429,6 +430,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <node>	func_application func_expr_common_subexpr
 %type <node>	common_table_expr
+%type <keep>    keep_clause
 %type <with>	with_clause opt_with_clause
 %type <list>	cte_list
 
@@ -541,7 +543,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
     SHRINK USE_P
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
-	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
+	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DENSE_RANK DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DIAGNOSTICS DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
@@ -567,7 +569,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 	JOIN
 
-	KEY KILL KEY_PATH KEY_STORE
+	KEEP KEY KILL KEY_PATH KEY_STORE
 
 	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIST LIKE LIMIT LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
@@ -11825,6 +11827,7 @@ unreserved_keyword:
 			| DELIMITER
 			| DELIMITERS
 			| DELTA
+			| DENSE_RANK
 			| DETERMINISTIC
 			| DICTIONARY
 			| DIRECT
@@ -11920,6 +11923,7 @@ unreserved_keyword:
 			| INVOKER
             | IP
 			| ISOLATION
+			| KEEP
 			| KEY
 			| KEY_PATH
 			| KEY_STORE

@@ -1,0 +1,354 @@
+create database keep_func_adb with dbcompatibility = 'A';
+\c keep_func_adb
+CREATE TABLE employees (department_id INT,manager_id INT,last_name varchar(50),hiredate varchar(50),SALARY INT);
+INSERT INTO employees VALUES(30, 100, 'Raphaely', '2017-07-01', 1700);
+INSERT INTO employees VALUES(30, 100, 'De Haan', '2018-05-01', 11000);
+INSERT INTO employees VALUES(40, 100, 'Errazuriz', '2017-07-21', 1400);
+INSERT INTO employees VALUES(50, 100, 'Hartstein', '2019-10-05', 14000);
+INSERT INTO employees VALUES(50, 100, 'Raphaely', '2017-07-22', 1700);
+INSERT INTO employees VALUES(50, 100, 'Weiss', '2019-10-05', 13500);
+INSERT INTO employees VALUES(90, 100, 'Russell', '2019-07-11', 13000);
+INSERT INTO employees VALUES(90, 100, 'Partners', '2018-12-01', 14000);
+explain (verbose on, costs off) SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum(salary) KEEP(DENSE_RANK FIRST ORDER BY salary), sum(salary) KEEP(DENSE_RANK LAST ORDER BY hiredate)
+   ->  Seq Scan on public.employees
+         Output: department_id, manager_id, last_name, hiredate, salary
+(4 rows)
+
+SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+ Worst | Best  
+-------+-------
+  1400 | 27500
+(1 row)
+
+SELECT department_id, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees GROUP BY department_id ORDER BY 1 DESC;
+ department_id | Worst | Best  
+---------------+-------+-------
+            90 | 13000 | 13000
+            50 |  1700 | 27500
+            40 |  1400 |  1400
+            30 |  1700 | 11000
+(4 rows)
+
+SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",  
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best" 
+               FROM employees ORDER BY department_id, salary, last_name;
+ last_name | department_id | salary | Worst | Best  
+-----------+---------------+--------+-------+-------
+ Raphaely  |            30 |   1700 |  1700 | 11000
+ De Haan   |            30 |  11000 |  1700 | 11000
+ Errazuriz |            40 |   1400 |  1400 |  1400
+ Raphaely  |            50 |   1700 |  1700 | 27500
+ Weiss     |            50 |  13500 |  1700 | 27500
+ Hartstein |            50 |  14000 |  1700 | 27500
+ Russell   |            90 |  13000 | 13000 | 13000
+ Partners  |            90 |  14000 | 13000 | 13000
+(8 rows)
+
+explain (verbose on, costs off) SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",  
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best" 
+               FROM employees ORDER BY department_id, salary, last_name;
+                                                                                                          QUERY PLAN                                                                                                           
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: last_name, department_id, salary, (sum(salary) KEEP(DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id)), (sum(salary) KEEP(DENSE_RANK LAST ORDER BY hiredate) OVER (PARTITION BY department_id))
+   Sort Key: employees.department_id, employees.salary, employees.last_name
+   ->  WindowAgg
+         Output: last_name, department_id, salary, sum(salary) KEEP(DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id), sum(salary) KEEP(DENSE_RANK LAST ORDER BY hiredate) OVER (PARTITION BY department_id)
+         ->  Sort
+               Output: department_id, last_name, salary, hiredate
+               Sort Key: employees.department_id
+               ->  Seq Scan on public.employees
+                     Output: department_id, last_name, salary, hiredate
+(10 rows)
+
+-- test keep for agg and window agg.
+SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+      stddev      
+------------------
+                 
+                 
+                 
+ 353.553390593274
+ 353.553390593274
+ 353.553390593274
+                 
+                 
+(8 rows)
+
+SELECT department_id, stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ department_id |      stddev      
+---------------+------------------
+            30 |                 
+            40 |                 
+            50 | 353.553390593274
+            90 |                 
+(4 rows)
+
+SELECT variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+      variance       
+---------------------
+                    
+                    
+                    
+ 125000.000000000000
+ 125000.000000000000
+ 125000.000000000000
+                    
+                    
+(8 rows)
+
+SELECT department_id, variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ department_id |      variance       
+---------------+---------------------
+            30 |                    
+            40 |                    
+            50 | 125000.000000000000
+            90 |                    
+(4 rows)
+
+SELECT min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+  min  
+-------
+ 11000
+ 11000
+  1400
+ 13500
+ 13500
+ 13500
+ 13000
+ 13000
+(8 rows)
+
+SELECT department_id, min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ department_id |  min  
+---------------+-------
+            30 | 11000
+            40 |  1400
+            50 | 13500
+            90 | 13000
+(4 rows)
+
+SELECT max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+  max  
+-------
+ 11000
+ 11000
+  1400
+ 14000
+ 14000
+ 14000
+ 13000
+ 13000
+(8 rows)
+
+SELECT department_id, max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ department_id |  max  
+---------------+-------
+            30 | 11000
+            40 |  1400
+            50 | 14000
+            90 | 13000
+(4 rows)
+
+SELECT count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ count 
+-------
+     1
+     1
+     1
+     2
+     2
+     2
+     1
+     1
+(8 rows)
+
+SELECT department_id, count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ department_id | count 
+---------------+-------
+            30 |     1
+            40 |     1
+            50 |     2
+            90 |     1
+(4 rows)
+
+--not first/last
+SELECT department_id, max(salary) KEEP (DENSE_RANK ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: ...ELECT department_id, max(salary) KEEP (DENSE_RANK ORDER BY H...
+                                                             ^
+-- syntax error
+-- test multi order by
+SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id ORDER BY salary) FROM employees;
+ERROR:  ORDER BY of OVER clause is prohibited in function stddev with keep
+LINE 1: SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDAT...
+               ^
+CONTEXT:  referenced column: stddev
+-- test vector executore unsupport
+set try_vector_engine_strategy=force;
+SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep feature for vector executor is not implemented
+set try_vector_engine_strategy=off;
+-- test var_pop unsupport
+SELECT var_pop(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees;
+ERROR:  KEEP for this function is not supported.
+LINE 1: SELECT var_pop(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDA...
+               ^
+--test include null and  order by xxx nulls first/last
+create table keep_table(id1 int, id2 int, id3 int);
+insert into keep_table values (1, 11, 21);
+insert into keep_table values (2, 12, 22);
+insert into keep_table values (NULL, NULL, 23);
+select min(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep_table;
+ min 
+-----
+    
+(1 row)
+
+select min(id1) keep (DENSE_RANK LAST ORDER BY id2 asc nulls first) from keep_table;
+ min 
+-----
+   2
+(1 row)
+
+select min(id1) keep (DENSE_RANK FIRST ORDER BY id2 desc nulls first) from keep_table;
+ min 
+-----
+    
+(1 row)
+
+select min(id1) keep (DENSE_RANK LAST ORDER BY id2 desc nulls first) from keep_table;
+ min 
+-----
+   1
+(1 row)
+
+select min(id1) keep (DENSE_RANK FIRST ORDER BY id2 nulls first) from keep_table;
+ min 
+-----
+    
+(1 row)
+
+select min(id1) keep (DENSE_RANK FIRST ORDER BY id2 nulls last) from keep_table;
+ min 
+-----
+   1
+(1 row)
+
+insert into keep_table values (7, NULL, 24);
+insert into keep_table values (8, NULL, 24);
+select sum(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep_table;
+ sum 
+-----
+  15
+(1 row)
+
+select count(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep_table;
+ count 
+-------
+     2
+(1 row)
+
+\c regression;
+drop database if exists keep_func_adb;
+--only A_FORMAT support keep func
+create database keep_func_bdb with dbcompatibility = 'B';
+\c keep_func_bdb
+CREATE TABLE employees (department_id INT,manager_id INT,last_name varchar(50),hiredate varchar(50),SALARY INT);
+INSERT INTO employees VALUES(30, 100, 'Raphaely', '2017-07-01', 1700);
+INSERT INTO employees VALUES(30, 100, 'De Haan', '2018-05-01', 11000);
+INSERT INTO employees VALUES(40, 100, 'Errazuriz', '2017-07-21', 1400);
+INSERT INTO employees VALUES(50, 100, 'Hartstein', '2019-10-05', 14000);
+INSERT INTO employees VALUES(50, 100, 'Raphaely', '2017-07-22', 1700);
+INSERT INTO employees VALUES(50, 100, 'Weiss', '2019-10-05', 13500);
+INSERT INTO employees VALUES(90, 100, 'Russell', '2019-07-11', 13000);
+INSERT INTO employees VALUES(90, 100, 'Partners', '2018-12-01', 14000);
+explain (verbose on, costs off) SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees GROUP BY department_id ORDER BY 1 DESC;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best"
+               FROM employees ORDER BY department_id, salary, last_name;
+ERROR:  keep clause is supported only in A_FORMAT database.
+explain (verbose on, costs off) SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best"
+               FROM employees ORDER BY department_id, salary, last_name;
+ERROR:  keep clause is supported only in A_FORMAT database.
+-- test keep for agg and window agg.
+SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+\c regression;
+drop database if exists keep_func_bdb;
+create database keep_func_pgdb with dbcompatibility = 'PG';
+\c keep_func_pgdb
+CREATE TABLE employees (department_id INT,manager_id INT,last_name varchar(50),hiredate varchar(50),SALARY INT);
+INSERT INTO employees VALUES(30, 100, 'Raphaely', '2017-07-01', 1700);
+INSERT INTO employees VALUES(30, 100, 'De Haan', '2018-05-01', 11000);
+INSERT INTO employees VALUES(40, 100, 'Errazuriz', '2017-07-21', 1400);
+INSERT INTO employees VALUES(50, 100, 'Hartstein', '2019-10-05', 14000);
+INSERT INTO employees VALUES(50, 100, 'Raphaely', '2017-07-22', 1700);
+INSERT INTO employees VALUES(50, 100, 'Weiss', '2019-10-05', 13500);
+INSERT INTO employees VALUES(90, 100, 'Russell', '2019-07-11', 13000);
+INSERT INTO employees VALUES(90, 100, 'Partners', '2018-12-01', 14000);
+explain (verbose on, costs off) SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) "Worst", SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) "Best" FROM employees GROUP BY department_id ORDER BY 1 DESC;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best"
+               FROM employees ORDER BY department_id, salary, last_name;
+ERROR:  keep clause is supported only in A_FORMAT database.
+explain (verbose on, costs off) SELECT last_name,department_id,salary, SUM(salary) KEEP (DENSE_RANK FIRST ORDER BY salary) OVER (PARTITION BY department_id) "Worst",
+               SUM(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) OVER (PARTITION BY department_id) "Best"
+               FROM employees ORDER BY department_id, salary, last_name;
+ERROR:  keep clause is supported only in A_FORMAT database.
+-- test keep for agg and window agg.
+SELECT stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, stddev(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, variance(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, min(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, max(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) over(partition by department_id) FROM employees;
+ERROR:  keep clause is supported only in A_FORMAT database.
+SELECT department_id, count(salary) KEEP (DENSE_RANK LAST ORDER BY HIREDATE) FROM employees GROUP BY department_id;
+ERROR:  keep clause is supported only in A_FORMAT database.
+\c regression;
+drop database if exists keep_func_pgdb;

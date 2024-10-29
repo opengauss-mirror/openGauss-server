@@ -190,5 +190,6 @@ extern void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_t
 extern int64 tuplesort_get_peak_memory(Tuplesortstate* state);
 
 extern void tuplesort_workerfinish(Sharedsort *shared);
-
+extern void* TuplesortGetSortkeys(Tuplesortstate* state);
+extern int TuplesortGetNsortkey(Tuplesortstate* state);
 #endif /* TUPLESORT_H */

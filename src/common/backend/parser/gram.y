@@ -342,6 +342,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	DefElem				*defelt;
 	SortBy				*sortby;
 	WindowDef			*windef;
+        KeepClause                      *keep;
 	JoinExpr			*jexpr;
 	IndexElem			*ielem;
 	Alias				*alias;
@@ -761,6 +762,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <node>	func_application func_with_separator func_expr_common_subexpr index_functional_expr_key func_application_special functime_app
 %type <node>	func_expr func_expr_windowless
 %type <node>	common_table_expr
+%type <keep>    keep_clause
 %type <with>	with_clause opt_with_clause
 %type <list>	cte_list
 
@@ -931,7 +933,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	SHRINK USE_P
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
-	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
+	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DENSE_RANK DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DIAGNOSTICS DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
@@ -957,7 +959,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	JOIN
 
-	KEY KILL KEY_PATH KEY_STORE
+	KEEP KEY KILL KEY_PATH KEY_STORE
 
 	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
@@ -28844,7 +28846,7 @@ c_expr_noparen:		columnref								{ $$ = $1; }
  * (Note that many of the special SQL functions wouldn't actually make any
  * sense as functional index entries, but we ignore that consideration here.)
  */
-func_expr:	func_application within_group_clause filter_clause over_clause
+func_expr:	func_application within_group_clause filter_clause keep_clause over_clause
 				{
 					FuncCall *n = (FuncCall *) $1;
 
@@ -28894,8 +28896,16 @@ func_expr:	func_application within_group_clause filter_clause over_clause
 							}
 						}
 						n->agg_order = $2;
-						
-						WindowDef *wd = (WindowDef*) $4;
+						if ($4 != NULL)
+						{
+							const char* message = "KEEP for this function is not supported.";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("KEEP for this function is not supported."),
+								 parser_errposition(@2)));
+						}
+						WindowDef *wd = (WindowDef*) $5;
 						if (wd != NULL)
 							wd->frameOptions = FRAMEOPTION_NONDEFAULT | FRAMEOPTION_ROWS | 
 												FRAMEOPTION_START_UNBOUNDED_PRECEDING |
@@ -28932,13 +28942,31 @@ func_expr:	func_application within_group_clause filter_clause over_clause
 						n->agg_order = $2;
 						n->agg_within_group = TRUE;
 						n->agg_filter = $3;
-						n->over = $4;
+						n->over = $5;
 						$$ = (Node *) n;
 					}
 					else
 					{
 						n->agg_filter = $3;
-						n->over = $4;
+                                                n->aggKeep = $4;
+                                                if ($4 !=  NULL &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "MIN") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "MAX") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "SUM") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "AVG") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "COUNT") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "VARIANCE") != 0 &&
+                                                        pg_strcasecmp(strVal(linitial(n->funcname)), "STDDEV") != 0)
+                                                {
+                                                        const char* message = "KEEP for this function is not supported.";
+                                                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                                                        ereport(errstate,
+                                                                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                                         errmsg("KEEP for this function is not supported."),
+                                                                         parser_errposition(@2)));
+                                                }
+						n->over = $5;
+
 					}
 					if (pg_strcasecmp(strVal(linitial(n->funcname)), "group_concat") == 0)
 					{
@@ -28949,7 +28977,7 @@ func_expr:	func_application within_group_clause filter_clause over_clause
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								errmsg("group_concat is not yet supported in distributed database.")));
 #endif
-						WindowDef *wd = (WindowDef*) $4;
+						WindowDef *wd = (WindowDef*) $5;
 						if (wd != NULL) {
 							ereport(errstate,
 									(errcode(ERRCODE_SYNTAX_ERROR),
@@ -29933,6 +29961,39 @@ xmlexists_argument:
 					$$ = $4;
 				}
 		;
+
+keep_clause:
+                        KEEP '(' DENSE_RANK FIRST_P sort_clause ')'
+                                {
+                                        if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+                                               ereport(ERROR,
+                                                       (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                               errmsg("keep clause is supported only in A_FORMAT database.")));
+                                        KeepClause *n = makeNode(KeepClause);
+                                        n->rank_first = true;
+                                        n->keep_order =$5;
+                                        n->location = @1;
+ 
+                                        $$ = n; 
+                                }
+                        | KEEP '(' DENSE_RANK LAST_P sort_clause ')'
+                                {
+                                        if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+                                               ereport(ERROR,
+                                                       (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                               errmsg("keep clause is supported only in A_FORMAT database.")));
+                                        KeepClause *n = makeNode(KeepClause);
+                                        n->rank_first = false;
+                                        n->keep_order =$5;
+                                        n->location = @1;
+                                        
+                                        $$ = n; 
+                                }
+                        | /*EMPTY*/
+                                { 
+                                        $$ = NULL; 
+                                }
+                ;
 
 /*
  * Aggregate decoration clauses
@@ -31393,6 +31454,7 @@ unreserved_keyword:
 			| DELIMITER
 			| DELIMITERS
 			| DELTA
+			| DENSE_RANK
 			| DETERMINISTIC
 			| DIAGNOSTICS
 			| DICTIONARY
@@ -31501,6 +31563,7 @@ unreserved_keyword:
 			| IP
 			| ISNULL
 			| ISOLATION
+			| KEEP
 			| KEY
 			| KEY_PATH
 			| KEY_STORE

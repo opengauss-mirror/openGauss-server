@@ -1136,7 +1136,7 @@ test: pg_object_type dump_object_type
 
 # test for on update timestamp and generated column
 test: on_update_session1 on_update_session2
-
+test: keep_dense_rank
 test: ts_gb18030_utf8
 test: backup_tool_audit
 

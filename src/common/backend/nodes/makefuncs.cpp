@@ -644,6 +644,7 @@ FuncCall* makeFuncCall(List* funcname, List* args, int location)
     funcCall->agg_distinct = FALSE;
     funcCall->agg_order = NIL;
     funcCall->agg_filter = NULL;
+    funcCall->aggKeep = NULL;
     funcCall->over = NULL;
     funcCall->location = location;
 

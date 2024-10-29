@@ -485,6 +485,8 @@ void UniqueSql::JumbleExpr(pgssJumbleState* jstate, Node* node)
             APP_JUMB(expr->winfnoid);
             APP_JUMB(expr->winref);
             UniqueSql::JumbleExpr(jstate, (Node*)expr->args);
+            UniqueSql::JumbleExpr(jstate, (Node*)expr->keep_args);
+            UniqueSql::JumbleExpr(jstate, (Node*)expr->winkporder);
             break;
         }
         case T_InitList: {

@@ -2312,6 +2312,14 @@ static Aggref* _readAggref(void)
         READ_BOOL_FIELD(aggvariadic);
     }
     READ_UINT_FIELD(agglevelsup);
+    IF_EXIST(aggiskeep)
+    {
+        READ_BOOL_FIELD(aggiskeep);
+    }
+    IF_EXIST(aggkpfirst)
+    {
+        READ_BOOL_FIELD(aggkpfirst);
+    }
     READ_LOCATION_FIELD(location);
     READ_TYPEINFO_FIELD(aggtype);
     READ_TYPEINFO_FIELD(aggtrantype);
@@ -2372,6 +2380,15 @@ static WindowFunc* _readWindowFunc(void)
     READ_UINT_FIELD(winref);
     READ_BOOL_FIELD(winstar);
     READ_BOOL_FIELD(winagg);
+    IF_EXIST(keep_args) {
+        READ_NODE_FIELD(keep_args);
+    }
+    IF_EXIST(winkporder) {
+        READ_NODE_FIELD(winkporder);
+    }
+    IF_EXIST(winkpfirst) {
+        READ_BOOL_FIELD(winkpfirst);
+    }
     READ_LOCATION_FIELD(location);
 
     READ_TYPEINFO_FIELD(wintype);

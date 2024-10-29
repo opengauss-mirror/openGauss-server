@@ -689,6 +689,7 @@ static List* extractVecSubplan(Expr* node, List* resSubplan, List* subplans)
         case T_WindowFunc: {
             WindowFunc* wfunc = (WindowFunc*)node;
             resSubplan = extractVecSubplan((Expr*)wfunc->args, resSubplan, subplans);
+            resSubplan = extractVecSubplan((Expr*)wfunc->keep_args, resSubplan, subplans);
         } break;
         case T_FuncExpr: {
             FuncExpr* funcexpr = (FuncExpr*)node;
@@ -882,6 +883,7 @@ static List* extractSubplan(Expr* node, List* resSubplan, List* subplans)
         case T_WindowFunc: {
             WindowFunc* wfunc = (WindowFunc*)node;
             resSubplan = extractSubplan((Expr*)wfunc->args, resSubplan, subplans);
+            resSubplan = extractSubplan((Expr*)wfunc->keep_args, resSubplan, subplans);
         } break;
         case T_ArrayRef: {
             ArrayRef* aref = (ArrayRef*)node;

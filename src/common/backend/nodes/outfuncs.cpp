@@ -2588,6 +2588,10 @@ static void _outAggref(StringInfo str, Aggref* node)
     WRITE_CHAR_FIELD(aggkind);
     WRITE_BOOL_FIELD(aggvariadic);
     WRITE_UINT_FIELD(agglevelsup);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(aggiskeep);
+        WRITE_BOOL_FIELD(aggkpfirst);
+    }
     WRITE_LOCATION_FIELD(location);
 
     WRITE_TYPEINFO_FIELD(aggtype);
@@ -2630,6 +2634,11 @@ static void _outWindowFunc(StringInfo str, WindowFunc* node)
     WRITE_UINT_FIELD(winref);
     WRITE_BOOL_FIELD(winstar);
     WRITE_BOOL_FIELD(winagg);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        WRITE_NODE_FIELD(keep_args);
+        WRITE_NODE_FIELD(winkporder);
+        WRITE_BOOL_FIELD(winkpfirst);
+    }
     WRITE_LOCATION_FIELD(location);
 
     WRITE_TYPEINFO_FIELD(wintype);
@@ -4325,6 +4334,9 @@ static void _outFuncCall(StringInfo str, FuncCall* node)
     WRITE_NODE_FIELD(agg_order);
     if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
         WRITE_NODE_FIELD(agg_filter);
+    }
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        WRITE_NODE_FIELD(aggKeep);
     }
     WRITE_BOOL_FIELD(agg_within_group);
     WRITE_BOOL_FIELD(agg_star);
@@ -6159,6 +6171,14 @@ static void _outVecRemoteQuery(StringInfo str, VecRemoteQuery* node)
     WRITE_NODE_TYPE("VECREMOTEQUERY");
     _outCommonRemoteQueryPart<VecRemoteQuery>(str, node);
 }
+static void _outKeepClause(StringInfo str, KeepClause* node)
+{
+    WRITE_NODE_TYPE("KEEP");
+
+    WRITE_BOOL_FIELD(rank_first);
+    WRITE_NODE_FIELD(keep_order);
+    WRITE_LOCATION_FIELD(location);
+}
 #endif
 
 static void _outVecWindowAgg(StringInfo str, VecWindowAgg* node)
@@ -7236,6 +7256,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_UnrotateInCell:
                 _outUnrotateInCell(str, (UnrotateInCell*)obj);
+                break;
+            case T_KeepClause:
+                _outKeepClause(str, (KeepClause *)obj);
                 break;
             case T_PruningResult:
                 _outPruningResult(str, (PruningResult *)obj);

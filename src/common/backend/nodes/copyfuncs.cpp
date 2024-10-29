@@ -2695,6 +2695,10 @@ static Aggref* _copyAggref(const Aggref* from)
     COPY_SCALAR_FIELD(aggvariadic);
     COPY_SCALAR_FIELD(aggkind);
     COPY_SCALAR_FIELD(agglevelsup);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(aggiskeep);
+        COPY_SCALAR_FIELD(aggkpfirst);
+    }
     COPY_LOCATION_FIELD(location);
     COPY_NODE_FIELD(aggargtypes);
     COPY_SCALAR_FIELD(aggsplit);
@@ -2748,6 +2752,11 @@ static WindowFunc* _copyWindowFunc(const WindowFunc* from)
     COPY_SCALAR_FIELD(winref);
     COPY_SCALAR_FIELD(winstar);
     COPY_SCALAR_FIELD(winagg);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COPY_NODE_FIELD(keep_args);
+        COPY_NODE_FIELD(winkporder);
+        COPY_SCALAR_FIELD(winkpfirst);
+    }
     COPY_LOCATION_FIELD(location);
 
     return newnode;
@@ -4130,6 +4139,9 @@ static FuncCall* _copyFuncCall(const FuncCall* from)
     COPY_NODE_FIELD(args);
     COPY_NODE_FIELD(agg_order);
     COPY_NODE_FIELD(agg_filter);
+    if (t_thrd.proc->workingVersionNum >= KEEP_FUNC_VERSION_NUMBER) {
+        COPY_NODE_FIELD(aggKeep);
+    }
     COPY_SCALAR_FIELD(agg_star);
     COPY_SCALAR_FIELD(agg_distinct);
     COPY_SCALAR_FIELD(func_variadic);
@@ -7315,6 +7327,16 @@ static CleanConnStmt* _copyCleanConnStmt(const CleanConnStmt* from)
     return newnode;
 }
 
+static KeepClause* _copyKeepClause(const KeepClause* from)
+{
+    KeepClause* newnode = makeNode(KeepClause);
+
+    COPY_SCALAR_FIELD(rank_first);
+    COPY_NODE_FIELD(keep_order);
+    COPY_LOCATION_FIELD(location);
+
+    return newnode;
+}
 #endif
 
 static ErrorCacheEntry* _copyErrorCacheEntry(const ErrorCacheEntry* from)
@@ -9074,6 +9096,9 @@ void* copyObject(const void* from)
             break;
         case T_UnrotateInCell:
             retval = _copyUnrotateInCell((UnrotateInCell*)from);
+            break;
+        case T_KeepClause:
+            retval = _copyKeepClause((KeepClause*)from);
             break;
         case T_RangeSubselect:
             retval = _copyRangeSubselect((RangeSubselect*)from);

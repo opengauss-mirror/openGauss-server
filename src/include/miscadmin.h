@@ -161,6 +161,7 @@ extern const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM;
 extern const uint32 CHARBYTE_SEMANTIC_VERSION_NUMBER;
 extern const uint32 APPLY_JOIN_VERSION_NUMBER;
 extern const uint32 PUBLIC_SYNONYM_VERSION_NUMBER;
+extern const uint32 KEEP_FUNC_VERSION_NUMBER;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

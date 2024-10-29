@@ -11137,7 +11137,9 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
                 get_rule_expr((Node*)tle->expr, context, true);
             }
         }
-
+        if (aggref->aggiskeep) {
+            appendStringInfo(buf, ") KEEP(DENSE_RANK %s", (aggref->aggkpfirst ? "FIRST" : "LAST"));
+        }
         if (aggref->aggorder != NIL) {
             Assert(funcname);   
             if (pg_strcasecmp(funcname, "listagg") == 0) {
@@ -11314,6 +11316,48 @@ static void construct_windowClause(deparse_context* context)
     context->windowTList = node->plan.targetlist;
 }
 
+static void get_keep_orderby(List* argList, List* orderList, bool keepfirst, deparse_context* context)
+{
+    if (list_length(argList) <= 0) {
+        return;
+    }
+    StringInfo buf = context->buf;
+    const char* sep = NULL;
+    ListCell* arg_l = NULL, *arg_lc;
+    appendStringInfo(buf, ") KEEP(DENSE_RANK %s ORDER BY ", (keepfirst ? "FIRST" : "LAST"));
+    sep = "";
+    forboth (arg_lc, argList, arg_l, orderList) {
+        SortGroupClause* srt = (SortGroupClause*)lfirst(arg_l);
+        Node *arg = (Node*)lfirst(arg_lc);
+        Oid sortcoltype;
+        TypeCacheEntry* typentry = NULL;
+
+        appendStringInfoString(buf, sep);
+        get_rule_expr(arg, context, true);
+        sortcoltype = exprType(arg);
+        /* See whether operator is default < or > for datatype */
+        typentry = lookup_type_cache(sortcoltype, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
+        if (srt->sortop == typentry->lt_opr) {
+            /* ASC is default, so emit nothing for it */
+            if (srt->nulls_first)
+                appendStringInfo(buf, " NULLS FIRST");
+        } else if (srt->sortop == typentry->gt_opr) {
+            appendStringInfo(buf, " DESC");
+            /* DESC defaults to NULLS FIRST */
+            if (!srt->nulls_first)
+                appendStringInfo(buf, " NULLS LAST");
+        } else {
+            appendStringInfo(buf, " USING %s", generate_operator_name(srt->sortop, sortcoltype, sortcoltype));
+            /* be specific to eliminate ambiguity */
+            if (srt->nulls_first)
+                appendStringInfo(buf, " NULLS FIRST");
+            else
+                appendStringInfo(buf, " NULLS LAST");
+        }
+        sep = ", ";
+    }
+}
+
 /*
  * get_windowfunc_expr	- Parse back a WindowFunc node
  */
@@ -11323,14 +11367,14 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
     Oid argtypes[FUNC_MAX_ARGS];
     int nargs;
     List* argnames = NIL;
-    ListCell* l = NULL;
+    ListCell* arg_l = NULL;
     char* funcname = NULL;
 
     if (list_length(wfunc->args) > FUNC_MAX_ARGS)
         ereport(ERROR, (errcode(ERRCODE_TOO_MANY_ARGUMENTS), errmsg("too many arguments")));
     nargs = 0;
-    foreach (l, wfunc->args) {
-        Node* arg = (Node*)lfirst(l);
+    foreach (arg_l, wfunc->args) {
+        Node* arg = (Node*)lfirst(arg_l);
 
         if (IsA(arg, NamedArgExpr))
             argnames = lappend(argnames, ((NamedArgExpr*)arg)->name);
@@ -11347,6 +11391,8 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
     else
         get_rule_expr((Node*)wfunc->args, context, true);
 
+    get_keep_orderby(wfunc->keep_args, wfunc->winkporder, wfunc->winkpfirst, context);
+
     Assert(funcname);
     if (pg_strcasecmp(funcname, "listagg") == 0)
         appendStringInfoString(buf, ") WITHIN GROUP ");
@@ -11355,8 +11401,8 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
 
     construct_windowClause(context);
 
-    foreach (l, context->windowClause) {
-        WindowClause* wc = (WindowClause*)lfirst(l);
+    foreach (arg_l, context->windowClause) {
+        WindowClause* wc = (WindowClause*)lfirst(arg_l);
 
         if (wc->winref == wfunc->winref) {
             if (wc->name)
@@ -11370,7 +11416,7 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
             break;
         }
     }
-    if (l == NULL) {
+    if (arg_l == NULL) {
         if (context->windowClause != NULL)
             ereport(ERROR, (errmodule(MOD_OPT), (errcode(ERRCODE_WINDOWING_ERROR),
                         errmsg("could not find window clause for winref %u", wfunc->winref))));

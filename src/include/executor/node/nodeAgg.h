@@ -195,6 +195,8 @@ typedef struct AggStatePerAggData {
     ProjectionInfo *evalproj;	/* projection machinery */
     ProjectionInfo *combinedproj; /* projection machinery */
     TupleTableSlot *evalslot;	/* current input tuple */
+    TupleTableSlot **keep_slot;
+    bool is_keep;
 } AggStatePerAggData;
 
 /*

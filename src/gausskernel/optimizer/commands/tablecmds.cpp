@@ -11571,6 +11571,9 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
             List *expr_args = (List *)UpdateVarattnoAfterAddColumn((Node *)expr->args,
                 startattnum, endattnum, is_increase);
             newexpr->args = expr_args;
+            List *expr_keep_args = (List *)UpdateVarattnoAfterAddColumn((Node *)expr->keep_args,
+                startattnum, endattnum, is_increase);
+            newexpr->keep_args = expr_keep_args;
             return (Node *)newexpr;
         }
         case T_ArrayCoerceExpr: {
