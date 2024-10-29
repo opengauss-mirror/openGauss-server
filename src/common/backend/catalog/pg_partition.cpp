@@ -1035,26 +1035,17 @@ void freePartList(List* plist)
     ListCell* tuplecell = NULL;
     HeapTuple tuple = NULL;
 
-    foreach (tuplecell, plist) {
+    tuplecell = list_head(plist);
+    while (tuplecell != NULL) {
+        ListCell* tmp = tuplecell;
         tuple = (HeapTuple)lfirst(tuplecell);
+
+        tuplecell = lnext(tuplecell);
 
         if (HeapTupleIsValid(tuple)) {
             heap_freetuple_ext(tuple);
         }
-    }
-
-    if (PointerIsValid(plist)) {
-        pfree_ext(plist);
-    }
-}
-
-void freeSubPartList(List* plist)
-{
-    ListCell* cell = NULL;
-
-    foreach (cell, plist) {
-        List *subParts = (List *)lfirst(cell);
-        freePartList(subParts);
+        pfree(tmp);
     }
 
     if (PointerIsValid(plist)) {
