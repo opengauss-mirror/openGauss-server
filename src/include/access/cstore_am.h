@@ -36,7 +36,15 @@
 
 #define MAX_CU_PREFETCH_REQSIZ (64)
 
+#define GetUncompressErrMsg(ret_code) ((CU_ERR_CRC == (ret_code)) ? "incorrect checksum" : "incorrect magic")
+
 #define MaxDelBitmapSize ((int)DefaultFullCUSize / 8 + 1)
+
+#define MAX_IMCS_PAGES_PER_CU 1024
+#define MAX_POSSIBLE_ROW_PER_PAGE   \
+        (MaxHeapTuplesPerPage > MaxPossibleUHeapTuplesPerPage ? MaxHeapTuplesPerPage : MaxPossibleUHeapTuplesPerPage)
+#define IMCSTORE_MAX_ROW_PER_CU (MAX_IMCS_PAGES_PER_CU * MAX_POSSIBLE_ROW_PER_PAGE)
+#define MAX_IMCSTORE_DEL_BITMAP_SIZE ((int)IMCSTORE_MAX_ROW_PER_CU / 8 + 1)
 
 class BatchCUData;
 
@@ -150,9 +158,9 @@ public:
     virtual void Destroy();
 
     // Scan APIs
-    void InitScan(CStoreScanState *state, Snapshot snapshot = NULL);
+    virtual void InitScan(CStoreScanState *state, Snapshot snapshot = NULL);
     void InitReScan();
-    void InitPartReScan(Relation rel);
+    virtual void InitPartReScan(Relation rel);
     bool IsEndScan() const;
 
     // late read APIs
@@ -170,14 +178,14 @@ public:
     // LoadCUDescCtrl include maxCUDescNum for this load, because if we load all
     // it need big memory to hold
     // 
-    bool LoadCUDesc(_in_ int col, __inout LoadCUDescCtl *loadInfoPtr, _in_ bool prefetch_control,
+    virtual bool LoadCUDesc(_in_ int col, __inout LoadCUDescCtl *loadInfoPtr, _in_ bool prefetch_control,
                     _in_ Snapshot snapShot = NULL);
 
     // Get CU description information from CUDesc table
     bool GetCUDesc(_in_ int col, _in_ uint32 cuid, _out_ CUDesc *cuDescPtr, _in_ Snapshot snapShot = NULL);
 
     // Get tuple deleted information from VC CU description.
-    void GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot);
+    virtual void GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot);
 
     bool GetCURowCount(_in_ int col, __inout LoadCUDescCtl *loadCUDescInfoPtr, _in_ Snapshot snapShot);
     // Get live row numbers.
@@ -185,7 +193,7 @@ public:
 
     // Get CU data.
     // Note that the CU is pinned
-    CU *GetCUData(_in_ CUDesc *cuDescPtr, _in_ int colIdx, _in_ int valSize, _out_ int &slotId);
+    virtual CU *GetCUData(_in_ CUDesc *cuDescPtr, _in_ int colIdx, _in_ int valSize, _out_ int &slotId);
 
     CU *GetUnCompressCUData(Relation rel, int col, uint32 cuid, _out_ int &slotId, ForkNumber forkNum = MAIN_FORKNUM,
                             bool enterCache = true) const;
@@ -218,7 +226,7 @@ public:
     void FillScanBatchLateIfNeed(__inout VectorBatch *vecBatch);
 
     /* Set CU range for scan in redistribute. */
-    void SetScanRange();
+    virtual void SetScanRange();
 
     // Judge whether dead row
     bool IsDeadRow(uint32 cuid, uint32 row) const;
@@ -233,15 +241,15 @@ public:
     int GetLateReadCtid() const;
     void IncLoadCuDescCursor();
 
-public:  // public vars
-    // Inserted/Scan Relation
-    Relation m_relation;
-
-private:  // private methods.
     // CStore scan : pass vector to VE.
     void CStoreScan(CStoreScanState *state, VectorBatch *vecBatchOut);
     void CStoreMinMaxScan(CStoreScanState *state, VectorBatch *vecBatchOut);
 
+public:  // public vars
+    // Inserted/Scan Relation
+    Relation m_relation;
+
+protected: // inherited by IMCStore
     // The number of holding CUDesc is  max_loaded_cudesc
     // if we load all CUDesc once, the memory will not enough.
     // So we load CUdesc once for max_loaded_cudesc
@@ -262,7 +270,7 @@ private:  // private methods.
     // indicate whether only accessing system column or const column.
     // true, means that m_virtualCUDescInfo is a new and single object.
     // false, means that m_virtualCUDescInfo just a pointer to m_CUDescInfo[0].
-    // 
+    //
     inline bool OnlySysOrConstCol(void)
     {
         return ((m_colNum == 0 && m_sysColNum != 0) || m_onlyConstCol);
@@ -286,7 +294,11 @@ private:  // private methods.
     void CheckConsistenceOfCUDesc(int cudescIdx) const;
     void CheckConsistenceOfCUData(CUDesc *cuDescPtr, CU *cu, AttrNumber col) const;
 
-private:
+    /* for imcstore delta scan, not for cstore */
+    virtual bool ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatchOut);
+    void UnPinCUDataBlock(int slotId);
+
+protected:
     // control private memory used locally.
     // m_scanMemContext: for objects alive during the whole cstore-scan
     // m_perScanMemCnxt: for memory per heap table scan and temp space
@@ -373,7 +385,7 @@ private:
     uint32 m_startCUID; /* scan start CU ID. */
     uint32 m_endCUID;   /* scan end CU ID. */
 
-    unsigned char m_cuDelMask[MaxDelBitmapSize];
+    unsigned char *m_cuDelMask;
 
     // whether dead rows exist
     bool m_hasDeadRow;
@@ -399,11 +411,16 @@ private:
     // for late read
     // the first late read column idx which is filled with ctid.
     int m_laterReadCtidColIdx;
+
+    // for checking whether is imcstore, the default value is false.
+    bool m_isImcstore = false;
 };
 
 // CStore Scan interface for sequential scan
 // 
 extern void InitScanDeltaRelation(CStoreScanState *node, Snapshot snapshot);
+extern bool FillOneDeltaTuple(
+    CStoreScanState* node, VectorBatch* outBatch, TupleTableSlot* slot, MemoryContext tmpContext);
 extern void ScanDeltaStore(CStoreScanState *node, VectorBatch *outBatch, List *indexqual);
 extern void EndScanDeltaRelation(CStoreScanState *node);
 extern CStoreScanDesc CStoreBeginScan(Relation relation, int colNum, int16 *colIdx, Snapshot snapshot, bool scanDelta);

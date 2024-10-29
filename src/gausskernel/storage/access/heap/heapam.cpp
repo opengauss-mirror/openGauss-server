@@ -60,6 +60,9 @@
 #include "access/ustore/knl_upage.h"
 #include "access/ustore/knl_uscan.h"
 #include "access/ustore/knl_uvisibility.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
@@ -9149,6 +9152,15 @@ static void heap_xlog_delete(XLogReaderState* record)
         bool isTupleLockUpgrade = (XLogRecGetInfo(record) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
         HeapXlogDeleteOperatorPage(&buffer, (void *)maindata, recordxid, isTupleLockUpgrade);
+#ifdef ENABLE_HTAP
+        if (HAVE_HTAP_TABLES) {
+            DecodedBkpBlock* bkpb = &record->blocks[HEAP_DELETE_ORIG_BLOCK_NUM];
+            Oid rel = bkpb->rnode.relNode;
+            ItemPointerData ctid;
+            ItemPointerSet(&ctid, buffer.blockinfo.blkno, xlrec->offnum);
+            IMCStoreDeleteHook(rel, &ctid, recordxid);
+        }
+#endif
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -9207,6 +9219,13 @@ static void heap_xlog_insert(XLogReaderState* record)
         HeapXlogInsertOperatorPage(
             &buffer, (void*)maindata, isinit, (void*)blkdata, blkdatalen, recordxid, &freespace, tde);
 
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES) {
+        ItemPointerData ctid;
+        ItemPointerSet(&ctid, blkno, xlrec->offnum);
+        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid);
+    }
+#endif
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -9402,6 +9421,15 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         HeapXlogUpdateOperatorNewpage(&nbuffer, (void *)maindata, isinit, (void *)blkdata, blkdatalen, recordxid,
                                       &freespace, isTupleLockUpgrade, tde);
 
+#ifdef ENABLE_HTAP
+        if (HAVE_HTAP_TABLES) {
+            ItemPointerData ctid;
+            ItemPointerData newCtid;
+            ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
+            ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
+            IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, recordxid);
+        }
+#endif
 
         MarkBufferDirty(nbuffer.buf);
     }

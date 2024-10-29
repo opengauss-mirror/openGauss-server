@@ -29,6 +29,11 @@
 #include "utils/resowner.h"
 #include "storage/ipc.h"
 #include "miscadmin.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcustorage.h"
+#include "storage/smgr/relfilenode.h"
+#endif
 
 const int MAX_LOOPS = 16;
 
@@ -125,9 +130,19 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
     m_cstoreCurrentSize = 0;
     m_cstoreMaxSize = cache_size;
 
-    total_slots = Min(cache_size / each_block_size, MAX_CACHE_SLOT_COUNT);
-    m_CacheSlots = (char *)palloc0(total_slots * each_slot_length);
-    m_CacheDesc = (CacheDesc *)palloc0(total_slots * sizeof(CacheDesc));
+    total_slots = isImcs ? (cache_size / each_block_size) * MaxHeapAttributeNumber
+                         : Min(cache_size / each_block_size, MAX_CACHE_SLOT_COUNT);
+
+    if (isImcs) {
+        m_CacheSlots = (char *)palloc0_huge(CurrentMemoryContext, total_slots * each_slot_length);
+        m_CacheDesc = (CacheDesc *)palloc0_huge(CurrentMemoryContext, total_slots * sizeof(CacheDesc));
+        MemSetAligned(m_CacheSlots, 0, total_slots * each_slot_length);
+        MemSetAligned(m_CacheDesc, 0, total_slots * sizeof(CacheDesc));
+    } else {
+        m_CacheSlots = (char *)palloc0(total_slots * each_slot_length);
+        m_CacheDesc = (CacheDesc *)palloc0(total_slots * sizeof(CacheDesc));
+    }
+
     m_CacheSlotsNum = total_slots;
     m_slot_length = each_slot_length;
     for (i = 0; i < total_slots; ++i) {
@@ -172,7 +187,12 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
     securec_check(rc, "\0", "\0");
 
     char hash_name[128] = {0};
-    rc = snprintf_s(hash_name, sizeof(hash_name), 127, "Cache Buffer Lookup Table(%d)", type);
+    if (isImcs) {
+        rc = snprintf_s(hash_name, sizeof(hash_name), 127, "Imcstore Cache Buffer Lookup Table(%d)", type);
+    } else {
+        rc = snprintf_s(hash_name, sizeof(hash_name), 127, "Cache Buffer Lookup Table(%d)", type);
+    }
+    
     securec_check_ss(rc, "\0", "\0");
 
     /* BufferTag maps to Buffer */
@@ -463,9 +483,44 @@ CacheSlotId_t CacheMgr::EvictCacheBlock(int size, int retryNum)
     }
     UnlockSweep();
 
+#ifdef ENABLE_HTAP
+    if (isImcs) {
+        EvictCacheCUIntoDisk(slotId);
+    }
+#endif
+
     // purposely returning pinned Invalid slot !!!
     return slotId;
 }
+
+#ifdef ENABLE_HTAP
+void CacheMgr::EvictCacheCUIntoDisk(CacheSlotId_t slotId)
+{
+    Assert(slotId >= 0 && slotId <= m_CaccheSlotMax && slotId < m_CacheSlotsNum);
+    Assert(m_CacheDesc[slotId].m_slot_id == slotId);
+
+    RelFileNode rnode;
+    int colId;
+    int32 cuId;
+    CU *cu = (CU *)(&m_CacheSlots[slotId * m_slot_length]);
+    ParseInfosByCacheTag(&m_CacheDesc[slotId].m_cache_tag, &rnode, &colId, &cuId);
+
+    IMCSDesc* imcsDesc = cu->imcsDesc;
+    CFileNode cFileNode(rnode, colId, MAIN_FORKNUM);
+    IMCUStorage* imcuStorage = New(CurrentMemoryContext)IMCUStorage(cFileNode);
+    CUDesc* cuDesc = imcsDesc->rowGroups[cuId]->m_cuDescs[colId];
+
+    /* in imcstore, cache cu always uncompress */
+    Assert(!cu->m_cache_compressed);
+    cu->Compress(cuDesc->row_count, 0, ALIGNOF_CUSIZE);
+    imcuStorage->SaveCU(cu->m_compressedBuf, cuId, cu->GetCUSize());
+
+    pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDesc->cu_size);
+    pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInMem, 1);
+    pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInDisk, (uint64)cuDesc->cu_size);
+    pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInDisk, 1);
+}
+#endif
 
 /*
  * @Description:  get an Invalid cache block, first try get from free list cache, if without space,
@@ -798,6 +853,11 @@ bool CacheMgr::PinCacheBlock(CacheSlotId_t slotId)
     if (m_cache_type == MGR_CACHE_TYPE_INDEX) {
         ResourceOwnerEnlargeMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#ifdef ENABLE_HTAP
+    } else if (isImcs) {
+        ResourceOwnerEnlargeIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
+        ResourceOwnerRememberIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#endif
     } else {
         ResourceOwnerEnlargeDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
@@ -821,6 +881,11 @@ void CacheMgr::PinCacheBlock_Locked(CacheSlotId_t slotId)
     if (m_cache_type == MGR_CACHE_TYPE_INDEX) {
         ResourceOwnerEnlargeMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#ifdef ENABLE_HTAP
+    } else if (isImcs) {
+        ResourceOwnerEnlargeIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
+        ResourceOwnerRememberIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#endif
     } else {
         ResourceOwnerEnlargeDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
@@ -846,6 +911,10 @@ void CacheMgr::UnPinCacheBlock(CacheSlotId_t slotId)
 
     if (m_cache_type == MGR_CACHE_TYPE_INDEX) {
         ResourceOwnerForgetMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#ifdef ENABLE_HTAP
+    } else if (isImcs) {
+        ResourceOwnerForgetIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+#endif
     } else {
         ResourceOwnerForgetDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
     }

@@ -1987,6 +1987,9 @@ bool IsIOCostNode(NodeTag node)
     switch (node) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

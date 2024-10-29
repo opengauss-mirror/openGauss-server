@@ -267,9 +267,10 @@ OrcDataValue* DataCacheMgr::GetORCDataBuf(int cuSlotId)
 bool DataCacheMgr::ReserveDataBlockWithSlotId(CacheSlotId_t slotId)
 {
     if (m_cache_mgr->ReserveCacheBlockWithSlotId(slotId)) {
-        Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO) ||
-               t_thrd.storage_cxt.CacheBlockInProgressIO == slotId);
-        t_thrd.storage_cxt.CacheBlockInProgressIO = slotId;
+        CacheSlotId_t ioCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+        GetCacheBlockInProgress(&ioCacheBlockInProgress, NULL);
+        Assert(!IsValidCacheSlotID(ioCacheBlockInProgress) || ioCacheBlockInProgress == slotId);
+        SetCacheBlockInProgress(slotId, CACHE_BLOCK_INVALID_IDX);
         return true;
     }
 
@@ -285,9 +286,10 @@ bool DataCacheMgr::ReserveDataBlockWithSlotId(CacheSlotId_t slotId)
 bool DataCacheMgr::ReserveCstoreDataBlockWithSlotId(CacheSlotId_t slotId)
 {
     if (m_cache_mgr->ReserveCstoreCacheBlockWithSlotId(slotId)) {
-        Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO) ||
-               t_thrd.storage_cxt.CacheBlockInProgressIO == slotId);
-        t_thrd.storage_cxt.CacheBlockInProgressIO = slotId;
+        CacheSlotId_t ioCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+        GetCacheBlockInProgress(&ioCacheBlockInProgress, NULL);
+        Assert(!IsValidCacheSlotID(ioCacheBlockInProgress) || ioCacheBlockInProgress == slotId);
+        SetCacheBlockInProgress(slotId, CACHE_BLOCK_INVALID_IDX);
         return true;
     }
 
@@ -311,8 +313,10 @@ CacheSlotId_t DataCacheMgr::ReserveDataBlock(DataSlotTag* dataSlotTag, int size,
     slot = m_cache_mgr->ReserveCacheBlock(&cacheTag, size, hasFound);
     if (!hasFound) {
         /* remember block slot in process */
-        Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO));
-        t_thrd.storage_cxt.CacheBlockInProgressIO = slot;
+        CacheSlotId_t ioCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+        GetCacheBlockInProgress(&ioCacheBlockInProgress, NULL);
+        Assert(!IsValidCacheSlotID(ioCacheBlockInProgress));
+        SetCacheBlockInProgress(slot, CACHE_BLOCK_INVALID_IDX);
     }
     if (cacheTag.type == CACHE_COlUMN_DATA) {
         CUSlotTag* cuslotTag = &dataSlotTag->slotTag.cuSlotTag;
@@ -389,23 +393,26 @@ void DataCacheMgr::AbortCU(CacheSlotId_t slot)
  */
 void DataCacheMgr::TerminateCU(bool abort)
 {
+    CacheSlotId_t ioCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+    CacheSlotId_t uncompresssCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+
     if (abort) {
-        if (IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO)) {
+        GetCacheBlockInProgress(&ioCacheBlockInProgress, &uncompresssCacheBlockInProgress);
+        if (IsValidCacheSlotID(ioCacheBlockInProgress)) {
             /* invalid this block slot, and include IO state and lock owner */
-            Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress));
-            AbortCU(t_thrd.storage_cxt.CacheBlockInProgressIO);
+            Assert(!IsValidCacheSlotID(uncompresssCacheBlockInProgress));
+            AbortCU(ioCacheBlockInProgress);
         }
-        if (IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress)) {
+        if (IsValidCacheSlotID(uncompresssCacheBlockInProgress)) {
             /* invalid this block slot, and don't care IO state or lock owner */
-            Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO));
-            m_cache_mgr->SetCacheBlockErrorState(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
-            CU* cuPtr = GetCUBuf(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
+            Assert(!IsValidCacheSlotID(ioCacheBlockInProgress));
+            m_cache_mgr->SetCacheBlockErrorState(uncompresssCacheBlockInProgress);
+            CU* cuPtr = GetCUBuf(uncompresssCacheBlockInProgress);
             cuPtr->FreeSrcBuf();
         }
     }
     /* clear record */
-    t_thrd.storage_cxt.CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
-    t_thrd.storage_cxt.CacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+    ResetCacheBlockInProgress(true);
 }
 
 /*
@@ -413,28 +420,31 @@ void DataCacheMgr::TerminateCU(bool abort)
  */
 void DataCacheMgr::TerminateVerifyCU()
 {
-    if (IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO)) {
+    CacheSlotId_t ioCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+    CacheSlotId_t uncompresssCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+    GetCacheBlockInProgress(&ioCacheBlockInProgress, &uncompresssCacheBlockInProgress);
+
+    if (IsValidCacheSlotID(ioCacheBlockInProgress)) {
         /* invalid this block slot, and include IO state and lock owner */
-        Assert (!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress));
-        Assert(m_cache_mgr->CstoreIOLockHeldByMe(t_thrd.storage_cxt.CacheBlockInProgressIO));
-        AbortCU(t_thrd.storage_cxt.CacheBlockInProgressIO);
+        Assert (!IsValidCacheSlotID(uncompresssCacheBlockInProgress));
+        Assert(m_cache_mgr->CstoreIOLockHeldByMe(ioCacheBlockInProgress));
+        AbortCU(ioCacheBlockInProgress);
         HOLD_INTERRUPTS();  /* match the upcoming RESUME_INTERRUPTS */
-        m_cache_mgr->ReleaseCstoreIOLock(t_thrd.storage_cxt.CacheBlockInProgressIO);
+        m_cache_mgr->ReleaseCstoreIOLock(ioCacheBlockInProgress);
     }
-    if (IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress)) {
+    if (IsValidCacheSlotID(uncompresssCacheBlockInProgress)) {
         /* invalid this block slot, and don't care IO state or lock owner */
-        Assert (!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressIO));
-        Assert (m_cache_mgr->CompressLockHeldByMe(t_thrd.storage_cxt.CacheBlockInProgressUncompress));
-        m_cache_mgr->SetCacheBlockErrorState(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
-        CU* cuPtr = GetCUBuf(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
+        Assert (!IsValidCacheSlotID(ioCacheBlockInProgress));
+        Assert (m_cache_mgr->CompressLockHeldByMe(uncompresssCacheBlockInProgress));
+        m_cache_mgr->SetCacheBlockErrorState(uncompresssCacheBlockInProgress);
+        CU* cuPtr = GetCUBuf(uncompresssCacheBlockInProgress);
         cuPtr->FreeSrcBuf();
         HOLD_INTERRUPTS();  /* match the upcoming RESUME_INTERRUPTS */
-        m_cache_mgr->ReleaseCompressLock(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
+        m_cache_mgr->ReleaseCompressLock(uncompresssCacheBlockInProgress);
     }
 
     /* clear record */
-    t_thrd.storage_cxt.CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
-    t_thrd.storage_cxt.CacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+    ResetCacheBlockInProgress(true);
 
     return;
 }
@@ -480,8 +490,10 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
     }
 
     /* remember this slot id */
-    Assert(!IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress));
-    t_thrd.storage_cxt.CacheBlockInProgressUncompress = slotId;
+    CacheSlotId_t uncompresssCacheBlockInProgress = CACHE_BLOCK_INVALID_IDX;
+    GetCacheBlockInProgress(NULL, &uncompresssCacheBlockInProgress);
+    Assert(!IsValidCacheSlotID(uncompresssCacheBlockInProgress));
+    SetCacheBlockInProgress(CACHE_BLOCK_INVALID_IDX, slotId);
 
     if (cuPtr->CheckCrc() == false) {
         /* CRC check failed */
@@ -563,7 +575,7 @@ void DataCacheMgr::DataBlockCompleteIO(CacheSlotId_t slotId)
     m_cache_mgr->CompleteIO(slotId);
 
     /* clear block slot in IO progress, aio completer thread does not use it */
-    t_thrd.storage_cxt.CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
+    ResetCacheBlockInProgress(false);
 
     return;
 }
@@ -774,6 +786,53 @@ void DataCacheMgr::AcquireCompressLock(CacheSlotId_t slotId)
 void DataCacheMgr::ReleaseCompressLock(CacheSlotId_t slotId)
 {
     return m_cache_mgr->ReleaseCompressLock(slotId);
+}
+
+/*
+ * @Description:  get global block slot in progress
+ * @IN ioCacheBlock: global cache block slot
+ * @IN uncompressCacheBlock: global uncompress block slot
+ * @See also:
+ */
+void DataCacheMgr::GetCacheBlockInProgress(CacheSlotId_t *ioCacheBlock, CacheSlotId_t *uncompressCacheBlock)
+{
+    Assert(ioCacheBlock || uncompressCacheBlock);
+    if (ioCacheBlock) {
+        *ioCacheBlock = t_thrd.storage_cxt.CacheBlockInProgressIO;
+    }
+    if (uncompressCacheBlock) {
+        *uncompressCacheBlock = t_thrd.storage_cxt.CacheBlockInProgressUncompress;
+    }
+}
+
+/*
+ * @Description:  set global block slot in progress
+ * @IN ioCacheBlock: global cache block slot
+ * @IN uncompressCacheBlock: global uncompress block slot
+ * @See also:
+ */
+void DataCacheMgr::SetCacheBlockInProgress(CacheSlotId_t ioCacheBlock, CacheSlotId_t uncompressCacheBlock)
+{
+    if (IsValidCacheSlotID(ioCacheBlock)) {
+        t_thrd.storage_cxt.CacheBlockInProgressIO = ioCacheBlock;
+    }
+    if (IsValidCacheSlotID(uncompressCacheBlock)) {
+        t_thrd.storage_cxt.CacheBlockInProgressUncompress = uncompressCacheBlock;
+    }
+}
+
+/*
+ * @Description:  reset global block slot in progress
+ * @IN ioCacheBlock: global cache block slot
+ * @IN uncompressCacheBlock: global uncompress block slot
+ * @See also:
+ */
+void DataCacheMgr::ResetCacheBlockInProgress(bool resetUncompress)
+{
+    t_thrd.storage_cxt.CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
+    if (resetUncompress) {
+        t_thrd.storage_cxt.CacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+    }
 }
 
 /*

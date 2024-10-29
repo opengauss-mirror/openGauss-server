@@ -196,6 +196,10 @@
 #include "storage/spin.h"
 #endif
 
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
+
 #include "access/twophase.h"
 #include "access/ustore/knl_undoworker.h"
 #include "alarm/alarm.h"
@@ -4280,6 +4284,14 @@ static int ServerLoop(void)
                     g_instance.pid_cxt.WalWriterAuxiliaryPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
         }
 
+#ifdef ENABLE_HTAP
+        if (g_instance.pid_cxt.IMCStoreVacuumPID == 0 && pmState == PM_RUN) {
+            g_instance.pid_cxt.IMCStoreVacuumPID = initialize_util_thread(IMCSTORE_VACUUM);
+            ereport(LOG,
+                (errmsg("ServerLoop create ImcsVacuum(%lu) for pmState:%u, ServerMode:%u.",
+                    g_instance.pid_cxt.IMCStoreVacuumPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
+        }
+#endif
         /*
          * let cbm writer thread exit if enable_cbm_track gus is switched off
          */
@@ -6067,6 +6079,12 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             }
         }
 
+#ifdef ENABLE_HTAP
+        if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
+            signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGHUP);
+        }
+#endif    
+    
         if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID != 0) {
             signal_child(g_instance.pid_cxt.sharedStorageXlogCopyThreadPID, SIGHUP);
         }
@@ -6379,6 +6397,12 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
             }
 
+#ifdef ENABLE_HTAP
+            if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
+                signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+            }
+#endif        
+
             if (fencedMasterPID != 0) {
                 if (kill(fencedMasterPID, SIGTERM) < 0)
 		            elog(DEBUG3, "kill(%ld,%d) failed: %m", (long) fencedMasterPID, SIGTERM);
@@ -6630,6 +6654,11 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
+#ifdef ENABLE_HTAP
+                if (g_instance.pid_cxt.IMCStoreVacuumPID != 0)
+                    signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+#endif     
+
                 if (g_instance.pid_cxt.CBMWriterPID != 0) {
                     Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
@@ -6852,6 +6881,12 @@ dms_demote:
                     if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
+#ifdef ENABLE_HTAP
+                    if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
+                        signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+                    }
+#endif        
+
                     /* shut down all backends and autovac workers */
                     (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
@@ -6931,6 +6966,12 @@ dms_demote:
 
                     if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+#ifdef ENABLE_HTAP
+                    if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
+                        signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+                    }
+#endif
 
                     pmState = PM_WAIT_BACKENDS;
                 }
@@ -7183,6 +7224,12 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
                 g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
+
+#ifdef ENABLE_HTAP
+            if (g_instance.pid_cxt.IMCStoreVacuumPID == 0) {
+                g_instance.pid_cxt.IMCStoreVacuumPID = initialize_util_thread(IMCSTORE_VACUUM);
+            }
+#endif
 
             if (g_instance.pid_cxt.CBMWriterPID == 0 && !dummyStandbyMode &&
                 u_sess->attr.attr_storage.enable_cbm_tracking) {
@@ -7903,6 +7950,17 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+#ifdef ENABLE_HTAP
+        if (pid == g_instance.pid_cxt.IMCStoreVacuumPID) {
+            g_instance.pid_cxt.IMCStoreVacuumPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus))
+                LogChildExit(LOG, _("imcstore vacuum process"), pid, exitstatus);
+
+            continue;
+        }
+#endif
+
         if (pid == g_instance.pid_cxt.CPMonitorPID) {
             g_instance.pid_cxt.CPMonitorPID = 0;
 
@@ -8143,6 +8201,10 @@ static const char* GetProcName(ThreadId pid)
         return "stack perf process";
     else if (pid == g_instance.pid_cxt.CfsShrinkerPID)
         return "cfs shrinker process";
+#ifdef ENABLE_HTAP
+    else if (pid == g_instance.pid_cxt.IMCStoreVacuumPID)
+        return "imcstore vacuum process";
+#endif
     else if (pg_auditor_thread(pid)) {
         return "system auditor process";
     }
@@ -8547,6 +8609,9 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.CheckpointerPID == 0);
     Assert(g_instance.pid_cxt.WalWriterPID == 0);
     Assert(g_instance.pid_cxt.WalWriterAuxiliaryPID == 0);
+#ifdef ENABLE_HTAP
+    Assert(g_instance.pid_cxt.IMCStoreVacuumPID == 0);
+#endif
     Assert(g_instance.pid_cxt.AutoVacPID == 0);
     Assert(g_instance.pid_cxt.PgJobSchdPID == 0);
     Assert(g_instance.pid_cxt.CBMWriterPID == 0);
@@ -8639,6 +8704,9 @@ static void PostmasterStateMachine(void)
             && g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
 #endif   /* ENABLE_MULTIPLE_NODES */
 
+#ifdef ENABLE_HTAP
+            g_instance.pid_cxt.IMCStoreVacuumPID == 0 &&
+#endif
             g_instance.pid_cxt.UndoLauncherPID == 0 && g_instance.pid_cxt.UndoRecyclerPID == 0 &&
             g_instance.pid_cxt.exrto_recycler_pid == 0 && g_instance.pid_cxt.GlobalStatsPID == 0 &&
 #ifndef ENABLE_MULTIPLE_NODES
@@ -10494,6 +10562,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
+#ifdef ENABLE_HTAP
+        if (g_instance.pid_cxt.IMCStoreVacuumPID != 0)
+            signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+#endif
+
         /* WLM threads need to release resources, such as long-holding table locks */
         if (g_instance.pid_cxt.WLMCollectPID != 0) {
             WLMProcessThreadShutDown();
@@ -10565,6 +10638,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+#ifdef ENABLE_HTAP
+        if (g_instance.pid_cxt.IMCStoreVacuumPID != 0)
+            signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+#endif        
 
         /* WLM threads need to release resources, such as long-holding table locks */
         if (g_instance.pid_cxt.WLMCollectPID != 0) {
@@ -10675,6 +10753,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+#ifdef ENABLE_HTAP
+        if (g_instance.pid_cxt.IMCStoreVacuumPID != 0)
+            signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
+#endif
 
         if (SS_PERFORMING_FAILOVER) {
             pmState = PM_WAIT_BACKENDS;
@@ -13662,6 +13745,11 @@ static void SetAuxType()
         case EXRTO_RECYCLER:
             t_thrd.bootstrap_cxt.MyAuxProcType = ExrtoRecyclerProcess;
             break;
+#ifdef ENABLE_HTAP
+        case IMCSTORE_VACUUM:
+            t_thrd.bootstrap_cxt.MyAuxProcType = IMCStoreVacuumProcess;
+            break;
+#endif
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
@@ -13808,7 +13896,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
      * InitPostgres pushups, but there are a couple of things that need to get
      * lit up even in an auxiliary process.
      */
-    if (thread_role != LOGICAL_READ_RECORD && thread_role != PARALLEL_DECODE) {
+    if (thread_role != LOGICAL_READ_RECORD && thread_role != PARALLEL_DECODE
+#ifdef ENABLE_HTAP
+        && thread_role != IMCSTORE_VACUUM
+#endif
+     ) {
         if (IsUnderPostmaster) {
             /*
              * Create a PGPROC so we can use LWLocks.  In the EXEC_BACKEND case,
@@ -14253,6 +14345,17 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             GaussDbAuxiliaryThreadMain<thread_role>(arg);
             proc_exit(0);
         } break;
+#ifdef ENABLE_HTAP
+        case IMCSTORE_VACUUM: {
+            t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+            InitProcessAndShareMemory();
+            IMCStoreVacuumWorkerMain();
+            proc_exit(0);
+        } break;
+#endif
 #ifdef USE_SPQ
         case SPQ_COORDINATOR: {
             spq_adps_coordinator_thread_main();
@@ -14778,6 +14881,9 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<COMM_POOLER_CLEAN>, COMM_POOLER_CLEAN, "COMMpoolcleaner", "communicator pooler auto cleaner" },
     { GaussDbThreadMain<LOGICAL_READ_RECORD>, LOGICAL_READ_RECORD, "LogicalReader", "logical reader" },
     { GaussDbThreadMain<PARALLEL_DECODE>, PARALLEL_DECODE, "LogicalDecoder", "logical decoder" },
+#ifdef ENABLE_HTAP
+    { GaussDbThreadMain<IMCSTORE_VACUUM>, IMCSTORE_VACUUM, "imcstorevacuum", "imcstore vacuum" },
+#endif
     { GaussDbThreadMain<UNDO_RECYCLER>, UNDO_RECYCLER, "undorecycler", "undo recycler" },
     { GaussDbThreadMain<UNDO_LAUNCHER>, UNDO_LAUNCHER, "asyncundolaunch", "async undo launcher" },
     { GaussDbThreadMain<UNDO_WORKER>, UNDO_WORKER, "asyncundoworker", "async undo worker" },

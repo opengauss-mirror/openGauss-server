@@ -134,6 +134,12 @@ typedef struct ResourceOwnerData {
     CacheSlotId_t* dataCacheSlots; /* dynamically allocated array */
     int maxDataCacheSlots;         /* currently allocated array size */
 
+#ifdef ENABLE_HTAP
+    int nIMCSDataCacheSlots;           /* number of owned data cache block pins */
+    CacheSlotId_t* imcsDataCacheSlots; /* dynamically allocated array */
+    int maxIMCSDataCacheSlots;         /* currently allocated array size */
+#endif
+
     int nMetaCacheSlots;           /* number of owned meta cache block pins */
     CacheSlotId_t* metaCacheSlots; /* dynamically allocated array */
     int maxMetaCacheSlots;         /* currently allocated array size */
@@ -644,6 +650,13 @@ static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
         ResourceOwnerRememberDataCacheSlot(target, source->dataCacheSlots[--source->nDataCacheSlots]);
     }
 
+#ifdef ENABLE_HTAP
+    while (source->nIMCSDataCacheSlots > 0) {
+        ResourceOwnerEnlargeIMCSDataCacheSlot(target);
+        ResourceOwnerRememberIMCSDataCacheSlot(target, source->imcsDataCacheSlots[--source->nIMCSDataCacheSlots]);
+    }
+#endif
+
     while (source->nMetaCacheSlots > 0) {
         ResourceOwnerEnlargeMetaCacheSlot(target);
         ResourceOwnerRememberMetaCacheSlot(target, source->metaCacheSlots[--source->nMetaCacheSlots]);
@@ -827,6 +840,29 @@ void ResourceOwnerEnlargeDataCacheSlot(ResourceOwner owner)
     }
 }
 
+#ifdef ENABLE_HTAP
+/*
+ * same as ResourceOwnerEnlargeDataCacheSlot()
+ */
+void ResourceOwnerEnlargeIMCSDataCacheSlot(ResourceOwner owner)
+{
+    int newmax;
+
+    if (owner == NULL || owner->nIMCSDataCacheSlots < owner->maxIMCSDataCacheSlots)
+        return; /* nothing to do */
+
+    if (owner->imcsDataCacheSlots == NULL) {
+        newmax = 16;
+        owner->imcsDataCacheSlots = (CacheSlotId_t*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(CacheSlotId_t));
+        owner->maxIMCSDataCacheSlots = newmax;
+    } else {
+        newmax = owner->maxIMCSDataCacheSlots * 2;
+        owner->imcsDataCacheSlots = (Buffer*)repalloc(owner->imcsDataCacheSlots, newmax * sizeof(Buffer));
+        owner->maxIMCSDataCacheSlots = newmax;
+    }
+}
+#endif
+
 /*
  * same as ResourceOwnerEnlargeCacheSlot()
  */
@@ -884,6 +920,20 @@ void ResourceOwnerRememberDataCacheSlot(ResourceOwner owner, CacheSlotId_t sloti
     }
 }
 
+#ifdef ENABLE_HTAP
+/*
+ * same as ResourceOwnerRememberDataCacheSlot()
+ */
+void ResourceOwnerRememberIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
+{
+    if (owner != NULL) {
+        Assert(owner->nIMCSDataCacheSlots < owner->maxIMCSDataCacheSlots);
+        owner->imcsDataCacheSlots[owner->nIMCSDataCacheSlots] = slotid;
+        owner->nIMCSDataCacheSlots++;
+    }
+}
+#endif
+
 /*
  * same as ResourceOwnerRememberDataCacheSlot()
  */
@@ -929,6 +979,39 @@ void ResourceOwnerForgetDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
                 errmsg("data cache block %d is not owned by resource owner %s", slotid, owner->name)));
     }
 }
+
+#ifdef ENABLE_HTAP
+/*
+ * same as ResourceOwnerForgetDataCacheSlot()
+ */
+void ResourceOwnerForgetIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
+{
+    if (owner != NULL && owner->valid) {
+        CacheSlotId_t* dataCacheSlots = owner->imcsDataCacheSlots;
+        int nb1 = owner->nIMCSDataCacheSlots - 1;
+        int i;
+
+        /*
+         * Scan back-to-front because it's more likely we are releasing a
+         * recently pinned buffer.	This isn't always the case of course, but
+         * it's the way to bet.
+         */
+        for (i = nb1; i >= 0; i--) {
+            if (dataCacheSlots[i] == slotid) {
+                while (i < nb1) {
+                    dataCacheSlots[i] = dataCacheSlots[i + 1];
+                    i++;
+                }
+                owner->nIMCSDataCacheSlots = nb1;
+                return;
+            }
+        }
+        ereport(ERROR,
+            (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+                errmsg("data cache block %d is not owned by resource owner %s", slotid, owner->name)));
+    }
+}
+#endif
 
 /*
  * same as ResourceOwnerForgetDataCacheSlot()

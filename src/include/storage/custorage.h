@@ -30,10 +30,16 @@
 #include "storage/smgr/fd.h"
 #include "storage/cstore/cstorealloc.h"
 
+extern void LoadCUReportIOError(
+    const char* fileName, uint64 readOffset, int readBytes, int expectedBytes, int expectedTotalBytes);
+extern void SaveCUReportIOError(const char* fileName,
+    uint64 writeOffset, int writtenBtyes, int expectedBytes, int expectedTotalBytes, int align_size);
+
 class CUFile;
 
 class CUStorage : public BaseObject {
 public:
+    CUStorage(const CFileNode& cFileNode, File fd);  // for imcstore inher
     CUStorage(const CFileNode& cFileNode, CStoreAllocateStrategy strategy = APPEND_ONLY);
     virtual ~CUStorage();
     virtual void Destroy();
@@ -101,28 +107,30 @@ public:
     bool Is2ByteAlign();
 
 private:
-    void InitFileNamePrefix(_in_ const CFileNode& cFileNode);
     File CreateFile(_in_ char* file_name, _in_ int fileId, bool isRedo) const;
-    File OpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
-    File WSOpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
     void InitCstoreFreeSpace(CStoreAllocateStrategy strategy);
-    void CloseFile(_in_ File fd) const;
 
 public:
     CFileNode m_cnode;
 
-private:
+protected: // inherited by imcustorage
+    virtual void InitFileNamePrefix(_in_ const CFileNode& cFileNode);
+    virtual File WSOpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
+    File OpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
+    void CloseFile(_in_ File fd) const;
+
     // The common prefix of column file name
     char m_fileNamePrefix[MAXPGPATH];
 
     // The column file name
     char m_fileName[MAXPGPATH];
 
-    // free space alloctor.
-    CStoreFreeSpace* m_freespace;
-
     // Currently read/write fd
     File m_fd;
+
+private:
+    // free space alloctor.
+    CStoreFreeSpace* m_freespace;
 
     // allocate strategy: append; reuse
     CStoreAllocateStrategy m_strategy;

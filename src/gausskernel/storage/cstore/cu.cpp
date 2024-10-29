@@ -38,8 +38,18 @@
 #include "utils/pg_crc.h"
 #include "port/pg_crc32c.h"
 #include "utils/builtins.h"
+#ifdef ENABLE_HTAP
+#include "utils/elog.h"
+#include "storage/lock/lwlock.h"
+#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcstore_delta.h"
+#include "access/htap/imcustorage.h"
+#include "access/htap/imcstore_am.h"
+#include "access/tableam.h"
+#include "access/htap/imcstore_insert.h"
+#include "access/htap/imcs_ctlg.h"
+#endif
 #include "storage/time_series_compress.h"
-
 
 int CUAlignUtils::GetCuAlignSizeColumnId(int columnId)
 {
@@ -198,6 +208,10 @@ void CU::Reset()
     m_typeMode = 0;
     m_atttypid = 0;
     m_numericIntLike = false;
+
+#ifdef ENABLE_HTAP
+    imcsDesc = NULL;
+#endif
 }
 
 void CU::SetTypeLen(int typeLen)
@@ -244,6 +258,9 @@ CU::~CU()
     m_compressedBuf = NULL;
     m_compressedLoadBuf = NULL;
     m_srcData = NULL;
+#ifdef ENABLE_HTAP
+    imcsDesc = NULL;
+#endif
 }
 
 void CU::Destroy()
@@ -1225,11 +1242,27 @@ int CU::ToVectorLateRead(_in_ ScalarVector* tids, _out_ ScalarVector* vec)
     uint32 tmpCuId = InValidCUID;
     uint32 tmpOffset = 0;
     int pos = 0;
+#ifdef ENABLE_HTAP
+    uint32* tmpOffsetPtr = NULL;
+#endif
+
 
     for (int rowCnt = 0; rowCnt < tids->m_rows; ++rowCnt) {
+#ifdef ENABLE_HTAP
+        if (imcsDesc != NULL) {
+            tmpOffsetPtr = (uint32*)(tidVals + rowCnt);
+            tmpOffset = (*tmpOffsetPtr) - 1;
+        } else {
+            tidPtr = (ItemPointer)(tidVals + rowCnt);
+            tmpCuId = ItemPointerGetBlockNumber(tidPtr);
+            tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+        }
+#else
         tidPtr = (ItemPointer)(tidVals + rowCnt);
         tmpCuId = ItemPointerGetBlockNumber(tidPtr);
         tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+#endif
+        Assert(tmpOffset >= 0);
 
         if (hasNull && this->IsNull(tmpOffset)) {
             vec->SetNull(pos);
@@ -1279,13 +1312,27 @@ int CU::ToVectorLateRead<8, false>(_in_ ScalarVector* tids, _out_ ScalarVector* 
     uint32 tmpOffset = 0;
     uint32 firstOffset = 0;
     uint32 nextOffset = 0;
+#ifdef ENABLE_HTAP
+    uint32* tmpOffsetPtr = NULL;
+#endif
 
     int pos = 0;
     size_t contiguous = 0;
 
     for (int rowCnt = 0; rowCnt < tids->m_rows; ++rowCnt) {
+#ifdef ENABLE_HTAP
+        if (imcsDesc != NULL) {
+            tmpOffsetPtr = (uint32*)(tidVals + rowCnt);
+            tmpOffset = (*tmpOffsetPtr) - 1;
+        } else {
+            tidPtr = (ItemPointer)(tidVals + rowCnt);
+            tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+        }
+#else
         tidPtr = (ItemPointer)(tidVals + rowCnt);
         tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+#endif
+        Assert(tmpOffset >= 0);
 
         contiguous = 0;
         nextOffset = tmpOffset;
@@ -1300,8 +1347,19 @@ int CU::ToVectorLateRead<8, false>(_in_ ScalarVector* tids, _out_ ScalarVector* 
             }
 
             /* fetch and check the next data contiguous within the same cu. */
+#ifdef ENABLE_HTAP
+            if (imcsDesc != NULL) {
+                tmpOffsetPtr = (uint32*)(tidVals + rowCnt);
+                tmpOffset = (*tmpOffsetPtr) - 1;
+            } else {
+                tidPtr = (ItemPointer)(tidVals + rowCnt);
+                tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            }
+#else
             tidPtr = (ItemPointer)(tidVals + rowCnt);
             tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+#endif
+            Assert(tmpOffset >= 0);
         }
 
         /* rowCnt is point to the first tid in the next contiguous data. */
@@ -1328,6 +1386,9 @@ int CU::ToVectorLateRead<-1, false>(_in_ ScalarVector* tids, _out_ ScalarVector*
 {
     ScalarValue* tidVals = tids->m_vals;
     ItemPointer tidPtr = NULL;
+#ifdef ENABLE_HTAP
+    uint32* tmpOffsetPtr = NULL;
+#endif
 
     uint32 tmpOffset = 0;
     uint32 firstOffset = 0;
@@ -1337,8 +1398,19 @@ int CU::ToVectorLateRead<-1, false>(_in_ ScalarVector* tids, _out_ ScalarVector*
     int contiguous = 0;
 
     for (int rowCnt = 0; rowCnt < tids->m_rows; ++rowCnt) {
+#ifdef ENABLE_HTAP
+        if (imcsDesc != NULL) {
+            tmpOffsetPtr = (uint32*)(tidVals + rowCnt);
+            tmpOffset = (*tmpOffsetPtr) - 1;
+        } else {
+            tidPtr = (ItemPointer)(tidVals + rowCnt);
+            tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+        }
+#else
         tidPtr = (ItemPointer)(tidVals + rowCnt);
         tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+#endif
+        Assert(tmpOffset >= 0);
 
         contiguous = 0;
         nextOffset = tmpOffset;
@@ -1352,8 +1424,19 @@ int CU::ToVectorLateRead<-1, false>(_in_ ScalarVector* tids, _out_ ScalarVector*
                 break;
 
             /* fetch and check the next data contiguous within the same cu. */
+#ifdef ENABLE_HTAP
+            if (imcsDesc != NULL) {
+                tmpOffsetPtr = (uint32*)(tidVals + rowCnt);
+                tmpOffset = (*tmpOffsetPtr) - 1;
+            } else {
+                tidPtr = (ItemPointer)(tidVals + rowCnt);
+                tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+            }
+#else
             tidPtr = (ItemPointer)(tidVals + rowCnt);
             tmpOffset = ItemPointerGetOffsetNumber(tidPtr) - 1;
+#endif
+            Assert(tmpOffset >= 0);
         }
 
         /* rowCnt is point to the first tid in the next contiguous data. */
@@ -1765,3 +1848,273 @@ int CU::GetCurScanPos(int rowCursorInCU)
     Assert(this->m_offset[rowCursorInCU] >= 0);
     return this->m_offset[rowCursorInCU];
 }
+
+#ifdef ENABLE_HTAP
+void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts)
+{
+    relOid = RelationGetRelid(rel);
+    imcsAttsNum = int2vectorCopy(imcstoreAttsNum);
+    imcsNatts = imcstoreNatts;
+    imcsStatus = t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE
+                           ? IMCS_POPULATE_ONSTANDBY
+                           : IMCS_POPULATE_INITIAL;
+    isPartition = rel->parentId == InvalidOid ? false : true;
+    parentOid = rel->parentId;
+    relname = isPartition ? getPartitionName(relOid, false) : pstrdup(NameStr(rel->rd_rel->relname));
+    pg_atomic_init_u64(&cuSizeInMem, 0);
+    pg_atomic_init_u64(&cuNumsInMem, 0);
+    pg_atomic_init_u64(&cuSizeInDisk, 0);
+    pg_atomic_init_u64(&cuNumsInDisk, 0);
+    pg_atomic_init_u32(&referenceCount, 0);
+
+    // In case of specify partition population, different table may have different imcs cols,
+    // no need to remember imcs cols for partitioned table, imcstoreAttsNum will be NULL */
+    if (imcstoreAttsNum == NULL) {
+        Assert(RelationIsPartitioned(rel));
+        attmap = NULL;
+    } else {
+        int relNatts = rel->rd_att->natts;
+        attmap = (int*)palloc(sizeof(int) * (relNatts + 1));
+        for (int i = 0, j = 0; i < relNatts; i++) {
+            /* imcstored cols */
+            if (j < imcstoreNatts && imcstoreAttsNum->values[j] - 1 == i) {
+                /* imccstored col index */
+                attmap[i] = j;
+                j++;
+                continue;
+            }
+            /* not imcstored cols */
+            attmap[i] = -1;
+        }
+        /* ctid col */
+        attmap[relNatts] = imcstoreNatts;
+    }
+
+    /* not primary node && not partitioned */
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode != PRIMARY_MODE && !RelationIsPartitioned(rel)) {
+        uint32 totalBlks = RelationGetNumberOfBlocks(rel);
+        uint32 rowGroupNums = ImcsCeil(totalBlks, MAX_IMCS_PAGES_ONE_CU);
+        imcuDescContext = AllocSetContextCreate(CurrentMemoryContext,
+            "imcu desc context",
+            ALLOCSET_SMALL_MINSIZE,
+            ALLOCSET_SMALL_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE,
+            SHARED_CONTEXT);
+        MemoryContext oldcontext = MemoryContextSwitchTo(imcuDescContext);
+        InitRowGroups(rowGroupNums, imcsNatts);
+        imcsDescLock = LWLockAssign(LWTRANCHE_IMCS_DESC_LOCK);
+        MemoryContextSwitchTo(oldcontext);
+    } else {
+        imcuDescContext = NULL;
+        imcsDescLock = NULL;
+        curMaxRowGroupId = 0;
+        maxRowGroupCapacity = 0;
+        rowGroups = NULL;
+    }
+}
+
+void IMCSDesc::InitRowGroups(uint32 initRGNums, int imcsNatts)
+{
+    if (initRGNums == 0) {
+        curMaxRowGroupId = 0;
+        maxRowGroupCapacity = ROW_GROUP_INIT_NUMS;
+    } else {
+        curMaxRowGroupId = initRGNums - 1;
+        maxRowGroupCapacity = initRGNums;
+    }
+    rowGroups = (RowGroup**)palloc0(sizeof(RowGroup*) * maxRowGroupCapacity);
+    for (uint32 i = 0; i < initRGNums; i++) {
+        rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+    }
+}
+
+RowGroup* IMCSDesc::GetRowGroup(uint32 rowGroupId)
+{
+    RowGroup* result = NULL;
+    LWLockAcquire(imcsDescLock, LW_SHARED);
+    if (maxRowGroupCapacity > 0 && rowGroupId <= curMaxRowGroupId) {
+        result = rowGroups[rowGroupId];
+        if (result) pg_atomic_add_fetch_u32(&referenceCount, 1);
+    }
+    LWLockRelease(imcsDescLock);
+    return result;
+}
+
+RowGroup* IMCSDesc::GetNewRGForCUInsert(uint32 rowGroupId)
+{
+    RowGroup* result = NULL;
+    LWLockAcquire(imcsDescLock, LW_EXCLUSIVE);
+    /* consider concurrent */
+    if (maxRowGroupCapacity > 0 && rowGroupId <= curMaxRowGroupId) {
+        result = rowGroups[rowGroupId];
+        if (result) pg_atomic_add_fetch_u32(&referenceCount, 1);
+        LWLockRelease(imcsDescLock);
+        return result;
+    }
+
+    /* create new rowgroup */
+    /* rowgroups array capacity not enough, extend */
+    while (rowGroupId >= maxRowGroupCapacity) {
+        ExtendRowGroups();
+    }
+    for (uint32 i = curMaxRowGroupId + 1; i <= rowGroupId; i++) {
+        rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+    }
+
+    result = rowGroups[rowGroupId];
+    curMaxRowGroupId = rowGroupId > curMaxRowGroupId ? rowGroupId : curMaxRowGroupId;
+    pg_atomic_add_fetch_u32(&referenceCount, 1);
+    LWLockRelease(imcsDescLock);
+    return result;
+}
+
+void IMCSDesc::UnReferenceRowGroup()
+{
+    pg_atomic_sub_fetch_u32(&referenceCount, 1);
+}
+
+void IMCSDesc::ExtendRowGroups()
+{
+    errno_t rc = EOK;
+    int oldRowGroupCapacity = maxRowGroupCapacity;
+
+    RowGroup** oldRowGroups = rowGroups;
+    maxRowGroupCapacity = maxRowGroupCapacity * IMCSTORE_DOUBLE;
+    RowGroup** newRowGroups = (RowGroup**)palloc0(sizeof(RowGroup*) * maxRowGroupCapacity);
+    rc = memcpy_s(
+        newRowGroups, sizeof(RowGroup*) * maxRowGroupCapacity, rowGroups, sizeof(RowGroup*) * oldRowGroupCapacity);
+    securec_check_c(rc, "\0", "\0");
+    rowGroups = newRowGroups;
+    pfree(oldRowGroups);
+}
+
+void IMCSDesc::DropRowGroups(RelFileNode* relNode)
+{
+    if (rowGroups == NULL || relNode == NULL) {
+        return;
+    }
+    // wait all reading rowgroup finish
+    while (pg_atomic_read_u32(&referenceCount) != 0) {
+        pg_usleep(WAIT_ROWGROUP_UNREFERENCE);
+    }
+    for (uint32 i = 0; i <= curMaxRowGroupId; i++) {
+        if (rowGroups[i] == NULL) {
+            continue;
+        }
+        if (rowGroups[i]->m_actived) {
+            rowGroups[i]->DropCUDescs(relNode, imcsNatts);
+        }
+        delete rowGroups[i];
+        rowGroups[i] = NULL;
+    }
+    pfree_ext(rowGroups);
+}
+
+IMCSDesc::IMCSDesc()
+{
+    relOid = InvalidOid;
+    imcsAttsNum = NULL;
+    imcsNatts = 0;
+    imcsStatus = IMCS_POPULATE_INITIAL;
+    imcuDescContext = NULL;
+    imcsDescLock = NULL;
+    rowGroups = NULL;
+    curMaxRowGroupId = ROW_GROUP_INIT_NUMS;
+    maxRowGroupCapacity = ROW_GROUP_INIT_NUMS;
+    imcuDescContext = NULL;
+    rowGroups = NULL;
+    pg_atomic_init_u64(&cuSizeInMem, 0);
+    pg_atomic_init_u64(&cuNumsInMem, 0);
+    pg_atomic_init_u64(&cuSizeInMem, 0);
+    pg_atomic_init_u64(&cuNumsInDisk, 0);
+}
+
+IMCSDesc::~IMCSDesc()
+{
+    if (rowGroups != NULL) {
+        pfree_ext(rowGroups);
+    }
+    if (imcsAttsNum != NULL) {
+        pfree_ext(imcsAttsNum);
+    }
+    if (attmap != NULL) {
+        pfree_ext(attmap);
+    }
+    if (relname) {
+        pfree_ext(relname);
+    }
+    if (imcuDescContext != NULL) {
+        MemoryContextDelete(imcuDescContext);
+        imcuDescContext = NULL;
+    }
+}
+
+RowGroup::RowGroup(uint32 rowGroupId, int imcsNatts)
+{
+    m_rowGroupId = rowGroupId;
+    m_actived = false;
+    m_cuDescs = (CUDesc**)palloc0((imcsNatts + 1) * sizeof(CUDesc*));
+    m_delta = New(CurrentMemoryContext) DeltaTable();
+    m_mutex = PTHREAD_RWLOCK_INITIALIZER;
+}
+
+RowGroup::~RowGroup()
+{
+    if (m_cuDescs != NULL) {
+        pfree_ext(m_cuDescs);
+    }
+    pthread_rwlock_destroy(&m_mutex);
+}
+
+void RowGroup::DropCUDescs(RelFileNode* relNode, int imcsNatts)
+{
+    /* no need to lock rowgroup here, outside should make sure rowgroup or imcsdesc been locked */
+    if (m_cuDescs == NULL) {
+        return;
+    }
+    CFileNode cFileNode(*relNode, 0, MAIN_FORKNUM);
+    IMCUStorage* imcuStorage = New(CurrentMemoryContext)IMCUStorage(cFileNode);
+    for (int col = 0; col < imcsNatts + 1; col++) {
+        if (m_cuDescs[col] == NULL) {
+            continue;
+        }
+        IMCU_CACHE->InvalidateCU((RelFileNodeOld*)relNode, col, m_cuDescs[col]->cu_id, m_cuDescs[col]->cu_pointer);
+        imcuStorage->TryRemoveCUFile(m_cuDescs[col]->cu_id, col);
+        DELETE_EX(m_cuDescs[col]);
+    }
+    DELETE_EX(imcuStorage);
+}
+
+/* this function will replace cudesc and vacuum delta by xid, need lock rowgroup before use this function */
+void RowGroup::Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs, CU** newCUs, TransactionId xid)
+{
+    pthread_rwlock_wrlock(&m_mutex);
+    m_delta->Vacuum(xid);
+
+    RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
+    DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
+
+    if (newCUDescs && newCUs && newCUDescs[0]->row_count > 0) {
+        m_actived = true;
+    } else {
+        m_actived = false;
+    }
+    for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
+        if (m_actived) {
+            IMCU_CACHE->SaveCU(imcsDesc, relNodeOid, col, newCUs[col], newCUDescs[col]);
+            m_cuDescs[col] = newCUDescs[col];
+        } else {
+            m_cuDescs[col] = NULL;
+        }
+    }
+    pthread_rwlock_unlock(&m_mutex);
+}
+
+void RowGroup::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
+{
+    pthread_rwlock_wrlock(&m_mutex);
+    m_delta->Insert(type, ctid, xid, relid, cuId);
+    pthread_rwlock_unlock(&m_mutex);
+}
+
+#endif

@@ -120,7 +120,7 @@ public:
     /* Manage I/O busy CUs */
     bool DataBlockWaitIO(int cuSlotId);
     void DataBlockCompleteIO(int cuSlotId);
-    int64 GetCurrentMemSize();
+    virtual int64 GetCurrentMemSize();
     void PrintDataCacheSlotLeakWarning(CacheSlotId_t slotId);
 
     void AbortCU(CacheSlotId_t slot);
@@ -146,23 +146,28 @@ public:
     void AcquireCompressLock(CacheSlotId_t slotId);
     void ReleaseCompressLock(CacheSlotId_t slotId);
 
+    virtual void GetCacheBlockInProgress(CacheSlotId_t *ioCacheBlock, CacheSlotId_t *uncompressCacheBlock);
+    virtual void SetCacheBlockInProgress(CacheSlotId_t ioCacheBlock, CacheSlotId_t uncompressCacheBlock);
+    virtual void ResetCacheBlockInProgress(bool resetUncompress);
+
     List* GetInvalidRnodeList();
     slock_t* GetInvalidRnodeListLock();
     void SetNullInvalidRList();
 
     int64 m_cstoreMaxSize;
 
-#ifndef ENABLE_UT
-private:
-#endif  // ENABLE_UT
-
+protected:
     DataCacheMgr()
     {}
     ~DataCacheMgr()
     {}
 
-    static DataCacheMgr* m_data_cache;
     CacheMgr* m_cache_mgr;
+
+#ifndef ENABLE_UT
+private:
+#endif  // ENABLE_UT
+    static DataCacheMgr* m_data_cache;
     slock_t m_adio_write_cache_lock;  // write private cache, not cucache. I add here because spinlock need init once
                                       // for cstore module
     List* invalid_relfilenodes;

@@ -77,6 +77,10 @@
 #include "ddes/dms/ss_xmin.h"
 #include "ddes/dms/ss_dms_callback.h"
 
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
+
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
@@ -223,6 +227,9 @@ typedef struct knl_g_pid_context {
     ThreadId StackPerfPID;
     ThreadId CfsShrinkerPID;
     ThreadId DmsAuxiliaryPID;
+#ifdef ENABLE_HTAP
+    ThreadId IMCStoreVacuumPID;
+#endif
 } knl_g_pid_context;
 
 typedef struct {
@@ -1312,6 +1319,18 @@ typedef struct knl_g_spq_context {
 } knl_g_spq_context;
 #endif
 
+#ifdef ENABLE_HTAP
+template<typename T> class MpmcBoundedQueue;
+typedef struct knl_g_imcstore_context {
+    pthread_rwlock_t context_mutex;
+    char* dbname;
+    Latch vacuum_latch;
+    MpmcBoundedQueue<IMCStoreVacuumTarget> *vacuum_queue;
+
+    pg_atomic_uint32 imcs_tbl_cnt;
+} knl_g_imcstore_context;
+#endif
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -1427,6 +1446,10 @@ typedef struct knl_instance_context {
     struct HTAB* mmapCache;
     struct HTAB* tmpTab;
     knl_g_hypo_context hypo_cxt;
+
+#ifdef ENABLE_HTAP
+    knl_g_imcstore_context imcstore_cxt;
+#endif
 
     knl_g_segment_context segment_cxt;
     knl_g_pldebug_context pldebug_cxt;

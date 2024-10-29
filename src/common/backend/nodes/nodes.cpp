@@ -531,6 +531,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_VecRecursiveUnion, "VecRecursiveUnion"},
     {T_VecScan, "VecScan"},
     {T_CStoreScan, "CStoreScan"},
+#ifdef ENABLE_HTAP
+    {T_IMCStoreScan, "IMCStoreScan"},
+#endif
     {T_VecIndexScan, "VecIndexScan"},
     {T_VecIndexOnlyScan, "VecIndexOnlyScan"},
     {T_VecBitmapIndexScan, "VecBitmapIndexScan"},
@@ -571,6 +574,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_VecSortState, "VecSortState"},
     {T_VecForeignScanState, "VecForeignScanState"},
     {T_CStoreScanState, "CStoreScanState"},
+#ifdef ENABLE_HTAP
+    {T_IMCStoreScanState, "IMCStoreScanState"},
+#endif
     {T_CStoreIndexScanState, "CStoreIndexScanState"},
     {T_CStoreIndexCtidScanState, "CStoreIndexCtidScanState"},
     {T_CStoreIndexHeapScanState, "CStoreIndexHeapScanState"},

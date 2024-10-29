@@ -773,6 +773,59 @@ void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPa
     path->stream_cost = 0;
 }
 
+#ifdef ENABLE_HTAP
+/*
+ * cost_imcstorescan
+ *	  Determines and returns the cost of scanning a column store.
+ *	  The pruning ration for Partitioned table will be considered in set_plain_rel_size().
+ */
+void cost_imcstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel)
+{
+    double spc_seq_page_cost;
+    Cost startup_cost = 0;
+    Cost run_cost = 0;
+    Cost cpu_per_tuple = 0.0;
+    int dop = SET_DOP(path->dop);
+
+    /* Should only be applied to base relations */
+    Assert(baserel->relid > 0 && baserel->rtekind == RTE_RELATION);
+
+    set_rel_path_rows(path, baserel, NULL);
+    set_parallel_path_rows(path);
+
+    /* fetch estimated page cost for tablespace containing table */
+    get_tablespace_page_costs(baserel->reltablespace, NULL, &spc_seq_page_cost);
+
+    startup_cost += baserel->baserestrictcost.startup;
+
+    if (!u_sess->attr.attr_sql.enable_seqscan)
+        startup_cost += g_instance.cost_cxt.disable_cost;
+
+    /*
+     * When we parallel the scan node, then the disk costs and cpu costs
+     * wiil be equal division to all parallelism thread.
+     */
+    run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
+    run_cost += spc_seq_page_cost * baserel->pages / dop;
+    cpu_per_tuple =
+        u_sess->attr.attr_sql.cpu_tuple_cost / COL_TUPLE_COST_MULTIPLIER + baserel->baserestrictcost.per_tuple;
+    run_cost += cpu_per_tuple * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples) / dop;
+
+    if (root->parse->is_flt_frame) {
+        startup_cost += path->pathtarget->cost.startup;
+        run_cost += path->pathtarget->cost.per_tuple * path->rows;
+    }
+
+    path->startup_cost = startup_cost;
+    path->total_cost = startup_cost + run_cost;
+    path->stream_cost = 0;
+
+    if (!u_sess->attr.attr_sql.enable_seqscan)
+        path->total_cost *=
+            (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
+}
+#endif
+
 /*
  * cost_cstorescan
  *	  Determines and returns the cost of scanning a column store.

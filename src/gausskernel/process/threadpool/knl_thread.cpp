@@ -637,6 +637,14 @@ static void knl_t_vacuum_init(knl_t_vacuum_context* vacuum_cxt)
     vacuum_cxt->in_vacuum = false;
 }
 
+#ifdef ENABLE_HTAP
+static void knl_t_imcstore_vacuum_init(knl_t_imcstore_vacuum_context* vacuum_cxt)
+{
+    vacuum_cxt->got_SIGHUP = false;
+    vacuum_cxt->got_SIGTERM = false;
+}
+#endif
+
 static void knl_t_arch_init(knl_t_arch_context* arch)
 {
     arch->got_SIGHUP = false;
@@ -1360,6 +1368,10 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->StrategyControl = NULL;
     storage_cxt->CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
     storage_cxt->CacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+#ifdef ENABLE_HTAP
+    storage_cxt->IMCSCacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
+    storage_cxt->IMCSCacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+#endif
     storage_cxt->MetaBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
 
 #define STANDBY_INITIAL_WAIT_US 1000
@@ -1974,6 +1986,11 @@ void knl_thread_init(knl_thread_role role)
     KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
     KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
     KnlTPublicationInit(&t_thrd.publication_cxt);
+
+#ifdef ENABLE_HTAP
+    knl_t_imcstore_vacuum_init(&t_thrd.imcstore_vacuum_cxt);
+#endif
+
 #ifdef ENABLE_MOT
     knl_t_mot_init(&t_thrd.mot_cxt);
 #endif

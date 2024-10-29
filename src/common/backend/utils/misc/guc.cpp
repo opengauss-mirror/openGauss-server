@@ -2144,6 +2144,21 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+#ifdef ENABLE_HTAP
+        {{"enable_parallel_populate",
+          PGC_USERSET,
+          NODE_ALL,
+          QUERY_TUNING,
+          gettext_noop("Enable parallel populate for imcstore"),
+          NULL},
+         &u_sess->attr.attr_common.enable_parallel_populate,
+         true,
+         NULL,
+         NULL,
+         NULL,
+         NULL
+        },
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

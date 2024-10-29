@@ -122,6 +122,10 @@
 #include "catalog/pg_object.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/gs_dependencies_obj.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#endif
+
 /*
  * This constant table maps ObjectClasses to the corresponding catalog OIDs.
  * See also getObjectClass().
@@ -1308,6 +1312,17 @@ static void doDeletion(const ObjectAddress* object, int flags)
                  */
                 if (relKind == RELKIND_RELATION)
                     isTmpTable = IsTempTable(object->objectId);
+#ifdef ENABLE_HTAP
+                if (RelHasImcs(object->objectId)) {
+                    ereport(WARNING,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Dropping Rel: %d which enabled imcstore, canceling imcstore.", object->objectId)));
+                    Relation rel = relation_open(object->objectId, AccessExclusiveLock);
+                    UnPopulateImcs(rel);
+                    /* Then close the relation opened previously */
+                    relation_close(rel, AccessExclusiveLock);
+                }
+#endif
                 else if (RELKIND_IS_SEQUENCE(relKind)) {
                     isTmpSequence = IsTempSequence(object->objectId);
                     /*

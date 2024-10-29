@@ -5459,6 +5459,24 @@ static CStoreScan* _readCStoreScan(CStoreScan* local_node)
     READ_DONE();
 }
 
+#ifdef ENABLE_HTAP
+static CStoreScan* _readIMCStoreScan(IMCStoreScan* local_node)
+{
+    READ_LOCALS_NULL(IMCStoreScan);
+    READ_TEMP_LOCALS();
+
+    // Read Scan
+    _readScan((Scan*)local_node);
+
+    READ_NODE_FIELD(cstorequal);
+    READ_NODE_FIELD(minMaxInfo);
+    READ_ENUM_FIELD(relStoreLocation, RelstoreType);
+    READ_BOOL_FIELD(is_replica_table);
+
+    READ_DONE();
+}
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* _readTsStoreScan(TsStoreScan *local_node)
 {
@@ -6984,6 +7002,10 @@ Node* parseNodeString(void)
         return_value = _readVecResult(NULL);
     } else if (MATCH("CSTORESCAN", 10)) {
         return_value = _readCStoreScan(NULL);
+#ifdef ENABLE_HTAP
+    } else if (MATCH("IMCSTORESCAN", 12)) {
+        return_value = _readIMCStoreScan(NULL);
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     } else if (MATCH("TSSTORESCAN",11)) {
         return_value = _readTsStoreScan(NULL);

@@ -319,6 +319,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
         case T_CStoreScan: {
             Scan* splan = (Scan*)plan;
             splan->scanrelid += rtoffset;
@@ -532,6 +535,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             switch (nodeTag(splan->plan.lefttree)) {
                 case T_SeqScan:
                 case T_CStoreScan:
+#ifdef ENABLE_HTAP
+                case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
                 case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

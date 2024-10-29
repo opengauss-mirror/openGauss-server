@@ -253,6 +253,9 @@ typedef struct knl_session_attr_common {
     bool enable_record_nettime;
     bool foreign_key_checks;
     bool enable_dump_trigger_definer;
+#ifdef ENABLE_HTAP
+    bool enable_parallel_populate;
+#endif
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

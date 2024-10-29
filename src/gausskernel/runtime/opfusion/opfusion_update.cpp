@@ -25,6 +25,9 @@
 #include "opfusion/opfusion_update.h"
 
 #include "access/tableam.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
 #include "opfusion/opfusion_indexscan.h"
@@ -487,6 +490,13 @@ lreplace:
                         bucket_rel == NULL ? destRel : bucket_rel,
                         NULL, tup, &((HeapTuple)oldtup)->t_self, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
                 }
+#ifdef ENABLE_HTAP
+                if (HAVE_HTAP_TABLES) {
+                    Relation fake_relation = (bucket_rel == NULL) ? destRel : bucket_rel;
+                    IMCStoreUpdateHook(RelationGetRelid(fake_relation), tableam_tops_get_t_self(fake_relation, oldtup),
+                        tableam_tops_get_t_self(fake_relation, tup));
+                }
+#endif
                 if (oldslot) {
                     ExecDropSingleTupleTableSlot(oldslot);
                 }

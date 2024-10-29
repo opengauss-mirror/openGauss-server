@@ -55,6 +55,9 @@
 #include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "pgxc/pgxc.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
 
 /* Hook for plugins to get control in set_rel_pathlist() */
 THR_LOCAL set_rel_pathlist_hook_type set_rel_pathlist_hook = NULL;
@@ -111,6 +114,109 @@ static void updateRelOptInfoMinSecurity(RelOptInfo* rel);
 
 static void find_index_path(RelOptInfo* rel);
 static void bitmap_path_walker(Path* path);
+
+#ifdef ENABLE_HTAP
+bool CheckRelEnableImcstoreScan(Oid relOid, Bitmapset *scanAttrs)
+{
+    Bitmapset *imcstoreAttrs = NULL;
+    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relOid);
+    /* 1. check if imcstore is enabled for rel */
+    if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
+        return false;
+    }
+    /* 2. check scan attrs is subsets of imcs attrs, if so, enable imcsscan. */
+    for (int i = 0; i < imcsDesc->imcsAttsNum->dim1; ++i) {
+        imcstoreAttrs = bms_add_member(
+            imcstoreAttrs, imcsDesc->imcsAttsNum->values[i] - FirstLowInvalidHeapAttributeNumber);
+    }
+    if (!bms_is_subset(scanAttrs, imcstoreAttrs)) {
+        bms_free_ext(imcstoreAttrs);
+        return false;
+    }
+    bms_free_ext(imcstoreAttrs);
+    return true;
+}
+
+bool CheckPartitionsEnableImcsScan(Oid relOid, Bitmapset *scanAttrs)
+{
+    Oid partitionOid = InvalidOid;
+    Relation rel = NULL;
+    ListCell* partOidCell = NULL;
+
+    /* get oids of all partitions */
+    rel = heap_open(relOid, AccessShareLock);
+    List* partitionOidList = relationGetPartitionOidList(rel);
+    heap_close(rel, AccessShareLock);
+
+    /* check all partitions */
+    foreach (partOidCell, partitionOidList) {
+        partitionOid = lfirst_oid(partOidCell);
+        if (!CheckRelEnableImcstoreScan(partitionOid, scanAttrs)) {
+            releasePartitionOidList(&partitionOidList);
+            return false;
+        }
+    }
+    releasePartitionOidList(&partitionOidList);
+    return true;
+}
+
+bool CheckEnableImcsScan(RelOptInfo *rel, RangeTblEntry *rte)
+{
+    /* 1. get all scan attrs */
+    Bitmapset *scanAttrs = NULL;
+    pull_varattnos((Node*)rel->reltarget->exprs, rel->relid, &scanAttrs);
+    if (scanAttrs == NULL) {
+        return false;
+    }
+    ListCell *cell = NULL;
+    foreach(cell, rel->baserestrictinfo) {
+        RestrictInfo* info = (RestrictInfo*)lfirst(cell);
+        Node* clause = (Node*)info->clause;
+        pull_varattnos(clause, rel->relid, &scanAttrs);
+    }
+
+    /* 2. start checking if enable imcsscan */
+    if (!rte->ispartrel) {
+        return CheckRelEnableImcstoreScan(rte->relid, scanAttrs);
+    }
+
+    /* specify one partition, check itself */
+    if (rte->isContainPartition) {
+        return CheckRelEnableImcstoreScan(rte->partitionOid, scanAttrs);
+    }
+
+    /* specify one subpartition for scan, check itself */
+    if (rte->isContainSubPartition) {
+        return CheckRelEnableImcstoreScan(rte->subpartitionOid, scanAttrs);
+    }
+
+    /* partitioned table, and scan all partitions, check all parts */
+    return CheckPartitionsEnableImcsScan(rte->relid, scanAttrs);
+}
+
+void try_add_imcstorescan_path(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte, int dop, bool can_parallel)
+{
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+        return;
+    }
+
+    if (root->parse->commandType != CMD_SELECT) {
+        return;
+    }
+    if (!u_sess->attr.attr_sql.enable_imcsscan) {
+        return;
+    }
+
+    if (!CheckEnableImcsScan(rel, rte)) {
+        return;
+    }
+
+    add_path(root, rel, create_imcstorescan_path(root, rel, 1));
+    if (can_parallel) {
+        add_path(root, rel, create_imcstorescan_path(root, rel, dop));
+    }
+}
+#endif
 
 static bool check_func_walker(Node* node, bool* found)
 {
@@ -1193,6 +1299,9 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
                 add_path(root, rel, create_seqscan_path(root, rel, required_outer));
                 if (can_parallel)
                     add_path(root, rel, create_seqscan_path(root, rel, required_outer, u_sess->opt_cxt.query_dop));
+#ifdef ENABLE_HTAP
+                try_add_imcstorescan_path(root, rel, rte, u_sess->opt_cxt.query_dop, can_parallel);
+#endif
                 break;
             }
             default: {
@@ -4102,6 +4211,9 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
     switch (path->pathtype) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */

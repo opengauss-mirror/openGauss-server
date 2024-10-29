@@ -114,6 +114,11 @@
 #include "tsdb/cache/part_cachemgr.h"
 #include "tsdb/storage/part.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_ctlg.h"
+#include "utils/relfilenodemap.h"
+#endif   /* ENABLE_HTAP */
 
 extern void CodeGenThreadTearDown();
 extern void deleteGlobalOBSInstrumentation();
@@ -7464,6 +7469,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
         if (IS_EXRTO_READ) {
             update_delay_ddl_files(newColFileNodes, nrels, lsn);
         } else {
+#ifdef ENABLE_HTAP
+            for (int i = 0; i < nrels; i++) {
+                RelFileNode rnode = (newColFileNodes + i)->filenode;
+                if (RelHasImcs(rnode.relNode)) {
+                    IMCU_CACHE->DeleteImcsDesc(rnode.relNode, &rnode);
+                }
+            }
+#endif
             unlink_relfiles(newColFileNodes, nrels);
             xact_redo_log_drop_segs(newColFileNodes, nrels, lsn);
         }

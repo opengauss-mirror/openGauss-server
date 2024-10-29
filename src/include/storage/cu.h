@@ -31,7 +31,11 @@
 #include "storage/cstore/cstore_mem_alloc.h"
 #include "utils/datum.h"
 #include "storage/lock/lwlock.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
 
+#define ROW_GROUP_INIT_NUMS (1024)
+#endif
 
 #define ATT_IS_CHAR_TYPE(atttypid) (atttypid == BPCHAROID || atttypid == VARCHAROID || atttypid == NVARCHAR2OID)
 #define ATT_IS_NUMERIC_TYPE(atttypid) (atttypid == NUMERICOID)
@@ -182,6 +186,56 @@ public:
     {}
 };
 
+#ifdef ENABLE_HTAP
+class CU;
+struct IMCSDesc;
+
+class RowGroup : public BaseObject {
+public:
+    pthread_rwlock_t m_mutex;
+    uint32 m_rowGroupId;
+    bool m_actived;
+    CUDesc** m_cuDescs;
+    DeltaTable* m_delta;
+    RowGroup(uint32 rowGroupId, int imcsNatts);
+    ~RowGroup();
+    void DropCUDescs(RelFileNode* relNode, int imcsNatts);
+    void Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs, CU** newCUs, TransactionId xid);
+    void Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
+};
+struct IMCSDesc {
+    Oid relOid;
+    const char* relname;
+    int2vector* imcsAttsNum;
+    /* rel attid -> imcs index */
+    int* attmap;
+    int imcsNatts;
+    int imcsStatus;
+    pg_atomic_uint64 cuSizeInMem;
+    pg_atomic_uint64 cuNumsInMem;
+    pg_atomic_uint64 cuSizeInDisk;
+    pg_atomic_uint64 cuNumsInDisk;
+    pg_atomic_uint32 referenceCount;
+    MemoryContext imcuDescContext;
+    LWLock *imcsDescLock;
+    RowGroup** rowGroups;
+    uint32 curMaxRowGroupId;
+    uint32 maxRowGroupCapacity;
+    bool isPartition;
+    Oid parentOid;
+    IMCSDesc();
+    ~IMCSDesc();
+
+    void Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts);
+    void InitRowGroups(uint32 initRGNums, int imcsNatts);
+    RowGroup* GetRowGroup(uint32 rowGroupId);
+    RowGroup* GetNewRGForCUInsert(uint32 rowGroupId);
+    void UnReferenceRowGroup();
+    void ExtendRowGroups();
+    void DropRowGroups(RelFileNode* relNode);
+};
+#endif
+
 /* temp info about CU compression
  * because CU data cache exists, we should control used memory and
  * reduce as much as possible. So all temp data during compressing
@@ -301,6 +355,10 @@ public:
     bool m_inCUCache;        /* whether in CU cache */
 
     bool m_numericIntLike; /* whether all data in the numeric CU can be transformed to Int64 */
+
+#ifdef ENABLE_HTAP
+    IMCSDesc* imcsDesc;
+#endif
 
 public:
     CU();

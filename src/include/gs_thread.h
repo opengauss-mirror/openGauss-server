@@ -111,6 +111,10 @@ typedef enum knl_thread_role {
     LOGICAL_READ_RECORD,
     PARALLEL_DECODE,
 
+#ifdef ENABLE_HTAP
+    IMCSTORE_VACUUM,
+#endif
+
     UNDO_RECYCLER,
     UNDO_LAUNCHER,
     UNDO_WORKER,

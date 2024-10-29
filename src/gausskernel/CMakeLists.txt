@@ -251,6 +251,12 @@ if("${ENABLE_MOT}" STREQUAL "ON")
     )
 endif()
 
+if("${ENABLE_HTAP}" STREQUAL "ON")
+    list(APPEND gaussdb_objects
+        $<TARGET_OBJECTS:gausskernel_storage_htap>
+    )
+endif()
+
 if("${ENABLE_UT}" STREQUAL "ON")
     list(APPEND gaussdb_objects
         $<TARGET_OBJECTS:gausskernel_storage_test>

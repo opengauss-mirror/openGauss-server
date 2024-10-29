@@ -6187,6 +6187,13 @@ static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource so
     return true;
 }
 
+#ifdef ENABLE_HTAP
+ReplConnInfo* GetReplConnInfo(const char* ConnInfoList, int* InfoLength)
+{
+    return ParseReplConnInfo(ConnInfoList, InfoLength);
+}
+#endif
+
 /*
  * @@GaussDB@@
  * Brief			: Parse one replconninfo, and get the connect info of each channel.

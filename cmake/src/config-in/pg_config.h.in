@@ -949,3 +949,7 @@
 /* Define to 1 if you want to build opengauss rpm package on openeuler os.
  * (--with-openeuler-os) */
 #cmakedefine WITH_OPENEULER_OS
+
+/* Define to 1 if you want to use htap
+ * --enable-htap */
+#cmakedefine ENABLE_HTAP

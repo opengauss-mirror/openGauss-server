@@ -102,6 +102,9 @@
 #include "parser/parsetree.h"
 #include "utils/partitionmap_gs.h"
 #include "access/tableam.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "gs_ledger/ledger_utils.h"
 #include "gs_ledger/userchain.h"
 #include "gs_ledger/blockchain.h"
@@ -4992,6 +4995,12 @@ uint64 CopyFrom(CopyState cstate)
                         ((UHeapTuple)slot->tts_tuple)->table_oid = RelationGetRelid(targetRel);
                     }
 
+#ifdef ENABLE_HTAP
+                    if (HAVE_HTAP_TABLES) {
+                        IMCStoreInsertHook(RelationGetRelid(targetRel), tableam_tops_get_t_self(targetRel, tuple));
+                    }
+#endif
+
                     /* OK, store the tuple and create index entries for it */
                     if (resultRelInfo->ri_NumIndices > 0 && !RelationIsColStore(cstate->rel))
                         recheckIndexes = ExecInsertIndexTuples(slot,
@@ -5397,6 +5406,13 @@ void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hi_o
         (Tuple*)bufferedTuples, nBufferedTuples, mycid, hi_options, bistate, &args);
     MemoryContextSwitchTo(oldcontext);
 
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES) {
+        for (i = 0; i < nBufferedTuples; i++) {
+            IMCStoreInsertHook(RelationGetRelid(rel), tableam_tops_get_t_self(rel, bufferedTuples[i]));
+        }
+    }
+#endif
     /*
      * If there are any indexes, update them for all the inserted tuples, and
      * run AFTER ROW INSERT triggers.
@@ -5471,6 +5487,14 @@ void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int
             bistate,
             NULL);
     MemoryContextSwitchTo(oldcontext);
+
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES) {
+        for (i = 0; i < nBufferedTuples; i++) {
+            IMCStoreInsertHook(RelationGetRelid(rel), tableam_tops_get_t_self(rel, bufferedTuples[i]));
+        }
+    }
+#endif
 
     /*
      * If there are any indexes, update them for all the inserted tuples, and

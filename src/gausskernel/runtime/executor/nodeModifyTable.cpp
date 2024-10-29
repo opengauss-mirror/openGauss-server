@@ -85,6 +85,9 @@
 #include "access/heapam.h"
 #include "access/ustore/knl_uheap.h"
 #include "access/ustore/knl_whitebox_test.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "gs_ledger/ledger_utils.h"
 #include "gs_ledger/userchain.h"
 
@@ -1055,6 +1058,12 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         goto vlock;
     }
 
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES) {
+        IMCStoreInsertHook(RelationGetRelid(targetrel), tableam_tops_get_t_self(targetrel, tuple));
+    }
+#endif
+
     /* try to insert tuple into mlog-table. */
     if (targetrel != NULL && targetrel->rd_mlogoid != InvalidOid) {
         /* judge whether need to insert into mlog-table */
@@ -1559,6 +1568,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                  * insert index entries for tuple
                  */
                 pTSelf = tableam_tops_get_t_self(result_relation_desc, tuple);
+#ifdef ENABLE_HTAP
+                if (HAVE_HTAP_TABLES && target_rel != NULL) {
+                    IMCStoreInsertHook(RelationGetRelid(target_rel), tableam_tops_get_t_self(target_rel, tuple));
+                }
+#endif
                 if (result_rel_info->ri_NumIndices > 0 && !RelationIsColStore(result_relation_desc)) {
                     if (state->isReplace) {
                         bool specConflict = false;
@@ -1839,6 +1853,11 @@ ldelete:
                     return NULL;
 
                 case TM_Ok: {
+#ifdef ENABLE_HTAP
+                    if (HAVE_HTAP_TABLES) {
+                        IMCStoreDeleteHook(RelationGetRelid(fake_relation), tupleid);
+                    }
+#endif
                     /* Record delete operator to history table */
                     if (result_relation_desc->rd_isblockchain) {
                         MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
@@ -2401,6 +2420,12 @@ lreplace:
                             return NULL;
 
                         case TM_Ok:
+#ifdef ENABLE_HTAP
+                            if (HAVE_HTAP_TABLES) {
+                                IMCStoreUpdateHook(RelationGetRelid(result_relation_desc), tupleid,
+                                    tableam_tops_get_t_self(result_relation_desc, tuple));
+                            }
+#endif
                             /* Record updating behevior into user chain table */
                             if (result_relation_desc->rd_isblockchain) {
                                 MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
@@ -2720,6 +2745,12 @@ lreplace:
                                 return NULL;
 
                             case TM_Ok:
+#ifdef ENABLE_HTAP
+                                if (HAVE_HTAP_TABLES) {
+                                    IMCStoreUpdateHook(RelationGetRelid(fake_relation), tupleid,
+                                        tableam_tops_get_t_self(fake_relation, tuple));
+                                }
+#endif
                                 /* Record updating behevior into user chain table */
                                 if (result_relation_desc->rd_isblockchain) {
                                     MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
@@ -2928,6 +2959,11 @@ ldelete:
                                     return NULL;
 
                                 case TM_Ok: {
+#ifdef ENABLE_HTAP
+                                    if (HAVE_HTAP_TABLES) {
+                                        IMCStoreDeleteHook(RelationGetRelid(old_fake_relation), tupleid);
+                                    }
+#endif
                                     if (result_relation_desc->rd_isblockchain) {
                                         MemoryContext old_context =
                                             MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
@@ -3096,6 +3132,13 @@ ldelete:
 
                             (void)tableam_tuple_insert(fake_insert_relation, 
                                 tuple, estate->es_output_cid, 0, NULL);
+
+#ifdef ENABLE_HTAP
+                            if (HAVE_HTAP_TABLES) {
+                                IMCStoreInsertHook(RelationGetRelid(fake_insert_relation),
+                                    tableam_tops_get_t_self(fake_insert_relation, tuple));
+                            }
+#endif
 
                             if (result_rel_info->ri_NumIndices > 0) {
                                 recheck_indexes = ExecInsertIndexTuples(slot, &(((HeapTuple)tuple)->t_self), estate,

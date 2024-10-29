@@ -281,6 +281,15 @@ void UHeapXlogInsert(XLogReaderState *record)
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &targetNode, blkno, true);
+
+#ifdef ENABLE_HTAP
+        if (HAVE_HTAP_TABLES) {
+            XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
+            ItemPointerData ctid;
+            ItemPointerSet(&ctid, blkno, xlrec->offnum);
+            IMCStoreInsertHook(targetNode.relNode, &ctid, XLogRecGetXid(record));
+        }
+#endif
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -476,6 +485,12 @@ static void UHeapXlogDelete(XLogReaderState *record)
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &targetNode, blkno, true);
+
+#ifdef ENABLE_HTAP
+            if (HAVE_HTAP_TABLES) {
+                IMCStoreDeleteHook(targetNode.relNode, &targetTid, XLogRecGetXid(record));
+            }
+#endif
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -1320,6 +1335,16 @@ static void UHeapXlogUpdate(XLogReaderState *record)
             Page page = BufferGetPage(buffers.newbuffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &rnode, BufferGetBlockNumber(buffers.newbuffer.buf), true);
+
+#ifdef ENABLE_HTAP
+            if (HAVE_HTAP_TABLES) {
+                ItemPointerData ctid;
+                ItemPointerData newCtid;
+                ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
+                ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
+                IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, XLogRecGetXid(record));
+            }
+#endif
         }
 
         if (BufferIsValid(buffers.newbuffer.buf) && buffers.newbuffer.buf != buffers.oldbuffer.buf) {

@@ -69,6 +69,7 @@ option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.c
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)
 option(MAX_ALLOC_SEGNUM "max alloc xlog seg num in extreme_rto" 4)
 option(USE_TASSL "build with tassl, the old is --with-tassl" OFF)#ON
+option(ENABLE_HTAP "enable HTAP in single/distribute mode,the old is --enable-htap" ON)
 
 #No matter what to set, the old mppdb aways use ENABLE_THREAD_SAFETY=yes by default defined.
 option(ENABLE_THREAD_SAFETY "enable thread safety, the old is --enable-thread-safety" ON)
@@ -231,6 +232,10 @@ endif()
 
 if(${USE_SPQ})
     set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DUSE_SPQ")
+endif()
+
+if(${ENABLE_HTAP})
+    set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DENABLE_HTAP")
 endif()
 
 if(${USE_LDAP})

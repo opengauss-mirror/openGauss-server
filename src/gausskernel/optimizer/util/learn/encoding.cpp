@@ -968,6 +968,9 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
         case T_ValuesScan:
         case T_CteScan:
         case T_WorkTableScan:

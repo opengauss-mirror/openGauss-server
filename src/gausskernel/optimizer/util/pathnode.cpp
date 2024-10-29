@@ -2057,6 +2057,47 @@ Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path)
     return pathnode;
 }
 
+#ifdef ENABLE_HTAP
+/*
+ * create_imcstorescan_path with dop parm for parallelism
+ * Creates a path corresponding to a column store scan, returning the
+ * pathnode.
+ */
+Path* create_imcstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop)
+{
+    Path* pathnode = makeNode(Path);
+
+    pathnode->parent = rel;
+    pathnode->pathtarget = rel->reltarget;
+    pathnode->pathkeys = NIL; /* seqscan has unordered result */
+    pathnode->dop = dop;
+    pathnode->exec_type = SetBasePathExectype(root, rel);
+
+#ifdef STREAMPLAN
+    if (IS_STREAM_PLAN) {
+        pathnode->distribute_keys = rel->distribute_keys;
+        pathnode->locator_type = rel->locator_type;
+
+        /* add location information for cstorescan path */
+        RangeTblEntry* rte = root->simple_rte_array[rel->relid];
+        Distribution* distribution = ng_get_baserel_data_distribution(rte->relid, rte->relkind);
+        ng_copy_distribution(&pathnode->distribution, distribution);
+    }
+#endif
+
+    pathnode->pathtype = T_IMCStoreScan;
+
+    RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
+    if (NULL == rte->tablesample) {
+        if (REL_ROW_ORIENTED == rel->orientation) {
+            cost_imcstorescan(pathnode, root, rel);
+        }
+    }
+
+    return pathnode;
+}
+#endif
+
 /*
  * create_cstorescan_path with dop parm for parallelism
  * Creates a path corresponding to a column store scan, returning the

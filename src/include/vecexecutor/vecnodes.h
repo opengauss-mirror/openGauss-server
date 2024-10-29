@@ -244,6 +244,7 @@ typedef struct CStoreScanState : ScanState {
     vecqual_func jitted_vecqual;
 
     bool m_isReplicaTable; /* If it is a replication table? */
+    bool m_isImcstore = false; /* default value is false, only set true when imcstore */
 } CStoreScanState;
 
 class TimeRange;

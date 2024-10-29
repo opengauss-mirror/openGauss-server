@@ -25,6 +25,9 @@
 #include "opfusion/opfusion_insert.h"
 
 #include "access/tableam.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
 #include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/matview.h"
@@ -389,6 +392,12 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
 
     if (result_rel_info->ri_WithCheckOptions != NIL)
         ExecWithCheckOptions(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES) {
+        IMCStoreInsertHook(RelationGetRelid(rel), tableam_tops_get_t_self(rel, tuple));
+    }
+#endif
 
     /****************
      * step 3: done *

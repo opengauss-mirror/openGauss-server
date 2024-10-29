@@ -38,6 +38,9 @@
 #include "utils/memutils.h"
 #include "utils/memprot.h"
 #include "workload/workload.h"
+#ifdef ENABLE_HTAP
+#include "access/tuptoaster.h"
+#endif
 
 /*
  * Configure different block size for string and integer.
@@ -1270,6 +1273,11 @@ bulkload_rows::bulkload_rows(TupleDesc tuple_desc, int rows_maxnum, bool to_init
     m_form_append_column_func = NULL;
     m_form_sample_tuple_size_func = NULL;
     m_has_dropped_column = false;
+#ifdef ENABLE_HTAP
+    isImcs = false;
+    imcsAttsNum = NULL;
+    relNatts = 0;
+#endif
 
     if (to_init) {
         init(tuple_desc, rows_maxnum);
@@ -1337,10 +1345,24 @@ void bulkload_rows::init(TupleDesc tup_desc, int rows_maxnum)
         m_inited = true;
         m_using_blocks_total_rawsize = m_using_blocks_init_rawsize;
 
+#ifdef ENBALE_HTAP
+        /* default to false, set to true when imcstore */
+        isImcs = false;
+        relNatts = 0;
+        imcsAttsNum = NULL;
+#endif
         (void)MemoryContextSwitchTo(old_context);
     }
 }
 
+#ifdef ENABLE_HTAP
+void bulkload_rows::EnableImcs(int2vector* imcsAtts, int relationNatts)
+{
+    isImcs = true;
+    imcsAttsNum = imcsAtts;
+    relNatts = relationNatts;
+}
+#endif
 /*
  * @Description: reset bulkload_rows object.
  * @IN reuse_blocks: decide to free all holding memory blocks.
@@ -1410,13 +1432,39 @@ bool bulkload_rows::append_one_tuple(Datum* values, const bool* isnull, TupleDes
 
     /* append one tuple */
     for (int attrIdx = 0; attrIdx < m_attr_num; ++attrIdx) {
+#ifdef ENABLE_HTAP
+        int imcsTmpIdx = 0;
+        if (isImcs) {
+            if (attrIdx == m_attr_num - 1)
+                break;
+            /* save imcs index and get rel index */
+            imcsTmpIdx = attrIdx;
+            attrIdx = imcsAttsNum->values[attrIdx] - 1;
+        }
+#endif
         if (unlikely(isnull[attrIdx])) {
             /* append a NULL */
             vector->m_values_nulls.set_null(m_rows_curnum);
         } else {
+#ifdef ENABLE_HTAP
+            bool isToast = false;
+            if (isImcs) {
+                isToast = attrs->attlen == -1 && VARATT_IS_EXTENDED(DatumGetPointer(values[attrIdx]));
+                if (isToast) {
+                    values[attrIdx] = PointerGetDatum(
+                        heap_tuple_untoast_attr((struct varlena *) DatumGetPointer(values[attrIdx])));
+                }
+            }
+#endif
             /* append this value into vector */
             Datum v = (vector->*(vector->m_append))(this, values[attrIdx], (*attrs).attlen);
 
+#ifdef ENABLE_HTAP
+            if (isToast) {
+                char* ptr = DatumGetPointer(values[attrIdx]);
+                pfree(ptr);
+            }
+#endif
             /* compare for min/max values */
             vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
                                        vector->m_minmax.m_max_buf,
@@ -1425,10 +1473,28 @@ bool bulkload_rows::append_one_tuple(Datum* values, const bool* isnull, TupleDes
                                        &(vector->m_minmax.m_varstr_maxlen));
         }
 
+#ifdef ENABLE_HTAP
+        if (isImcs) {
+            attrIdx = imcsTmpIdx;
+        }
+#endif
         /* advance to the next attribute */
         ++vector;
         ++attrs;
     }
+
+#ifdef ENABLE_HTAP
+    if (isImcs) {
+        /* ctid */
+        Datum v = (vector->*(vector->m_append))(this, values[relNatts], (*attrs).attlen);
+            /* compare for min/max values */
+        vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
+                                   vector->m_minmax.m_max_buf,
+                                   v,
+                                   &(vector->m_minmax.m_first_compare),
+                                   &(vector->m_minmax.m_varstr_maxlen));
+    }
+#endif
 
     /* update rows' number */
     ++m_rows_curnum;

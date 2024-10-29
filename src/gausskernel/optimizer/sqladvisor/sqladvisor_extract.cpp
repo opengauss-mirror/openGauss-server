@@ -514,6 +514,9 @@ void extractNode(Plan* plan, List* ancestors, List* rtable, List* subplans)
         case T_SeqScan: {
             resSubplan = extractNodeSeqScan(plan, ancestors, rtable, subplans);
         } break;
+#ifdef ENABLE_HTAP
+        case T_IMCStoreScan:
+#endif
         case T_CStoreScan: {
             resSubplan = extractNodeCStoreScan(plan, ancestors, rtable, subplans);
         } break;

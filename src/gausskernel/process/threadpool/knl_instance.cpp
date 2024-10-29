@@ -290,6 +290,17 @@ static void knl_g_reqcheck_init(knl_g_reqcheck_context* reqcheck_cxt)
     reqcheck_cxt->g_close_poll_requested = false;
 }
 
+#ifdef ENABLE_HTAP
+static void knl_g_imcstore_init(knl_g_imcstore_context* context)
+{
+    context->context_mutex = PTHREAD_RWLOCK_INITIALIZER;
+    context->dbname = nullptr;
+    InitIMCStoreVacuumQueue(context);
+
+    pg_atomic_init_u32(&(context->imcs_tbl_cnt), 0);
+}
+#endif
+
 static void knl_g_mctcp_init(knl_g_mctcp_context* mctcp_cxt)
 {
     Assert(mctcp_cxt != NULL);
@@ -1049,6 +1060,11 @@ void knl_instance_init()
     knl_g_startup_init(&g_instance.startup_cxt);
     knl_g_dms_init(&g_instance.dms_cxt);
     knl_g_shmem_init(&g_instance.shmem_cxt);
+
+#ifdef ENABLE_HTAP
+    knl_g_imcstore_init(&g_instance.imcstore_cxt);
+#endif
+
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
     knl_g_heartbeat_init(&g_instance.heartbeat_cxt);

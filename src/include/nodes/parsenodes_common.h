@@ -975,7 +975,11 @@ typedef enum AlterTableType {
     AT_ModifyColumn,
     AT_SetCharsetCollate,
     AT_ConvertCharset,
-    AT_ResetPartitionno
+    AT_ResetPartitionno,
+    AT_Imcstored,
+    AT_UnImcstored,
+    AT_ModifyPartitionImcstored,
+    AT_ModifyPartitionUnImcstored,
 } AlterTableType;
 
 typedef enum AlterTableStatProperty { /* Additional Property for AlterTableCmd */

@@ -1608,6 +1608,36 @@ void PostgresInitializer::InitApplyWorker()
     return;
 }
 
+void PostgresInitializer::InitHTAPImcsVacuum()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitSettings();
+
+    FinishInit();
+
+    return;
+}
+
 void PostgresInitializer::InitUndoLauncher()
 {
     InitThread();

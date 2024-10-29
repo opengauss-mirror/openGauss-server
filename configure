@@ -758,6 +758,7 @@ enable_lite_mode
 enable_relocation
 enable_finance_mode
 enable_mot
+enable_htap
 enable_bbox
 enable_memory_check
 enable_mysql_fdw
@@ -847,6 +848,7 @@ enable_lite_mode
 enable_relocation
 enable_finance_mode
 enable_mot
+enable_htap
 enable_bbox
 enable_memory_check
 enable_mysql_fdw
@@ -1560,6 +1562,7 @@ Optional Features:
   --enable-memory-check   build with memory checking feature
   --disable-spinlocks     do not use spinlocks
   --enable-debug          build with debugging symbols (-g)
+  --enable-htap           enable htap feture
   --enable-qunit          enable query driven unit test framework(QUnit)
   --enable-profiling      build with profiling enabled
   --enable-coverage       build with coverage testing instrumentation
@@ -3334,6 +3337,40 @@ if test "${enable_bbox+set}" = set; then
 
 else
   enable_bbox=no
+
+fi
+
+# Check whether --enable-htap was given.
+if test "${enable_htap+set}" = set; then
+  enableval=$enable_htap;
+  case $enableval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_HTAP 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-htap option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-htap option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_htap=no
+
+fi
+
+if test "$enable_htap" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_HTAP 1
+_ACEOF
 
 fi
 

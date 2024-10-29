@@ -86,6 +86,9 @@
 #include "utils/json.h"
 #include "utils/jsonapi.h"
 #include "access/ondemand_extreme_rto/page_redo.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcucache_mgr.h"
+#endif
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -10092,7 +10095,11 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
     SRF_RETURN_DONE(funcctx);
 }
 
+#ifdef ENABLE_HTAP
+#define MEMORY_TYPES_CNT 26
+#else
 #define MEMORY_TYPES_CNT 24
+#endif
 const char* MemoryTypeName[] = {"max_process_memory",
     "process_used_memory",
     "max_dynamic_memory",
@@ -10116,7 +10123,12 @@ const char* MemoryTypeName[] = {"max_process_memory",
     "pooler_conn_memory",
     "pooler_freeconn_memory",
     "storage_compress_memory",
-    "udf_reserved_memory"};
+    "udf_reserved_memory",
+#ifdef ENABLE_HTAP
+    "imcstore_max_memory",
+    "imcstore_used_memory",
+#endif
+    };
 
 /*
  * pv_total_memory_detail
@@ -10246,6 +10258,10 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         ereport(DEBUG2, (errmodule(MOD_LLVM), errmsg("LLVM IR file count is %ld, total memory is %ldKB",
                 g_instance.codegen_IRload_process_count,
                 g_instance.codegen_IRload_process_count * IR_FILE_SIZE / 1024)));
+#ifdef ENABLE_HTAP
+        mem_size[24] = (int)(g_instance.attr.attr_memory.max_imcs_cache >> BITS_IN_KB);
+        mem_size[25] = IMCU_CACHE->GetCurrentMemSize() >> BITS_IN_MB;
+#endif
     }
 
     /* stuff done on every call of the function */
