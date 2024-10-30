@@ -15,9 +15,9 @@ alter index func_idx_alter_index_disable disable;
 
 \c db_restore
 -- the function-based index `func_idx_alter_index_disable` was disabled
-explain select * from alter_index_disable where to_char(a) = '1';
+explain (costs off) select * from alter_index_disable where to_char(a) = '1';
 alter index func_idx_alter_index_disable enable;
-explain select * from alter_index_disable where to_char(a) = '1';
+explain (costs off) select * from alter_index_disable where to_char(a) = '1';
 
 \c postgres
 drop database db_alter_index_disable;
