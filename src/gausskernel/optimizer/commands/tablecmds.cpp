@@ -26216,11 +26216,11 @@ static void ATExecEnableIndex(Relation rel, bool enable) {
     if(!HeapTupleIsValid(index_tuple))
         elog(ERROR, "cache lookup failed for index %u", rel->rd_id);
     if (heap_attisnull(index_tuple, Anum_pg_index_indexprs, NULL)) {
+        ReleaseSysCache(index_tuple);
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("can not set enable/disable index for relation %s, as it is not a function based index",
                     RelationGetRelationName(rel))));
-        ReleaseSysCache(index_tuple);
     }
     ReleaseSysCache(index_tuple);
 

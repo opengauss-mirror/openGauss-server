@@ -8369,18 +8369,21 @@ bool GetIndexEnableStateByTuple(HeapTuple indexTuple)
 bool relationHasDisableIndex(Relation relation) {
     auto indexoidlist = RelationGetIndexList(relation);
     foreach_cell(l, indexoidlist) {
-        auto indexoid = lfirst_oid(l);
+        auto indexOid = lfirst_oid(l);
+        auto indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
+        if (!HeapTupleIsValid(indexTuple))
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("could not find tuple for amop entry %u", indexOid)));
 
-        /*
-         * Extract info from the relation descriptor for the index.
-         */
-        auto indexRelation = index_open(indexoid, AccessShareLock);
-        if (IndexIsValid(indexRelation->rd_index) && !GetIndexEnableStateByTuple(indexRelation->rd_indextuple)) {
-            index_close(indexRelation, AccessShareLock);
+        auto enableState = GetIndexEnableStateByTuple(indexTuple);
+        ReleaseSysCache(indexTuple);
+        if (!enableState) {
+            list_free(indexoidlist);
             return true;
         }
-        index_close(indexRelation, AccessShareLock);
     }
+    list_free(indexoidlist);
     return false;
 }
 
@@ -8398,10 +8401,10 @@ bool resultRelationsHasDisableIndex(PlannedStmt *plannedstmt) {
 
         auto rel = heap_open(rid, AccessShareLock);
         if (relationHasDisableIndex(rel)) {
-            heap_close(rel, AccessShareLock);
+            heap_close(rel, NoLock);
             return true;
         }
-        heap_close(rel, AccessShareLock);
+        heap_close(rel, NoLock);
     }
     return false;
 }

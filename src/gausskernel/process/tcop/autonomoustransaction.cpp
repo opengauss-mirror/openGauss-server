@@ -109,7 +109,7 @@ void AutonomousSession::AttachSession(void)
      * but this timeout interval is meaningless.
      */
     errno_t ret = snprintf_s(connInfo, sizeof(connInfo), sizeof(connInfo) - 1,
-                             "dbname=%s port=%d host='localhost' application_name='autonomoustransaction' user=%s "
+                             "dbname=%s port=%d application_name='autonomoustransaction' user=%s "
                              "connect_timeout=600",
                              dbName, g_instance.attr.attr_network.PostPortNumber,
                              (char*)GetSuperUserName((char*)userName));
