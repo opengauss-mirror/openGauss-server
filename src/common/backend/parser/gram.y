@@ -297,6 +297,7 @@ static int GetFillerColIndex(char *filler_col_name, List *col_list);
 static void RemoveFillerCol(List *filler_list, List *col_list);
 static int errstate;
 static void CheckPartitionExpr(Node* expr, int* colCount);
+static void CheckPartitionExprInner(Node* expr, int* colCount, bool checkTypeCast);
 static char* transformIndexOptions(List* list);
 static void setAccessMethod(Constraint *n);
 static char* GetValidUserHostId(char* userName, char* hostId);
@@ -34445,7 +34446,13 @@ static void checkDeleteRelationError()
 #ifndef MAX_SUPPORTED_FUNC_FOR_PART_EXPR
 #define MAX_SUPPORTED_FUNC_FOR_PART_EXPR 25
 #endif
+
 static void CheckPartitionExpr(Node* expr, int* colCount)
+{
+	CheckPartitionExprInner(expr, colCount, true);
+}
+
+static void CheckPartitionExprInner(Node* expr, int* colCount, bool checkTypeCast)
 {
 	if (expr == NULL)
 		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The expr can't be NULL")));
@@ -34457,8 +34464,8 @@ static void CheckPartitionExpr(Node* expr, int* colCount)
 		char* name = strVal(linitial(a_expr->name));
 		if (strcmp(name, "+") != 0 && strcmp(name, "-") != 0 && strcmp(name, "*") != 0)
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s operator is not supported for Partition Expr", name)));
-		CheckPartitionExpr(a_expr->lexpr, colCount);
-		CheckPartitionExpr(a_expr->rexpr, colCount);
+		CheckPartitionExprInner(a_expr->lexpr, colCount, false);
+		CheckPartitionExprInner(a_expr->rexpr, colCount, false);
 	} else if (expr->type == T_FuncCall) {
 		char* validFuncName[MAX_SUPPORTED_FUNC_FOR_PART_EXPR] = {"abs","ceiling","datediff","day","dayofmonth","dayofweek","dayofyear","extract","floor","hour",
 		"microsecond","minute","mod","month","quarter","second","time_to_sec","to_days","to_seconds","unix_timestamp","weekday","year","yearweek","date_part","div"};
@@ -34474,12 +34481,18 @@ static void CheckPartitionExpr(Node* expr, int* colCount)
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s func is not supported for Partition Expr", funcname)));
 		ListCell* cell = NULL;
 		foreach (cell, ((FuncCall*)expr)->args) {
-			CheckPartitionExpr((Node*)(lfirst(cell)),colCount);
+			CheckPartitionExprInner((Node*)(lfirst(cell)), colCount, false);
 		}
 	} else if (expr->type == T_ColumnRef) {
 		(*colCount)++;
 	} else if (expr->type == T_A_Const) {
 		return;
+	} else if (expr->type == T_TypeCast) {
+		if (checkTypeCast) {
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be a Type Cast")));
+		} else {
+			return;
+		}
 	} else {
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));
 	}

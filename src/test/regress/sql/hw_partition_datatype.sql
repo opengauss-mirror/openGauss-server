@@ -196,7 +196,29 @@ partition by range(a)
 	partition test_range_datatype_bool_p2 values less than (true)
 );
 
+--test typecast in the partition expression
+CREATE TABLE test_typecast_in_partition_expr_inner (
+    event_id NUMBER PRIMARY KEY,
+    event_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
+)
+PARTITION BY RANGE (date_part('year'::text, event_timestamp))
+(
+    partition part1 values less than(2020),
+    partition part2 values less than(2021)
+);
+
+CREATE TABLE test_typecast_in_partition_expr_outer (
+    event_id NUMBER PRIMARY KEY,
+    event_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
+)
+PARTITION BY RANGE (date_part('year', event_timestamp)::int)
+(
+    partition part1 values less than(2020),
+    partition part2 values less than(2021)
+);
+
 --clean up
+drop table test_typecast_in_partition_expr_inner;
 drop table test_range_datatype_bpchar;
 drop table test_range_datatype_char;
 drop table test_range_datatype_charactern;
