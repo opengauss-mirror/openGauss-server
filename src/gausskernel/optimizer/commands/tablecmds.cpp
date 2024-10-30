@@ -22129,9 +22129,9 @@ static void relation_mark_replica_identity(Relation rel, char ri_type, Oid index
 
         if (dirty) {
             HeapTuple newitup = NULL;
-            Datum values[Natts_pg_class];
-            bool nulls[Natts_pg_class];
-            bool replaces[Natts_pg_class];
+            Datum values[Natts_pg_index];
+            bool nulls[Natts_pg_index];
+            bool replaces[Natts_pg_index];
             errno_t rc;
             rc = memset_s(values, sizeof(values), 0, sizeof(values));
             securec_check(rc, "\0", "\0");
