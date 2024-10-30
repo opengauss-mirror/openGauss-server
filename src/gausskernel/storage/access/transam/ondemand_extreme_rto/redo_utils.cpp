@@ -763,3 +763,15 @@ static void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState) {
         (errmsg("[On-demand][redo] blockState->blockparse.blockhead: %s.",
         res.data)));
 }
+
+bool OndemandAllowBufAccess()
+{
+    /*
+     * We allow dms worker thread access buffer in ondemand redo. Dont't worry for access old
+     * version buffer because we know it will redo these page.
+     */
+    if (AmDmsProcess() && SS_PRIMARY_ONDEMAND_RECOVERY && t_thrd.dms_cxt.in_ondemand_redo) {
+        return true;
+    }
+    return false;
+}

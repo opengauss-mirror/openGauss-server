@@ -2418,7 +2418,7 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
          * So, "In RBM_ZERO_AND_LOCK mode the caller expects the page to
          * be locked on return." can be ignored.
          */
-        if (!isLocalBuf && t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
+        if (!isLocalBuf && t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
             /* Mode cannot be RBM_ZERO_AND_CLEANUP_LOCK/RBM_ZERO_AND_LOCK here */
             bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, firstBlockNum, mode);
         }
@@ -2675,7 +2675,7 @@ found_branch:
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
 
-                if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
+                if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
                     bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, blockNum, mode);
                 }
             }
@@ -3043,7 +3043,7 @@ retry:
          * Checkpoint if buffer need to redo and try hashMap partition lock,
          * if need to redo but doesn't get lock, unpinbuffer and retry.
          */
-        if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE &&
+        if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY &&
             ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
             UnpinBuffer(buf, true);
             goto retry;
@@ -3259,7 +3259,7 @@ retry:
             if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock)
                 LWLockRelease(old_partition_lock);
 
-            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE) {
+            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
                 /*release the mapping lock before pinning buffer*/
                 LWLockRelease(new_partition_lock);
 retry_new_buffer:
@@ -3423,7 +3423,7 @@ retry_new_buffer:
     * Checkpoint if buffer need to redo and try hashMap partition lock,
     * if need to redo but doesn't get lock, unpinbuffer and retry.
     */
-    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE) {
+    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
         bool hasUnpinned = false;
         while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
             if (!hasUnpinned) {
@@ -6389,7 +6389,7 @@ retry:
              * hold the content shared lock all the time, give the MES from the primary a chance to get it,
              * and the timeout time of the primary and standby servers is modified to open the unlocking
              * time window.
-            */
+             */
             if (!dms_standby_retry_read && SS_STANDBY_MODE) {
                 dms_standby_retry_read = true;
                 mode = BUFFER_LOCK_EXCLUSIVE;

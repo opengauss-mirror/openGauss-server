@@ -8971,7 +8971,7 @@ static void XLogMakeUpRemainSegsContent(char *contentBuffer)
 
 void XLogCheckRemainSegs()
 {
-    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE) {
+    if (SS_PRIMARY_ONDEMAND_RECOVERY) {
         return;
     }
 
