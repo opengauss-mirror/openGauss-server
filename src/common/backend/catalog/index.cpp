@@ -661,6 +661,7 @@ static void UpdateIndexRelation(Oid indexoid, Oid heapoid, IndexInfo* indexInfo,
     values[Anum_pg_index_indisreplident - 1] = BoolGetDatum(false);
     values[Anum_pg_index_indnkeyatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexKeyAttrs);
     values[Anum_pg_index_indisvisible - 1] = BoolGetDatum(visible);
+    values[Anum_pg_index_indisenable - 1] = BoolGetDatum(true);
     tuple = heap_form_tuple(RelationGetDescr(pg_index), values, nulls);
 
     /*

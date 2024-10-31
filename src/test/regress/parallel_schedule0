@@ -1142,5 +1142,9 @@ test: backup_tool_audit
 
 # to_number func
 test: to_number_default
+
+test: alter_index_disable
+test: dump_alter_index_disable
+
 # to_timestamp func
 test: to_timestamp_default

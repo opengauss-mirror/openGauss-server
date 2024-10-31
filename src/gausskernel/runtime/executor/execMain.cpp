@@ -147,6 +147,7 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 #ifdef USE_SPQ
 extern void build_backward_connection(PlannedStmt *planstmt);
 #endif
+extern void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt);
 
 /*
  * Note that GetUpdatedColumns() also exists in commands/trigger.c.  There does
@@ -611,6 +612,8 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         estate->compileCodegen = true;
     }
 #endif
+
+    CheckWriteCommandWithDisableIndex(queryDesc->plannedstmt);
 
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {

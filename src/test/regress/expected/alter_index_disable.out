@@ -1,0 +1,83 @@
+create table alter_index_disable (a int, b int);
+insert into alter_index_disable select generate_series(1, 10000) as a, generate_series(1, 10000) as b;
+insert into alter_index_disable values (10001, 10001);
+CREATE OR REPLACE PROCEDURE insert_data
+IS
+BEGIN
+    INSERT INTO alter_index_disable(a, b) VALUES (10003, 10003);
+END;
+/
+-- only function based indexes are supported
+create index idx_alter_index_disable on alter_index_disable(a);
+alter index idx_alter_index_disable disable;
+ERROR:  can not set enable/disable index for relation idx_alter_index_disable, as it is not a function based index
+drop index idx_alter_index_disable;
+-- create function based index
+create index func_idx_alter_index_disable on alter_index_disable(to_char(a));
+explain (costs off) select * from alter_index_disable where to_char(a) = '1';
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Bitmap Heap Scan on alter_index_disable
+   Recheck Cond: (((int4out(a))::character varying)::text = '1'::text)
+   ->  Bitmap Index Scan on func_idx_alter_index_disable
+         Index Cond: (((int4out(a))::character varying)::text = '1'::text)
+(4 rows)
+
+-- disable function based index
+alter index func_idx_alter_index_disable disable;
+explain (costs off) select * from alter_index_disable where to_char(a) = '1';
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Seq Scan on alter_index_disable
+   Filter: (((int4out(a))::character varying)::text = '1'::text)
+(2 rows)
+
+-- insert data when index was disabled
+delete from alter_index_disable where a = 10001 and b = 10001;
+ERROR:  The relation has no permit to write because it has index in disable state
+select * from alter_index_disable where a = 10001 and b = 10001;
+   a   |   b   
+-------+-------
+ 10001 | 10001
+(1 row)
+
+-- SQL bypass
+explain (costs off) insert into alter_index_disable values(10002, 10002);
+          QUERY PLAN           
+-------------------------------
+ [Bypass]
+ Insert on alter_index_disable
+   ->  Result
+(3 rows)
+
+insert into alter_index_disable values(10002, 10002);
+ERROR:  The relation has no permit to write because it has index in disable state
+select * from alter_index_disable where a = 10002 and b = 10002;
+ a | b 
+---+---
+(0 rows)
+
+-- stored procedure
+CALL insert_data();
+ERROR:  The relation has no permit to write because it has index in disable state
+CONTEXT:  SQL statement "INSERT INTO alter_index_disable(a, b) VALUES (10003, 10003)"
+PL/pgSQL function insert_data() line 2 at SQL statement
+select * from alter_index_disable where a = 10003 and b = 10003;
+ a | b 
+---+---
+(0 rows)
+
+-- enable function based index
+alter index func_idx_alter_index_disable enable;
+explain (costs off) select * from alter_index_disable where to_char(a) = '1';
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Bitmap Heap Scan on alter_index_disable
+   Recheck Cond: (((int4out(a))::character varying)::text = '1'::text)
+   ->  Bitmap Index Scan on func_idx_alter_index_disable
+         Index Cond: (((int4out(a))::character varying)::text = '1'::text)
+(4 rows)
+
+drop procedure insert_data;
+drop index func_idx_alter_index_disable;
+drop table alter_index_disable cascade;

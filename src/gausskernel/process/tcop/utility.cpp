@@ -415,24 +415,30 @@ bool CommandIsReadOnly(Node* parse_tree)
 {
     if (IsA(parse_tree, PlannedStmt)) {
         PlannedStmt* stmt = (PlannedStmt*)parse_tree;
+        return CommandIsReadOnly(stmt);
+    }
+    /* For now, treat all utility commands as read/write */
+    return false;
+}
 
-        switch (stmt->commandType) {
-            case CMD_SELECT:
-                if (stmt->rowMarks != NIL)
-                    return false; /* SELECT FOR [KEY] UPDATE/SHARE */
-                else if (stmt->hasModifyingCTE)
-                    return false; /* data-modifying CTE */
-                else
-                    return true;
-            case CMD_UPDATE:
-            case CMD_INSERT:
-            case CMD_DELETE:
-            case CMD_MERGE:
+bool CommandIsReadOnly(PlannedStmt *stmt)
+{
+    switch (stmt->commandType) {
+        case CMD_SELECT:
+            if (stmt->rowMarks != NIL)
+                return false; /* SELECT FOR [KEY] UPDATE/SHARE */
+            else if (stmt->hasModifyingCTE)
+                return false; /* data-modifying CTE */
+            else
+                return true;
+        case CMD_UPDATE:
+        case CMD_INSERT:
+        case CMD_DELETE:
+        case CMD_MERGE:
                 return false;
-            default:
-                elog(WARNING, "unrecognized commandType: %d", (int)stmt->commandType);
-                break;
-        }
+        default:
+            elog(WARNING, "unrecognized commandType: %d", (int)stmt->commandType);
+            break;
     }
     /* For now, treat all utility commands as read/write */
     return false;
@@ -9933,6 +9939,12 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
             break;
         case AT_RebuildAllIndexOnPartition:
             tag = "REBUILD ALL INDEX ON PARTITION";
+            break;
+        case AT_DisableIndex:
+            tag = "DISABLE INDEX";
+            break;
+        case AT_EnableIndex:
+            tag = "ENABLE INDEX";
             break;
         case AT_EnableTrig:
             tag = "ENABLE TRIGGER";

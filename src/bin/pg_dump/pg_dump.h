@@ -338,6 +338,7 @@ typedef struct _indxInfo {
     bool indisusable;
     bool indisreplident;
     bool indisvisible;
+    bool indisenable;
     /* if there is an associated constraint object, its dumpId: */
     DumpId indexconstraint;
 } IndxInfo;

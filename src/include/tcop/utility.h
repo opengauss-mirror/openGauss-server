@@ -100,6 +100,7 @@ extern const char* CreateCommandTag(Node* parsetree);
 extern LogStmtLevel GetCommandLogLevel(Node* parsetree);
 
 extern bool CommandIsReadOnly(Node* parsetree);
+extern bool CommandIsReadOnly(PlannedStmt *plannedstmt);
 
 #ifdef PGXC
 

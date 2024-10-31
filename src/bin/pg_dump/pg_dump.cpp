@@ -8106,6 +8106,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
     int ntups = 0;
     int i_indisreplident = 0;
     int i_indisvisible = 0;
+    int i_indisenable = 0;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
 
     for (i = 0; i < numTables; i++) {
@@ -8163,6 +8164,11 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
                 appendPQExpBuffer(query, "i.indisvisible, ");
             } else {
                 appendPQExpBuffer(query, "true AS indisvisible, ");
+            }
+            if (is_column_exists(AH->connection, IndexRelationId, "indisenable")) {
+                appendPQExpBuffer(query, "i.indisenable, ");
+            } else {
+                appendPQExpBuffer(query, "true AS indisenable, ");
             }
             appendPQExpBuffer(query,
                 "c.contype, c.conname, "
@@ -8337,6 +8343,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
         i_condef = PQfnumber(res, "condef");
         i_tablespace = PQfnumber(res, "tablespace");
         i_options = PQfnumber(res, "options");
+        i_indisenable = PQfnumber(res, "indisenable");
 
         indxinfo = (IndxInfo*)pg_malloc(ntups * sizeof(IndxInfo));
         constrinfo = (ConstraintInfo*)pg_malloc(ntups * sizeof(ConstraintInfo));
@@ -8374,6 +8381,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
             indxinfo[j].indisusable = (PQgetvalue(res, j, i_indisusable)[0] == 't');
             indxinfo[j].indisreplident = (PQgetvalue(res, j, i_indisreplident)[0] == 't');
             indxinfo[j].indisvisible = (PQgetvalue(res, j, i_indisvisible)[0] == 't');
+            indxinfo[j].indisenable = (PQgetvalue(res, j, i_indisenable)[0] == 't');
 
             if (contype == 'p' || contype == 'u' || contype == 'x') {
                 /*
@@ -21514,6 +21522,9 @@ static void dumpIndex(Archive* fout, IndxInfo* indxinfo)
         if (indxinfo->indisreplident) {
             appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY USING", fmtId(tbinfo->dobj.name));
             appendPQExpBuffer(q, " INDEX %s;\n", fmtId(indxinfo->dobj.name));
+        }
+        if (!indxinfo->indisenable) {
+            appendPQExpBuffer(q, "\nALTER INDEX %s DISABLE;\n", fmtId(indxinfo->dobj.name));
         }
 
         /*

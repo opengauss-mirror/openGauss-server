@@ -2322,6 +2322,22 @@ alter_table_cmd:
 				}
 
 			|
+			/*ALTER INDEX index_name DISABLE*/
+			DISABLE_P
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_DisableIndex;
+					$$ = (Node *)n;
+				}
+			|
+			/*ALTER INDEX index_name ENABLE*/
+			ENABLE_P
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_EnableIndex;
+					$$ = (Node *)n;
+				}
+			|
 			/* ALTER TABLE <name> ADD <coldef> */
 			ADD_P columnDef
 				{

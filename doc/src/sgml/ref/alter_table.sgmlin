@@ -53,6 +53,7 @@ column_clause
     | ENCRYPTION KEY ROTATION
     | AUTO_INCREMENT [ = ] value
     | ALTER INDEX index_name [ VISBLE | INVISIBLE ]
+    | ALTER INDEX index_name [ ENABLE | DISABLE ]
     | [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] default_charset ] [ [ DEFAULT ] COLLATE [ = ] default_collation ]
     | CONVERT TO CHARACTER SET | CHARSET charset [ COLLATE collation ]
 NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!

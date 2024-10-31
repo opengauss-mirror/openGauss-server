@@ -1,0 +1,24 @@
+create user u_alter_disable password '1234@abcd';
+grant all privileges to u_alter_disable;
+
+create database db_alter_index_disable;
+create database db_restore;
+
+\c db_alter_index_disable
+create table alter_index_disable (a int, b int);
+create index func_idx_alter_index_disable on alter_index_disable(to_char(a));
+alter index func_idx_alter_index_disable disable;
+
+\! @abs_bindir@/gs_dump -p @portstring@ db_alter_index_disable -f @abs_bindir@/dump -F c -w > @abs_bindir@/gs_dump_alter_disable.log 2>&1 ; echo $?
+
+\! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_alter_disable -W 1234@abcd -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_alter_disable.log 2>&1 ; echo $?
+
+\c db_restore
+-- the function-based index `func_idx_alter_index_disable` was disabled
+explain select * from alter_index_disable where to_char(a) = '1';
+alter index func_idx_alter_index_disable enable;
+explain select * from alter_index_disable where to_char(a) = '1';
+
+\c postgres
+drop database db_alter_index_disable;
+drop database db_restore;
