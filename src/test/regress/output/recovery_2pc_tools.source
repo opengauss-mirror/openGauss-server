@@ -321,7 +321,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_proc_coverage                             | bool    |      |           | 
  enable_record_nettime                            | bool    |      |           | 
  enable_recyclebin                                | bool    |      |           | 
- enable_remote_excute                             | bool    |      |           | 
+ enable_remote_execute                            | bool    |      |           | 
  enable_resource_record                           | bool    |      |           | 
  enable_resource_track                            | bool    |      |           | 
  enable_save_confirmed_lsn                        | bool    |      |           | 
