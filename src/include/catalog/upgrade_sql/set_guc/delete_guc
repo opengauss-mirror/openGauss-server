@@ -17,3 +17,4 @@ twophase_clean_workers datanode
 bgwriter_thread_num datanode
 gds_debug_mod datanode
 unique_sql_clean_ratio datanode
+enable_remote_excute datanode

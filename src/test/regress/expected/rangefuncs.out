@@ -67,7 +67,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_pbe_optimization           | on
  enable_prevent_job_task_startup   | off
  enable_recyclebin                 | off
- enable_remote_excute              | off
+ enable_remote_execute             | off
  enable_resource_record            | off
  enable_resource_track             | on
  enable_save_datachanged_timestamp | on
