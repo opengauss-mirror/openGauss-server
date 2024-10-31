@@ -3,6 +3,17 @@ CREATE DATABASE frwt_db;
 
 -- With Ties功能测试
 -- 数据库初始化：创建测试表并插入数据
+create table t(X char,Y number,Z NUMBER);
+insert into t values('A',1,NULL);
+insert into t values('B',2,1);
+insert into t values('C',3,1);
+insert into t values('D',4,2);
+insert into t values('E',5,3);
+insert into t values('F',6,47);
+
+SELECT * FROM T FETCH FIRST 20 PERCENT ROW ONLY;
+SELECT * FROM T FETCH NEXT 20 PERCENT ROW WITH TIES;
+
 CREATE TABLE test_table (
     id SERIAL PRIMARY KEY,
     name VARCHAR(50),
