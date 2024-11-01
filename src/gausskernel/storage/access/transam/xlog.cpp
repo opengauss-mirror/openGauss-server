@@ -712,8 +712,6 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
             extra_waits++;
         }
 
-        Assert(pg_atomic_read_u32(&proc->xlogGroupNext) == INVALID_PGPROCNO);
-
 #ifdef ENABLE_MULTIPLE_NODES
         /* Fix semaphore count for any absorbed wakeups */
         while (extra_waits-- > 0) {
@@ -727,6 +725,7 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
          * in case of memory reordering in relaxed memory model like ARM.
          */
         pg_memory_barrier();
+        Assert(pg_atomic_read_u32(&proc->xlogGroupNext) == INVALID_PGPROCNO);
         return proc->xlogGroupReturntRecPtr;
     }
 
