@@ -26,6 +26,8 @@
 #include "dlfcn.h"
 #endif
 
+#include "c.h"
+#include "pgstat.h"
 #include "ddes/dms/ss_dms.h"
 #include "utils/elog.h"
 
@@ -223,7 +225,15 @@ void dms_get_error(int *errcode, const char **errmsg)
 
 int dms_request_page(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode_t mode)
 {
-    return g_ss_dms_func.dms_request_page(dms_ctx, ctrl, mode);
+    DMSWaiteventTarget target;
+    target.page.buffer = ctrl->buf_id + 1;
+    target.page.mode = mode;
+    pgstat_report_dms_waitevent(WAIT_EVENT_PCR_REQ_HEAP_PAGE, &target);
+
+    int res = g_ss_dms_func.dms_request_page(dms_ctx, ctrl, mode);
+    
+    pgstat_report_dms_waitevent(WAIT_EVENT_END);
+    return res;
 }
 
 int dms_broadcast_msg(dms_context_t *dms_ctx, dms_broadcast_info_t *dms_broad_info)
@@ -247,7 +257,10 @@ int dms_request_opengauss_txn_status(dms_context_t *dms_ctx, unsigned char reque
 }
 int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx, dms_opengauss_txn_snapshot_t *dms_txn_snapshot)
 {
-    return g_ss_dms_func.dms_request_opengauss_txn_snapshot(dms_ctx, dms_txn_snapshot);
+    pgstat_report_dms_waitevent(WAIT_EVENT_TXN_REQ_SNAPSHOT);
+    int res = g_ss_dms_func.dms_request_opengauss_txn_snapshot(dms_ctx, dms_txn_snapshot);
+    pgstat_report_dms_waitevent(WAIT_EVENT_END);
+    return res;
 }
 
 int dms_request_opengauss_txn_of_master(dms_context_t *dms_ctx, dms_opengauss_txn_sw_info_t *dms_txn_swinfo)

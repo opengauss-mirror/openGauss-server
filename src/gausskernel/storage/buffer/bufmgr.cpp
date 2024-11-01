@@ -133,6 +133,24 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
     bool *need_repair);
 
 
+char* BufferTagToString(const BufferTag* buftag, char* resBuffer, int len)
+{
+    if (resBuffer == NULL) {
+        StringInfoData tag;
+        initStringInfo(&tag);
+        appendStringInfo(&tag, "%u/%u/%u/%d %d-%u",
+            buftag->rnode.spcNode, buftag->rnode.dbNode, buftag->rnode.relNode, buftag->rnode.bucketNode,
+            buftag->forkNum, buftag->blockNum);
+        return tag.data;
+    } else {
+        errno_t rc = snprintf_s(resBuffer, len, len - 1, "%u/%u/%u/%d %d-%u",
+            buftag->rnode.spcNode, buftag->rnode.dbNode, buftag->rnode.relNode, buftag->rnode.bucketNode,
+            buftag->forkNum, buftag->blockNum);
+        securec_check_ss(rc, "", "");
+        return resBuffer;
+    }
+}
+
 /*
  * Ensure that the the PrivateRefCountArray has sufficient space to store one
  * more entry. This has to be called before using NewPrivateRefCountEntry() to

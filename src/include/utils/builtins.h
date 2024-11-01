@@ -1884,6 +1884,10 @@ extern Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS);
 
 /* plhandler.cpp */
 extern Datum generate_procoverage_report(PG_FUNCTION_ARGS);
+
+/* lwlock.cpp */
+extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
+
 #else
 #endif
 extern char *pg_ultostr(char *str, uint32 value);

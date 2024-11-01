@@ -412,7 +412,8 @@ static const char* WaitStateDesc[] = {
     "gtm set consistency point",     // STATE_GTM_SET_CONSISTENCY_POINT
     "wait sync bgworkers",           // STATE_WAIT_SYNC_BGWORKERS
     "stanby read recovery conflict", // STATE_STANDBY_READ_RECOVERY_CONFLICT
-    "standby get snapshot"           // STATE_STANDBY_GET_SNAPSHOT
+    "standby get snapshot",          // STATE_STANDBY_GET_SNAPSHOT
+    "wait dms"                       // STATE_WAIT_DMS
 };
 
 // description for WaitStatePhase enums.
@@ -444,6 +445,8 @@ const char* pgstat_get_waitstatusdesc(uint32 wait_event_info)
             return WaitStateDesc[STATE_WAIT_LOCK];
         case PG_WAIT_IO:
             return WaitStateDesc[STATE_WAIT_IO];
+        case PG_WAIT_DMS:
+            return WaitStateDesc[STATE_WAIT_DMS];
         default:
             return WaitStateDesc[STATE_WAIT_UNDEFINED];
     }
@@ -2936,16 +2939,12 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
 
 static void GetBlockInfo(const PgBackendStatus* beentry, Datum values[], bool nulls[])
 {
+    uint32 waitevent = beentry->st_waitevent;
+    uint32 classId = waitevent & WAITEVENT_CLASS_MASK;
+
+    /* lock */
     struct LOCKTAG locktag = beentry->locallocktag.lock;
-
-    if (beentry->locallocktag.lock.locktag_lockmethodid == 0) {
-        nulls[NUM_PG_LOCKTAG_ID] = true;
-        nulls[NUM_PG_LOCKMODE_ID] = true;
-        nulls[NUM_PG_BLOCKSESSION_ID] = true;
-        return;
-    }
-
-    if ((beentry->st_waitevent & 0xFF000000) == PG_WAIT_LOCK) {
+    if (classId == PG_WAIT_LOCK && locktag.locktag_lockmethodid != 0) {
         char* blocklocktag = LocktagToString(locktag);
         values[NUM_PG_LOCKTAG_ID] = CStringGetTextDatum(blocklocktag);
         values[NUM_PG_LOCKMODE_ID] = CStringGetTextDatum(
@@ -2953,11 +2952,48 @@ static void GetBlockInfo(const PgBackendStatus* beentry, Datum values[], bool nu
                             beentry->locallocktag.mode));
         values[NUM_PG_BLOCKSESSION_ID] = Int64GetDatum(beentry->st_block_sessionid);
         pfree_ext(blocklocktag);
-    } else {
-        nulls[NUM_PG_LOCKTAG_ID] = true;
-        nulls[NUM_PG_LOCKMODE_ID] = true;
-        nulls[NUM_PG_BLOCKSESSION_ID] = true;
+        return;
     }
+
+    /* lwlock */
+    LWLockMode lwmode = beentry->lw_want_mode;
+    LWLock *lwlock = beentry->lw_want_lock;
+    if (classId == PG_WAIT_LWLOCK && lwlock != NULL) {
+        char buffer[64] = {0};
+        const char* modeStr = lwmode == LW_EXCLUSIVE ? "Exclusive" : "Shared";
+        LWLockExplainTag(lwlock, buffer, sizeof(buffer));
+        values[NUM_PG_LOCKTAG_ID] = CStringGetTextDatum(buffer);
+        values[NUM_PG_LOCKMODE_ID] = CStringGetTextDatum(modeStr);
+        nulls[NUM_PG_BLOCKSESSION_ID] = true;
+        return;
+    }
+
+    /* dms waitevent */
+    DMSWaiteventTarget dmsWaitTarget = beentry->dms_wait_target;
+    if (classId == PG_WAIT_DMS) {
+        if (waitevent == WAIT_EVENT_PCR_REQ_HEAP_PAGE || waitevent == WAIT_EVENT_DCS_TRANSFER_PAGE ||
+            waitevent == WAIT_EVENT_DCS_INVLDT_SHARE_COPY_PROCESS) {
+            char *dmsTag, *dmsMode;
+            decode_dms_waitevent_target(waitevent, beentry->dms_wait_target, &dmsTag, &dmsMode);
+
+            if (dmsTag != NULL) {
+                values[NUM_PG_LOCKTAG_ID] = CStringGetTextDatum(dmsTag);
+                values[NUM_PG_LOCKMODE_ID] = CStringGetTextDatum(dmsMode);
+                pfree(dmsTag);
+                pfree(dmsMode);
+            } else {
+                nulls[NUM_PG_LOCKTAG_ID] = true;
+                nulls[NUM_PG_LOCKMODE_ID] = true;
+            }
+            nulls[NUM_PG_BLOCKSESSION_ID] = true;
+            return;
+        }
+    }
+
+    /* unknown */
+    nulls[NUM_PG_LOCKTAG_ID] = true;
+    nulls[NUM_PG_LOCKMODE_ID] = true;
+    nulls[NUM_PG_BLOCKSESSION_ID] = true;
 }
 
 /*
