@@ -2,6 +2,27 @@ CREATE DATABASE frwt_db;
 \c frwt_db
 -- With Ties功能测试
 -- 数据库初始化：创建测试表并插入数据
+create table t(X char,Y number,Z NUMBER);
+insert into t values('A',1,NULL);
+insert into t values('B',2,1);
+insert into t values('C',3,1);
+insert into t values('D',4,2);
+insert into t values('E',5,3);
+insert into t values('F',6,47);
+SELECT * FROM T FETCH FIRST 20 PERCENT ROW ONLY;
+ x | y | z 
+---+---+---
+ A | 1 |  
+ B | 2 | 1
+(2 rows)
+
+SELECT * FROM T FETCH NEXT 20 PERCENT ROW WITH TIES;
+ x | y | z 
+---+---+---
+ A | 1 |  
+ B | 2 | 1
+(2 rows)
+
 CREATE TABLE test_table (
     id SERIAL PRIMARY KEY,
     name VARCHAR(50),
@@ -100,7 +121,8 @@ SELECT * FROM test_table ORDER BY score DESC FETCH FIRST 0 ROWS WITH TIES;
 SELECT * FROM test_table ORDER BY score FETCH NEXT 3 PERCENT ROWS WITH TIES;
  id | name | score | group_id 
 ----+------+-------+----------
-(0 rows)
+ 10 | Judy |    60 |        5
+(1 row)
 
 -- 测试用例 5: 复杂查询
 -- 5.1 联合查询中的 WITH TIES
@@ -292,13 +314,13 @@ SELECT COUNT(*) FROM emp_view_ties;
 SELECT COUNT(*) FROM emp_view_percent;
  count 
 -------
-     3
+     4
 (1 row)
 
 SELECT COUNT(*) FROM emp_view_percent_ties;
  count 
 -------
-     4
+     5
 (1 row)
 
 INSERT INTO employees (id, name, department, salary) VALUES (10, 'Eve', 'Finance', 6200);
@@ -345,7 +367,7 @@ BEGIN
         RAISE NOTICE 'Total: %', rec.count;
     END LOOP;
 END $$;
-NOTICE:  Total: 4
+NOTICE:  Total: 5
 -- 测试用例 9: SMP支持
 SET query_dop=1002;
 DELETE FROM test_table;
@@ -434,7 +456,8 @@ SELECT * FROM percent_test_table ORDER BY score DESC OFFSET 5 FETCH NEXT 30 PERC
   8 | Heidi |    60 |        4
   9 | Ivan  |    55 |        5
  10 | Judy  |    50 |        5
-(5 rows)
+ 11 | Ken   |    45 |        6
+(6 rows)
 
 -- 用例 4: 使用不同百分比值的测试
 -- 获取 10% 的行
@@ -442,7 +465,8 @@ SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 10 PERCENT ROWS 
  id | name  | score | group_id 
 ----+-------+-------+----------
   1 | Alice |    95 |        1
-(1 row)
+  2 | Bob   |    90 |        1
+(2 rows)
 
 -- 获取 75% 的行
 SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 75 PERCENT ROWS ONLY;
@@ -461,7 +485,8 @@ SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 75 PERCENT ROWS 
  11 | Ken     |    45 |        6
  12 | Laura   |    40 |        6
  13 | Mike    |    35 |        7
-(13 rows)
+ 14 | Nancy   |    30 |        7
+(14 rows)
 
 -- 用例 5: 超过 100% 的百分比测试
 SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 110 PERCENT ROWS ONLY;
@@ -521,7 +546,8 @@ SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50.5 PERCENT ROW
   7 | Grace   |    65 |        4
   8 | Heidi   |    60 |        4
   9 | Ivan    |    55 |        5
-(9 rows)
+ 10 | Judy    |    50 |        5
+(10 rows)
 
 SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50.5 PERCENT ROWS WITH TIES;
  id |  name   | score | group_id 
@@ -535,7 +561,8 @@ SELECT * FROM percent_test_table ORDER BY score DESC FETCH NEXT 50.5 PERCENT ROW
   7 | Grace   |    65 |        4
   8 | Heidi   |    60 |        4
   9 | Ivan    |    55 |        5
-(9 rows)
+ 10 | Judy    |    50 |        5
+(10 rows)
 
 -- 用例 9: 空数据集测试
 CREATE TABLE empty_table (
@@ -568,7 +595,8 @@ SELECT * FROM percent_test_table ORDER BY group_id ASC, score DESC FETCH NEXT 30
   3 | Charlie |    85 |        2
   4 | David   |    80 |        2
   5 | Eve     |    75 |        3
-(5 rows)
+  6 | Frank   |    70 |        3
+(6 rows)
 
 -- 用例 11: 含有 NULL 值的数据处理
 -- 插入包含 NULL 的数据
@@ -638,7 +666,8 @@ SELECT * FROM percent_partitioned_table FETCH FIRST 50 PERCENT ROWS ONLY;
     | Peter   |    70 |        3
     | Grace   |    65 |        4
     | Heidi   |    60 |        4
-(9 rows)
+    | Ivan    |    55 |        5
+(10 rows)
 
 -- 分区表用例 2: FETCH NEXT N PERCENT 与 ORDER BY 结合
 SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 50 PERCENT ROWS ONLY;
@@ -653,7 +682,8 @@ SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 50 PERCE
     | Peter   |    70 |        3
     | Grace   |    65 |        4
     | Heidi   |    60 |        4
-(9 rows)
+    | Ivan    |    55 |        5
+(10 rows)
 
 -- 分区表用例 3: FETCH NEXT N PERCENT 与 OFFSET 结合
 SELECT * FROM percent_partitioned_table ORDER BY score DESC OFFSET 5 ROWS FETCH NEXT 30 PERCENT ROWS ONLY;
@@ -664,7 +694,8 @@ SELECT * FROM percent_partitioned_table ORDER BY score DESC OFFSET 5 ROWS FETCH 
     | Grace |    65 |        4
     | Heidi |    60 |        4
     | Ivan  |    55 |        5
-(5 rows)
+    | Judy  |    50 |        5
+(6 rows)
 
 -- 分区表用例 4: 使用不同百分比值的测试
 -- 获取 10% 的行
@@ -672,7 +703,8 @@ SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 10 PERCE
  id | name  | score | group_id 
 ----+-------+-------+----------
     | Alice |    95 |        1
-(1 row)
+    | Bob   |    90 |        1
+(2 rows)
 
 -- 获取 75% 的行
 SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 75 PERCENT ROWS ONLY;
@@ -692,7 +724,8 @@ SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 75 PERCE
     | Ken     |    45 |        6
     | Laura   |    40 |        6
     | Mike    |    35 |        7
-(14 rows)
+    | Nancy   |    30 |        7
+(15 rows)
 
 -- 分区表用例 5: 超过 100% 的百分比测试
 SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 110 PERCENT ROWS ONLY;
@@ -732,7 +765,8 @@ SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 50 PERCE
     | Peter   |    70 |        3
     | Grace   |    65 |        4
     | Heidi   |    60 |        4
-(9 rows)
+    | Ivan    |    55 |        5
+(10 rows)
 
 -- 分区表用例 7: FETCH NEXT 0 PERCENT
 SELECT * FROM percent_partitioned_table ORDER BY score DESC FETCH FIRST 0 PERCENT ROWS ONLY;

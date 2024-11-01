@@ -147,7 +147,7 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
                     tuple_num++;
                 }
 
-                node->count = (int64)(node->fraction * tuple_num);
+                node->count = std::ceil(node->fraction * tuple_num);
                 if (node->count <= 0) {
                     node->lstate = LIMIT_EMPTY;
                     return NULL;
