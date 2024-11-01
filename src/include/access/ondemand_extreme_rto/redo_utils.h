@@ -55,5 +55,6 @@ void OnDemandNotifyHashMapPruneIfNeed();
 XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
 bool IsRecParseStateHaveChildState(XLogRecParseState *checkState);
 void OndemandGlobalXLogMemReleaseIfNeed(RedoMemManager *memctl);
+bool OndemandAllowBufAccess();
 
 #endif /* ONDEMAND_EXTREME_RTO_REDO_UTILS_H */

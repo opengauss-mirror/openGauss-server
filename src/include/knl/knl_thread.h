@@ -3441,6 +3441,7 @@ typedef struct knl_t_dms_context {
     uint32 srsn; /* session rsn used for DMS page request ordering */
     PinnedBufferItem* pincount_array;
     bool need_check_pincount;
+    bool in_ondemand_redo;
 } knl_t_dms_context;
 
 typedef struct knl_t_ondemand_xlog_copy_context {

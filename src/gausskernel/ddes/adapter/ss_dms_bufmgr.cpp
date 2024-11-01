@@ -352,8 +352,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     /*
      * we need redo items to get lastest page in ondemand recovery
      */
-    if (t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE &&
-        !LWLockHeldByMe(buf_desc->content_lock)) {
+    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && !LWLockHeldByMe(buf_desc->content_lock)) {
         buf_desc = RedoForOndemandExtremeRTOQuery(buf_desc, RELPERSISTENCE_PERMANENT, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, read_mode);
     }
@@ -810,8 +809,7 @@ bool CheckPageNeedSkipInRecovery(Buffer buf, uint64 xlogLsn)
 dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
-    if (AmDmsReformProcProcess() || (AmPageRedoProcess() && !SS_ONDEMAND_BUILD_DONE) ||
-        (AmStartupProcess() && !SS_ONDEMAND_BUILD_DONE)) {
+    if (AmDmsReformProcProcess() || ((AmPageRedoProcess() || AmStartupProcess()) && !SS_ONDEMAND_BUILD_DONE)) {
         /* When SS double cluster, main standby always is in recovery.
          * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
@@ -898,7 +896,8 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
 
 bool DmsCheckBufAccessible()
 {
-    if (dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) || DMSGetProcType4RequestPage() == DMS_SESSION_RECOVER) {
+    if (dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) || DMSGetProcType4RequestPage() == DMS_SESSION_RECOVER ||
+        OndemandAllowBufAccess()) {
         return true;
     }
     return false;

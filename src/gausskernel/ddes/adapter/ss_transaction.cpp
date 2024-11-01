@@ -610,14 +610,10 @@ void SSRequestAllStandbyReloadReformCtrlPage()
         .handle_recv_msg = (unsigned char)false,
         .check_session_kill = (unsigned char)true
     };
-    do {
-        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
-
-        if (ret == DMS_SUCCESS) {
-            return;
-        }
-        pg_usleep(5000L);
-    } while (ret != DMS_SUCCESS);
+    ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+    if (ret != DMS_SUCCESS) {
+        ereport(DEBUG1, (errmsg("SS broadcast reload reform contrl page failed!")));
+    }
 }
 
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
