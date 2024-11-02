@@ -703,7 +703,11 @@ void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
      * When modifying the structure of ResourceOwnerData, note that the ResourceOwnerConcat
      * function needs to be adapted when tracing new types of resources.
      */
+#ifdef ENABLE_HTAP
+    Assert(sizeof(ResourceOwnerData) == 464); /* The current size of ResourceOwnerData is 464 */
+#else
     Assert(sizeof(ResourceOwnerData) == 448); /* The current size of ResourceOwnerData is 448 */
+#endif
 
     /* Recurse to handle descendants */
     for (child = source->firstchild; child != NULL; child = child->nextchild) {
