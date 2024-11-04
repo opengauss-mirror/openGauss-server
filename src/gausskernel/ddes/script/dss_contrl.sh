@@ -74,8 +74,17 @@ program_pid()
 
 program_pid2()
 {
-    pid=`ps -f f -u \`whoami\` | grep -w ${1} | grep -v grep | grep -v ${SCRIPT_NAME} | awk '{print $2}'`
-    echo ${pid}
+    pid=`ps -f -u \`whoami\` | grep -w ${1} | grep -v grep | grep -v ${SCRIPT_NAME} | awk '{print $2}'`
+    result=""
+    for p in ${pid}; do
+        ppid=`ps -o ppid= -p ${p}`
+        parent_name=`ps -p ${ppid} -o comm=`
+        if [ "${parent_name}" != "cm_server" ]; then
+            result="${result} ${p}"
+        fi
+    done
+
+    echo ${result}
 }
 
 program_status()
