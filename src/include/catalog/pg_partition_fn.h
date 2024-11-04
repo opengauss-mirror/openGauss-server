@@ -229,7 +229,6 @@ extern List *searchPgPartitionByParentId(char parttype, Oid parentId, ScanDirect
 extern List *searchPgSubPartitionByParentId(char parttype, List *parentOids,
     ScanDirection direction = ForwardScanDirection);
 extern void freePartList(List *l);
-extern void freeSubPartList(List* plist);
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
 extern Oid GetBaseRelOidOfParition(Relation relation);
 
