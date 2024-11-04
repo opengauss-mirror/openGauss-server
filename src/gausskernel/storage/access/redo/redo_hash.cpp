@@ -1136,6 +1136,7 @@ static void HashXlogMovePageContentsBlock(XLogBlockHead *blockhead, XLogBlockDat
 
     if (block_id == HASH_MOVE_BUK_BLOCK_NUM) {
         PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+        MakeRedoBufferDirty(bufferinfo);
     }
 
     if (block_id == HASH_MOVE_ADD_BLOCK_NUM) {
@@ -1169,6 +1170,7 @@ static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
 
     if (block_id == HASH_SQUEEZE_BUK_BLOCK_NUM) {
         PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+        MakeRedoBufferDirty(bufferinfo);
     }
 
     if (block_id == HASH_SQUEEZE_ADD_BLOCK_NUM) {
