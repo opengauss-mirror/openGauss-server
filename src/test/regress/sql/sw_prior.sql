@@ -1,4 +1,5 @@
 -- base test
+set timezone to 'PRC';
 DROP TABLE IF EXISTS table_name;
 CREATE TABLE table_name(node1, node2) AS
 SELECT 'A1', 'B1' UNION ALL
@@ -703,3 +704,5 @@ COUNT(ID)
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "text" HAVING PRIOR "text" LIKE '%second%';
+
+reset timezone;
