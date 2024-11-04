@@ -961,12 +961,15 @@ Datum sys_connect_by_path(PG_FUNCTION_ARGS)
     List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, &constArrayList);
 
     ListCell *token = NULL;
-
-    if (!constArrayList) {
+    char *trimValue = TrimStr(value);
+    if (trimValue != NULL && !constArrayList) {
         bool valid = false;
         foreach (token, token_list) {
-            const char *curValue = (const char *)lfirst(token);
-            if (strcmp(TrimStr(value), TrimStr(curValue)) == 0) {
+            char *curValue = TrimStr((const char *)lfirst(token));
+            if (curValue == NULL) {
+                continue;
+            }
+            if (strcmp(trimValue, curValue) == 0) {
                 valid = true;
                 break;
             }
@@ -1015,17 +1018,23 @@ Datum connect_by_root(PG_FUNCTION_ARGS)
     char *raw_array_str = NULL;
     List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, &constArrayList);
     ListCell *lc = NULL;
-    bool valid = false;
-    foreach (lc, token_list) {
-        const char *curValue = (const char *)lfirst(lc);
-        if (strcmp(TrimStr(value), TrimStr(curValue)) == 0) {
-            valid = true;
-            break;
+    char *trimValue = TrimStr(value);
+    if (trimValue != NULL && !constArrayList) {
+        bool valid = false;
+        foreach (lc, token_list) {
+            char *curValue = TrimStr((const char *)lfirst(lc));
+            if (curValue == NULL) {
+                continue;
+            }
+            if (strcmp(trimValue, curValue) == 0) {
+                valid = true;
+                break;
+            }
         }
-    }
 
-    if (!valid) {
-        elog(ERROR, "node value is not in path (value:%s path:%s)", value, raw_array_str);
+        if (!valid) {
+            elog(ERROR, "node value is not in path (value:%s path:%s)", value, raw_array_str);
+        }
     }
 
     /*

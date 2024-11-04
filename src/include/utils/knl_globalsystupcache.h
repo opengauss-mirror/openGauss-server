@@ -103,6 +103,10 @@ struct GlobalCatCTup {
     HeapTupleData tuple;      /* tuple management header */
 
     void Release();
+    static void Free(GlobalCatCTup *ct)
+    {
+        pfree_ext(ct);
+    }
 };
 
 /*
@@ -133,6 +137,7 @@ struct GlobalCatCList {
     GlobalCatCTup *members[FLEXIBLE_ARRAY_MEMBER];
 
     void Release();
+    static void Free(GlobalCatCList *cl);
 };
 
 /*
@@ -305,7 +310,10 @@ public:
     {
         return m_relinfo.cc_reloid;
     }
-
+    inline int *GetCCKeyno()
+    {
+        return m_relinfo.cc_keyno;
+    }
     void Init();
     inline bool Inited()
     {
@@ -323,7 +331,8 @@ public:
         uint32 hash_value, Datum *arguments, oidvector* argModes, bool is_disposable);
     GlobalCatCTup *SearchTupleMissWithArgModes(InsertCatTupInfo *tup_info, oidvector* argModes);
 #endif
-
+    void FreeDeadCts();
+    void FreeDeadCls();
     bool enable_rls;
 private:
     /*
@@ -375,16 +384,12 @@ private:
     void SearchBuiltinProcCacheList(InsertCatListInfo *list_info);
     GlobalCatCList *FindListInternal(uint32 hash_value, int nkeys, Datum *arguments, int *location);
     
-    void FreeDeadCts();
     void HandleDeadGlobalCatCTup(GlobalCatCTup *ct);
     void RemoveTailTupleElements(Index hash_index);
     void InvalidLSC(uint32 hash_value);
 
-    void FreeDeadCls();
     void HandleDeadGlobalCatCList(GlobalCatCList *cl);
     void RemoveTailListElements();
-
-    void FreeGlobalCatCList(GlobalCatCList *cl);
 
     /* when initdb, this func call first */
     void InitCacheInfo(Oid reloid, Oid indexoid, int nkeys, const int *key, int nbuckets);
@@ -404,10 +409,8 @@ private:
     }
 
     void AddHeadToCCList(GlobalCatCList *cl);
-    void RemoveElemFromCCList(GlobalCatCList *cl);
 
     void AddHeadToBucket(Index hash_index, GlobalCatCTup *ct);
-    void RemoveElemFromBucket(GlobalCatCTup *ct);
 
     /* Global cache identifier */
     Oid m_dbOid;

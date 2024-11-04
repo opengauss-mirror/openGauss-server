@@ -65,6 +65,17 @@ public:
     template <bool force>
     void ResetCatCaches();
 
+    void FreeDeadElements()
+    {
+        for (int i = 0; i < SysCacheSize; i++) {
+            if (m_global_systupcaches[i] == NULL) {
+                continue;
+            }
+            m_global_systupcaches[i]->FreeDeadCls();
+            m_global_systupcaches[i]->FreeDeadCts();
+        }
+    }
+
     void RemoveAllTailElements();
 
     /*

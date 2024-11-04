@@ -84,14 +84,6 @@ void GlobalSysDBCache::ReleaseGSCEntry(GlobalSysDBCacheEntry *entry)
     pg_atomic_fetch_sub_u64(&entry->m_refcount, 1);
 }
 
-void GlobalSysDBCache::RemoveElemFromBucket(GlobalSysDBCacheEntry *entry)
-{
-    /* shared db never remove */
-    Assert(entry->m_dbOid != InvalidOid);
-    m_bucket_list.RemoveElemFromBucket(&entry->m_cache_elem);
-    m_dbstat_manager.RecordSwapOutDBEntry(entry);
-}
-
 void GlobalSysDBCache::AddHeadToBucket(Index hash_index, GlobalSysDBCacheEntry *entry)
 {
     m_bucket_list.AddHeadToBucket(hash_index, &entry->m_cache_elem);
@@ -101,11 +93,22 @@ void GlobalSysDBCache::AddHeadToBucket(Index hash_index, GlobalSysDBCacheEntry *
     m_dbstat_manager.ThreadHoldDB(entry);
 }
 
+static void free_dead_dbs_internal(GlobalSysDBCacheEntry *entry)
+{
+    /* sub all to delete, make sure no one use the entry */
+    entry->MemoryEstimateSub(entry->m_rough_used_space);
+    Assert(entry->m_rough_used_space == 0);
+    GlobalSysDBCacheEntry::Free(entry);
+}
+
 void GlobalSysDBCache::HandleDeadDB(GlobalSysDBCacheEntry *entry)
 {
-    RemoveElemFromBucket(entry);
+    /* shared db never remove */
+    Assert(entry->m_dbOid != InvalidOid);
+    m_bucket_list.RemoveElemFromBucket(&entry->m_cache_elem);
+    m_dbstat_manager.RecordSwapOutDBEntry(entry);
     if (entry->m_refcount == 0) {
-        m_dead_dbs.AddHead(&entry->m_cache_elem);
+        free_dead_dbs_internal(entry);
     } else {
         m_dead_dbs.AddTail(&entry->m_cache_elem);
     }
@@ -129,10 +132,7 @@ void GlobalSysDBCache::FreeDeadDBs()
             m_dead_dbs.AddTail(&dbEntry->m_cache_elem);
             break;
         } else {
-            /* sub all to delete, make sure no one use the entry */
-            dbEntry->MemoryEstimateSub(dbEntry->m_rough_used_space);
-            Assert(dbEntry->m_rough_used_space == 0);
-            dbEntry->Free(dbEntry);
+            free_dead_dbs_internal(dbEntry);
         }
     }
 }
@@ -177,7 +177,7 @@ GlobalSysDBCacheEntry *GlobalSysDBCache::SearchGSCEntry(Oid db_id, Index hash_in
     if (existDbEntry != NULL) {
         m_dbstat_manager.ThreadHoldDB(existDbEntry);
         PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
-        newDbEntry->Free(newDbEntry);
+        GlobalSysDBCacheEntry::Free(newDbEntry);
         return existDbEntry;
     }
 

@@ -4118,14 +4118,20 @@ Datum replace_text_with_two_args(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-
     if (PG_ARGISNULL(1))
         PG_RETURN_TEXT_P(PG_GETARG_TEXT_PP(0));
-
-    return DirectFunctionCall3(replace_text,
-        PG_GETARG_DATUM(0),
-        PG_GETARG_DATUM(1),
-        CStringGetTextDatum("\0"));
+    FunctionCallInfoData locfcinfo;
+    Datum result;
+    InitFunctionCallInfoData(locfcinfo, NULL, 3, InvalidOid, NULL, NULL);
+    locfcinfo.arg[0] = PG_GETARG_DATUM(0);
+    locfcinfo.arg[1] = PG_GETARG_DATUM(1);
+    locfcinfo.arg[2] = CStringGetTextDatum("\0");
+    locfcinfo.argnull[0] = false;
+    locfcinfo.argnull[1] = false;
+    locfcinfo.argnull[2] = false;
+    result = (*replace_text)(&locfcinfo);
+    fcinfo->isnull = locfcinfo.isnull;
+    return result;
 }
 
 /*

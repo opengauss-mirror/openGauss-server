@@ -42,7 +42,7 @@ public:
 
     GlobalRelationEntry *SearchReadOnly(Oid relOid, uint32 hash_value)
     {
-        GlobalBaseDefCache::FreeDeadEntrys<true>();
+        GlobalBaseDefCache::FreeDeadElements<true>();
         GlobalRelationEntry *entry =
                 (GlobalRelationEntry *)GlobalBaseDefCache::SearchReadOnly(relOid, hash_value);
         return entry;
@@ -55,7 +55,7 @@ public:
             return;
         }
         GlobalBaseDefCache::ResetCaches<true, force>();
-        GlobalBaseDefCache::FreeDeadEntrys<true>();
+        GlobalBaseDefCache::FreeDeadElements<true>();
     }
 
     inline uint64 GetSysCacheSpaceNum()

@@ -149,7 +149,7 @@ void GlobalCatCList::Release()
 void GlobalSysTupCache::ReleaseGlobalCatCTup(GlobalCatCTup *ct)
 {
     if (unlikely(!ct->canInsertGSC)) {
-        pfree(ct);
+        GlobalCatCTup::Free(ct);
         return;
     }
     (void)pg_atomic_fetch_sub_u64(&ct->refcount, 1);
@@ -158,7 +158,7 @@ void GlobalSysTupCache::ReleaseGlobalCatCTup(GlobalCatCTup *ct)
 void GlobalSysTupCache::ReleaseGlobalCatCList(GlobalCatCList *cl)
 {
     if (unlikely(!cl->canInsertGSC)) {
-        FreeGlobalCatCList(cl);
+        GlobalCatCList::Free(cl);
         return;
     }
     (void)pg_atomic_fetch_sub_u64(&cl->refcount, 1);
@@ -185,12 +185,13 @@ void GlobalSysTupCache::AddHeadToCCList(GlobalCatCList *cl)
     pg_atomic_fetch_add_u64(m_tup_space, cl_size);
     DLAddHead(&cc_lists, &cl->cache_elem);
 }
-void GlobalSysTupCache::RemoveElemFromCCList(GlobalCatCList *cl)
+
+static void free_dead_cl_internal(GlobalCatCList *cl, volatile uint64 *tup_space, GlobalSysDBCacheEntry *entry)
 {
     uint64 cl_size = GetClEstimateSize(cl);
-    m_dbEntry->MemoryEstimateSub(cl_size);
-    pg_atomic_fetch_sub_u64(m_tup_space, cl_size);
-    DLRemove(&cl->cache_elem);
+    entry->MemoryEstimateSub(cl_size);
+    pg_atomic_fetch_sub_u64(tup_space, cl_size);
+    GlobalCatCList::Free(cl);
 }
 
 void GlobalSysTupCache::AddHeadToBucket(Index hash_index, GlobalCatCTup *ct)
@@ -203,23 +204,23 @@ void GlobalSysTupCache::AddHeadToBucket(Index hash_index, GlobalCatCTup *ct)
     DLAddHead(&cc_buckets[hash_index], &ct->cache_elem);
 }
 
-void GlobalSysTupCache::RemoveElemFromBucket(GlobalCatCTup *ct)
+static void free_dead_ct_internal(GlobalCatCTup *ct, volatile uint64 *tup_space, GlobalSysDBCacheEntry *entry)
 {
     uint64 ct_size = GetCtEstimateSize(ct);
-    pg_atomic_fetch_sub_u64(m_tup_space, ct_size);
+    pg_atomic_fetch_sub_u64(tup_space, ct_size);
     /* free space of tup */
-    m_dbEntry->MemoryEstimateSub(ct_size);
-    pg_atomic_fetch_sub_u64(m_tup_count, 1);
-    DLRemove(&ct->cache_elem);
+    entry->MemoryEstimateSub(ct_size);
+    GlobalCatCTup::Free(ct);
 }
 
 void GlobalSysTupCache::HandleDeadGlobalCatCTup(GlobalCatCTup *ct)
 {
     /* this func run in wr lock, so dont call free directly */
-    RemoveElemFromBucket(ct);
+    pg_atomic_fetch_sub_u64(m_tup_count, 1);
+    DLRemove(&ct->cache_elem);
     ct->dead = true;
     if (ct->refcount == 0) {
-        m_dead_cts.AddHead(&ct->cache_elem);
+        free_dead_ct_internal(ct, m_tup_space, m_dbEntry);
     } else {
         m_dead_cts.AddTail(&ct->cache_elem);
     }
@@ -248,7 +249,7 @@ void GlobalSysTupCache::FreeDeadCts()
             m_dead_cts.AddTail(&ct->cache_elem);
             break;
         } else {
-            pfree(ct);
+            free_dead_ct_internal(ct, m_tup_space, m_dbEntry);
         }
     }
 
@@ -297,22 +298,22 @@ void GlobalSysTupCache::RemoveTailTupleElements(Index hash_index)
     ResourceOwnerForgetGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_is_tup_swappingouts[hash_index]);
 }
 
-void GlobalSysTupCache::FreeGlobalCatCList(GlobalCatCList *cl)
+void GlobalCatCList::Free(GlobalCatCList *cl)
 {
     Assert(cl->refcount == 0 || !cl->canInsertGSC);
     for (int i = 0; i < cl->n_members; i++) {
         cl->members[i]->Release();
     }
-    CatCacheFreeKeys(m_relinfo.cc_tupdesc, cl->nkeys, m_relinfo.cc_keyno, cl->keys);
-    pfree(cl);
+    CatCacheFreeKeys(cl->my_cache->GetCCTupleDesc(), cl->nkeys, cl->my_cache->GetCCKeyno(), cl->keys);
+    pfree_ext(cl);
 }
 
 void GlobalSysTupCache::HandleDeadGlobalCatCList(GlobalCatCList *cl)
 {
     /* this func run in wr lock, so dont call free directly */
-    RemoveElemFromCCList(cl);
+    DLRemove(&cl->cache_elem);
     if (cl->refcount == 0) {
-        m_dead_cls.AddHead(&cl->cache_elem);
+        free_dead_cl_internal(cl, m_tup_space, m_dbEntry);
     } else {
         m_dead_cls.AddTail(&cl->cache_elem);
     }
@@ -341,7 +342,7 @@ void GlobalSysTupCache::FreeDeadCls()
             m_dead_cls.AddTail(&cl->cache_elem);
             break;
         } else {
-            FreeGlobalCatCList(cl);
+            free_dead_cl_internal(cl, m_tup_space, m_dbEntry);
         }
     }
 
@@ -612,7 +613,7 @@ GlobalCatCTup *GlobalSysTupCache::InsertHeapTupleIntoGlobalCatCache(InsertCatTup
     if (unlikely(ct != NULL)) {
         /* other thread has inserted one */
         PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, bucket_lock);
-        pfree_ext(new_ct);
+        GlobalCatCTup::Free(new_ct);
         return ct;
     }
 
@@ -1033,7 +1034,7 @@ GlobalCatCList *GlobalSysTupCache::InsertListIntoCatCacheList(InsertCatListInfo 
         ResourceOwnerRememberGlobalCatCList(LOCAL_SYSDB_RESOWNER, exist_cl);
         /* we need mark clist's refcont to 0 then do real free up. */
         cl->refcount = 0;
-        FreeGlobalCatCList(cl);
+        GlobalCatCList::Free(cl);
         cl = exist_cl;
     } else {
         AddHeadToCCList(cl);

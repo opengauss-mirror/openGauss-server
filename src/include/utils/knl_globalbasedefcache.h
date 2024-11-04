@@ -72,6 +72,7 @@ public:
     }
     template <bool is_relation>
     void RemoveAllTailElements();
+    template <bool is_relation> void FreeDeadElements(); /* free elem */
 
 protected:
     /* base class initialization funciton */
@@ -101,14 +102,12 @@ protected:
 
     /* fucntions to remove/free elem from GSC hashtable */
     template <bool is_relation> void HandleDeadEntry(GlobalBaseEntry *entry); /* remove from hashtable */
-    template <bool is_relation> void FreeDeadEntrys(); /* free elem */
 
     /* function to handle GSC memory swapout */
     template <bool is_relation, bool force> void ResetCaches();
     template <bool is_relation> void RemoveTailElements(Index hash_index);
 
     /* function to add/remove elem to GSC hashtable */
-    template <bool is_relation> void RemoveElemFromBucket(GlobalBaseEntry *base);
     template <bool is_relation> void AddHeadToBucket(Index hash_index, GlobalBaseEntry *base);
 
     /* GSC Identifier fields */
@@ -120,6 +119,7 @@ protected:
     char m_relkind; /* dev-debug only, no real process so far */
 
     volatile uint32 *m_is_swappingouts;
+    volatile uint32 m_recovery_basedef_flag;
 
     /* GSC statistic information, assigned from GlobalSysCacheStat class */
     volatile uint64 *m_searches;

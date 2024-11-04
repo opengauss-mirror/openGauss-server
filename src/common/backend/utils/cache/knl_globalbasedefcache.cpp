@@ -52,22 +52,6 @@ static uint64 GetPartEstimateSize(GlobalPartitionEntry *entry)
 }
 
 template <bool is_relation>
-void GlobalBaseDefCache::RemoveElemFromBucket(GlobalBaseEntry *base)
-{
-    if (is_relation) {
-        GlobalRelationEntry *entry = (GlobalRelationEntry *)base;
-        uint64 rel_size = GetRelEstimateSize(entry);
-        pg_atomic_fetch_sub_u64(&m_base_space, AllocSetContextUsedSpace(((AllocSet)entry->rel_mem_manager)));
-        m_db_entry->MemoryEstimateSub(rel_size);
-    } else {
-        GlobalPartitionEntry *entry = (GlobalPartitionEntry *)base;
-        uint64 part_size = GetPartEstimateSize(entry);
-        pg_atomic_fetch_sub_u64(&m_base_space, part_size);
-        m_db_entry->MemoryEstimateSub(part_size);
-    }
-    m_bucket_list.RemoveElemFromBucket(&base->cache_elem);
-}
-template <bool is_relation>
 void GlobalBaseDefCache::AddHeadToBucket(Index hash_index, GlobalBaseEntry *base)
 {
     if (is_relation) {
@@ -86,16 +70,11 @@ void GlobalBaseDefCache::AddHeadToBucket(Index hash_index, GlobalBaseEntry *base
 
 template void GlobalBaseDefCache::AddHeadToBucket<true>(Index hash_index, GlobalBaseEntry *base);
 template void GlobalBaseDefCache::AddHeadToBucket<false>(Index hash_index, GlobalBaseEntry *base);
-template void GlobalBaseDefCache::RemoveElemFromBucket<true>(GlobalBaseEntry *base);
-template void GlobalBaseDefCache::RemoveElemFromBucket<false>(GlobalBaseEntry *base);
 
 
-template <bool is_relation>
 void GlobalBaseEntry::Free(GlobalBaseEntry *entry)
 {
-    Assert(entry->refcount == 0);
-    if (is_relation) {
-        Assert(entry->type == GLOBAL_RELATION_ENTRY);
+    if (entry->type == GLOBAL_RELATION_ENTRY) {
         if (((GlobalRelationEntry *)entry)->rel_mem_manager != NULL) {
             MemoryContextDelete(((GlobalRelationEntry *)entry)->rel_mem_manager);
         }
@@ -107,8 +86,30 @@ void GlobalBaseEntry::Free(GlobalBaseEntry *entry)
     }
     pfree(entry);
 }
-template void GlobalBaseEntry::Free<true>(GlobalBaseEntry *entry);
-template void GlobalBaseEntry::Free<false>(GlobalBaseEntry *entry);
+
+static void free_dead_defentry_internal(GlobalBaseEntry *entry, volatile uint64 *base_space,
+    GlobalSysDBCacheEntry *db_entry)
+{
+    Assert(entry->refcount == 0);
+    if (entry->type == GLOBAL_RELATION_ENTRY) {
+        if (((GlobalRelationEntry *)entry)->rel_mem_manager != NULL) {
+            GlobalRelationEntry *rel_entry = (GlobalRelationEntry *)entry;
+            uint64 rel_size = GetRelEstimateSize(rel_entry);
+            pg_atomic_fetch_sub_u64(
+                base_space, AllocSetContextUsedSpace(((AllocSet)rel_entry->rel_mem_manager)));
+            db_entry->MemoryEstimateSub(rel_size);
+        }
+    } else {
+        Assert(entry->type == GLOBAL_PARTITION_ENTRY);
+        if (((GlobalPartitionEntry *)entry)->part != NULL) {
+            GlobalPartitionEntry *part_entry = (GlobalPartitionEntry *)entry;
+            uint64 part_size = GetPartEstimateSize(part_entry);
+            pg_atomic_fetch_sub_u64(base_space, part_size);
+            db_entry->MemoryEstimateSub(part_size);
+        }
+    }
+    GlobalBaseEntry::Free(entry);
+}
 
 void GlobalBaseEntry::Release()
 {
@@ -166,8 +167,18 @@ GlobalBaseEntry *GlobalBaseDefCache::SearchReadOnly(Oid obj_oid, uint32 hash_val
 }
 
 template <bool is_relation>
-void GlobalBaseDefCache::FreeDeadEntrys()
+void GlobalBaseDefCache::FreeDeadElements()
 {
+    if (m_dead_entries.GetLength() == 0) {
+        return;
+    }
+
+    /* only one clean is enough */
+    ResourceOwnerEnlargeGlobalIsExclusive(t_thrd.utils_cxt.CurrentResourceOwner);
+    if (!atomic_compare_exchange_u32(&m_recovery_basedef_flag, 0, 1)) {
+        return;
+    }
+    ResourceOwnerRememberGlobalIsExclusive(t_thrd.utils_cxt.CurrentResourceOwner, &m_recovery_basedef_flag);
     while (m_dead_entries.GetLength() > 0) {
         Dlelem *elt = m_dead_entries.RemoveHead();
         if (elt == NULL) {
@@ -179,12 +190,15 @@ void GlobalBaseDefCache::FreeDeadEntrys()
             m_dead_entries.AddTail(&entry->cache_elem);
             break;
         } else {
-            entry->Free<is_relation>(entry);
+            free_dead_defentry_internal(entry, &m_base_space, m_db_entry);
         }
     }
+    Assert(m_recovery_basedef_flag == 1);
+    ResourceOwnerForgetGlobalIsExclusive(t_thrd.utils_cxt.CurrentResourceOwner, &m_recovery_basedef_flag);
+    atomic_compare_exchange_u32(&m_recovery_basedef_flag, 1, 0);
 }
-template void GlobalBaseDefCache::FreeDeadEntrys<false>();
-template void GlobalBaseDefCache::FreeDeadEntrys<true>();
+template void GlobalBaseDefCache::FreeDeadElements<false>();
+template void GlobalBaseDefCache::FreeDeadElements<true>();
 
 template <bool is_relation>
 void GlobalBaseDefCache::Invalidate(Oid dbid, Oid obj_oid)
@@ -268,9 +282,9 @@ template void GlobalBaseDefCache::ResetCaches<true, true>();
 template <bool is_relation>
 void GlobalBaseDefCache::HandleDeadEntry(GlobalBaseEntry *entry)
 {
-    RemoveElemFromBucket<is_relation>(entry);
+    m_bucket_list.RemoveElemFromBucket(&entry->cache_elem);
     if (entry->refcount == 0) {
-        m_dead_entries.AddHead(&entry->cache_elem);
+        free_dead_defentry_internal(entry, &m_base_space, m_db_entry);
     } else {
         m_dead_entries.AddTail(&entry->cache_elem);
     }
@@ -396,4 +410,5 @@ GlobalBaseDefCache::GlobalBaseDefCache(Oid db_oid, bool is_shared, GlobalSysDBCa
     m_base_space = 0;
     m_obj_locks = NULL;
     m_db_entry = entry;
+    m_recovery_basedef_flag = 0;
 }

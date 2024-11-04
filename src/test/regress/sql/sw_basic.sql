@@ -180,3 +180,20 @@ order siblings by id;
 
 reset enable_startwith_debug;
 reset client_min_messages;
+
+-- bugfixed I61AIW: cte+connect by error, cannot find relation
+create table temptest (col numeric(3));
+insert into temptest values ('1'),('2'),('3'),('4'),('');
+
+WITH alias5 AS ( SELECT alias1.col AS alias2 FROM temptest AS alias1 CONNECT BY nocycle alias1.col >= alias1.col )
+SELECT * FROM alias5, temptest CONNECT BY nocycle PRIOR temptest.col < temptest.col;
+
+drop table temptest;
+
+-- sys_connect_by_path with blank value
+create table test_connect_sys(x varchar2(10),y number,z number, a text);
+insert into test_connect_sys values('A',1,null, ' '),('B',2,1, ' '),('C',3,1, ' '),('D',4,2,' '),('E',5,3,' ') ,('F',6,4,' '),('G',7,4,' ');
+select sys_connect_by_path(a, '@') from test_connect_sys start with x = 'A' connect by prior y=z;
+-- connect_by_root with blank value
+select connect_by_root a from test_connect_sys start with x = 'A' connect by prior y=z;
+drop table test_connect_sys;
