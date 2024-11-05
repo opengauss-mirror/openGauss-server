@@ -261,7 +261,17 @@ ORDER BY 1, 2, 3;
        4439 |            5 | ~>~
        4444 |            1 | @@
        4444 |            2 | @@@
-(80 rows)
+       8300 |            1 | <#>
+       8300 |            1 | <%>
+       8300 |            1 | <+>
+       8300 |            1 | <->
+       8300 |            1 | <=>
+       8300 |            1 | <~>
+       8301 |            1 | <#>
+       8301 |            1 | <->
+       8301 |            1 | <=>
+       8301 |            1 | <~>
+(90 rows)
 
 -- Check that all opclass search operators have selectivity estimators.
 -- This is not absolutely required, but it seems a reasonable thing
@@ -419,7 +429,8 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
       (CASE WHEN p1.amname IN ('gist', 'gin') THEN p1.amsupport - 1
-            WHEN p1.amname IN ('btree', 'ubtree') THEN p1.amsupport - 2
+            WHEN p1.amname IN ('btree', 'ubtree', 'hnsw') THEN p1.amsupport - 2
+            WHEN p1.amname = 'ivfflat' THEN p1.amsupport - 3
             ELSE p1.amsupport END)
       AND p1.amsupport;
  amname | opfname | amproclefttype | amprocrighttype 
@@ -434,6 +445,7 @@ FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
 WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
+    AND am.amname <> 'hnsw' AND am.amname <> 'ivfflat'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL;
  amname | opcname | count 

@@ -156,7 +156,13 @@ DATA(insert OID = 4439 (  ubtree		5 3 t f t t t t t t f t t 0 ubtinsert ubtbegin
 DESCR("ustore b-tree index access method");
 #define UBTREE_AM_OID 4439
 
-#define HNSW_AM_OID 4446
+DATA(insert OID = 8300 (  hnsw		0 3 f t f f f t f f f f f 0 hnswinsert hnswbeginscan hnswgettuple - hnswrescan hnswendscan - - - hnswbuild hnswbuildempty hnswbulkdelete hnswvacuumcleanup - hnswcostestimate hnswoptions - -));
+DESCR("hnsw index access method");
+#define HNSW_AM_OID 8300
+
+DATA(insert OID = 8301 (  ivfflat		0 5 f t f f f t f f f f f 0 ivfflatinsert ivfflatbeginscan ivfflatgettuple - ivfflatrescan ivfflatendscan - - - ivfflatbuild ivfflatbuildempty ivfflatbulkdelete ivfflatvacuumcleanup - ivfflatcostestimate ivfflatoptions - -));
+DESCR("ivfflat index access method");
+#define IVFFLAT_AM_OID 8301
 
 #define OID_IS_BTREE(oid) ((oid) == BTREE_AM_OID || (oid) == UBTREE_AM_OID)
 

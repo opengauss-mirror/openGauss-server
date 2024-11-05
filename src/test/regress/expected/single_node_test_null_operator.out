@@ -5,15 +5,15 @@ LINE 1: SELECT 1 <=> 1;
                  ^
 HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 SELECT '' <=> NULL;
-ERROR:  operator does not exist: unknown <=> unknown
+ERROR:  operator is not unique: unknown <=> unknown
 LINE 1: SELECT '' <=> NULL;
                   ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+HINT:  Could not choose a best candidate operator. You might need to add explicit type casts.
 SELECT NULL <=> NULL;
-ERROR:  operator does not exist: unknown <=> unknown
+ERROR:  operator is not unique: unknown <=> unknown
 LINE 1: SELECT NULL <=> NULL;
                     ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+HINT:  Could not choose a best candidate operator. You might need to add explicit type casts.
 SELECT (1,2) <=> (1,2);
 ERROR:  operator does not exist: integer <=> integer
 LINE 1: SELECT (1,2) <=> (1,2);
