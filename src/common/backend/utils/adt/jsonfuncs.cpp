@@ -34,6 +34,7 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 #include "utils/array.h"
+#include "utils/jsonpath.h"
 
 /* Operations available for setPath */
 #define JB_PATH_CREATE                  0x0001
@@ -125,12 +126,24 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
 static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len, JsonbParseState **st,
                             int level, Jsonb *newval, int nelems, int op_type);
 
+/* semantic action functions for get json object values */
+static void OvalsArrayStart(void* stateIn);
+static void OvalsScalar(void* stateIn, char* token, JsonTokenType tokentype);
+static void OvalsObjectFieldStart(void* stateIn, char* fname, bool isnull);
+static void OvalsObjectFieldEnd(void* stateIn, char* fname, bool isnull);
+
 /* search type classification for json_get* functions */
 typedef enum {
     JSON_SEARCH_OBJECT = 1,
     JSON_SEARCH_ARRAY,
     JSON_SEARCH_PATH
 } JsonSearch;
+
+typedef enum {
+    FALSE_ON_ERROR = 0, /* default */
+    TRUE_ON_ERROR,
+    ERROR_ON_ERROR
+} OnErrorType;
 
 /* state for json_object_keys */
 typedef struct OkeysState {
@@ -238,8 +251,49 @@ typedef struct PopulateRecordsetState {
     MemoryContext    fn_mcxt;      /* used to stash IO funcs */
 } PopulateRecordsetState;
 
+struct OvalsState {
+    JsonLexContext* lex;
+    char **result;
+    int result_size;
+    int result_count;
+    char* result_start;
+};
+
+struct JsonExistsPathContext {
+    bool result;
+};
+
+struct JsonTextContainsContext {
+    char* target;
+    bool result;
+};
+
+struct JsonStringArray {
+    char** data;
+    int len;
+    int maxlen;
+};
+
 /* Turn a jsonb object into a record */
 static void make_row_from_rec_and_jsonb(Jsonb *element, PopulateRecordsetState *state);
+
+/* functions supporting json_exists and json_textcontains */
+static bool IsJsonText(text* t);
+static void JsonPathWalker(JsonPathItem* path, text* topJson, text* json, void (*pwalker)(text*, void*), void* context);
+static void JPWalkArrayStep(JsonPathItem* path, text* topJson, text* json,
+    void (*pwalker)(text*, void*), void* context);
+static void JPWalkObjectStep(JsonPathItem* path, text* topJson, text* json,
+    void (*pwalker)(text*, void*), void* context);
+static OvalsState* json_object_values_internal(text* json);
+
+/* functions supporting json_exists */
+static void JsonPathExistsPathWalker(text* json, JsonExistsPathContext* context);
+
+/* functions supporting json_textcontains */
+static List* GetObjectValues(text* json);
+static void SplitString(char* str, char delim, int strlen, JsonStringArray* results);
+static void CollectValsFromJson(text* json, JsonStringArray* vals);
+static void JsonTextContainsWalker(text* json, JsonTextContainsContext* context);
 
 /*
  * SQL function json_object_keys
@@ -3331,4 +3385,437 @@ Datum jsonb_set(PG_FUNCTION_ARGS)
     Assert(res != NULL);
 
     PG_RETURN_JSONB(JsonbValueToJsonb(res));
+}
+
+static void OvalsArrayStart(void* stateIn)
+{
+    OvalsState* state = (OvalsState *)stateIn;
+
+    /* top level must be a json object */
+    if (state->lex->lex_level == 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("cannot get object values from an array")));
+    }
+}
+
+static void OvalsScalar(void* stateIn, char* token, JsonTokenType tokentype)
+{
+    OvalsState* state = (OvalsState*)stateIn;
+
+    /* json structure check */
+    if (state->lex->lex_level == 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("cannot get object values from a scalar")));
+    }
+}
+
+static void OvalsObjectFieldStart(void* stateIn, char* fname, bool isnull)
+{
+    OvalsState* state = (OvalsState*) stateIn;
+
+    /* save a pointer to where the value starts */
+    if (state->lex->lex_level == 1) {
+        state->result_start = state->lex->token_start;
+    }
+}
+
+static void OvalsObjectFieldEnd(void* stateIn, char* fname, bool isnull)
+{
+    OvalsState* state = (OvalsState*) stateIn;
+
+    /* skip over nested objects */
+    if (state->lex->lex_level != 1) {
+        return;
+    }
+
+    if (state->result_count >= state->result_size) {
+        int doubleSize = 2;
+        state->result_size *= doubleSize;
+        state->result = static_cast<char**>(repalloc(state->result, sizeof(char *) * state->result_size));
+    }
+
+    int len = state->lex->prev_token_terminator - state->result_start + 1;
+    if (len > 0) {
+        char* result = static_cast<char*>(palloc(len * sizeof(char)));
+        int rc = memcpy_s(result, len, state->result_start, len);
+        securec_check(rc, "\0", "\0");
+        result[len - 1] = '\0';
+        state->result[state->result_count++] = result;
+    } else {
+        state->result[state->result_count++] = NULL;
+    }
+}
+
+static OvalsState* json_object_values_internal(text* json)
+{
+    OvalsState* state = NULL;
+    JsonLexContext* lex = makeJsonLexContext(json, true);
+    JsonSemAction*  sem = NULL;
+    int initSize = 256;
+
+    state = static_cast<OvalsState*>(palloc(sizeof(OvalsState)));
+    sem = static_cast<JsonSemAction*>(palloc0(sizeof(JsonSemAction)));
+
+    state->lex = lex;
+    state->result_size = initSize;
+    state->result_count = 0;
+    state->result = static_cast<char**>(palloc(initSize * sizeof(char*)));
+
+    sem->semstate = (void*)state;
+    sem->array_start = OvalsArrayStart;
+    sem->scalar = OvalsScalar;
+    sem->object_field_start = OvalsObjectFieldStart;
+    sem->object_field_end = OvalsObjectFieldEnd;
+
+    pg_parse_json(lex, sem);
+
+    pfree(lex->strval->data);
+    pfree(lex->strval);
+    pfree(lex);
+
+    return state;
+}
+
+static bool IsJsonText(text* t)
+{
+    JsonLexContext* lex = makeJsonLexContext(t, false);
+    MemoryContext oldcxt = CurrentMemoryContext;
+    bool result = false;
+    JsonSemAction nullSemAction = {
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL
+    };
+
+    PG_TRY();
+    {
+        /* try to parse the text as a formatted json,
+           if this fails, the text is not a formatted json */
+        pg_parse_json(lex, &nullSemAction);
+        result = true;
+    }
+    PG_CATCH();
+    {
+        ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+        if (edata->sqlerrcode == ERRCODE_INVALID_TEXT_REPRESENTATION) {
+            MemoryContextSwitchTo(oldcxt);
+            result = false;
+            FlushErrorState();
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+
+    return result;
+}
+
+static List* GetObjectValues(text* json)
+{
+    OvalsState* state = json_object_values_internal(json);
+    List* resultList = NIL;
+
+    for (int i = 0; i < state->result_count; i++) {
+        resultList = lappend(resultList, cstring_to_text(state->result[i]));
+        pfree(state->result[i]);
+    }
+    pfree(state->result);
+    pfree(state);
+
+    return resultList;
+}
+
+static void JPWalkArrayStep(JsonPathItem* path, text* topJson, text* json,
+    void (*pwalker)(text*, void*), void* context)
+{
+    JsonPathArrayStep* as = (JsonPathArrayStep*)path;
+    char* jsonType = text_to_cstring(DatumGetTextP(DirectFunctionCall1(json_typeof, PointerGetDatum(json))));
+    text* result = NULL;
+    if (strcmp(jsonType, "array") != 0)
+        return;
+
+    if (as->indexes != NIL) {
+        ListCell* idxCell = NULL;
+        int index;
+
+        foreach (idxCell, as->indexes) {
+            int index = lfirst_int(idxCell);
+            result = get_worker(json, NULL, index, NULL, NULL, -1, true);
+            JsonPathWalker(path->next, topJson, result, pwalker, context);
+        }
+    } else {
+        int length = DatumGetInt32(DirectFunctionCall1(json_array_length, PointerGetDatum(json)));
+        for (int i = 0; i < length; i++) {
+            result = get_worker(json, NULL, i, NULL, NULL, -1, true);
+            JsonPathWalker(path->next, topJson, result, pwalker, context);
+        }
+    }
+}
+
+static void JPWalkObjectStep(JsonPathItem* path, text* topJson, text* json,
+    void (*pwalker)(text*, void*), void* context)
+{
+    JsonPathObjectStep* os = (JsonPathObjectStep*)path;
+    char* jsonType = text_to_cstring(DatumGetTextP(DirectFunctionCall1(json_typeof, PointerGetDatum(json))));
+    text* result = NULL;
+    if (strcmp(jsonType, "object") != 0)
+        return;
+
+    if (os->fieldName != NULL) {
+        result = get_worker(json, os->fieldName, -1, NULL, NULL, -1, true);
+        JsonPathWalker(path->next, topJson, result, pwalker, context);
+    } else {
+        List* valList = GetObjectValues(json);
+        ListCell* valCell = NULL;
+
+        foreach(valCell, valList) {
+            text* valTxt = (text*)lfirst(valCell);
+            JsonPathWalker(path->next, topJson, valTxt, pwalker, context);
+        }
+    }
+}
+
+static void JsonPathWalker(JsonPathItem* path, text* topJson, text* json, void (*pwalker)(text*, void*), void* context)
+{
+    if (path == NULL) {
+        pwalker(json, context);
+        return;
+    } else if (json == NULL || !IsJsonText(json)) {
+        return;
+    }
+
+    check_stack_depth();
+
+    switch (path->type) {
+        case JPI_ABSOLUTE_START:
+            JsonPathWalker(path->next, topJson, topJson, pwalker, context);
+            break;
+        case JPI_ARRAY: {
+            JPWalkArrayStep(path, topJson, json, pwalker, context);
+            break;
+        }
+        case JPI_OBJECT: {
+            JPWalkObjectStep(path, topJson, json, pwalker, context);
+            break;
+        }
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                 errmsg("unrecognized json path item type: %d", path->type)));
+    }
+}
+
+static void JsonPathExistsPathWalker(text* json, JsonExistsPathContext* context)
+{
+    if (context->result)
+        return;
+
+    context->result = !(json == NULL);
+}
+
+/*
+ * SQL function json_exists
+ * returns true if there's data in json under specified pathStr
+ */
+Datum json_path_exists(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(1))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("the json path expression is not of text type")));
+
+    int argnum = 2;
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(argnum))
+        PG_RETURN_NULL();
+
+    text* json = PG_GETARG_TEXT_P(0);
+    const char* pathStr = text_to_cstring(PG_GETARG_TEXT_P(1));
+    OnErrorType onError = (OnErrorType)PG_GETARG_INT32(2);
+    int len = strlen(pathStr);
+    JsonPathItem* path = ParseJsonPath(pathStr, len);
+
+    JsonExistsPathContext context;
+    if (!IsJsonText(json))
+    switch (onError) {
+        case FALSE_ON_ERROR:
+            context.result = false;
+            break;
+        case TRUE_ON_ERROR:
+            context.result = true;
+            break;
+        case ERROR_ON_ERROR:
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("the input is not a well-formed json data")));
+            break;
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("unrecognized ON ERROR option: %d", onError)));
+            break;
+    } else {
+        context.result = false;
+        JsonPathWalker(path, json, json, (void (*)(text*, void*))JsonPathExistsPathWalker, (void*)(&context));
+    }
+
+    PG_RETURN_BOOL(context.result);
+}
+
+static void ExpandJsonStringArray(JsonStringArray* array)
+{
+    if (array->len >= array->maxlen) {
+        int doubleSize = 2;
+        array->maxlen *= doubleSize;
+        array->data = static_cast<char**>(repalloc(array->data, array->maxlen * sizeof(char*)));
+    }
+}
+
+static void SplitString(char* str, char delim, int strlen, JsonStringArray* results)
+{
+    char* lptr = str;
+    char* rptr = str;
+
+    while (*rptr != '\0' && strlen != 0) {
+        if (*rptr == delim || strlen == 1) {
+            if (rptr != lptr) {
+                ExpandJsonStringArray(results);
+                int len = (*rptr == delim) ? (rptr - lptr + 1) : (rptr - lptr + 2);
+                char* res = (char*)palloc(len * sizeof(char));
+                int rc = memcpy_s(res, len, lptr, len);
+                securec_check(rc, "\0", "\0");
+                res[len - 1] = '\0';
+                results->data[results->len++] = res;
+            }
+            lptr = rptr + 1;
+        }
+        strlen--;
+        rptr++;
+    }
+}
+
+static void CollectValsFromJson(text* json, JsonStringArray* vals)
+{
+    JsonTokenType tok = (JsonTokenType)json_typeof_internal(json);
+
+    check_stack_depth();
+
+    switch (tok) {
+        case JSON_TOKEN_NULL:
+            return;
+        case JSON_TOKEN_NUMBER:
+        case JSON_TOKEN_TRUE:
+        case JSON_TOKEN_FALSE:
+            vals->data[vals->len++] = text_to_cstring(json);
+            break;
+        case JSON_TOKEN_STRING: {
+            char* cjson = text_to_cstring(json);
+            /* trim the quote mark before and after the string */
+            int quotes = 2;
+            SplitString(cjson + 1, ' ', strlen(cjson) - quotes, vals);
+            break;
+        }
+        case JSON_TOKEN_OBJECT_START: {
+            List* valList = GetObjectValues(json);
+            ListCell* valCell = NULL;
+
+            foreach(valCell, valList) {
+                text* valTxt = (text*)lfirst(valCell);
+                CollectValsFromJson(valTxt, vals);
+            }
+            break;
+        }
+        case JSON_TOKEN_ARRAY_START: {
+            int length = DatumGetInt32(DirectFunctionCall1(json_array_length, PointerGetDatum(json)));
+            text* result;
+            for (int i = 0; i < length; i++) {
+                result = get_worker(json, NULL, i, NULL, NULL, -1, true);
+                CollectValsFromJson(result, vals);
+            }
+            break;
+        }
+        default:
+            elog(ERROR, "unexpected json token: %d", tok);
+    }
+}
+
+static void JsonTextContainsWalker(text* json, JsonTextContainsContext* context)
+{
+    if (context->result)
+        return;
+
+    MemoryContext tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
+                                                  "json_textcontains temp context",
+                                                  ALLOCSET_DEFAULT_MINSIZE,
+                                                  ALLOCSET_DEFAULT_INITSIZE,
+                                                  ALLOCSET_DEFAULT_MAXSIZE);
+    MemoryContext old_cxt = MemoryContextSwitchTo(tmp_cxt);
+    JsonStringArray* targets = (JsonStringArray*)palloc(sizeof(JsonStringArray));
+    JsonStringArray* vals = (JsonStringArray*)palloc(sizeof(JsonStringArray));
+    int initLen = 256;
+
+    targets->maxlen = initLen;
+    targets->len = 0;
+    targets->data = static_cast<char**>(palloc(targets->maxlen * sizeof(char*)));
+    vals->maxlen = initLen;
+    vals->len = 0;
+    vals->data = static_cast<char**>(palloc(targets->maxlen * sizeof(char*)));
+    
+    SplitString(context->target, ' ', strlen(context->target), targets);
+    CollectValsFromJson(json, vals);
+
+    MemoryContextSwitchTo(old_cxt);
+
+    int i, j;
+    for (i = 0; i <= (vals->len - targets->len); i++) {
+        for (j = 0; j < targets->len; j++) {
+            if (pg_strcasecmp(targets->data[j], vals->data[i + j]) != 0)
+                break;
+        }
+        if (j >= targets->len) {
+            context->result = true;
+            break;
+        }
+    }
+
+    MemoryContextDelete(tmp_cxt);
+}
+
+/*
+ * SQL function json_textcontains
+ * returns true if the json contains target under specified pathStr
+ */
+
+Datum json_textcontains(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(1))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("the json path expression is not of text type")));
+    
+    int argnum = 2;
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(argnum))
+        PG_RETURN_NULL();
+
+    text* json = PG_GETARG_TEXT_P(0);
+    const char* pathStr = text_to_cstring(PG_GETARG_TEXT_P(1));
+    int len = strlen(pathStr);
+    JsonPathItem* path = ParseJsonPath(pathStr, len);
+    char* target = PG_GETARG_CSTRING(2);
+    char* tok;
+
+    JsonTextContainsContext context;
+    context.result = false;
+
+    if (!IsJsonText(json))
+        PG_RETURN_BOOL(context.result);
+
+    tok = strtok(target, ",");
+    while (!(context.result) && tok != NULL) {
+        context.target = tok;
+        JsonPathWalker(path, json, json, (void (*)(text*, void*))JsonTextContainsWalker, (void*)(&context));
+        tok = strtok(NULL, ",");
+    }
+    PG_RETURN_BOOL(context.result);
 }
