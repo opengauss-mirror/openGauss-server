@@ -263,6 +263,11 @@ typedef struct PortalData {
     bool isPkgCur; /* cursor variable is a package variable? */
 #endif
     int nextval_default_expr_type; /* nextval does not support lightproxy and sqlbypass */
+    List *specialDataList;
+    /*
+     * A specific data link list hung under the portal.
+     * The special data mounted in the portal can be used during cleaning,such as utl_tcp.
+     */
 } PortalData;
 
 /*

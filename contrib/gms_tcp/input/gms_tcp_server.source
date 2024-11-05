@@ -1,0 +1,2 @@
+\! chmod -R 700 @abs_bindir@/../jre
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/../../../src/test/regress/jdbc_test/gsjdbc400.jar:@abs_builddir@/gms_tcp_test/. gms_tcp_server

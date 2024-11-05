@@ -193,6 +193,7 @@ typedef struct knl_u_executor_context {
     void *EventTriggerState; 
 
     bool isFlashBack;
+    List **portal_data_list;
 } knl_u_executor_context;
 
 typedef struct knl_u_sig_context {

@@ -640,3 +640,11 @@ SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       in
 
 Section: Class SR - Uncorrected Error & warning
 SR001    E    ERRCODE_SR_RECOVERY_CONFLICT                                    recovery_conflict
+
+Section: Class UT - gms_tcp
+U0001    E    ERRCODE_END_OF_INPUT                                            gms_tcp_end_of_input
+U0002    E    ERRCODE_NETWORK_ERROR                                           gms_tcp_network_error
+U0003    E    ERRCODE_BAD_ARGUMENT                                            gms_tcp_bad_argument
+U0004    E    ERRCODE_TRANSFER_TIMEOUT                                        gms_tcp_transfer_timeout
+U0005    E    ERRCODE_PARTIAL_MULTIBYTE_CHAR                                  gms_tcp_partial_multibyte_char
+U0006    E    ERRCODE_BUFFER_TOO_SMALL                                        gms_tcp_buffer_too_small

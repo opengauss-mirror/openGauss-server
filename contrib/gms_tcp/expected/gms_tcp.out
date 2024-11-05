@@ -1,0 +1,13 @@
+\dx
+                                    List of installed extensions
+      Name       | Version |   Schema   |                        Description                         
+-----------------+---------+------------+------------------------------------------------------------
+ dist_fdw        | 1.0     | pg_catalog | foreign-data wrapper for distfs access
+ file_fdw        | 1.0     | pg_catalog | foreign-data wrapper for flat file access
+ gms_tcp         | 1.0     | public     | provides TCP/IP client=side access functionality in PL/SQL
+ hstore          | 1.1     | pg_catalog | data type for storing sets of (key, value) pairs
+ log_fdw         | 1.0     | pg_catalog | Foreign Data Wrapper for accessing logging data
+ plpgsql         | 1.0     | pg_catalog | PL/pgSQL procedural language
+ security_plugin | 1.0     | pg_catalog | provides security functionality
+(7 rows)
+

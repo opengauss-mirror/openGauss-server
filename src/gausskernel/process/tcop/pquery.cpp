@@ -1017,6 +1017,7 @@ bool PortalRun(
     MemoryContext savePortalContext;
     MemoryContext saveMemoryContext;
     errno_t errorno = EOK;
+    List **savePortalDataList;
 
     AssertArg(PortalIsValid(portal));
     AssertArg(PointerIsValid(portal->commandTag));
@@ -1094,6 +1095,7 @@ bool PortalRun(
     saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     savePortalContext = t_thrd.mem_cxt.portal_mem_cxt;
     saveMemoryContext = CurrentMemoryContext;
+    savePortalDataList = u_sess->exec_cxt.portal_data_list;
 
     u_sess->attr.attr_sql.create_index_concurrently = false;
 
@@ -1125,6 +1127,7 @@ bool PortalRun(
             needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_TOO_MANY_PORTAL);
         }
         t_thrd.mem_cxt.portal_mem_cxt = PortalGetHeapMemory(portal);
+        u_sess->exec_cxt.portal_data_list = &portal->specialDataList;
 
         MemoryContextSwitchTo(t_thrd.mem_cxt.portal_mem_cxt);
 
@@ -1221,6 +1224,7 @@ bool PortalRun(
             t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
         }
         t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
+        u_sess->exec_cxt.portal_data_list = savePortalDataList;
 
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s clear curr_compile_context because of error.", __func__)));
@@ -1269,6 +1273,7 @@ bool PortalRun(
         t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
     }
     t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
+    u_sess->exec_cxt.portal_data_list = savePortalDataList;
 
     if (portal->strategy != PORTAL_MULTI_QUERY) {
         PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
