@@ -2194,7 +2194,6 @@ int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum,
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
     bool noNeedRedo = false;
     bool getSharedLock = false;
-
     /* buffer redo done, no need to check */
     if (buf_ctrl->state & BUF_ONDEMAND_REDO_DONE) {
         return ONDEMAND_HASHMAP_ENTRY_REDO_DONE;
@@ -2212,6 +2211,17 @@ int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum,
     /* get partition lock by redoItemTag */
     unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
     xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    if (LWLockHeldByMe(xlog_partition_lock)) {
+        Assert(LWLockHeldByMeInMode(xlog_partition_lock, LW_EXCLUSIVE));
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when "
+                       "pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                       redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode,
+                       redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                       redoItemTag.forkNum, redoItemTag.blockNum)));
+        return ONDEMAND_HASHMAP_ENTRY_NEED_REDO;
+    }
 
     /* if buffer has be redone, set state to REDO_DONE and return REDO_DONE */
     if (checkBlockRedoDoneFromHashMap(xlog_partition_lock, hashMap, redoItemTag, &getSharedLock)) {
@@ -2312,9 +2322,10 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
     if (LWLockHeldByMe(*lock)) {
         Assert(LWLockHeldByMeInMode(*lock, LW_EXCLUSIVE));
         ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
-                        redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
-                        redoItemTag.forkNum, redoItemTag.blockNum)));
+                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when "
+                       "pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                       redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode,
+                       redoItemTag.rNode.bucketNode, redoItemTag.forkNum, redoItemTag.blockNum)));
         RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
 
         /* Page is already up-to-date, no need to replay. */
