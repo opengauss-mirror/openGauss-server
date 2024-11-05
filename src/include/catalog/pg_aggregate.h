@@ -485,7 +485,9 @@ DATA(insert ( 9990	tdigest_merge		tdigest_merge_to_one		calculate_quantile_of			
 
 DATA(insert ( 9986	tdigest_mergep		tdigest_merge_to_one		calculate_value_at				0	4406	_null_ _null_ 	n	0));
 #define ADDTDIGESTMERGEPOID 9986
-
+/*vector aggregate function*/
+DATA(insert ( 8241	vector_accum	vector_combine	vector_avg	0	1022	"{0}"  "{0}" 	n	0));
+DATA(insert ( 8242	vector_add	vector_add	-	0	8305	_null_  _null_	n	0));
 /*
  * prototypes for functions in pg_aggregate.c
  */

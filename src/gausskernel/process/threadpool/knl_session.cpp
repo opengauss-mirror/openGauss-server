@@ -1476,6 +1476,12 @@ static void knl_u_libsw_init(knl_u_libsw_context* libsw_cxt)
     libsw_cxt->redirect_manager = New(CurrentMemoryContext) RedirectManager();
  }
 
+static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
+{
+    datavec_cxt->hnsw_ef_search = 0;
+    datavec_cxt->ivfflat_probes = 0;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));

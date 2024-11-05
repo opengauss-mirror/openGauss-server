@@ -38,6 +38,20 @@ set(TGT_adt_INC
     ${LIBOPENSSL_INCLUDE_PATH}
 )
 
+if ((APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64*")
+    set(datavec_OPTFLAGS "")
+else ()
+    set(datavec_OPTFLAGS "-march=native")
+endif ()
+
+set(datavec_OPTFLAGS ${datavec_OPTFLAGS} -ftree-vectorize -fassociative-math -fno-signed-zeros -fno-trapping-math)
+
+set_source_files_properties(
+    SOURCE vector.cpp f2s.cpp halfvec.cpp halfutils.cpp sparsevec.cpp bitvec.cpp
+    APPEND
+    PROPERTIES COMPILE_OPTIONS "${datavec_OPTFLAGS}"
+)
+
 set(adt_DEF_OPTIONS ${MACRO_OPTIONS})
 set(adt_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(adt_LINK_OPTIONS ${BIN_LINK_OPTIONS})

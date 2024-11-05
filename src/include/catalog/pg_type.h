@@ -822,6 +822,19 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 DATA(insert OID = 4408 ( undefined		PGNSP PGUID  -2 f u W f t \054 0 0 0 undefinedin undefinedout undefinedrecv undefinedsend - - - c p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("undefined objects as PLSQL compilation time");
 #define UNDEFINEDOID		4408
+
+DATA(insert OID = 8305 (vector		PGNSP PGUID  -1 f b U f t \054 0 0 8308 vector_in vector_out vector_recv vector_send vector_typmod_in - - i e f 0 -1 0 0 _null_ _null_ _null_));
+#define VECTOROID 8305
+
+DATA(insert OID = 8307 (sparsevec	PGNSP PGUID  -1 f b U f t \054 0 0 8310 sparsevec_in sparsevec_out sparsevec_recv sparsevec_send sparsevec_typmod_in - - i e f 0 -1 0 0 _null_ _null_ _null_));
+#define SPARSEVECTOROID 8307
+
+DATA(insert OID = 8308 (  _vector	PGNSP PGUID -1 f b A f t \054 0	8305 0 array_in array_out array_recv array_send vector_typmod_in - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define VECTORARRAYOID 8308
+
+DATA(insert OID = 8310 (  _sparsevec	PGNSP PGUID -1 f b A f t \054 0	8307 0 array_in array_out array_recv array_send sparsevec_typmod_in - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define SPARSEVECARRAYOID 8310
+
 /*
  * macros
  */

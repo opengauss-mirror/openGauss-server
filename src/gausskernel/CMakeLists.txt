@@ -213,6 +213,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_ustore>
     $<TARGET_OBJECTS:gausskernel_storage_access_ustore_undo>
     $<TARGET_OBJECTS:gausskernel_storage_access_ubtree>
+    $<TARGET_OBJECTS:gausskernel_storage_access_datavec>
     $<TARGET_OBJECTS:gausskernel_storage_tcap>
     $<TARGET_OBJECTS:gausskernel_storage_sync>
     $<TARGET_OBJECTS:gausskernel_storage_dorado_operation>
