@@ -1409,9 +1409,16 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     dms_ctrl_info_t ctrl_info = { 0 };
+
     ctrl_info.ctrl = *buf_ctrl;
-    ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
-    ctrl_info.is_dirty = SSBufferIsDirty(buf_desc);
+    if ((buf_ctrl->state & BUF_NEED_LOAD) || !(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
+        ctrl_info.lsn = SS_MAX_UINT64;
+        ctrl_info.is_dirty = true;
+    } else {
+        ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
+        ctrl_info.is_dirty = SSBufferIsDirty(buf_desc);
+    }
+
     int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][%u/%u/%u/%d %d-%u] rebuild page: failed.",

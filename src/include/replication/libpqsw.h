@@ -89,6 +89,8 @@ void libpqsw_create_conn();
 void libpqsw_trace_q_msg(const char* commandTag, const char* queryString);
 void libpqsw_disconnect(bool clear_queue);
 void libpqsw_check_ddl_on_primary(const char* commandTag);
+bool libpqsw_command_is_prepare();
+bool libpqsw_is_prepare_within_PBE();
 
 #ifdef _cplusplus
 }
@@ -132,6 +134,9 @@ typedef struct {
     bool already_connected;
     bool client_enable_ce;
     bool have_savepoint;
+    bool isPBEPacket;
+    bool isPrepareCommand;
+    bool localError;
 } RedirectState;
 
 // the max len =(PBEPBEDS) == 8, 20 is enough
@@ -263,6 +268,9 @@ public:
         state.already_connected = false;
         state.client_enable_ce = false;
         state.have_savepoint = false;
+        state.isPBEPacket = false;
+        state.isPrepareCommand = false;
+        state.localError = false;
         ss_standby_state = 0;
         server_proc_slot = 0;
         ss_standby_sxid = 0;
@@ -304,6 +312,36 @@ public:
         state.inited = true;
         state.enable_remote_excute = enable_remote_excute();
         return state.enable_remote_excute;
+    }
+
+    void set_pbe_state(bool flag)
+    {
+        state.isPBEPacket = flag;
+    }
+
+    bool get_pbe_state()
+    {
+        return state.isPBEPacket;
+    }
+
+    void set_prepare_command(bool flag)
+    {
+        state.isPrepareCommand = flag;
+    }
+
+    bool get_prepare_command()
+    {
+        return state.isPrepareCommand;
+    }
+
+    void set_local_error(bool flag)
+    {
+        state.localError = flag;
+    }
+
+    bool get_local_error()
+    {
+        return state.localError;
     }
 
     bool log_enable();

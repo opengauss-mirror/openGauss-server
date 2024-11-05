@@ -8673,6 +8673,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.xact_cxt.callPrint = false;
 
         u_sess->pcache_cxt.cur_stmt_name = NULL;
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_is_prepare_within_PBE()) {
+            get_redirect_manager()->set_local_error(true);
+        }
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
 
@@ -9759,7 +9762,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
-                if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command()) &&
+                if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command() || libpqsw_command_is_prepare()) &&
                     !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
                         &input_message,

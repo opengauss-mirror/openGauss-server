@@ -170,6 +170,8 @@
 /* max length of max int range as char */
 #define MAX_LEN_OF_MAXINTRANGE      12
 
+#define SS_MAX_UINT64 ULLONG_MAX
+
 #define SS_AM_WORKER  (t_thrd.role == WORKER || \
                        t_thrd.role == THREADPOOL_WORKER || \
                        t_thrd.role == STREAM_WORKER || \
