@@ -148,6 +148,8 @@
 #include "utils/xml.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
+#include "access/datavec/hnsw.h"
+#include "access/datavec/ivfflat.h"
 #include "utils/guc_sql.h"
 
 #define DEFAULT_USTATS_TRACKER_NAPTIME 20
@@ -2561,6 +2563,32 @@ static void InitSqlConfigureNamesInt()
             15 * 60,
             1,
             24 * 60 * 60,
+            NULL,
+            NULL,
+            NULL},
+        {{"hnsw.ef_search",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Sets the size of the dynamic candidate list for search"),
+            gettext_noop("Valid range is 1..1000.")},
+            &u_sess->datavec_ctx.hnsw_ef_search,
+            HNSW_DEFAULT_EF_SEARCH,
+            HNSW_MIN_EF_SEARCH,
+            HNSW_MAX_EF_SEARCH,
+            NULL,
+            NULL,
+            NULL},
+        {{"ivfflat.probes",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Sets the number of probes"),
+            gettext_noop("Valid range is 1..lists."),},
+            &u_sess->datavec_ctx.ivfflat_probes,
+            IVFFLAT_DEFAULT_PROBES,
+            IVFFLAT_MIN_LISTS,
+            IVFFLAT_MAX_LISTS,
             NULL,
             NULL,
             NULL},
