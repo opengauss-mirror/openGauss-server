@@ -91,5 +91,50 @@ select sin(sum(a)+sum(b)) , d from test_agg_false where 0=1 group by d;
 explain (verbose ,costs off) select sum(a)+sum(b) , d , 1 from test_agg_false where 0=1 group by d;
 select sum(a)+sum(b) , d ,1 from test_agg_false where 0=1 group by d;
 
+CREATE TABLE test_table (column_x double precision , column_y double precision);
+INSERT INTO test_table (column_x, column_y) VALUES (55, 38);
+INSERT INTO test_table (column_x, column_y) VALUES (46, 29);
+INSERT INTO test_table (column_x, column_y) VALUES (41, 24);
+INSERT INTO test_table (column_x, column_y) VALUES (48, 33);
+INSERT INTO test_table (column_x, column_y) VALUES (51, 39);
+INSERT INTO test_table (column_x, column_y) VALUES (49, 32);
+
+SELECT corr_s(column_x, column_y) FROM test_table;
+SELECT corr_s(column_x, column_y, 'COEFFICIENT') FROM test_table;
+SELECT corr_s(column_x, column_y, 'ONE_SIDED_SIG') FROM test_table;
+SELECT corr_s(column_x, column_y, 'ONE_SIDED_SIG_POS') FROM test_table;
+SELECT corr_s(column_x, column_y, 'ONE_SIDED_SIG_NEG') FROM test_table;
+SELECT corr_s(column_x, column_y, 'TWO_SIDED_SIG') FROM test_table;
+
+SELECT corr_k(column_x, column_y) FROM test_table;
+SELECT corr_k(column_x, column_y, 'COEFFICIENT') FROM test_table;
+SELECT corr_k(column_x, column_y, 'ONE_SIDED_SIG') FROM test_table;
+SELECT corr_k(column_x, column_y, 'ONE_SIDED_SIG_POS') FROM test_table;
+SELECT corr_k(column_x, column_y, 'ONE_SIDED_SIG_NEG') FROM test_table;
+SELECT corr_k(column_x, column_y, 'TWO_SIDED_SIG') FROM test_table;
+
+CREATE TABLE null_table1 (column_x double precision, column_y double precision);
+INSERT INTO null_table1 (column_x, column_y) VALUES (null, null);
+INSERT INTO null_table1 (column_x, column_y) VALUES (null, null);
+SELECT corr_s(column_x, column_y, 'COEFFICIENT') FROM null_table1;
+
+CREATE TABLE null_table2 (column_x double precision, column_y double precision);
+INSERT INTO null_table2(column_x, column_y) VALUES (null, 38);
+INSERT INTO null_table2(column_x, column_y) VALUES (null, 29);
+SELECT corr_s(column_x, column_y, 'COEFFICIENT') FROM null_table2;
+
+CREATE TABLE null_table3 (column_x double precision, column_y double precision);
+INSERT INTO null_table3(column_x, column_y) VALUES (55, 38);
+INSERT INTO null_table3(column_x, column_y) VALUES (null, 29);
+INSERT INTO null_table3(column_x, column_y) VALUES (41, 24);
+INSERT INTO null_table3(column_x, column_y) VALUES (48, 33);
+INSERT INTO null_table3(column_x, column_y) VALUES (51, 39);
+INSERT INTO null_table3(column_x, column_y) VALUES (49, 32);
+SELECT corr_s(column_x, column_y, 'COEFFICIENT') FROM null_table3;
+
+drop table test_table;
+drop table null_table1;
+drop table null_table2;
+drop table null_table3;
 drop table t1;
 drop schema aggregate CASCADE;

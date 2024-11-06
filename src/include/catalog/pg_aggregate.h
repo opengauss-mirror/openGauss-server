@@ -479,6 +479,11 @@ DATA(insert (4461 ordered_set_transition - mode_final 0 2281 _null_ _null_ o 0))
 DATA(insert (5555 median_transfn      -    median_float8_finalfn            0   2281    _null_   _null_ 	 n 0));
 DATA(insert (5556 median_transfn      -    median_interval_finalfn          0   2281    _null_   _null_ 	 n 0));
 
+DATA(insert (5561 corr_sk_trans_fn      -    corr_s_final_fn            0   2281    _null_   _null_ 	 n 0));
+DATA(insert (5562 corr_sk_trans_fn      -    corr_k_final_fn          0   2281    _null_   _null_ 	 n 0));
+DATA(insert (5566 corr_sk_trans_fn_no3      -    corr_s_final_fn            0   2281    _null_   _null_ 	 n 0));
+DATA(insert (5567 corr_sk_trans_fn_no3      -    corr_k_final_fn          0   2281    _null_   _null_ 	 n 0));
+
 /* percentile */
 DATA(insert ( 9990	tdigest_merge		tdigest_merge_to_one		calculate_quantile_of				0	4406	_null_ _null_ 	n	0));
 #define ADDTDIGESTMERGEOID 9990

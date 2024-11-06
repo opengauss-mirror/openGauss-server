@@ -1152,6 +1152,11 @@ extern Datum timestamptz_list_agg_noarg2_transfn(PG_FUNCTION_ARGS);
 extern Datum interval_list_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum interval_list_agg_noarg2_transfn(PG_FUNCTION_ARGS);
 
+extern Datum corr_sk_trans_fn(PG_FUNCTION_ARGS);
+extern Datum corr_sk_trans_fn_no3(PG_FUNCTION_ARGS);
+extern Datum corr_s_final_fn(PG_FUNCTION_ARGS);
+extern Datum corr_k_final_fn(PG_FUNCTION_ARGS);
+
 extern Datum text_concat(PG_FUNCTION_ARGS);
 extern Datum text_concat_ws(PG_FUNCTION_ARGS);
 extern Datum text_left(PG_FUNCTION_ARGS);
