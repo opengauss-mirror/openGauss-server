@@ -2779,8 +2779,13 @@ found_branch:
                 if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
                         TerminateBufferIO(bufHdr, false, 0);
-                        // when reform fail, should return InvalidBuffer to reform proc thread
+                        /* when reform fail, should return InvalidBuffer to reform proc thread */
                         if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
+                        /* when in failover, should return to worker thread exit */
+                        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
@@ -3345,6 +3350,11 @@ retry_new_buffer:
                 * need to improve.
                 */
                 if (DmsReleaseOwner(old_tag, buf->buf_id)) {
+                    ClearReadHint(buf->buf_id, true);
+                    break;
+                }
+                /* when in failover,  woker thread should return InvalidBuffer and exit */
+                if (SS_IN_FAILOVER && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
                     ClearReadHint(buf->buf_id, true);
                     break;
                 }
@@ -6344,7 +6354,10 @@ retry:
             buf_ctrl->state &= ~BUF_READ_MODE_ZERO_LOCK;
         }
         bool with_io_in_progress = true;
-
+        /* when in failover, should return to worker thread exit */
+        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
+            return;
+        }
         if (IsSegmentBufferID(buf->buf_id)) {
             tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode, &with_io_in_progress);
         } else {
