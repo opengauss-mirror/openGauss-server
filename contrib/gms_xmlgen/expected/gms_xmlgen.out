@@ -1,0 +1,3260 @@
+create extension gms_xmlgen;
+create extension gms_output;
+select gms_output.enable(100000);
+ enable 
+--------
+ 
+(1 row)
+
+create schema gms_xmlgen_test;
+set search_path = gms_xmlgen_test;
+set behavior_compat_options = 'bind_procedure_searchpath';
+-- prepare data
+create table t_types (
+    "integer" integer,
+    "float" float,
+    "numeric" numeric(20, 6),
+    "boolean" boolean,
+    "char" char(20),
+    "varchar" varchar(20),
+    "text" text,
+    "blob" blob,
+    "raw" raw,
+    "date" date,
+    "time" time,
+    "timestamp" timestamp,
+    "json" json,
+    "varchar_array" varchar(20)[]
+);
+insert into t_types
+values(
+        1,
+        1.23456,
+        1.234567,
+        true,
+        '"''<>&char test',
+        'varchar"''<>&test',
+        'text test"''<>&',
+        'ff',
+        hextoraw('ABCD'),
+        '2024-01-02',
+        '18:01:02',
+        '2024-02-03 19:03:04',
+        '{"a" : 1, "b" : 2}',
+        array['abc', '"''<>&', '你好']
+    ),
+    (
+        2,
+        2.23456,
+        2.234567,
+        false,
+        '2"''<>&char test',
+        '2varchar"''<>&test',
+        '2text test"''<>&',
+        'eeee',
+        hextoraw('ffff'),
+        '2026-03-04',
+        '20:12:13',
+        '2026-05-06 21:13:00',
+        '[9,8,7,6]',
+        array['&^%@', '"''<>&', '<&y''">']
+    ),
+    (
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+    );
+-- GMS_XMLGEN.NEWCONTEXT && GMS_XMLGEN.CLOSECONTEXT
+select gms_xmlgen.newcontext('select * from t_types');
+ newcontext 
+------------
+          1
+(1 row)
+
+select gms_xmlgen.getxml(1);
+                            getxml                            
+--------------------------------------------------------------
+ <?xml version="1.0"?>                                       +
+ <ROWSET>                                                    +
+   <ROW>                                                     +
+     <integer>1</integer>                                    +
+     <float>1.23456</float>                                  +
+     <numeric>1.234567</numeric>                             +
+     <boolean>true</boolean>                                 +
+     <char>&quot;&apos;&lt;&gt;&amp;char test      </char>   +
+     <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar> +
+     <text>text test&quot;&apos;&lt;&gt;&amp;</text>         +
+     <blob>FF</blob>                                         +
+     <raw>ABCD</raw>                                         +
+     <date>2024-01-02T00:00:00</date>                        +
+     <time>18:01:02</time>                                   +
+     <timestamp>2024-02-03T19:03:04</timestamp>              +
+     <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>     +
+     <varchar_array>                                         +
+       <varchar>abc</varchar>                                +
+       <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>          +
+       <varchar>你好</varchar>                               +
+     </varchar_array>                                        +
+   </ROW>                                                    +
+   <ROW>                                                     +
+     <integer>2</integer>                                    +
+     <float>2.23456</float>                                  +
+     <numeric>2.234567</numeric>                             +
+     <boolean>false</boolean>                                +
+     <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>   +
+     <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>+
+     <text>2text test&quot;&apos;&lt;&gt;&amp;</text>        +
+     <blob>EEEE</blob>                                       +
+     <raw>FFFF</raw>                                         +
+     <date>2026-03-04T00:00:00</date>                        +
+     <time>20:12:13</time>                                   +
+     <timestamp>2026-05-06T21:13:00</timestamp>              +
+     <json>[9,8,7,6]</json>                                  +
+     <varchar_array>                                         +
+       <varchar>&amp;^%@</varchar>                           +
+       <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>          +
+       <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>         +
+     </varchar_array>                                        +
+   </ROW>                                                    +
+   <ROW>                                                     +
+   </ROW>                                                    +
+ </ROWSET>                                                   +
+ 
+(1 row)
+
+select gms_xmlgen.closecontext(1);
+ closecontext 
+--------------
+ 
+(1 row)
+
+-- procedure case
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- newcontext by cursor
+DECLARE
+CURSOR xc is select * from t_types;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('xc'::refcursor);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- newcontext by cursor expression
+DECLARE
+CURSOR xc is select "integer", CURSOR(select * from t_types) from t_types;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+open xc;
+xml_cxt := gms_xmlgen.newcontext(xc);
+gms_xmlgen.closecontext(xml_cxt);
+close xc;
+END;
+/
+-- invalid null parameter
+select gms_xmlgen.newcontext(NULL);
+ERROR:  invalid query string
+CONTEXT:  referenced column: newcontext
+-- ok for invalid query sql
+select gms_xmlgen.newcontext('aabbccdd');
+ newcontext 
+------------
+          5
+(1 row)
+
+-- ok for closecontext NULL
+select gms_xmlgen.closecontext(NULL);
+ closecontext 
+--------------
+ 
+(1 row)
+
+-- ok for closecontext not exist id
+select gms_xmlgen.closecontext(99);
+ closecontext 
+--------------
+ 
+(1 row)
+
+-- error for closecontext invalid range
+select gms_xmlgen.closecontext(-1);
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.close_context(ctx)"
+PL/pgSQL function gms_xmlgen.closecontext(gms_xmlgen.ctxhandle) line 2 at PERFORM
+referenced column: closecontext
+select gms_xmlgen.closecontext(4294967296);
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.close_context(ctx)"
+PL/pgSQL function gms_xmlgen.closecontext(gms_xmlgen.ctxhandle) line 2 at PERFORM
+referenced column: closecontext
+-- GMS_XMLGEN.GETXML
+-- getxml by query
+DECLARE
+xml_output clob;
+BEGIN
+xml_output := gms_xmlgen.getxml('select * from t_types');
+gms_output.put_line(xml_output);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxml by cursor
+DECLARE
+CURSOR xc is select * from t_types;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+open xc;
+xml_cxt := gms_xmlgen.newcontext(xc);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+close xc;
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxml by cursor expression
+DECLARE
+CURSOR xc is select "integer", CURSOR(select * from t_types) from t_types;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+open xc;
+xml_cxt := gms_xmlgen.newcontext(xc);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+close xc;
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <_x003F_column_x003F_>&lt;unnamed portal 6&gt;</_x003F_column_x003F_>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <_x003F_column_x003F_>&lt;unnamed portal 7&gt;</_x003F_column_x003F_>
+  </ROW>
+  <ROW>
+    <_x003F_column_x003F_>&lt;unnamed portal 8&gt;</_x003F_column_x003F_>
+  </ROW>
+</ROWSET>
+
+-- getxml by context id
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxml by context id with out parameter
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.getxml(xml_cxt, xml_output);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- no result when getxml twice without restartquery
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.getxml(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- invalid null parameter
+select gms_xmlgen.getxml(NULL);
+ERROR:  invalid query string
+CONTEXT:  referenced column: getxml
+-- invalid query sql
+select gms_xmlgen.getxml('aabbccdd');
+ERROR:  syntax error at or near "aabbccdd"
+LINE 1: select gms_xmlgen.getxml('aabbccdd');
+        ^
+CONTEXT:  referenced column: getxml
+-- invalid xmlgen context id 
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');	
+gms_xmlgen.closecontext(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+END;
+/
+ERROR:  invalid gms_xmlgen context found
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+-- invalid xmlgen context id with out parameter 
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');	
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.getxml(xml_cxt, xml_output);
+gms_output.put_line(xml_output);
+END;
+/
+ERROR:  invalid gms_xmlgen context found
+CONTEXT:  PL/pgSQL function gms_xmlgen.getxml(gms_xmlgen.ctxhandle,clob,numeric) line 2 at assignment
+SQL statement "CALL gms_xmlgen.getxml(xml_cxt,xml_output)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+-- GMS_XMLGEN.GETXMLTYPE
+-- getxmltype by query
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+xml_type xmltype;
+BEGIN
+xml_type := gms_xmlgen.getxmltype('select * from t_types');
+gms_output.put_line(xml_type::text);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxmltype by query with parameter 2
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+xml_type xmltype;
+BEGIN
+xml_type := gms_xmlgen.getxmltype('select * from t_types', 1);
+gms_output.put_line(xml_type::text);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxmltype by context id
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+xml_type xmltype;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_type := gms_xmlgen.getxmltype(xml_cxt);
+gms_output.put_line(xml_type::text);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxmltype by context id with parameter 2
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+xml_type xmltype;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_type := gms_xmlgen.getxmltype(xml_cxt, 1);
+gms_output.put_line(xml_type::text);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxmltype by cursor
+DECLARE
+CURSOR xc is select * from t_types;
+xml_cxt gms_xmlgen.ctxhandle;
+xml_output xmltype;
+BEGIN
+open xc;
+xml_cxt := gms_xmlgen.newcontext(xc);
+xml_output := gms_xmlgen.getxmltype(xml_cxt);
+gms_output.put_line(xml_output::text);
+close xc;
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- getxmltype by cursor expression
+DECLARE
+CURSOR xc is select "integer", CURSOR(select * from t_types) from t_types;
+xml_cxt gms_xmlgen.ctxhandle;
+xml_output xmltype;
+BEGIN
+open xc;
+xml_cxt := gms_xmlgen.newcontext(xc);
+xml_output := gms_xmlgen.getxmltype(xml_cxt);
+gms_output.put_line(xml_output::text);
+close xc;
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <_x003F_column_x003F_>&lt;unnamed portal 19&gt;</_x003F_column_x003F_>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <_x003F_column_x003F_>&lt;unnamed portal 20&gt;</_x003F_column_x003F_>
+  </ROW>
+  <ROW>
+    <_x003F_column_x003F_>&lt;unnamed portal 21&gt;</_x003F_column_x003F_>
+  </ROW>
+</ROWSET>
+
+-- invalid null parameter
+select gms_xmlgen.getxmltype(NULL);
+ERROR:  invalid query string
+CONTEXT:  referenced column: getxmltype
+-- invalid query sql
+select gms_xmlgen.getxmltype('aabbccdd');
+ERROR:  syntax error at or near "aabbccdd"
+LINE 1: select gms_xmlgen.getxmltype('aabbccdd');
+        ^
+CONTEXT:  referenced column: getxmltype
+-- invalid context id
+DECLARE
+xml_cxt gms_xmlgen.ctxhandle;
+xml_type xmltype;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+xml_type := gms_xmlgen.getxmltype(xml_cxt);
+END;
+/
+ERROR:  invalid gms_xmlgen context found
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+-- invalid parameter 2 range
+select gms_xmlgen.getxmltype('select * from t_types', -1);
+ERROR:  value is out of range.
+CONTEXT:  referenced column: getxmltype
+select gms_xmlgen.getxmltype('select * from t_types', 4294967296);
+ERROR:  value is out of range.
+CONTEXT:  referenced column: getxmltype
+-- GMS_XMLGEN.NEWCONTEXTFROMHIERARCHY
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('
+SELECT "integer", xmltype(gms_xmlgen.getxml(''select * from t_types''))
+FROM t_types
+START WITH "integer" = 1 OR "integer" = 2
+CONNECT BY nocycle "integer" = PRIOR "integer"');
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+<?xml version="1.0" encoding="utf-8"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'&lt;&gt;&amp;char test      </char>
+    <varchar>varchar"'&lt;&gt;&amp;test</varchar>
+    <text>text test"'&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar"'&lt;&gt;&amp;test</varchar>
+    <text>2text test"'&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y'"&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'&lt;&gt;&amp;char test      </char>
+    <varchar>varchar"'&lt;&gt;&amp;test</varchar>
+    <text>text test"'&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar"'&lt;&gt;&amp;test</varchar>
+    <text>2text test"'&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y'"&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET></ROWSET>
+
+-- with set row set tag
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('
+SELECT "integer", xmltype(gms_xmlgen.getxml(''select * from t_types''))
+FROM t_types
+START WITH "integer" = 1 OR "integer" = 2
+CONNECT BY nocycle "integer" = PRIOR "integer"');
+gms_xmlgen.setrowsettag(xml_cxt_from_hierarchy, 'TopTag');
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+<?xml version="1.0" encoding="utf-8"?>
+<TopTag>
+  <ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'&lt;&gt;&amp;char test      </char>
+    <varchar>varchar"'&lt;&gt;&amp;test</varchar>
+    <text>text test"'&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar"'&lt;&gt;&amp;test</varchar>
+    <text>2text test"'&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y'"&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'&lt;&gt;&amp;char test      </char>
+    <varchar>varchar"'&lt;&gt;&amp;test</varchar>
+    <text>text test"'&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar"'&lt;&gt;&amp;test</varchar>
+    <text>2text test"'&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>"'&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y'"&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET></ROWSET>
+</TopTag>
+
+-- error with set row tag
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('
+SELECT "integer", xmltype(gms_xmlgen.getxml(''select * from t_types''))
+FROM t_types
+START WITH "integer" = 1 OR "integer" = 2
+CONNECT BY nocycle "integer" = PRIOR "integer"');
+gms_xmlgen.setrowtag(xml_cxt_from_hierarchy, 'TopTag');
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+ERROR:  this operation is invalid in the hierarchy context
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_row_tag(ctx,rowTagName)"
+PL/pgSQL function gms_xmlgen.setrowtag(gms_xmlgen.ctxhandle,character varying) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setrowtag(xml_cxt_from_hierarchy,'TopTag')"
+PL/pgSQL function inline_code_block line 9 at PERFORM
+-- error with setmaxrows
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('
+SELECT "integer", xmltype(gms_xmlgen.getxml(''select * from t_types''))
+FROM t_types
+START WITH "integer" = 1 OR "integer" = 2
+CONNECT BY nocycle "integer" = PRIOR "integer"');
+gms_xmlgen.setmaxrows(xml_cxt_from_hierarchy, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+ERROR:  this operation is invalid in the hierarchy context
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_max_rows(ctx,maxrows)"
+PL/pgSQL function gms_xmlgen.setmaxrows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setmaxrows(xml_cxt_from_hierarchy,1)"
+PL/pgSQL function inline_code_block line 9 at PERFORM
+-- error with setskiprows
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('
+SELECT "integer", xmltype(gms_xmlgen.getxml(''select * from t_types''))
+FROM t_types
+START WITH "integer" = 1 OR "integer" = 2
+CONNECT BY nocycle "integer" = PRIOR "integer"');
+gms_xmlgen.setskiprows(xml_cxt_from_hierarchy, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+ERROR:  this operation is invalid in the hierarchy context
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_skip_rows(ctx,skipRows)"
+PL/pgSQL function gms_xmlgen.setskiprows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setskiprows(xml_cxt_from_hierarchy,1)"
+PL/pgSQL function inline_code_block line 9 at PERFORM
+-- invalid null parameter
+select gms_xmlgen.newcontextfromhierarchy(NULL);
+ERROR:  invalid query string
+CONTEXT:  referenced column: newcontextfromhierarchy
+-- ok for invalid query sql
+select gms_xmlgen.newcontextfromhierarchy('aabbccdd');
+ newcontextfromhierarchy 
+-------------------------
+                      23
+(1 row)
+
+-- get xml error with invalid query sql
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('aabbccdd');
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+ERROR:  syntax error at or near "aabbccdd"
+LINE 1: aabbccdd
+        ^
+QUERY:  aabbccdd
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+-- get xml error with not hierarchy query sql
+DECLARE
+xml_output clob;
+xml_cxt_from_hierarchy gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt_from_hierarchy := gms_xmlgen.newcontextfromhierarchy('select * from t_types');
+xml_output := gms_xmlgen.getxml(xml_cxt_from_hierarchy);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt_from_hierarchy);
+END;
+/
+ERROR:  invalid query result
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+-- GMS_XMLGEN.RESTARTQUERY
+-- get xml twice
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.restartquery(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for restartquery closed context id
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.restartquery(xml_cxt);
+END;
+/
+-- GMS_XMLGEN.SETCONVERTSPECIALCHARS
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setconvertspecialchars(xml_cxt, false);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.setconvertspecialchars(xml_cxt, true);
+gms_xmlgen.restartquery(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'<>&char test      </char>
+    <varchar>varchar"'<>&test</varchar>
+    <text>text test"'<>&</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'<>&</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'<>&char test     </char>
+    <varchar>2varchar"'<>&test</varchar>
+    <text>2text test"'<>&</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&^%@</varchar>
+      <varchar>"'<>&</varchar>
+      <varchar><&y'"></varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- error for missing parameter 2
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setconvertspecialchars(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setconvertspecialchars has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setconvertspecialchars(xml_cxt, true);
+END;
+/
+-- GMS_XMLGEN.SETMAXROWS
+-- set max rows 0
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 0);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- set max rows 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+-- parameter nums error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setmaxrows has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, -1);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_max_rows(ctx,maxrows)"
+PL/pgSQL function gms_xmlgen.setmaxrows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setmaxrows(xml_cxt,-1)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 4294967296);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_max_rows(ctx,maxrows)"
+PL/pgSQL function gms_xmlgen.setmaxrows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setmaxrows(xml_cxt,4294967296)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setmaxrows(xml_cxt, 1);
+END;
+/
+-- GMS_XMLGEN.SETNULLHANDLING
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 0);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.setnullhandling(xml_cxt, 1);
+gms_xmlgen.restartquery(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.setnullhandling(xml_cxt, 2);
+gms_xmlgen.restartquery(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
+  </ROW>
+</ROWSET>
+
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer/>
+    <float/>
+    <numeric/>
+    <boolean/>
+    <char/>
+    <varchar/>
+    <text/>
+    <blob/>
+    <raw/>
+    <date/>
+    <time/>
+    <timestamp/>
+    <json/>
+    <varchar_array/>
+  </ROW>
+</ROWSET>
+
+-- other numbers > 2, the same as 0
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 3);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+gms_xmlgen.setnullhandling(NULL, 1);
+END;
+/
+-- parameter nums error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setnullhandling has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, -1);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_null_handling(ctx,flag)"
+PL/pgSQL function gms_xmlgen.setnullhandling(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setnullhandling(xml_cxt,-1)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 4294967296);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_null_handling(ctx,flag)"
+PL/pgSQL function gms_xmlgen.setnullhandling(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setnullhandling(xml_cxt,4294967296)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setnullhandling(xml_cxt, 1);
+END;
+/
+-- GMS_XMLGEN.SETROWSETTAG
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowsettag(xml_cxt, 'test');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<test>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</test>
+
+-- error for setrowsettag NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowsettag(xml_cxt, NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  the xml has multiple root nodes
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+-- ok for setrowsettag NULL with one row
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types where rownum = 1');
+gms_xmlgen.setrowsettag(xml_cxt, NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROW>
+  <integer>1</integer>
+  <float>1.23456</float>
+  <numeric>1.234567</numeric>
+  <boolean>true</boolean>
+  <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+  <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+  <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+  <blob>FF</blob>
+  <raw>ABCD</raw>
+  <date>2024-01-02T00:00:00</date>
+  <time>18:01:02</time>
+  <timestamp>2024-02-03T19:03:04</timestamp>
+  <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+  <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+</ROW>
+
+-- ok for setrowsettag context id null
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+gms_xmlgen.setrowsettag(NULL, 'test');
+END;
+/
+-- parameter nums error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowsettag(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setrowsettag has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- parameter type error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowsettag(xml_cxt, true);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setrowsettag(gms_xmlgen.ctxhandle, boolean) does not exist
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  SQL statement "CALL gms_xmlgen.setrowsettag(xml_cxt,true)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setrowsettag(xml_cxt, 'test');
+END;
+/
+-- GMS_XMLGEN.SETROWTAG
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowtag(xml_cxt, 'test');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <test>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </test>
+  <test>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </test>
+  <test>
+  </test>
+</ROWSET>
+
+-- ok for setrowtag NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowtag(xml_cxt, NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <integer>1</integer>
+  <float>1.23456</float>
+  <numeric>1.234567</numeric>
+  <boolean>true</boolean>
+  <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+  <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+  <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+  <blob>FF</blob>
+  <raw>ABCD</raw>
+  <date>2024-01-02T00:00:00</date>
+  <time>18:01:02</time>
+  <timestamp>2024-02-03T19:03:04</timestamp>
+  <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+  <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  <integer>2</integer>
+  <float>2.23456</float>
+  <numeric>2.234567</numeric>
+  <boolean>false</boolean>
+  <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+  <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+  <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+  <blob>EEEE</blob>
+  <raw>FFFF</raw>
+  <date>2026-03-04T00:00:00</date>
+  <time>20:12:13</time>
+  <timestamp>2026-05-06T21:13:00</timestamp>
+  <json>[9,8,7,6]</json>
+  <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+</ROWSET>
+
+-- error for setrowsettag NULL && setrowtag NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowsettag(xml_cxt, NULL);
+gms_xmlgen.setrowtag(xml_cxt, NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  the xml has multiple root nodes
+CONTEXT:  PL/pgSQL function inline_code_block line 7 at assignment
+-- ok for setrowtag context id null
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+gms_xmlgen.setrowtag(NULL, 'test');
+END;
+/
+-- parameter nums error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowtag(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setrowtag has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- parameter type error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setrowtag(xml_cxt, true);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setrowtag(gms_xmlgen.ctxhandle, boolean) does not exist
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  SQL statement "CALL gms_xmlgen.setrowtag(xml_cxt,true)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setrowtag(xml_cxt, 'test');
+END;
+/
+-- GMS_XMLGEN.SETSKIPROWS
+-- set skip row 0
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 0);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- set skip row 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- set skip row 2
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 2);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for setskiprows context id null
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(NULL, 1);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- parameter nums error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  function gms_xmlgen.setskiprows has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, -1);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_skip_rows(ctx,skipRows)"
+PL/pgSQL function gms_xmlgen.setskiprows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setskiprows(xml_cxt,-1)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- parameter range error
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 4294967296);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+ERROR:  value is out of range.
+CONTEXT:  SQL statement "CALL gms_xmlgen.set_skip_rows(ctx,skipRows)"
+PL/pgSQL function gms_xmlgen.setskiprows(gms_xmlgen.ctxhandle,numeric) line 2 at PERFORM
+SQL statement "CALL gms_xmlgen.setskiprows(xml_cxt,4294967296)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.setskiprows(xml_cxt, 1);
+END;
+/
+-- GMS_XMLGEN.USEITEMTAGSFORCOLL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.useitemtagsforcoll(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar_ITEM>abc</varchar_ITEM>
+      <varchar_ITEM>&quot;&apos;&lt;&gt;&amp;</varchar_ITEM>
+      <varchar_ITEM>你好</varchar_ITEM>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar_ITEM>&amp;^%@</varchar_ITEM>
+      <varchar_ITEM>&quot;&apos;&lt;&gt;&amp;</varchar_ITEM>
+      <varchar_ITEM>&lt;&amp;y&apos;&quot;&gt;</varchar_ITEM>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for useitemtagsforcoll context id NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.useitemtagsforcoll(NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.useitemtagsforcoll(xml_cxt);
+END;
+/
+-- GMS_XMLGEN.USENULLATTRIBUTEINDICATOR
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.usenullattributeindicator(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
+  </ROW>
+</ROWSET>
+
+-- ok for parameter 2 true
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.usenullattributeindicator(xml_cxt, true);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
+  </ROW>
+</ROWSET>
+
+-- ok for parameter 2 false, the result is the same as the true's
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.usenullattributeindicator(xml_cxt, false);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
+  </ROW>
+</ROWSET>
+
+-- ok for usenullattributeindicator context id NULL
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.usenullattributeindicator(NULL);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- ok for closed context
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.closecontext(xml_cxt);
+gms_xmlgen.usenullattributeindicator(xml_cxt);
+END;
+/
+-- GMS_XMLGEN.GETNUMROWSPROCESSED
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+3
+-- getnumrowsprocessed with skip rows
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+2
+-- getnumrowsprocessed with max rows
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 2);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+2
+-- getnumrowsprocessed with skip rows && max rows
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1);
+gms_xmlgen.setmaxrows(xml_cxt, 1);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+1
+-- ok for getnumrowsprocessed context id NULL
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(NULL);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- ok for closed context
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_xmlgen.closecontext(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+END;
+/
+-- GMS_XMLGEN.CONVERT
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, NULL);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 0);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 1);
+ convert 
+---------
+ "'<>&
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 2);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, -1);
+ convert 
+---------
+ 
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 4294967295);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 4294967296);
+ convert 
+---------
+ 
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::varchar2);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::varchar2, NULL);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::varchar2, 0);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::varchar2, 1);
+ convert 
+---------
+ "'<>&
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::varchar2, 2);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+-- would not convert
+select GMS_XMLGEN.CONVERT('&QUOT;&ApOS;&LT;&gT;&Amp;'::varchar2, 1);
+          convert          
+---------------------------
+ &QUOT;&ApOS;&LT;&gT;&Amp;
+(1 row)
+
+select pg_typeof(GMS_XMLGEN.CONVERT('"''<>&'::varchar2, 1));
+     pg_typeof     
+-------------------
+ character varying
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, NULL);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, 0);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, 1);
+ convert 
+---------
+ "'<>&
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, 2);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, -1);
+ convert 
+---------
+ 
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, 4294967295);
+          convert          
+---------------------------
+ &quot;&apos;&lt;&gt;&amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('"''<>&'::clob, 4294967296);
+ convert 
+---------
+ 
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::clob);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::clob, NULL);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::clob, 0);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::clob, 1);
+ convert 
+---------
+ "'<>&
+(1 row)
+
+select GMS_XMLGEN.CONVERT('&quot;&apos;&lt;&gt;&amp;'::clob, 2);
+                    convert                    
+-----------------------------------------------
+ &amp;quot;&amp;apos;&amp;lt;&amp;gt;&amp;amp;
+(1 row)
+
+-- would not convert
+select GMS_XMLGEN.CONVERT('&QUOT;&ApOS;&LT;&gT;&Amp;'::clob, 1);
+          convert          
+---------------------------
+ &QUOT;&ApOS;&LT;&gT;&Amp;
+(1 row)
+
+select pg_typeof(GMS_XMLGEN.CONVERT('"''<>&'::clob, 1));
+ pg_typeof 
+-----------
+ clob
+(1 row)
+
+-- error for NULL
+select GMS_XMLGEN.CONVERT(NULL, 0);
+ERROR:  invalid parameter
+CONTEXT:  referenced column: convert
+select GMS_XMLGEN.CONVERT(NULL);
+ERROR:  invalid parameter
+CONTEXT:  referenced column: convert
+-- compatibility tool usecases
+DECLARE ctx GMS_xmlgen.ctxHandle;
+BEGIN ctx := GMS_xmlgen.newContext('select * FROM t_types');
+GMS_xmlgen.closeContext(ctx);
+GMS_output.put_line(ctx::text);
+END;
+/
+73
+DECLARE res XMLType;
+BEGIN res := GMS_XMLGEN.GETXMLTYPE('123');
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE res GMS_XMLGEN.ctxHandle;
+BEGIN res := GMS_XMLGEN.NEWCONTEXTFROMHIERARCHY('123');
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE d varchar2(100);
+a varchar2(100);
+BEGIN d := GMS_XMLGEN.CONVERT(a);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE d number;
+a GMS_XMLGEN.ctxHandle;
+BEGIN d := GMS_XMLGEN.GETNUMROWSPROCESSED(a);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE a GMS_XMLGEN.ctxHandle;
+b clob;
+BEGIN b := GMS_XMLGEN.GETXML(a);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN GMS_XMLGEN.RESTARTQUERY(CTX);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+GMS_XMLGEN.SETCONVERTSPECIALCHARS(CTX, false);
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN GMS_XMLGEN.SETMAXROWS(CTX, 2);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+GMS_XMLGEN.SETNULLHANDLING(CTX, 1);
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+GMS_XMLGEN.SETROWSETTAG(CTX, 'srst');
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+GMS_XMLGEN.SETROWTAG(CTX, 'srst');
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN GMS_XMLGEN.SETSKIPROWS(CTX, 5);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN GMS_XMLGEN.USEITEMTAGSFORCOLL(CTX);
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END;
+/
+DECLARE CTX GMS_XMLGEN.CTXHANDLE;
+BEGIN CTX := GMS_XMLGEN.NEWCONTEXT('select * FROM t_types');
+GMS_XMLGEN.USENULLATTRIBUTEINDICATOR(CTX, false);
+END;
+/
+reset search_path;
+drop schema gms_xmlgen_test cascade;
+NOTICE:  drop cascades to table gms_xmlgen_test.t_types

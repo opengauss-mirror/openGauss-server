@@ -107,6 +107,7 @@ install:
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_tcp; then $(MAKE) -C contrib/gms_tcp $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
+	@if test -d contrib/gms_xmlgen; then $(MAKE) -C contrib/gms_xmlgen $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
 	@if test -d contrib/timescaledb; then (./contrib/timescaledb/run_to_build.sh && $(MAKE) -C contrib/timescaledb/build $@); fi
 	@if test -d contrib/chparser; then \
