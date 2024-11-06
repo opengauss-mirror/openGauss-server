@@ -399,6 +399,11 @@ char gs_find_memory_data(StreamState* node, int* waitnode_count)
          * If an notice occured, we can still receive data.
          */
         buf = node->sharedContext->messages[u_sess->stream_cxt.smp_id][i];
+
+        if (buf->cursor == 'R') {
+            node->ss.ps.state->es_processed += node->sharedContext->rows;
+            resetStringInfo(buf);
+        }
         if (buf->len > 0) {
             if (buf->cursor == 'E') {
                 HandleStreamError(node, buf->data, buf->len);

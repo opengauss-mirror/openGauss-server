@@ -274,6 +274,8 @@ public:
     void setUniqueSQLKey(uint64 unique_sql_id, Oid unique_user_id, uint32 unique_cn_id);
     void setGlobalSessionId(GlobalSessionId* globalSessionId);
     void getGlobalSessionId(GlobalSessionId* globalSessionId);
+    
+    void stream_send_rows_to_consumer(int rows);
 
     /* The plan the producer thread will run. */
     PlannedStmt* m_plan;

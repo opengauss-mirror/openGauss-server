@@ -48,7 +48,8 @@ typedef struct ShippingInfo {
 #define IS_STREAM_PLAN (IS_STREAM && check_stream_support())
 #endif
 #define STREAM_IS_LOCAL_NODE(type) (type == LOCAL_DISTRIBUTE || type == LOCAL_ROUNDROBIN || type == LOCAL_BROADCAST)
-#define SET_DOP(dop) (dop > 1 ? dop : 1)
+#define DEFAULT_DOP 1
+#define SET_DOP(dop) (dop > DEFAULT_DOP ? dop : DEFAULT_DOP)
 
 #define RANDOM_SHIPPABLE (u_sess->opt_cxt.is_randomfunc_shippable && IS_STREAM_PLAN)
  

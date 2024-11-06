@@ -21,6 +21,9 @@
 #include "executor/tstoreReceiver.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#ifndef ENABLE_MULTIPLE_NODES
+#include "distributelayer/streamProducer.h"
+#endif
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "optimizer/pgxcplan.h"
@@ -318,6 +321,11 @@ static void ProcessQuery(
                     ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
                     "REPLACE %u %lu", lastOid, queryDesc->estate->es_processed);
                 } else {
+#ifndef ENABLE_MULTIPLE_NODES
+                    if (u_sess->stream_cxt.producer_obj) {
+                        u_sess->stream_cxt.producer_obj->stream_send_rows_to_consumer(queryDesc->estate->es_processed);
+                    }
+#endif
                     ret = snprintf_s(completionTag,
                         COMPLETION_TAG_BUFSIZE,
                         COMPLETION_TAG_BUFSIZE - 1,
@@ -328,6 +336,11 @@ static void ProcessQuery(
                 securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_UPDATE:
+#ifndef ENABLE_MULTIPLE_NODES
+                    if (u_sess->stream_cxt.producer_obj) {
+                        u_sess->stream_cxt.producer_obj->stream_send_rows_to_consumer(queryDesc->estate->es_processed);
+                    }
+#endif
                 ret = snprintf_s(completionTag,
                     COMPLETION_TAG_BUFSIZE,
                     COMPLETION_TAG_BUFSIZE - 1,
@@ -336,6 +349,11 @@ static void ProcessQuery(
                 securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_DELETE:
+#ifndef ENABLE_MULTIPLE_NODES
+                    if (u_sess->stream_cxt.producer_obj) {
+                        u_sess->stream_cxt.producer_obj->stream_send_rows_to_consumer(queryDesc->estate->es_processed);
+                    }
+#endif
                 ret = snprintf_s(completionTag,
                     COMPLETION_TAG_BUFSIZE,
                     COMPLETION_TAG_BUFSIZE - 1,
