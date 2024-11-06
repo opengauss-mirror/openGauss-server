@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.nls_initcap(text, text) CASCADE;
