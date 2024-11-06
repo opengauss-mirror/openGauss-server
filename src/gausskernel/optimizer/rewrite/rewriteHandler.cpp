@@ -813,7 +813,8 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
                         att_tup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
+                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        NULL, NULL, -1, false, false);
                 }
             }
 
@@ -958,7 +959,8 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                         att_tup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
+                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        NULL, NULL, -1, false, false);
                 }
                 if (new_expr != NULL) {
                     new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
@@ -1258,6 +1260,8 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool need
         atttypmod,
         COERCION_ASSIGNMENT,
         COERCE_IMPLICIT_CAST,
+        NULL,
+        NULL,
         -1);
 
     /*
@@ -1481,7 +1485,8 @@ static bool rewriteValuesRTE(Query* parsetree, RangeTblEntry* rte, Relation targ
                         att_tup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
+                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        NULL, NULL, -1, false, false);
                 }
                 newList = lappend(newList, new_expr);
             } else {
@@ -2643,7 +2648,8 @@ static List* rewriteTargetListMergeInto(
                         att_tup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
+                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        NULL, NULL, -1, false, false);
                 }
             }
 

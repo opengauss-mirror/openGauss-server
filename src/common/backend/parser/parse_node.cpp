@@ -356,7 +356,8 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
                 subexpr = transformExpr(pstate, ai->lidx, pstate->p_expr_kind);
                 /* If it's not int4 already, try to coerce */
                 subexpr = coerce_to_target_type(
-                    pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                    pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+                    NULL, NULL, -1);
                 if (subexpr == NULL) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -380,11 +381,12 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
             /* subcript type is varchar */
             subexpr = coerce_to_target_type(pstate, subexpr, exprType(subexpr),
                                             list_nth_oid(((Param*)arrayBase)->tableOfIndexTypeList, i),
-                                            -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                                            -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, NULL, NULL, -1);
         } else {
              /* If it's not int4 already, try to coerce */
             subexpr = coerce_to_target_type(
-                pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+                NULL, NULL, -1);
         }
        
         if (subexpr == NULL) {
@@ -407,7 +409,8 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
         Node* newFrom = NULL;
 
         newFrom = coerce_to_target_type(
-            pstate, assignFrom, typesource, typeneeded, arrayTypMod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+            pstate, assignFrom, typesource, typeneeded, arrayTypMod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+            NULL, NULL, -1);
         if (newFrom == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),

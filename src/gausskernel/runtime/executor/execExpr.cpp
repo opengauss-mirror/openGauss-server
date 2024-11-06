@@ -633,11 +633,12 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 					if (found) {
 						if (entry->isParse) {
-							con = (Const *)uservar->value;
+                            con = (Const *)uservar->value;
                             entry->isParse = false;
 						} else {
-							Node *node_tmp = coerce_type(NULL, (Node *)entry->value, entry->value->consttype,
-								((Const *)uservar->value)->consttype, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                            Node *node_tmp = coerce_type(NULL, (Node *)entry->value, entry->value->consttype,
+                                ((Const *)uservar->value)->consttype, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,
+                                    NULL, NULL, -1);
                             node_tmp = eval_const_expression_value(NULL, node_tmp, NULL);
 							if (!IsA(node_tmp, Const)) {
 								ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),

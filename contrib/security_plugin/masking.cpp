@@ -281,7 +281,7 @@ static inline Node* create_string_node(ParseState *pstate, const char* letter, i
 {
     Node* const_node = (Node*)make_const(pstate, makeString((char*)letter), location);
     const_node = coerce_type(pstate, const_node, ((Const*)const_node)->consttype, col_type, -1,
-                             COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                             COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, NULL, NULL,-1);
     return const_node;
 }
 
@@ -291,7 +291,7 @@ Node* create_integer_node(ParseState *pstate, int value, int location, int col_t
     Node* const_node = (Node*)make_const(pstate, makeInteger(value), location);
     if (make_cast) {
         const_node = coerce_type(pstate, const_node, ((Const*)const_node)->consttype, col_type, -1,
-                                 COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                                 COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, NULL, NULL, -1);
     }
     return const_node;
 }
@@ -300,7 +300,7 @@ static inline Node* create_float_node(ParseState *pstate, const char* value, int
 {
     Node* const_node = (Node*)make_const(pstate, makeFloat((char*)value), location);
     const_node = coerce_type(pstate, const_node, ((Const*)const_node)->consttype, col_type, -1,
-                             COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                             COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,NULL, NULL, -1);
     return const_node;
 }
 

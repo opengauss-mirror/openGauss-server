@@ -690,6 +690,8 @@ ExecNodes* GetRelationNodesByQuals(void* query_arg, Oid reloid, Index varno, Nod
                             disttypmod,
                             COERCION_ASSIGNMENT,
                             COERCE_IMPLICIT_CAST,
+                            NULL,
+                            NULL,
                             -1);
                     } else {
                         distcol_expr = NULL;
@@ -702,6 +704,8 @@ ExecNodes* GetRelationNodesByQuals(void* query_arg, Oid reloid, Index varno, Nod
                         disttypmod,
                         COERCION_ASSIGNMENT,
                         COERCE_IMPLICIT_CAST,
+                        NULL,
+                        NULL,
                         -1);
                 }
 

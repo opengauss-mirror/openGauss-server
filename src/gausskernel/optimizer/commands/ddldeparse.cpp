@@ -5409,7 +5409,7 @@ static List *deparse_partition_boudaries(Oid parentoid, char reltype, char strat
 
                 char* partvalue_str = TextDatumGetCString(dt);
                 Type targetType = typeidType(TEXTARRAYOID);
-                Datum partvalue_array_datum = stringTypeDatum(targetType, partvalue_str, TEXTOID, true);
+                Datum partvalue_array_datum = stringTypeDatum(targetType, partvalue_str, NULL, NULL, TEXTOID, true);
                 ReleaseSysCache(targetType);
 
                 ArrayType* partvalue_array = DatumGetArrayTypeP(partvalue_array_datum);

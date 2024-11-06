@@ -1572,6 +1572,8 @@ static bool lazyagg_rewrite_childquery(Query* childParse, lazyagg_query_context*
                             -1,
                             COERCION_IMPLICIT,
                             COERCE_IMPLICIT_CAST,
+                            NULL,
+                            NULL,
                             aggref->location);
                     }
                 }
@@ -1730,7 +1732,8 @@ static bool lazyagg_rewrite_delayed_query(
             /* Add a type converter if necessary */
             if (fromType != toType) {
                 newNode = coerce_to_target_type(
-                    NULL, newNode, fromType, toType, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                    NULL, newNode, fromType, toType, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,
+                    NULL, NULL, -1);
             }
 
             /* generate replace lists */

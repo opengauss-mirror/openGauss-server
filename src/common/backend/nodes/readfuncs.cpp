@@ -1738,6 +1738,8 @@ static AlterTriggerStmt* _readAlterTriggerStmt(void)
     READ_LOCALS(AlterTriggerStmt);
     READ_STRING_FIELD(trigname);
     READ_CHAR_FIELD(tgenabled);
+
+    READ_DONE();
 }
 
 static CreateMatViewLogStmt* _readCreateMatViewLogStmt(void)
@@ -2465,6 +2467,12 @@ static FuncExpr* _readFuncExpr(void)
     READ_ENUM_FIELD(funcformat, CoercionForm);
     READ_OID_FIELD(funccollid);
     READ_OID_FIELD(inputcollid);
+    IF_EXIST(fmtstr) {
+        READ_STRING_FIELD(fmtstr);
+    }
+    IF_EXIST(nlsfmtstr) {
+        READ_STRING_FIELD(nlsfmtstr);
+    }
     READ_NODE_FIELD(args);
     token = pg_strtok(&length);
     char* fieldName = nullable_string(token, length);
@@ -2730,6 +2738,12 @@ static CoerceViaIO* _readCoerceViaIO(void)
     READ_LOCALS(CoerceViaIO);
 
     READ_NODE_FIELD(arg);
+    IF_EXIST(fmtstr) {
+        READ_STRING_FIELD(fmtstr);
+    }
+    IF_EXIST(nlsfmtstr) {
+        READ_STRING_FIELD(nlsfmtstr);
+    }
     READ_OID_FIELD(resulttype);
     READ_OID_FIELD(resultcollid);
     READ_ENUM_FIELD(coerceformat, CoercionForm);
@@ -2748,6 +2762,12 @@ static ArrayCoerceExpr* _readArrayCoerceExpr(void)
     READ_LOCALS(ArrayCoerceExpr);
 
     READ_NODE_FIELD(arg);
+    IF_EXIST(fmtstr) {
+        READ_STRING_FIELD(fmtstr);
+    }
+    IF_EXIST(nlsfmtstr) {
+        READ_STRING_FIELD(nlsfmtstr);
+    }
     READ_OID_FIELD(elemfuncid);
     READ_OID_FIELD(resulttype);
     READ_INT_FIELD(resulttypmod);
@@ -6077,6 +6097,15 @@ static TypeCast* _readTypeCast(void)
     READ_LOCALS(TypeCast);
     READ_NODE_FIELD(arg);
     READ_NODE_FIELD(typname);
+    IF_EXIST(fmt_str) {
+        READ_NODE_FIELD(fmt_str);
+    }
+    IF_EXIST(nls_fmt_str) {
+        READ_NODE_FIELD(nls_fmt_str);
+    }
+    IF_EXIST(default_expr) {
+        READ_NODE_FIELD(default_expr);
+    }
     READ_INT_FIELD(location);
     READ_DONE();
 }

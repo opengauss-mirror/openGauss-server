@@ -1881,20 +1881,20 @@ static Datum GetRangeTypeBaseValue(Oid rangeoid, Oid typmod, char* string)
         case INT8RANGEOID:
         case INT4RANGEOID: {
             Type targetType = typeidType(rangeoid);
-            datum = stringTypeDatum(targetType, "(0,0)", typmod, true);
+            datum = stringTypeDatum(targetType, "(0,0)", NULL, NULL, typmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case TSRANGEOID:
         case TSTZRANGEOID: {
             Type targetType = typeidType(rangeoid);
-            datum = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", typmod, true);
+            datum = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", NULL, NULL, typmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case DATERANGEOID: {
             Type targetType = typeidType(rangeoid);
-            datum = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", typmod, true);
+            datum = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", NULL, NULL, typmod, true);
             ReleaseSysCache(targetType);
             break;
         }

@@ -312,6 +312,10 @@ static bool _equalFuncExpr(const FuncExpr* a, const FuncExpr* b)
     COMPARE_COERCIONFORM_FIELD(funcformat);
     COMPARE_SCALAR_FIELD(funccollid);
     COMPARE_SCALAR_FIELD(inputcollid);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COMPARE_STRING_FIELD(fmtstr);
+        COMPARE_STRING_FIELD(nlsfmtstr);
+    }
     COMPARE_NODE_FIELD(args);
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(refSynOid);
@@ -474,6 +478,10 @@ static bool _equalRelabelType(const RelabelType* a, const RelabelType* b)
 static bool _equalCoerceViaIO(const CoerceViaIO* a, const CoerceViaIO* b)
 {
     COMPARE_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COMPARE_STRING_FIELD(fmtstr);
+        COMPARE_STRING_FIELD(nlsfmtstr);
+    }
     COMPARE_SCALAR_FIELD(resulttype);
     COMPARE_SCALAR_FIELD(resultcollid);
     COMPARE_COERCIONFORM_FIELD(coerceformat);
@@ -485,6 +493,10 @@ static bool _equalCoerceViaIO(const CoerceViaIO* a, const CoerceViaIO* b)
 static bool _equalArrayCoerceExpr(const ArrayCoerceExpr* a, const ArrayCoerceExpr* b)
 {
     COMPARE_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COMPARE_STRING_FIELD(fmtstr);
+        COMPARE_STRING_FIELD(nlsfmtstr);
+    }
     COMPARE_SCALAR_FIELD(elemfuncid);
     COMPARE_SCALAR_FIELD(resulttype);
     COMPARE_SCALAR_FIELD(resulttypmod);
@@ -2758,6 +2770,11 @@ static bool _equalTypeCast(const TypeCast* a, const TypeCast* b)
 {
     COMPARE_NODE_FIELD(arg);
     COMPARE_NODE_FIELD(typname);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COMPARE_NODE_FIELD(fmt_str);
+        COMPARE_NODE_FIELD(nls_fmt_str);
+        COMPARE_NODE_FIELD(default_expr);
+    }
     COMPARE_LOCATION_FIELD(location);
 
     return true;

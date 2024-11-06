@@ -26,13 +26,17 @@
 #include <ctype.h>
 
 #include "miscadmin.h"
+#include "catalog/pg_collation.h"
 #include "storage/smgr/fd.h"
+#include "regex/regex.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/builtins.h"
 #include "utils/tzparser.h"
 #include "threadpool/threadpool.h"
 
 #define WHITESPACE " \t\n\r"
+constexpr int LIST_LENGTH_MIN = 2;
 
 static bool validateTzEntry(tzEntry* tzentry);
 static bool splitTzLine(const char* filename, int lineno, char* line, tzEntry* tzentry);
@@ -420,4 +424,39 @@ TimeZoneAbbrevTable* load_tzoffsets(const char* filename)
     MemoryContextDelete(tmpContext);
 
     return result;
+}
+
+/** To test the source whether satify the pattern, if yes, return the rest of.
+    otherwise, return null;
+ */
+char* pg_findformat(const char* key, const char* source)
+{
+    List* elemlist = NULL;
+    ListCell* l = NULL;
+
+    if (source == NULL || source[0] == '\0') {
+        return NULL; /* nothing to do */
+    }
+
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString((char*)source, '=', &elemlist, false, false) ||
+                                list_length(elemlist) != LIST_LENGTH_MIN) {
+        /* syntax error in list */
+        list_free(elemlist);
+        return NULL;
+    }
+
+    l = list_head(elemlist);
+    char* tok = (char*)lfirst(l);
+    if (strcmp(tok, key) == 0) {
+        char* ret = (char *)lsecond(elemlist);
+        list_free(elemlist);
+        return ret;
+    } else {
+        list_free(elemlist);
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid format: %s", tok)));
+    }
+
+    list_free(elemlist);
+    return NULL;
 }

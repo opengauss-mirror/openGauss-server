@@ -422,8 +422,8 @@ static List* expand_targetlist(List* tlist, int command_type, List* resultRelati
                                 true, /* isnull */
                                 att_tup->attbyval);
                             new_expr =
-                                coerce_to_domain(new_expr, InvalidOid, -1, atttype, COERCE_IMPLICIT_CAST, -1,
-                                                 false, false);
+                                coerce_to_domain(new_expr, InvalidOid, -1, atttype, COERCE_IMPLICIT_CAST,
+                                                 NULL, NULL, -1, false, false);
                         } else {
                             /* Insert NULL for dropped column */
                             new_expr = (Node*)makeConst(INT4OID,

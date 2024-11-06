@@ -2014,6 +2014,9 @@ typedef struct TypeCast {
     NodeTag type;
     Node *arg;         /* the expression being casted */
     TypeName *typname; /* the target type */
+    Node *fmt_str;     /* cast format str and other format string */
+    Node *nls_fmt_str; /* nls format string */
+    Node *default_expr;/* default expr on conversion error */
     int location;      /* token location, or -1 if unknown */
 } TypeCast;
 

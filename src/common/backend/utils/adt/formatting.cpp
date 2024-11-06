@@ -93,6 +93,7 @@
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "utils/pg_locale.h"
+#include "utils/tzparser.h"
 #include "miscadmin.h"
 
 /* just keep compiler silent */
@@ -755,6 +756,7 @@ static char* months_full[] = {"January",
 
 static char* days_short[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", NULL};
 
+static char* g_nlsLanguage[] = {"american", "english", nullptr};
 /* ----------
  * AD / BC
  * ----------
@@ -925,7 +927,7 @@ static char* numth[] = {"st", "nd", "rd", "th", NULL};
 typedef struct {
     FromCharDateMode mode;
     int hh, pm, mi, ss, sssss, d, dd, ddd, mm, ms, year, bc, ww, w, cc, j, us, yysz, /* is it YY or YYYY ? */
-        clock;                                                                       /* 12 or 24 hour clock? */
+        clock, tzh, tzm;                                                            /* 12 or 24 hour clock? */
 } TmFromChar;
 
 /*
@@ -949,6 +951,8 @@ typedef struct {
     bool cc_flag;
     bool j_flag;
     bool us_flag;
+    bool tzh_flag;
+    bool tzm_flag;
     bool yysz_flag;
     bool clock_flag;
 } TmFromCharFlag;
@@ -1139,6 +1143,8 @@ typedef enum {
     DCH_SSSSS,
     DCH_SS,
     DCH_SYYYY,
+    DCH_TZH,
+    DCH_TZM,
     DCH_TZ,
     DCH_US,
     DCH_WW,
@@ -1194,6 +1200,8 @@ typedef enum {
     DCH_sssss,
     DCH_ss,
     DCH_syyyy,
+    DCH_tzh,
+    DCH_tzm,
     DCH_tz,
     DCH_us,
     DCH_ww,
@@ -1308,6 +1316,8 @@ static const KeyWord DCH_keywords[] = {
     {"SSSSS", 5, DCH_SSSSS, TRUE, FROM_CHAR_DATE_NONE}, /* S */
     {"SS", 2, DCH_SS, TRUE, FROM_CHAR_DATE_NONE},
     {"SYYYY", 5, DCH_SYYYY, TRUE, FROM_CHAR_DATE_NONE},
+    {"TZH", 3, DCH_TZH, FALSE, FROM_CHAR_DATE_NONE},     /* TZ */
+    {"TZM", 3, DCH_TZM, FALSE, FROM_CHAR_DATE_NONE},     /* TM */
     {"TZ", 2, DCH_TZ, FALSE, FROM_CHAR_DATE_NONE},     /* T */
     {"US", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},      /* U */
     {"WW", 2, DCH_WW, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* W */
@@ -1363,6 +1373,8 @@ static const KeyWord DCH_keywords[] = {
     {"sssss", 5, DCH_SSSSS, TRUE, FROM_CHAR_DATE_NONE}, /* s */
     {"ss", 2, DCH_SS, TRUE, FROM_CHAR_DATE_NONE},
     {"syyyy", 5, DCH_SYYYY, TRUE, FROM_CHAR_DATE_NONE},
+    {"tzh", 3, DCH_tzh, FALSE, FROM_CHAR_DATE_NONE},     /* tzh */
+    {"tzm", 3, DCH_tzm, FALSE, FROM_CHAR_DATE_NONE},     /* tm */
     {"tz", 2, DCH_tz, FALSE, FROM_CHAR_DATE_NONE},     /* t */
     {"us", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},      /* u */
     {"ww", 2, DCH_WW, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* w */
@@ -1489,7 +1501,7 @@ static const int DCH_index[KeyWord_INDEX_SIZE] = {
     DCH_Q,
     DCH_RM,
     DCH_SSSSS,
-    DCH_TZ,
+    DCH_TZH,
     DCH_US,
     -1,
     DCH_WW,
@@ -1870,11 +1882,9 @@ static int from_char_seq_search(int* dest, char** src, char** array, int type, i
 /*
  * exposed for bulkload datetime formatting.
  */
-static void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec);
 static char* fill_str(char* str, int c, int max);
 static Datum to_numeric_number_internal_with_fmt(text* value, text* fmt, bool withDefault, Oid fncollation, bool *err);
 static Datum to_numeric_number_internal_without_fmt(text* sourceValue, Oid fncollation, bool *err);
-static Datum to_numeric_to_number_internal(text* value, text* fmt, Oid fncollation, bool *resultNull);
 static FormatNode* NUM_cache(int len, NUMDesc* Num, text* pars_str, bool* shouldFree);
 static char* int_to_roman(int number);
 static void NUM_prepare_locale(NUMProc* Np);
@@ -3418,6 +3428,18 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 s += strlen(s);
                 break;
             case DCH_tz:
+            case DCH_tzh:
+                INVALID_FOR_INTERVAL;
+                if (tmtcTzn(in)) {
+                    char* p = str_tolower_z(tmtcTzn(in), collid);
+
+                    rc = strcpy_s(s, len, p);
+                    securec_check(rc, "\0", "\0");
+                    pfree_ext(p);
+                    s += strlen(s);
+                }
+                break;
+            case DCH_tzm:
                 INVALID_FOR_INTERVAL;
                 if (tmtcTzn(in)) {
                     char* p = str_tolower_z(tmtcTzn(in), collid);
@@ -3429,6 +3451,15 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 }
                 break;
             case DCH_TZ:
+            case DCH_TZH:
+                INVALID_FOR_INTERVAL;
+                if (tmtcTzn(in)) {
+                    rc = strcpy_s(s, len, tmtcTzn(in));
+                    securec_check(rc, "\0", "\0");
+                    s += strlen(s);
+                }
+                break;
+            case DCH_TZM:
                 INVALID_FOR_INTERVAL;
                 if (tmtcTzn(in)) {
                     rc = strcpy_s(s, len, tmtcTzn(in));
@@ -3955,9 +3986,19 @@ static void DCH_from_char(FormatNode* node, char* in, TmFromChar* out, bool* non
                 SKIP_THth(s, n->suffix);
                 out_flag->sssss_flag = true;
                 break;
+            case DCH_tzh:
+            case DCH_TZH:
             case DCH_tz:
             case DCH_TZ:
-                ERROR_NOT_SUPPORT_TZ();
+                from_char_parse_int(&out->tzh, &s, n, out_flag->tzh_flag);
+                SKIP_THth(s, n->suffix);
+                out_flag->tzh_flag = true;
+                break;
+            case DCH_tzm:
+            case DCH_TZM:
+                from_char_parse_int(&out->tzm, &s, n, out_flag->tzm_flag);
+                SKIP_THth(s, n->suffix);
+                out_flag->tzm_flag = true;
                 break;
             case DCH_A_D:
             case DCH_B_C:
@@ -3990,8 +4031,23 @@ static void DCH_from_char(FormatNode* node, char* in, TmFromChar* out, bool* non
                 out_flag->mm_flag = true;
                 break;
             case DCH_MM:
-                from_char_parse_int(&out->mm, &s, n, out_flag->mm_flag);
-                SKIP_THth(s, n->suffix);
+                PG_TRY(); {
+                    from_char_parse_int(&out->mm, &s, n, out_flag->mm_flag);
+                    SKIP_THth(s, n->suffix);
+                }
+                PG_CATCH(); {
+                    FlushErrorState();
+                    if (u_sess && u_sess->parser_cxt.nls_fmt_str &&
+                        (pg_strcasecmp(u_sess->parser_cxt.nls_fmt_str, g_nlsLanguage[0]) == 0 ||
+                        pg_strcasecmp(u_sess->parser_cxt.nls_fmt_str, g_nlsLanguage[1]) == 0)) {
+                        (void)from_char_seq_search(&value, &s, months_full, ONE_UPPER, MAX_MONTH_LEN, n);
+                        from_char_set_int(&out->mm, value + 1, n, out_flag->mm_flag);
+                    } else {
+                        from_char_parse_int(&out->mm, &s, n, out_flag->mm_flag);
+                        SKIP_THth(s, n->suffix);
+                    }
+                }
+                PG_END_TRY();
                 out_flag->mm_flag = true;
                 break;
             case DCH_DAY:
@@ -4627,7 +4683,7 @@ Datum to_timestamp(PG_FUNCTION_ARGS)
     struct pg_tm tm;
     fsec_t fsec;
 
-    do_to_timestamp(date_txt, fmt, &tm, &fsec);
+    do_to_timestamp(date_txt, fmt, &tm, &fsec, &tz);
 
     if (tm2timestamp(&tm, fsec, &tz, &result) != 0)
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
@@ -4647,8 +4703,9 @@ Datum to_date(PG_FUNCTION_ARGS)
     DateADT result;
     struct pg_tm tm;
     fsec_t fsec;
+    int tz;
 
-    do_to_timestamp(date_txt, fmt, &tm, &fsec);
+    do_to_timestamp(date_txt, fmt, &tm, &fsec, &tz);
 
     if (!IS_VALID_JULIAN(tm.tm_year, tm.tm_mon, tm.tm_mday))
         ereport(ERROR,
@@ -5350,7 +5407,7 @@ static
  * This function does very little error checking, e.g.
  * to_timestamp('20096040','YYYYMMDD') works
  */
-static void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec)
+void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec, int* tz)
 {
     FormatNode* format = NULL;
     TmFromChar tmfc;
@@ -5418,6 +5475,11 @@ static void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t*
         if (!incache)
             pfree_ext(format);
     }
+    int tzz = (fabs(tmfc.tzh) * MINS_PER_HOUR + tmfc.tzm) * SECS_PER_MINUTE;
+    if (tmfc.tzh < 0) {
+        tzz = -tzz;
+    }
+    *tz = -tzz;
 
     convert_values_to_pgtime(tm, fsec, tmfc, tmfc_flag);
 }
@@ -6805,36 +6867,35 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
         SET_VARSIZE(result, len + VARHDRSZ);                                                \
     } while (0)
 
-
-Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool withDefault, 
-    Oid fncollation, bool *resultNull)
+/* formatting an input string with format string, MUST BE free the formatted string manually.
+ * returns NULL, if input does not match the format string. otherwise, returns a new allocated
+ * formatted string.
+ */
+char* format_numeric_with_fmt(text* sourceValue, text* fmt, bool withDefault, Oid fncollation,
+    unsigned int* precision, unsigned int* scale)
 {
-    Datum result;
     // Number description: fmt
     NUMDesc numDesc;
     FormatNode* format = NULL;
-    char* sourceNumstr = NULL;
+    char* sourceNumstr = nullptr;
     bool shouldFree = false;
     int len = 0;
     int valuelen = 0;
-    char* fmtstr = NULL;
-    unsigned int scale;
-    unsigned int precision;
+    char* fmtstr = nullptr;
 
     len = VARSIZE(fmt) - VARHDRSZ;
     if (len <= 0 || len >= INT_MAX / NUM_MAX_ITEM_SIZ) {
-        *resultNull = true;
-        return 0;
+        return nullptr;
     }
 
-    fmtstr = (char*)palloc(len + 1);
+    fmtstr = static_cast<char*>(palloc(len + 1));
     errno_t rc = EOK;
     // Copy the data part of the fmt value to fmtstr.
     rc = strncpy_s(fmtstr, len + 1, VARDATA(fmt), len);
     securec_check(rc, "\0", "\0");
     fmtstr[len] = '\0';
 
-    // When converting a hexadecimal string to a decimal number, 
+    // When converting a hexadecimal string to a decimal number,
     // characters other than 'x' or 'X' are not allowed in the format string.
     // otherwise an error will be reported.
     if (NULL != strchr(fmtstr, 'x') || NULL != strchr(fmtstr, 'X')) {
@@ -6844,8 +6905,7 @@ Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool wit
                 pfree_ext(fmtstr);
 
                 if (withDefault) {
-                    *resultNull = true;
-                    return 0;
+                    return nullptr;
                 } else {
                     ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number format model")));
                 }
@@ -6856,10 +6916,9 @@ Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool wit
             pfree_ext(fmtstr);
 
             if (withDefault) {
-                    *resultNull = true;
-                    return 0;
+                return nullptr;
             } else {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number")));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid number")));
             }
         }
     }
@@ -6867,7 +6926,7 @@ Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool wit
 
     format = NUM_cache(len, &numDesc, fmt, &shouldFree);
 
-    sourceNumstr = (char*)palloc((len * NUM_MAX_ITEM_SIZ) + 1);
+    sourceNumstr = static_cast<char*>(palloc((len * NUM_MAX_ITEM_SIZ) + 1));
 
     (void)NUM_processor(format,
         &numDesc,
@@ -6879,8 +6938,8 @@ Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool wit
         false,
         fncollation);
 
-    scale = (unsigned int)numDesc.post;
-    precision = Max(0, numDesc.pre) + scale;
+    *scale = (unsigned int)numDesc.post;
+    *precision = Max(0, numDesc.pre) + *scale;
 
     if (shouldFree)
         pfree_ext(format);
@@ -6888,16 +6947,31 @@ Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool wit
     // empty strings
     if (*sourceNumstr == '\0' && withDefault) {
         pfree_ext(sourceNumstr);
-        *resultNull = true;
+        return nullptr;
+    }
+
+    return sourceNumstr;
+}
+
+Datum to_numeric_number_internal_with_fmt(text* sourceValue, text* fmt, bool withDefault, 
+    Oid fncollation, bool *resultNull)
+{
+    Datum result;
+    unsigned int precision;
+    unsigned int scale;
+    char* sourceNumStr = format_numeric_with_fmt(sourceValue, fmt, withDefault, fncollation,
+        &precision, &scale);
+
+    if (sourceNumStr == nullptr) {
         return 0;
     }
 
     // into numeric_in func
     result = DirectFunctionCall3(numeric_in,
-        CStringGetDatum(sourceNumstr),
+        CStringGetDatum(sourceNumStr),
         ObjectIdGetDatum(InvalidOid),
         Int32GetDatum(((precision << 16) | scale) + VARHDRSZ));
-    pfree_ext(sourceNumstr);
+    pfree_ext(sourceNumStr);
 
     return result;
 }
@@ -6931,6 +7005,13 @@ Datum to_numeric_number_internal_without_fmt(text* sourceValue, Oid fncollation,
 /**
  * Common implementation of processing value and fmt
  */
+Datum to_numeric_to_number(text* value, text* fmt, Oid fncollation, bool *resultNull)
+{
+    Datum result = to_numeric_number_internal_with_fmt(value, fmt, false, fncollation, resultNull);
+
+    return result;
+}
+
 Datum to_numeric_to_number_internal(text* value, text* fmt, Oid fncollation, bool *resultNull)
 {
     Datum result = to_numeric_number_internal_with_fmt(value, fmt, false, fncollation, resultNull);
@@ -7654,7 +7735,31 @@ Datum to_timestamp_default_format(PG_FUNCTION_ARGS)
     struct pg_tm tm;
     fsec_t fsec = 0;
 
-    do_to_timestamp(date_txt, fmt, &tm, &fsec);
+    do_to_timestamp(date_txt, fmt, &tm, &fsec, &tz);
+
+    if (tm2timestamp(&tm, fsec, &tz, &result) != 0)
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+
+    PG_RETURN_TIMESTAMP(result);
+}
+
+// to_timestamp(string, string, string)
+Datum to_timestamp_with_fmt_nls(PG_FUNCTION_ARGS)
+{
+    text* date_txt = PG_GETARG_TEXT_P(0);
+    text* fmt =  PG_GETARG_TEXT_P(1);
+    text* nls_fmt = PG_GETARG_TEXT_P(2);
+    Timestamp result = 0;
+    int tz = 0;
+
+    if (nls_fmt) {
+        char *nlsStmtPtr = pg_strtoupper(text_to_cstring(nls_fmt));
+        u_sess->parser_cxt.nls_fmt_str = pg_findformat("NLS_DATE_LANGUAGE", nlsStmtPtr);
+    }
+    struct pg_tm tm;
+    fsec_t fsec = 0;
+
+    do_to_timestamp(date_txt, fmt, &tm, &fsec, &tz);
 
     if (tm2timestamp(&tm, fsec, &tz, &result) != 0)
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
@@ -7688,7 +7793,7 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
-        do_to_timestamp(date_txt, fmt, &tm, &fsec);
+        do_to_timestamp(date_txt, fmt, &tm, &fsec, &tz);
 
         if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
             ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
@@ -7706,7 +7811,7 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
         } else {
             text* defaultVal = PG_GETARG_TEXT_P(1);
 
-            do_to_timestamp(defaultVal, fmt, &tm, &fsec);
+            do_to_timestamp(defaultVal, fmt, &tm, &fsec, &tz);
             pfree_ext(fmt);
 
             if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
@@ -8104,6 +8209,42 @@ static void parse_field_syyyy(FormatNode* node, TmFormatConstraint* tm_const, ch
     out->yysz = 4;
 }
 
+static void parse_field_tzh(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
+{
+    (void)optimized_parse_int(&out->tzh, src_str, node, tm_const);
+    if (out->tzh > MAX_VALUE_12_CLOCK || out->tzh < -MAX_VALUE_12_CLOCK) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                errmsg("invalid data for \"tzh = 0\" ,"
+                       "value must be between 0 and 12 or -12")));
+    }
+    out->yysz = 3;
+}
+
+static void parse_field_tzm(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
+{
+    (void)optimized_parse_int(&out->tzm, src_str, node, tm_const);
+    if ((out->tzm < MIN_VALUE_MI) || (out->tzm > MAX_VALUE_MI)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                errmsg("invalid data for \"tzm = 0\" ,"
+                       "value must be between 0 and 60")));
+    }
+    out->yysz = 3;
+}
+
+static void parse_field_tz(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
+{
+    (void)optimized_parse_int(&out->tzh, src_str, node, tm_const);
+    if (out->tzh > MAX_VALUE_12_CLOCK || out->tzh < -MAX_VALUE_12_CLOCK) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                errmsg("invalid data for \"tzh = 0\" ,"
+                       "value must be between 0 and 12 or -12")));
+    }
+    out->yysz = 3;
+}
+
 static void parse_field_cc(FormatNode* node, TmFormatConstraint* tm_const, char** src_str, TmFromChar* out)
 {
     (void)optimized_parse_int(&out->cc, src_str, node, tm_const);
@@ -8253,7 +8394,9 @@ static const parse_field parse_field_map[] = {
     parse_field_sssss,     /* DCH_SSSSS */
     parse_field_ss,        /* DCH_SS    */
     parse_field_syyyy,     /* DCH_SYYYY */
-    NULL,                  /* DCH_TZ    */
+    parse_field_tzh,       /* DCH_TZH   */
+    parse_field_tzm,       /* DCH_TZM   */
+    parse_field_tz,        /* DCH_TZ   */
 
     /* -----  50~59  ----- */
     parse_field_usff,      /* DCH_US    */
@@ -8320,7 +8463,9 @@ static const parse_field parse_field_map[] = {
     parse_field_sssss,     /* DCH_sssss */
     parse_field_ss,        /* DCH_ss    */
     parse_field_syyyy,     /* DCH_syyyy */
-    NULL,                  /* DCH_tz    */
+    parse_field_tzh,       /* DCH_TZH   */
+    parse_field_tzm,       /* DCH_TZM   */
+    parse_field_tz,        /* DCH_TZ   */
     parse_field_usff,      /* DCH_us    */
     parse_field_iw,        /* DCH_ww    */
     parse_field_w,         /* DCH_w     */

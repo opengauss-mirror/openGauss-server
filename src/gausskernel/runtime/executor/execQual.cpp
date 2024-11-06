@@ -1111,7 +1111,7 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
                 con = entry->value;
             } else {
                 Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
-                    -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                    -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, NULL, NULL, -1);
                 node = eval_const_expression_value(NULL, node, NULL);
                 if (nodeTag(node) != T_Const) {
                     ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
@@ -3567,6 +3567,11 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
     bool has_refcursor = false;
     int cursor_return_number = 0;
 
+    if (u_sess) {
+        u_sess->parser_cxt.fmt_str = fcache->fmtstr;
+        u_sess->parser_cxt.nls_fmt_str = fcache->nlsfmtstr;
+    }
+
     if (fcache->xprstate.is_flt_frame) {
        init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, false, false);
        has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
@@ -5753,24 +5758,29 @@ static Datum ExecEvalRelabelType(GenericExprState* exprstate, ExprContext* econt
 */
 static Datum ExecEvalCoerceViaIO(CoerceViaIOState* iostate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
-   Datum result;
-   Datum inputval;
-   char* string = NULL;
+    Datum result;
+    Datum inputval;
+    char* string = NULL;
 
-   inputval = ExecEvalExpr(iostate->arg, econtext, isNull, isDone);
+    inputval = ExecEvalExpr(iostate->arg, econtext, isNull, isDone);
 
-   if (isDone && *isDone == ExprEndResult)
-       return inputval; /* nothing to do */
+    if (isDone && *isDone == ExprEndResult)
+        return inputval; /* nothing to do */
 
-   if (*isNull)
-       string = NULL; /* output functions are not called on nulls */
-   else
-       string = OutputFunctionCall(&iostate->outfunc, inputval);
+    if (*isNull)
+        string = NULL; /* output functions are not called on nulls */
+    else
+        string = OutputFunctionCall(&iostate->outfunc, inputval);
 
-   result = InputFunctionCall(&iostate->infunc, string, iostate->intypioparam, -1);
+    if (u_sess) {
+        u_sess->parser_cxt.fmt_str = iostate->fmtstr;
+        u_sess->parser_cxt.nls_fmt_str = iostate->nlsfmtstr;
+    }
+   
+    result = InputFunctionCall(&iostate->infunc, string, iostate->intypioparam, -1);
 
-   /* The input function cannot change the null/not-null status */
-   return result;
+    /* The input function cannot change the null/not-null status */
+    return result;
 }
 
 /* ----------------------------------------------------------------
@@ -5782,63 +5792,68 @@ static Datum ExecEvalCoerceViaIO(CoerceViaIOState* iostate, ExprContext* econtex
 static Datum ExecEvalArrayCoerceExpr(
    ArrayCoerceExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
-   ArrayCoerceExpr* acoerce = (ArrayCoerceExpr*)astate->xprstate.expr;
-   Datum result;
-   ArrayType* array = NULL;
-   FunctionCallInfoData locfcinfo;
+    ArrayCoerceExpr* acoerce = (ArrayCoerceExpr*)astate->xprstate.expr;
+    Datum result;
+    ArrayType* array = NULL;
+    FunctionCallInfoData locfcinfo;
 
-   result = ExecEvalExpr(astate->arg, econtext, isNull, isDone);
+    if (u_sess) {
+        u_sess->parser_cxt.fmt_str = astate->fmtstr;
+        u_sess->parser_cxt.nls_fmt_str = astate->nlsfmtstr;
+    }
 
-   if (isDone && *isDone == ExprEndResult)
-       return result; /* nothing to do */
-   if (*isNull)
-       return result; /* nothing to do */
+    result = ExecEvalExpr(astate->arg, econtext, isNull, isDone);
 
-   /*
-    * If it's binary-compatible, modify the element type in the array header,
-    * but otherwise leave the array as we received it.
-    */
-   if (!OidIsValid(acoerce->elemfuncid)) {
-       /* Detoast input array if necessary, and copy in any case */
-       array = DatumGetArrayTypePCopy(result);
-       ARR_ELEMTYPE(array) = astate->resultelemtype;
-       PG_RETURN_ARRAYTYPE_P(array);
-   }
+    if (isDone && *isDone == ExprEndResult)
+        return result; /* nothing to do */
+    if (*isNull)
+        return result; /* nothing to do */
 
-   /* Detoast input array if necessary, but don't make a useless copy */
-   array = DatumGetArrayTypeP(result);
+    /*
+        * If it's binary-compatible, modify the element type in the array header,
+        * but otherwise leave the array as we received it.
+        */
+    if (!OidIsValid(acoerce->elemfuncid)) {
+        /* Detoast input array if necessary, and copy in any case */
+        array = DatumGetArrayTypePCopy(result);
+        ARR_ELEMTYPE(array) = astate->resultelemtype;
+        PG_RETURN_ARRAYTYPE_P(array);
+    }
 
-   /* Initialize function cache if first time through */
-   if (astate->elemfunc.fn_oid == InvalidOid) {
-       AclResult aclresult;
+    /* Detoast input array if necessary, but don't make a useless copy */
+    array = DatumGetArrayTypeP(result);
 
-       /* Check permission to call function */
-       aclresult = pg_proc_aclcheck(acoerce->elemfuncid, GetUserId(), ACL_EXECUTE);
-       if (aclresult != ACLCHECK_OK)
-           aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(acoerce->elemfuncid));
+    /* Initialize function cache if first time through */
+    if (astate->elemfunc.fn_oid == InvalidOid) {
+        AclResult aclresult;
 
-       /* Set up the primary fmgr lookup information */
-       fmgr_info_cxt(acoerce->elemfuncid, &(astate->elemfunc), econtext->ecxt_per_query_memory);
-       fmgr_info_set_expr((Node*)acoerce, &(astate->elemfunc));
-   }
+        /* Check permission to call function */
+        aclresult = pg_proc_aclcheck(acoerce->elemfuncid, GetUserId(), ACL_EXECUTE);
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(acoerce->elemfuncid));
 
-   /*
-    * Use array_map to apply the function to each array element.
-    *
-    * We pass on the desttypmod and isExplicit flags whether or not the
-    * function wants them.
-    *
-    * Note: coercion functions are assumed to not use collation.
-    */
-   InitFunctionCallInfoData(locfcinfo, &(astate->elemfunc), 3, InvalidOid, NULL, NULL);
-   locfcinfo.arg[0] = PointerGetDatum(array);
-   locfcinfo.arg[1] = Int32GetDatum(acoerce->resulttypmod);
-   locfcinfo.arg[2] = BoolGetDatum(acoerce->isExplicit);
-   locfcinfo.argnull[0] = false;
-   locfcinfo.argnull[1] = false;
-   locfcinfo.argnull[2] = false;
+        /* Set up the primary fmgr lookup information */
+        fmgr_info_cxt(acoerce->elemfuncid, &(astate->elemfunc), econtext->ecxt_per_query_memory);
+        fmgr_info_set_expr((Node*)acoerce, &(astate->elemfunc));
+    }
 
-   return array_map(&locfcinfo, ARR_ELEMTYPE(array), astate->resultelemtype, astate->amstate);
+    /*
+        * Use array_map to apply the function to each array element.
+        *
+        * We pass on the desttypmod and isExplicit flags whether or not the
+        * function wants them.
+        *
+        * Note: coercion functions are assumed to not use collation.
+        */
+    InitFunctionCallInfoData(locfcinfo, &(astate->elemfunc), 3, InvalidOid, NULL, NULL);
+    locfcinfo.arg[0] = PointerGetDatum(array);
+    locfcinfo.arg[1] = Int32GetDatum(acoerce->resulttypmod);
+    locfcinfo.arg[2] = BoolGetDatum(acoerce->isExplicit);
+    locfcinfo.argnull[0] = false;
+    locfcinfo.argnull[1] = false;
+    locfcinfo.argnull[2] = false;
+
+    return array_map(&locfcinfo, ARR_ELEMTYPE(array), astate->resultelemtype, astate->amstate);
 }
 
 /* ----------------------------------------------------------------
@@ -6182,6 +6197,8 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
            fstate->func.fn_oid = InvalidOid; /* not initialized */
            fstate->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(funcexpr->funcid);
            fstate->funcReturnsSet = false;
+           fstate->fmtstr = funcexpr->fmtstr;
+           fstate->nlsfmtstr = funcexpr->nlsfmtstr;
            state = (ExprState*)fstate;
        } break;
        case T_OpExpr: {
@@ -6321,6 +6338,8 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
 
            iostate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalCoerceViaIO;
            iostate->arg = ExecInitExprByRecursion(iocoerce->arg, parent);
+           iostate->fmtstr = iocoerce->fmtstr;
+           iostate->nlsfmtstr = iocoerce->nlsfmtstr;
            /* lookup the result type's input function */
            getTypeInputInfo(iocoerce->resulttype, &iofunc, &iostate->intypioparam);
            fmgr_info(iofunc, &iostate->infunc);
@@ -6336,6 +6355,8 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
 
            astate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalArrayCoerceExpr;
            astate->arg = ExecInitExprByRecursion(acoerce->arg, parent);
+           astate->fmtstr = acoerce->fmtstr;
+           astate->nlsfmtstr = acoerce->nlsfmtstr;
            astate->resultelemtype = get_element_type(acoerce->resulttype);
            if (astate->resultelemtype == InvalidOid)
                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("target type is not an array")));

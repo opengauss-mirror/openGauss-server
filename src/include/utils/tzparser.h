@@ -31,5 +31,5 @@ typedef struct tzEntry {
 } tzEntry;
 
 extern TimeZoneAbbrevTable* load_tzoffsets(const char* filename);
-
+extern char* pg_findformat(const char* pattern, const char* source);
 #endif /* TZPARSER_H */

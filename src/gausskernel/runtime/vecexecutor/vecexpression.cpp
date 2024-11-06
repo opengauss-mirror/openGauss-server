@@ -2762,6 +2762,8 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 ExprDoneCond* isDone);
 
             iostate->arg = ExecInitVecExpr(iocoerce->arg, parent);
+            iostate->fmtstr= iocoerce->fmtstr;
+            iostate->nlsfmtstr = iocoerce->nlsfmtstr;
             /* lookup the result type's input function */
             getTypeInputInfo(iocoerce->resulttype, &iofunc, &iostate->intypioparam);
             fmgr_info(iofunc, &iostate->infunc);

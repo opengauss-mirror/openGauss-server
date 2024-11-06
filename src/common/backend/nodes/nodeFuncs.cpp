@@ -1568,6 +1568,7 @@ int exprLocation(const Node* expr)
              */
             loc = exprLocation(tc->arg);
             loc = leftmostLoc(loc, tc->typname->location);
+            loc = leftmostLoc(loc, exprLocation(tc->default_expr));
             loc = leftmostLoc(loc, tc->location);
         } break;
         case T_CollateClause:
@@ -2938,6 +2939,9 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             TypeCast *newnode = NULL;
             FLATCOPY(newnode, tc, TypeCast, isCopy);
             MUTATE(newnode->arg, tc->arg, Node*);
+            MUTATE(newnode->fmt_str, tc->fmt_str, Node*);
+            MUTATE(newnode->nls_fmt_str, tc->nls_fmt_str, Node*);
+            MUTATE(newnode->default_expr, tc->default_expr, Node*);
             return (Node*)newnode;
         } break;
         
@@ -3471,6 +3475,15 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(tc->typname, context)) {
+                return true;
+            }
+            if (p2walker(tc->fmt_str, context)) {
+                return true;
+            }
+            if (p2walker(tc->nls_fmt_str, context)) {
+                return true;
+            }
+            if (p2walker(tc->default_expr, context)) {
                 return true;
             }
         } break;

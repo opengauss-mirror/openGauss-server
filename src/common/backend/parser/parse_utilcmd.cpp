@@ -7115,6 +7115,8 @@ static Datum evaluate_opexpr(
                     typmod,
                     COERCION_ASSIGNMENT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
 
                 res = get_partition_arg_value((Node*)e, &isnull);
@@ -7165,7 +7167,8 @@ static Const* coerce_partition_arg(ParseState* pstate, Node* node, Oid targetTyp
     Assert(OidIsValid(curtyp));
 
     if (curtyp != targetType && OidIsValid(targetType)) {
-        node = coerce_type(pstate, node, curtyp, targetType, typmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        node = coerce_type(pstate, node, curtyp, targetType, typmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
 
         if (!PointerIsValid(node))
             ereport(

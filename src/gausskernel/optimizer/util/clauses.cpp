@@ -58,6 +58,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "utils/tzparser.h"
 #include "catalog/pg_proc_fn.h"
 
 typedef struct {
@@ -2646,6 +2647,8 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             newexpr->funccollid = expr->funccollid;
             newexpr->inputcollid = expr->inputcollid;
             newexpr->args = args;
+            newexpr->fmtstr = expr->fmtstr;
+            newexpr->nlsfmtstr = expr->nlsfmtstr;
             newexpr->location = expr->location;
             return (Node*)newexpr;
         }
@@ -2957,6 +2960,8 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
              */
             newexpr = makeNode(CoerceViaIO);
             newexpr->arg = (Expr*)linitial(args);
+            newexpr->fmtstr = expr->fmtstr;
+            newexpr->nlsfmtstr = expr->nlsfmtstr;
             newexpr->resulttype = expr->resulttype;
             newexpr->resultcollid = expr->resultcollid;
             newexpr->coerceformat = expr->coerceformat;
@@ -2976,6 +2981,8 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
 
             newexpr = makeNode(ArrayCoerceExpr);
             newexpr->arg = arg;
+            newexpr->fmtstr = expr->fmtstr;
+            newexpr->nlsfmtstr = expr->nlsfmtstr;
             newexpr->elemfuncid = expr->elemfuncid;
             newexpr->resulttype = expr->resulttype;
             newexpr->resulttypmod = expr->resulttypmod;
@@ -3422,9 +3429,20 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                 Node *defResNode = tc->arg;
                 Oid sourceTypeId = exprType(defResNode);
                 Oid ptype = tc->typname->typeOid;
+                char* fmtStr = NULL;
+                char* nlsFmtStr = NULL;
+                if (tc->fmt_str && IsA(tc->fmt_str, A_Const) &&
+                    ((A_Const*)tc->fmt_str)->val.type == T_String) {
+                    fmtStr = ((A_Const*)tc->fmt_str)->val.val.str;
+                }
+                if (tc->nls_fmt_str && IsA(tc->nls_fmt_str, A_Const) &&
+                    ((A_Const*)tc->nls_fmt_str)->val.type == T_String) {
+                    char* source = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
+                    nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", source);
+                }
                 if (can_coerce_type(1, &sourceTypeId, &ptype, COERCION_IMPLICIT)) {
                     return coerce_type(NULL, defResNode, sourceTypeId, ptype, -1,
-                        COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                        COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, fmtStr, nlsFmtStr, -1);
                 } else {
                     ereport(ERROR,
                         (errcode(ERRCODE_CANNOT_COERCE), errmsg("could not convert type %s to %s",

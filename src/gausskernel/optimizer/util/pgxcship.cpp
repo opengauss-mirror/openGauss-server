@@ -4000,6 +4000,8 @@ Expr* get_coerced_expr(Query* query, RelationLocInfo* loc_info, AttrNumber attnu
                     disttypmod,
                     COERCION_ASSIGNMENT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
             } else {
                 distcol_expr = NULL;
@@ -4012,6 +4014,8 @@ Expr* get_coerced_expr(Query* query, RelationLocInfo* loc_info, AttrNumber attnu
                 disttypmod,
                 COERCION_ASSIGNMENT,
                 COERCE_IMPLICIT_CAST,
+                NULL,
+                NULL,
                 -1);
         }
     } else {

@@ -197,7 +197,7 @@ test: keep_dense_rank
 # to_number func
 test: to_number_default
 # to_timestamp func
-test: to_timestamp_default
+test: to_timestamp_default cast
 
 test: alter_index_disable
 test: dump_alter_index_disable

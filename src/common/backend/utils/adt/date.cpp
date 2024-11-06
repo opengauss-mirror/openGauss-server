@@ -232,9 +232,16 @@ Datum input_date_in(char* str, bool can_ignore)
     int dterr;
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
+    int tz;
 
     if (u_sess->attr.attr_common.enable_iud_fusion) {
-        dterr = ParseIudDateOnly(str, tm);
+        if (u_sess && u_sess->parser_cxt.fmt_str) { // with frmt, shared from to_timestamp
+            text* fmt_txt = cstring_to_text(u_sess->parser_cxt.fmt_str);
+            text* date_txt = cstring_to_text(str);
+            do_to_timestamp(date_txt, fmt_txt, tm, &fsec, &tz);
+        } else {
+            dterr = ParseIudDateOnly(str, tm);
+        }
         if (dterr == 0) {
             if (!IS_VALID_JULIAN(tm->tm_year, tm->tm_mon, tm->tm_mday)) {
                 ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("date out of range: \"%s\"", str)));

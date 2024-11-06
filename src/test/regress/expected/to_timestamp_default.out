@@ -1,4 +1,8 @@
 -- For function TO_TIMESTAMP
+-- to make all the output indenpdent to env.
+SET LC_TIME = 'C';
+SET TIMEZONE TO 'UTC';
+SET DATESTYLE= 'ISO, YMD';
 -- float8_timestamptz
 SELECT TO_TIMESTAMP(' Infinity'::float);
  to_timestamp 
@@ -29,45 +33,45 @@ SHOW nls_timestamp_format;
 (1 row)
 
 SELECT TO_TIMESTAMP('1998');
-       to_timestamp       
---------------------------
- Thu Jan 01 00:00:00 1998
+    to_timestamp     
+---------------------
+ 1998-01-01 00:00:00
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28');
-       to_timestamp       
---------------------------
- Mon Dec 28 00:00:00 1998
+    to_timestamp     
+---------------------
+ 1998-12-28 00:00:00
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 01');
-       to_timestamp       
---------------------------
- Mon Dec 28 01:00:00 1998
+    to_timestamp     
+---------------------
+ 1998-12-28 01:00:00
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 01:02');
-       to_timestamp       
---------------------------
- Mon Dec 28 01:02:00 1998
+    to_timestamp     
+---------------------
+ 1998-12-28 01:02:00
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 01:02:03');
-       to_timestamp       
---------------------------
- Mon Dec 28 01:02:03 1998
+    to_timestamp     
+---------------------
+ 1998-12-28 01:02:03
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12');
-        to_timestamp         
------------------------------
- Mon Dec 28 01:02:03.12 1998
+      to_timestamp      
+------------------------
+ 1998-12-28 01:02:03.12
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 01:02:03.12 AM');
-        to_timestamp         
------------------------------
- Mon Dec 28 01:02:03.12 1998
+      to_timestamp      
+------------------------
+ 1998-12-28 01:02:03.12
 (1 row)
 
 SELECT TO_TIMESTAMP('1998-12-28 11:12:13 PM');
@@ -75,15 +79,15 @@ ERROR:  invalid value "PM" for "FF"
 DETAIL:  Value must be an integer.
 CONTEXT:  referenced column: to_timestamp
 SELECT TO_TIMESTAMP('01');
-       to_timestamp       
---------------------------
- Mon Jan 01 00:00:00 0001
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
 (1 row)
 
 SELECT TO_TIMESTAMP('01', 'yyyy-MM-dd'); 
-       to_timestamp       
---------------------------
- Mon Jan 01 00:00:00 0001
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
 (1 row)
 
 -- TO_TIMESTAMP(text)
@@ -94,9 +98,9 @@ SHOW nls_timestamp_format;
 (1 row)
 
 SELECT TO_TIMESTAMP('01');
-       to_timestamp       
---------------------------
- Mon Jan 01 00:00:00 0001
+    to_timestamp     
+---------------------
+ 0001-01-01 00:00:00
 (1 row)
 
 SELECT TO_TIMESTAMP('01-Sep');
@@ -317,7 +321,8 @@ select TO_TIMESTAMP('20120930 09:30 11111', 'yyyymmdd hh:MI SSSSS');
 ERROR:   minutes of hour conflicts with seconds in day
 CONTEXT:  referenced column: to_timestamp
 select TO_TIMESTAMP('20120930 09:30 11111 TZ', 'yyyymmdd hh:MI SSSSS TZ');
-ERROR:  "TZ"/"tz" format patterns are not supported in to_date
+ERROR:  invalid value "TZ" for "TZ"
+DETAIL:  Value must be an integer.
 CONTEXT:  referenced column: to_timestamp
 select TO_TIMESTAMP('20120930 09:30 111 B.C.', 'yyyymmdd hh:MI US B.C.');
         to_timestamp        
@@ -1443,3 +1448,38 @@ SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAM
  @ 0
 (1 row)
 
+-- to test nls language.
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = American');
+    to_timestamp     
+---------------------
+ 2016-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = english');
+    to_timestamp     
+---------------------
+ 2016-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');
+    to_timestamp     
+---------------------
+ 2016-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
+ERROR:  invalid format: NLS_DATE_LANG
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
+ERROR:  invalid format: NLS_DATE_LANG
+CONTEXT:  referenced column: to_timestamp
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = ENGLISH');
+    to_timestamp     
+---------------------
+ 2016-01-01 00:00:00
+(1 row)
+
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');
+ERROR:  invalid value "ja" for "mm"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp

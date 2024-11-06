@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93025;
+const uint32 GRAND_VERSION_NUM = 93026;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 CAST_FUNC_VERSION_NUMBER = 93026;
 const uint32 IGNORE_NULLS_VERSION_NUMBER = 93025;
 const uint32 DATAVEC_VERSION_NUMBER = 93019;
 const uint32 HTAP_VERSION_NUMBER = 93015;

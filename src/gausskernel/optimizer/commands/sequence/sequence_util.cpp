@@ -581,7 +581,8 @@ static Node* update_seq_expr(FuncExpr* func)
 {
     func->funcresulttype = NUMERICOID;
     Node* newnode = coerce_to_target_type(
-        NULL, (Node*)func, NUMERICOID, INT8OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        NULL, (Node*)func, NUMERICOID, INT8OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
     return newnode;
 }
 
@@ -592,7 +593,8 @@ static Node* rollback_seq_expr(FuncExpr* func)
 {
     func->funcresulttype = INT8OID;
     Node* newnode = coerce_to_target_type(
-        NULL, (Node*)func, INT8OID, NUMERICOID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        NULL, (Node*)func, INT8OID, NUMERICOID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
     return newnode;
 }
 

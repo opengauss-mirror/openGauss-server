@@ -181,6 +181,9 @@ static Node *makeBoolAConst(bool state, int location)
     typecast->typname = makeTypeNameFromNameList(
                             list_make2(makeString("pg_catalog"),
                             makeString("bool")));
+    typecast->fmt_str = NULL;
+    typecast->nls_fmt_str = NULL;
+    typecast->default_expr = NULL;
     typecast->location = location;
 
     return (Node *)typecast;
@@ -925,6 +928,7 @@ static void rowNumOrLevelWalker(Node *expr, bool *hasRownumOrLevel, bool *hasPri
         case T_TypeCast: {
             TypeCast* tc = (TypeCast*)expr;
             rowNumOrLevelWalker(tc->arg, hasRownumOrLevel, hasPrior);
+            rowNumOrLevelWalker(tc->default_expr, hasRownumOrLevel, hasPrior);
             break;
         }
 
@@ -1146,6 +1150,9 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
         case T_TypeCast: {
             TypeCast* tc = (TypeCast*)expr;
             StartWithWalker(context, tc->arg);
+            StartWithWalker(context, tc->fmt_str);
+            StartWithWalker(context, tc->nls_fmt_str);
+            StartWithWalker(context, tc->default_expr);
             break;
         }
 

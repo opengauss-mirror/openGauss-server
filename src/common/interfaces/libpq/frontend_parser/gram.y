@@ -136,7 +136,7 @@ static void base_yyerror(YYLTYPE *yylloc, core_yyscan_t yyscanner,
                          const char *msg);
 static Node *makeColumnRef(char *colname, List *indirection,
 						   int location, core_yyscan_t yyscanner);
-static Node *makeTypeCast(Node *arg, TypeName *typname, int location);
+static Node *makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *default_expr, int location);
 static Node *makeStringConst(char *str, int location, core_yyscan_t yyscanner);
 static Node *makeStringConstCast(char *str, int location, TypeName *typname, core_yyscan_t yyscanner);
 static Node *makeIntConst(int val, int location);
@@ -447,7 +447,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				interval_expr maxValueItem list_partitioning_clause hash_partitioning_clause
 				range_start_end_item range_less_than_item list_partition_item hash_partition_item
 				subpartitioning_clause range_subpartitioning_clause hash_subpartitioning_clause
-				list_subpartitioning_clause subpartition_item
+				list_subpartitioning_clause subpartition_item opt_default_fmt_clause opt_default_nls_clause default_on_err_expr
 %type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list
 			maxValueList listValueList column_item_list tablespaceList opt_interval_tablespaceList
 			split_dest_partition_define_list range_start_end_list range_less_than_list opt_range_every_list
@@ -9195,7 +9195,7 @@ interval_second:
  */
 a_expr:		c_expr									{ $$ = $1; }
 			| a_expr TYPECAST Typename
-					{ $$ = makeTypeCast($1, $3, @2); }
+					{ $$ = makeTypeCast($1, $3, NULL, NULL, NULL, @2); }
 			| a_expr COLLATE any_name
 				{
 					CollateClause *n = makeNode(CollateClause);
@@ -9646,12 +9646,12 @@ a_expr:		c_expr									{ $$ = $1; }
 			| FCONST_F
 				{
 					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float4"), @1);	
+					$$ = makeTypeCast(num, SystemTypeName("float4"), NULL, NULL, NULL, @1);	
 				}
 			| FCONST_D
 				{
 					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float8"), @1);	
+					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);	
 				}
 		;
 
@@ -9667,7 +9667,7 @@ a_expr:		c_expr									{ $$ = $1; }
 b_expr:		c_expr
 				{ $$ = $1; }
 			| b_expr TYPECAST Typename
-				{ $$ = makeTypeCast($1, $3, @2); }
+				{ $$ = makeTypeCast($1, $3, NULL, NULL, NULL, @2); }
 			| '+' b_expr					%prec UMINUS
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "+", NULL, $2, @1); }
 			| '-' b_expr					%prec UMINUS
@@ -10162,6 +10162,22 @@ func_application:	func_name '(' ')'
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
+			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P opt_sort_clause ')'
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = $1;
+					n->args = lappend($3, $5);
+					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					n->agg_order = $9;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *) n;
+				}				
 		;
 
 func_expr_common_subexpr:
@@ -10203,7 +10219,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
-					$$ = makeTypeCast(n, SystemTypeName("date"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("date"), NULL, NULL, NULL, @1);
 				}
 			| CURRENT_TIME
 				{
@@ -10213,7 +10229,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
-					$$ = makeTypeCast(n, SystemTypeName("timetz"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("timetz"), NULL, NULL, NULL, @1);
 				}
 			| CURRENT_TIME '(' Iconst ')'
 				{
@@ -10226,7 +10242,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
 					d = SystemTypeName("timetz");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| CURRENT_TIMESTAMP
 				{
@@ -10257,7 +10273,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
 					d = SystemTypeName("timestamptz");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| LOCALTIME
 				{
@@ -10267,7 +10283,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
-					$$ = makeTypeCast((Node *)n, SystemTypeName("time"), @1);
+					$$ = makeTypeCast((Node *)n, SystemTypeName("time"), NULL, NULL, NULL, @1);
 				}
 			| LOCALTIME '(' Iconst ')'
 				{
@@ -10280,7 +10296,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
 					d = SystemTypeName("time");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast((Node *)n, d, @1);
+					$$ = makeTypeCast((Node *)n, d, NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP
 				{
@@ -10290,7 +10306,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
-					$$ = makeTypeCast(n, SystemTypeName("timestamp"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("timestamp"), NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP '(' Iconst ')'
 				{
@@ -10303,7 +10319,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"), yyscanner);
 					d = SystemTypeName("timestamp");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| SYSDATE
 				{
@@ -10404,7 +10420,17 @@ func_expr_common_subexpr:
 					$$ = (Node *)n;
 				}
 			| CAST '(' a_expr AS Typename ')'
-				{ $$ = makeTypeCast($3, $5, @1); }
+				{ $$ = makeTypeCast($3, $5, NULL, NULL, NULL, @1); }
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause')'
+				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }		
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause ')'
+				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }												
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause default_on_err_expr ')'
+				{ $$ = makeTypeCast($3, $5, $6, NULL, $7, @1); }				
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause default_on_err_expr ')'
+				{ $$ = makeTypeCast($3, $5, $6, $7, $8, @1); }
+			| CAST '(' a_expr AS Typename default_on_err_expr ')'
+				{ $$ = makeTypeCast($3, $5, NULL, NULL, $6, @1); }
 			| EXTRACT '(' extract_list ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -10661,7 +10687,22 @@ func_expr_common_subexpr:
 					$$ = (Node *)n;
 				}
 		;
+opt_default_fmt_clause:
+            ',' a_expr {
+                $$ = $2;
+            }
+	;
 
+opt_default_nls_clause:
+            ',' a_expr {
+                $$ = $2;
+            }
+	;
+default_on_err_expr:
+	DEFAULT a_expr ON CONVERSION_P ERROR_P {
+		$$ = $2;
+	}
+	;				
 /*
  * SQL/XML support
  */
@@ -11197,7 +11238,7 @@ substr_list:
 					 */
 					$$ = list_make3($1, makeIntConst(1, -1),
 									makeTypeCast($2,
-												 SystemTypeName("int4"), -1));
+												 SystemTypeName("int4"), NULL, NULL, NULL, -1));
 				}
 			| expr_list
 				{
@@ -12504,11 +12545,14 @@ makeColumnRef(char *colname, List *indirection,
 }
 
 static Node *
-makeTypeCast(Node *arg, TypeName *typname, int location)
+makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *default_expr, int location)
 {
 	TypeCast *n = makeNode(TypeCast);
 	n->arg = arg;
 	n->typname = typname;
+	n->default_expr = default_expr;
+	n->fmt_str = fmt_list;
+	n->nls_fmt_str = nls_fmt;	
 	n->location = location;
 	return (Node *) n;
 }
@@ -12548,7 +12592,7 @@ makeStringConstCast(char *str, int location, TypeName *typname, core_yyscan_t yy
 {
 	Node *s = makeStringConst(str, location, yyscanner);
 
-	return makeTypeCast(s, typname, -1);
+	return makeTypeCast(s, typname, NULL, NULL, NULL, -1);
 }
 
 static Node *
@@ -12634,7 +12678,7 @@ makeBoolAConst(bool state, int location)
 	n->val.val.str = (char *)(state ? "t" : "f");
 	n->location = location;
 
-	return makeTypeCast((Node *)n, SystemTypeName("bool"), -1);
+	return makeTypeCast((Node *)n, SystemTypeName("bool"), NULL, NULL, NULL, -1);
 }
 
 /* check_qualified_name --- check the result of qualified_name production
