@@ -1570,6 +1570,7 @@ static Query* _readQuery(void)
     IF_EXIST(limitIsPercent) {
         READ_BOOL_FIELD(limitIsPercent);
         READ_BOOL_FIELD(limitWithTies);
+        READ_BOOL_FIELD(isFetch);
     }
     READ_NODE_FIELD(rowMarks);
     READ_NODE_FIELD(setOperations);

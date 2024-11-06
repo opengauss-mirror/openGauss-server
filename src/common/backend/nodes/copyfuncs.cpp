@@ -5011,6 +5011,7 @@ static Query* _copyQuery(const Query* from)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         COPY_SCALAR_FIELD(limitIsPercent);
         COPY_SCALAR_FIELD(limitWithTies);
+        COPY_SCALAR_FIELD(isFetch);
     }
     COPY_NODE_FIELD(rowMarks);
     COPY_NODE_FIELD(setOperations);
@@ -5199,6 +5200,7 @@ static SelectStmt* _copySelectStmt(const SelectStmt* from)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         COPY_SCALAR_FIELD(limitIsPercent);
         COPY_SCALAR_FIELD(limitWithTies);
+        COPY_SCALAR_FIELD(isFetch);
     }
     COPY_NODE_FIELD(lockingClause);
     COPY_NODE_FIELD(hintState);

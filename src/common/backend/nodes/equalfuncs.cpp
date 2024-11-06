@@ -995,6 +995,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(limitIsPercent);
         COMPARE_SCALAR_FIELD(limitWithTies);
+        COMPARE_SCALAR_FIELD(isFetch);
     }
     COMPARE_NODE_FIELD(rowMarks);
     COMPARE_NODE_FIELD(setOperations);
@@ -1128,6 +1129,7 @@ static bool _equalSelectStmt(const SelectStmt* a, const SelectStmt* b)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(limitIsPercent);
         COMPARE_SCALAR_FIELD(limitWithTies);
+        COMPARE_SCALAR_FIELD(isFetch);
     }
     COMPARE_NODE_FIELD(lockingClause);
     COMPARE_SCALAR_FIELD(op);

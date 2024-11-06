@@ -7,6 +7,7 @@ INSERT INTO my_table1 VALUES (1);
 INSERT INTO my_table2 VALUES (2);
 CREATE PUBLIC SYNONYM tbl_syn1 FOR my_table1;
 CREATE SYNONYM tbl_syn1 FOR my_table2;
+CREATE SYNONYM public.tbl_syn2 FOR my_table2;
 SELECT * FROM tbl_syn1;
  a 
 ---
@@ -33,6 +34,7 @@ DROP PUBLIC SYNONYM IF EXISTS public.tbl_syn1; -- should failed
 ERROR:  missing or invalid synonym identifier
 DROP PUBLIC SYNONYM tbl_syn1;
 DROP SYNONYM tbl_syn1;
+DROP SYNONYM public.tbl_syn2;
 CREATE PUBLIC SYNONYM tbl_syn1 FOR my_table1;
 DROP PUBLIC SYNONYM IF EXISTS tbl_syn1;
 SELECT * FROM tbl_syn1;  -- should fail: object not found
