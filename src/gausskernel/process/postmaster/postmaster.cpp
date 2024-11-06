@@ -10697,7 +10697,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
                     pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
                     t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] clean backens: set reform_ready to true suceessfully")));
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] clean backends: set reform_ready to true suceessfully")));
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
