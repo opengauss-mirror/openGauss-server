@@ -34,6 +34,13 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp
 )
 
+if("${USE_LIBXML}" STREQUAL "ON")
+	INCLUDE_DIRECTORIES(${LIBXML_INCLUDE_PATH}/libxml2)
+    INCLUDE_DIRECTORIES(${LIBXML_LIB_PATH})
+	list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/gms_xmlgen)
+    add_subdirectory(gms_xmlgen)
+endif()
+
 add_subdirectory(hstore)
 add_subdirectory(test_decoding)
 add_subdirectory(mppdb_decoding)
@@ -67,5 +74,4 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
     add_subdirectory(chparser)
 endif()
 add_subdirectory(gms_profiler)
-
 add_subdirectory(gms_lob)

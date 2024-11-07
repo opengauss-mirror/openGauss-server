@@ -99,6 +99,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "gms_stats",
         "gms_output",
         "gms_profiler",
+        "gms_xmlgen",
         "gms_lob",
         "gms_sql"
 #endif

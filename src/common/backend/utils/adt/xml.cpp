@@ -364,7 +364,7 @@ static void appendStringInfoText(StringInfo str, const text* t)
 }
 #endif
 
-static xmltype* stringinfo_to_xmltype(StringInfo buf)
+xmltype* stringinfo_to_xmltype(StringInfo buf)
 {
     return (xmltype*)cstring_to_text_with_len(buf->data, buf->len);
 }

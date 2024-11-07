@@ -70,8 +70,10 @@ endif
 
 ifeq ($(with_libxml),yes)
 SUBDIRS += xml2
+SUBDIRS += gms_xmlgen
 else
 ALWAYS_SUBDIRS += xml2
+ALWAYS_SUBDIRS += gms_xmlgen
 endif
 
 ifeq ($(with_selinux),yes)
