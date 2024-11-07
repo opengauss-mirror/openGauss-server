@@ -6566,6 +6566,10 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
          */                                                                                 \
         len = strlen(VARDATA(result));                                                      \
         SET_VARSIZE(result, len + VARHDRSZ);                                                \
+        /* In A compatibility, all we need for overflow num is a pure "###" style str */    \
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && overflow) {              \
+            fill_str(VARDATA(result), '#', len);                                            \
+        }                                                                                   \
     } while (0)
 
 
@@ -6890,6 +6894,7 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
     FormatNode* format = NULL;
     text* result = NULL;
     bool shouldFree = false;
+    bool overflow = false;
     int len = 0, plen = 0, sign = 0;
     char *numstr = NULL, *orgnum = NULL, *p = NULL;
     Numeric x;
@@ -6975,9 +6980,13 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
         if (Num.pre > len)
             plen = Num.pre - len;
         else if (len > Num.pre) {
-            numstr = (char*)palloc(Num.pre + Num.post + 2);
-            fill_str(numstr, '#', Num.pre + Num.post + 1);
-            *(numstr + Num.pre) = '.';
+            overflow = true;
+            // if overflow when A_FORMAT, do fill_str later.
+            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                numstr = (char*)palloc(Num.pre + Num.post + 2);
+                fill_str(numstr, '#', Num.pre + Num.post + 1);
+                *(numstr + Num.pre) = '.';
+            }
         }
     }
 
@@ -7004,6 +7013,7 @@ Datum int4_to_char(PG_FUNCTION_ARGS)
     FormatNode* format = NULL;
     text* result = NULL;
     bool shouldFree = false;
+    bool overflow = false;
     int len = 0, plen = 0, sign = 0;
     char *numstr = NULL, *orgnum = NULL;
     errno_t ret = EOK;
@@ -7073,9 +7083,12 @@ Datum int4_to_char(PG_FUNCTION_ARGS)
         if (Num.pre > len)
             plen = Num.pre - len;
         else if (len > Num.pre) {
-            numstr = (char*)palloc(Num.pre + Num.post + 2);
-            fill_str(numstr, '#', Num.pre + Num.post + 1);
-            *(numstr + Num.pre) = '.';
+            overflow = true;
+            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                numstr = (char*)palloc(Num.pre + Num.post + 2);
+                fill_str(numstr, '#', Num.pre + Num.post + 1);
+                *(numstr + Num.pre) = '.';
+            }
         }
     }
 
@@ -7095,6 +7108,7 @@ Datum int8_to_char(PG_FUNCTION_ARGS)
     FormatNode* format = NULL;
     text* result = NULL;
     bool shouldFree = false;
+    bool overflow = false;
     int len = 0, plen = 0, sign = 0;
     char *numstr = NULL, *orgnum = NULL;
     errno_t ret = EOK;
@@ -7174,8 +7188,11 @@ Datum int8_to_char(PG_FUNCTION_ARGS)
         if (Num.pre > len)
             plen = Num.pre - len;
         else if (len > Num.pre) {
-            numstr = (char*)palloc(Num.pre + Num.post + 2);
-            fill_str(numstr, '#', Num.pre + Num.post + 1);
+            overflow = true;
+            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                numstr = (char*)palloc(Num.pre + Num.post + 2);
+                fill_str(numstr, '#', Num.pre + Num.post + 1);
+            }
         }
     }
 
@@ -7195,6 +7212,7 @@ Datum float4_to_char(PG_FUNCTION_ARGS)
     FormatNode* format = NULL;
     text* result = NULL;
     bool shouldFree = false;
+    bool overflow = false;
     int len = 0, plen = 0, sign = 0;
     char *numstr = NULL, *orgnum = NULL, *p = NULL;
     errno_t ret = EOK;
@@ -7282,8 +7300,11 @@ Datum float4_to_char(PG_FUNCTION_ARGS)
         if (Num.pre > len)
             plen = Num.pre - len;
         else if (len > Num.pre) {
-            numstr = (char*)palloc(Num.pre + Num.post + 2);
-            fill_str(numstr, '#', Num.pre + Num.post + 1);
+            overflow = true;
+            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                numstr = (char*)palloc(Num.pre + Num.post + 2);
+                fill_str(numstr, '#', Num.pre + Num.post + 1);
+            }
         }
     }
 
@@ -7303,6 +7324,7 @@ Datum float8_to_char(PG_FUNCTION_ARGS)
     FormatNode* format = NULL;
     text* result = NULL;
     bool shouldFree = false;
+    bool overflow = false;
     int len = 0, plen = 0, sign = 0;
     char *numstr = NULL, *orgnum = NULL, *p = NULL;
     errno_t ret = EOK;
@@ -7390,9 +7412,12 @@ Datum float8_to_char(PG_FUNCTION_ARGS)
         if (Num.pre > len)
             plen = Num.pre - len;
         else if (len > Num.pre) {
-            numstr = (char*)palloc(Num.pre + Num.post + 2);
-            fill_str(numstr, '#', Num.pre + Num.post + 1);
-            *(numstr + Num.pre) = '.';
+            overflow = true;
+            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                numstr = (char*)palloc(Num.pre + Num.post + 2);
+                fill_str(numstr, '#', Num.pre + Num.post + 1);
+                *(numstr + Num.pre) = '.';
+            }
         }
     }
 

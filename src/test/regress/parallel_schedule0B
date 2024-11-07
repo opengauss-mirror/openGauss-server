@@ -167,7 +167,7 @@ test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vecha
 # ----------$
 # The first group of parallel tests$
 # ----------$
-test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike
+test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike to_char
 #test: float8 numeric char varchar text int2 int4 float4 numeric_2 money
 
 # Depends on things setup during char, varchar and text
