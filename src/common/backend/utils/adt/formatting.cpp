@@ -4636,6 +4636,12 @@ Datum blob_to_char_default(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(result);
 }
 
+Datum unknown_to_char2(PG_FUNCTION_ARGS)
+{
+    Datum result = DirectFunctionCall2(numeric_to_char, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1));
+    PG_RETURN_DATUM(result);
+}
+
 /* ---------------------
  * TO_TIMESTAMP()
  *

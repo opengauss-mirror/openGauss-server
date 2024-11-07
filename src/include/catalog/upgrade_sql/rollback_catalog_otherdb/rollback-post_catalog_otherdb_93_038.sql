@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.to_char(unknown, unknown) CASCADE;

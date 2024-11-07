@@ -372,5 +372,6 @@ INSERT INTO blob_table (c1) VALUES ( hextoraw('C0AF') );
 SELECT to_char(c1, 873) FROM blob_table ;
 DROP TABLE blob_table;
 DROP TABLE blob_t;
+SELECT to_char('','');
 
 drop schema basefunc cascade;
