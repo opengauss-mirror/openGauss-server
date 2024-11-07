@@ -300,7 +300,6 @@ bool IMCStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ Vector
         FillPerRowGroupDelta((IMCStoreScanState*)state, currid, vecBatchOut);
 
         if (!BatchIsNull(vecBatchOut)) {
-            state->ss_deltaScan = true;
             return true;
         }
     }
@@ -308,7 +307,6 @@ bool IMCStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ Vector
     if (BatchIsNull(vecBatchOut)) {
         return false;
     }
-    state->ss_deltaScan = true;
     return true;
 }
 
