@@ -1923,7 +1923,7 @@ void IMCSDesc::InitRowGroups(uint32 initRGNums, int imcsNatts)
         maxRowGroupCapacity = initRGNums;
     }
     rowGroups = (RowGroup**)palloc0(sizeof(RowGroup*) * maxRowGroupCapacity);
-    for (uint32 i = 0; i < initRGNums; i++) {
+    for (uint32 i = 0; i < curMaxRowGroupId + 1; i++) {
         rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
     }
 }
