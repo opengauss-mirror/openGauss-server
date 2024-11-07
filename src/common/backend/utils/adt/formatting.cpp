@@ -4638,7 +4638,9 @@ Datum blob_to_char_default(PG_FUNCTION_ARGS)
 
 Datum unknown_to_char2(PG_FUNCTION_ARGS)
 {
-    Datum result = DirectFunctionCall2(numeric_to_char, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1));
+    Datum arg0 = DirectFunctionCall3(numeric_in, PG_GETARG_DATUM(0), NUMERICOID, -1);
+    Datum arg1 = DirectFunctionCall1(textin, PG_GETARG_DATUM(1));
+    Datum result = DirectFunctionCall2(numeric_to_char, arg0, arg1);
     PG_RETURN_DATUM(result);
 }
 
