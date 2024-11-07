@@ -2702,6 +2702,7 @@ typedef struct OrderedSetAggState {
     Tuplesortstate* sortstate; /* Used for accumulate sort datum */
     int64 number_of_rows;      /* Number of normal datum inside sortstate */
     TupleDesc tupdesc;         /* Tuple descriptor for datum inside sortstate */
+    TupleTableSlot *tupslot;   /* Tuple slot we can use for inserting/extracting tuples: */
 
     Oid datumtype; /* Datatype of datums being sorted */
     int16 typLen;

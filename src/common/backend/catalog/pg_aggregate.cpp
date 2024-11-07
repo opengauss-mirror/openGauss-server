@@ -69,6 +69,10 @@ static void InternalAggIsSupported(const char *aggName)
         "age_collect",
         "age_percentilecont",
         "age_percentiledisc",
+        "cume_dist",
+        "dense_rank",
+        "rank",
+        "percent_rank",
         "corr_s",
         "corr_k"
     };
@@ -272,9 +276,15 @@ ObjectAddress AggregateCreate(const char* aggName, Oid aggNamespace, char aggKin
 
 #endif
     /* handle finalfn, if supplied */
+    int nargsfinalfn = 1;
     if (aggfinalfnName != NULL) {
         fnArgs[0] = aggTransType;
-        finalfn = lookup_agg_function(aggfinalfnName, 1, fnArgs, &finaltype);
+        if (aggKind == AGGKIND_HYPOTHETICAL)
+        {
+            fnArgs[1] = 2276;
+            nargsfinalfn += 1;
+        }
+        finalfn = lookup_agg_function(aggfinalfnName, nargsfinalfn, fnArgs, &finaltype);
     } else {
         /*
          * If no finalfn, aggregate result type is type of the state value
@@ -426,7 +436,10 @@ ObjectAddress AggregateCreate(const char* aggName, Oid aggNamespace, char aggKin
 #endif
     /* handle ordered set aggregate with no direct args. */
     values[Anum_pg_aggregate_aggkind - 1] = CharGetDatum(aggKind);
-    values[Anum_pg_aggregate_aggnumdirectargs - 1] = Int8GetDatum(AGGNUMDIRECTARGS_DEFAULT);
+    if (aggKind == AGGKIND_HYPOTHETICAL)
+        values[Anum_pg_aggregate_aggnumdirectargs - 1] = Int8GetDatum(AGGNUMDIRECTARGS_DEFAULT + 1);
+    else
+        values[Anum_pg_aggregate_aggnumdirectargs - 1] = Int8GetDatum(AGGNUMDIRECTARGS_DEFAULT);
 
     aggdesc = heap_open(AggregateRelationId, RowExclusiveLock);
     tupDesc = aggdesc->rd_att;
@@ -522,6 +535,7 @@ static Oid lookup_agg_function(List* fnName, int nargs, Oid* input_types, Oid* r
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FUNCTION),
                 errmsg("function %s does not exist", func_signature_string(fnName, nargs, NIL, input_types))));
+   
     if (retset)
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),

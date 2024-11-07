@@ -3681,4 +3681,3 @@ void HeapTupleSetUid(HeapTuple tup, uint64 uid, int nattrs)
     HeapTupleHeaderSetDatumLength(tup->t_data, hoff + data_len);
     HeapTupleHeaderSetUid(tup->t_data, uid, uidLen);
 }
-

@@ -221,6 +221,9 @@ extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 extern TupleConstr *TupleConstrCopy(const TupleDesc tupdesc);
 extern TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr);
 
+extern void TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
+                               TupleDesc src, AttrNumber srcAttno);
+
 #define RelHasAutoInc(rel)  ((rel)->rd_att->constr && (rel)->rd_att->constr->cons_autoinc)
 #define RelAutoIncSeqOid(rel)  (RelHasAutoInc(rel) ? (rel)->rd_att->constr->cons_autoinc->seqoid : InvalidOid)
 #define RelAutoIncAttrNum(rel)  (RelHasAutoInc(rel) ? (rel)->rd_att->constr->cons_autoinc->attnum : 0)

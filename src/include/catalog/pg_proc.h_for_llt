@@ -2718,6 +2718,9 @@ DATA(insert OID = 4098 (  group_concat_finalfn		PGNSP PGUID 12 1 0 0 0 f f f f f
 DESCR("aggregate final function");
 DATA(insert OID = 4099 (  group_concat_transfn		PGNSP PGUID 12 1 0 2276 0 f f f f f f i 3 0 2281 "2281 25 2276" "{2281,25,2276}" "{i,i,v}" _null_ _null_ group_concat_transfn _null_ _null_ _null_ "" f));
 DESCR("aggregate transition function");
+DATA(insert OID = 4099 (  group_concat_transfn		PGNSP PGUID 12 1 0 2276 0 f f f f f f i 3 0 2281 "2281 25 2276" "{2281,25,2276}" "{i,i,v}" _null_ _null_ group_concat_transfn _null_ _null_ _null_ "" f));
+DESCR("aggregate transition function");
+
 
 
 /* To ASCII conversion */
@@ -5106,13 +5109,29 @@ DESCR("row number within partition");
 DATA(insert OID = 3101 (  rank			PGNSP PGUID 12 1 0 0 0 f t f f f f i 0 0 20 "" _null_ _null_ _null_ _null_ window_rank _null_ _null_ _null_ "" f));
 DESCR("integer rank with gaps");
 #define RANKFUNCOID 3101
+DATA(insert OID = 3248 (  rank			PGNSP PGUID 12 1 0 2276 0 t f f f f f i 1 0 20 "2276" "{2276}" "{v}" _null_ _null_ aggregate_dummy _null_ _null_ _null_ "" f));
+DESCR("rank of hypothetical row");
+DATA(insert OID = 3249 (  rank_final	PGNSP PGUID 12 1 0 2276 0 f f f f f f i 2 0 20 "2281 2276" "{2281,2276}" "{i,v}" _null_ _null_ hypothetical_rank_final _null_ _null_ _null_ "" f));
+DESCR("aggregate final function");
 DATA(insert OID = 3102 (  dense_rank	PGNSP PGUID 12 1 0 0 0 f t f f f f i 0 0 20 "" _null_ _null_ _null_ _null_ window_dense_rank _null_ _null_ _null_ "" f));
 DESCR("integer rank without gaps");
 #define DENSERANKFUNCOID 3102
+DATA(insert OID = 4082 (  dense_rank	PGNSP PGUID 12 1 0 2276 0 t f f f f f i 1 0 20 "2276" "{2276}" "{v}" _null_ _null_ aggregate_dummy _null_ _null_ _null_ "" f));
+DESCR("rank of hypothetical row without gaps");
+DATA(insert OID = 4084 (  dense_rank_final	PGNSP PGUID 12 1 0 2276 0 f f f f f f i 2 0 20 "2281 2276" "{2281,2276}" "{i,v}" _null_ _null_ hypothetical_dense_rank_final _null_ _null_ _null_ "" f));
+DESCR("aggregate final function");
 DATA(insert OID = 3103 (  percent_rank	PGNSP PGUID 12 1 0 0 0 f t f f f f i 0 0 701 "" _null_ _null_ _null_ _null_ window_percent_rank _null_ _null_ _null_ "" f));
 DESCR("fractional rank within partition");
+DATA(insert OID = 4083 (  percent_rank	PGNSP PGUID 12 1 0 0 0 t f f f f f i 1 0 701 "2276" "{2276}" "{v}" _null_ _null_ aggregate_dummy _null_ _null_ _null_ "" f));
+DESCR("fractional rank of hypothetical row");
+DATA(insert OID = 4083 (  percent_rank_final	PGNSP PGUID 12 1 0 0 0 f f f f f f i 2 0 701 "2281 2276" "{2281,2276}" "{i,v}" _null_ _null_ hypothetical_percent_rank_final _null_ _null_ _null_ "" f));
+DESCR("aggregate final function");
 DATA(insert OID = 3104 (  cume_dist		PGNSP PGUID 12 1 0 0 0 f t f f f f i 0 0 701 "" _null_ _null_ _null_ _null_ window_cume_dist _null_ _null_ _null_ "" f));
 DESCR("fractional row number within partition");
+DATA(insert OID = 3148 (  cume_dist		PGNSP PGUID 12 1 0 2276 0 f f f f f f i 1 0 701 "2276" "{2276}" "{v}" _null_ _null_ aggregate_dummy _null_ _null_ _null_ "" f));
+DESCR("cumulative distribution of hypothetical row");
+DATA(insert OID = 3148 (  cume_dist_final	PGNSP PGUID 12 1 0 2276 0 t f f f f f i 2 0 701 "2281 2276" "{2281,2276}" "{i,v}" _null_ _null_ hypothetical_cume_dist_final _null_ _null_ _null_ "" f));
+DESCR("aggregate final function");
 DATA(insert OID = 3105 (  ntile			PGNSP PGUID 12 1 0 0 0 f t f f t f i 1 0 23 "23" _null_ _null_ _null_ _null_ window_ntile _null_ _null_ _null_ "" f));
 DESCR("split rows into N groups");
 DATA(insert OID = 3106 (  lag			PGNSP PGUID 12 1 0 0 0 f t f f t f i 1 0 2283 "2283" _null_ _null_ _null_ _null_ window_lag _null_ _null_ _null_ "" f));

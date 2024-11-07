@@ -1261,3 +1261,46 @@ TupleDesc BuildDescFromLists(List *names, List *types, List *typmods, List *coll
 
     return desc;
 }
+
+/*
+ * TupleDescCopyEntry
+ *      This function copies a single attribute structure from one tuple
+ *      descriptor to another.
+ *
+ * !!! Constraints and defaults are not copied !!!
+ */
+void TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
+                        TupleDesc src, AttrNumber srcAttno)
+{
+    Form_pg_attribute dstAtt = TupleDescAttr(dst, dstAttno - 1);
+    Form_pg_attribute srcAtt = TupleDescAttr(src, srcAttno - 1);
+
+    /*
+     * sanity checks
+     */
+    Assert(PointerIsValid(src));
+    Assert(PointerIsValid(dst));
+    Assert(srcAttno >= 1);
+    Assert(srcAttno <= src->natts);
+    Assert(dstAttno >= 1);
+    Assert(dstAttno <= dst->natts);
+
+    errno_t rc = EOK;
+    rc = memcpy_s(dstAtt, ATTRIBUTE_FIXED_PART_SIZE, srcAtt, ATTRIBUTE_FIXED_PART_SIZE);
+    securec_check(rc, "\0", "\0");
+
+    /*
+     * Aside from updating the attno, we'd better reset attcacheoff.
+     *
+     * XXX Actually, to be entirely safe we'd need to reset the attcacheoff of
+     * all following columns in dst as well.  Current usage scenarios don't
+     * require that though, because all following columns will get initialized
+     * by other uses of this function or TupleDescInitEntry.  So we cheat a
+     * bit to avoid a useless O(N^2) penalty.
+     */
+    dstAtt->attnum = dstAttno;
+    dstAtt->attcacheoff = -1;
+    /* since we're not copying constraints or defaults, clear these */
+    dstAtt->attnotnull = false;
+    dstAtt->atthasdef = false;
+}

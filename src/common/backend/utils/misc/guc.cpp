@@ -2144,6 +2144,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_aggr_coerce_type",
+            PGC_USERSET,
+            NODE_ALL,
+            ERROR_HANDLING_OPTIONS,
+            gettext_noop("Enable some aggregate coerce type, otherwise error"),
+            NULL},
+            &u_sess->attr.attr_common.enable_aggr_coerce_type,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifdef ENABLE_HTAP
         {{"enable_parallel_populate",
           PGC_USERSET,

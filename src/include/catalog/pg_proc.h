@@ -440,6 +440,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define UNDEFINEDOUTPUT 5707
 #define UNDEFINEDSEND 5709
 #define UNDEFINEDRECV 5710
+#define RANKFUNCHYPOOID 3248
+#define RANKFUNCHYPFINALOOID 3249
 
 /*
  * Symbolic values for prokind column, use highest bit to identify whether this procedure belongs to an object type.
