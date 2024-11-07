@@ -59,8 +59,10 @@ SUBDIRS = \
 		ndpplugin       \
 		gms_profiler    \
 		gms_output      \
+		gms_stats       \
 		gms_lob         \
-		gms_sql
+		gms_sql         \
+		gms_i18n
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo
