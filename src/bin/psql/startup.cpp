@@ -578,7 +578,12 @@ int main(int argc, char* argv[])
         values[8] = CONNECT_TIMEOUT;
 #ifdef HAVE_CE
         keywords[9] = "enable_ce";
-        values[9] = (pset.enable_client_encryption) ? (char*)"1" : NULL;
+        if (!pset.enable_client_encryption_log) {
+            values[9] = (pset.enable_client_encryption) ? (char*)"1" : NULL;
+        } else {
+            values[9] = (pset.enable_client_encryption) ? (char*)"1_with_log" : NULL;
+            printf("startup with enable_client_encryption.\n");
+        }
 #endif
         if (pset.maintance) {
             keywords[PARAMS_ARRAY_SIZE - 2] = "options";
@@ -1052,6 +1057,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"with-decryption", required_argument, NULL, 'D'},
         {"with-module-params", required_argument, NULL, 'u'},
         {"with-salt", required_argument, NULL, 1},
+        {"enable_client_encryption_log", no_argument, NULL, '3'},
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
         {"sql-parse", no_argument, NULL, 'g'},
 #endif
@@ -1077,10 +1083,10 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     rc = memset_s(options, sizeof(*options), 0, sizeof(*options));
     check_memset_s(rc);
 
-    check_short_optOfVoid("aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", argc, argv);
+    check_short_optOfVoid("aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?0123", argc, argv);
 
     while ((c = getopt_long(
-                argc, argv, "aAc:d:D:eEf:F:gh:Hlk:u:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", long_options, &optindex)) != -1) {
+                argc, argv, "aAc:d:D:eEf:F:gh:Hlk:u:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?0123", long_options, &optindex)) != -1) {
         switch (c) {
             case 'a':
                 if (!SetVariable(pset.vars, "ECHO", "all")) {
@@ -1222,6 +1228,14 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 break;
             case 'C':
                 pset.enable_client_encryption = true;
+                break;
+            case '3':
+                pset.enable_client_encryption_log = true;
+                if (pset.enable_client_encryption) {
+                    printf("running psql with client_encryption.\n");
+                } else {
+                    printf("running psql without client_encryption.\n");
+                }
                 break;
             case 'r':
 #ifdef USE_READLINE

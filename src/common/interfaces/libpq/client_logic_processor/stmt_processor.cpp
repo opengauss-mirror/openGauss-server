@@ -2143,6 +2143,17 @@ bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query
             return false;
         }
     }
+
+    if (conn->client_logic->enable_client_encryption_log == true) {
+        foreach (stmt_iter, stmts) {
+            Node *stmt = (Node *)lfirst(stmt_iter);
+            size_t size = statement_data->conn->client_logic->rawValuesForReplace->size();
+            if (IsA(stmt, InsertStmt) || IsA(stmt, CopyStmt)) {
+                printf("rawValuesForReplace size is %zu.\n", size);
+            }
+        }
+    }
+    
     statement_data->replace_raw_values();
     if (!is_inner_query) {
         free_memory();

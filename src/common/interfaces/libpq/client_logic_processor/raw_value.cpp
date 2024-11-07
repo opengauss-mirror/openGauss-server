@@ -182,7 +182,11 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
             1; /* the \0 is counted in the orignal PQescapeByteaCe function, so we need -1 */
     }
 
-    return true;
+    if (!m_conn->client_logic->enable_client_encryption_log) {
+        return true;
+    } else {
+        return check_processed_data(err_msg);
+    }
 }
 
 void RawValue::inc_ref_count()
@@ -195,3 +199,20 @@ void RawValue::dec_ref_count()
     Assert(ref_count > 0);
     ref_count--;
 }
+
+
+bool RawValue::check_processed_data(char *err_msg)
+{
+    if (m_processed_data_size != 0 && m_processed_data_size < 12 &&
+        !(m_processed_data_size == 2 && m_processed_data[0] == '\\' && m_processed_data[1] == 'x')) {
+        check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "invalid processed_data[%s].", m_processed_data));
+        return false;
+    }
+    if (strcmp((char*)m_data_value, (char*)m_processed_data) == 0) {
+        check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "invalid processed_data[%s].", m_processed_data));
+        return false;
+    }
+    return true;
+}
+
+
