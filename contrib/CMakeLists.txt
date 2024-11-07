@@ -32,6 +32,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_lob
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_sql
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_i18n
 )
 
 if("${USE_LIBXML}" STREQUAL "ON")
@@ -75,3 +76,4 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
 endif()
 add_subdirectory(gms_profiler)
 add_subdirectory(gms_lob)
+add_subdirectory(gms_i18n)

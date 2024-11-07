@@ -1,0 +1,5 @@
+# gms_i18n extension
+comment = 'collection of i18n for PL/SQL applications'
+default_version = '1.0'
+module_pathname = '$libdir/gms_i18n'
+relocatable = true

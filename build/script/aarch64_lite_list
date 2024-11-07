@@ -71,6 +71,8 @@
 ./share/postgresql/extension/gms_lob.control
 ./share/postgresql/extension/gms_sql--1.0.sql
 ./share/postgresql/extension/gms_sql.control
+./share/postgresql/extension/gms_i18n--1.0.sql
+./share/postgresql/extension/gms_i18n.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -764,6 +766,7 @@
 ./lib/postgresql/gms_profiler.so
 ./lib/postgresql/gms_lob.so
 ./lib/postgresql/gms_sql.so
+./lib/postgresql/gms_i18n.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
 ./include/postgresql/server/pgtime.h

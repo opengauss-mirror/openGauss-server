@@ -1,0 +1,145 @@
+create extension gms_i18n;
+create schema gms_i18n_test;
+set search_path=gms_i18n_test;
+-- test gms_i18n.raw_to_char
+select gms_i18n.raw_to_char(hextoraw('616263646566C2AA'), 'utf8');
+ raw_to_char 
+-------------
+ abcdefª
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('e6b58be8af95'), 'utf8');
+ raw_to_char 
+-------------
+ 测试
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('e6b58be8af95'), '');
+ raw_to_char 
+-------------
+ 测试
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('e6b58be8af95'));
+ raw_to_char 
+-------------
+ 测试
+(1 row)
+
+select gms_i18n.raw_to_char('', 'utf8');
+ raw_to_char 
+-------------
+ 
+(1 row)
+
+select gms_i18n.raw_to_char('', '');
+ raw_to_char 
+-------------
+ 
+(1 row)
+
+select gms_i18n.raw_to_char('');
+ raw_to_char 
+-------------
+ 
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('e6b58be8af95'), 'unvalid_charset');
+ERROR:  invalid source encoding name "unvalid_charset"
+CONTEXT:  referenced column: raw_to_char
+select gms_i18n.raw_to_char(hextoraw('b2e2cad4'), 'gbk');
+ raw_to_char 
+-------------
+ 测试
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('b2e2cad4'), 'euc_cn');
+ raw_to_char 
+-------------
+ 测试
+(1 row)
+
+select gms_i18n.raw_to_char(hextoraw('b4fab8d5'), 'big5');
+ raw_to_char 
+-------------
+ 測試
+(1 row)
+
+select gms_i18n.raw_to_char();
+ERROR:  function gms_i18n.raw_to_char() does not exist
+LINE 1: select gms_i18n.raw_to_char();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: raw_to_char
+-- test gms_i18n.string_to_raw
+select gms_i18n.string_to_raw('abcdefª', 'utf8');
+  string_to_raw   
+------------------
+ 616263646566C2AA
+(1 row)
+
+select gms_i18n.string_to_raw('测试', 'utf8');
+ string_to_raw 
+---------------
+ E6B58BE8AF95
+(1 row)
+
+select gms_i18n.string_to_raw('测试', '');
+ string_to_raw 
+---------------
+ E6B58BE8AF95
+(1 row)
+
+select gms_i18n.string_to_raw('测试');
+ string_to_raw 
+---------------
+ E6B58BE8AF95
+(1 row)
+
+select gms_i18n.string_to_raw('', 'utf8');
+ string_to_raw 
+---------------
+ 
+(1 row)
+
+select gms_i18n.string_to_raw('', '');
+ string_to_raw 
+---------------
+ 
+(1 row)
+
+select gms_i18n.string_to_raw('');
+ string_to_raw 
+---------------
+ 
+(1 row)
+
+select gms_i18n.string_to_raw('测试', 'unvalid_charset');
+ERROR:  invalid destination encoding name "unvalid_charset"
+CONTEXT:  referenced column: string_to_raw
+select gms_i18n.string_to_raw('测试', 'gbk');
+ string_to_raw 
+---------------
+ B2E2CAD4
+(1 row)
+
+select gms_i18n.string_to_raw('测试', 'euc_cn');
+ string_to_raw 
+---------------
+ B2E2CAD4
+(1 row)
+
+select gms_i18n.string_to_raw('測試', 'big5');
+ string_to_raw 
+---------------
+ B4FAB8D5
+(1 row)
+
+select gms_i18n.string_to_raw();
+ERROR:  function gms_i18n.string_to_raw() does not exist
+LINE 1: select gms_i18n.string_to_raw();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: string_to_raw
+reset search_path;
+drop schema gms_i18n_test cascade;
