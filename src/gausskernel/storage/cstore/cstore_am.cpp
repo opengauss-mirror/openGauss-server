@@ -889,8 +889,9 @@ void CStore::CStoreScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatch
     RoughCheckIfNeed(state);
     CSTORESCAN_TRACE_END(MIN_MAX_CHECK);
 
-    if (m_isImcstore && ImcstoreFillByDeltaScan(state, vecBatchOut)) {
-        return;
+    if (m_isImcstore) {
+        state->ss_deltaScan = ImcstoreFillByDeltaScan(state, vecBatchOut);
+        if (state->ss_deltaScan) return;
     }
 
     // step3: Have CU hitted
