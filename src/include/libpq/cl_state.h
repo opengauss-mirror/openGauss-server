@@ -79,6 +79,7 @@ public:
     size_t get_rec_origial_ids_length(const Oid typid, const char* pname) const;
     PGconn* m_conn;
     bool enable_client_encryption;
+    bool enable_client_encryption_log;
     bool disable_once;
     PreparedStatementsList *preparedStatements;
     PreparedStatementsList *pendingStatements;

@@ -120,6 +120,7 @@ void StatementData::replace_raw_values()
             params.new_query = (char *)libpq_realloc(params.new_query, params.new_query_size,
                 params.new_query_size + (new_size - original_size) + 1);
             if (params.new_query == NULL) {
+                fprintf(stderr, "cannot realloc memory for encrypt str.\n");
                 return;
             }
         }
@@ -129,6 +130,8 @@ void StatementData::replace_raw_values()
         if (new_str != NULL) {
             check_memcpy_s(memcpy_s(params.new_query + raw_value->m_location,
                 params.new_query_size - raw_value->m_location, new_str, new_size));
+        } else {
+            fprintf(stderr, "cannot get the str after encrypt.\n");
         }
         params.new_query[params.new_query_size] = '\0';
     }

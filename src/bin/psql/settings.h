@@ -98,6 +98,7 @@ typedef struct _psqlSettings {
     bool on_error_stop;
     bool quiet;
     bool enable_client_encryption;
+    bool enable_client_encryption_log;
     bool singleline;
     bool singlestep;
     bool maintance;

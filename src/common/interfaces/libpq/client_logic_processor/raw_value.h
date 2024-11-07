@@ -57,6 +57,7 @@ public:
     bool safe_to_delete() {
         return ref_count == 0;
     }
+    bool check_processed_data(char *err_msg);
 public:
     bool m_is_param;
 

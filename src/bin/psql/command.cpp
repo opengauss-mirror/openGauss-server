@@ -1518,7 +1518,14 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
         values[7] = CONNECT_TIMEOUT;
 #ifdef HAVE_CE
         keywords[8] = "enable_ce";
-        values[8] = (pset.enable_client_encryption) ? "1" : NULL;
+        if (!pset.enable_client_encryption_log) {
+            values[8] = (pset.enable_client_encryption) ? "1" : NULL;
+        } else {
+            values[8] = (pset.enable_client_encryption) ? "1_with_log" : NULL;
+            if (pset.enable_client_encryption) {
+                printf("do_connect with enable_client_encryption.\n");
+            }
+        }
 #endif
         keywords[PARAMS_ARRAY_SIZE-1] = NULL;
         values[PARAMS_ARRAY_SIZE-1] = NULL;
