@@ -9329,8 +9329,21 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     int width = 0;
     Oid resultRelOid = InvalidOid; /* the relOid is used to cost memory when open relations. */
 #ifdef STREAMPLAN
+    bool iudParallel = false;
+    int iudDop = DEFAULT_DOP;
+    bool isUstore = false;
     ExecNodes* exec_nodes = NULL;
 #endif
+    List* resultRelation = (List*)linitial(resultRelations);
+    Index resultidx;
+    if (resultRelation != NIL && root->simple_rte_array != NULL) {
+        resultidx = (Index)linitial_int(resultRelation);
+        RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
+        isUstore = result_rte->is_ustore;
+    }
+
+    bool supportIUDParallel = (operation == CMD_DELETE || operation == CMD_UPDATE || operation == CMD_INSERT) &&
+                        returningLists == NIL && !isUstore && list_length(subplans) == 1;
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -9346,13 +9359,17 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     init_plan_cost(plan);
     total_size = 0;
 
-    /*
-     * Modify table can not parallel.
-     * If the subplan already parallelize,
-     * add local gather.
-     */
-    if (u_sess->opt_cxt.query_dop > 1) {
-        deparallelize_modifytable(subplans);
+    if (u_sess->opt_cxt.query_dop > DEFAULT_DOP) {
+        //In sepecific scenarios, modify table can parallel.
+        if (supportIUDParallel) {
+            Plan* subplan = (Plan*)linitial(subplans);
+            if (subplan->dop > DEFAULT_DOP) {
+                iudParallel = true;
+                iudDop = subplan->dop;
+            }
+        } else {
+            deparallelize_modifytable(subplans);
+        }
     }
 
     foreach (subnode, subplans) {
@@ -9383,7 +9400,8 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     else
         plan->plan_width = 0;
 
-    node->plan.dop = 1;
+    node->plan.parallel_enabled = iudParallel;
+    node->plan.dop = iudDop;
     node->plan.lefttree = NULL;
     node->plan.righttree = NULL;
     node->plan.qual = NIL;
@@ -9420,7 +9438,6 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     node->plan.exec_nodes = exec_nodes;
 
     resultRelations = (List*)linitial(resultRelations);
-    Index resultidx;
     if (resultRelations != NIL && root->simple_rte_array != NULL) {
         resultidx = (Index)linitial_int(resultRelations);
         RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
@@ -9526,6 +9543,9 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
                         &node->mem_info);
                 }
             }
+        }
+        if (iudParallel) {
+            rtn = create_local_gather(rtn);
         }
         return rtn;
     } else {

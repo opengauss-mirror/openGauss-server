@@ -74,8 +74,8 @@ analyze t2;
 :EXP insert /*+ set(query_dop 1008) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Insert on t1
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Insert on t1
          ->  Nested Loop
                Join Filter: (tt1.c1 = tt2.c1)
                ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
@@ -199,10 +199,10 @@ deallocate all;
 :EXP insert /*+ set(query_dop 1008) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1 on duplicate key update c2 = c2 + 1;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Insert on t1
-   Conflict Resolution: UPDATE
-   Conflict Arbiter Indexes: t1_pkey
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Insert on t1
+         Conflict Resolution: UPDATE
+         Conflict Arbiter Indexes: t1_pkey
          ->  Nested Loop
                Join Filter: (tt1.c1 = tt2.c1)
                ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
@@ -325,8 +325,8 @@ deallocate all;
 :EXP update /*+ set(query_dop 1008) */ t1 set c2 = 2 where c2 in (select c2 from t2);
                          QUERY PLAN                          
 -------------------------------------------------------------
- Update on t1
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Update on t1
          ->  Nested Loop
                Join Filter: (t1.c2 = t2.c2)
                ->  HashAggregate
@@ -457,8 +457,8 @@ deallocate all;
 :EXP delete /*+ set(query_dop 1008) */ t1 where c2 in (select c2 from t2);
                          QUERY PLAN                          
 -------------------------------------------------------------
- Delete on t1
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Delete on t1
          ->  Nested Loop
                Join Filter: (t1.c2 = t2.c2)
                ->  HashAggregate
