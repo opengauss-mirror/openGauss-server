@@ -716,6 +716,7 @@ test: a_outerjoin_conversion
 
 test: setrefs
 test: agg window_agg_stream_test
+test: aggregates_hypothetical
 
 # test sql by pass
 test: bypass_simplequery_support

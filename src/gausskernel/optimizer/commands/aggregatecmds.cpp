@@ -124,6 +124,8 @@ ObjectAddress DefineAggregate(List* name, List* args, bool oldstyle, List* param
             initval = defGetString(defel);
         else if (pg_strcasecmp(defel->defname, "initcond1") == 0)
             initval = defGetString(defel);
+        else if (pg_strcasecmp(defel->defname, "hypothetical") == 0)
+            aggKind = AGGKIND_HYPOTHETICAL;
 #ifdef PGXC
         else if (pg_strcasecmp(defel->defname, "cfunc") == 0)
             collectfuncName = defGetQualifiedName(defel);

@@ -248,6 +248,7 @@ extern void heap_slot_getsomeattrs(TupleTableSlot* slot, int attnum);
 extern bool heap_slot_attisnull(TupleTableSlot* slot, int attnum);
 extern void heap_slot_formbatch(TupleTableSlot* slot, struct VectorBatch* batch, int cur_rows, int attnum);
 
+
 #ifdef USE_SPQ
 extern Datum slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull);
 extern void slot_getsomeattrs(TupleTableSlot *slot, int attnum);

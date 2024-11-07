@@ -103,7 +103,8 @@ typedef FormData_pg_aggregate *Form_pg_aggregate;
 #define AGGKIND_NORMAL				'n'
 #define AGGKIND_DEFAULT				'n'
 #define AGGKIND_ORDERED_SET			'o'
-#define AGGKIND_IS_ORDERED_SET(kind)  ((kind) == AGGKIND_ORDERED_SET)
+#define AGGKIND_HYPOTHETICAL        'h'
+#define AGGKIND_IS_ORDERED_SET(kind)  ((kind) != AGGKIND_NORMAL)
 #define AGGNUMDIRECTARGS_DEFAULT	 0
 /* ----------------
  * initial contents of pg_aggregate
@@ -475,6 +476,11 @@ DATA(insert ( 4508	interval_list_agg_noarg2_transfn			-	list_agg_finalfn			0	228
 DATA(insert ( 4452 ordered_set_transition      -    percentile_cont_float8_final            0   2281    _null_   _null_ 	 o 1));
 DATA(insert ( 4454 ordered_set_transition      -    percentile_cont_interval_final          0   2281    _null_   _null_ 	 o 1));
 DATA(insert (4461 ordered_set_transition - mode_final 0 2281 _null_ _null_ o 0));
+
+DATA(insert ( 3148 ordered_set_transition_multi      -    cume_dist_final            0   2281    _null_   _null_ 	 h 1));
+DATA(insert ( 3248 ordered_set_transition_multi      -    rank_final            0   2281    _null_   _null_ 	 h 1));
+DATA(insert ( 4082 ordered_set_transition_multi      -    dense_rank_final            0   2281    _null_   _null_ 	 h 1));
+DATA(insert ( 4083 ordered_set_transition_multi      -    percent_rank_final            0   2281    _null_   _null_ 	 h 1));
 
 DATA(insert (5555 median_transfn      -    median_float8_finalfn            0   2281    _null_   _null_ 	 n 0));
 DATA(insert (5556 median_transfn      -    median_interval_finalfn          0   2281    _null_   _null_ 	 n 0));

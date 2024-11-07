@@ -4740,3 +4740,62 @@ static void exec_lookups_agg_flattened(AggState *aggstate, Agg *node, EState *es
         phase->evaltrans = ExecBuildAggTrans(aggstate, phase, dosort, dohash);
     }
 }
+
+/*
+ * AggGetAggref - allow an aggregate support function to get its Aggref
+ *
+ * If the function is being called as an aggregate support function,
+ * return the Aggref node for the aggregate call.  Otherwise, return NULL.
+ *
+ * Note that if an aggregate is being used as a window function, this will
+ * return NULL.  We could provide a similar function to return the relevant
+ * WindowFunc node in such cases, but it's not needed yet.
+ */
+Aggref *AggGetAggref(FunctionCallInfo fcinfo)
+{
+    if (fcinfo->context && IsA(fcinfo->context, AggState)) {
+        AggStatePerAgg curperagg = ((AggState *) fcinfo->context)->curperagg;
+
+        if (curperagg)
+            return curperagg->aggref;
+    }
+    return NULL;
+}
+
+
+/*
+ * AggGetPerAggEContext - fetch per-output-tuple ExprContext
+ *
+ * This is useful for aggs to register shutdown callbacks, which will ensure
+ * that non-memory resources are freed.
+ *
+ * As above, this is currently not useful for aggs called as window functions.
+ */
+ExprContext *AggGetPerAggEContext(FunctionCallInfo fcinfo)
+{
+    if (fcinfo->context && IsA(fcinfo->context, AggState)) {
+        AggState   *aggstate = (AggState *) fcinfo->context;
+
+        return aggstate->ss.ps.ps_ExprContext;
+    }
+    return NULL;
+}
+
+/*
+ * AggGetPerTupleEContext - fetch per-input-tuple ExprContext
+ *
+ * This is useful in agg final functions; the econtext returned is the
+ * same per-tuple context that the transfn was called in (which can
+ * safely get reset during the final function).
+ *
+ * As above, this is currently not useful for aggs called as window functions.
+ */
+ExprContext *AggGetPerTupleEContext(FunctionCallInfo fcinfo)
+{
+    if (fcinfo->context && IsA(fcinfo->context, AggState)) {
+        AggState   *aggstate = (AggState *) fcinfo->context;
+
+        return aggstate->tmpcontext;
+    }
+    return NULL;
+}

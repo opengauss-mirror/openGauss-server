@@ -1774,7 +1774,11 @@ extern Datum tdigest_mergep(PG_FUNCTION_ARGS);
 extern Datum calculate_value_at(PG_FUNCTION_ARGS);
 extern Datum tdigest_out(PG_FUNCTION_ARGS);
 extern Datum tdigest_in(PG_FUNCTION_ARGS);
-
+extern Datum ordered_set_transition_multi(PG_FUNCTION_ARGS);
+extern Datum hypothetical_cume_dist_final(PG_FUNCTION_ARGS);
+extern Datum hypothetical_rank_final(PG_FUNCTION_ARGS);
+extern Datum hypothetical_dense_rank_final(PG_FUNCTION_ARGS);
+extern Datum hypothetical_percent_rank_final(PG_FUNCTION_ARGS);
 /* AI */
 extern Datum db4ai_predict_by(PG_FUNCTION_ARGS);
 extern Datum db4ai_explain_model(PG_FUNCTION_ARGS);

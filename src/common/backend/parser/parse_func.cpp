@@ -43,7 +43,8 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs, bool
 static Oid cl_get_input_param_original_type(Oid func_oid, int argno);
 static bool CheckDefaultArgsPosition(int2vector* defaultargpos, int pronargdefaults, int ndargs,
     int pronallargs, int pronargs, HeapTuple procTup);
-
+static void unify_hypothetical_args(ParseState *pstate,
+    List *fargs, int numAggregatedArgs, Oid *actual_arg_types, Oid *declared_arg_types);
 /*
  *	Parse a function call
  *
@@ -305,6 +306,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
         /* Now do the saftey check. */
         if (isOrderedSet) {
             int numDirectArgs = 0;
+            int numAggregatedArgs = 0;
 
             if (!agg_within_group)
                 ereport(ERROR,
@@ -337,7 +339,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
              * While agg_order is the number of aggregated args, we can conduct
              * the number of direct args.
              */
-            numDirectArgs = nargs - list_length(agg_order);
+            numAggregatedArgs = list_length(agg_order);
+            numDirectArgs = nargs - numAggregatedArgs;
             Assert(numDirectArgs >= 0);
             if (nvargs > 1)
                 pronargs -= nvargs - 1;
@@ -354,8 +357,20 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
                                 numDirectArgs),
                             parser_errposition(pstate, location)));
             } else {
+                if (aggkind == AGGKIND_HYPOTHETICAL) {
+                    int argsfactor = 2;
+                    if (nvargs != argsfactor * numAggregatedArgs)
+                        ereport(ERROR,
+                                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                                 errmsg("function %s does not exist",
+                                        func_signature_string(funcname, nargs, argnames, actual_arg_types)),
+                                 errhint("To use the hypothetical-set aggregate %s, the number of hypothetical direct "
+                                         "arguments (here %d) must match the number of ordering columns (here %d).",
+                                         NameListToString(funcname), nvargs - numAggregatedArgs, numAggregatedArgs),
+                                 parser_errposition(pstate, location)));
+                }
                 /* the agg was "..., VARIADIC ORDER BY VARIADIC" */
-                if (nvargs <= list_length(agg_order))
+                if (nvargs <= numAggregatedArgs)
                     ereport(ERROR,
                         (errcode(ERRCODE_UNDEFINED_FUNCTION),
                             errmsg("function %s does not exist",
@@ -365,6 +380,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
                                 catDirectArgs),
                             parser_errposition(pstate, location)));
             }
+            /* Check type matching of hypothetical arguments */
+            if (aggkind == AGGKIND_HYPOTHETICAL)
+                unify_hypothetical_args(pstate, fargs, numAggregatedArgs,
+                                        actual_arg_types, declared_arg_types);
+
         } else {
             /* Normal aggregate, so it can't have WITHIN GROUP */
             if (agg_within_group)
@@ -1884,6 +1904,96 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
     }
 
     return FUNCDETAIL_NOTFOUND;
+}
+
+
+/*
+ * unify_hypothetical_args()
+ *
+ * Ensure that each hypothetical direct argument of a hypothetical-set
+ * aggregate has the same type as the corresponding aggregated argument.
+ * Modify the expressions in the fargs list, if necessary, and update
+ * actual_arg_types[].
+ *
+ * If the agg declared its args non-ANY (even ANYELEMENT), we need only a
+ * sanity check that the declared types match; make_fn_arguments will coerce
+ * the actual arguments to match the declared ones.  But if the declaration
+ * is ANY, nothing will happen in make_fn_arguments, so we need to fix any
+ * mismatch here.  We use the same type resolution logic as UNION etc.
+ */
+static void unify_hypothetical_args(ParseState *pstate,
+                                    List *fargs,
+                                    int numAggregatedArgs,
+                                    Oid *actual_arg_types,
+                                    Oid *declared_arg_types)
+{
+    Node        *args[FUNC_MAX_ARGS];
+    int         numDirectArgs, numNonHypotheticalArgs;
+    int         i;
+    ListCell    *lc;
+
+    numDirectArgs = list_length(fargs) - numAggregatedArgs;
+    numNonHypotheticalArgs = numDirectArgs - numAggregatedArgs;
+    /* safety check (should only trigger with a misdeclared agg) */
+    if (numNonHypotheticalArgs < 0)
+        elog(ERROR, "incorrect number of arguments to hypothetical-set aggregate");
+
+    /* Deconstruct fargs into an array for ease of subscripting */
+    i = 0;
+    foreach(lc, fargs) {
+        args[i++] = (Node *) lfirst(lc);
+    }
+
+    /* Check each hypothetical arg and corresponding aggregated arg */
+    for (i = numNonHypotheticalArgs; i < numDirectArgs; i++) {
+        int			aargpos = numDirectArgs + (i - numNonHypotheticalArgs);
+        Oid			commontype;
+
+        /* A mismatch means AggregateCreate didn't check properly ... */
+        if (declared_arg_types[i] != declared_arg_types[aargpos])
+            elog(ERROR, "hypothetical-set aggregate has inconsistent declared argument types");
+
+        /* No need to unify if make_fn_arguments will coerce */
+        if (declared_arg_types[i] != ANYOID)
+            continue;
+
+        /*
+         * Select common type, giving preference to the aggregated argument's
+         * type (we'd rather coerce the direct argument once than coerce all
+         * the aggregated values).
+         */
+        commontype = select_common_type(pstate,
+                                        list_make2(args[aargpos], args[i]),
+                                        "WITHIN GROUP",
+                                        NULL);
+
+        /*
+         * Perform the coercions.  We don't need to worry about NamedArgExprs
+         * here because they aren't supported with aggregates.
+         */
+        args[i] = coerce_type(pstate,
+                              args[i],
+                              actual_arg_types[i],
+                              commontype, -1,
+                              COERCION_IMPLICIT,
+                              COERCE_IMPLICIT_CAST,
+                              -1);
+        actual_arg_types[i] = commontype;
+        args[aargpos] = coerce_type(pstate,
+                                    args[aargpos],
+                                    actual_arg_types[aargpos],
+                                    commontype, -1,
+                                    COERCION_IMPLICIT,
+                                    COERCE_IMPLICIT_CAST,
+                                    -1);
+        actual_arg_types[aargpos] = commontype;
+    }
+
+    /* Reconstruct fargs from array */
+    i = 0;
+    foreach(lc, fargs) {
+        lfirst(lc) = args[i++];
+    }
 }
 
 /*

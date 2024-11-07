@@ -623,6 +623,11 @@ extern void** find_rendezvous_variable(const char* varName);
 
 extern int AggCheckCallContext(FunctionCallInfo fcinfo, MemoryContext* aggcontext);
 
+typedef struct Aggref *fmAggrefPtr;
+typedef struct ExprContext *fmExprContextPtr;
+extern fmAggrefPtr AggGetAggref(FunctionCallInfo fcinfo);
+extern fmExprContextPtr AggGetPerTupleEContext(FunctionCallInfo fcinfo);
+extern fmExprContextPtr AggGetPerAggEContext(FunctionCallInfo fcinfo);
 /*
  * We allow plugin modules to hook function entry/exit.  This is intended
  * as support for loadable security policy modules, which may want to

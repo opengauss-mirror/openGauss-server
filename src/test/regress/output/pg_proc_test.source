@@ -5,19 +5,28 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
         2276 | 3058 | concat
         2276 | 3059 | concat_ws
         1185 | 3119 | standby_statement_history
+        2276 | 3148 | cume_dist
         2276 | 3239 | json_build_array
+        2276 | 3248 | rank
+        2276 | 3249 | rank_final
         2276 | 3261 | json_build_object
           25 | 3262 | json_extract_path
           25 | 3264 | json_extract_path_text
           25 | 3425 | jsonb_extract_path
           25 | 3426 | jsonb_extract_path_text
         2276 | 3539 | format
+        2276 | 4082 | dense_rank
+        2276 | 4083 | percent_rank
+        2276 | 4084 | dense_rank_final
+        2276 | 4085 | percent_rank_final
         2276 | 4097 | group_concat
         2276 | 4099 | group_concat_transfn
           25 | 4216 | pg_logical_slot_get_changes
           25 | 4217 | pg_logical_slot_get_binary_changes
           25 | 4218 | pg_logical_slot_peek_changes
           25 | 4219 | pg_logical_slot_peek_binary_changes
+           0 | 4464 | ordered_set_transition_multi
+        2276 | 4465 | cume_dist_final
           25 | 4978 | pg_logical_get_area_changes
         2276 | 7101 | db4ai_predict_by_bool
         2276 | 7102 | db4ai_predict_by_int32
@@ -27,7 +36,7 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
         2276 | 7107 | db4ai_predict_by_numeric
         2276 | 7108 | db4ai_predict_by_text
         2276 | 7109 | db4ai_predict_by_float8_array
-(26 rows)
+(35 rows)
 
 select prokind,length(prokind),count(*) from pg_proc where oid < 16384 group by prokind;
  prokind | length | count 
