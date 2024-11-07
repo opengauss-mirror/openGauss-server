@@ -104,6 +104,7 @@ install:
 	@if test -d contrib/age; then $(MAKE) -C contrib/age $@; fi
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec clean; fi
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec $@; fi
+	@if test -d contrib/gms_compress; then $(MAKE) -C contrib/gms_compress $@; fi
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi

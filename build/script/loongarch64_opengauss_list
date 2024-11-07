@@ -97,6 +97,8 @@
 ./share/postgresql/extension/mot_fdw.control
 ./share/postgresql/extension/postgres_fdw--1.0.sql
 ./share/postgresql/extension/postgres_fdw.control
+./share/postgresql/extension/gms_compress--1.0.sql
+./share/postgresql/extension/gms_compress.control
 ./share/postgresql/extension/dblink--1.0.sql
 ./share/postgresql/extension/dblink--unpackaged--1.0.sql
 ./share/postgresql/extension/dblink.control
@@ -775,6 +777,7 @@
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so
+./lib/postgresql/gms_compress.so
 ./lib/postgresql/dblink.so
 ./lib/postgresql/pgoutput.so
 ./lib/postgresql/assessment.so

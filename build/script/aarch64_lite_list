@@ -49,6 +49,8 @@
 ./share/postgresql/extension/dolphin--2.0.1--2.0.sql
 ./share/postgresql/extension/dolphin--4.0--4.0.1.sql
 ./share/postgresql/extension/dolphin--4.0.1--4.0.sql
+./share/postgresql/extension/gms_compress--1.0.sql
+./share/postgresql/extension/gms_compress.control
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control
@@ -745,6 +747,7 @@
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
 ./lib/postgresql/dolphin.so
+./lib/postgresql/gms_compress.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
