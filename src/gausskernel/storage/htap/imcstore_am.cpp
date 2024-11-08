@@ -108,7 +108,8 @@ void IMCStore::InitScan(CStoreScanState* state, Snapshot snapshot)
     m_relation = state->ss_currentRelation;
 
     m_imcstoreDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(m_relation));
-    m_currentRowGroups = NIL;
+    UnlockRowGroups();
+    u_sess->imcstore_ctx.pinnedRowGroups = NIL;
     m_ctidCol = m_imcstoreDesc->imcsNatts;
     m_deltaScanCurr = 0;
     m_deltaMaskMax = 0;
@@ -420,7 +421,8 @@ bool IMCStore::LoadCUDesc(
         if (rowgroup != NULL) {
             pthread_rwlock_rdlock(&rowgroup->m_mutex);
             MemoryContext old = MemoryContextSwitchTo(m_scanMemContext);
-            m_currentRowGroups = lappend(m_currentRowGroups, rowgroup);
+            PinnedRowGroup* pinned = New(CurrentMemoryContext)PinnedRowGroup(rowgroup, m_imcstoreDesc);
+            u_sess->imcstore_ctx.pinnedRowGroups = lappend(u_sess->imcstore_ctx.pinnedRowGroups, pinned);
             MemoryContextSwitchTo(old);
         }
         char* valPtr = NULL;
@@ -532,14 +534,11 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     DeltaOperationType ctidtpye;
 
     while ((item = deltaIter.GetNext(&ctidtpye, nullptr)) != NULL) {
-        if (ctidtpye == DeltaOperationType::IMCSTORE_INSERT) {
-            BlockNumber blockoffset = ItemPointerGetBlockNumber(item) - cuid * MAX_IMCS_PAGES_ONE_CU;
-            OffsetNumber offset = ItemPointerGetOffsetNumber(item);
-            uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
-            m_cuDeltaMask[idx >> 3] |= (1 << (idx % 8));
-            m_deltaMaskMax = Max(idx, m_deltaMaskMax);
-            continue;
-        }
+        BlockNumber blockoffset = ItemPointerGetBlockNumber(item) - cuid * MAX_IMCS_PAGES_ONE_CU;
+        OffsetNumber offset = ItemPointerGetOffsetNumber(item);
+        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
+        m_cuDeltaMask[idx >> 3] |= (1 << (idx % 8));
+        m_deltaMaskMax = Max(idx, m_deltaMaskMax);
         if (cu == NULL) {
             continue;
         }
@@ -785,14 +784,17 @@ RETRY_LOAD_CU:
     return cuPtr;
 }
 
-void IMCStore::UnlockRowGroups()
+void UnlockRowGroups()
 {
-    if (!m_currentRowGroups) return;
-    ListCell *lc = NULL;
-    foreach(lc, m_currentRowGroups) {
-        RowGroup* rowgroup = (RowGroup*)lfirst(lc);
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
-        m_imcstoreDesc->UnReferenceRowGroup();
+    if (!u_sess->imcstore_ctx.pinnedRowGroups) {
+        return;
     }
-    list_free_ext(m_currentRowGroups);
+    ListCell *lc = NULL;
+    foreach(lc, u_sess->imcstore_ctx.pinnedRowGroups) {
+        PinnedRowGroup* pinned = (PinnedRowGroup*)lfirst(lc);
+        pthread_rwlock_unlock(&pinned->rowgroup->m_mutex);
+        pinned->desc->UnReferenceRowGroup();
+        delete pinned;
+    }
+    list_free_ext(u_sess->imcstore_ctx.pinnedRowGroups);
 }
