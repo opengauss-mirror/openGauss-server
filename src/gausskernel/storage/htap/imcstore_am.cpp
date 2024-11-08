@@ -581,14 +581,14 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 //    the cache entry.
 CU* IMCStore::GetCUData(CUDesc* cuDescPtr, int colIdx, int valSize, int& slotId)
 {
-    colIdx = m_isCtidCU ? m_ctidCol : m_imcstoreDesc->attmap[colIdx];
+    int imcsColIdx = m_isCtidCU ? m_ctidCol : m_imcstoreDesc->attmap[colIdx];
 
     /*
      * we will reset m_PerScanMemCnxt when switch to the next batch of cudesc data.
      * so the spaces only used for this batch should be managed by m_PerScanMemCnxt,
      * including the peices of space used in the decompression.
      */
-    if (colIdx != m_ctidCol && m_relation->rd_att->attrs[colIdx].attisdropped) {
+    if (imcsColIdx != m_ctidCol && m_relation->rd_att->attrs[colIdx].attisdropped) {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPERATION),
                  (errmsg("Cannot get CUData for a dropped column \"%s\" of table \"%s\"",
@@ -603,7 +603,7 @@ CU* IMCStore::GetCUData(CUDesc* cuDescPtr, int colIdx, int valSize, int& slotId)
     CUUncompressedRetCode retCode = CU_OK;
     bool hasFound = false;
     DataSlotTag dataSlotTag = IMCU_CACHE->InitCUSlotTag(
-        (RelFileNodeOld *)&m_relation->rd_node, colIdx, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
+        (RelFileNodeOld *)&m_relation->rd_node, imcsColIdx, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
 
     // Record a fetch (read).
     // The fetch count is the sum of the hits and reads.
@@ -630,7 +630,7 @@ RETRY_LOAD_CU:
     // Use the cached CU
     cuPtr = IMCU_CACHE->GetCUBuf(slotId);
     cuPtr->m_inCUCache = true;
-    if (colIdx == m_ctidCol) {
+    if (imcsColIdx == m_ctidCol) {
         cuPtr->SetAttInfo(valSize, -1, TIDOID);
     } else {
         cuPtr->SetAttInfo(valSize, attrs[colIdx].atttypmod, attrs[colIdx].atttypid);
@@ -646,7 +646,7 @@ RETRY_LOAD_CU:
                      errmsg("CU wait IO find an error, need to reload! table(%s), column(%s), relfilenode(%u/%u/%u), "
                             "cuid(%u)",
                             RelationGetRelationName(m_relation),
-                            (colIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
+                            (imcsColIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
                             m_relation->rd_node.spcNode,
                             m_relation->rd_node.dbNode,
                             m_relation->rd_node.relNode,
@@ -676,7 +676,7 @@ RETRY_LOAD_CU:
                               errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), "
                                      "column(%s), relfilenode(%u/%u/%u), cuid(%u)",
                                      RelationGetRelationName(m_relation),
-                                     (colIdx == m_ctidCol)
+                                     (imcsColIdx == m_ctidCol)
                                      ? "ctid"
                                      : NameStr(m_relation->rd_att->attrs[colIdx].attname),
                                      m_relation->rd_node.spcNode, m_relation->rd_node.dbNode,
@@ -688,15 +688,15 @@ RETRY_LOAD_CU:
                          errmodule(MOD_ADIO),
                          errmsg("Load CU failed in adio! table(%s), column(%s), relfilenode(%u/%u/%u), cuid(%u)",
                                 RelationGetRelationName(m_relation),
-                                (colIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
+                                (imcsColIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
                                 m_relation->rd_node.spcNode,
                                 m_relation->rd_node.dbNode,
                                 m_relation->rd_node.relNode,
                                 cuDescPtr->cu_id)));
             } else if (retCode == CU_ERR_CRC || retCode == CU_ERR_MAGIC) {
                 /* Prefech CU contains incorrect checksum */
-                addBadBlockStat(&m_imcuStorage[colIdx]->m_cnode.m_rnode,
-                    ColumnId2ColForkNum(m_imcuStorage[colIdx]->m_cnode.m_attid));
+                addBadBlockStat(&m_imcuStorage[imcsColIdx]->m_cnode.m_rnode,
+                    ColumnId2ColForkNum(m_imcuStorage[imcsColIdx]->m_cnode.m_attid));
 
                 // unlogged table can not remote read
                 IMCU_CACHE->TerminateCU(true);
@@ -705,7 +705,7 @@ RETRY_LOAD_CU:
                          (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, prefetch %s",
                                  cuDescPtr->cu_id,
                                  RelationGetRelationName(m_relation),
-                                 relcolpath(m_imcuStorage[colIdx]),
+                                 relcolpath(m_imcuStorage[imcsColIdx]),
                                  cuDescPtr->cu_pointer,
                                  GetUncompressErrMsg(retCode)),
                           errdetail("Can not load imcu. Should unpopulate table and re-populate"
@@ -724,8 +724,8 @@ RETRY_LOAD_CU:
     pgstatCountCUHDDSyncRead4SessionLevel();
     pgstat_count_cu_hdd_sync(m_relation);
 
-    m_imcuStorage[colIdx]->LoadCU(
-        cuPtr, cuDescPtr->cu_id, cuDescPtr->cu_size, m_imcstoreDesc);
+    // load cu from disk
+    LoadCU(imcsColIdx, cuPtr, cuDescPtr);
 
     ADIO_RUN()
     {
@@ -750,7 +750,7 @@ RETRY_LOAD_CU:
                  errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), column(%s), "
                         "relfilenode(%u/%u/%u), cuid(%u)",
                         RelationGetRelationName(m_relation),
-                        (colIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
+                        (imcsColIdx == m_ctidCol) ? "ctid" : NameStr(m_relation->rd_att->attrs[colIdx].attname),
                         m_relation->rd_node.spcNode,
                         m_relation->rd_node.dbNode,
                         m_relation->rd_node.relNode,
@@ -758,15 +758,15 @@ RETRY_LOAD_CU:
         goto RETRY_LOAD_CU;
     } else if (retCode == CU_ERR_CRC || retCode == CU_ERR_MAGIC) {
         /* Sync load CU contains incorrect checksum */
-        addBadBlockStat(
-            &m_imcuStorage[colIdx]->m_cnode.m_rnode, ColumnId2ColForkNum(m_imcuStorage[colIdx]->m_cnode.m_attid));
+        addBadBlockStat(&m_imcuStorage[imcsColIdx]->m_cnode.m_rnode,
+            ColumnId2ColForkNum(m_imcuStorage[imcsColIdx]->m_cnode.m_attid));
 
         // unlogged table can not remote read
         IMCU_CACHE->TerminateCU(true);
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, sync load %s",
                                 cuDescPtr->cu_id,
-                                RelationGetRelationName(m_relation), relcolpath(m_imcuStorage[colIdx]),
+                                RelationGetRelationName(m_relation), relcolpath(m_imcuStorage[imcsColIdx]),
                                 cuDescPtr->cu_pointer,
                                 GetUncompressErrMsg(retCode)),
                          errdetail("Can not load imcu. Should unpopulate table and re-populate "
@@ -797,4 +797,20 @@ void UnlockRowGroups()
         delete pinned;
     }
     list_free_ext(u_sess->imcstore_ctx.pinnedRowGroups);
+}
+
+void IMCStore::LoadCU(int imcsColIdx, CU *cuPtr, CUDesc *cuDescPtr)
+{
+    Assert(cuPtr && cuDescPtr);
+    int loadCUSize = cuDescPtr->numericIntLikeCU
+        ? IMCS_NUMERIC_CU_HDSZ + cuDescPtr->cuSrcBufSize + cuDescPtr->cuOffsetSize
+        : cuDescPtr->cu_size;
+    m_imcuStorage[imcsColIdx]->LoadCU(
+        cuPtr, cuDescPtr->cu_id, loadCUSize);
+    cuPtr->imcsDesc = m_imcstoreDesc;
+    cuPtr->SetCUSize(cuDescPtr->cu_size);
+    pg_atomic_add_fetch_u64(&m_imcstoreDesc->cuSizeInMem, (uint64)cuDescPtr->cu_size);
+    pg_atomic_add_fetch_u64(&m_imcstoreDesc->cuNumsInMem, 1);
+    pg_atomic_sub_fetch_u64(&m_imcstoreDesc->cuSizeInDisk, (uint64)cuDescPtr->cu_size);
+    pg_atomic_sub_fetch_u64(&m_imcstoreDesc->cuNumsInDisk, 1);
 }

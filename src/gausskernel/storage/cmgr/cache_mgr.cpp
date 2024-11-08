@@ -502,6 +502,7 @@ void CacheMgr::EvictCacheCUIntoDisk(CacheSlotId_t slotId)
     RelFileNode rnode;
     int colId;
     int32 cuId;
+    uint32 compressedBufSize;
     CU *cu = (CU *)(&m_CacheSlots[slotId * m_slot_length]);
     ParseInfosByCacheTag(&m_CacheDesc[slotId].m_cache_tag, &rnode, &colId, &cuId);
 
@@ -512,8 +513,14 @@ void CacheMgr::EvictCacheCUIntoDisk(CacheSlotId_t slotId)
 
     /* in imcstore, cache cu always uncompress */
     Assert(!cu->m_cache_compressed);
-    cu->Compress(cuDesc->row_count, 0, ALIGNOF_CUSIZE);
-    imcuStorage->SaveCU(cu->m_compressedBuf, cuId, cu->GetCUSize());
+    if (cu->m_numericIntLike) {
+        cu->PackNumericCUForFlushToDisk();
+        compressedBufSize = cu->m_compressedBufSize;
+    } else {
+        cu->Compress(cuDesc->row_count, 0, ALIGNOF_CUSIZE);
+        compressedBufSize = cu->GetCUSize();
+    }
+    imcuStorage->SaveCU(cu->m_compressedBuf, cuId, compressedBufSize);
 
     pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDesc->cu_size);
     pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInMem, 1);

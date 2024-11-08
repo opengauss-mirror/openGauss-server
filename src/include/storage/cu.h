@@ -35,6 +35,11 @@
 #include "access/htap/imcstore_delta.h"
 
 #define ROW_GROUP_INIT_NUMS (1024)
+/* header size = m_crc + m_magic + m_infoMode + m_cuSizeExcludePadding + m_srcBufSize + m_srcDataSize
+ + m_bpNullRawSize + m_offsetSize */
+#define IMCS_NUMERIC_CU_HDSZ  \
+    (sizeof(uint32) + sizeof(uint32) + sizeof(int16) + sizeof(int32) + \
+    sizeof(int32) + sizeof(int32) + sizeof(int16) + sizeof(uint32))     // 28
 #endif
 
 #define ATT_IS_CHAR_TYPE(atttypid) (atttypid == BPCHAROID || atttypid == VARCHAROID || atttypid == NVARCHAR2OID)
@@ -165,6 +170,15 @@ struct CUDesc : public BaseObject {
      * magic number is used to check CU Data valid
      */
     uint32 magic;
+
+#ifdef ENABLE_HTAP
+    /*
+     *  In imcstore,  used to pack/unpack numeric cu when flush cu into disk.
+     */
+    bool numericIntLikeCU;
+    uint32 cuSrcBufSize;
+    int32 cuOffsetSize;
+#endif
 
 public:
     CUDesc();
@@ -392,6 +406,11 @@ public:
     void AppendNullValue(int row);
 
     static void AppendCuData(_in_ Datum value, _in_ int repeat, _in_ Form_pg_attribute attr, __inout CU* cu);
+
+#ifdef ENABLE_HTAP
+    void PackNumericCUForFlushToDisk();
+    void UnpackNumericCUFromDisk(int rowCount, uint32 magic, int cuSize);
+#endif
 
     // Compress data
     //

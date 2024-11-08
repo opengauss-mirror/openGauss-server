@@ -89,6 +89,29 @@ bool CheckIsInTrans()
     return false;
 }
 
+static FORCE_INLINE int CompareAttrNumberFunc(const void *left, const void *right)
+{
+    return (*(const int2 *)left) - (*(const int2 *)right);
+}
+
+static FORCE_INLINE void DeDuplicateAttrNumber(int2* sortedAttsNums, int *colNum)
+{
+    Assert(sortedAttsNums && colNum && *colNum > 0);
+    if (*colNum == 1) {
+        return;
+    }
+
+    int curr = 0;
+    for (int i = 0; i < *colNum; i++) {
+        if (sortedAttsNums[curr] == sortedAttsNums[i]) {
+            continue;
+        }
+        ++curr;
+        sortedAttsNums[curr] = sortedAttsNums[i];
+    }
+    *colNum = curr + 1;
+}
+
 void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts)
 {
     /* check if specify cols, yes when colCnt != 0 */
@@ -114,6 +137,8 @@ void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcs
             *(attsNums + i) = attnumber;
             i++;
         }
+        qsort(attsNums, (size_t)imcsColCnt, sizeof(int2), CompareAttrNumberFunc);
+        DeDuplicateAttrNumber(attsNums, &imcsColCnt);
     } else {
         /* populate all cols */
         FormData_pg_attribute *relAtts = rel->rd_att->attrs;

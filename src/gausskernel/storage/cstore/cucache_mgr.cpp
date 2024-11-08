@@ -516,7 +516,16 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
 
     /* Always presume compressed disk and uncompressed cache. */
     UNCOMPRESS_TRACE(TRACK_START(planNodeId, UNCOMPRESS_CU));
+
+#ifdef ENABLE_HTAP
+    if (cuDescPtr->numericIntLikeCU) {
+        cuPtr->UnpackNumericCUFromDisk(cuDescPtr->row_count, cuDescPtr->magic, cuDescPtr->cu_size);
+    } else {
+        cuPtr->UnCompress(cuDescPtr->row_count, cuDescPtr->magic, align_size);
+    }
+#else
     cuPtr->UnCompress(cuDescPtr->row_count, cuDescPtr->magic, align_size);
+#endif
     UNCOMPRESS_TRACE(TRACK_END(planNodeId, UNCOMPRESS_CU));
 
     /* Do not put the compressedBuf in the cache

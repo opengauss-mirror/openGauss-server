@@ -44,7 +44,7 @@ public:
 
     // Load CU data from storage
     //
-    void LoadCU(_in_ CU* cuPtr, _in_ uint32 cuId, _in_ int size, _in_ IMCSDesc* imcsDesc);
+    void LoadCU(_in_ CU* cuPtr, _in_ uint32 cuId, _in_ int size);
 
     // Load data from file into outbuf
     //

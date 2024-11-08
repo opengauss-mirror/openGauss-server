@@ -10450,10 +10450,6 @@ void StartupXLOG(void)
             knl_g_set_redo_finish_status(0);
             ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false when starting redo")));
 
-#ifdef ENABLE_HTAP
-            /* for imcstore populate, current xlog lsn is recorded every 10000 times. */
-            int imcsXlogCnt = 0;
-#endif
             do {
                 TermFileData term_file;
 
@@ -10583,8 +10579,7 @@ void StartupXLOG(void)
                 t_thrd.xlog_cxt.LastRec = t_thrd.xlog_cxt.ReadRecPtr;
 
 #ifdef ENABLE_HTAP
-                imcsXlogCnt++;
-                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && imcsXlogCnt > 10000) {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
                     pg_atomic_write_u64(&IMCU_CACHE->m_xlog_latest_lsn, xlogreader->ReadRecPtr);
                 }
 #endif
