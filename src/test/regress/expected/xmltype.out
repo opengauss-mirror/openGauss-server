@@ -2,12 +2,12 @@
                                              List of functions
    Schema   |  Name   | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
 ------------+---------+------------------+---------------------+--------+------------+------------+---------
- pg_catalog | xmltype | xml              | xmlvalue text       | normal | f          | f          | f
+ pg_catalog | xmltype | xmltype          | xmlvalue text       | normal | f          | f          | f
 (1 row)
 
 \sf xmltype
 CREATE OR REPLACE FUNCTION pg_catalog.xmltype(xmlvalue text)
- RETURNS xml
+ RETURNS xmltype
  LANGUAGE plpgsql
  NOT FENCED NOT SHIPPABLE
 AS $function$
@@ -18,9 +18,15 @@ begin
     if dbcom != 'A' THEN
         raise exception 'Functions for type xmltype is only support in database which dbcompatibility = ''A''.';
     end if;
-    return xml(xmlvalue);
+    return xml(xmlvalue)::xmltype;
 end;
 $function$;
+\sf xmltype.createxml
+CREATE OR REPLACE FUNCTION xmltype.createxml(xmldata character varying)
+ RETURNS xmltype
+ LANGUAGE sql
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$ select xmltype($1); $function$;
 select * from pg_type where typname = 'xmltype';
  typname | typnamespace | typowner | typlen | typbyval | typtype | typcategory | typispreferred | typisdefined | typdelim | typrelid | typelem | typarray | typinput  | typoutput | typreceive  | typsend  | typmodin | typmodout | typanalyze | typalign | typstorage | typnotnull | typbasetype | typtypmod | typndims | typcollation | typdefaultbin | typdefault | typacl 
 ---------+--------------+----------+--------+----------+---------+-------------+----------------+--------------+----------+----------+---------+----------+-----------+-----------+-------------+----------+----------+-----------+------------+----------+------------+------------+-------------+-----------+----------+--------------+---------------+------------+--------

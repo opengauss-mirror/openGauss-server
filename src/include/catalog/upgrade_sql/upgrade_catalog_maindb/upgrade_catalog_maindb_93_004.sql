@@ -3,7 +3,7 @@ DROP SCHEMA IF EXISTS xmltype cascade;
 CREATE SCHEMA xmltype;
 GRANT USAGE ON SCHEMA xmltype TO PUBLIC;
 CREATE OR REPLACE FUNCTION pg_catalog.xmltype(xmlvalue text)
-RETURNS xml as $$
+RETURNS xmltype as $$
 declare
     dbcom text;
 begin
@@ -11,7 +11,7 @@ begin
     if dbcom != 'A' THEN
         raise exception 'Functions for type xmltype is only support in database which dbcompatibility = ''A''.';
     end if;
-    return xml(xmlvalue);
+    return xml(xmlvalue)::xmltype;
 end;
 $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION pg_catalog.xmltype() IS 'pg_catalog function XMLTYPE';
@@ -20,6 +20,6 @@ COMMENT ON FUNCTION pg_catalog.xmltype() IS 'pg_catalog function XMLTYPE';
  * createxml function
  */
 CREATE OR REPLACE FUNCTION xmltype.createxml(xmldata varchar2)
-RETURNS xml 
+RETURNS xmltype 
 AS $$ select xmltype($1); $$
 LANGUAGE SQL IMMUTABLE STRICT;

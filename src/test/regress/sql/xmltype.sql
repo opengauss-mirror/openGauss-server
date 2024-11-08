@@ -1,5 +1,6 @@
 \df xmltype
 \sf xmltype
+\sf xmltype.createxml
 select * from pg_type where typname = 'xmltype';
 create table t_xmltype(xml xmltype);
 \d t_xmltype
