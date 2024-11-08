@@ -2960,6 +2960,7 @@ typedef struct knl_u_hook_context {
     void *pluginPlannerHook;
     void *groupingplannerHook;
     void *replaceNullOrNotHook;
+    void *noAutoValueOnZeroHook;
     void *nullsMinimalPolicyHook;
     void *getIgnoreKeywordTokenHook;
     void *modifyTypeForPartitionKeyHook;

@@ -746,6 +746,14 @@ extern inline bool CheckPluginReplaceNull()
            ((replaceNullOrNotFunc)(u_sess->hook_cxt.replaceNullOrNotHook))() : false;
 }
 
+typedef bool (*noAutoValueOnZeroFunc)();
+
+extern inline bool CheckPluginNoAutoValueOnZero()
+{
+    return u_sess->hook_cxt.noAutoValueOnZeroHook != NULL ?
+           ((noAutoValueOnZeroFunc)(u_sess->hook_cxt.noAutoValueOnZeroHook))() : false;
+}
+
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock
 //
