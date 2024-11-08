@@ -1,0 +1,24 @@
+create user u_alter_invisible password '1234@abcd';
+grant all privileges to u_alter_invisible;
+
+create database db_alter_index_invisible;
+create database db_restore;
+
+\c db_alter_index_invisible
+create table alter_index_invisible (a int, b int);
+create index idx_alter_index_invisible on alter_index_invisible(a);
+alter index idx_alter_index_invisible invisible;
+
+\! @abs_bindir@/gs_dump -p @portstring@ db_alter_index_invisible -f @abs_bindir@/dump -F c -w > @abs_bindir@/gs_dump_alter_invisible.log 2>&1 ; echo $?
+
+\! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_alter_invisible -W 1234@abcd -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_alter_invisible.log 2>&1 ; echo $?
+
+\c db_restore
+-- the index `idx_alter_index_invisible` is invisible
+explain (costs off) select * from alter_index_invisible where a = 1;
+alter index idx_alter_index_invisible visible;
+explain (costs off) select * from alter_index_invisible where a = 1;
+
+\c postgres
+drop database db_alter_index_invisible;
+drop database db_restore;

@@ -1149,3 +1149,5 @@ test: dump_alter_index_disable
 
 # to_timestamp func
 test: to_timestamp_default
+
+test: dump_alter_index_invisible
