@@ -7,4 +7,8 @@ create database test1 dbcompatibility 'b';
 create table t1(id int);
 insert into t1 values(1);
 create snapshot qwer as select * from t1;
+create table t2(c1 int, c2 int);
+create snapshot s1 as select * from t2;
+create snapshot s1@2.0.0 from@1.0.0 comment is 'inherits from@1.0' using (INSERT VALUES(6,6), (7,7); DELETE WHERE c1 = 1);
+create snapshot s1@3.0.0 from@1.0.0 comment is 'inherits from@1.0' using (UPDATE SET c2 = 6 WHERE c1 = 6;ALTER ADD COLUMN num int);
 \c regression

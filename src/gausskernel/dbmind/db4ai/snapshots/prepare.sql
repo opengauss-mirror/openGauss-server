@@ -62,7 +62,7 @@ BEGIN
             e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
 
-        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (184|550|616|723) at assignment%'
+        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (185|551|617|724) at assignment%'
           AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 224 at IF%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.prepare_snapshot_internal(bigint,bigint,bigint,bigint,name,name,text[],text,name,'
@@ -329,6 +329,7 @@ BEGIN
             s_bt_dist TEXT;     -- DISTRIBUTE BY clause for creating backing table
         BEGIN
 
+            s_bt_proj := '';
             FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
                 s_bt_proj := s_bt_proj || pg_catalog.quote_ident(mapping[idx]) || ' AS ' || mapping[idx-2] || ',';
             END LOOP;
@@ -417,7 +418,7 @@ BEGIN
                 LOOP
                     idx := idx + 1;
                     cur_ch := pg_catalog.substr(stmt, idx, 1);
-                    EXIT WHEN cur_ch IS NULL OR cur_ch = '';
+                    EXIT WHEN cur_ch IS NULL OR (ascii(cur_ch) <> ascii(' ') AND cur_ch = '');
 
                     CASE cur_ch
                     WHEN '"' THEN
@@ -587,7 +588,7 @@ BEGIN
                     LOOP
                         idx := idx + 1;
                         cur_ch := pg_catalog.substr(tokens, idx, 1);
-                        EXIT WHEN cur_ch IS NULL OR cur_ch = '';
+                        EXIT WHEN cur_ch IS NULL OR (ascii(cur_ch) <> ascii(' ') AND cur_ch = '');
 
                         CASE cur_ch
                         WHEN '"' THEN
@@ -904,6 +905,7 @@ ELSE
         END LOOP;
     END;
 
+    s_uv_proj := '';
     FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
         s_uv_proj := s_uv_proj || pg_catalog.quote_ident(mapping[idx]) || ',';
     END LOOP;

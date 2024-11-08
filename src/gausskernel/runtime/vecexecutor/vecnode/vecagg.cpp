@@ -915,8 +915,8 @@ void BaseAggRunner::init_aggInfo(int agg_num, VecAggInfo* agg_info)
     for (int i = 0; i < m_aggNum; i++) {
         m_cols++;
         m_aggIdx[i] = agg_idx;
-        if (agg_info[i].vec_agg_function.flinfo->fn_addr == int8inc_any || /* count(col) */
-            agg_info[i].vec_agg_function.flinfo->fn_addr == int8inc) { /* count(*) */
+        Oid aggFuncOid = agg_info[i].vec_agg_function.flinfo->fn_oid;
+        if (aggFuncOid == F_INT8INC || aggFuncOid == F_INT8INC_ANY) { /* count(*) or count(col) */
             m_aggCount[i] = true;
         }
 

@@ -30,4 +30,23 @@ create snapshot qwer as select * from t1;
  public | qwer@1.0.0
 (1 row)
 
+create table t2(c1 int, c2 int);
+create snapshot s1 as select * from t2;
+ schema |   name   
+--------+----------
+ public | s1@1.0.0
+(1 row)
+
+create snapshot s1@2.0.0 from@1.0.0 comment is 'inherits from@1.0' using (INSERT VALUES(6,6), (7,7); DELETE WHERE c1 = 1);
+ schema |   name   
+--------+----------
+ public | s1@2.0.0
+(1 row)
+
+create snapshot s1@3.0.0 from@1.0.0 comment is 'inherits from@1.0' using (UPDATE SET c2 = 6 WHERE c1 = 6;ALTER ADD COLUMN num int);
+ schema |   name   
+--------+----------
+ public | s1@3.0.0
+(1 row)
+
 \c regression
