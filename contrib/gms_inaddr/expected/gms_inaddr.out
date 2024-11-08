@@ -1,0 +1,29 @@
+create extension gms_output;
+create extension gms_inaddr;
+begin
+gms_output.enable;
+gms_output.put_line(gms_inaddr.get_host_address('localhost'));
+gms_output.put_line(gms_inaddr.get_host_name('127.0.0.1'));
+end
+/
+127.0.0.1
+localhost
+begin
+gms_output.enable;
+gms_output.put_line(gms_inaddr.get_host_address('localhostxx'));
+gms_output.put_line(gms_inaddr.get_host_name('127.0.0.1'));
+end;
+/
+ERROR:  could not translate host name "localhostxx" to address: Name or service not known
+CONTEXT:  SQL statement "CALL gms_output.put_line(gms_inaddr.get_host_address('localhostxx'))"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+begin
+gms_output.enable;
+gms_output.put_line(gms_inaddr.get_host_name('10.254.180.400'));
+end;
+/
+ERROR:  error happen when fetch hostname: Name or service not known
+CONTEXT:  SQL statement "CALL gms_output.put_line(gms_inaddr.get_host_name('10.254.180.400'))"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+drop extension gms_output;
+drop extension gms_inaddr;

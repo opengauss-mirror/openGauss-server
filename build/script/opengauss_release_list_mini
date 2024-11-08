@@ -86,6 +86,8 @@
 ./share/postgresql/extension/dblink.control
 ./share/postgresql/extension/gms_output--1.0.sql
 ./share/postgresql/extension/gms_output.control
+./share/postgresql/extension/gms_inaddr--1.0.sql
+./share/postgresql/extension/gms_inaddr.control
 ./share/postgresql/extension/gms_stats--1.0.sql
 ./share/postgresql/extension/gms_stats.control
 ./share/postgresql/extension/gms_profiler--1.0.sql
@@ -772,6 +774,7 @@
 ./lib/postgresql/gms_compress.so
 ./lib/postgresql/dblink.so
 ./lib/postgresql/gms_output.so
+./lib/postgresql/gms_inaddr.so
 ./lib/postgresql/gms_stats.so
 ./lib/postgresql/gms_profiler.so
 ./lib/postgresql/gms_lob.so

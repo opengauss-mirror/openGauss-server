@@ -1,0 +1,5 @@
+# gms_inaddr extension
+comment = 'gms_inaddr package'
+default_version = '1.0'
+module_pathname = '$libdir/gms_inaddr'
+relocatable = false
