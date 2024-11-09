@@ -286,6 +286,8 @@ public:
     void setGlobalSessionId(GlobalSessionId* globalSessionId);
     void getGlobalSessionId(GlobalSessionId* globalSessionId);
 
+    void streamSendRowsToConsumer(int rows);
+
     /* The plan the producer thread will run. */
     PlannedStmt* m_plan;
 

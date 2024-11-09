@@ -2039,7 +2039,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 tsdbExtensiblePlan->extensible_plans = list_make1(plan);
                 plan = (Plan*)tsdbExtensiblePlan;
             }
-            ((ModifyTable*)plan)->isReplace = parse->isReplace;
+            if (plan->type == T_Stream) {
+                ((ModifyTable*)(plan->lefttree))->isReplace = parse->isReplace;
+            } else {
+                ((ModifyTable*)plan)->isReplace = parse->isReplace;
+            }
         }
     }
 

@@ -26,6 +26,7 @@
 #include "utils/partitionmap_gs.h"
 #include "utils/plpgsql.h"
 #include "utils/guc.h"
+#include "catalog/pg_resource_pool.h"
 
 /*
  * The "eflags" argument to ExecutorStart and the various ExecInitNode
@@ -106,7 +107,7 @@ extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
     } while (0)
 #endif
 
-#define SET_DOP(dop) (dop > 1 ? dop : 1)
+#define SET_DOP(dop) ((dop) > DEFAULT_DOP ? (dop) : DEFAULT_DOP)
 /*
  * Calculate the memory restriction in each thread.
  * And the memeory in each thread must be larger than 64K.

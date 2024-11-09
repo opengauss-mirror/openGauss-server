@@ -512,7 +512,11 @@ static void execute_stream_plan(StreamProducer* producer)
     if (dest >= DestTupleBroadCast)
         SetStreamReceiverParams(receiver, producer, portal);
 
-    producer->setEcontext(GetPerTupleExprContext(portal->queryDesc->estate));
+#ifdef USE_SPQ
+    if (portal->strategy == PORTAL_ONE_SELECT) {
+        producer->setEcontext(GetPerTupleExprContext(portal->queryDesc->estate));
+    }
+#endif
 
     /*
      * Run the portal to completion, and then drop it (and the receiver).
