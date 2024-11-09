@@ -3073,6 +3073,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     qry->limitCount = transformLimitClause(pstate, stmt->limitCount, EXPR_KIND_LIMIT, "LIMIT");
     qry->limitIsPercent = stmt->limitIsPercent;
     qry->limitWithTies = stmt->limitWithTies && stmt->sortClause != NIL;
+    qry->isFetch = stmt->isFetch;
 
     /* transform window clauses after we have seen all window functions */
     qry->windowClause = transformWindowDefinitions(pstate, pstate->p_windowdefs, &qry->targetList);

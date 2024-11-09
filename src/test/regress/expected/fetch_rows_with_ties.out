@@ -264,6 +264,28 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS ONLY;
+\d+ emp_mv
+                           Materialized view "public.emp_mv"
+   Column   |         Type          | Modifiers | Storage  | Stats target | Description 
+------------+-----------------------+-----------+----------+--------------+-------------
+ id         | integer               |           | plain    |              | 
+ name       | character varying(50) |           | extended |              | 
+ department | character varying(50) |           | extended |              | 
+ salary     | numeric               |           | main     |              | 
+Rules:
+    "_RETURN" AS
+    ON SELECT TO emp_mv DO INSTEAD  SELECT employees.id, employees.name, 
+    employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ OFFSET 2
+ ROWS 
+ FETCH FIRST 3
+ ROWS ONLY
+Replica Identity: NOTHING
+Has OIDs: no
+Options: orientation=row, compression=no
+
 -- 7.3 : 创建包含 ROW LIMITING CLAUSE 的普通视图
 CREATE VIEW emp_view_only
 AS
@@ -272,6 +294,23 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS ONLY;
+\d+ emp_view_only
+                       View "public.emp_view_only"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ id         | integer               |           | plain    | 
+ name       | character varying(50) |           | extended | 
+ department | character varying(50) |           | extended | 
+ salary     | numeric               |           | main     | 
+View definition:
+ SELECT employees.id, employees.name, employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ OFFSET 2
+ ROWS 
+ FETCH FIRST 3
+ ROWS ONLY;
+
 CREATE VIEW emp_view_ties
 AS
 SELECT id, name, department, salary
@@ -279,6 +318,23 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS WITH TIES;
+\d+ emp_view_ties
+                       View "public.emp_view_ties"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ id         | integer               |           | plain    | 
+ name       | character varying(50) |           | extended | 
+ department | character varying(50) |           | extended | 
+ salary     | numeric               |           | main     | 
+View definition:
+ SELECT employees.id, employees.name, employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ OFFSET 2
+ ROWS 
+ FETCH FIRST 3
+ ROWS WITH TIES;
+
 CREATE VIEW emp_view_percent
 AS
 SELECT id, name, department, salary
@@ -286,6 +342,24 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 33.4 PERCENT ROWS ONLY;
+\d+ emp_view_percent
+                     View "public.emp_view_percent"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ id         | integer               |           | plain    | 
+ name       | character varying(50) |           | extended | 
+ department | character varying(50) |           | extended | 
+ salary     | numeric               |           | main     | 
+View definition:
+ SELECT employees.id, employees.name, employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ OFFSET 2
+ ROWS 
+ FETCH FIRST 33.4
+ PERCENT 
+ ROWS ONLY;
+
 CREATE VIEW emp_view_percent_ties
 AS
 SELECT id, name, department, salary
@@ -293,6 +367,44 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 45.8 PERCENT ROWS WITH TIES;
+\d+ emp_view_percent_ties
+                   View "public.emp_view_percent_ties"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ id         | integer               |           | plain    | 
+ name       | character varying(50) |           | extended | 
+ department | character varying(50) |           | extended | 
+ salary     | numeric               |           | main     | 
+View definition:
+ SELECT employees.id, employees.name, employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ OFFSET 2
+ ROWS 
+ FETCH FIRST 45.8
+ PERCENT 
+ ROWS WITH TIES;
+
+CREATE VIEW emp_view_limit
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+LIMIT 5;
+\d+ emp_view_limit
+                      View "public.emp_view_limit"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ id         | integer               |           | plain    | 
+ name       | character varying(50) |           | extended | 
+ department | character varying(50) |           | extended | 
+ salary     | numeric               |           | main     | 
+View definition:
+ SELECT employees.id, employees.name, employees.department, employees.salary
+   FROM employees
+  ORDER BY employees.salary DESC
+ LIMIT 5;
+
 SELECT COUNT(*) FROM emp_mv;
  count 
 -------

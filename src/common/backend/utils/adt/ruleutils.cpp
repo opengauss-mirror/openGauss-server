@@ -6416,8 +6416,7 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
         hasOffset = true;
     }
     if (query->limitCount != NULL) {
-        if (DB_IS_CMPT(A_FORMAT) && !(IsA(query->limitCount, Const) && ((Const*)query->limitCount)->constisnull)) {
-            /* We use FETCH instead of LIMIT in A_FORMAT */
+        if (DB_IS_CMPT(A_FORMAT) && query->isFetch) {
             if (hasOffset) {
                 appendContextKeyword(context, " ROWS ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
             }

@@ -742,6 +742,7 @@ typedef struct SelectStmt {
     Node *limitCount;    /* # of result tuples to return */
     bool limitIsPercent; /* FETCH PERCENT ROW? */
     bool limitWithTies;  /* FETCH WITH TIES? */
+    bool isFetch;        /* is fetch stmt */
     List *lockingClause; /* FOR UPDATE (list of LockingClause's) */
     HintState *hintState;
 
@@ -2143,6 +2144,7 @@ typedef struct Query {
     Node* limitCount;  /* # of result tuples to return (int8 expr) */
     bool limitIsPercent; /* FETCH PERCENT ROW? */
     bool limitWithTies;  /* FETCH WITH TIES? */
+    bool isFetch;        /* is fetch stmt? */
 
     List* rowMarks; /* a list of RowMarkClause's */
 

@@ -153,6 +153,7 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS ONLY;
+\d+ emp_mv
 
 -- 7.3 : 创建包含 ROW LIMITING CLAUSE 的普通视图
 CREATE VIEW emp_view_only
@@ -162,6 +163,7 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS ONLY;
+\d+ emp_view_only
 
 CREATE VIEW emp_view_ties
 AS
@@ -170,6 +172,7 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 3 ROWS WITH TIES;
+\d+ emp_view_ties
 
 CREATE VIEW emp_view_percent
 AS
@@ -178,6 +181,7 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 33.4 PERCENT ROWS ONLY;
+\d+ emp_view_percent
 
 CREATE VIEW emp_view_percent_ties
 AS
@@ -186,6 +190,15 @@ FROM employees
 ORDER BY salary DESC
 OFFSET 2 ROWS
 FETCH FIRST 45.8 PERCENT ROWS WITH TIES;
+\d+ emp_view_percent_ties
+
+CREATE VIEW emp_view_limit
+AS
+SELECT id, name, department, salary
+FROM employees
+ORDER BY salary DESC
+LIMIT 5;
+\d+ emp_view_limit
 
 SELECT COUNT(*) FROM emp_mv;
 SELECT COUNT(*) FROM emp_view_only;

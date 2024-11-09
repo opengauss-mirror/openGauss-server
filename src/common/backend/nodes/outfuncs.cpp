@@ -4314,6 +4314,7 @@ static void _outSelectStmt(StringInfo str, SelectStmt* node)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         WRITE_BOOL_FIELD(limitIsPercent);
         WRITE_BOOL_FIELD(limitWithTies);
+        WRITE_BOOL_FIELD(isFetch);
     }
     WRITE_NODE_FIELD(lockingClause);
     WRITE_ENUM_FIELD(op, SetOperation);
@@ -5026,6 +5027,7 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= FETCH_ENHANCE_VERSION_NUM) {
         WRITE_BOOL_FIELD(limitIsPercent);
         WRITE_BOOL_FIELD(limitWithTies);
+        WRITE_BOOL_FIELD(isFetch);
     }
     WRITE_NODE_FIELD(rowMarks);
     WRITE_NODE_FIELD(setOperations);
