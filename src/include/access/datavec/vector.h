@@ -79,15 +79,5 @@ Datum binary_quantize(PG_FUNCTION_ARGS);
 Datum subvector(PG_FUNCTION_ARGS);
 Datum vector_mul(PG_FUNCTION_ARGS);
 Datum vector_concat(PG_FUNCTION_ARGS);
-void set_extension_index(uint32 index);
-void init_session_vars(void);
-
-typedef struct datavec_session_context {
-    int hnsw_ef_search;
-    int ivfflat_probes;
-} datavec_session_context;
-
-extern uint32 datavec_index;
-extern datavec_session_context *get_session_context();
 
 #endif

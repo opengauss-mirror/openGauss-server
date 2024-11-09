@@ -32,19 +32,6 @@
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
 
-static relopt_kind ivfflat_relopt_kind;
-static THR_LOCAL bool IvfflatNeedInitialization = true;
-
-/*
- * Initialize index options and variables
- */
-void IvfflatInit(void)
-{
-    ivfflat_relopt_kind = add_reloption_kind();
-    add_int_reloption(ivfflat_relopt_kind, "lists", "Number of inverted lists", IVFFLAT_DEFAULT_LISTS,
-                      IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS);
-}
-
 /*
  * Estimate the cost of an index scan
  */
@@ -131,12 +118,7 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
     int numoptions;
     IvfflatOptions *rdopts;
 
-    if (IvfflatNeedInitialization) {
-        IvfflatInit();
-        IvfflatNeedInitialization = false;
-    }
-
-    options = parseRelOptions(reloptions, validate, ivfflat_relopt_kind, &numoptions);
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_IVFFLAT, &numoptions);
     rdopts = (IvfflatOptions *)allocateReloptStruct(sizeof(IvfflatOptions), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(IvfflatOptions), options, numoptions, validate, tab, lengthof(tab));
 

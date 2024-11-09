@@ -64,44 +64,6 @@
 
 #define MarkGUCPrefixReserved(x) EmitWarningsOnPlaceholders(x)
 
-uint32 datavec_index;
-
-void set_extension_index(uint32 index)
-{
-    datavec_index = index;
-}
-
-datavec_session_context *get_session_context()
-{
-    if (u_sess->attr.attr_common.extension_session_vars_array[datavec_index] == NULL) {
-        init_session_vars();
-    }
-    return (datavec_session_context *)u_sess->attr.attr_common.extension_session_vars_array[datavec_index];
-}
-
-void init_session_vars(void)
-{
-    RepallocSessionVarsArrayIfNecessary();
-    datavec_session_context *ctx =
-        (datavec_session_context *)MemoryContextAllocZero(u_sess->self_mem_cxt, sizeof(datavec_session_context));
-    u_sess->attr.attr_common.extension_session_vars_array[datavec_index] = ctx;
-
-    ctx->hnsw_ef_search = 0;
-    ctx->ivfflat_probes = 0;
-
-    DefineCustomIntVariable("hnsw.ef_search", "Sets the size of the dynamic candidate list for search",
-                            "Valid range is 1..1000.", &(get_session_context()->hnsw_ef_search), HNSW_DEFAULT_EF_SEARCH,
-                            HNSW_MIN_EF_SEARCH, HNSW_MAX_EF_SEARCH, PGC_USERSET, 0, NULL, NULL, NULL);
-
-    MarkGUCPrefixReserved("hnsw");
-
-    DefineCustomIntVariable("ivfflat.probes", "Sets the number of probes", "Valid range is 1..lists.",
-                            &(get_session_context()->ivfflat_probes), IVFFLAT_DEFAULT_PROBES, IVFFLAT_MIN_LISTS,
-                            IVFFLAT_MAX_LISTS, PGC_USERSET, 0, NULL, NULL, NULL);
-
-    MarkGUCPrefixReserved("ivfflat");
-}
-
 /*
  * Ensure same dimensions
  */
