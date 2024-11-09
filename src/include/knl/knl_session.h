@@ -3015,6 +3015,12 @@ typedef struct knl_u_datavec_context {
     int ivfflat_probes;
 } knl_u_datavec_context;
 
+#ifdef ENABLE_HTAP
+typedef struct knl_u_imcstore_context {
+    List* pinnedRowGroups;
+} knl_u_imcstore_context;
+#endif
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -3170,6 +3176,10 @@ typedef struct knl_session_context {
     knl_u_libsw_context libsw_cxt;
 
     knl_u_datavec_context datavec_ctx;
+
+#ifdef ENABLE_HTAP
+    knl_u_imcstore_context imcstore_ctx;
+#endif
 
 } knl_session_context;
 

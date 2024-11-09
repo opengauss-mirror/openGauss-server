@@ -1482,6 +1482,13 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->ivfflat_probes = 0;
 }
 
+#ifdef ENABLE_HTAP
+static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
+{
+    imcstore_context->pinnedRowGroups = NIL;
+}
+#endif
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));
@@ -1583,6 +1590,10 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
     knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
+
+#ifdef ENABLE_HTAP
+    knl_u_imcstore_init(&sess_cxt->imcstore_ctx);
+#endif
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }

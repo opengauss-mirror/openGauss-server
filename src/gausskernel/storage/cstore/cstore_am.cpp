@@ -70,6 +70,7 @@
 #include "executor/executor.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcstore_am.h"
 #endif
 
 #ifdef PGXC
@@ -718,6 +719,9 @@ void CStoreAbortCU()
 #endif
         CUListPrefetchAbort();
     }
+#ifdef ENABLE_HTAP
+    UnlockRowGroups();
+#endif
 }
 
 /*
