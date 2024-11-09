@@ -58,6 +58,7 @@ SUBDIRS = \
 		security_plugin	\
 		ndpplugin       \
 		gms_profiler    \
+		gms_inaddr  \
 		gms_output      \
 		gms_stats       \
 		gms_lob         \
