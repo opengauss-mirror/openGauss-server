@@ -93,3 +93,13 @@ select relname from pg_class where relname = 'ttv1';
 reset restrict_nonsystem_relation_kind;
 drop view ttv1;
 drop table t1;
+
+create table tt3 (c1 varchar2(10),c2 varchar2(5));
+\d tt3;
+create table tt_union(col1 varchar2(15));
+insert into tt_union values('1234567890abcdr');
+create view t_v3 as select c1 as id from tt3 union all select col1 from tt_union;
+\d t_v3;
+drop table tt3 cascade;
+drop view t_v3 cascade;
+drop table tt_union cascade;
