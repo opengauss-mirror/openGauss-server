@@ -296,7 +296,6 @@ Buffer IvfflatNewBuffer(Relation index, ForkNumber forkNum);
 void IvfflatInitPage(Buffer buf, Page page);
 void IvfflatInitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state);
 PGDLLEXPORT void IvfflatParallelBuildMain(const BgWorkerContext *bwc);
-void IvfflatInit(void);
 const IvfflatTypeInfo *IvfflatGetTypeInfo(Relation index);
 
 Datum ivfflathandler(PG_FUNCTION_ARGS);

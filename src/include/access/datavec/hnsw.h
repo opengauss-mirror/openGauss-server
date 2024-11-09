@@ -531,7 +531,6 @@ Datum HnswNormValue(const HnswTypeInfo *typeInfo, Oid collation, Datum value);
 bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
 Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
 void HnswInitPage(Buffer buf, Page page);
-void HnswInit(void);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
                       int m, bool inserting, HnswElement skipElement, IndexScanDesc scan = NULL);
 HnswElement HnswGetEntryPoint(Relation index);
