@@ -798,7 +798,7 @@ void cost_imcstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel)
 
     startup_cost += baserel->baserestrictcost.startup;
 
-    if (!u_sess->attr.attr_sql.enable_seqscan)
+    if (!u_sess->attr.attr_sql.enable_imcsscan)
         startup_cost += g_instance.cost_cxt.disable_cost;
 
     /*
@@ -820,7 +820,7 @@ void cost_imcstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel)
     path->total_cost = startup_cost + run_cost;
     path->stream_cost = 0;
 
-    if (!u_sess->attr.attr_sql.enable_seqscan)
+    if (!u_sess->attr.attr_sql.enable_imcsscan)
         path->total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
 }
