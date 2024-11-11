@@ -758,55 +758,38 @@ static bool GetCurrentPath(char *currentPath, PGresult *res, int rownum)
     return true;
 }
 
-static bool SSUpdateControlFileForAllNodes(FILE* file, const char* filename, const void* copybuf)
+static bool SSUpdateControlFile(FILE* file, const char* filename, const void* copybuf)
 {
-    for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
-        long seekpos = (long)BLCKSZ * node;
-        
+    off_t seekpos = 0;
+    if (ss_instance_config.dss.enable_dorado) {
+        for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+            seekpos = (off_t)BLCKSZ * node;
+            if (fseek(file, seekpos, SEEK_SET) < 0) {
+                pg_log(PG_WARNING, _("could not seek in file \"%s\" for node %d: %s\n"),
+                    filename, node, strerror(errno));
+                return false;
+            }
+            if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
+                pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"),
+                    filename, strerror(errno));
+                return false;
+            }
+        }
+    } else {
+        seekpos = (off_t)BLCKSZ * ss_instance_config.dss.instance_id;
         if (fseek(file, seekpos, SEEK_SET) < 0) {
-            pg_log(PG_WARNING, _("could not seek in file \"%s\" for node %d: %s\n"), 
-                   filename, node, strerror(errno));
+            pg_log(PG_WARNING, _("could not seek in file \"%s\": %s\n"),
+                filename, strerror(errno));
             return false;
         }
-        
-        if (ss_instance_config.dss.enable_dorado || node == ss_instance_config.dss.instance_id) {
-            if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
-                pg_log(PG_WARNING, _("could not write to file \"%s\" for node %d: %s\n"), 
-                       filename, node, strerror(errno));
-                return false;
-            }
-        } else {
-            ControlFileData buffer;
-            if (fread(&buffer, 1, sizeof(ControlFileData), file) != sizeof(ControlFileData)) {
-                if (feof(file)) {
-                    pg_log(PG_WARNING, _("unexpected end of file \"%s\" for node %d\n"), 
-                           filename, node);
-                } else {
-                    pg_log(PG_WARNING, _("could not read existing control file \"%s\" for node %d: %s\n"), 
-                           filename, node, strerror(errno));
-                }
-                return false;
-            }
-            
-            buffer.system_identifier = ((ControlFileData*)copybuf)->system_identifier;
-            INIT_CRC32C(buffer.crc);
-            COMP_CRC32C(buffer.crc, (char*)&buffer, offsetof(ControlFileData, crc));
-            FIN_CRC32C(buffer.crc);
-            
-            if (fseek(file, seekpos, SEEK_SET) < 0) {
-                pg_log(PG_WARNING, _("could not seek back in file \"%s\" for node %d: %s\n"), 
-                       filename, node, strerror(errno));
-                return false;
-            }
-            
-            if (fwrite(&buffer, sizeof(ControlFileData), 1, file) != 1) {
-                pg_log(PG_WARNING, _("could not write updated control file \"%s\" for node %d: %s\n"), 
-                       filename, node, strerror(errno));
-                return false;
-            }
+
+        if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
+            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"),
+                filename, strerror(errno));
+            return false;
         }
     }
-    
+
     return true;
 }
 /*
@@ -1082,7 +1065,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /* pg_control will be written into pages of each interconnect nodes in dorado stanby cluster corresponding to */
             if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                if (!SSUpdateControlFileForAllNodes(file, filename, copybuf)) {
+                if (!SSUpdateControlFile(file, filename, copybuf)) {
                     DisconnectConnection();
                     FREE_AND_RESET(copybuf);
                     return false;
