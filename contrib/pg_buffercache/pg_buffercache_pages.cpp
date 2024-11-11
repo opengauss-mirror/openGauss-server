@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * pg_buffercache_pages.c
+ * pg_buffercache_pages.c (deprecated in openGauss)
  *	  display some contents of the buffer cache
  *
  *	  contrib/pg_buffercache/pg_buffercache_pages.c
