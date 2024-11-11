@@ -50,6 +50,7 @@ CurlUtils::CurlUtils() : m_withSSL(false),
 CurlUtils::~CurlUtils()
 {
     curl_easy_cleanup(m_curlForPost);
+    m_curlForPost = NULL;
 }
 
 void CurlUtils::initialize(bool withSSL, const std::string certificate, const std::string user,
@@ -91,7 +92,7 @@ bool CurlUtils::http_post_file_request(const std::string url, const std::string 
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_CUSTOMREQUEST, "POST");
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_TCP_KEEPALIVE, 1L);
 
-        /* a simply connection test to server, just verify the connection without any data transfer */
+        /* a simple connection test to server, just verify the connection without any data transfer */
         if (connection_testing) {
             (void)curl_easy_setopt(m_curlForPost, CURLOPT_CONNECT_ONLY, 1L);
         }
@@ -111,7 +112,7 @@ bool CurlUtils::http_post_file_request(const std::string url, const std::string 
 
             curl_slist_free_all(slist1);
             curl_easy_reset(m_curlForPost);
-            ereport(WARNING, (errmsg("Connection issue happended, post file error: %s\n", curl_easy_strerror(res))));
+            ereport(WARNING, (errmsg("Connection issue happened, post file error: %s\n", curl_easy_strerror(res))));
             return false;
         }
         curl_slist_free_all(slist1);
