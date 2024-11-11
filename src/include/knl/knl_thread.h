@@ -2168,9 +2168,9 @@ typedef struct knl_t_libpq_context {
     /* Size send buffer */
     int PqSendBufferSize;
     /* Next index to store a byte in PqSendBuffer */
-    int PqSendPointer;
+    size_t PqSendPointer;
     /* Next index to send a byte in PqSendBuffer */
-    int PqSendStart;
+    size_t PqSendStart;
     char* PqRecvBuffer;
     /* Size recv buffer */
     int PqRecvBufferSize;
