@@ -4097,6 +4097,10 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
             /* if same type and same typmod, use typmod; else default */
             if (lcoltype == rcoltype && lcoltypmod == rcoltypmod) {
                 rescoltypmod = lcoltypmod;
+            } else if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && lcoltype == rcoltype && \
+                    !(lcoltypmod == -1 || rcoltypmod == -1)) {
+                /* same type, neither typmod is -1, select max */
+                rescoltypmod = Max(lcoltypmod, rcoltypmod);
             } else {
                 rescoltypmod = -1;
             }
