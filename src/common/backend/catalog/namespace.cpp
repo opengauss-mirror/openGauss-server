@@ -305,7 +305,7 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
             if (isSupportSynonym) {
                 pfree_ext(errDetail);
                 errDetail = RelnameGetRelidExtended(relation->relname, &relId, refSynOid, detailInfo);
-                if (relId != NULL && OidIsValid(relId)) {
+                if (OidIsValid(relId)) {
                     Oid namespaceId = get_rel_namespace(relId);
                     LookupExplicitNamespace(get_namespace_name(namespaceId));
                 }

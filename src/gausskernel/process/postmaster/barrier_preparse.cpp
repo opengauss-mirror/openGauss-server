@@ -404,8 +404,6 @@ Datum gs_get_preparse_location(PG_FUNCTION_ARGS)
     bool nulls[3] = {0};
     HeapTuple tuple;
     Datum result;
-    char location[MAXFNAMELEN * 3] = {0};
-    errno_t rc = EOK;
 
     const int COLUMN_NUM = 3;
     tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false);
