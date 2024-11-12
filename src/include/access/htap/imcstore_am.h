@@ -76,6 +76,7 @@ public:
     void FillPerRowGroupDelta(_in_ IMCStoreScanState* state, _in_ uint32 cuid, _out_ VectorBatch* vecBatchOut);
     bool InsertDeltaRowToBatch(_in_ IMCStoreScanState* state, ItemPointerData item, _out_ VectorBatch* vecBatchOut);
     bool ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatchOut) override;
+    void LoadCU(int imcsColIdx, CU *cuPtr, CUDesc *cuDescPtr);
 
 private:
     IMCUStorage** m_imcuStorage;

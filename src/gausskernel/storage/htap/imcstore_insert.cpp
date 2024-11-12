@@ -227,6 +227,9 @@ CU* IMCStoreInsert::FormCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPt
         cuPtr->UnCompress(batchRowPtr->m_rows_curnum, cuDescPtr->magic, ALIGNOF_CUSIZE);
         cuPtr->FreeCompressBuf();
         cuDescPtr->cu_size = cuPtr->GetCUSize();
+        cuDescPtr->numericIntLikeCU = cuPtr->m_numericIntLike;
+        cuDescPtr->cuSrcBufSize = cuPtr->m_numericIntLike ? cuPtr->m_srcBufSize : 0;
+        cuDescPtr->cuOffsetSize = cuPtr->m_numericIntLike ? cuPtr->m_offsetSize : 0;
     }
     cuDescPtr->row_count = batchRowPtr->m_rows_curnum;
 

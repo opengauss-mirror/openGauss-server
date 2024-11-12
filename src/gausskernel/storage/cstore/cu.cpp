@@ -103,6 +103,11 @@ void CUDesc::Reset()
     cu_pointer = 0;
     magic = 0;
     xmin = 0;
+#ifdef ENABLE_HTAP
+    numericIntLikeCU = false;
+    cuSrcBufSize = 0;
+    cuOffsetSize = 0;
+#endif
 }
 
 FORCE_INLINE
@@ -2115,6 +2120,117 @@ void RowGroup::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId x
     pthread_rwlock_wrlock(&m_mutex);
     m_delta->Insert(type, ctid, xid, relid, cuId);
     pthread_rwlock_unlock(&m_mutex);
+}
+
+void CU::PackNumericCUForFlushToDisk()
+{
+    errno_t rc;
+    Assert(m_numericIntLike);
+
+    m_compressedBufSize = IMCS_NUMERIC_CU_HDSZ + m_srcBufSize + m_offsetSize;
+    m_compressedBuf = (char*)CStoreMemAlloc::Palloc(m_compressedBufSize, false);
+    // m_crc will be set at the end of compress
+    char* buf = m_compressedBuf;
+    int pos = sizeof(m_crc);
+
+    rc = memcpy_s(buf + pos, sizeof(m_magic), &m_magic, sizeof(m_magic));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_magic);
+    m_infoMode |= CU_CRC32C;
+
+    rc = memcpy_s(buf + pos, sizeof(m_infoMode), &m_infoMode, sizeof(m_infoMode));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_infoMode);
+
+    rc = memcpy_s(buf + pos, sizeof(m_cuSizeExcludePadding), &m_cuSizeExcludePadding, sizeof(m_cuSizeExcludePadding));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_cuSizeExcludePadding);
+
+    rc = memcpy_s(buf + pos, sizeof(m_srcBufSize), &m_srcBufSize, sizeof(m_srcBufSize));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_srcBufSize);
+
+    rc = memcpy_s(buf + pos, sizeof(m_srcDataSize), &m_srcDataSize, sizeof(m_srcDataSize));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_srcDataSize);
+
+    rc = memcpy_s(buf + pos, sizeof(m_bpNullRawSize), &m_bpNullRawSize, sizeof(m_bpNullRawSize));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_bpNullRawSize);
+
+    rc = memcpy_s(buf + pos, sizeof(m_offsetSize), &m_offsetSize, sizeof(m_offsetSize));
+    securec_check(rc, "\0", "\0");
+    pos += sizeof(m_offsetSize);
+
+    Assert(pos == IMCS_NUMERIC_CU_HDSZ);
+
+    rc = memcpy_s(buf + pos, m_srcBufSize, m_srcBuf, m_srcBufSize);
+    securec_check(rc, "\0", "\0");
+    pos += m_srcBufSize;
+
+    rc = memcpy_s(buf + pos, m_offsetSize, m_offset, m_offsetSize);
+    securec_check(rc, "\0", "\0");
+
+    // finally, compute CRC value
+    m_crc = GenerateCrc(m_infoMode);
+    *(uint32*)m_compressedBuf = m_crc;
+
+    FreeSrcBuf();
+}
+
+void CU::UnpackNumericCUFromDisk(int rowCount, uint32 magic, int cuSize)
+{
+    errno_t rc;
+    int pos = 0;
+
+    m_crc = *(uint32*)(m_compressedBuf + pos);
+    pos += sizeof(m_crc);
+
+    m_magic = *(uint32*)(m_compressedBuf + pos);
+    pos += sizeof(m_magic);
+
+    Assert(magic == m_magic);
+
+    if (magic != m_magic)
+        ereport(PANIC, (errmsg(
+            "magic is not matched, maybe data has corrupted, cudesc magic(%u) stored magic(%u)", magic, m_magic)));
+
+    m_infoMode = *(int16*)(m_compressedBuf + pos);
+    pos += sizeof(m_infoMode);
+
+    m_cuSizeExcludePadding = *(int32*)(m_compressedBuf + pos);
+    pos += sizeof(m_cuSizeExcludePadding);
+
+    m_srcBufSize = *(int32*)(m_compressedBuf + pos);
+    pos += sizeof(m_srcBufSize);
+
+    m_srcDataSize = *(int32*)(m_compressedBuf + pos);
+    pos += sizeof(m_srcDataSize);
+
+    m_bpNullRawSize = *(int16*)(m_compressedBuf + pos);
+    pos += sizeof(m_bpNullRawSize);
+
+    m_offsetSize = *(int32*)(m_compressedBuf + pos);
+    pos += sizeof(m_offsetSize);
+
+    Assert(pos == IMCS_NUMERIC_CU_HDSZ);
+
+    char* srcBuf = m_compressedBuf + pos;
+    m_srcBuf = (char*)CStoreMemAlloc::Palloc(m_srcBufSize, false);
+    rc = memcpy_s(m_srcBuf, m_srcBufSize, srcBuf, m_srcBufSize);
+    securec_check(rc, "\0", "\0");
+    m_srcData = m_srcBuf;
+    pos += m_srcBufSize;
+
+    char* offset = m_compressedBuf + pos;
+    m_offset = (int32*)CStoreMemAlloc::Palloc(m_offsetSize, false);
+    rc = memcpy_s((char*)m_offset, m_offsetSize, offset, m_offsetSize);
+    securec_check(rc, "\0", "\0");
+
+    m_cache_compressed = false;
+    m_cuSize = cuSize;
+    m_inCUCache = true;
+    m_numericIntLike = true;
 }
 
 #endif

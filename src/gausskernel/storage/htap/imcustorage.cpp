@@ -119,7 +119,7 @@ void IMCUStorage::Load(_in_ uint32 cuId, _in_ int size, __inout char* outbuf)
     TryRemoveCUFile(cuId, m_cnode.m_attid);
 }
 
-void IMCUStorage::LoadCU(_in_ CU* cuPtr, _in_ uint32 cuId, _in_ int size, _in_ IMCSDesc* imcsDesc)
+void IMCUStorage::LoadCU(_in_ CU* cuPtr, _in_ uint32 cuId, _in_ int size)
 {
     if (size < 0) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
@@ -140,18 +140,10 @@ void IMCUStorage::LoadCU(_in_ CU* cuPtr, _in_ uint32 cuId, _in_ int size, _in_ I
     }
 
     // in imcstore, cu always in cache.
-    cuPtr->m_compressedLoadBuf = (char*)CStoreMemAlloc::Palloc(size, false);
-    Load(cuId, size, cuPtr->m_compressedLoadBuf);
-
-    cuPtr->m_compressedBuf = cuPtr->m_compressedLoadBuf;
-    cuPtr->SetCUSize(size);
+    cuPtr->m_compressedBuf = (char*)CStoreMemAlloc::Palloc(size, false);
+    Load(cuId, size, cuPtr->m_compressedBuf);
     cuPtr->m_compressedBufSize = size;
     cuPtr->m_cache_compressed = true;
-    cuPtr->imcsDesc = imcsDesc;
-    pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)size);
-    pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInMem, 1);
-    pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInDisk, (uint64)size);
-    pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInDisk, 1);
 }
 
 void IMCUStorage::TryRemoveCUFile(_in_ uint32 cuId, _in_ int colId)

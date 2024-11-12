@@ -33,11 +33,15 @@
 #include "catalog/query_imcstore_views.h"
 
 #ifdef ENABLE_HTAP
-static void FillIMCStoreViewsValues(Datum* imcstoreViewsValues, IMCStoreView *imcstoreView)
+static void FillIMCStoreViewsValues(Datum* imcstoreViewsValues, bool* imcstoreViewsNulls, IMCStoreView *imcstoreView)
 {
     imcstoreViewsValues[Anum_imcstore_views_reloid - 1] = ObjectIdGetDatum(imcstoreView->relOid);
     imcstoreViewsValues[Anum_imcstore_views_relname - 1] = NameGetDatum(imcstoreView->relname);
-    imcstoreViewsValues[Anum_imcstore_views_imcs_attrs - 1] = PointerGetDatum(imcstoreView->imcsAttsNum);
+    if (imcstoreView->imcsAttsNum) {
+        imcstoreViewsValues[Anum_imcstore_views_imcs_attrs - 1] = PointerGetDatum(imcstoreView->imcsAttsNum);
+    } else {
+        imcstoreViewsNulls[Anum_imcstore_views_imcs_attrs - 1] = true;
+    }
     imcstoreViewsValues[Anum_imcstore_views_imcs_nattrs - 1] = Int16GetDatum(imcstoreView->imcsNatts);
     imcstoreViewsValues[Anum_imcstore_views_imcs_status - 1] = NameGetDatum(imcstoreView->imcsStatus);
     imcstoreViewsValues[Anum_imcstore_views_is_partition - 1] = BoolGetDatum(imcstoreView->isPartition);
@@ -131,7 +135,7 @@ Datum query_imcstore_views(PG_FUNCTION_ARGS)
         bool imcstoreViewsNulls[Natts_imcstore_views] = {false};
 
         imcstoreView += funcctx->call_cntr;
-        FillIMCStoreViewsValues(imcstoreViewsValues, imcstoreView);
+        FillIMCStoreViewsValues(imcstoreViewsValues, imcstoreViewsNulls, imcstoreView);
         tuple = heap_form_tuple(funcctx->tuple_desc, imcstoreViewsValues, imcstoreViewsNulls);
         result = HeapTupleGetDatum(tuple);
         SRF_RETURN_NEXT(funcctx, result);
