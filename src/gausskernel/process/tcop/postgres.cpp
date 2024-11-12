@@ -8739,6 +8739,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.postgres_cxt.mark_explain_analyze = false;
         t_thrd.postgres_cxt.mark_explain_only = false;
         u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+        u_sess->stream_cxt.enter_sync_point = false;
         if (unlikely(t_thrd.log_cxt.msgbuf->data != NULL)) {
             pfree_ext(t_thrd.log_cxt.msgbuf->data);
         }

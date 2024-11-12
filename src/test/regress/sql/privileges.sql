@@ -211,6 +211,10 @@ SELECT atest1_privileges_test.* FROM atest1_privileges_test, atest5 order by 1, 
 SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test, atest5 order by 1, 2, 3; -- ok 
 SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.two); -- fail
 SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.one); -- ok 
+set query_dop=4;
+SELECT * FROM atest1_privileges_test, atest5; -- fail
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test, atest5 order by 1, 2, 3; -- ok 
+set query_dop=1;
 SELECT one, two FROM atest5; -- fail
 
 SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
