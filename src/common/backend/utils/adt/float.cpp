@@ -639,7 +639,7 @@ Datum float8out(PG_FUNCTION_ARGS)
     errno_t rc = EOK;
 
     if (isnan(num)) {
-        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+        if (u_sess->attr.attr_sql.enable_binary_special_o_format && !is_req_from_jdbc()) {
             rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Nan");
         } else {
             rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
@@ -649,7 +649,7 @@ Datum float8out(PG_FUNCTION_ARGS)
     }
     switch (is_infinite(num)) {
         case 1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format && !is_req_from_jdbc()) {
                 rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Inf");
             } else {
                 rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
@@ -657,7 +657,7 @@ Datum float8out(PG_FUNCTION_ARGS)
             securec_check(rc, "\0", "\0");
             break;
         case -1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format && !is_req_from_jdbc()) {
                 rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Inf");
             } else {
                 rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
@@ -3167,4 +3167,9 @@ Datum to_binary_float_text_number(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_FLOAT4((float4)result);
+}
+
+bool is_req_from_jdbc()
+{
+    return strcmp(u_sess->attr.attr_common.application_name, "PostgreSQL JDBC Driver") == 0;
 }
