@@ -1,8 +1,5 @@
 # contrib/pg_buffercache/Makefile
 
-MODULE_big = pg_buffercache
-OBJS = pg_buffercache_pages.o
-
 EXTENSION = pg_buffercache
 DATA = pg_buffercache--1.0.sql pg_buffercache--unpackaged--1.0.sql
 

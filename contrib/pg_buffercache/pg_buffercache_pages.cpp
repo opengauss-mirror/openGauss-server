@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * pg_buffercache_pages.c
+ * pg_buffercache_pages.c (deprecated in openGauss)
  *	  display some contents of the buffer cache
  *
  *	  contrib/pg_buffercache/pg_buffercache_pages.c
@@ -18,14 +18,13 @@
 
 PG_MODULE_MAGIC;
 
-Datum pg_buffercache_pages(PG_FUNCTION_ARGS);
-
 /*
  * Record structure holding the to be exposed cache data.
  */
 typedef struct {
     uint32 bufferid;
     Oid relfilenode;
+    int4 bucketnode;
     Oid reltablespace;
     Oid reldatabase;
     ForkNumber forknum;
@@ -48,6 +47,8 @@ typedef struct {
  * relation node/tablespace/database/blocknum and dirty indicator.
  */
 PG_FUNCTION_INFO_V1(pg_buffercache_pages);
+
+extern "C" Datum pg_buffercache_pages(PG_FUNCTION_ARGS);
 
 Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
 {
