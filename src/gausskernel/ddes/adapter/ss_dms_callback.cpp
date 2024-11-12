@@ -1851,28 +1851,27 @@ static void FailoverCleanBackends()
     }
 
     /**
-     * for failover: wait for backend threads to exit, at most 30s
-     * why wait code write this
+     * for failover:
+     * Ensure one round of failover and clean up all backend threads
      *      step 1, sned signal to tell thread to exit
      *      step 2, PM detected backend exit
      *      step 3, reform proc wait
      */
     g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = false;
     SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS);
-    long max_wait_time = 30000000L;
     long wait_time = 0;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] wait backends to exit")));
     while (true) {
         if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && !CheckpointInProgress()) {
-            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] backends exit successfully")));
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] backends exit successfully, "
+                "wait_time = %ds", wait_time / FAILOVER_TIME_CONVERT)));
             break;
         }
-        if (wait_time > max_wait_time) {
-            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] failover failed, backends can not exit")));
-            /* check and print some thread which no exit. */
-            SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
-            _exit(0);
-        }
+
+        /* check and print some thread which no exit. */
+        int backendNum = SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+        ereport (WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] there are %d backends can not exit! "
+            "wait_time = %ds", backendNum, wait_time / FAILOVER_TIME_CONVERT)));
 
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] reform failed during clean backends")));
