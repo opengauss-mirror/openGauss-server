@@ -1905,5 +1905,6 @@ extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
 extern char *printTypmod(const char *typname, int32 typmod, Oid typmodout);
 /* float.cpp */
 extern int float8_cmp_internal(float8 a, float8 b);
+extern bool is_req_from_jdbc();
 
 #endif /* BUILTINS_H */
