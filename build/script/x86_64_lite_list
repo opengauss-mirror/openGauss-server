@@ -63,6 +63,8 @@
 ./share/postgresql/extension/hstore--1.0--1.1.sql
 ./share/postgresql/extension/log_fdw--1.0.sql
 ./share/postgresql/extension/log_fdw.control
+./share/postgresql/extension/gms_utility--1.0.sql
+./share/postgresql/extension/gms_utility.control
 ./share/postgresql/extension/gms_output--1.0.sql
 ./share/postgresql/extension/gms_output.control
 ./share/postgresql/extension/gms_stats--1.0.sql
@@ -765,6 +767,7 @@
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/pgoutput.so
+./lib/postgresql/gms_utility.so
 ./lib/postgresql/gms_output.so
 ./lib/postgresql/gms_stats.so
 ./lib/postgresql/gms_profiler.so

@@ -29,6 +29,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/datavec
     ${CMAKE_CURRENT_SOURCE_DIR}/chparser
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_utility
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_profiler
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_lob
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_sql
@@ -60,6 +61,7 @@ add_subdirectory(pagehack)
 add_subdirectory(pg_xlogdump)
 add_subdirectory(file_fdw)
 add_subdirectory(log_fdw)
+add_subdirectory(gms_utility)
 add_subdirectory(gms_stats)
 add_subdirectory(gms_sql)
 add_subdirectory(gms_tcp)

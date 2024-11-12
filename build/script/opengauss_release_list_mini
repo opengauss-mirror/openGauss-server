@@ -98,6 +98,8 @@
 ./share/postgresql/extension/gms_sql.control
 ./share/postgresql/extension/gms_i18n--1.0.sql
 ./share/postgresql/extension/gms_i18n.control
+./share/postgresql/extension/gms_utility--1.0.sql
+./share/postgresql/extension/gms_utility.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -780,6 +782,7 @@
 ./lib/postgresql/gms_lob.so
 ./lib/postgresql/gms_sql.so
 ./lib/postgresql/gms_i18n.so
+./lib/postgresql/gms_utility.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so

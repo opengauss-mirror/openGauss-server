@@ -1,0 +1,3315 @@
+reset search_path;
+create extension if not exists gms_utility;
+-- start test db_version
+declare
+    version varchar2(50);
+    compatibility varchar2(50);
+begin
+    gms_utility.db_version(version, compatibility);
+    raise info 'version: %', version;
+    raise info 'compatibility: %', compatibility;
+end;
+/
+--?INFO:  version: openGauss.*
+--?INFO:  compatibility: openGuass.*
+declare
+    version varchar2(50);
+begin
+    gms_utility.db_version(version);
+    raise info 'version: %', version;
+end;    -- error
+/
+ERROR:  function "db_version" with 1 parameters doesn't exist 
+CONTEXT:  SQL statement "CALL gms_utility.db_version(version)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+call gms_utility.db_version();  -- error
+ERROR:  function "db_version" with 0 parameters doesn't exist 
+declare
+    version int;
+    compatibility int;
+begin
+    gms_utility.db_version(version, compatibility);
+    raise info 'version: %', version;
+    raise info 'compatibility: %', compatibility;
+end;    -- error
+/
+--?ERROR:  invalid input syntax for integer:.*
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
+-- end test db_version
+-- start test get_cpu_time
+select gms_utility.get_cpu_time();
+ get_cpu_time 
+--------------
+--?.*
+(1 row)
+
+select gms_utility.get_cpu_time(100);   -- error
+ERROR:  function gms_utility.get_cpu_time(integer) does not exist
+LINE 1: select gms_utility.get_cpu_time(100);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_cpu_time
+declare
+    cputime char(1);
+begin
+    cputime := gms_utility.get_cpu_time();
+    raise info 'cpuTimeDelta: %', cputime;
+end;
+/
+ERROR:  value too long for type character(1)
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at assignment
+declare
+    cputime json;
+begin
+    cputime := gms_utility.get_cpu_time();
+    raise info 'cpuTimeDelta: %', cputime;
+end;
+/
+--?INFO:  cpuTimeDelta:.*
+declare
+    t1 number := 0;
+    t2 number := 0;
+    timeDelta number;
+    i integer;
+    sum integer;
+begin
+    t1 := gms_utility.get_cpu_time();
+    for i in 1..1000000 loop
+       sum := sum + i * 2 + i / 2;
+    end loop;
+    t2 := gms_utility.get_cpu_time();
+    timeDelta = t2 - t1;
+    raise info 'cpuTimeDelta: %', timeDelta;
+end;
+/
+--?INFO:  cpuTimeDelta:.*
+declare
+    i number;
+    j number;
+    k number;
+begin
+    i := gms_utility.get_cpu_time;
+
+    select count(*)
+    into j
+    from pg_class t, pg_index i
+    where t.Oid = i.indexrelid;
+
+    k := gms_utility.get_cpu_time;
+    raise info 'costtime: %', (k-i);
+end;
+/
+--?INFO:  costtime:.*
+-- end test get_cpu_time
+-- start test get_endianness
+select gms_utility.get_endianness();
+ get_endianness 
+----------------
+--?.*
+(1 row)
+
+select gms_utility.get_endianness(1000);
+ERROR:  function gms_utility.get_endianness(integer) does not exist
+LINE 1: select gms_utility.get_endianness(1000);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_endianness
+-- end test get_endianness
+-- start test get_sql_hash
+declare
+    hash    raw(50);
+    l4b     number;
+begin
+    gms_utility.get_sql_hash('Today is a good day!', hash, l4b);
+    raise info 'hash: %', hash;
+    raise info 'last4byte: %', l4b;
+end;
+/
+INFO:  hash: 834E5BE13C0240D4F1AEBB1BCE7205AF
+INFO:  last4byte: 2936369870
+declare
+    hash    raw(50);
+    l4b     number;
+begin
+    gms_utility.get_sql_hash(NULL, hash, l4b);
+    raise info 'hash: %', hash;
+    raise info 'last4byte: %', l4b;
+end;
+/
+INFO:  hash: <NULL>
+INFO:  last4byte: <NULL>
+declare
+    hash    raw(50);
+    l4b     number;
+begin
+    gms_utility.get_sql_hash('', hash, l4b);
+    raise info 'hash: %', hash;
+    raise info 'last4byte: %', l4b;
+end;
+/
+INFO:  hash: <NULL>
+INFO:  last4byte: <NULL>
+call gms_utility.get_sql_hash();
+ERROR:  function "get_sql_hash" with 0 parameters doesn't exist 
+-- end test get_sql_hash
+-- start test is_bit_set
+declare
+	r raw(50) := '123456AF';
+	result NUMBER;
+	pos NUMBER;
+begin
+	for pos in 1..32 loop
+		result := gms_utility.is_bit_set(r, pos);
+		raise info 'position = %, result = %', pos, result;
+	end loop;
+end;
+/
+INFO:  position = 1, result = 1
+INFO:  position = 2, result = 1
+INFO:  position = 3, result = 1
+INFO:  position = 4, result = 1
+INFO:  position = 5, result = 0
+INFO:  position = 6, result = 1
+INFO:  position = 7, result = 0
+INFO:  position = 8, result = 1
+INFO:  position = 9, result = 0
+INFO:  position = 10, result = 1
+INFO:  position = 11, result = 1
+INFO:  position = 12, result = 0
+INFO:  position = 13, result = 1
+INFO:  position = 14, result = 0
+INFO:  position = 15, result = 1
+INFO:  position = 16, result = 0
+INFO:  position = 17, result = 0
+INFO:  position = 18, result = 0
+INFO:  position = 19, result = 1
+INFO:  position = 20, result = 0
+INFO:  position = 21, result = 1
+INFO:  position = 22, result = 1
+INFO:  position = 23, result = 0
+INFO:  position = 24, result = 0
+INFO:  position = 25, result = 0
+INFO:  position = 26, result = 1
+INFO:  position = 27, result = 0
+INFO:  position = 28, result = 0
+INFO:  position = 29, result = 1
+INFO:  position = 30, result = 0
+INFO:  position = 31, result = 0
+INFO:  position = 32, result = 0
+declare
+	r raw(50) := '123456AF';
+	result NUMBER;
+	pos NUMBER;
+begin
+	for pos in 33..64 loop
+		result := gms_utility.is_bit_set(r, pos);
+		raise info 'position = %, result = %', pos, result;
+	end loop;
+end;
+/
+INFO:  position = 33, result = 1
+INFO:  position = 34, result = 1
+INFO:  position = 35, result = 1
+INFO:  position = 36, result = 1
+INFO:  position = 37, result = 0
+INFO:  position = 38, result = 1
+INFO:  position = 39, result = 0
+INFO:  position = 40, result = 1
+INFO:  position = 41, result = 0
+INFO:  position = 42, result = 1
+INFO:  position = 43, result = 1
+INFO:  position = 44, result = 0
+INFO:  position = 45, result = 1
+INFO:  position = 46, result = 0
+INFO:  position = 47, result = 1
+INFO:  position = 48, result = 0
+INFO:  position = 49, result = 0
+INFO:  position = 50, result = 0
+INFO:  position = 51, result = 1
+INFO:  position = 52, result = 0
+INFO:  position = 53, result = 1
+INFO:  position = 54, result = 1
+INFO:  position = 55, result = 0
+INFO:  position = 56, result = 0
+INFO:  position = 57, result = 0
+INFO:  position = 58, result = 1
+INFO:  position = 59, result = 0
+INFO:  position = 60, result = 0
+INFO:  position = 61, result = 1
+INFO:  position = 62, result = 0
+INFO:  position = 63, result = 0
+INFO:  position = 64, result = 0
+select gms_utility.is_bit_set(); -- error
+ERROR:  function gms_utility.is_bit_set() does not exist
+LINE 1: select gms_utility.is_bit_set();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set(NULL, 10); -- error
+ERROR:  invalid input value
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('', 10);  -- error
+ERROR:  invalid input value
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('123456'); -- error
+ERROR:  function gms_utility.is_bit_set(unknown) does not exist
+LINE 1: select gms_utility.is_bit_set('123456');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('123456AF', 9);
+ is_bit_set 
+------------
+          0
+(1 row)
+
+select gms_utility.is_bit_set('12345678AF', 9);
+ is_bit_set 
+------------
+          0
+(1 row)
+
+select gms_utility.is_bit_set('123456TT', 9); -- error
+ERROR:  invalid hexadecimal digit: "T"
+LINE 1: select gms_utility.is_bit_set('123456TT', 9);
+                                      ^
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('12345678TT', 9); -- error
+ERROR:  invalid hexadecimal digit: "T"
+LINE 1: select gms_utility.is_bit_set('12345678TT', 9);
+                                      ^
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('1234', 9);
+ is_bit_set 
+------------
+          0
+(1 row)
+
+select gms_utility.is_bit_set('12345678', -10); -- error
+ERROR:  invalid second param value range
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('12345678', 0); -- error
+ERROR:  invalid second param value range
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('12345678', 100);
+ is_bit_set 
+------------
+          1
+(1 row)
+
+select gms_utility.is_bit_set('12345678', 3.14E100); -- error
+ERROR:  integer out of range
+CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('团团又圆圆', 20); -- error
+--?ERROR:  invalid hexadecimal digit:.*
+LINE 1: select gms_utility.is_bit_set('团团又圆圆', 20);
+                                      ^
+CONTEXT:  referenced column: is_bit_set
+-- end test is_bit_set
+-- start test is_cluster_database
+select gms_utility.is_cluster_database();
+ is_cluster_database 
+---------------------
+ f
+(1 row)
+
+select gms_utility.is_cluster_database(1000);
+ERROR:  function gms_utility.is_cluster_database(integer) does not exist
+LINE 1: select gms_utility.is_cluster_database(1000);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: is_cluster_database
+begin
+	if gms_utility.is_cluster_database then
+		raise info 'true';
+	else
+		raise info 'false';
+	end if;
+end;
+/
+INFO:  false
+-- end test is_cluster_database
+-- start test old_current_schema
+select gms_utility.old_current_schema();
+ old_current_schema 
+--------------------
+--?.*
+(1 row)
+
+select gms_utility.old_current_schema(2000);
+ERROR:  function gms_utility.old_current_schema(integer) does not exist
+LINE 1: select gms_utility.old_current_schema(2000);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: old_current_schema
+-- end test old_current_schema
+-- start test old_current_user
+select gms_utility.old_current_user();
+ old_current_user 
+------------------
+--?.*
+(1 row)
+
+select gms_utility.old_current_user(2000);
+ERROR:  function gms_utility.old_current_user(integer) does not exist
+LINE 1: select gms_utility.old_current_user(2000);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: old_current_user
+-- end test old_current_user
+---------------------------
+-- expand_sql_text
+---------------------------
+create schema test_utility_est;
+set search_path to test_utility_est;
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text(NULL, sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+INFO:  output_sql_text: <NULL>
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text(NULL);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  function "expand_sql_text" with 1 parameters doesn't exist 
+CONTEXT:  SQL statement "CALL gms_utility.expand_sql_text(NULL)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+create table test_dx(id int);
+create view view1 as select * from test_dx;
+create materialized view mv_dx as select * from test_dx;
+declare
+    input_sql_text clob := 'select * from test_utility_est.view1';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: SELECT id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1
+declare
+    input_sql_text clob := 'select * from test_utility_est.view1;';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: SELECT id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1
+-- don't expand materialized view sql, just print
+declare
+    input_sql_text clob := 'select * from test_utility_est.mv_dx';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: SELECT id FROM test_utility_est.mv_dx
+-- test multi sql, error
+declare
+    input_sql_text clob := 'select * from test_utility_est.view1;select * from test_utility_est.view1';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+ERROR:  Expand_sql_text only support one query
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text(input_sql_text,output_sql_text)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+-- test select into
+insert into test_dx values (3);
+declare
+    num int := 0;
+    input_sql_text clob := 'select * into t_into from test_utility_est.view1;';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: INSERT INTO gms_utility.t_into (id) SELECT id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1
+declare
+    num int := 0;
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text('select id into num from test_utility_est.view1', output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: INSERT INTO gms_utility.num (id) SELECT id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1
+--test with select
+declare
+    num int := 0;
+    input_sql_text clob := 'with ws (id) AS (select id from test_utility_est.view1) select * from ws';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: WITH ws(id) AS (SELECT view1.id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1) SELECT id FROM ws
+-- test select for update
+declare
+    input_sql_text clob := 'select * from test_utility_est.test_dx for update';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: SELECT id FROM test_utility_est.test_dx FOR UPDATE OF test_dx
+declare
+    input_sql_text clob := 'select * from test_utility_est.view1 for update';
+    output_sql_text clob;
+begin
+    gms_utility.expand_sql_text(input_sql_text, output_sql_text);
+    raise info 'output_sql_text: %', output_sql_text;
+end;
+/
+INFO:  output_sql_text: SELECT id FROM (SELECT test_dx.id FROM test_utility_est.test_dx) view1 FOR UPDATE OF view1
+create table test_1(id int, name varchar(20));
+create table test_2(id int, name varchar(20));
+create view view2 as select * from test_1;
+create view view3 as select * from test_1 union select * from test_2;
+create view view4 as select * from test_1 union select * from view3;
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+ input_sql_text2 clob := 'select * from test_utility_est.view4';
+ output_sql_text2 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+  gms_utility.expand_sql_text(input_sql_text2, output_sql_text2);
+  raise info 'output_sql_text2: %', output_sql_text2;
+END;
+/
+INFO:  output_sql_text1: SELECT id, name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT test_2.id, test_2.name FROM test_utility_est.test_2) view3
+INFO:  output_sql_text2: SELECT id, name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT view3.id, view3.name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT test_2.id, test_2.name FROM test_utility_est.test_2) view3) view4
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+ input_sql_text2 clob := 'select * from test_utility_est.view4';
+ output_sql_text2 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+  gms_utility.expand_sql_text(input_sql_text2, output_sql_text2);
+  raise info 'output_sql_text2: %', output_sql_text2;
+END;
+/
+INFO:  output_sql_text1: SELECT id, name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT test_2.id, test_2.name FROM test_utility_est.test_2) view3
+INFO:  output_sql_text2: SELECT id, name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT view3.id, view3.name FROM (SELECT test_1.id, test_1.name FROM test_utility_est.test_1 UNION SELECT test_2.id, test_2.name FROM test_utility_est.test_2) view3) view4
+-- test not select query, error
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text('create table test(id int)', sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  Unsupported query type, only support SELECT query
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text('create table test(id int)',sqlTxt)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text('begin', sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  Unsupported query type, only support SELECT query
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text('begin',sqlTxt)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text('update test_1 set name = ''ggboom'' where id = 1', sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  Unsupported query type, only support SELECT query
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text('update test_1 set name = ''ggboom'' where id = 1',sqlTxt)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text('delete from test_1', sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  Unsupported query type, only support SELECT query
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text('delete from test_1',sqlTxt)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+-- test not valid query, error
+declare
+    sqlTxt CLOB;
+begin
+    gms_utility.expand_sql_text('today is a good day', sqlTxt);
+    raise info 'output_sql_text: %', sqlTxt;
+end;
+/
+ERROR:  syntax error at or near "today"
+LINE 1: CALL gms_utility.expand_sql_text('today is a good day',sqlTx...
+        ^
+QUERY:  CALL gms_utility.expand_sql_text('today is a good day',sqlTxt)
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+PL/pgSQL function inline_code_block line 3 at SQL statement
+create table t1(srvr_id int);
+create view expandv as select * from t1;
+declare
+    vclobin clob := 
+'select distinct srvr_id 
+from public.expandv 
+where srvr_id not in 
+(select srvr_id 
+from public.expandv 
+minus 
+select srvr_id 
+from public.t1)';
+    vclobout clob;
+begin
+    gms_utility.expand_sql_text(vclobin, vclobout);
+    raise info 'output_sql_text: %', vclobout; 
+end;
+/
+ERROR:  relation "public.expandv" does not exist on datanode1
+LINE 1: CALL gms_utility.expand_sql_text(vclobin,vclobout)
+                                      ^
+QUERY:  CALL gms_utility.expand_sql_text(vclobin,vclobout)
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+PL/pgSQL function inline_code_block line 12 at SQL statement
+-- test privileges
+create user user01 password 'utility@123';
+set session AUTHORIZATION user01 password 'utility@123';
+set search_path to test_utility_est;
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+END;
+/
+ERROR:  permission denied for schema test_utility_est
+LINE 1: CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_...
+                      ^
+DETAIL:  N/A
+QUERY:  CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_text1)
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+PL/pgSQL function inline_code_block line 4 at SQL statement
+RESET SESSION AUTHORIZATION;
+drop view view4;
+drop view view3;
+drop view view2;
+drop view view1;
+drop view expandv;
+drop materialized view mv_dx;
+drop table t1;
+drop table if exists t_into;
+NOTICE:  table "t_into" does not exist, skipping
+drop talbe if exists test_2;
+ERROR:  syntax error at or near "talbe"
+LINE 1: drop talbe if exists test_2;
+             ^
+drop talbe if exists test_1;
+ERROR:  syntax error at or near "talbe"
+LINE 1: drop talbe if exists test_1;
+             ^
+drop talbe if exists test_dx;
+ERROR:  syntax error at or near "talbe"
+LINE 1: drop talbe if exists test_dx;
+             ^
+drop schema test_utility_est;
+ERROR:  cannot drop schema test_utility_est because other objects depend on it
+DETAIL:  table test_dx depends on schema test_utility_est
+table test_1 depends on schema test_utility_est
+table test_2 depends on schema test_utility_est
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+---------------------------
+-- analyze_schema|database
+---------------------------
+create user test_utility_analyze password "test_utility_analyze@123";
+set search_path to test_utility_analyze;
+create table t1 (id int, c2 text);
+create unique index t1_id_uidx on t1 using btree(id);
+insert into t1 values (generate_series(1, 100), 'aabbcc');
+insert into t1 values (generate_series(101, 200), '123dfg');
+insert into t1 values (generate_series(201, 300), '人面桃花相映红');
+insert into t1 values (generate_series(301, 400), 'fortunate');
+insert into t1 values (generate_series(401, 500), 'open@gauss');
+insert into t1 values (generate_series(501, 600), '127.0.0.1');
+insert into t1 values (generate_series(601, 700), '!@#$!%#!');
+insert into t1 values (generate_series(701, 800), '[1,2,3,4]');
+insert into t1 values (generate_series(801, 900), '{"name":"张三","age":18}');
+insert into t1 values (generate_series(901, 1000), '');
+create or replace function batch_insert(count INT)
+returns int as $$
+declare
+	i INT;
+	start INT;
+begin
+	select count(*) into start from t1;
+	for i in select generate_series(1, count) loop
+		insert into t1 values (start + i, left((pg_catalog.random() * i)::text, 6));
+	end loop;
+
+	return count;
+end;
+$$ language plpgsql;
+select batch_insert(50000);
+ batch_insert 
+--------------
+        50000
+(1 row)
+
+-- analyze_schema
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=-100);	-- error
+ERROR:  invalid value "-100" for "estimate_rows"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_percent:=20);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_percent:=0);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_percent:=101); -- error
+ERROR:  invalid value "101" for "estimate_percent"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR TABLE');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXES');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL COLUMNS');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL COLUMNS SIZE 100');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXED COLUMNS');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXED COLUMNS SIZE 100');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', estimate_rows:=10000);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', estimate_percent:=-100);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', estimate_rows:=10000, estimate_percent:=-100);
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR TABLE');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL INDEXES');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL INDEXED COLUMNS');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL INDEXED COLUMNS SIZE 100');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL COLUMNS');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL COLUMNS SIZE 100');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR TABLE FOR ALL INDEXES');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR TABLE FOR ALL INDEXED COLUMNS');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR TABLE123');	-- error
+ERROR:  invalid input value for method_opt
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='111FOR TABLE');	-- error
+ERROR:  unrecognized param value: "111FOR TABLE"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+call gms_utility.analyze_schema('test_utility_analyze', 'DELETE');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_schema('test_utility_analyze', 'DELETE', method_opt:='FOR TABLE');	-- error
+ERROR:  The Command did not end correctly
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+DECLARE
+    res boolean;
+BEGIN
+    gms_utility.analyze_schema('SYSTEM','ESTIMATE', NULL, 10);
+    EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+/
+--  test analyze database 
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=-100);	-- error
+ERROR:  invalid value "-100" for "estimate_rows"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+call gms_utility.analyze_database('ESTIMATE', estimate_percent:=20);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_percent:=0);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_percent:=101); -- error
+ERROR:  invalid value "101" for "estimate_percent"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR TABLE');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXES');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL COLUMNS');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL COLUMNS SIZE 100');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXED COLUMNS');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('ESTIMATE', estimate_rows:=10000, estimate_percent:=101, method_opt:='FOR ALL INDEXED COLUMNS SIZE 100');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', estimate_rows:=10000);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', estimate_percent:=-100);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', estimate_rows:=10000, estimate_percent:=-100);
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR TABLE');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL INDEXES');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL INDEXED COLUMNS');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL INDEXED COLUMNS SIZE 100');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL COLUMNS');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL COLUMNS SIZE 100');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR TABLE FOR ALL INDEXES');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR TABLE FOR ALL INDEXED COLUMNS');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR TABLE123');	-- error
+ERROR:  invalid input value for method_opt
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+call gms_utility.analyze_database('COMPUTE', method_opt:='111FOR TABLE');	-- error
+ERROR:  unrecognized param value: "111FOR TABLE"
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+call gms_utility.analyze_database('DELETE');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('DELETE', method_opt:='FOR TABLE');	-- error
+ERROR:  The Command did not end correctly
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+ALTER INDEX t1_id_uidx UNUSABLE;
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL INDEXES');
+ERROR:  index "t1_id_uidx" is not available
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_schema(character varying,character varying,numeric,numeric,character varying) line 2 at PERFORM
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL INDEXES');
+ERROR:  index "t1_id_uidx" is not available
+CONTEXT:  SQL statement "CALL gms_utility.analyze_schema_c_fun(schema_name,method,estimate_rows,estimate_percent,method_opt)"
+PL/pgSQL function gms_utility.analyze_database(character varying,numeric,numeric,character varying) line 5 at PERFORM
+ALTER INDEX t1_id_uidx REBUILD;
+call gms_utility.analyze_schema('test_utility_analyze', 'COMPUTE', method_opt:='FOR ALL INDEXES');
+ analyze_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.analyze_database('COMPUTE', method_opt:='FOR ALL INDEXES');
+ analyze_database 
+------------------
+ 
+(1 row)
+
+drop table t1 cascade;
+drop function batch_insert;
+reset search_path;
+drop user test_utility_analyze cascade;
+---------------------------
+-- canonicalize
+---------------------------
+create schema test_utility_canonicalize;
+set search_path to test_utility_canonicalize;
+-- canonicalize
+declare
+    canon_name varchar2(100);
+begin
+    gms_utility.canonicalize('uwclass.test', canon_name, 16);
+    raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "UWCLASS"."TEST"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."ROOY"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  function "canonicalize" with 2 parameters doesn't exist 
+CONTEXT:  SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+-- empty、space
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize(NULL, canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- NULL
+/
+INFO:  canon_name: <NULL>
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: <NULL>
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('""', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value """" with zero length
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('""',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('     ', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: 
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('    .abcd', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "    .abcd" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('    .abcd',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll..nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "koll..nuuop.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll..nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."".nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "koll."".nuuop.a" with zero length
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll."".nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: KOLL
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('"koll"', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: koll
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('   "  koll.rooy"  .nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "  koll.rooy"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."ROOY"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "~!#@@#$%)(#@(!@))<>?/*-+"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy#_$nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."ROOY#_$NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."rooy"  abc.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;  	-- error
+/
+ERROR:  Invalid parameter value "koll."rooy"  abc.nuuop.a" after quotation
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll."rooy"  abc.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "koll.rooy.nuuop."
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nu"uo"p', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid parameter value "koll.rooy.nu"uo"p" before quotation
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.rooy.nu"uo"p',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy."nu"u"o"p', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid parameter value "koll.rooy."nu"u"o"p" after quotation
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.rooy."nu"u"o"p',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."rooy"."nuuop.', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "koll."rooy"."nuuop." with quotation not closed
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll."rooy"."nuuop.',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+-- identy
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.123rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid paramter value "koll.123rooy.nuuop.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.123rooy.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll._rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- ok for og, error for A
+/
+INFO:  canon_name: "KOLL"."_ROOY"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."_rooy".nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."_rooy"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('table', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: TABLE
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.table.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+ERROR:  Invalid paramter value "koll.rooy.table.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.rooy.table.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('column', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: COLUMN
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.column.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+ERROR:  Invalid paramter value "koll.column.nuuop.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.column.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+-- test indentifier overlength; og >= 64, A >= 128
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+ERROR:  identifier too long, max length is 64
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+-- param canon_len
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, -10);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Input parameter "canon_len" value "-10" is less than zero
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name,-10)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 0);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: 
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 10);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."RO
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('开车.rooy.nuuop.a', canon_name, 10);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "开车"."
+declare
+	canon_name varchar2(10);
+begin
+	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 20);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  value too long for type character varying(10)
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+drop schema test_utility_canonicalize;
+---------------------------
+-- compile schema
+---------------------------
+create schema test_utility_compile;
+set search_path to test_utility_compile;
+create table classes (  
+    class_id int primary key,  
+    class_name varchar(50) not null  
+)
+with (orientation=row, compression=no);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "classes_pkey" for table "classes"
+  
+create table students (  
+    student_id int primary key,  
+    class_id int,  
+    student_name varchar(50) not null
+)
+with (orientation=row, compression=no);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "students_pkey" for table "students"
+  
+create table studentscores (  
+    score_id int primary key,  
+    student_id int,  
+    subject varchar(50),  
+    score int
+)
+with (orientation=row, compression=no);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "studentscores_pkey" for table "studentscores"
+create or replace procedure insertclass(in classname varchar(50))
+as
+	ct int;
+begin
+	select count(class_id) into ct from classes;
+    insert into classes values (ct + 1, classname);
+end;
+/
+  
+create or replace procedure insertstudent(in classname varchar(50), in studentname varchar(50))
+as
+	classid int;
+	ct int;
+begin  
+    select class_id into classid from classes where class_name = classname;
+	select count(student_id) into ct from students;
+    insert into students values (ct + 1, classid, studentname);
+end;
+/
+create or replace function insertscore(studentid int, subject varchar(50), score int)  
+returns int
+as $$
+declare
+	ct int;
+begin
+	select count(score_id) into ct from studentscores;
+    insert into studentscores values (ct + 1, studentid, subject, score);
+    return ct + 1;  
+end;
+$$ language plpgsql;
+create or replace function getrank(score int)
+returns text
+as $$
+declare
+    rk text;
+begin
+    if score = 100 then
+        rk := 'perfect';
+    elsif score >= 80 then
+        rk := 'nice';
+    elsif score >= 60 then
+        rk := 'ordinary';
+    elsif score >= 0 then
+        rk := 'poor';
+    else
+        raise notice 'error input';
+    end if;
+
+    return rk;
+end;
+$$ language plpgsql;
+call insertclass('class a');  
+ insertclass 
+-------------
+ 
+(1 row)
+
+call insertclass('class b');  
+ insertclass 
+-------------
+ 
+(1 row)
+
+  
+call insertstudent('class a', 'alice');  
+ insertstudent 
+---------------
+ 
+(1 row)
+
+call insertstudent('class a', 'bob');  
+ insertstudent 
+---------------
+ 
+(1 row)
+
+call insertstudent('class b', 'charlie');  
+ insertstudent 
+---------------
+ 
+(1 row)
+
+call insertstudent('class b', 'rose');
+ insertstudent 
+---------------
+ 
+(1 row)
+
+call insertstudent('class b', 'jack');
+ insertstudent 
+---------------
+ 
+(1 row)
+
+  
+select insertscore(1, 'math', 90);  
+ insertscore 
+-------------
+           1
+(1 row)
+
+select insertscore(1, 'science', 85);  
+ insertscore 
+-------------
+           2
+(1 row)
+
+select insertscore(2, 'math', 95);  
+ insertscore 
+-------------
+           3
+(1 row)
+
+select insertscore(2, 'science', 88);  
+ insertscore 
+-------------
+           4
+(1 row)
+
+select insertscore(3, 'math', 78);  
+ insertscore 
+-------------
+           5
+(1 row)
+
+select insertscore(3, 'science', 82);
+ insertscore 
+-------------
+           6
+(1 row)
+
+select insertscore(4, 'math', 100);  
+ insertscore 
+-------------
+           7
+(1 row)
+
+select insertscore(4, 'science', 66);
+ insertscore 
+-------------
+           8
+(1 row)
+
+select insertscore(5, 'math', 57);  
+ insertscore 
+-------------
+           9
+(1 row)
+
+select insertscore(5, 'science', 68);
+ insertscore 
+-------------
+          10
+(1 row)
+
+create view stud_class as select s.student_name, c.class_name from students s join classes c on s.class_id = c.class_id;
+create view stud_score as select b.student_name, a.subject, a.score, getrank(a.score) from studentscores a join students b on a.student_id = b.student_id;
+create table t_pkg (c1 text);
+create package p_batch as
+	procedure insertpkg(txt text);
+	function batchinsert(num int) return int;
+end p_batch;
+/
+create package body p_batch as
+    procedure insertpkg(txt text)
+    as
+    begin
+        insert into t_pkg values (txt);
+    end;
+
+    function batchinsert(num int)
+    return int
+    is
+        start int := 0;
+        i int := 0;
+    begin
+        select count(*) into start from t_pkg;
+        for i in select generate_series(1, num) loop
+            insert into t1 values (start + i, left((pg_catalog.random() * i)::text, 6));
+        end loop;
+
+        return i;
+    end;
+end p_batch;
+/
+call gms_utility.compile_schema('test_utility_compile');
+ compile_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.compile_schema('test_utility_compile', true, false);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+call gms_utility.compile_schema(); -- error
+ERROR:  function "compile_schema" with 0 parameters doesn't exist 
+call gms_utility.compile_schema(1); -- error
+ERROR:  schema "1" does not exists
+CONTEXT:  SQL statement "CALL gms_utility.compile_schema_c_func(schema,compile_all,reuse_settings)"
+PL/pgSQL function gms_utility.compile_schema(character varying,boolean,boolean) line 2 at PERFORM
+call gms_utility.compile_schema('no_schema'); -- error
+ERROR:  schema "no_schema" does not exists
+CONTEXT:  SQL statement "CALL gms_utility.compile_schema_c_func(schema,compile_all,reuse_settings)"
+PL/pgSQL function gms_utility.compile_schema(character varying,boolean,boolean) line 2 at PERFORM
+create or replace function getrank(score int)
+returns text
+as $$
+declare
+    rk text;
+begin
+    if score = 100 then
+        rk := 'perfect';
+    elsif score >= 80 then
+        rk := 'nice';
+    elsif score >= 60 then
+        rk := 'ordinary';
+    elsif score >= 0 then
+        rk := 'poor';
+    else
+        rk := 'error';
+    end if;
+
+    return rk;
+end;
+$$ language plpgsql;
+call gms_utility.compile_schema('test_utility_compile');
+ compile_schema 
+----------------
+ 
+(1 row)
+
+drop package body p_batch;
+drop package p_batch;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function test_utility_compile.insertpkg(text)
+drop cascades to function test_utility_compile.batchinsert(integer)
+drop table t_pkg;
+drop view stud_score;
+drop view stud_class;
+drop function getrank;
+drop function insertscore;
+drop procedure insertstudent;
+drop procedure insertclass;
+drop table studentscores;
+drop table students;
+drop table classes;
+-- test invalid object compile
+set behavior_compat_options = 'plpgsql_dependency';
+create type s_type as (
+    id integer,
+    name varchar,
+    addr text
+);
+create or replace procedure type_alter(a s_type)
+is
+begin    
+    raise info 'call a: %', a;
+end;
+/
+select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+alter type s_type add attribute a int;
+select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%rowtype);
+create or replace package pkg
+is    
+    procedure proc1(p_in r1);
+end pkg;
+/
+create or replace package body pkg
+is
+declare
+    v1 r1;
+    v2 stu%rowtype;
+    procedure proc1(p_in r1) as
+    begin        
+    raise info 'call p_in: %', p_in;
+    end;
+end pkg;
+/
+call pkg.proc1((1,(1,'zhang','m',1)));
+INFO:  call p_in: (1,"(1,zhang,m,1)")
+ proc1 
+-------
+ 
+(1 row)
+
+select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+alter table stu add column b int;
+select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+create view v_stu as select * from stu;
+select * from v_stu;
+ sno | name | sex | cno | b 
+-----+------+-----+-----+---
+(0 rows)
+
+select valid from pg_object where object_type='v' and object_oid in (select oid from pg_class where relname='v_stu' and relkind='v' and relnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+ t
+(1 row)
+
+alter table stu drop column b;
+select valid from pg_object where object_type='v' and object_oid in (select oid from pg_class where relname='v_stu' and relkind='v' and relnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+ f
+(1 row)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+WARNING:  Compile view "v_stu" failed
+CONTEXT:  SQL statement "CALL gms_utility.compile_schema_c_func(schema,compile_all,reuse_settings)"
+PL/pgSQL function gms_utility.compile_schema(character varying,boolean,boolean) line 2 at PERFORM
+ compile_schema 
+----------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='v' and object_oid in (select oid from pg_class where relname='v_stu' and relkind='v' and relnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+ f
+(1 row)
+
+select * from v_stu;
+ERROR:  The view v_stu is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+alter table stu add column b int;
+select valid from pg_object where object_type='v' and object_oid in (select oid from pg_class where relname='v_stu' and relkind='v' and relnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+ f
+(1 row)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='v' and object_oid in (select oid from pg_class where relname='v_stu' and relkind='v' and relnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+ t
+(1 row)
+
+select * from v_stu;
+ sno | name | sex | cno | b 
+-----+------+-----+-----+---
+(0 rows)
+
+drop view v_stu;
+drop package body pkg;
+drop package pkg cascade;
+ERROR:  syntax error at or near "cascade"
+LINE 1: drop package pkg cascade;
+                         ^
+drop type r1;
+drop table stu;
+drop procedure type_alter;
+-- test procedure compile error
+set behavior_compat_options = 'plpgsql_dependency';
+create or replace procedure proc_err(p_in s_type) as
+begin
+    raise info 'call p_in: %', p_in;
+end;
+/
+drop type s_type;
+select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='proc_err' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+call gms_utility.compile_schema('test_utility_compile', false);
+WARNING:  "proc_err" header is undefined, you can try to recreate.
+CONTEXT:  SQL statement "CALL gms_utility.compile_schema_c_func(schema,compile_all,reuse_settings)"
+PL/pgSQL function gms_utility.compile_schema(character varying,boolean,boolean) line 2 at PERFORM
+ compile_schema 
+----------------
+ 
+(1 row)
+
+select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='proc_err' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+ valid 
+-------
+(0 rows)
+
+drop procedure proc_err;
+drop schema test_utility_compile cascade;
+NOTICE:  drop cascades to 2 other objects
+--?DETAIL:  drop cascades to package.*
+drop cascades to function test_utility_compile.proc1(undefined)
+---------------------------
+-- name tokenize
+---------------------------
+create schema test_utility_tokenize;
+set search_path to test_utility_tokenize;
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 25
+-- test empty character
+declare
+    name varchar2(50) := NULL;
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := '';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := '""';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value """" with zero length
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := '  .  ';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "  .  " with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := '"  .  "';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a =   .  , b = <NULL>, c = <NULL>, dblink = <NULL>, nextpos = 7
+declare
+    name varchar2(50) := 'peer.   lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 28
+declare
+    name varchar2(50) := 'peer."   lokppe.vuumee"@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b =    lokppe.vuumee, c = <NULL>, dblink = OOKEYY, nextpos = 30
+-- test support special char
+declare
+    name varchar2(50) := 'peer._lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- ok for og, error for A
+/
+INFO:  a = PEER, b = _LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.lokp_pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKP_PE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.$lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- ok for og, error for A
+/
+INFO:  a = PEER, b = $LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.lokp$pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKP$PE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.lokp233pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKP233PE, c = VUUMEE, dblink = OOKEYY, nextpos = 28
+declare
+    name varchar2(50) := 'peer.233lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = , c = , dblink = , nextpos = 4
+/
+INFO:  a = PEER, b = <NULL>, c = <NULL>, dblink = <NULL>, nextpos = 4
+declare
+    name varchar2(50) := 'peer.-lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "eer.-lokppe.vuumee@ookeyy"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer."-lokppe".vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = -lokppe, c = VUUMEE, dblink = OOKEYY, nextpos = 28
+declare
+    name varchar2(50) := 'peer.lokp-pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
+/
+INFO:  a = PEER, b = LOKP, c = <NULL>, dblink = <NULL>, nextpos = 9
+declare
+    name varchar2(50) := 'peer.lokp=pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
+/
+INFO:  a = PEER, b = LOKP, c = <NULL>, dblink = <NULL>, nextpos = 9
+declare
+    name varchar2(50) := 'peer.=lokppe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "eer.=lokppe.vuumee@ookeyy"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokp`pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokp`pe.vuumee@ookeyy" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokp~pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokp~pe.vuumee@ookeyy" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokp%pe.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokp%pe.vuumee@ookeyy" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+-- test keyword
+declare
+    name varchar2(50) := 'peer.table.vuumee@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.table.vuumee@ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+-- test @
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokppe.vuumee@" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@_ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- ok for og, error for A
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = _OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@"_ookeyy"';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = _ookeyy, nextpos = 28
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@$ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- ok for og, error for A
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = $OOKEYY, nextpos = 26
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@"$ookeyy"';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = $ookeyy, nextpos = 28
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@123ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid dblink value "peer.lokppe.vuumee@123ookeyy"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy.zk';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY.ZK, nextpos = 28
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokppe.vuumee@" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := '@vuumee';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "@vuumee" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@ook=eyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOK, nextpos = 22
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOK, nextpos = 22
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@=ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "eer.lokppe.vuumee@=ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee@ook%eyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokppe.vuumee@ook%eyy" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+-- test double quote
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee"@ookeyy"';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = , nextpos = 18
+/
+INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = <NULL>, nextpos = 18
+declare
+    name varchar2(50) := 'peer.lokppe.vu"ume"e@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKPPE, c = VU, dblink = , nextpos = 14
+/
+INFO:  a = PEER, b = LOKPPE, c = VU, dblink = <NULL>, nextpos = 14
+declare
+    name varchar2(50) := 'peer.lokppe."vu"ume"e@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- a = PEER, b = LOKPPE, c = vu, dblink = , nextpos = 16
+/
+INFO:  a = PEER, b = LOKPPE, c = vu, dblink = <NULL>, nextpos = 16
+declare
+    name varchar2(50) := 'peer.lokppe.vuumee.aking@ookeyy';
+    a   varchar2(50);
+    b   varchar2(50);
+    c   varchar2(50);
+    dblink  varchar2(50);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.lokppe.vuumee.aking@ookeyy"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+-- test idnetifier overlength. og >= 64, A >= 128
+declare
+    name varchar2(100) := 'peer.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.vuumee.aking@ookeyy';
+    a   varchar2(100);
+    b   varchar2(100);
+    c   varchar2(100);
+    dblink  varchar2(100);
+    nextpos integer;
+begin
+    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+end;    -- error
+/
+ERROR:  identifier too long, max length is 64
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+drop schema test_utility_tokenize;
+---------------------------
+-- name resolve
+---------------------------
+reset search_path;
+-- prepare data
+CREATE TABLE public.t_resolve (c1 NUMBER, c2 VARCHAR2(100));
+CREATE UNIQUE INDEX IF NOT EXISTS public.t_resolve_c1_udx ON public.t_resolve(c1);
+CREATE TABLE public.t_log (c1 NUMBER, c2 TIMESTAMP);
+CREATE SEQUENCE IF NOT EXISTS public.t_seq
+    INCREMENT BY 1
+    NOMINVALUE
+    NOMAXVALUE
+    START WITH 1
+    NOCYCLE;
+SELECT public.t_seq.NEXTVAL;
+ nextval 
+---------
+       1
+(1 row)
+
+CREATE OR REPLACE FUNCTION public.add_numbers (  
+    p_num1 IN INT,  
+    p_num2 IN INT  
+) RETURN NUMBER IS  
+    v_result INT;  
+BEGIN  
+    v_result := p_num1 + p_num2;  
+    RETURN v_result;  
+END;  
+/
+CREATE OR REPLACE PROCEDURE public.insert_val(name VARCHAR2(100)) IS 
+	id INT := 0;
+BEGIN 
+	SELECT public.t_seq.NEXTVAL INTO id;
+	INSERT INTO public.t_resolve VALUES (id, name);
+END;
+/
+CREATE OR REPLACE FUNCTION public.tg_log() RETURNS TRIGGER AS
+$$
+BEGIN
+    INSERT INTO public.t_log VALUES (NEW.c1, SYSDATE);
+    RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER log_resolve_after_insert
+AFTER INSERT ON public.t_resolve 
+FOR EACH ROW 
+EXECUTE PROCEDURE public.tg_log();
+CREATE OR REPLACE PACKAGE public.t_pkg IS
+    FUNCTION multi_number(num1 IN INT, num2 IN INT) RETURN INT;
+    PROCEDURE delete_val(id IN INT);
+END t_pkg;
+/
+CREATE OR REPLACE PACKAGE BODY public.t_pkg IS
+    FUNCTION multi_number(num1 IN INT, num2 IN INT) RETURN INT IS
+        v_res INT;
+    BEGIN
+        v_res = num1 * num2;
+        return v_res;
+    END multi_number;
+
+    PROCEDURE delete_val(id IN INT) AS
+    BEGIN
+        DELETE FROM t_resolve WHERE c1 = id;
+    END delete_val;
+END t_pkg;
+/
+CREATE TYPE public.t_typ AS (t1 INT, t2 TEXT);
+CREATE OR REPLACE SYNONYM public.syn_tbl FOR t_resolve;
+CREATE OR REPLACE SYNONYM public.syn_idx FOR t_resolve_c1_udx;
+CREATE OR REPLACE SYNONYM public.syn_seq FOR t_seq;
+CREATE OR REPLACE SYNONYM public.syn_fun FOR add_numbers;
+CREATE OR REPLACE SYNONYM public.syn_pro FOR insert_val;
+CREATE OR REPLACE SYNONYM public.syn_tg FOR log_resolve_after_insert;
+CREATE OR REPLACE SYNONYM public.syn_pkg FOR t_pkg;
+CREATE OR REPLACE SYNONYM public.syn_typ FOR t_typ;
+-- test table
+declare 
+    name varchar2 := 'public.t_resolve';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
+declare 
+    name varchar2 := 't_resolve';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
+declare
+    name varchar2 := 'public.syn_tbl';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
+declare 
+    name varchar2 := 'syn_tbl';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
+-- test PL/SQL
+declare
+    name varchar2 := 'public.add_numbers';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
+declare 
+    name varchar2 := 'add_numbers';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
+declare
+    name varchar2 := 'public.syn_fun';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
+declare
+    name varchar2 := 'syn_fun';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
+declare
+    name varchar2 := 'public.insert_val';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
+declare 
+    name varchar2 := 'insert_val';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
+declare
+    name varchar2 := 'public.syn_pro';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
+declare 
+    name varchar2 := 'syn_pro';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
+-- test package
+declare
+    name varchar2 := 'public.t_pkg.multi_number';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'public.t_pkg.delete_val';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAL, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'public.t_pkg.qwer';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare 
+    name varchar2 := 't_pkg.multi_number';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare 
+    name varchar2 := 't_pkg.delete_val';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAL, dblink = <NULL>, part1_type = 9, object_number =.*
+declare 
+    name varchar2 := 't_pkg.qwer';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'public.syn_pkg.multi_number';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'public.syn_pkg.delete_var';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAR, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'public.syn_pkg.qwer';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'syn_pkg.multi_number';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'syn_pkg.delete_var';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAR, dblink = <NULL>, part1_type = 9, object_number =.*
+declare
+    name varchar2 := 'syn_pkg.qwer';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
+--  test trigger
+declare
+    name varchar2 := 'public.log_resolve_after_insert';
+    context number := 3;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = LOG_RESOLVE_AFTER_INSERT, part2 = <NULL>, dblink = <NULL>, part1_type = 12, object_number =.*
+declare
+    name varchar2 := 'public.syn_tg';
+    context number := 3;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;    -- error
+/
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 'log_resolve_after_insert';
+    context number := 3;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = LOG_RESOLVE_AFTER_INSERT, part2 = <NULL>, dblink = <NULL>, part1_type = 12, object_number =.*
+declare
+    name varchar2 := 'syn_tg';
+    context number := 3;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;    -- error
+/
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+-- test sequence
+declare
+    name varchar2 := 'public.t_seq';
+    context number := 2;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
+declare
+    name varchar2 := 'public.syn_seq';
+    context number := 2;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
+declare 
+    name varchar2 := 't_seq';
+    context number := 2;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
+declare 
+    name varchar2 := 'syn_seq';
+    context number := 2;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
+-- test type
+declare
+    name varchar2 := 'public.t_typ';
+    context number := 7;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
+declare
+    name varchar2 := 'public.syn_typ';
+    context number := 7;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
+declare
+    name varchar2 := 't_typ';
+    context number := 7;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
+declare
+    name varchar2 := 'syn_typ';
+    context number := 7;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
+-- test index
+declare
+    name varchar2 := 'public.t_resolve_c1_udx';
+    context number := 9;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE_C1_UDX, part2 = <NULL>, dblink = <NULL>, part1_type = 1, object_number =.*
+declare
+    name varchar2 := 'public.syn_idx';
+    context number := 9;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;    -- error
+/
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 't_resolve_c1_udx';
+    context number := 9;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  schema = PUBLIC, part1 = T_RESOLVE_C1_UDX, part2 = <NULL>, dblink = <NULL>, part1_type = 1, object_number =.*
+declare
+    name varchar2 := 'syn_idx';
+    context number := 9;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;    -- error
+/
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+-- test java
+declare
+    name varchar2 := 'public.java.class';
+    context number := 4;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+ERROR:  Unsupported context type: 4
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 'public.java.class';
+    context number := 5;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+ERROR:  Unsupported context type: 5
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 'public.java.class';
+    context number := 6;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+ERROR:  Unsupported context type: 6
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 'public.java.class';
+    context number := 8;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+ERROR:  Unsupported context type: 8
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+-- test with dblink
+declare
+    name varchar2 := 'peer.lokppe.vuumee@ookeyy';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = LOKPPE, part2 = VUUMEE, dblink = OOKEYY, part1_type = 0, object_number = 0
+declare
+    name varchar2 := 'peer@ookeyy';
+    context number := 1;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = <NULL>, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+declare
+    name varchar2 := 'peer@ookeyy';
+    context number := 2;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = <NULL>, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+declare
+    name varchar2 := 'peer.@ookeyy';
+    context number := 3;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;    -- error
+/
+ERROR:  Invalid input value "peer.@ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function inline_code_block line 10 at SQL statement
+declare
+    name varchar2 := 'peer.lokppe@ookeyy';
+    context number := 7;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+declare
+    name varchar2 := 'peer.lokppe@ookeyy';
+    context number := 9;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+declare
+    name varchar2 := 'peer.lokppe@ookeyy';
+    context number := 10;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+DROP SYNONYM syn_tbl;
+DROP SYNONYM syn_idx;
+DROP SYNONYM syn_seq;
+DROP SYNONYM syn_fun;
+DROP SYNONYM syn_pro;
+DROP SYNONYM syn_tg;
+DROP SYNONYM syn_pkg;
+DROP SYNONYM syn_typ;
+DROP TYPE public.t_typ;
+DROP PACKAGE BODY public.t_pkg;
+DROP PACKAGE public.t_pkg;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function public.multi_number(integer,integer)
+drop cascades to function public.delete_val(integer)
+DROP TRIGGER log_resolve_after_insert ON t_resolve;
+DROP FUNCTION public.tg_log;
+DROP FUNCTION public.add_numbers;
+DROP PROCEDURE public.insert_val;
+DROP INDEX public.t_resolve_c1_udx;
+DROP TABLE public.t_log;
+DROP TABLE public.t_resolve;
+DROP SEQUENCE public.t_seq;
+drop extension gms_utility cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table gms_utility.t_into
+drop cascades to table gms_utility.num
+reset search_path;
