@@ -688,6 +688,7 @@ ifeq ($(enable_lite_mode), no)
 	@if test -f $(DSS_BIN_PATH)/dss_clear.sh; then cp $(DSS_BIN_PATH)/dss_clear.sh $(DESTDIR)$(bindir)/dss_clear.sh; fi
 	@if test -f $(DSS_BIN_PATH)/dsscmd; then cp $(DSS_BIN_PATH)/dsscmd $(DESTDIR)$(bindir)/dsscmd; fi
 	@if test -f $(DSS_BIN_PATH)/dssserver; then cp $(DSS_BIN_PATH)/dssserver $(DESTDIR)$(bindir)/dssserver; fi
+	@if test -f $(DSS_BIN_PATH)/dsstbox; then cp $(DSS_BIN_PATH)/dsstbox $(DESTDIR)$(bindir)/dsstbox; fi
 	@if test -f $(DSS_BIN_PATH)/perctrl; then cp $(DSS_BIN_PATH)/perctrl $(DESTDIR)$(bindir)/perctrl; fi
 	@if test -f $(DMS_LIB_PATH)/libdms.so; then cp $(DMS_LIB_PATH)/libdms.so $(DESTDIR)$(libdir)/libdms.so; fi
 	@if test -f $(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh; then cp $(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh $(DESTDIR)$(bindir)/dms_contrl.sh; fi

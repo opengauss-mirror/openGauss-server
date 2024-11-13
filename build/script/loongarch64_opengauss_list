@@ -1,6 +1,7 @@
 [server]
 ./bin/dsscmd
 ./bin/dssserver
+./bin/dsstbox
 ./bin/perctrl
 ./bin/dms_contrl.sh
 ./bin/dss_clear.sh
