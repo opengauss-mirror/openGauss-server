@@ -18,6 +18,8 @@
 constexpr int INIT_CORR_ARRAY_LENGTH = 64;
 constexpr int MAX_CORR_ARRAY_LENGTH = 524288;
 
+constexpr float HALF = 0.5;
+
 enum class ModeType {
     COEFFICIENT,
     ONE_SIDED_SIG,
@@ -303,7 +305,13 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
 
     float8 one_sided_p_value_pos = 1 - boost::math::cdf(t_dist, t_stat);
     float8 one_sided_p_value_neg = 1 - one_sided_p_value_pos;
-    float8 two_sided_p_value = 2 * one_sided_p_value_pos;
+    float8 one_sided_p_value;
+    if (one_sided_p_value_pos < HALF) {
+        one_sided_p_value = one_sided_p_value_pos;
+    } else {
+        one_sided_p_value = one_sided_p_value_neg;
+    }
+    float8 two_sided_p_value = 2 * one_sided_p_value;
 
     pfree(x_ranks);
     pfree(y_ranks);
@@ -380,7 +388,13 @@ Datum corr_k_final_fn(PG_FUNCTION_ARGS)
     boost::math::normal_distribution<> normal_dist(0.0, 1.0);
     float8 one_sided_p_value_pos = 1.0 - boost::math::cdf(normal_dist, z_stat);
     float8 one_sided_p_value_neg = boost::math::cdf(normal_dist, z_stat);
-    float8 two_sided_p_value = 2 * one_sided_p_value_pos;
+    float8 one_sided_p_value;
+    if (one_sided_p_value_pos < HALF) {
+        one_sided_p_value = one_sided_p_value_pos;
+    } else {
+        one_sided_p_value = one_sided_p_value_neg;
+    }
+    float8 two_sided_p_value = 2 * one_sided_p_value;
 
     pfree(x_ranks);
     pfree(y_ranks);
