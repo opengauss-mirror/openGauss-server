@@ -862,6 +862,30 @@ typedef struct CStoreIndexOr : public BitmapOr {
 } CStoreIndexOr;
 
 /* ----------------
+ *     Vector ann index scan node
+ * use vector index scan and list of qual expressions to scan data.
+ */
+typedef struct AnnIndexScan {
+    Scan scan;
+    Oid indexid;                 /* OID of index to scan */
+    char* indexname;             /* Index name of index to scan	*/
+    List* indexqual;             /* list of index quals (usually OpExprs) */
+    List* indexqualorig;         /* the same in original form */
+    List* indexorderby;          /* list of index ORDER BY exprs */
+    List* indexorderbyorig;      /* the same in original form */
+    ScanDirection indexorderdir; /* forward or backward or don't care */
+    Index indexscan_relid;       /* Hack for column store index, treat the index as normal relation */
+    List* idx_cstorequal;        /* For column store, this contains only quals pushdownable to
+                                    storage engine */
+    List* cstorequal;            /* quals that can be pushdown to cstore base table */
+    List* targetlist;            /* Hack for column store index, target list to be computed at this node */
+    bool index_only_scan;
+    bool is_ustore;
+    double selectivity;
+    bool is_partial;
+} AnnIndexScan;
+
+/* ----------------
  *		tid scan node
  *
  * tidquals is an implicitly OR'ed list of qual expressions of the form

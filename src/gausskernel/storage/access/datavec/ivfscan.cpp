@@ -235,7 +235,7 @@ IndexScanDesc ivfflatbeginscan_internal(Relation index, int nkeys, int norderbys
     Oid sortOperators[] = {FLOAT8LTOID};
     Oid sortCollations[] = {InvalidOid};
     bool nullsFirstFlags[] = {false};
-    int probes = u_sess->datavec_ctx.ivfflat_probes;
+    int probes = INT_MAX;
     int natts = 2;
     int attDistance = 1;
     int attHeaptid = 2;

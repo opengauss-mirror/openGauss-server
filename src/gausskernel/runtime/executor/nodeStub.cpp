@@ -20,6 +20,7 @@
 #include "executor/node/nodeSeqscan.h"
 #include "executor/node/nodeIndexscan.h"
 #include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeAnnIndexscan.h"
 #include "executor/node/nodeBitmapIndexscan.h"
 #include "executor/node/nodeBitmapHeapscan.h"
 #include "executor/node/nodeTidscan.h"
@@ -178,6 +179,9 @@ void ExecEndNodeStubScan(PlanState* node)
 #ifdef USE_SPQ
         case T_SpqBitmapHeapScan:
 #endif
+        case T_AnnIndexScan:
+            ExecEndAnnIndexScan((AnnIndexScanState*)node);
+            break;
         case T_BitmapIndexScan:
             ExecEndBitmapIndexScan((BitmapIndexScanState*)node);
             break;

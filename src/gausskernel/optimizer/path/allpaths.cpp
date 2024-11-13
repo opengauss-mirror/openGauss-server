@@ -4107,7 +4107,8 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_IndexScan:
-        case T_IndexOnlyScan: {
+        case T_IndexOnlyScan:
+        case T_AnnIndexScan: {
             PartIteratorPath* itrpath = makeNode(PartIteratorPath);
 
             itrpath->subPath = path;
@@ -4127,7 +4128,10 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
             /* scan parttition from lower boundary to upper boundary by default */
             itrpath->direction = ForwardScanDirection;
 
-            if (NIL != path->pathkeys && (T_IndexOnlyScan == path->pathtype || T_IndexScan == path->pathtype)) {
+            if (NIL != path->pathkeys &&
+                (T_IndexOnlyScan == path->pathtype ||
+                 T_IndexScan == path->pathtype ||
+                 T_AnnIndexScan == path->pathtype)) {
                 /* try to inherit pathkeys from IndexPath/IndexOnlyScan since only */
                 make_partiterator_pathkey(root, rel, relation, itrpath, path->pathkeys);
             }

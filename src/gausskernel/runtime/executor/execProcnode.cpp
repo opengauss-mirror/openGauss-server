@@ -76,6 +76,7 @@
 
 #include "executor/executor.h"
 #include "executor/node/nodeAgg.h"
+#include "executor/node/nodeAnnIndexscan.h"
 #include "executor/node/nodeAppend.h"
 #include "executor/node/nodeBitmapAnd.h"
 #include "executor/node/nodeBitmapHeapscan.h"
@@ -205,6 +206,7 @@ bool NeedStubExecution(Plan* plan)
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapIndexScan:
         case T_BitmapHeapScan:
         case T_TidScan:
@@ -328,6 +330,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitIndexScan((IndexScan*)node, estate, eflags);
         case T_IndexOnlyScan:
             return (PlanState*)ExecInitIndexOnlyScan((IndexOnlyScan*)node, estate, eflags);
+        case T_AnnIndexScan:
+            return (PlanState*)ExecInitAnnIndexScan((AnnIndexScan*)node, estate, eflags);
         case T_BitmapIndexScan:
             return (PlanState*)ExecInitBitmapIndexScan((BitmapIndexScan*)node, estate, eflags);
         case T_BitmapHeapScan:
@@ -1157,6 +1161,10 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_IndexOnlyScanState:
             ExecEndIndexOnlyScan((IndexOnlyScanState*)node);
+            break;
+
+        case T_AnnIndexScanState:
+            ExecEndAnnIndexScan((AnnIndexScanState*)node);
             break;
 
         case T_BitmapIndexScanState:

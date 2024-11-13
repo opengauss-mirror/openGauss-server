@@ -358,6 +358,20 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             }
             return set_indexonlyscan_references(root, splan, rtoffset);
         } break;
+        case T_AnnIndexScan: {
+            AnnIndexScan* splan = (AnnIndexScan*)plan;
+
+            splan->scan.scanrelid += rtoffset;
+            splan->scan.plan.targetlist = fix_scan_list(root, splan->scan.plan.targetlist, rtoffset);
+            if (splan->scan.plan.distributed_keys != NIL) {
+                splan->scan.plan.distributed_keys = fix_scan_list(root, splan->scan.plan.distributed_keys, rtoffset);
+            }
+            splan->scan.plan.qual = fix_scan_list(root, splan->scan.plan.qual, rtoffset);
+            splan->indexqual = fix_scan_list(root, splan->indexqual, rtoffset);
+            splan->indexqualorig = fix_scan_list(root, splan->indexqualorig, rtoffset);
+            splan->indexorderby = fix_scan_list(root, splan->indexorderby, rtoffset);
+            splan->indexorderbyorig = fix_scan_list(root, splan->indexorderbyorig, rtoffset);
+        } break;
         case T_CStoreIndexScan: {
             CStoreIndexScan* splan = (CStoreIndexScan*)plan;
 
@@ -537,6 +551,7 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 #endif   /* ENABLE_MULTIPLE_NODES */
                 case T_IndexScan:
                 case T_IndexOnlyScan:
+                case T_AnnIndexScan:
                 case T_BitmapHeapScan:
                 case T_TidScan:
                 case T_CStoreIndexScan:

@@ -1904,6 +1904,79 @@ void StreamNodeGroup::MarkRecursiveVfdInvalid()
     }
 }
 
+void StreamNodeGroup::BuildStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    memset_s(&streamKey, sizeof(streamKey), 0, sizeof(streamKey));
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+
+    void* parallelDesc = NULL;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+            parallelDesc = palloc0(sizeof(ParallelIndexScanDescData));
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_indexid = ((IndexScan*)node)->indexid;
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_relid = ((IndexScan*)node)->scan.scanrelid;
+            ((ParallelIndexScanDescData*)parallelDesc)->psBtpscan = Btbuildparallelscan();
+            break;
+        default:
+            break;
+    }
+
+    if (!parallelDesc) {
+        return;
+    }
+    bool found = false;
+    StreamDescElement* element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_ENTER, &found);
+    if (found != false) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("streamKey of stream nodegroup id is duplicated")));
+    }
+    element->key = streamKey;
+    element->parallelDesc = (ParallelIndexScanDescData*)parallelDesc;
+}
+
+void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    memset_s(&streamKey, sizeof(streamKey), 0, sizeof(streamKey));
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+    bool found = false;
+    StreamDescElement* element = NULL;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+        case T_AnnIndexScan:
+            element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_FIND, &found);
+            if (found == true) {
+                if (((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan) {
+                    delete ((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan;
+                }
+                pfree(element->parallelDesc);
+                (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_REMOVE, NULL);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void* StreamNodeGroup::GetParalleDesc(const uint64& queryId, const uint64& planNodeId)
+{
+    StreamKey key;
+    memset_s(&key, sizeof(key), 0, sizeof(key));
+    key.queryId = queryId;
+    key.planNodeId = planNodeId;
+    bool found = false;
+    StreamDescElement* element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &key, HASH_FIND, &found);
+    if (found == false) {
+        return NULL;
+    } else {
+        return element->parallelDesc;
+    }
+}
+
 #ifndef ENABLE_MULTIPLE_NODES
 bool InitStreamObject(PlannedStmt* planStmt)
 {

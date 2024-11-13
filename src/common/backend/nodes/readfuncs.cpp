@@ -4153,6 +4153,54 @@ static CStoreIndexScan* _readCStoreIndexScan(CStoreIndexScan* local_node)
     READ_DONE();
 }
 
+static AnnIndexScan* _readAnnIndexScan(AnnIndexScan* local_node)
+{
+    READ_LOCALS_NULL(AnnIndexScan);
+    READ_TEMP_LOCALS();
+
+    // Read Scan
+    _readScan(&local_node->scan);
+
+    READ_OID_FIELD(indexid);
+#ifdef STREAMPLAN
+    // Note: The Oid shipped(in plan) is invalid here
+    // We need to get the Oid on this node
+    if (local_node->indexid >= FirstBootstrapObjectId) {
+        IF_EXIST(indexname) {
+            char *indexname, *indexnamespace;
+
+            token = pg_strtok(&length);
+            token = pg_strtok(&length);
+            indexname = nullable_string(token, length);
+            token = pg_strtok(&length);
+            token = pg_strtok(&length);
+            indexnamespace = nullable_string(token, length);
+            if (!IS_PGXC_COORDINATOR)
+                local_node->indexid = get_valid_relname_relid(indexnamespace, indexname);
+
+            pfree_ext(indexname);
+            pfree_ext(indexnamespace);
+        }
+    }
+#endif  // STREAMPLAN
+
+    READ_NODE_FIELD(indexqual);
+    READ_NODE_FIELD(indexqualorig);
+    READ_NODE_FIELD(indexorderby);
+    READ_NODE_FIELD(indexorderbyorig);
+    READ_ENUM_FIELD(indexorderdir, ScanDirection);
+    IF_EXIST(is_ustore) {
+        READ_BOOL_FIELD(is_ustore);
+    }
+    IF_EXIST(selectivity) {
+        READ_FLOAT_FIELD(selectivity);
+    }
+    IF_EXIST(is_partial) {
+        READ_BOOL_FIELD(is_partial);
+    }
+    READ_DONE();
+}
+
 static Sort* _readSort(Sort* local_node)
 {
     READ_LOCALS_NULL(Sort);
@@ -6795,7 +6843,9 @@ Node* parseNodeString(void)
         return_value = _readSubqueryScan(NULL);
     } else if (MATCH("INDEXSCAN", 9)) {
         return_value = _readIndexScan(NULL);
-    } else if (MATCH("JOIN", 4)) {
+    } else if (MATCH("ANNINDEXSCAN", 12)) {
+        return_value = _readAnnIndexScan(NULL);
+    }  else if (MATCH("JOIN", 4)) {
         return_value = _readJoin(NULL);
     } else if (MATCH("HASH", 4)) {
         return_value = _readHash(NULL);
