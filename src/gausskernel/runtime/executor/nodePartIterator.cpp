@@ -71,6 +71,7 @@ static int GetScanPartitionNum(PartIteratorState* node, PlanState* noden)
         case T_SeqScanState:
         case T_IndexScanState:
         case T_IndexOnlyScanState:
+        case T_AnnIndexScanState:
         case T_BitmapHeapScanState:
         case T_TidScanState:
             partitionScan =  ((ScanState*)noden)->part_id;
@@ -120,7 +121,8 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanSt
     if (IsA(noden, VecToRowState)) {
         subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
     } else if (IsA(noden, ScanState) || IsA(noden, SeqScanState) || IsA(noden, IndexOnlyScanState) ||
-               IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState)) {
+               IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState) ||
+               IsA(noden, AnnIndexScanState)) {
         subPartLengthList = ((ScanState *)noden)->subPartLengthList;
     }
 
@@ -194,7 +196,8 @@ static TupleTableSlot* ExecPartIterator(PlanState* planState)
             if (IsA(noden, VecToRowState)) {
                 subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
             } else if (IsA(noden, ScanState) || IsA(noden, SeqScanState) || IsA(noden, IndexOnlyScanState) ||
-                       IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState)) {
+                       IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState) ||
+                       IsA(noden, AnnIndexScanState)) {
                 subPartLengthList = ((ScanState *)noden)->subPartLengthList;
             }
 

@@ -1000,7 +1000,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
     if (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)) {
         if (IsA(planstate, SeqScanState)) {
             scan_handler_tbl_restrpos(castNode(SeqScanState, planstate)->ss_currentScanDesc);
-        } else if (IsA(planstate, IndexScanState)) {
+        } else if (IsA(planstate, IndexScanState) || IsA(planstate, AnnIndexScanState)) {
             ExecReScan(planstate);
         }
     }

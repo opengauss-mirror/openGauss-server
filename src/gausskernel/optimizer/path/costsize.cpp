@@ -5218,6 +5218,7 @@ bool has_indexed_join_quals(NestPath* joinpath)
     switch (innerpath->pathtype) {
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
             indexclauses = ((IndexPath*)innerpath)->indexclauses;
             break;
         case T_BitmapHeapScan: {

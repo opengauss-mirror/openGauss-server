@@ -92,6 +92,11 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
 
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
         } break;
+        case T_AnnIndexScan: {
+            AnnIndexScan* splan = (AnnIndexScan*)result_plan;
+
+            res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
+        } break;
         case T_CStoreIndexScan: {
             CStoreIndexScan* splan = (CStoreIndexScan*)result_plan;
 
@@ -363,6 +368,7 @@ void stream_path_walker(Path* path, ContainStreamContext* context)
 
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan: {
             IndexPath* indexPath = (IndexPath*)path;
             if (g_instance.attr.attr_storage.enable_delta_store &&

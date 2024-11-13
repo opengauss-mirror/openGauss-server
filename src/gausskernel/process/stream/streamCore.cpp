@@ -1958,6 +1958,7 @@ void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
 
     switch (nodeTag(node)) {
         case T_IndexScan:
+        case T_AnnIndexScan:
             element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_FIND, &found);
             if (found == true) {
                 if (((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan) {

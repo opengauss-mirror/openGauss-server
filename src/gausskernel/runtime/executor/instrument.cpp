@@ -1186,6 +1186,13 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             pname = "CStore Index Or";
             plan_type = IO_OP;
             break;
+        case T_AnnIndexScan:
+            if (((AnnIndexScan*)plan)->scan.isPartTbl)
+                pname = "Partitioned Ann Index Scan";
+            else
+                pname = "Ann Index Scan";
+            plan_type = IO_OP;
+            break;
         case T_TidScan:
             if (((Scan*)plan)->isPartTbl)
                 pname = "Partitioned Tid Scan";
@@ -1453,6 +1460,7 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:

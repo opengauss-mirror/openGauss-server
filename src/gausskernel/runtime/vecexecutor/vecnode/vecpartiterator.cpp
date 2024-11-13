@@ -86,6 +86,7 @@ static int GetVecscanPartitionNum(const PartIteratorState* node)
                 case T_SeqScanState:
                 case T_IndexScanState:
                 case T_IndexOnlyScanState:
+                case T_AnnIndexScanState:
                 case T_BitmapHeapScanState:
                     partitionScan =  scanState->part_id;
                     break;

@@ -83,6 +83,7 @@ const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
 #endif
     {T_IndexScan,           TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_CStoreIndexScan,     TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
+    {T_AnnIndexScan,        TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_ANN_INDEX},
     {T_IndexOnlyScan,       TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX_ONLY},
     {T_BitmapIndexScan,     TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_INDEX},
     {T_CStoreIndexHeapScan, TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_HEAP},
@@ -509,7 +510,7 @@ static inline bool IsScan(Plan* plan)
            IsA(plan, FunctionScan) || IsA(plan, ValuesScan) || IsA(plan, CteScan) ||
            IsA(plan, WorkTableScan) || IsA(plan, ForeignScan) || IsA(plan, VecScan) ||
            IsA(plan, VecIndexScan) || IsA(plan, VecIndexOnlyScan) || IsA(plan, VecBitmapIndexScan) ||
-           IsA(plan, VecBitmapHeapScan);
+           IsA(plan, VecBitmapHeapScan) || IsA(plan, AnnIndexScan);
 }
 
 static inline bool IsJoin(Plan* plan)
@@ -914,6 +915,9 @@ static void GetSpecialPlanOptCondition(PlanState* planstate, StringInfo conditio
         case T_IndexOnlyScan:
             GetPlanOptConditionFromQual(((IndexOnlyScan*)plan)->indexqual, planstate, condition, maxlen, rtable);
             break;
+        case T_AnnIndexScan:
+            GetPlanOptConditionFromQual(((AnnIndexScan*)plan)->indexqualorig, planstate, condition, maxlen, rtable);
+            break;
         case T_BitmapIndexScan:
             GetPlanOptConditionFromQual(((BitmapIndexScan*)plan)->indexqualorig, planstate, condition, maxlen, rtable);
             break;
@@ -984,6 +988,7 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
         case T_Agg:
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_CStoreIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:

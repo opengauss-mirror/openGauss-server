@@ -69,6 +69,7 @@ typedef enum NodeTag {
 #endif
     T_IndexScan,
     T_IndexOnlyScan,
+    T_AnnIndexScan,
     T_BitmapIndexScan,
     T_BitmapHeapScan,
     T_TidScan,
@@ -188,6 +189,7 @@ typedef enum NodeTag {
 #endif
     T_IndexScanState,
     T_IndexOnlyScanState,
+    T_AnnIndexScanState,
     T_BitmapIndexScanState,
     T_BitmapHeapScanState,
     T_TidScanState,
