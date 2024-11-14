@@ -11382,6 +11382,10 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
     }
 
     funcname = generate_function_name(wfunc->winfnoid, nargs, argnames, argtypes, false, NULL);
+   
+    if (pg_strcasecmp(funcname,"\"nth_value\"") == 0) {
+        funcname = "nth_value";
+    }
     appendStringInfo(buf, "%s(", funcname);
 
     /* winstar can be set only in zero-argument aggregates */
@@ -11395,8 +11399,14 @@ static void get_windowfunc_expr(WindowFunc* wfunc, deparse_context* context)
     Assert(funcname);
     if (pg_strcasecmp(funcname, "listagg") == 0)
         appendStringInfoString(buf, ") WITHIN GROUP ");
-    else
-        appendStringInfoString(buf, ") OVER ");
+    else {
+        appendStringInfoString(buf, ")");
+        if (wfunc->is_from_last)
+            appendStringInfoString(buf, " FROM LAST");
+        if (wfunc->is_ignore_nulls)
+            appendStringInfoString(buf, " IGNORE NULLS");
+        appendStringInfoString(buf, " OVER ");
+    }
 
     construct_windowClause(context);
 

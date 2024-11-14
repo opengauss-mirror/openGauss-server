@@ -57,6 +57,8 @@ typedef struct WindowObjectData {
     int readptr;              /* tuplestore read pointer for this fn */
     int64 markpos;            /* row that markptr is positioned on */
     int64 seekpos;            /* row that readptr is positioned on */
+    bool is_from_last;        /* used for nth_value */
+    bool is_ignore_nulls;     /* used for nth_value */
 } WindowObjectData;
 
 /* this struct is private in nodeWindowAgg.c */

@@ -1,0 +1,356 @@
+--nth_value support algorithm FROM LAST/FIRST and IGNORE/REPSECT NULLS
+DROP TABLE IF EXISTS temp_table;
+NOTICE:  table "temp_table" does not exist, skipping
+CREATE TABLE temp_table(ten int, four int);
+insert into temp_table values(1,1),(1,1),(7,1),(9,1),(0,2),(1,3),(3,3),(null,1),(null,2),(8,1),(null,1),(null,1); 
+--check whole partition
+SELECT NTH_VALUE(TEN, 1) OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         1 |   1 |    1
+         1 |   1 |    1
+         1 |   7 |    1
+         1 |   8 |    1
+         1 |   9 |    1
+         1 |     |    1
+         1 |     |    1
+         1 |     |    1
+         0 |   0 |    2
+         0 |     |    2
+         1 |   1 |    3
+         1 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) FROM LAST OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+           |   1 |    1
+           |   1 |    1
+           |   7 |    1
+           |   8 |    1
+           |   9 |    1
+           |     |    1
+           |     |    1
+           |     |    1
+           |   0 |    2
+           |     |    2
+         3 |   1 |    3
+         3 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) FROM FIRST OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         1 |   1 |    1
+         1 |   1 |    1
+         1 |   7 |    1
+         1 |   8 |    1
+         1 |   9 |    1
+         1 |     |    1
+         1 |     |    1
+         1 |     |    1
+         0 |   0 |    2
+         0 |     |    2
+         1 |   1 |    3
+         1 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         1 |   1 |    1
+         1 |   1 |    1
+         1 |   7 |    1
+         1 |   8 |    1
+         1 |   9 |    1
+         1 |     |    1
+         1 |     |    1
+         1 |     |    1
+         0 |   0 |    2
+         0 |     |    2
+         1 |   1 |    3
+         1 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) RESPECT NULLS OVER (PARTITION BY FOUR order by ten desc ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+           |   9 |    1
+           |   8 |    1
+           |   7 |    1
+           |   1 |    1
+           |   1 |    1
+           |     |    2
+           |   0 |    2
+         3 |   3 |    3
+         3 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         9 |   1 |    1
+         9 |   1 |    1
+         9 |   7 |    1
+         9 |   8 |    1
+         9 |   9 |    1
+         9 |     |    1
+         9 |     |    1
+         9 |     |    1
+         0 |   0 |    2
+         0 |     |    2
+         3 |   1 |    3
+         3 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN,2) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         8 |   1 |    1
+         8 |   1 |    1
+         8 |   7 |    1
+         8 |   8 |    1
+         8 |   9 |    1
+         8 |     |    1
+         8 |     |    1
+         8 |     |    1
+           |   0 |    2
+           |     |    2
+         1 |   1 |    3
+         1 |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN,3) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         7 |   1 |    1
+         7 |   1 |    1
+         7 |   7 |    1
+         7 |   8 |    1
+         7 |   9 |    1
+         7 |     |    1
+         7 |     |    1
+         7 |     |    1
+           |   0 |    2
+           |     |    2
+           |   1 |    3
+           |   3 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN,2) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+         8 |     |    1
+         8 |     |    1
+         8 |     |    1
+         8 |   9 |    1
+         8 |   8 |    1
+         8 |   7 |    1
+         8 |   1 |    1
+         8 |   1 |    1
+           |     |    2
+           |   0 |    2
+         1 |   3 |    3
+         1 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN,3) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+         7 |     |    1
+         7 |     |    1
+         7 |     |    1
+         7 |   9 |    1
+         7 |   8 |    1
+         7 |   7 |    1
+         7 |   1 |    1
+         7 |   1 |    1
+           |     |    2
+           |   0 |    2
+           |   3 |    3
+           |   1 |    3
+(12 rows)
+
+--check default frame head to current row
+SELECT NTH_VALUE(TEN, 1) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+         9 |   9 |    1
+         9 |   8 |    1
+         9 |   7 |    1
+         9 |   1 |    1
+         9 |   1 |    1
+           |     |    2
+         0 |   0 |    2
+         3 |   3 |    3
+         3 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 2) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+           |   9 |    1
+         8 |   8 |    1
+         8 |   7 |    1
+         8 |   1 |    1
+         8 |   1 |    1
+           |     |    2
+           |   0 |    2
+           |   3 |    3
+         1 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 3) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+           |   9 |    1
+           |   8 |    1
+         7 |   7 |    1
+         7 |   1 |    1
+         7 |   1 |    1
+           |     |    2
+           |   0 |    2
+           |   3 |    3
+           |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 1) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+         9 |   9 |    1
+         8 |   8 |    1
+         7 |   7 |    1
+         1 |   1 |    1
+         1 |   1 |    1
+           |     |    2
+         0 |   0 |    2
+         3 |   3 |    3
+         1 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 2) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+           |   9 |    1
+         9 |   8 |    1
+         8 |   7 |    1
+         1 |   1 |    1
+         1 |   1 |    1
+           |     |    2
+           |   0 |    2
+           |   3 |    3
+         3 |   1 |    3
+(12 rows)
+
+SELECT NTH_VALUE(TEN, 3) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ nth_value | ten | four 
+-----------+-----+------
+           |     |    1
+           |     |    1
+           |     |    1
+           |   9 |    1
+           |   8 |    1
+         9 |   7 |    1
+         7 |   1 |    1
+         7 |   1 |    1
+           |     |    2
+           |   0 |    2
+           |   3 |    3
+           |   1 |    3
+(12 rows)
+
+--check error case
+SELECT NTH_VALUE(TEN, 0) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ERROR:  argument of nth_value must be greater than zero
+SELECT NTH_VALUE(TEN, 1) IGNORE NULLS FROM LAST OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+ERROR:  syntax error at or near "FROM"
+LINE 1: SELECT NTH_VALUE(TEN, 1) IGNORE NULLS FROM LAST OVER (PARTIT...
+                                              ^
+SELECT NTH_VALUE(TEN, 1) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR
+FROM temp_table 
+GROUP BY 1
+ORDER BY FOUR, TEN desc;
+ERROR:  window functions not allowed in GROUP BY clause
+LINE 1: SELECT NTH_VALUE(TEN, 1) FROM LAST IGNORE NULLS OVER (PARTIT...
+               ^
+--check for dump
+CREATE VIEW nthview1 as SELECT NTH_VALUE(TEN, 1) OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+create view nthview2 as SELECT NTH_VALUE(TEN, 1) FROM LAST OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+create view nthview3 as SELECT NTH_VALUE(TEN, 2) IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+create view nthview4 as SELECT NTH_VALUE(TEN,3) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN;
+\d+ nthview1
+                 View "public.nthview1"
+  Column   |  Type   | Modifiers | Storage | Description 
+-----------+---------+-----------+---------+-------------
+ nth_value | integer |           | plain   | 
+ ten       | integer |           | plain   | 
+ four      | integer |           | plain   | 
+View definition:
+ SELECT nth_value(temp_table.ten, 1) OVER (PARTITION BY temp_table.four ORDER BY temp_table.ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "nth_value", 
+    temp_table.ten, temp_table.four
+   FROM temp_table
+  ORDER BY temp_table.four, temp_table.ten;
+
+\d+ nthview2
+                 View "public.nthview2"
+  Column   |  Type   | Modifiers | Storage | Description 
+-----------+---------+-----------+---------+-------------
+ nth_value | integer |           | plain   | 
+ ten       | integer |           | plain   | 
+ four      | integer |           | plain   | 
+View definition:
+ SELECT nth_value(temp_table.ten, 1) FROM LAST OVER (PARTITION BY temp_table.four ORDER BY temp_table.ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "nth_value", 
+    temp_table.ten, temp_table.four
+   FROM temp_table
+  ORDER BY temp_table.four, temp_table.ten;
+
+\d+ nthview3
+                 View "public.nthview3"
+  Column   |  Type   | Modifiers | Storage | Description 
+-----------+---------+-----------+---------+-------------
+ nth_value | integer |           | plain   | 
+ ten       | integer |           | plain   | 
+ four      | integer |           | plain   | 
+View definition:
+ SELECT nth_value(temp_table.ten, 2) IGNORE NULLS OVER (PARTITION BY temp_table.four ORDER BY temp_table.ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "nth_value", 
+    temp_table.ten, temp_table.four
+   FROM temp_table
+  ORDER BY temp_table.four, temp_table.ten;
+
+\d+ nthview4
+                 View "public.nthview4"
+  Column   |  Type   | Modifiers | Storage | Description 
+-----------+---------+-----------+---------+-------------
+ nth_value | integer |           | plain   | 
+ ten       | integer |           | plain   | 
+ four      | integer |           | plain   | 
+View definition:
+ SELECT nth_value(temp_table.ten, 3) FROM LAST IGNORE NULLS OVER (PARTITION BY temp_table.four ORDER BY temp_table.ten ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "nth_value", 
+    temp_table.ten, temp_table.four
+   FROM temp_table
+  ORDER BY temp_table.four, temp_table.ten;
+
+DROP TABLE IF EXISTS temp_table CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to view nthview1
+drop cascades to view nthview2
+drop cascades to view nthview3
+drop cascades to view nthview4

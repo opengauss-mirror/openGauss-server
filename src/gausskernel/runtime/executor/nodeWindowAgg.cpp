@@ -1488,6 +1488,8 @@ WindowAggState* ExecInitWindowAgg(WindowAgg* node, EState* estate, int eflags)
             winobj->winstate = winstate;
             winobj->argstates = wfuncstate->args;
             winobj->localmem = NULL;
+            winobj->is_from_last = wfunc->is_from_last;
+            winobj->is_ignore_nulls = wfunc->is_ignore_nulls;
             perfuncstate->winobj = winobj;
         }
     }

@@ -2643,6 +2643,10 @@ static void _outWindowFunc(StringInfo str, WindowFunc* node)
 
     WRITE_TYPEINFO_FIELD(wintype);
     WRITE_FUNCINFO_FIELD(winfnoid);
+    if (t_thrd.proc->workingVersionNum >= IGNORE_NULLS_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_from_last);
+        WRITE_BOOL_FIELD(is_ignore_nulls);
+    }
 }
 
 static void _outArrayRef(StringInfo str, ArrayRef* node)
@@ -4346,6 +4350,10 @@ static void _outFuncCall(StringInfo str, FuncCall* node)
     WRITE_NODE_FIELD(over);
     WRITE_LOCATION_FIELD(location);
     WRITE_BOOL_FIELD(call_func);
+    if (t_thrd.proc->workingVersionNum >= IGNORE_NULLS_VERSION_NUMBER) {
+        WRITE_BOOL_FIELD(is_from_last);
+        WRITE_BOOL_FIELD(is_ignore_nulls);
+    }
 }
 
 static void _outTableLikeClause(StringInfo str, const TableLikeClause* node)
