@@ -2288,6 +2288,17 @@ bool instr_stmt_need_track_plan()
 
 void instr_stmt_exec_report_query_plan(QueryDesc *queryDesc)
 {
+    if ((!IS_UNIQUE_SQL_TRACK_ALL && u_sess->unique_sql_cxt.parent_unique_sql_id != 0) ||
+        u_sess->attr.attr_sql.under_explain) {
+        return;
+    }
+
+     /* In procedure, record query plan directly */
+    if (IS_UNIQUE_SQL_TRACK_ALL && u_sess->unique_sql_cxt.parent_unique_sql_id != 0) {
+        instr_stmt_report_query_plan(queryDesc);
+        return;
+    }
+
     if (instr_stmt_level_fullsql_open()) {
         instr_stmt_report_query_plan(queryDesc);
         return;
@@ -2307,7 +2318,7 @@ void instr_stmt_exec_report_query_plan(QueryDesc *queryDesc)
 void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-    if (queryDesc == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2 
+    if (queryDesc == NULL || queryDesc->planstate == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2
         || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
         || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)) {
         return;
