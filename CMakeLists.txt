@@ -150,6 +150,12 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.0.1--4.0.sql
         DESTINATION share/postgresql/extension/
     )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.0--4.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.1--4.0.sql
+        DESTINATION share/postgresql/extension/
+    )
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/openGauss_expr_dolphin.ir
         DESTINATION share/postgresql/extension/
     )
