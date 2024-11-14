@@ -8803,7 +8803,7 @@ static void PostmasterStateMachine(void)
     }
 
     if (SS_IN_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 && g_instance.pid_cxt.StatementPID == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
         }
     }
@@ -10725,9 +10725,14 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+        
+        /* statement flush thread alse involves reading page */
+        if (g_instance.pid_cxt.StatementPID != 0)
+            signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
 
         //active check once
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 &&
+            g_instance.pid_cxt.StatementPID == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
         }
 
