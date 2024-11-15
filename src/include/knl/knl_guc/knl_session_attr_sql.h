@@ -268,6 +268,7 @@ typedef struct knl_session_attr_sql {
     bool dolphin;
     bool whale;
     bool enable_vector_targetlist;
+    bool enable_default_local_index;
 #endif
 } knl_session_attr_sql;
 
