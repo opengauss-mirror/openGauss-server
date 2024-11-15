@@ -34,7 +34,7 @@
 ./share/postgresql/extension/security_plugin.control
 ./share/postgresql/extension/security_plugin--1.0.sql
 ./share/postgresql/extension/dolphin.control
-./share/postgresql/extension/dolphin--4.0.sql
+./share/postgresql/extension/dolphin--4.1.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
 ./share/postgresql/extension/dolphin--1.1--1.0.sql
 ./share/postgresql/extension/dolphin--1.1--2.0.sql
