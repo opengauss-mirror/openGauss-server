@@ -26,6 +26,10 @@ ALTER INDEX [ IF EXISTS ] index_name
     RENAME PARTITION partition_name TO new_partition_name;
 ALTER INDEX [ IF EXISTS ] index_name 
     MOVE PARTITION index_partition_name TABLESPACE new_tablespace;
+ALTER INDEX [ IF EXISTS ] index_name
+    INVISIBLE / VISIBLE
+ALTER INDEX [ IF EXISTS ] index_name
+    DISABLE / ENABLE
 </synopsis>
 </refsynopsisdiv>
 </refentry>

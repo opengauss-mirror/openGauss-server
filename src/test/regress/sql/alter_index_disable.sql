@@ -38,6 +38,8 @@ select * from alter_index_disable where a = 10003 and b = 10003;
 alter index func_idx_alter_index_disable enable;
 explain (costs off) select * from alter_index_disable where to_char(a) = '1';
 
+\h alter index
+
 drop procedure insert_data;
 drop index func_idx_alter_index_disable;
 drop table alter_index_disable cascade;
