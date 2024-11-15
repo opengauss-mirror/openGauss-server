@@ -617,7 +617,8 @@ static unsigned long long CBGetGlobalLSN(void *db_handle)
     return GetInsertRecPtr();
 }
 
-static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
+static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl,
+    unsigned long long seq)
 {
     bool is_seg;
     int ret = DMS_SUCCESS;
@@ -714,6 +715,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
+
             if ((*buf_ctrl)->been_loaded == false) {
                 *buf_ctrl = NULL;
                 LWLockRelease(buf_desc->content_lock);
@@ -724,6 +726,19 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->forkNum, tag->blockNum)));
                 break;
             }
+
+            if (seq <= (*buf_ctrl)->seq) {
+                *buf_ctrl = NULL;
+                ret = DMS_ERROR;
+                LWLockRelease(buf_desc->content_lock);
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[SS page][%u/%u/%u/%d %d-%u] message expired",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum)));
+                break;
+            }
+
             if ((*buf_ctrl)->lock_mode == DMS_LOCK_NULL) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS page][%u/%u/%u/%d %d-%u] lock mode is null, still need to transfer page",
@@ -750,10 +765,10 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 }
 
 static int CBEnterLocalPage(void *db_handle, char pageid[DMS_PAGEID_SIZE], dms_lock_mode_t mode,
-    dms_buf_ctrl_t **buf_ctrl)
+    dms_buf_ctrl_t **buf_ctrl, unsigned long long seq)
 {
     BufferTag *tag = (BufferTag *)pageid;
-    return tryEnterLocalPage(tag, mode, buf_ctrl);
+    return tryEnterLocalPage(tag, mode, buf_ctrl, seq);
 }
 
 static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
@@ -794,7 +809,8 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
     return (char *)BufHdrGetBlock(buf_desc);
 }
 
-static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner)
+static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
+    unsigned long long seq)
 {
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
@@ -841,6 +857,15 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     buf_ctrl->seg_fileno = EXTENT_INVALID;
                     buf_ctrl->seg_blockno = InvalidBlockNumber;
                     ret = DMS_SUCCESS;
+                    break;
+                }
+
+                if (seq <= buf_ctrl->seq) {
+                    ereport(LOG, (errmodule(MOD_DMS),
+                        errmsg("[SS page][%d/%d/%d/%d %d-%d] expired message", tag->rnode.spcNode, tag->rnode.dbNode,
+                        tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+                    UnlockBufHdr(buf_desc, buf_state);
+                    ret = DMS_ERROR;
                     break;
                 }
 
@@ -1392,6 +1417,8 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
     Assert(buf_ctrl->is_edp != 1);
     Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
 #endif
+    buf_ctrl->seq = 0;
+
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     dms_ctrl_info_t ctrl_info = { 0 };
@@ -1475,22 +1502,37 @@ static int32 CBBufRebuildDrcInternal(int begin, int len, unsigned char thread_in
     */
 const int dms_invalid_thread_index = 255;
 const int dms_invalid_thread_num = 255;
-static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
+static void CBAllocBufRangeForThread(unsigned char thread_index, unsigned char thread_num,
+    int* buf_begin, int* buf_num)
 {
     Assert((thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) ||
             (thread_index != dms_invalid_thread_index && thread_num != dms_invalid_thread_num &&
             thread_index < thread_num));
-    int buf_num = TOTAL_BUFFER_NUM / thread_num;
-    int buf_begin = thread_index * buf_num;
+    int num = TOTAL_BUFFER_NUM / thread_num;
+    int begin = thread_index * num;
     if (thread_index == thread_num - 1) {
-        buf_num = TOTAL_BUFFER_NUM - buf_begin;
+        num = TOTAL_BUFFER_NUM - begin;
     }
 
     if (thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) {
-        buf_begin = 0;
-        buf_num = TOTAL_BUFFER_NUM;
+        begin = 0;
+        num = TOTAL_BUFFER_NUM;
     }
+    *buf_begin = begin;
+    *buf_num = num;
+}
+
+static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
+{
+    int buf_begin = 0;
+    int buf_num = 0;
+    CBAllocBufRangeForThread(thread_index, thread_num, &buf_begin, &buf_num);
     return CBBufRebuildDrcInternal(buf_begin, buf_num, thread_index);
+}
+
+static int32 CBRcyClean(void* db_handle, unsigned char thread_index, unsigned char thread_num)
+{
+
 }
 
 static int32 CBDrcBufValidate(void *db_handle)
@@ -2255,6 +2297,7 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     return GS_SUCCESS;
 }
 
+
 void CBGetBufInfo(char* resid, stat_buf_info_t *buf_info)
 {
     BufferTag tag;
@@ -2285,6 +2328,19 @@ int CBDoCheckpointImmediately(unsigned long long *ckpt_lsn)
     return GS_SUCCESS;
 }
 
+int CBBufCtrlRcyClean(void *db_handle, unsigned char thread_index, unsigned char thread_num)
+{
+    int buf_begin = 0;
+    int buf_num = 0;
+    CBAllocBufRangeForThread(thread_index, thread_num, &buf_begin, &buf_num);
+    int buf_end = buf_begin + buf_num - 1;
+    for (int i = buf_begin; i <= buf_end; i++) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(i);
+        buf_ctrl->in_rcy = false;
+    }
+    return GS_SUCCESS;
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2304,6 +2360,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->reform_start_notify = CBReformStartNotify;
     callback->reform_set_dms_role = CBReformSetDmsRole;
     callback->opengauss_ondemand_redo_buffer = CBOndemandRedoPageForStandby;
+    callback->dms_ctl_rcy_clean_parallel = CBRcyClean;
 
     callback->inc_and_get_srsn = CBIncAndGetSrsn;
     callback->get_page_hash_val = CBPageHashCode;
@@ -2353,4 +2410,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->buf_ctrl_recycle = CBBufCtrlRecycle;
     callback->dms_thread_deinit = DmsThreadDeinit;
     callback->opengauss_do_ckpt_immediate = CBDoCheckpointImmediately;
+    callback->dms_ctl_rcy_clean_parallel = CBBufCtrlRcyClean;
 }
