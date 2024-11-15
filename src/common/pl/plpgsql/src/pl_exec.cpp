@@ -87,6 +87,13 @@ typedef struct SimpleEcontextStackEntry {
     struct SimpleEcontextStackEntry* next; /* next stack entry up */
 } SimpleEcontextStackEntry;
 
+typedef bool (*EnableProcedureExecutement)();
+extern inline bool IsEnableProcedureExecutement()
+{
+    return DB_IS_CMPT(B_FORMAT) && (u_sess->hook_cxt.enableProcedureExecutementHook != NULL ?
+           ((EnableProcedureExecutement)(u_sess->hook_cxt.enableProcedureExecutementHook))() : false);
+}
+
 /************************************************************
  * Local function forward declarations
  ************************************************************/
@@ -8192,6 +8199,25 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
      * First we evaluate the string expression after the EXECUTE keyword. Its
      * result is the querystring we have to execute.
      */
+    char* queryExpr = ((PLpgSQL_expr*)stmt->query)->query;
+    if (IsEnableProcedureExecutement() && queryExpr != NULL) {
+        const int selectLen = 8;
+        if (strncasecmp(queryExpr, "SELECT '", selectLen) == 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmodule(MOD_PLSQL),
+                    errmsg("syntax error at or near \"%s\"", queryExpr + selectLen - 1)));
+        } else if (strncasecmp(queryExpr, "SELECT ", selectLen - 1) == 0) {
+            StringInfoData newQueryStr;
+            initStringInfo(&newQueryStr);
+            appendStringInfoString(&newQueryStr, "SELECT 'EXECUTE ");
+            appendStringInfoString(&newQueryStr, queryExpr + selectLen - 1);
+            appendStringInfoString(&newQueryStr, "'");
+            ((PLpgSQL_expr*)stmt->query)->query = pstrdup(newQueryStr.data);
+            pfree_ext(queryExpr);
+            FreeStringInfo(&newQueryStr);
+        }
+    }
     query = exec_eval_expr(estate, stmt->query, &isnull, &restype);
 #ifndef ENABLE_MULTIPLE_NODES
     stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
