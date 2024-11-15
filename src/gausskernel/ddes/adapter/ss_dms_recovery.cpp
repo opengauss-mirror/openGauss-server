@@ -39,6 +39,7 @@
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
+#include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/double_write.h"
 #include "access/twophase.h"
 #include <sys/types.h>
@@ -293,7 +294,7 @@ XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn()
         if (dms_req_opengauss_immediate_checkpoint(&dms_ctx, (unsigned long long *)&primaryRedoLsn) == GS_SUCCESS) {
             ereport(DEBUG1, (errmodule(MOD_DMS),
                 errmsg("[SS][On-demand] request primary node %d checkpoint success, redoLoc %X/%X", SS_PRIMARY_ID,
-                    (uint32)(primaryRedoLsn << 32), (uint32)primaryRedoLsn)));
+                    (uint32)(primaryRedoLsn >> 32), (uint32)primaryRedoLsn)));
             return primaryRedoLsn;
         }
         ereport(DEBUG1, (errmodule(MOD_DMS),

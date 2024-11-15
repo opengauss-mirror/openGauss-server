@@ -117,6 +117,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/dcf_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/cucache_mgr.h"
 #include "storage/smgr/fd.h"
@@ -155,6 +156,7 @@
 #include "access/ustore/knl_undoworker.h"
 #include "ddes/dms/ss_init.h"
 #include "ddes/dms/ss_dms.h"
+#include "ddes/dms/ss_transaction.h"
 #include "storage/dss/dss_log.h"
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
@@ -7002,6 +7004,32 @@ static void assign_dcf_log_backup_file_count(int newval, void* extra)
 
 static void assign_dcf_flow_control_rto(int newval, void *extra)
 {
+    int oldval = u_sess->attr.attr_storage.target_rto;
+    // used in realtime-build log ctrl
+    if (ENABLE_DMS && !SS_DISASTER_CLUSTER && t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        // clean realtime-build log ctrl cache, before realtime-build log ctrl enable.
+        if (g_instance.dms_cxt.dmsInited && SS_PRIMARY_MODE && oldval == 0 && newval > 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+            SpinLockInit(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
+            g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
+            errno_t rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl,
+                                  sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl),
+                                  0,
+                                  sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl));
+            securec_check(rc, "", "");
+        }
+        g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto = newval;
+        // make realtime-build logctrl disable, when recovery_time_target is set to 0;
+        if (g_instance.dms_cxt.dmsInited && SS_PRIMARY_MODE && oldval > 0 && newval == 0) {
+            g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+        }
+
+        // notify nodes, start or stop realtime-build log ctrl.
+        if (g_instance.dms_cxt.dmsInited && SS_PRIMARY_MODE && !SS_IN_REFORM &&
+            ((oldval == 0 && newval > 0) || (oldval > 0 && newval == 0))) {
+            SSBroadcastRealtimeBuildLogCtrlEnable(true);
+        }
+    }
     if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
         dcf_set_param("DN_FLOW_CONTROL_RTO", std::to_string(newval).c_str());
     }

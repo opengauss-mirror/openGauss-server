@@ -1328,6 +1328,12 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_RELOAD_REFORM_CTRL_PAGE:
                 ret = SSReloadReformCtrlPage(len);
                 break;
+            case BCAST_REALTIME_BUILD_LOG_CTRL_ENABLE:
+                ret = SSUpdateRealtimeBuildLogCtrl(data, len);
+                break;
+            case BCAST_REPORT_REALTIME_BUILD_PTR:
+                ret = SSGetStandbyRealtimeBuildPtr(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast operate type")));
                 ret = DMS_ERROR;
@@ -1871,7 +1877,7 @@ static void FailoverCleanBackends()
         /* check and print some thread which no exit. */
         int backendNum = SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
         ereport (WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] there are %d backends can not exit! "
-            "wait_time = %ds", backendNum, wait_time / FAILOVER_TIME_CONVERT)));
+            "wait_time = %lds", backendNum, wait_time / FAILOVER_TIME_CONVERT)));
 
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] reform failed during clean backends")));
@@ -1880,6 +1886,25 @@ static void FailoverCleanBackends()
 
         pg_usleep(REFORM_WAIT_TIME);
         wait_time += REFORM_WAIT_TIME;
+    }
+}
+
+static void RestartRealtimeBuildCtrl()
+{
+    if (SS_IN_REFORM && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl) {
+        ereport(LOG, (errmsg("[SS reform][On-demand] reform happened, disable realtime build log ctrl, "
+                            "and will make it enable again after reform if needed.")));
+    }
+    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+    SpinLockInit(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
+    g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
+    errno_t rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl,
+                          sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl),
+                          0,
+                          sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl));
+    securec_check(rc, "", "");
+    if (SS_PRIMARY_MODE && ENABLE_REALTIME_BUILD_TARGET_RTO) {
+        SSBroadcastRealtimeBuildLogCtrlEnable(false);
     }
 }
 
@@ -2011,18 +2036,18 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] reform start, role:%d, reform type:SS %s, standby scenario:%d, "
-            "bitmap_reconnect:%d, reform_ver:%ld.",
+            "bitmap_reconnect:%llu, reform_ver:%ld.",
             reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario(),
             reform_info->bitmap_reconnect, reform_info->reform_ver)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         SSGrantDSSWritePermission();
     }
-
     int old_primary = SSGetPrimaryInstId();
     SSReadControlFile(old_primary, true);
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] old cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
+    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
     } else if (SSBackendNeedExitScenario()) {
@@ -2075,18 +2100,21 @@ static int CBReformDoneNotify(void *db_handle)
                 errmsg("[SS reform] Reform success, instance:%d is running.",
                        g_instance.attr.attr_storage.dms_attr.instance_id)));
 
+    if (ENABLE_REALTIME_BUILD_TARGET_RTO && SS_PRIMARY_MODE) {
+        RestartRealtimeBuildCtrl();
+    }
     /* reform success indicates that reform of primary and standby all complete, then update gaussdb.state */
     g_instance.dms_cxt.dms_status = (dms_status_t)DMS_STATUS_IN;
     SendPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE);
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = false;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
-    
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "
-                    "rec=%d, dmsStatus=%d.", pmState, g_instance.dms_cxt.SSClusterState,
-                    g_instance.demotion, t_thrd.walsender_cxt.WalSndCtl->demotion,
-                    t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery,
-                    g_instance.dms_cxt.dms_status)));
+
+    ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "
+                       "rec=%d, dmsStatus=%d.", pmState, g_instance.dms_cxt.SSClusterState,
+                       g_instance.demotion, t_thrd.walsender_cxt.WalSndCtl->demotion,
+                       t_thrd.xlog_cxt.InRecovery, g_instance.dms_cxt.dms_status)));
     return GS_SUCCESS;
 }
 
