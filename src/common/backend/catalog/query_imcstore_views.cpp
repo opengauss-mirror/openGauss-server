@@ -13,11 +13,11 @@
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  *
- * imcustorage.cpp
+ * query_imcstore_views.cpp
  *      routines to support IMColStore
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/htap/imcustorage.cpp
+ *        src/gausskernel/storage/htap/query_imcstore_views.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
