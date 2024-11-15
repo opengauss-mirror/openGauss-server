@@ -28,6 +28,7 @@
 #include "storage/procarray.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment_internal.h"
+#include "access/multi_redo_api.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -1137,4 +1138,144 @@ bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, Commi
             return false;
         }
     } while (ret != DMS_SUCCESS);
+}
+
+/* broadcast to standby node update realtime-build logctrl enable */
+void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform)
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret;
+    SSBroadcastRealtimeBuildLogCtrl logCtrl;
+    logCtrl.type = BCAST_REALTIME_BUILD_LOG_CTRL_ENABLE;
+    logCtrl.enableLogCtrl = ENABLE_REALTIME_BUILD_TARGET_RTO;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&logCtrl,
+        .len = sizeof(SSBroadcastRealtimeBuildLogCtrl),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+        if (ret == DMS_SUCCESS || (canncelInReform && SS_IN_REFORM)) {
+            break;
+        }
+        pg_usleep(5000L);
+    } while (ret != DMS_SUCCESS);
+    if (ret == DMS_SUCCESS) {
+        ereport(LOG,
+                (errmsg("[SS reform][On-demand] notify standby node update realtime-build log ctrl enable success, "
+                        "enableLogCtrl: %d", logCtrl.enableLogCtrl)));
+    }
+}
+
+int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len)
+{
+    if (unlikely(len != sizeof(SSBroadcastRealtimeBuildLogCtrl))) {
+        return DMS_ERROR;
+    }
+    if (!ENABLE_ONDEMAND_REALTIME_BUILD) {
+        return DMS_SUCCESS;
+    }
+    SSBroadcastRealtimeBuildLogCtrl *logCtrlEnable = (SSBroadcastRealtimeBuildLogCtrl *)data;
+    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = logCtrlEnable->enableLogCtrl;
+    ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[On-demand] Update standby realtime-build log ctrl %s, "
+                "enableLogCtrl: %s, enable_ondemand_realtime_build: true.",
+                logCtrlEnable->enableLogCtrl ? "enable" : "disable",
+                logCtrlEnable->enableLogCtrl ? "true" : "false")));
+    return DMS_SUCCESS;
+}
+
+/* report realtime-build ptr to primary */
+bool SSReportRealtimeBuildPtr(XLogRecPtr realtimeBuildPtr)
+{
+    if (!SS_STANDBY_ENABLE_TARGET_RTO) {
+        return false;
+    }
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret;
+    SSBroadcastRealtimeBuildPtr reportMessage;
+    reportMessage.type = BCAST_REPORT_REALTIME_BUILD_PTR;
+    reportMessage.realtimeBuildPtr = realtimeBuildPtr;
+    reportMessage.srcInstId = SS_MY_INST_ID;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&reportMessage,
+        .len = sizeof(SSBroadcastRealtimeBuildPtr),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_SPECIFY_LIST,
+        .inst_map = (unsigned long long)1 << SS_PRIMARY_ID,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+        if (ret == DMS_SUCCESS) {
+            break;
+        }
+        if (!SS_STANDBY_ENABLE_TARGET_RTO) {
+            break;
+        }
+        pg_usleep(5000L);
+    } while (ret != DMS_SUCCESS);
+    return ret == DMS_SUCCESS;
+}
+
+int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len)
+{
+    if (unlikely(len != sizeof(SSBroadcastRealtimeBuildPtr))) {
+        return DMS_ERROR;
+    }
+    if (!ENABLE_REALTIME_BUILD_TARGET_RTO || !SS_PRIMARY_MODE || SS_IN_REFORM) {
+        return DMS_SUCCESS;
+    }
+    SSBroadcastRealtimeBuildPtr *receiveMessage = (SSBroadcastRealtimeBuildPtr *)data;
+    XLogRecPtr realtimePtr = receiveMessage->realtimeBuildPtr;
+    int srcId = receiveMessage->srcInstId;
+
+    if (!g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl) {
+        g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = true;
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Get realtime-build ptr from standby inst_id: %d,"
+                   "enable realtime-build log ctrl, replayEndRecPtr: %X/%X",
+                   SS_PRIMARY_ID, (uint32)(realtimePtr >> 32), (uint32)realtimePtr)));
+    }
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
+
+    // If the time interval betwen two reply < 100 ms, ignore this reply.
+    TimestampTz currentTime = GetCurrentTimestamp();
+    if (SSLogCtrlCalculateTimeDiff(rtBuildCtrl->replyTime, currentTime) <= MIN_REPLY_MILLISEC_TIME_DIFF) {
+        return DMS_SUCCESS;
+    }
+    rtBuildCtrl->prevReplyTime = rtBuildCtrl->replyTime;
+    rtBuildCtrl->replyTime = currentTime;
+    rtBuildCtrl->prevBuildPtr = rtBuildCtrl->realtimeBuildPtr;
+    rtBuildCtrl->realtimeBuildPtr = realtimePtr;
+    if (rtBuildCtrl->prevBuildPtr > rtBuildCtrl->realtimeBuildPtr) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Get realtimeBuild lsn from standby node %d is less than prevBuildPtr, "
+                   " prevBuildPtr: %X/%X, realtime-build ptr: %X/%X.", srcId,
+                   (uint32)(rtBuildCtrl->prevBuildPtr >> 32), (uint32)rtBuildCtrl->prevBuildPtr,
+                   (uint32)(rtBuildCtrl->realtimeBuildPtr >> 32), (uint32)rtBuildCtrl->realtimeBuildPtr)));
+    } else if (rtBuildCtrl->prevBuildPtr != InvalidXLogRecPtr) {
+        ereport(DEBUG4, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Get realtimeBuild lsn from standby inst_id %d, "
+                   " prevBuildPtr: %X/%X, realtime-build ptr: %X/%X.", srcId,
+                   (uint32)(rtBuildCtrl->prevBuildPtr >> 32), (uint32)rtBuildCtrl->prevBuildPtr,
+                   (uint32)(rtBuildCtrl->realtimeBuildPtr >> 32), (uint32)rtBuildCtrl->realtimeBuildPtr)));
+        if (rtBuildCtrl->prevBuildPtr != InvalidXLogRecPtr) {
+            SSRealtimebuildLogCtrl(srcId);
+        }
+    }
+    return DMS_SUCCESS;
 }

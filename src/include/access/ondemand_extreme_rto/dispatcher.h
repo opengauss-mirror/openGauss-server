@@ -185,6 +185,7 @@ typedef struct {
      * control file into standby node's, when standby node shutdown.
      */
     ControlFileData* restoreControlFile;
+    TimestampTz reportTime;
 } LogDispatcher;
 
 typedef struct {

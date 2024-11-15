@@ -58,6 +58,15 @@
 #define SS_ONDEMAND_RECOVERY_TRXN_QUEUE_FULL (ENABLE_DMS && \
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status == PAUSE_FOR_PRUNE_TRXN_QUEUE)
 
+#define ENABLE_REALTIME_BUILD_TARGET_RTO (ENABLE_DMS && \
+    g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto > 0 && \
+    !g_instance.attr.attr_storage.ss_enable_dorado && \
+    !g_instance.attr.attr_storage.ss_stream_cluster)
+#define SS_PRIMARY_ENABLE_TARGET_RTO (ENABLE_REALTIME_BUILD_TARGET_RTO && \
+    SS_NORMAL_PRIMARY && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
+#define SS_STANDBY_ENABLE_TARGET_RTO (SS_NORMAL_STANDBY && \
+    SS_ONDEMAND_REALTIME_BUILD_NORMAL && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
+
 #define REFORM_CTRL_VERSION 1
 typedef struct st_reformer_ctrl {
     uint32 version;
@@ -128,13 +137,25 @@ typedef struct ondemand_recovery_stat {
     uint64 recordItemMemUsed;
 } ondemand_recovery_stat;
 
+typedef struct realtime_build_log_ctrl {
+    int64 currentRTO;
+    TimestampTz prevReplyTime;
+    TimestampTz prevCalculateTime;
+    TimestampTz replyTime;
+    uint64 periodTotalBuild;
+    uint64 buildRate;
+    XLogRecPtr prevBuildPtr;
+    XLogRecPtr realtimeBuildPtr;
+    int sleepTime;
+} realtime_build_ctrl_t;
+
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
     volatile failover_ckpt_status_t failover_ckpt_status;
     char recovery_xlog_dir[MAXPGPATH];
     int recovery_inst_id;
     volatile SSGlobalClusterState cluster_ondemand_status;
-    char xlog_list[DMS_MAX_INSTANCE][MAXPGPATH];;
+    char xlog_list[DMS_MAX_INSTANCE][MAXPGPATH];
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true
@@ -152,6 +173,10 @@ typedef struct ss_recovery_info {
     bool disaster_cluster_promoting;         // standby cluster is promoting
     volatile ondemand_recovery_pause_status_t ondemand_recovery_pause_status;
     bool realtime_build_in_reform; // used to avoid starting realtime build during reform
+    volatile bool enableRealtimeBuildLogCtrl;
+    slock_t sleepTimeSyncLock;
+    volatile int globalSleepTime;
+    realtime_build_ctrl_t rtBuildCtrl[DMS_MAX_INSTANCES];
 } ss_recovery_info_t;
 
 typedef struct ondemand_htab_ctrl {

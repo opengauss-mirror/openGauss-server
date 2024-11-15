@@ -104,6 +104,7 @@ typedef struct knl_instance_attr_dms {
     bool enable_ondemand_realtime_build;
     bool enable_ondemand_recovery;
     int ondemand_recovery_mem_size;
+    int realtime_build_target_rto;
     int instance_id;
     int recv_msg_pool_size;
     char* interconnect_url;

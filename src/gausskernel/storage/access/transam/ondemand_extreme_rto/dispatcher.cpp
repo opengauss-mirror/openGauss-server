@@ -111,6 +111,9 @@ static const int invalid_worker_id = -1;
 static const int UNDO_START_BLK = 1;
 static const int UHEAP_UPDATE_UNDO_START_BLK = 2; 
 
+// unit: ms
+static const int LOG_CTRL_REPORT_TIME_INTERVAL = 200;
+
 struct ControlFileData restoreControlFile;
 
 typedef void *(*GetStateFunc)(PageRedoWorker *worker);
@@ -178,6 +181,7 @@ void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderStat
 void SendSingalToPageWorker(int signal);
 
 static void RestoreControlFileForRealtimeBuild();
+static void LogCtrlReportRealtimeBuildPtr();
 
 /* dispatchTable must consistent with RmgrTable */
 static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
@@ -441,6 +445,9 @@ void HandleStartupInterruptsForExtremeRto()
 
     if (SS_STANDBY_FAILOVER && pmState == PM_STARTUP && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         OndemandRealtimeBuildHandleFailover();
+    }
+    if (SS_STANDBY_ENABLE_TARGET_RTO) {
+        LogCtrlReportRealtimeBuildPtr();
     }
 }
 
@@ -2517,4 +2524,32 @@ static void RestoreControlFileForRealtimeBuild() {
     LWLockRelease(ControlFileLock);
 }
 
+/* Startup report realtime-build ptr to primary node for realtime-build log ctrl. */
+static void LogCtrlReportRealtimeBuildPtr()
+{
+    TimestampTz currentTime = GetCurrentTimestamp();
+    if (SSLogCtrlCalculateTimeDiff(g_dispatcher->reportTime, currentTime) < LOG_CTRL_REPORT_TIME_INTERVAL) {
+        return;
+    }
+    XLogRecPtr minEnd = t_thrd.shemem_ptr_cxt.XLogCtl->replayEndRecPtr;
+    if (minEnd == InvalidXLogRecPtr || !SS_STANDBY_ENABLE_TARGET_RTO) {
+        g_dispatcher->reportTime = currentTime;
+        return;
+    }
+    ereport(DEBUG4, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] send primary node %d realtime-build ptr start, realtime-build %X/%X",
+                   SS_PRIMARY_ID, (uint32)(minEnd >> 32), (uint32)minEnd)));
+
+    if (SSReportRealtimeBuildPtr(minEnd)) {
+        ereport(DEBUG4, (errmodule(MOD_DMS),
+                errmsg("[SS][On-demand] send primary node %d realtime-build ptr success, "
+                       "realtime-build ptr: %X/%X", SS_PRIMARY_ID,
+                       (uint32)(minEnd >> 32), (uint32)minEnd)));
+    } else {
+        ereport(DEBUG4, (errmodule(MOD_DMS),
+                errmsg("[SS][On-demand] send primary node %d realtime-build ptr fail, realtime-build ptr: %X/%X",
+                       SS_PRIMARY_ID, (uint32)(minEnd >> 32), (uint32)minEnd)));
+    }
+    g_dispatcher->reportTime = GetCurrentTimestamp();
+}
 }  // namespace ondemand_extreme_rto

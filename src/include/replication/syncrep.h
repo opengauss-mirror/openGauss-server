@@ -153,6 +153,7 @@ extern int syncrep_scanner_yylex(syncrep_scanner_YYSTYPE* lvalp, YYLTYPE* llocp,
 extern void syncrep_scanner_yyerror(const char* message, syncrep_scanner_yyscan_t yyscanner);
 extern void AtomicUpdateIfGreater(volatile XLogRecPtr* ptr, XLogRecPtr newVal, bool* result);
 extern bool SyncRepGetSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, bool* am_sync, bool check_am_sync = true);
+extern SyncWaitRet SSRealtimeBuildWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr);
 #endif
