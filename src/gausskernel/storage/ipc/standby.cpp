@@ -38,8 +38,9 @@
 #include "catalog/pg_partition_fn.h"
 #include "replication/walreceiver.h"
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
-                                                   ProcSignalReason reason, TimestampTz waitStart,
+                                                   ProcSignalReason reason, TimestampTz waitStart, int retry_count,
                                                    TransactionId limitXmin = InvalidTransactionId);
+
 static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
 static void log_access_exclusive_locks_new(int nlocks, XlStandbyLockNew* locks);
@@ -182,7 +183,7 @@ static bool WaitExceedsMaxStandbyDelay(TimestampTz startTime)
  */
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
                                                    ProcSignalReason reason, TimestampTz waitStart,
-                                                   TransactionId limitXmin)
+                                                   int retry_count, TransactionId limitXmin)
 {
     char* new_status = NULL;
     bool waited = false;
@@ -240,7 +241,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
                  * Now find out who to throw out of the balloon.
                  */
                 Assert(VirtualTransactionIdIsValid(*waitlist));
-                pid = CancelVirtualTransaction(*waitlist, reason);
+                pid = CancelVirtualTransaction(*waitlist, reason, retry_count);
                 /*
                  * Wait a little bit for it to die so that we avoid flooding
                  * an unresponsive backend when system is heavily loaded.
@@ -280,7 +281,7 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
 {
     VirtualTransactionId* backends = NULL;
     TimestampTz waitStart;
-
+    int retry_count;
     /*
      * If we get passed InvalidTransactionId then we are a little surprised,
      * but it is theoretically possible in normal running. It also happens
@@ -316,6 +317,7 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
     }
 
     waitStart = GetCurrentTimestamp();
+    retry_count = 0;
     while (true) {
         backends = GetConflictingVirtualXIDs(latestRemovedXid, node.dbNode, lsn, limitXminCSN,
             t_thrd.storage_cxt.xminArray);
@@ -323,8 +325,9 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
             break;
         }
 
+        retry_count++;
         ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray,
-            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, latestRemovedXid);
+            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, retry_count, latestRemovedXid);
     }
 }
 
@@ -332,6 +335,7 @@ void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid 
 {
     VirtualTransactionId* backends = NULL;
     TimestampTz waitStart;
+    int retry_count;
     /*
      * If we get passed InvalidTransactionId then we are a little surprised,
      * but it is theoretically possible in normal running. It also happens
@@ -353,6 +357,7 @@ void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid 
     }
 
     waitStart = GetCurrentTimestamp();
+    retry_count = 0;
     while (true) {
         backends = GetConflictingVirtualXIDs(latestRemovedXid, dbid, lsn, InvalidCommitSeqNo,
             t_thrd.storage_cxt.xminArray);
@@ -360,8 +365,9 @@ void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid 
             break;
         }
 
+        retry_count++;
         ResolveRecoveryConflictWithVirtualXIDs(backends, t_thrd.storage_cxt.xminArray,
-            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, latestRemovedXid);
+            PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, waitStart, retry_count, latestRemovedXid);
     }
 }
 
@@ -370,7 +376,7 @@ void ResolveRecoveryConflictWithTablespace(Oid tsid)
 {
     VirtualTransactionId* temp_file_users = NULL;
     TimestampTz waitStart;
-
+    int retry_count;
     /*
      * Standby users may be currently using this tablespace for their
      * temporary files. We only care about current users because
@@ -389,19 +395,22 @@ void ResolveRecoveryConflictWithTablespace(Oid tsid)
      * We don't wait for commit because drop tablespace is non-transactional.
      */
     waitStart = GetCurrentTimestamp();
+    retry_count = 0;
     while (true) {
         temp_file_users = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
         if (!VirtualTransactionIdIsValid(*temp_file_users)) {
             break;
         }
 
+        retry_count++;
         ResolveRecoveryConflictWithVirtualXIDs(temp_file_users, NULL,
-            PROCSIG_RECOVERY_CONFLICT_TABLESPACE, waitStart);
+            PROCSIG_RECOVERY_CONFLICT_TABLESPACE, waitStart, retry_count);
     }
 }
 
 void ResolveRecoveryConflictWithDatabase(Oid dbid)
 {
+    int retry_count;
     /*
      * We don't do ResolveRecoveryConflictWithVirtualXIDs() here since that
      * only waits for transactions and completely idle sessions would block
@@ -420,8 +429,10 @@ void ResolveRecoveryConflictWithDatabase(Oid dbid)
             pg_usleep(10000);
         }
     } else {
+        retry_count = 0;
         while (CountDBBackends(dbid) > 0) {
-            CancelDBBackends(dbid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true);
+            retry_count++;
+            CancelDBBackends(dbid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true, retry_count);
             /*
              * Wait awhile for them to die so that we avoid flooding an
              * unresponsive backend when system is heavily loaded.
@@ -438,6 +449,7 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
     int num_attempts = 0;
     LOCKTAG locktag;
     TimestampTz waitStart;
+    int retry_count;
 
     SET_LOCKTAG_RELATION(locktag, dbOid, relOid);
 
@@ -450,13 +462,16 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
      * justifies the means.
      */
     waitStart = GetCurrentTimestamp();
+    retry_count = 0;
     while (!lock_acquired) {
         if (++num_attempts < 3)
             backends = GetLockConflicts(&locktag, AccessExclusiveLock);
         else
             backends = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
 
-        ResolveRecoveryConflictWithVirtualXIDs(backends, NULL, PROCSIG_RECOVERY_CONFLICT_LOCK, waitStart);
+        retry_count++;
+        ResolveRecoveryConflictWithVirtualXIDs(backends, NULL, PROCSIG_RECOVERY_CONFLICT_LOCK, 
+            waitStart, retry_count);
 
         if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) != LOCKACQUIRE_NOT_AVAIL)
             lock_acquired = true;
@@ -488,7 +503,7 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
  * so we don't do a deadlock check right away ... only if we have had to wait
  * at least deadlock_timeout.  Most of the logic about that is in proc.c.
  */
-void ResolveRecoveryConflictWithBufferPin(void)
+void ResolveRecoveryConflictWithBufferPin(int retry_count)
 {
     bool sig_alarm_enabled = false;
     TimestampTz ltime;
@@ -514,7 +529,7 @@ void ResolveRecoveryConflictWithBufferPin(void)
         /*
          * We're already behind, so clear a path as quickly as possible.
          */
-        SendRecoveryConflictWithBufferPin(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN);
+        SendRecoveryConflictWithBufferPin(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN, retry_count);
     } else {
         /*
          * Wake up at ltime, and check for deadlocks as well if we will be
@@ -540,7 +555,7 @@ void ResolveRecoveryConflictWithBufferPin(void)
     ereport(LOG, (errmsg("buffer pin confilict resolve ok, proc time %d ms", ComputeTimeStamp(now))));
 }
 
-void SendRecoveryConflictWithBufferPin(ProcSignalReason reason)
+void SendRecoveryConflictWithBufferPin(ProcSignalReason reason, int retry_count)
 {
     Assert(reason == PROCSIG_RECOVERY_CONFLICT_BUFFERPIN || reason == PROCSIG_RECOVERY_CONFLICT_STARTUP_DEADLOCK);
 
@@ -550,7 +565,7 @@ void SendRecoveryConflictWithBufferPin(ProcSignalReason reason)
      * conflict flag yet, since most backends will be innocent. Let the
      * SIGUSR1 handling in each backend decide their own fate.
      */
-    CancelDBBackends(InvalidOid, reason, false);
+    CancelDBBackends(InvalidOid, reason, false, retry_count);
 }
 
 /*

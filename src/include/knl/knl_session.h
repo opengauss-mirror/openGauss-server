@@ -209,6 +209,7 @@ typedef struct knl_u_sig_context {
      */
     volatile sig_atomic_t got_pool_reload;
     volatile sig_atomic_t cp_PoolReload;
+    volatile sig_atomic_t got_terminate_sess_socket;
 } knl_u_sig_context;
 
 class AutonomousSession;
