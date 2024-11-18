@@ -24,22 +24,6 @@
 #include "common/int.h"
 #include "utils/builtins.h"
 
-/*
- * A table of all two-digit numbers. This is used to speed up decimal digit
- * generation by copying pairs of digits into the final output.
- */
-static const char DIGIT_TABLE[] =
-"00" "01" "02" "03" "04" "05" "06" "07" "08" "09"
-"10" "11" "12" "13" "14" "15" "16" "17" "18" "19"
-"20" "21" "22" "23" "24" "25" "26" "27" "28" "29"
-"30" "31" "32" "33" "34" "35" "36" "37" "38" "39"
-"40" "41" "42" "43" "44" "45" "46" "47" "48" "49"
-"50" "51" "52" "53" "54" "55" "56" "57" "58" "59"
-"60" "61" "62" "63" "64" "65" "66" "67" "68" "69"
-"70" "71" "72" "73" "74" "75" "76" "77" "78" "79"
-"80" "81" "82" "83" "84" "85" "86" "87" "88" "89"
-"90" "91" "92" "93" "94" "95" "96" "97" "98" "99";
-
 static inline int
 decimalLength32(const uint32 v)
 {
@@ -769,51 +753,43 @@ pg_ultostr(char *str, uint32 value)
 	return str + len;
 }
 
-/*
- * pg_ultostr_zeropad
- *		Converts 'value' into a decimal string representation stored at 'str'.
- *		'minwidth' specifies the minimum width of the result; any extra space
- *		is filled up by prefixing the number with zeros.
- *
- * Returns the ending address of the string result (the last character written
- * plus 1).  Note that no NUL terminator is written.
- *
- * The intended use-case for this function is to build strings that contain
- * multiple individual numbers, for example:
- *
- *	str = pg_ltostr_zeropad(str, hours, 2);
- *	*str++ = ':';
- *	str = pg_ltostr_zeropad(str, mins, 2);
- *	*str++ = ':';
- *	str = pg_ltostr_zeropad(str, secs, 2);
- *	*str = '\0';
- *
- * Note: Caller must ensure that 'str' points to enough memory to hold the
- * result.
- */
-char* pg_ultostr_zeropad(char* str, uint32 value, int32 minwidth)
+// Converts 'value' into a decimal string representation stored at 'str'.
+// 'min_width' specifies the minimum width of the result; any extra space
+// is filled up by prefixing the number with zeros.
+//
+// Returns the ending address of the string result (the last character written
+// plus 1).  Note that no NUL terminator is written.
+//
+// The intended use-case for this function is to build strings that contain
+// multiple individual numbers, for example:
+//
+// ```cpp
+// str = pg_ultostr_zeropad(str, hours, 2);
+// *str++ = ':';
+// str = pg_ultostr_zeropad(str, mins, 2);
+// *str++ = ':';
+// str = pg_ultostr_zeropad(str, secs, 2);
+// *str = '\0';
+// ```
+//
+// Note: Caller must ensure that 'str' points to enough memory to hold the
+// result
+char *pg_ultostr_zeropad(char *str, uint32 value, int min_width)
 {
     int len;
     errno_t rc = EOK;
 
-    Assert(minwidth > 0);
-
-    if (value < 100 && minwidth == 2)	/* Short cut for common case */
-    {
-        rc = memcpy_sp(str, 2, DIGIT_TABLE + value * 2, 2);
-        securec_check(rc, "\0", "\0");
-        return str + 2;
-    }
+    Assert(min_width > 0);
 
     len = pg_ultoa_n(value, str);
-    if (len >= minwidth)
+    if (len >= min_width)
         return str + len;
 
-    rc = memmove_s(str + minwidth - len, len, str, len);
+    rc = memmove_s(str + min_width - len, len, str, len);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(str, minwidth - len, '0', minwidth - len);
+    rc = memset_s(str, min_width - len, '0', min_width - len);
     securec_check(rc, "\0", "\0");
-    return str + minwidth;
+    return str + min_width;
 }
 
 /*
