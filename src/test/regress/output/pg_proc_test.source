@@ -5,7 +5,7 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
         2276 | 3058 | concat
         2276 | 3059 | concat_ws
         1185 | 3119 | standby_statement_history
-        2276 | 3148 | cume_dist
+        2276 | 3149 | cume_dist
         2276 | 3239 | json_build_array
         2276 | 3248 | rank
         2276 | 3249 | rank_final

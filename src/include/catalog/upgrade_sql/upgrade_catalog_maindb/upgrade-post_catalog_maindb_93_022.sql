@@ -29,9 +29,9 @@ internal, VARIADIC "any"
 ) RETURNS internal LANGUAGE INTERNAL IMMUTABLE as 'ordered_set_transition_multi';
 
 DROP AGGREGATE IF EXISTS pg_catalog.cume_dist("any");
-SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3148;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3149;
 CREATE AGGREGATE pg_catalog.cume_dist("any") (SFUNC=ordered_set_transition_multi, STYPE= internal, finalfunc = cume_dist_final, hypothetical);
-UPDATE pg_catalog.pg_proc SET provariadic = 2276, proallargtypes=ARRAY[2276], proargmodes=ARRAY['v'] WHERE oid=3148;
+UPDATE pg_catalog.pg_proc SET provariadic = 2276, proallargtypes=ARRAY[2276], proargmodes=ARRAY['v'] WHERE oid=3149;
 
 DROP AGGREGATE IF EXISTS pg_catalog.rank("any");
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3248;

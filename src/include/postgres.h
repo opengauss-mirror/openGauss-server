@@ -959,6 +959,7 @@ extern size_t mmap_threshold;
 void HandlePoolerReload(void);
 void HandleMemoryContextDump(void);
 void HandleExecutorFlag(void);
+void handle_terminate_active_sess_socket();
 
 extern void start_xact_command(void);
 extern void finish_xact_command(void);
