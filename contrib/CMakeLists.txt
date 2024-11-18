@@ -32,6 +32,13 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/age
 )
 
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    INCLUDE_DIRECTORIES(${LIBODBC_INCLUDE_PATH})
+    INCLUDE_DIRECTORIES(${LIBODBC_LIB_PATH})
+       list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/dblink)
+    add_subdirectory(dblink)
+endif()
+
 add_subdirectory(hstore)
 add_subdirectory(test_decoding)
 add_subdirectory(mppdb_decoding)
