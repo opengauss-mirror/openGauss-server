@@ -8941,13 +8941,21 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     int width = 0;
     Oid resultRelOid = InvalidOid; /* the relOid is used to cost memory when open relations. */
 #ifdef STREAMPLAN
-    bool is_smp_enable = false;
-    int iud_dop = DEFAULT_DOP;
+    bool iudParallel = false;
+    int iudDop = DEFAULT_DOP;
+    bool isUstore = false;
     ExecNodes* exec_nodes = NULL;
-
-    bool support_smp_scenario = (operation == CMD_DELETE || operation == CMD_UPDATE || operation == CMD_INSERT) &&
-                        returningLists == NIL;
 #endif
+    List* resultRelation = (List*)linitial(resultRelations);
+    Index resultidx;
+    if (resultRelation != NIL && root->simple_rte_array != NULL) {
+        resultidx = (Index)linitial_int(resultRelation);
+        RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
+        isUstore = result_rte->is_ustore;
+    }
+
+    bool supportIUDParallel = (operation == CMD_DELETE || operation == CMD_UPDATE || operation == CMD_INSERT) &&
+                        returningLists == NIL && !isUstore && list_length(subplans) == 1;
     Assert(list_length(subplan) == 1);
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -8963,27 +8971,18 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     init_plan_cost(plan);
     total_size = 0;
 
-    /*
-     * Modify table can not parallel.
-     * If the subplan already parallelize,
-     * add local gather.
-     */
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (support_smp_scenario) {
-        Plan* subplan = (Plan*)linitial(subplans);
-        if (subplan->dop > DEFAULT_DOP) {
-            is_smp_enable = true;
-            iud_dop = subplan->dop;
-        }
-    } else {
-        deparallelize_modifytable(subplans);
-    }
-#else
     if (u_sess->opt_cxt.query_dop > DEFAULT_DOP) {
-        deparallelize_modifytable(subplans);
+        //In sepecific scenarios, modify table can parallel.
+        if (supportIUDParallel) {
+            Plan* subplan = (Plan*)linitial(subplans);
+            if (subplan->dop > DEFAULT_DOP) {
+                iudParallel = true;
+                iudDop = subplan->dop;
+            }
+        } else {
+            deparallelize_modifytable(subplans);
+        }
     }
-#endif
 
     foreach (subnode, subplans) {
         Plan* subplan = (Plan*)lfirst(subnode);
@@ -9013,8 +9012,8 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     else
         plan->plan_width = 0;
 
-    node->plan.dop = is_smp_enable ? iud_dop : DEFAULT_DOP;
-    node->plan.parallel_enabled = is_smp_enable;
+    node->plan.parallel_enabled = iudParallel;
+    node->plan.dop = iudDop;
     node->plan.lefttree = NULL;
     node->plan.righttree = NULL;
     node->plan.qual = NIL;
@@ -9051,7 +9050,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     node->plan.exec_nodes = exec_nodes;
 
     resultRelations = (List*)linitial(resultRelations);
-    Index resultidx;
+    resultidx;
     if (resultRelations != NIL && root->simple_rte_array != NULL) {
         resultidx = (Index)linitial_int(resultRelations);
         RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
@@ -9158,11 +9157,9 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
                 }
             }
         }
-#ifndef ENABLE_MULTIPLE_NODES
-        if (is_smp_enable) {
+        if (iudParallel) {
             rtn = create_local_gather(rtn);
         }
-#endif
         return rtn;
     } else {
         if (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE) {

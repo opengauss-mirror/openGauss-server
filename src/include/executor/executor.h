@@ -26,6 +26,7 @@
 #include "utils/partitionmap_gs.h"
 #include "utils/plpgsql.h"
 #include "utils/guc.h"
+#include "catalog/pg_resource_pool.h"
 
 /*
  * The "eflags" argument to ExecutorStart and the various ExecInitNode

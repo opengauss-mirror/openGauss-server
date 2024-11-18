@@ -4466,11 +4466,6 @@ TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
 
     Assert(ItemPointerIsValid(tid));
 
-    /* Don't allow any write/lock operator in stream. */
-#ifdef ENABLE_MULTIPLE_NODES
-    Assert(!StreamThreadAmI());
-#endif
-
     /*
      * Forbid this during a parallel operation, lest it allocate a combocid.
      * Other workers might need that combocid for visibility checks, and we
@@ -5024,11 +5019,6 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     char relreplident;
     LockTupleMode mode;
     Assert(ItemPointerIsValid(otid));
-
-    /* Don't allow any write/lock operator in stream. */
-#ifdef ENABLE_MULTIPLE_NODES
-    Assert(!StreamThreadAmI());
-#endif
 
     /*
      * Forbid this during a parallel operation, lest it allocate a combocid.
