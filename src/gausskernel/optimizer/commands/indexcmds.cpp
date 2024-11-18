@@ -536,8 +536,13 @@ void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table)
             stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
         }
     } else if (!stmt->isPartitioned) {
-        /* default partition index is set to Global index */
-        stmt->isGlobal = (!DEFAULT_CREATE_LOCAL_INDEX ? true : stmt->isGlobal);
+        /*
+         * default partition index is set to Global index.
+         * if B compatibility and enable_default_local_index is true, set Local index.
+         */
+        if (!DEFAULT_CREATE_LOCAL_INDEX
+            && !(DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.enable_default_local_index))
+            stmt->isGlobal = true;
     }
     stmt->isPartitioned = true;
 #ifndef ENABLE_MULTIPLE_NODES
