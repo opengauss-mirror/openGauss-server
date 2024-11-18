@@ -29,6 +29,7 @@
 #include "column.h"
 #include "utilities.h"
 #include "mot_error.h"
+#include "knl/knl_session.h"
 
 extern uint16_t MOTTimestampToStr(uintptr_t src, char* destBuf, size_t len);
 extern uint16_t MOTTimestampTzToStr(uintptr_t src, char* destBuf, size_t len);
@@ -893,11 +894,16 @@ uint16_t ColumnDECIMAL::PrintValue(uint8_t* data, char* destBuf, size_t len, boo
 
 bool ColumnVARCHAR::Pack(uint8_t* dest, uintptr_t src, size_t len)
 {
-    if (len > (m_size - 4)) {
+    size_t tlen = len;
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        /* use char length instead byte length */
+        tlen = pg_mbstrlen_with_len((char*)src, (int) len);
+    }
+    if (tlen > (m_size - 4)) {
         return false;
     }
     *((uint32_t*)(dest + m_offset)) = len;
-    errno_t erc = memcpy_s(dest + m_offset + 4, m_size - 4, (void*)src, len);
+    errno_t erc = memcpy_s(dest + m_offset + 4, len > m_size - 4 ? len : m_size - 4, (void*)src, len);
     securec_check(erc, "\0", "\0");
     return true;
 }

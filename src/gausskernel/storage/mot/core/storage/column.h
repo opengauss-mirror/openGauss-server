@@ -28,6 +28,7 @@
 #include "catalog_column_types.h"
 #include "utils/elog.h"
 #include "securec.h"
+#include "postgres.h"
 
 #define MOT_MAXDATELEN 128
 
