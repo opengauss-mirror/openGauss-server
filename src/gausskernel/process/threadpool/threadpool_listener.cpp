@@ -206,6 +206,19 @@ void ThreadPoolListener::CreateEpoll()
     }
 }
 
+void ThreadPoolListener::dispatch_socked_closed_session(knl_session_context* session)
+{
+    Assert(session->status != KNL_SESS_UNINIT);
+    m_idleSessionList->Remove(&session->elem);
+    if (unlikely(session->status == KNL_SESS_UNINIT)) {
+        session->status = KNL_SESS_CLOSERAW;
+    } else {
+        session->status = KNL_SESS_CLOSE;
+    }
+    session->proc_cxt.MyProcPort->sock = PGINVALID_SOCKET;
+    AddIdleSessionToHead(session);
+}
+
 void ThreadPoolListener::AddEpoll(knl_session_context* session)
 {
     struct epoll_event ev = {0};
@@ -244,16 +257,13 @@ void ThreadPoolListener::AddEpoll(knl_session_context* session)
         }
     }
     if (unlikely(res != 0)) {
-#ifdef USE_ASSERT_CHECKING
-        ereport(PANIC,
-#else
         ereport(WARNING,
-#endif
                 (errmodule(MOD_THREAD_POOL),
                     errmsg("epoll_ctl fail %m, sess status:%d, sock:%d, host:%s, port:%s",
                            session->status, session->proc_cxt.MyProcPort->sock,
                            session->proc_cxt.MyProcPort->remote_host,
                            session->proc_cxt.MyProcPort->remote_port)));
+        dispatch_socked_closed_session(session);
     }
 }
 
@@ -483,7 +493,7 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
     }
 }
 
-void ThreadPoolListener::DelSessionFromEpoll(knl_session_context* session)
+void ThreadPoolListener::DelSessionFromEpoll(knl_session_context* session, bool sub_count)
 {
     if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
         struct epoll_event ev = {0};
@@ -497,7 +507,10 @@ void ThreadPoolListener::DelSessionFromEpoll(knl_session_context* session)
 #endif
         comm_epoll_ctl(m_epollFd, EPOLL_CTL_DEL, session->proc_cxt.MyProcPort->sock, NULL);
     }
-    (void)pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_sessionCount, 1);
+
+    if (sub_count) {
+        (void)pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_sessionCount, 1);
+    }
 }
 
 void ThreadPoolListener::RemoveWorkerFromList(ThreadPoolWorker* worker)

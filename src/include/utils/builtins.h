@@ -689,6 +689,7 @@ extern Datum pg_cancel_session(PG_FUNCTION_ARGS);
 extern Datum pg_cancel_invalid_query(PG_FUNCTION_ARGS);
 extern Datum pg_terminate_backend(PG_FUNCTION_ARGS);
 extern Datum pg_terminate_session(PG_FUNCTION_ARGS);
+extern Datum pg_terminate_active_session_socket(PG_FUNCTION_ARGS);
 extern Datum pg_reload_conf(PG_FUNCTION_ARGS);
 extern Datum pg_tablespace_databases(PG_FUNCTION_ARGS);
 extern Datum pg_tablespace_location(PG_FUNCTION_ARGS);

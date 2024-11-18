@@ -1453,6 +1453,7 @@ typedef struct knl_t_interrupt_context {
 
     volatile bool ignoreBackendSignal; /* ignore signal for threadpool worker */
 
+    volatile bool ignoreSessionBackendSignal; /* ignore signal for u_session */
 } knl_t_interrupt_context;
 
 typedef int64 pg_time_t;

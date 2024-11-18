@@ -3214,11 +3214,13 @@ VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
  *
  * Returns pid of the process signaled, or 0 if not found.
  */
-ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode)
+ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode, int retry_count)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
     int index;
     ThreadId pid = 0;
+    uint64 sessionid = 0;
+    const int max_retry_count = 1000;
 
     LWLockAcquire(ProcArrayLock, LW_SHARED);
 
@@ -3232,13 +3234,27 @@ ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalRe
         if (procvxid.backendId == vxid.backendId && procvxid.localTransactionId == vxid.localTransactionId) {
             proc->recoveryConflictPending = true;
             pid = proc->pid;
+            sessionid = proc->sessionid;
 
             if (pid != 0) {
                 /*
                  * Kill the pid if it's still here. If not, that's what we
                  * wanted so ignore any errors.
                  */
-                (void)SendProcSignal(pid, sigmode, vxid.backendId);
+                if (retry_count < max_retry_count) {
+                    (void)SendProcSignal(pid, sigmode, vxid.backendId);
+                } else {
+                    if (ENABLE_THREAD_POOL && pid != sessionid) {
+                        int count = g_threadPoolControler->GetSessionCtrl()->terminate_session_socket(pid, sessionid);
+                        if (count == 0) {
+                            ereport(WARNING, (errmsg("tid %lu and sessionid %lu do not match with valid active session",
+                                pid, sessionid)));
+                        }
+                    }
+                    (void)SendProcSignal(pid, PROCSIG_COMM_CLOSE_ACTIVE_SESSION_SOCKET, vxid.backendId);
+                    ereport(LOG, (errmsg("CancelVirtualTransaction: send signal to tid %lu and sessionid %lu",
+                        pid, sessionid)));
+                }
             }
 
             break;
@@ -3489,11 +3505,13 @@ int CountDBActiveBackends(Oid database_oid)
 /*
  * CancelDBBackends --- cancel backends that are using specified database
  */
-void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending)
+void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending, int retry_count)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
     int index;
     ThreadId pid = 0;
+    uint64 sessionid = 0;
+    const int max_retry_count = 1000;
 
     /* tell all backends to die */
     LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
@@ -3509,13 +3527,27 @@ void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPen
 
             proc->recoveryConflictPending = conflictPending;
             pid = proc->pid;
+            sessionid = proc->sessionid;
 
             if (pid != 0) {
                 /*
                  * Kill the pid if it's still here. If not, that's what we
                  * wanted so ignore any errors.
                  */
-                (void)SendProcSignal(pid, sigmode, procvxid.backendId);
+                if (retry_count < max_retry_count) {
+                    (void)SendProcSignal(pid, sigmode, procvxid.backendId);
+                } else {
+                    if (ENABLE_THREAD_POOL && pid != sessionid) {
+                        int count = g_threadPoolControler->GetSessionCtrl()->terminate_session_socket(pid, sessionid);
+                        if (count == 0) {
+                            ereport(WARNING, (errmsg("tid %lu and sessionid %lu do not match with valid active session",
+                                pid, sessionid)));
+                        }
+                    }
+                    (void)SendProcSignal(pid, PROCSIG_COMM_CLOSE_ACTIVE_SESSION_SOCKET, procvxid.backendId);
+                    ereport(LOG, (errmsg("CancelDBBackends: send signal to tid %lu and sessionid %lu",
+                        pid, sessionid)));
+                }
             }
         }
     }

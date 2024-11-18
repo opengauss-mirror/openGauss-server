@@ -6515,6 +6515,7 @@ bool ConditionalLockBuffer(Buffer buffer)
 void LockBufferForCleanup(Buffer buffer)
 {
     BufferDesc *buf_desc = NULL;
+    int retry_count = 0;
 
     Assert(BufferIsValid(buffer));
     Assert(t_thrd.storage_cxt.PinCountWaitBuf == NULL);
@@ -6564,10 +6565,11 @@ void LockBufferForCleanup(Buffer buffer)
 
         /* Wait to be signaled by UnpinBuffer() */
         if (InHotStandby && g_supportHotStandby) {
+            retry_count++;
             /* Publish the bufid that Startup process waits on */
             parallel_recovery::SetStartupBufferPinWaitBufId(buffer - 1);
             /* Set alarm and then wait to be signaled by UnpinBuffer() */
-            ResolveRecoveryConflictWithBufferPin();
+            ResolveRecoveryConflictWithBufferPin(retry_count);
             /* Reset the published bufid */
             parallel_recovery::SetStartupBufferPinWaitBufId(-1);
 
