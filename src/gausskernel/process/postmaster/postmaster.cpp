@@ -3082,18 +3082,6 @@ int PostmasterMain(int argc, char* argv[])
         ereport(LOG, (errmsg("[SS reform][db] Node:%d starts, found cluster PRIMARY:%d",
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
-
-        if (!SS_OFFICIAL_PRIMARY) {
-            const long SLEEP_ONE_SEC = 1000000L;
-            while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
-                pg_usleep(SLEEP_ONE_SEC);
-                SSReadControlFile(REFORM_CTRL_PAGE);
-                ereport(WARNING, (errmsg("[SS reform][db wait] Node:%d waiting for PRIMARY:%d to finish 1st reform",
-                    g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
-            }
-            ereport(LOG, (errmsg("[SS reform][db wait] Node:%d wait for PRIMARY:%d to finish 1st reform: success",
-                g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
-        }
     }
 
     if (SS_PRIMARY_MODE) {
