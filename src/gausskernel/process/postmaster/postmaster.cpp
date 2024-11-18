@@ -66,6 +66,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "knl/knl_guc/knl_session_attr_security.h"
 #include "gs_bbox.h"
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -360,6 +361,7 @@ static void CloseServerPorts(int status, Datum arg);
 static void getInstallationPaths(const char* argv0);
 static void checkDataDir(void);
 static void CheckGUCConflicts(void);
+static void CheckPasswordLenConfigConflics(void);
 static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
@@ -3190,6 +3192,16 @@ static void CheckShareStorageConfigConflicts(void)
     }
 }
 
+static void CheckPasswordLenConfigConflics(void)
+{
+    if (u_sess->attr.attr_security.Password_min_length > u_sess->attr.attr_security.Password_max_length) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("password_min_length (%d) should be no more than password_max_length (%d).",
+                        u_sess->attr.attr_security.Password_min_length,
+                        u_sess->attr.attr_security.Password_max_length)));
+    }
+}
+
 /*
  * Check for invalid combinations of GUC settings during starting up.
  */
@@ -3245,6 +3257,7 @@ static void CheckGUCConflicts(void)
     }
     CheckExtremeRtoGUCConflicts();
     CheckShareStorageConfigConflicts();
+    CheckPasswordLenConfigConflics();
 }
 
 static bool save_backend_variables_for_callback_thread()
