@@ -2259,7 +2259,7 @@ static void parse_format(
 #define A_FORMAT_INTERVAL_YEAR2 "YY-MM"
 #define A_FORMAT_INTERVAL_YEAR3 "YYY-MM"
 #define A_FORMAT_INTERVAL_YEAR "YYYY-MM"
-#define A_FORMAT_INTERVAL_DAY "DD HH:MI:SS"
+#define A_FORMAT_INTERVAL_DAY "DD HH24:MI:SS"
 #define POSITIVE_FORMAT(fmt) ("+" fmt)
 #define NEGETIVE_FORMAT(fmt) ("-" fmt)
 

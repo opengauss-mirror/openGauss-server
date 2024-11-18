@@ -838,6 +838,24 @@ SELECT TO_CHAR(INTERVAL '1 -11:11:11' DAY TO SECOND, 'YYYY-MON-DD');
  +01 11:11:11
 (1 row)
 
+SELECT TO_CHAR(INTERVAL '1 15h 24m 52s' DAY TO SECOND, 'YYYY-MON-DD');
+   to_char    
+--------------
+ +01 15:24:52
+(1 row)
+
+select to_char(interval '15h 24m 52s', 'HH24:MI:SS');
+   to_char    
+--------------
+ +00 15:24:52
+(1 row)
+
+SELECT TO_CHAR(INTERVAL '-15h 24m 52s' DAY TO SECOND, 'YYYY-MON-DD');
+   to_char    
+--------------
+ -00 15:24:52
+(1 row)
+
 SELECT TO_CHAR(INTERVAL '-11:11:11' DAY TO SECOND, 'YYYY-MON-DD');
    to_char    
 --------------
