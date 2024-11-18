@@ -549,7 +549,7 @@ int dss_stat_file(const char *path, struct stat *buf)
     dss_stat_t st;
     if (g_dss_device_op.dss_stat(path, &st) != DSS_SUCCESS) {
         dss_set_errno(NULL);
-        return -1;
+        return GS_ERROR;
     }
 
     // file type and mode
@@ -563,14 +563,14 @@ int dss_stat_file(const char *path, struct stat *buf)
         case DSS_LINK:
         /* fall-through */
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 int dss_fstat_file(int handle, struct stat *buf)
@@ -578,7 +578,7 @@ int dss_fstat_file(int handle, struct stat *buf)
     dss_stat_t st;
     if (g_dss_device_op.dss_fstat(handle, &st) != DSS_SUCCESS) {
         dss_set_errno(NULL);
-        return -1;
+        return GS_ERROR;
     }
 
     // file type and mode
@@ -592,14 +592,14 @@ int dss_fstat_file(int handle, struct stat *buf)
         case DSS_LINK:
         /* fall-through */
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 // return information of link itself when path is link
@@ -608,7 +608,7 @@ int dss_lstat_file(const char *path, struct stat *buf)
     dss_stat_t st;
     if (g_dss_device_op.dss_lstat(path, &st) != DSS_SUCCESS) {
         dss_set_errno(NULL);
-        return -1;
+        return GS_ERROR;
     }
 
     // file type and mode
@@ -623,20 +623,20 @@ int dss_lstat_file(const char *path, struct stat *buf)
             buf->st_mode = S_IFLNK;
             break;
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 int dss_chmod_file(const char* path, mode_t mode)
 {
     // dss do not have mode
-    return 0;
+    return GS_SUCCESS;
 }
 
 ssize_t buffer_align(char **unalign_buff, char **buff, size_t size)
@@ -699,7 +699,7 @@ int dss_get_addr(int handle, long long offset, char *poolname, char *imagename, 
 {
     if (g_dss_device_op.dss_get_addr(handle, offset, poolname, imagename, objAddr, objId, objOffset) != DSS_SUCCESS) {
         dss_set_errno(NULL);
-        return -1;
+        return GS_ERROR;
     }
     return GS_SUCCESS;
 }
@@ -708,7 +708,7 @@ int dss_compare_size(const char *vg_name, long long *au_size)
 {
     if (g_dss_device_op.dss_compare_size(vg_name, au_size) != DSS_SUCCESS) {
         dss_set_errno(NULL);
-        return -1;
+        return GS_ERROR;
     }
     return GS_SUCCESS;
 }
