@@ -1146,11 +1146,8 @@ static void StartupStreamThread(StreamState* node)
     Assert(pair->producerList != NULL);
 
     StreamTxnContext transactionCxt;
-#ifndef ENABLE_MULTIPLE_NODES
+
     transactionCxt.txnId = GetCurrentTransactionId();
-#else
-    transactionCxt.txnId = GetCurrentTransactionIdIfAny();
-#endif
     transactionCxt.snapshot = node->ss.ps.state->es_snapshot;
     StreamSaveTxnContext(&transactionCxt);
 
