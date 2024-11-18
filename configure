@@ -760,6 +760,7 @@ enable_mysql_fdw
 enable_oracle_fdw
 enable_thread_check
 enable_shared
+enable_mppdb_errcode
 default_gs_version
 default_port
 WANTED_LANGUAGES
@@ -854,6 +855,7 @@ enable_coverage
 enable_default_gcc
 enable_dtrace
 enable_gstrace
+enable_mppdb_errcode
 with_blocksize
 with_segsize
 with_wal_blocksize
@@ -2757,6 +2759,39 @@ else
 
 fi
 
+# Check whether --enable-mppdb-errcode was given.
+if test "${enable_mppdb_errcode+set}" = set; then
+  enableval=$enable_mppdb_errcode;
+  case $enableval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MPPDB_ERRCODE 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --disable-mppdb-errcode option" >&5
+$as_echo "$as_me: error: no argument expected for --disable-mppdb-errcode option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mppdb_errcode=yes
+
+fi
+
+if test "$enable_mppdb_errcode" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MPPDB_ERRCODE 1
+_ACEOF
+
+fi
 
 #
 # '-jemalloc'-like feature can be disabled

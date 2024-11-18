@@ -29,7 +29,6 @@ SUBDIRS = \
 	pgxc_clean \
 	gs_log \
 	gs_cgroup \
-	gsqlerr \
 	pg_upgrade \
 	pg_basebackup \
 	pg_probackup
@@ -52,7 +51,6 @@ SUBDIRS = \
 	pg_resetxlog \
 	gs_guc \
 	gs_cgroup \
-	gsqlerr \
 	pg_basebackup \
 	pg_probackup \
 	gs_plan_simulator
@@ -66,6 +64,9 @@ endif
 endif
 endif
 
+ifeq ($(enable_mppdb_errcode), yes)
+	SUBDIRS += gsqlerr
+endif
 
 $(recurse)
 $(recurse_always)

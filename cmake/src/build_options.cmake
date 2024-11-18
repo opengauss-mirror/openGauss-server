@@ -66,6 +66,7 @@ option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.c
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)
 option(MAX_ALLOC_SEGNUM "max alloc xlog seg num in extreme_rto" 4)
 option(USE_TASSL "build with tassl, the old is --with-tassl" OFF)#ON
+option(ENABLE_MPPDB_ERRCODE "build with mppdb errcode, the old is --enable-mppdb-errcode" ON)
 
 #No matter what to set, the old mppdb aways use ENABLE_THREAD_SAFETY=yes by default defined.
 option(ENABLE_THREAD_SAFETY "enable thread safety, the old is --enable-thread-safety" ON)
