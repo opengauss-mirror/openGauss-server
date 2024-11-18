@@ -455,17 +455,7 @@ extern Datum current_schemas(PG_FUNCTION_ARGS);
 extern Datum pseudo_current_user(PG_FUNCTION_ARGS);
 extern uint64 pg_strtouint64(const char* str, char** endptr, int base);
 
-/* numutils.c */
-extern int32 pg_atoi(char* s, int size, int c, bool can_ignore);
-extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
-extern int32 pg_strtoint32(const char* s, bool can_ignore);
-extern void pg_itoa(int16 i, char* a);
-extern void pg_ltoa(int32 l, char* a);
-extern char* pg_ltoa2(int32 l, int* len);
-extern void pg_ctoa(uint8 i, char* a);
-extern void pg_lltoa(int64 ll, char* a);
-extern char* pg_lltoa2(int64 ll, int* len);
-extern void pg_i128toa(int128 value, char* a, int length);
+#include "utils/numutils.h"
 
 /*
  *		Per-opclass comparison functions for new btrees.  These are
@@ -1852,8 +1842,6 @@ extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 
 #else
 #endif
-extern char *pg_ultostr(char *str, uint32 value);
-extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
 
 /* float.cpp */
 extern int float8_cmp_internal(float8 a, float8 b);
