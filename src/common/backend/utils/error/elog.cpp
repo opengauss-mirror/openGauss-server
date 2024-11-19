@@ -90,7 +90,9 @@
 #include "executor/exec/execStream.h"
 #include "executor/executor.h"
 #include "workload/workload.h"
+#ifdef ENABLE_MPPDB_ERRCODE
 #include "../bin/gsqlerr/errmsg.h"
+#endif
 #include "optimizer/randomplan.h"
 #include <execinfo.h>
 
@@ -3870,6 +3872,7 @@ void send_only_message_to_frontend(const char* message, bool is_putline)
 /* Get internal error code by the location(filename and lineno) of error message arised */
 static int pg_geterrcode_byerrmsg(ErrorData* edata)
 {
+#ifdef ENABLE_MPPDB_ERRCODE
     unsigned int i = 0;
     unsigned int j = 0;
     const char* szExtName = NULL;
@@ -3898,8 +3901,10 @@ static int pg_geterrcode_byerrmsg(ErrorData* edata)
             }
         }
     }
-
     return 0;
+#else
+    return ERRCODE_SUCCESSFUL_COMPLETION;
+#endif
 }
 
 /**

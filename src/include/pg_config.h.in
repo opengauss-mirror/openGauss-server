@@ -947,3 +947,6 @@
 
 /* Define to 1 if opengauss is integration into the openeuler system. (--with-openeuler-os) */
 #undef WITH_OPENEULER_OS
+
+/* Define to 1 if you want to generae mppdb errcode when send error message to client. (--enable-mppdb-errcode) */
+#undef ENABLE_MPPDB_ERRCODE

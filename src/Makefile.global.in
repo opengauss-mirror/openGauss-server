@@ -190,6 +190,7 @@ enable_ut	= @enable_ut@
 enable_qunit      = @enable_qunit@
 enable_gstrace  = @enable_gstrace@
 enable_libnet  = @enable_libnet@
+enable_mppdb_errcode = @enable_mppdb_errcode@
 
 python_includespec	= @python_includespec@
 python_libdir		= @python_libdir@
