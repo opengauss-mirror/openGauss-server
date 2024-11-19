@@ -113,6 +113,7 @@ static int	standby_priority_comparator(const void *a, const void *b);
 static inline void free_sync_standbys_list(List* sync_standbys);
 static int cmp_lsn(const void *a, const void *b);
 static bool DelayIntoMostAvaSync(bool checkSyncNum, SyncStandbyNumState state = STANDBIES_EMPTY);
+SyncWaitRet SSRealtimeBuildWaitForTime(XLogRecPtr XactCommitLSN);
 
 typedef struct TransContext {
     /* for global */
@@ -228,6 +229,9 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  */
 SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
+    if (SS_PRIMARY_ENABLE_TARGET_RTO) {
+        return SSRealtimeBuildWaitForTime(XactCommitLSN);
+    }
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
@@ -493,6 +497,58 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 
     RESUME_INTERRUPTS();
     return waitStopRes;
+}
+
+/*
+ * Used in realtime-build log ctrl.
+ * threads will wait for a while befor commit if need log ctrl.
+ */
+SyncWaitRet SSRealtimeBuildWaitForTime(XLogRecPtr XactCommitLSN)
+{
+    SyncWaitRet waitStopRes = NOT_REQUEST;
+
+    /*
+     * Only wait on prmiary node, and realtimeBuildLogCtrl enable.
+     */
+    if (!SS_PRIMARY_ENABLE_TARGET_RTO) {
+        return NOT_REQUEST;
+    }
+
+    /* Prevent the unexpected cleanups to be influenced by external interruptions */
+    HOLD_INTERRUPTS();
+
+    /*
+     * Wait for a while, until globalSleepTime timeout.
+     */
+    const int syncSleepTimeInterval = 1000;
+    int targetSleepTime = g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime;
+    if (targetSleepTime > 0) {
+        ereport(DEBUG4,
+            (errmsg("SSRealtimeBuildWaitForTime sleep %d microseconds before commit.", targetSleepTime)));
+    }
+
+    if (targetSleepTime == 0) {
+        return NOT_REQUEST;
+    }
+    for (int sleepTime = 0; sleepTime < targetSleepTime; sleepTime += syncSleepTimeInterval) {
+        int currentSleepTime = g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime;
+        if (sleepTime >= currentSleepTime) {
+            waitStopRes = SYNC_COMPLETE;
+            t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
+            RESUME_INTERRUPTS();
+            return REPSYNCED;
+        } else if (!SS_PRIMARY_ENABLE_TARGET_RTO) {
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            RESUME_INTERRUPTS();
+            return STOP_WAIT;
+        }
+        pg_usleep(syncSleepTimeInterval);
+    }
+
+    RESUME_INTERRUPTS();
+    waitStopRes = SYNC_COMPLETE;
+    t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
+    return REPSYNCED;
 }
 
 void SyncRepCleanupAtProcExit(void)

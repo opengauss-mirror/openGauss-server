@@ -215,7 +215,14 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.disaster_cluster_promoting = false;
     dms_cxt->SSRecoveryInfo.dorado_sharestorage_inited = false;
     dms_cxt->SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
-    dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
+    dms_cxt->SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+    dms_cxt->SSRecoveryInfo.globalSleepTime = 0;
+    dms_cxt->SSRecoveryInfo.sleepTimeSyncLock = (slock_t)0;
+    errno_t rc = memset_s(dms_cxt->SSRecoveryInfo.rtBuildCtrl,
+                          sizeof(dms_cxt->SSRecoveryInfo.rtBuildCtrl),
+                          0,
+                          sizeof(dms_cxt->SSRecoveryInfo.rtBuildCtrl));
+    securec_check(rc, "", "");
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
