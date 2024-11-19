@@ -13079,7 +13079,9 @@ parse_datatype(const char *string, int location)
         datatype = plpgsql_build_datatype(type_id, typmod,
                                   u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation, typeDependExtend);
     }
-    datatype->defaultvalues = get_default_plpgsql_expr_from_typeoid(type_id, &expr_len);
+    if (!(u_sess->hook_cxt.forTsdbHook && DB_IS_CMPT(PG_FORMAT))) {
+        datatype->defaultvalues = get_default_plpgsql_expr_from_typeoid(type_id, &expr_len);
+    }
     return datatype;
 }
 
