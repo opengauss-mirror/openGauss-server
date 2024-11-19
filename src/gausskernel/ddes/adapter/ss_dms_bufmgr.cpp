@@ -1022,21 +1022,8 @@ bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
 {
     bool get_lock = false;
     int wait_tickets = (SS_PRIMARY_MODE) ? 500 : 5000;
-    int cur_tickets = 0;
 
-    do {
-        get_lock = LWLockConditionalAcquire(lock, mode);
-        if (get_lock) {
-            break;
-        }
-
-        pg_usleep(1000L);
-        cur_tickets++;
-        if (cur_tickets >= wait_tickets) {
-            break;
-        }
-    } while (true);
-
+    get_lock = LWLockAcquireTimeout(lock, mode, wait_tickets);
     if (!get_lock) {
         ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:%dms",
             lock, mode, wait_tickets))));

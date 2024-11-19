@@ -495,6 +495,27 @@ bool PGSemaphoreTryLock(PGSemaphore sema)
 }
 
 /*
+ * PGSemaphoreLockTimeout
+ *
+ * Do not block obtaining locks until timeout
+ * Return the remaining time. 0 indicates that no semaphore is obtained within the sepcified time, otherwise,
+ * the semaphore is obtained within the specified time and the remaining time is returned.
+ */
+int PGSemaphoreLockTimeout(PGSemaphore sema, int timeout_ms)
+{
+    int remainingTime = timeout_ms;
+    do {
+        if (PGSemaphoreTryLock(sema)) {
+            break;
+        }
+        pg_usleep(1000L);
+        remainingTime--;
+    } while (remainingTime > 0);
+
+    return remainingTime;
+}
+
+/*
  * @@GaussDB@@
  * Brief		: cancel the semphore release on shmem exit
  * Description	:
