@@ -544,7 +544,9 @@ void PgStatCMAThreadStatus()
 {
     StringInfoData callStack;
     initStringInfo(&callStack);
-    for (int i = 0; i < NUM_CMAGENT_PROCS; i++) {
+    /* Get the total number of CMA procs. */
+    int allCMProcNum = pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount);
+    for (int i = 0; i < allCMProcNum; i++) {
         ThreadId pid = g_instance.proc_base->cmAgentAllProcs[i]->pid;
         if (pid != 0) {
             resetStringInfo(&callStack);
@@ -554,6 +556,8 @@ void PgStatCMAThreadStatus()
                 pid, callStack.data)));
         }
     }
+    /* It is abnormal that CM Agent proc List is full. */
+    Assert(allCMProcNum < NUM_CMAGENT_PROCS);
     FreeStringInfo(&callStack);
 }
 
@@ -796,6 +800,8 @@ void InitProcess(void)
             int rc = sprintf_s(cmaConnNumInfo, CONNINFOLEN, "All CMA proc [%d], uses[%d];",
                 NUM_CMAGENT_PROCS, g_instance.conn_cxt.CurCMAProcCount);
             securec_check_ss(rc, "\0", "\0");
+            /* It is abnormal that CM Agent proc List is full. */
+            Assert(g_instance.conn_cxt.CurCMAProcCount < NUM_CMAGENT_PROCS);
         }
 
         ereport(FATAL,
