@@ -6424,7 +6424,7 @@ Datum group_concat_finalfn(PG_FUNCTION_ARGS)
         StringInfo state = (StringInfo)PG_GETARG_POINTER(0);
         int cur_charset = get_valid_charset_by_collation(PG_GET_COLLATION());
         int encoding_max_length = pg_wchar_table[cur_charset].maxmblen;
-        int real_len = state->len - encoding_max_length;
+        int real_len = state->len - encoding_max_length > 0 ? state->len - encoding_max_length : 0;
         char* real_data = state->data + real_len;
         while (real_data != NULL) {
             int cur_len = pg_wchar_table[cur_charset].mblen((const unsigned char*)real_data);
