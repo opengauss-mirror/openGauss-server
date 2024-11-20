@@ -62,7 +62,7 @@ extern void CreateSharedRingBuffer(void);
 
 extern void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommit = true);
 extern void ProcArrayClearTransaction(PGPROC* proc);
-extern bool TransactionIdIsInProgress(TransactionId xid, uint32 *needSync = NULL, bool shortcutByRecentXmin = false,
+extern bool TransactionIdIsInProgress(TransactionId xid, uint32 *needSync = NULL,
     bool bCareNextxid = false, bool isTopXact = false, bool checkLatestCompletedXid = true);
 
 #ifdef PGXC /* PGXC_DATANODE */

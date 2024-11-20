@@ -4096,7 +4096,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
     for (int slotNo = 0; slotNo < numSlots; slotNo++) {
         TransactionId slotXid = transinfo[slotNo].xactid;
 
-        if (!TransactionIdIsInProgress(slotXid, NULL, false, false, true)) {
+        if (!TransactionIdIsInProgress(slotXid, NULL, false, true)) {
             if (UHeapTransactionIdDidCommit(slotXid))
                 completedXactSlots[nCompletedXactSlots++] = slotNo;
             else
@@ -5321,7 +5321,7 @@ bool UHeapExecPendingUndoActions(Relation relation, Buffer buffer, TransactionId
     /* It's either we're the one applying our own undo actions
      * or we're trying to apply undo action of a completed transaction.
      */
-    Assert(TransactionIdIsCurrentTransactionId(xid) || !TransactionIdIsInProgress(xid, NULL, false, false));
+    Assert(TransactionIdIsCurrentTransactionId(xid) || !TransactionIdIsInProgress(xid, NULL, false));
     /*
      * Apply Undo Actions if the transaction is aborted. To check abort,
      * we can call TransactionIdDidAbort but this will not always give
@@ -5329,7 +5329,7 @@ bool UHeapExecPendingUndoActions(Relation relation, Buffer buffer, TransactionId
      * crash, and after restart, status of this transaction will not be
      * aborted but we should still consider it as aborted because it dit not commit.
      */
-    if (TransactionIdIsValid(xid) && !TransactionIdIsInProgress(xid, NULL, false, false) &&
+    if (TransactionIdIsValid(xid) && !TransactionIdIsInProgress(xid, NULL) &&
         !UHeapTransactionIdDidCommit(xid)) {
         /*
          * Release the buffer lock here to prevent deadlock.

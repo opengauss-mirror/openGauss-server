@@ -388,7 +388,7 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
                 UBTPageOpaque opaque = (UBTPageOpaque)PageGetSpecialPointer(indexPage);
                 if (P_ISHALFDEAD((UBTPageOpaqueInternal)opaque)) {
                     TransactionId previousXact = opaque->xact;
-                    if (TransactionIdIsValid(previousXact) && TransactionIdIsInProgress(previousXact, NULL, true)) {
+                    if (TransactionIdIsValid(previousXact) && TransactionIdIsInProgress(previousXact, NULL)) {
                         pageUsable = false;
                     }
                 }

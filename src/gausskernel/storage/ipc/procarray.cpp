@@ -194,6 +194,7 @@ void ProcArrayGroupClearXid(bool isSubTransaction, PGPROC* proc, TransactionId l
                             TransactionId* subTransactionXids, TransactionId subTransactionLatestXid);
 
 extern bool StreamTopConsumerAmI();
+int ProcArraySubxidsBinarySearch(TransactionId targetId, volatile PGPROC *proc, int sum);
 
 #define PROCARRAY_MAXPROCS      (g_instance.shmem_cxt.MaxBackends + \
     g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS)
@@ -1318,7 +1319,7 @@ RecentXmin
  * in HeapTupleSatisfiesMVCC. But we keep assert checking every scene for
 data consistency.
  */
-bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcutByRecentXmin,
+bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync,
                                bool bCareNextxid, bool isTopXact, bool checkLatestCompletedXid)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
@@ -1326,30 +1327,13 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
     bool shortCutCheckRes = true;
 #endif
     volatile int i = 0;
-    volatile int j = 0;
 
-    /*
-     * Don't bother checking a transaction older than RecentXmin; it could not
-     * possibly still be running.  (Note: in particular, this guarantees that
-     * we reject InvalidTransactionId, FrozenTransactionId, etc as not
-     * running.)
-     *
-     * Notes: our principle for distribute transaction is:
-     * 	 We should treat gtm xact state as the global xact state, when local
-    xact state
-     * is not match with gtm xact, we block until they are match(
-    SyncLocalXactsWithGTM).
-     *
-     * 	 So, the shortcut `RecentXmin' is not worth worried, because when it is
-    assigned value
-     * local must sync with gtm.
-     */
-    uint64 recycle_xid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    uint64 bypassXid = u_sess->utils_cxt.RecentXmin;
     /* in hotstandby mode, the proc may being runnnig */
     if (RecoveryInProgress()) {
-        recycle_xid = InvalidTransactionId;
+        bypassXid = InvalidTransactionId;
     }
-    if (shortcutByRecentXmin && TransactionIdPrecedes(xid, recycle_xid)) {
+    if (TransactionIdPrecedes(xid, bypassXid)) {
         xc_by_recent_xmin_inc();
 
         /*
@@ -1483,19 +1467,15 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
                 if (pgxact->nxids > 0) {
                     /* Use subxidsLock to protect subxids */
                     LWLockAcquire(proc->subxidsLock, LW_SHARED);
-                    for (j = pgxact->nxids - 1; j >= 0; j--) {
-                        /* Fetch xid just once - see GetNewTransactionId */
-                        TransactionId cxid = proc->subxids.xids[j];
-
-                        if (TransactionIdEquals(cxid, xid)) {
-                            if (needSync != NULL)
-                                *needSync = pgxact->needToSyncXid;
-                            LWLockRelease(proc->subxidsLock);
-                            LWLockRelease(ProcArrayLock);
-                            xc_by_child_xid_inc();
-                            Assert(shortCutCheckRes == true);
-                            return true;
-                        }
+                    int index = ProcArraySubxidsBinarySearch(xid, proc, pgxact->nxids);
+                    if (index != -1) {
+                        if (needSync != NULL)
+                            *needSync = pgxact->needToSyncXid;
+                        LWLockRelease(proc->subxidsLock);
+                        LWLockRelease(ProcArrayLock);
+                        xc_by_child_xid_inc();
+                        Assert(shortCutCheckRes == true);
+                        return true;
                     }
                     LWLockRelease(proc->subxidsLock);
                 }
@@ -2655,6 +2635,32 @@ Datum pg_get_running_xacts(PG_FUNCTION_ARGS)
 
     LWLockRelease(ProcArrayLock);
     SRF_RETURN_DONE(funcctx);
+}
+
+int ProcArraySubxidsBinarySearch(TransactionId targetXid, volatile PGPROC *proc, int sum)
+{
+    if (sum <= 0) {
+        return -1;
+    }
+    pg_read_barrier();
+    int left = 0, right = sum - 1;
+    if (TransactionIdPrecedes(proc->subxids.xids[right], targetXid) ||
+        TransactionIdFollows(proc->subxids.xids[left], targetXid)) {
+        return -1;
+    }
+
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        TransactionId cxid = proc->subxids.xids[mid];
+        if (TransactionIdEquals(cxid, targetXid)) {
+            return mid;
+        } else if (TransactionIdPrecedes(cxid, targetXid)) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    return -1;
 }
 
 /*
@@ -4055,6 +4061,20 @@ void ProcArrayGetReplicationSlotXmin(TransactionId* xmin, TransactionId* catalog
     LWLockRelease(ProcArrayLock);
 }
 
+int ProcArrayUint64Cmp(const void *a, const void *b)
+{
+    TransactionId num1 = *(const TransactionId *)a;
+    TransactionId num2 = *(const TransactionId *)b;
+
+    if (num1 > num2) {
+        return 1;
+    } else if (num1 == num2) {
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
 /*
  * XidCacheRemoveRunningXids
  *
@@ -4073,6 +4093,7 @@ void ProcArrayGetReplicationSlotXmin(TransactionId* xmin, TransactionId* catalog
 void XidCacheRemoveRunningXids(PGPROC* proc, PGXACT* pgxact)
 {
     int i, j;
+    bool needSort = false;
     TransactionId xid = proc->procArrayGroupMemberXid;
     int nxids = proc->procArrayGroupSubXactNXids;
     TransactionId* xids = proc->procArrayGroupSubXactXids;
@@ -4090,6 +4111,9 @@ void XidCacheRemoveRunningXids(PGPROC* proc, PGXACT* pgxact)
 
         for (j = pgxact->nxids - 1; j >= 0; j--) {
             if (TransactionIdEquals(proc->subxids.xids[j], anxid)) {
+                if (j != t_thrd.pgxact->nxids - 1) {
+                    needSort = true;
+                }
                 proc->subxids.xids[j] = proc->subxids.xids[pgxact->nxids - 1];
                 pgxact->nxids--;
                 break;
@@ -4103,12 +4127,16 @@ void XidCacheRemoveRunningXids(PGPROC* proc, PGXACT* pgxact)
          * error during AbortSubTransaction.  So instead of Assert, emit a
          * debug warning.
          */
-        if (j < 0)
+        if (j < 0) {
             ereport(WARNING, (errmsg("did not find subXID " XID_FMT " in t_thrd.proc", anxid)));
+        }
     }
 
     for (j = pgxact->nxids - 1; j >= 0; j--) {
         if (TransactionIdEquals(proc->subxids.xids[j], xid)) {
+            if (j != t_thrd.pgxact->nxids - 1) {
+                needSort = true;
+            }
             proc->subxids.xids[j] = proc->subxids.xids[pgxact->nxids - 1];
             pgxact->nxids--;
             break;
@@ -4116,8 +4144,13 @@ void XidCacheRemoveRunningXids(PGPROC* proc, PGXACT* pgxact)
     }
 
     /* Ordinarily we should have found it, unless the cache has overflowed */
-    if (j < 0)
+    if (j < 0) {
         ereport(WARNING, (errmsg("did not find subXID " XID_FMT " in t_thrd.proc", xid)));
+    }
+
+    if (needSort) {
+        qsort(t_thrd.proc->subxids.xids, t_thrd.pgxact->nxids, sizeof(TransactionId), ProcArrayUint64Cmp);
+    }
 
     /* Also advance global latestCompletedXid while holding the lock */
     if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, latestXid))

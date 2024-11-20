@@ -166,7 +166,6 @@ TransactionId GetNewTransactionId(bool isSubXact)
 
         /* Re-acquire lock and start over */
         (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-
         xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
     }
 
@@ -256,6 +255,7 @@ TransactionId GetNewTransactionId(bool isSubXact)
             }
 
             myproc->subxids.xids[nxids] = xid;
+            pg_write_barrier();
             mypgxact->nxids = nxids + 1;
         }
     }

@@ -1020,7 +1020,7 @@ static bool ReserveForDeletion(Relation rel, Buffer buf)
             /* already reserved by self, continue */
             return true;
         }
-        if (!TransactionIdIsInProgress(previousXact, NULL, true)) {
+        if (!TransactionIdIsInProgress(previousXact, NULL)) {
             /* previous worker abort, we can still reserve for deletion */
             DoReserveDeletion(page);
             return true;
