@@ -467,7 +467,16 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     int instrument_option = 0;
     bool has_track_operator = false;
     char* old_stmt_name = u_sess->pcache_cxt.cur_stmt_name;
-    u_sess->statement_cxt.root_query_plan = queryDesc;
+
+    /* 
+     * For normal query, ExecutorRun will be called several times, we only record the first queryDesc,
+     * otherwise root_query_plan will be overwritten,
+     * and root_query_plan->planstate will be NULL,
+     * which may cause incorrect query_plan in statement_history
+     */
+    if (u_sess->statement_cxt.executer_run_level == 0) {
+        u_sess->statement_cxt.root_query_plan = queryDesc;
+    }
     u_sess->statement_cxt.executer_run_level++;
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
