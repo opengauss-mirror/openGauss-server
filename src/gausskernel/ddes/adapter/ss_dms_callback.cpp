@@ -58,6 +58,14 @@
 
 static void ReleaseResource();
 
+static inline void IniRedoInfo()
+{
+    g_instance.dms_cxt.SSReformInfo.redo_start_time = 0;
+    g_instance.dms_cxt.SSReformInfo.redo_end_time = 0;
+    g_instance.dms_cxt.SSReformInfo.construct_hashmap = 0;
+    g_instance.dms_cxt.SSReformInfo.redo_total_bytes = 0;
+}
+
 /*
  * Wake up startup process to replay WAL, or to notice that
  * failover has been requested.
@@ -2033,6 +2041,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
+    IniRedoInfo();
     if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
         SSXminInfoPrepare();
     }
