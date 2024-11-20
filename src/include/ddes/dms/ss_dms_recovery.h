@@ -66,7 +66,6 @@
     SS_NORMAL_PRIMARY && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
 #define SS_STANDBY_ENABLE_TARGET_RTO (SS_NORMAL_STANDBY && \
     SS_ONDEMAND_REALTIME_BUILD_NORMAL && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
-
 #define REFORM_CTRL_VERSION 1
 typedef struct st_reformer_ctrl {
     uint32 version;

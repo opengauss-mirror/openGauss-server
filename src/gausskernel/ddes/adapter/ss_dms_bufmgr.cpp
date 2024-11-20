@@ -30,6 +30,7 @@
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_dms_recovery.h"
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
@@ -477,12 +478,10 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return buffer;
     }
-
     if (!DmsCheckBufAccessible()) {
         *with_io = false;
         return 0;
     }
-
     if (!DmsStartBufferIO(buf_desc, mode)) {
         if (!DmsCheckBufAccessible()) {
             *with_io = false;
