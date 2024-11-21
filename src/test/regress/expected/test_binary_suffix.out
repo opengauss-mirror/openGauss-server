@@ -451,7 +451,7 @@ SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_NAN)) AS result;
  The value is NaN
 (1 row)
 
-set enable_binary_special_o_format to on;
+set enable_binary_special_a_format to on;
 SELECT CONCAT('The value is ', TO_CHAR(BINARY_DOUBLE_INFINITY)) AS result;
       result      
 ------------------

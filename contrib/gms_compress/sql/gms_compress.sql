@@ -685,7 +685,7 @@ BEGIN
 	v_handle := GMS_COMPRESS.LZ_UNCOMPRESS_OPEN(content);
   v_bool := GMS_COMPRESS.ISOPEN(v_handle);
   RAISE NOTICE 'v_bool=%', v_bool;
-	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(v_handle,content);
+	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(v_handle);
   v_bool := GMS_COMPRESS.ISOPEN(v_handle);
   RAISE NOTICE 'v_bool=%', v_bool;
 END;

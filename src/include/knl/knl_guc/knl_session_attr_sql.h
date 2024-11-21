@@ -130,7 +130,7 @@ typedef struct knl_session_attr_sql {
     bool enable_light_proxy;
     bool enable_pbe_optimization;
     bool enable_cluster_resize;
-    bool enable_binary_special_o_format;
+    bool enable_binary_special_a_format;
     bool lo_compat_privileges;
     bool quote_all_identifiers;
     bool enforce_a_behavior;

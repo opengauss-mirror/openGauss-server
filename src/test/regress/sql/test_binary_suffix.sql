@@ -161,7 +161,7 @@ set float_suffix_acceptance to on;
 SELECT CONCAT('The value is ', TO_CHAR(BINARY_DOUBLE_INFINITY)) AS result;
 SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_INFINITY)) AS result;
 SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_NAN)) AS result;
-set enable_binary_special_o_format to on;
+set enable_binary_special_a_format to on;
 SELECT CONCAT('The value is ', TO_CHAR(BINARY_DOUBLE_INFINITY)) AS result;
 SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_INFINITY)) AS result;
 SELECT CONCAT('The value is ', TO_CHAR(-BINARY_DOUBLE_NAN)) AS result;
