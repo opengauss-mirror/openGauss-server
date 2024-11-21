@@ -35,7 +35,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           170
+#define DMS_LOCAL_VERSION           172
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -260,10 +260,12 @@ typedef struct st_dms_cr_assist_t {
 
 typedef struct st_dms_drlock {
     dms_drid_t      drid;
+    void           *handle;
 } dms_drlock_t;
 
 typedef struct st_dms_drlatch {
-    dms_drid_t   drid;
+    dms_drid_t      drid;
+    void           *handle;
 } dms_drlatch_t;
 
 typedef struct st_dms_xid_ctx {
@@ -448,6 +450,7 @@ typedef struct st_dms_buf_ctrl
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
     volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm
+    unsigned long long seq; // for dms page swap message-sequence
 #ifdef OPENGAUSS
     int buf_id;
     unsigned int state;
@@ -851,14 +854,15 @@ typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
 typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn,
     unsigned long long *node_data, unsigned int len);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
-    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
+    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl, unsigned long long seq);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
     dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
 typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
-typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner);
+typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
+    unsigned long long seq);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index, dms_session_type_e session_type);
 typedef void (*dms_release_db_handle)(void *db_handle);
 typedef char *(*dms_get_wxid_from_cr_cursor)(void *cr_cursor);
@@ -987,6 +991,7 @@ typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
+typedef int (*dms_az_switchover_demote_stop_ckpt)(void *db_handle);
 typedef int (*dms_az_switchover_demote_update_node_ctrl)(void *db_handle, unsigned long long online_list);
 typedef int (*dms_az_switchover_demote_change_role)(void *db_handle);
 typedef int (*dms_az_switchover_demote_approve)(void *db_handle);
@@ -1184,6 +1189,7 @@ typedef struct st_dms_callback {
 
     // for az switchover and az failover
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
+    dms_az_switchover_demote_stop_ckpt az_switchover_demote_stop_ckpt;
     dms_az_switchover_demote_update_node_ctrl az_switchover_demote_update_node_ctrl;
     dms_az_switchover_demote_change_role az_switchover_demote_change_role;
     dms_az_switchover_demote_approve az_switchover_demote_approve;
@@ -1260,6 +1266,7 @@ typedef struct st_dms_profile {
     unsigned int max_alive_time_for_abnormal_status;
     unsigned char enable_dyn_trace;
     unsigned char enable_reform_trace;
+    unsigned long long drc_buf_size;
 } dms_profile_t;
 
 typedef struct st_logger_param {
