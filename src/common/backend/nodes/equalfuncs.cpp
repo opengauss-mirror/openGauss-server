@@ -386,6 +386,17 @@ static bool _equalScalarArrayOpExpr(const ScalarArrayOpExpr* a, const ScalarArra
         return false;
     }
 
+    if (t_thrd.proc->workingVersionNum >= HASH_SAOP_VERSION_NUMBER) {
+        /* As above, hashfuncid may differ too */
+        if (a->hashfuncid != b->hashfuncid && a->hashfuncid != 0 && b->hashfuncid != 0) {
+            return false;
+        }
+        /* Likewise for the negfuncid */
+        if (a->negfuncid != b->negfuncid && a->negfuncid != 0 && b->negfuncid != 0) {
+            return false;
+        }
+    }
+
     COMPARE_SCALAR_FIELD(useOr);
     COMPARE_SCALAR_FIELD(inputcollid);
     COMPARE_NODE_FIELD(args);

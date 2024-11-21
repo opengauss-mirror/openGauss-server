@@ -275,7 +275,7 @@ ExecBuildProjectionInfoByFlatten(List *targetList,
 {
 	ProjectionInfo *projInfo = makeNode(ProjectionInfo);
 	ExprState  *state;
-	ExprEvalStep scratch = {0};
+    ExprEvalStep scratch = {0};
 	ListCell   *lc;
 
 	projInfo->pi_exprContext = econtext;
@@ -533,7 +533,7 @@ static void
 ExecInitExprRec(Expr *node, ExprState *state,
 				Datum *resv, bool *resnull, Expr *parent_node)
 {
-    ExprEvalStep scratch;
+    ExprEvalStep scratch = {0};
 
 	/* Guard against stack overflow due to overly complex expressions */
 	check_stack_depth();
@@ -876,48 +876,98 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				FmgrInfo   *finfo;
 				FunctionCallInfo fcinfo;
 				AclResult	aclresult;
+                Oid cmpfuncid;
+
+                /*
+                 * Select the correct comparison function.  When we do hashed
+                 * NOT IN clauses, the opfuncid will be the inequality
+                 * comparison function and negfuncid will be set to equality.
+                 * We need to use the equality function for hash probes.
+                 */
+                if (OidIsValid(opexpr->negfuncid)) {
+                    Assert(OidIsValid(opexpr->hashfuncid));
+                    cmpfuncid = opexpr->negfuncid;
+                } else {
+                    cmpfuncid = opexpr->opfuncid;
+                }
 
 				Assert(list_length(opexpr->args) == 2);
 				scalararg = (Expr *) linitial(opexpr->args);
 				arrayarg = (Expr *) lsecond(opexpr->args);
 
 				/* Check permission to call function */
-				aclresult = pg_proc_aclcheck(opexpr->opfuncid,
+                aclresult = pg_proc_aclcheck(cmpfuncid,
 											 GetUserId(),
 											 ACL_EXECUTE);
 				if (aclresult != ACLCHECK_OK)
-					aclcheck_error(aclresult, ACL_KIND_PROC,
-								   get_func_name(opexpr->opfuncid));
-				InvokeFunctionExecuteHook(opexpr->opfuncid);
+                    aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(cmpfuncid));
+                InvokeFunctionExecuteHook(cmpfuncid);
+
+                if (OidIsValid(opexpr->hashfuncid)) {
+                    aclresult = pg_proc_aclcheck(opexpr->hashfuncid, GetUserId(), ACL_EXECUTE);
+                    if (aclresult != ACLCHECK_OK)
+                        aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(opexpr->hashfuncid));
+                    InvokeFunctionExecuteHook(opexpr->hashfuncid);
+                }
 
 				/* Set up the primary fmgr lookup information */
 				finfo = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
 				fcinfo = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
-				fmgr_info(opexpr->opfuncid, finfo);
+                fmgr_info(cmpfuncid, finfo);
 				fmgr_info_set_expr((Node *) node, finfo);
 				InitFunctionCallInfoData(*fcinfo, finfo, 2,
 										 opexpr->inputcollid, NULL, NULL);
 
-				/* Evaluate scalar directly into left function argument */
-				ExecInitExprRec(scalararg, state,
-								&fcinfo->arg[0], &fcinfo->argnull[0], node);
+                /*
+                 * If hashfuncid is set, we create a EEOP_HASHED_SCALARARRAYOP
+                 * step instead of a EEOP_SCALARARRAYOP.  This provides much
+                 * faster lookup performance than the normal linear search
+                 * when the number of items in the array is anything but very
+                 * small.
+                 */
+                if (OidIsValid(opexpr->hashfuncid)) {
+                    /* Evaluate scalar directly into left function argument */
+                    ExecInitExprRec(scalararg, state, &fcinfo->arg[0], &fcinfo->argnull[0], node);
 
-				/*
-				 * Evaluate array argument into our return value.  There's no
-				 * danger in that, because the return value is guaranteed to
-				 * be overwritten by EEOP_SCALARARRAYOP, and will not be
-				 * passed to any other expression.
-				 */
-				ExecInitExprRec(arrayarg, state, resv, resnull, node);
+                    /*
+                     * Evaluate array argument into our return value.  There's
+                     * no danger in that, because the return value is
+                     * guaranteed to be overwritten by
+                     * EEOP_HASHED_SCALARARRAYOP, and will not be passed to
+                     * any other expression.
+                     */
+                    ExecInitExprRec(arrayarg, state, resv, resnull, node);
 
-				/* And perform the operation */
-				scratch.opcode = EEOP_SCALARARRAYOP;
-				scratch.d.scalararrayop.element_type = InvalidOid;
-				scratch.d.scalararrayop.useOr = opexpr->useOr;
-				scratch.d.scalararrayop.finfo = finfo;
-				scratch.d.scalararrayop.fcinfo_data = fcinfo;
-				scratch.d.scalararrayop.fn_addr = finfo->fn_addr;
-				ExprEvalPushStep(state, &scratch);
+                    /* And perform the operation */
+                    scratch.opcode = EEOP_HASHED_SCALARARRAYOP;
+                    scratch.d.hashedscalararrayop.inclause = opexpr->useOr;
+                    scratch.d.hashedscalararrayop.finfo = finfo;
+                    scratch.d.hashedscalararrayop.fcinfo_data = fcinfo;
+                    scratch.d.hashedscalararrayop.saop = opexpr;
+                    scratch.d.hashedscalararrayop.elements_tab = NULL;
+
+                    ExprEvalPushStep(state, &scratch);
+                } else {
+                    /* Evaluate scalar directly into left function argument */
+                    ExecInitExprRec(scalararg, state, &fcinfo->arg[0], &fcinfo->argnull[0], node);
+
+                    /*
+                     * Evaluate array argument into our return value.  There's no
+                     * danger in that, because the return value is guaranteed to
+                     * be overwritten by EEOP_SCALARARRAYOP, and will not be
+                     * passed to any other expression.
+                     */
+                    ExecInitExprRec(arrayarg, state, resv, resnull, node);
+
+                    /* And perform the operation */
+                    scratch.opcode = EEOP_SCALARARRAYOP;
+                    scratch.d.scalararrayop.element_type = InvalidOid;
+                    scratch.d.scalararrayop.useOr = opexpr->useOr;
+                    scratch.d.scalararrayop.finfo = finfo;
+                    scratch.d.scalararrayop.fcinfo_data = fcinfo;
+                    scratch.d.scalararrayop.fn_addr = finfo->fn_addr;
+                    ExprEvalPushStep(state, &scratch);
+                }
 				break;
 			}
 		case T_BoolExpr:

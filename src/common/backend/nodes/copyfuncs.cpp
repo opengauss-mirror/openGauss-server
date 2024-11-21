@@ -2899,6 +2899,10 @@ static ScalarArrayOpExpr* _copyScalarArrayOpExpr(const ScalarArrayOpExpr* from)
     COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(opno);
     COPY_SCALAR_FIELD(opfuncid);
+    if (t_thrd.proc->workingVersionNum >= HASH_SAOP_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(hashfuncid);
+        COPY_SCALAR_FIELD(negfuncid);
+    }
     COPY_SCALAR_FIELD(useOr);
     COPY_SCALAR_FIELD(inputcollid);
     COPY_NODE_FIELD(args);

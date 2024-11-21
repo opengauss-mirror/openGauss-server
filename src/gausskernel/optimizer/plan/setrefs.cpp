@@ -1404,8 +1404,16 @@ static void fix_expr_common(PlannerInfo* root, Node* node)
         set_opfuncid((OpExpr*)node); /* rely on struct equivalence */
         record_plan_function_dependency(root, ((NullIfExpr*)node)->opfuncid);
     } else if (IsA(node, ScalarArrayOpExpr)) {
-        set_sa_opfuncid((ScalarArrayOpExpr*)node);
-        record_plan_function_dependency(root, ((ScalarArrayOpExpr*)node)->opfuncid);
+        ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *)node;
+
+        set_sa_opfuncid(saop);
+        record_plan_function_dependency(root, saop->opfuncid);
+
+        if (OidIsValid(saop->hashfuncid))
+            record_plan_function_dependency(root, saop->hashfuncid);
+
+        if (OidIsValid(saop->negfuncid))
+            record_plan_function_dependency(root, saop->negfuncid);
     } else if (IsA(node, ArrayCoerceExpr)) {
         if (OidIsValid(((ArrayCoerceExpr*)node)->elemfuncid))
             record_plan_function_dependency(root, ((ArrayCoerceExpr*)node)->elemfuncid);
