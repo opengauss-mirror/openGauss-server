@@ -940,13 +940,13 @@ BEGIN
 	v_handle := GMS_COMPRESS.LZ_UNCOMPRESS_OPEN(content);
   v_bool := GMS_COMPRESS.ISOPEN(v_handle);
   RAISE NOTICE 'v_bool=%', v_bool;
-	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(v_handle,content);
+	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(v_handle);
   v_bool := GMS_COMPRESS.ISOPEN(v_handle);
   RAISE NOTICE 'v_bool=%', v_bool;
 END;
 /
-ERROR:  when invoking function gms_compress.lz_uncompress_close, expected ")", maybe input something superfluous.
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 10
+NOTICE:  v_bool=t
+NOTICE:  v_bool=f
 -- abnormal scenario
 DECLARE
   v_bool boolean;
