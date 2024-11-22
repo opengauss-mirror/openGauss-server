@@ -1859,6 +1859,22 @@ bool enable_plpgsql_undefined()
             u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID);
 }
 
+bool enable_plpgsql_pkgfunc_lazy_delete()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return false;
+#endif
+    if (unlikely(IsInitdb || t_thrd.proc->workingVersionNum < SUPPORT_GS_DEPENDENCY_VERSION_NUM)) {
+        return false;
+    }
+    int save_compile_status = u_sess->plsql_cxt.compile_status;
+    if (save_compile_status != COMPILIE_ANON_BLOCK &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        return true;
+    }
+    return false;
+}
+
 void set_create_plsql_type_not_check_nsp_oid()
 {
     if (enable_plpgsql_undefined()) {

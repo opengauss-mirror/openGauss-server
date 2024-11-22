@@ -811,6 +811,49 @@ select nested_pkg1.nested_pkg1_fun2(1);
 drop package nested_pkg1;
 drop package nested_pkg2;
 
+-- Test for View Dependency on Package Functions
+CREATE TABLE t1(a int);
+
+CREATE OR REPLACE PACKAGE EAST_COMM IS
+function ADD_NUM(a int) RETURN int;
+END EAST_COMM;
+/
+CREATE OR REPLACE PACKAGE BODY EAST_COMM IS
+FUNCTION ADD_NUM(a int) RETURN int as
+BEGIN
+      RETURN a + 10;
+END;
+END EAST_COMM;
+/
+
+CREATE VIEW v_add AS
+SELECT a, EAST_COMM.ADD_NUM(a) AS RESULT FROM t1;
+CREATE VIEW v_other AS
+SELECT a from t1;
+
+select * from v_add;
+select * from v_other;
+
+CREATE OR REPLACE PACKAGE EAST_COMM IS
+function ADD_NUM(a int) RETURN int;
+END EAST_COMM;
+/
+CREATE OR REPLACE PACKAGE BODY EAST_COMM IS
+FUNCTION ADD_NUM(a int) RETURN int as
+BEGIN
+      RETURN a + 10;
+END;
+END EAST_COMM;
+/
+
+select * from v_add;
+select * from v_other;
+
+drop view v_add;
+drop view v_other;
+drop table t1;
+drop package east_comm;
+
 \c regression
 drop database db;
 drop user pkg_user1;
