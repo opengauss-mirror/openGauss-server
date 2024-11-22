@@ -1,8 +1,13 @@
 FROM openeuler-20.03-lts:latest
 
-COPY openGauss-5.0.0-openEuler-64bit.tar.bz2 .
+ARG VERSION=7.0.0-RC1
+
+COPY openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 .
 COPY gosu-arm64 /usr/local/bin/gosu
 COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_aarch64.repo
+# remove all lines containing scws if do no want to chparser#
+COPY scws.tar.gz .
+
 ENV LANG en_US.utf8
 
 #RUN yum install -y epel-release
@@ -15,20 +20,24 @@ RUN set -eux; \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    tar -jxf openGauss-5.0.0-openEuler-64bit.tar.bz2 -C /usr/local/opengauss && \
+    tar -jxf openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-5.0.0-openEuler-64bit.tar.bz2 && yum clean all
+    rm -rf openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 && \
+    tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
+    chmod 1777 /tmp && \
+    yum clean all
 
 RUN set -eux; \
     echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
     echo "export PATH=\$GAUSSHOME/bin:\$PATH " >> /home/omm/.bashrc && \
     echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc
 
+RUN set -eux; echo "export TMOUT=0 >> /etc/bashrc"
+
 ENV GOSU_VERSION 1.12
 RUN set -eux; \
      chmod +x /usr/local/bin/gosu
-
 
 ENV PGDATA /var/lib/opengauss/data
 
