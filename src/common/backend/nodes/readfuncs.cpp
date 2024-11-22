@@ -2394,7 +2394,12 @@ static WindowFunc* _readWindowFunc(void)
 
     READ_TYPEINFO_FIELD(wintype);
     READ_FUNCINFO_FIELD(winfnoid);
-
+    IF_EXIST(is_from_last) {
+        READ_BOOL_FIELD(is_from_last);
+    }
+    IF_EXIST(is_ignore_nulls) {
+        READ_BOOL_FIELD(is_ignore_nulls);
+    }
     READ_DONE();
 }
 

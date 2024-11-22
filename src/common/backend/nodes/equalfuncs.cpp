@@ -284,7 +284,8 @@ static bool _equalWindowFunc(const WindowFunc* a, const WindowFunc* b)
         COMPARE_SCALAR_FIELD(winkpfirst);
     }
     COMPARE_LOCATION_FIELD(location);
-
+    COMPARE_SCALAR_FIELD(is_from_last);
+    COMPARE_SCALAR_FIELD(is_ignore_nulls);
     return true;
 }
 
@@ -2690,6 +2691,8 @@ static bool _equalFuncCall(const FuncCall* a, const FuncCall* b)
     COMPARE_NODE_FIELD(over);
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(call_func);
+    COMPARE_SCALAR_FIELD(is_from_last);
+    COMPARE_SCALAR_FIELD(is_ignore_nulls);
 
     return true;
 }

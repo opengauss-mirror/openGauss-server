@@ -2599,6 +2599,8 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             newexpr->winkporder = (List*)expression_tree_mutator(
                 (Node*)expr->winkporder, (Node* (*)(Node*, void*)) eval_const_expressions_mutator, (void*)context);
             newexpr->winkpfirst = expr->winkpfirst;
+            newexpr->is_from_last = expr->is_from_last;
+            newexpr->is_ignore_nulls = expr->is_ignore_nulls;
             newexpr->location = expr->location;
 
             return (Node*)newexpr;

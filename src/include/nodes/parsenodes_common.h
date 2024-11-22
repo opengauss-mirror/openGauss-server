@@ -1742,6 +1742,8 @@ typedef struct FuncCall {
     struct WindowDef *over; /* OVER clause, if any */
     int location;           /* token location, or -1 if unknown */
     bool call_func;         /* call function, false is select function */
+    bool is_from_last;      /* used for window function nth_value */
+    bool is_ignore_nulls;   /* used for window function nth_value */
 } FuncCall;
 
 /*

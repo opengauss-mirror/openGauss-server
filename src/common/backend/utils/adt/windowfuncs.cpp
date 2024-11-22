@@ -396,6 +396,9 @@ Datum window_nth_value(PG_FUNCTION_ARGS)
     Datum result;
     bool isnull = false;
     int32 nth;
+    bool isout = false;
+    bool isFromLast = winobj->is_from_last;
+    bool isIgnNulls = winobj->is_ignore_nulls;
 
     nth = DatumGetInt32(WinGetFuncArgCurrent(winobj, 1, &isnull));
     if (isnull)
@@ -406,8 +409,32 @@ Datum window_nth_value(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_ARGUMENT_FOR_NTH_VALUE),
                 errmsg("argument of nth_value must be greater than zero")));
-
-    result = WinGetFuncArgInFrame(winobj, 0, nth - 1, WINDOW_SEEK_HEAD, const_offset, &isnull, NULL);
+    int startingPos = 0;
+    if (isFromLast) {
+        if (isIgnNulls) {
+            do {
+                result = WinGetFuncArgInFrame(winobj, 0, startingPos--, WINDOW_SEEK_TAIL, false, &isnull, &isout);
+            } while (isnull && !isout);
+            if (nth > 1) {
+                /* the startingPos should be startingPos+1, the nth index should be staringPos+1-(nth-1) */
+                result = WinGetFuncArgInFrame(winobj, 0, startingPos-nth+2, WINDOW_SEEK_TAIL, false, &isnull, &isout);
+            }
+        } else {
+            result = WinGetFuncArgInFrame(winobj, 0, 1-nth, WINDOW_SEEK_TAIL, const_offset, &isnull, NULL);
+        }
+    } else {
+        if (isIgnNulls) {
+            do {
+                result = WinGetFuncArgInFrame(winobj, 0, startingPos++, WINDOW_SEEK_HEAD, false, &isnull, &isout);
+            } while (isnull && !isout);
+            if (nth > 1) {
+                /* the startingPos should be startingPos-1,the nth index should be startingPos-1 + nth-1 */
+                result = WinGetFuncArgInFrame(winobj, 0, startingPos+nth-2, WINDOW_SEEK_HEAD, false, &isnull, &isout);
+            }
+        } else {
+            result = WinGetFuncArgInFrame(winobj, 0, nth - 1, WINDOW_SEEK_HEAD, const_offset, &isnull, NULL);
+        }
+    }
     if (isnull)
         PG_RETURN_NULL();
 

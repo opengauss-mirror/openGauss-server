@@ -646,6 +646,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <boolean> opt_percent only_or_ties
 
 %type <list>	OptSeqOptList SeqOptList
+%type <boolean> ignNulls fromLast
 %type <defelt>	SeqOptElem
 
 /* INSERT */
@@ -761,7 +762,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <boolean> xml_whitespace_option
 
 %type <node>	func_application func_with_separator func_expr_common_subexpr index_functional_expr_key func_application_special functime_app
-%type <node>	func_expr func_expr_windowless
+%type <node>	func_expr func_expr_windowless analytic_func_expr
 %type <node>	common_table_expr
 %type <keep>    keep_clause
 %type <with>	with_clause opt_with_clause
@@ -771,7 +772,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 %type <list>	within_group_clause pkg_body_subprogram
 %type <list>	window_clause window_definition_list opt_partition_clause
-%type <windef>	window_definition over_clause window_specification
+%type <windef>	window_definition over_clause window_specification opt_over_clause
 				opt_frame_clause frame_extent frame_bound
 %type <str>		opt_existing_window_name opt_unique_key
 %type <boolean>	opt_if_not_exists
@@ -972,7 +973,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
 	NAME_P NAMES NAN_P NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
-	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
+	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NTH_VALUE_P NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
@@ -992,7 +993,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
+	RESET RESIZE RESOURCE RESPECT_P RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
 	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
 	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
@@ -28899,7 +28900,7 @@ c_expr_noparen:		columnref								{ $$ = $1; }
  * (Note that many of the special SQL functions wouldn't actually make any
  * sense as functional index entries, but we ignore that consideration here.)
  */
-func_expr:	func_application within_group_clause filter_clause keep_clause over_clause
+func_expr:	func_application within_group_clause filter_clause keep_clause opt_over_clause
 				{
 					FuncCall *n = (FuncCall *) $1;
 
@@ -29057,6 +29058,96 @@ func_expr:	func_application within_group_clause filter_clause keep_clause over_c
 				{
 					$$ = MakeNoArgFunctionCall(SystemFuncName("current_schema"), @1);
 				}
+			| analytic_func_expr
+				{ $$ = $1; }
+		;
+opt_over_clause:
+			over_clause				{ $$ = $1; }
+			| /*EMPTY*/				{ $$ = NULL; }
+		;
+analytic_func_expr:
+ NTH_VALUE_P '(' func_arg_list ')' fromLast ignNulls over_clause
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("nth_value");
+					n->args = $3;
+					n->is_from_last = $5;
+					n->is_ignore_nulls = $6;
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = $7;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			|  NTH_VALUE_P '(' func_arg_list ')' fromLast over_clause
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("nth_value");
+					n->args = $3;
+					n->is_from_last = $5;
+					n->is_ignore_nulls = FALSE;
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = $6;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			|  NTH_VALUE_P '(' func_arg_list ')' ignNulls over_clause
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("nth_value");
+					n->args = $3;
+					n->is_from_last = FALSE;
+					n->is_ignore_nulls = $5;
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = $6;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			|  NTH_VALUE_P '(' func_arg_list ')' over_clause
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("nth_value");
+					n->args = $3;
+					n->is_from_last = FALSE;
+					n->is_ignore_nulls = FALSE;
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = $5;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			;
+fromLast:	 FROM FIRST_P
+			{
+				$$ = false;
+			}
+		| FROM LAST_P
+			{
+				$$ = true;
+			}
+		;
+ignNulls: 	IGNORE NULLS_P
+			{
+				$$ = true;
+			}
+		| RESPECT_P NULLS_P
+			{
+				$$ = false;
+			}
 		;
 
 func_application:	func_name '(' func_arg_list opt_sort_clause ')'
@@ -30125,8 +30216,6 @@ over_clause: OVER window_specification
 					n->location = @2;
 					$$ = n;
 				}
-			| /*EMPTY*/
-				{ $$ = NULL; }
 		;
 
 window_specification: '(' opt_existing_window_name opt_partition_clause
@@ -31821,6 +31910,7 @@ unreserved_keyword:
 			| RESET
 			| RESIZE
 			| RESOURCE
+			| RESPECT_P
 			| RESTART
 			| RESTRICT
 			| RESULT
@@ -32015,6 +32105,7 @@ col_name_keyword:
 			| NATIONAL
 			| NCHAR
 			| NONE
+                        | NTH_VALUE_P
 			| NULLIF
 			| NUMBER_P
 			| NUMERIC

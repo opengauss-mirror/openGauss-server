@@ -77,6 +77,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
     bool agg_star = (fn ? fn->agg_star : false);
     bool agg_distinct = (fn ? fn->agg_distinct : false);
     bool func_variadic = (fn ? fn->func_variadic : false);
+    bool is_from_last = (fn ? fn->is_from_last : false);
+    bool is_ignore_nulls = (fn ? fn->is_ignore_nulls : false);
     WindowDef* over = (fn ? fn->over : NULL);
     KeepClause *aggKeep = (fn ? fn->aggKeep : NULL);
     Oid rettype;
@@ -635,7 +637,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
         wfunc->winstar = agg_star;
         wfunc->winagg = (fdresult == FUNCDETAIL_AGGREGATE);
         wfunc->location = location;
-
+        wfunc->is_from_last = is_from_last;
+        wfunc->is_ignore_nulls = is_ignore_nulls;
         /*
          * agg_star is allowed for aggregate functions but distinct isn't
          */

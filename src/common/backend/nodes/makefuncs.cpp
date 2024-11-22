@@ -647,6 +647,8 @@ FuncCall* makeFuncCall(List* funcname, List* args, int location)
     funcCall->aggKeep = NULL;
     funcCall->over = NULL;
     funcCall->location = location;
+    funcCall->is_from_last = FALSE;
+    funcCall->is_ignore_nulls = FALSE;
 
     return funcCall;
 }

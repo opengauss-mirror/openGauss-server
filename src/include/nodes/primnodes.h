@@ -367,6 +367,8 @@ typedef struct WindowFunc {
 #ifdef USE_SPQ
     bool windistinct;	/* TRUE if it's agg(DISTINCT ...) */
 #endif
+    bool is_from_last;      /* used for window function nth_value */
+    bool is_ignore_nulls;   /* used for window function nth_value */
 } WindowFunc;
 
 /*

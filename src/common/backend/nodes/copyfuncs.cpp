@@ -2777,6 +2777,8 @@ static WindowFunc* _copyWindowFunc(const WindowFunc* from)
         COPY_SCALAR_FIELD(winkpfirst);
     }
     COPY_LOCATION_FIELD(location);
+    COPY_SCALAR_FIELD(is_from_last);
+    COPY_SCALAR_FIELD(is_ignore_nulls);
 
     return newnode;
 }
@@ -4168,6 +4170,8 @@ static FuncCall* _copyFuncCall(const FuncCall* from)
     COPY_NODE_FIELD(over);
     COPY_LOCATION_FIELD(location);
     COPY_SCALAR_FIELD(call_func);
+    COPY_SCALAR_FIELD(is_from_last);
+    COPY_SCALAR_FIELD(is_ignore_nulls);
 
     return newnode;
 }
