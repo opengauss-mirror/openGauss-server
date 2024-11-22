@@ -781,6 +781,8 @@ void knl_instance_init()
     g_instance.codegen_IRload_process_count = 0;
     g_instance.t_thrd = &t_thrd;
     g_instance.stat_cxt.track_memory_inited = false;
+    g_instance.stat_cxt.switchover_timeout = false;
+    g_instance.stat_cxt.print_stack_flag = false;
     g_instance.proc_base = NULL;
     g_instance.proc_array_idx = NULL;
     pg_atomic_init_u32(&g_instance.extensionNum, 0);

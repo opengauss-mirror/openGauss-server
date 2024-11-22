@@ -736,6 +736,7 @@ extern bool CheckStandbySignal(void);
 extern bool CheckCascadeStandbySignal(void);
 extern bool CheckNormalSignal(void);
 extern int CheckSwitchoverSignal(void);
+extern bool CheckSwitchoverTimeoutSignal(void);
 
 extern void WakeupRecovery(void);
 extern void WakeupDataRecovery(void);

@@ -165,6 +165,7 @@
 #define RECOVERY_COMMAND_DONE "recovery.done"
 #define FAILOVER_SIGNAL_FILE "failover"
 #define SWITCHOVER_SIGNAL_FILE "switchover"
+#define SWITCHOVER_TIMEOUT_SIGNAL_FILE "switchover_timeout"
 #define PRIMARY_SIGNAL_FILE "primary"
 #define STANDBY_SIGNAL_FILE "standby"
 #define CASCADE_STANDBY_SIGNAL_FILE "cascade_standby"
@@ -18082,6 +18083,24 @@ int CheckSwitchoverSignal(void)
     (void)unlink(SWITCHOVER_SIGNAL_FILE);
 
     return mode;
+}
+
+/*
+ * Check to see if a switchover timeout signal has arrived.
+ * Should be called by postmaster after receiving SIGUSR1.
+ */
+bool CheckSwitchoverTimeoutSignal(void)
+{
+    int fp = -1;
+    if ((fp = open(SWITCHOVER_TIMEOUT_SIGNAL_FILE, O_RDONLY, S_IRUSR)) >= 0) {
+        if (close(fp)) {
+            ereport(LOG, (errcode_for_file_access(), errmsg("cannot close switchover timeout file.\n")));
+        }
+        unlink(SWITCHOVER_TIMEOUT_SIGNAL_FILE);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 /*

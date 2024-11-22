@@ -313,6 +313,8 @@ typedef struct knl_g_stat_context {
 
     struct LRUCache* lru;
     List* fifo;
+    volatile sig_atomic_t switchover_timeout;
+    volatile sig_atomic_t print_stack_flag;
 #endif
 } knl_g_stat_context;
 
