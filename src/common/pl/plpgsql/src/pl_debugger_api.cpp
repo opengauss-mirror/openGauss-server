@@ -28,6 +28,7 @@
 #include "funcapi.h"
 #include "utils/acl.h"
 #include "utils/plpgsql.h"
+#include "utils/pl_debug.h"
 #include <sys/socket.h>
 
 /*
@@ -47,29 +48,18 @@
     dbe_pldebugger.step
 */
 
-typedef struct {
-    char* nodename;
-    int port;
-    Oid funcoid;
-} DebuggerServerInfo;
-
 /* send/rec msg for client */
-static void debug_client_rec_msg(DebugClientInfo* client);
-static void debug_client_send_msg(DebugClientInfo* client, char first_char, char* msg, int msg_len);
 
 static Datum get_info_local_data(const char* var_name, const int frameno, FunctionCallInfo fcinfo, bool show_all);
 static Datum get_tuple_lineno_and_query(DebugClientInfo* client);
 static void InterfaceCheck(const char* funcname, bool needAttach = true);
 static PlDebugEntry* add_debug_func(Oid key);
 static void* get_debug_entries(uint32* num);
-static DebugClientInfo* InitDebugClient(int comm_idx);
 static void* debug_client_split_breakpoints_msg(uint32* num);
 static void* debug_client_split_localvariables_msg(uint32 *num);
 static void* debug_client_split_backtrace_msg(uint32* num);
 static void* debug_client_split_infocode_msg(uint32* num);
 static List* collect_breakable_line_oid(Oid funcOid);
-static void init_pldebug_htcl();
-static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error = true);
 
 static Datum get_tuple_lineno_and_query(DebugClientInfo* client)
 {
@@ -132,7 +122,7 @@ static Datum get_tuple_lineno_and_query(DebugClientInfo* client)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-static void check_debugger_valid(int commidx)
+void check_debugger_valid(int commidx)
 {
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commidx];
     AutoMutexLock debuglock(&debug_comm->mutex);
@@ -153,6 +143,31 @@ static void check_debugger_valid(int commidx)
             ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_INVALID_OPERATION),
                 (errmsg("procedure is not running in expected way."))));
         }
+    } else {
+        debuglock.unLock();
+        ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_INVALID_OPERATION),
+            (errmsg("Corresponding procedure not turn on yet."))));
+    }
+    debuglock.unLock();
+}
+
+void attach_session(int commidx, uint64 sid)
+{
+    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commidx];
+    AutoMutexLock debuglock(&debug_comm->mutex);
+    debuglock.lock();
+    if (debug_comm->Used()) {
+        if (debug_comm->hasClient()) {
+            debuglock.unLock();
+            ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_TARGET_SERVER_ALREADY_ATTACHED),
+                (errmsg("procedure has already attached on other client."))));
+        }
+        if (debug_comm->hasClientErrorOccured || debug_comm->hasServerErrorOccured) {
+            debuglock.unLock();
+            ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_INVALID_OPERATION),
+                (errmsg("procedure is not running in expected way."))));
+        }
+        debug_comm->clientId =  sid;
     } else {
         debuglock.unLock();
         ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_INVALID_OPERATION),
@@ -1045,7 +1060,7 @@ static void InterfaceCheck(const char* funcname, bool needAttach)
     }
 }
 
-static void debug_client_rec_msg(DebugClientInfo* client)
+void debug_client_rec_msg(DebugClientInfo* client)
 {
     CHECK_DEBUG_COMM_VALID(client->comm_idx);
 
@@ -1129,7 +1144,7 @@ static void* get_debug_entries(uint32* num)
     return entry_array;
 }
 
-static DebugClientInfo* InitDebugClient(int comm_idx)
+DebugClientInfo* InitDebugClient(int comm_idx)
 {
     MemoryContext debug_context = AllocSetContextCreate(u_sess->cache_mem_cxt, "ClientDebugContext",
         ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
@@ -1364,7 +1379,7 @@ CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines)
     return ret;
 }
 
-static void debug_client_send_msg(DebugClientInfo* client, char first_char, char* msg, int msg_len)
+void debug_client_send_msg(DebugClientInfo* client, char first_char, char* msg, int msg_len)
 {
     MemoryContext old_context = MemoryContextSwitchTo(client->context);
     const int EXTRA_LEN = 4;
@@ -1396,7 +1411,7 @@ static void debug_client_send_msg(DebugClientInfo* client, char first_char, char
 }
 
 /* debug_proc_htbl function */
-static void init_pldebug_htcl()
+void init_pldebug_htcl()
 {
     if (u_sess->plsql_cxt.debug_proc_htbl)
         return;
@@ -1420,7 +1435,7 @@ static void init_pldebug_htcl()
         hash_create("Debug Func Table", debugSize, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
-static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error)
+bool CheckPlpgsqlFunc(Oid funcoid, bool report_error)
 {
     char* langname = get_func_langname(funcoid);
     if (strcmp(langname, "plpgsql") != 0) {
@@ -1556,3 +1571,18 @@ List* collect_breakable_line(PLpgSQL_function* func)
     collect_breakable_line_walker(block->body, &lines);
     return lines;
 }
+
+bool SetDebugCommGmsUsed(int commIdx, bool flag)
+{
+    bool rc = false;
+    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
+    AutoMutexLock debuglock(&debug_comm->mutex);
+    debuglock.lock();
+    if (debug_comm->Used()) {
+            debug_comm->isGmsDebug = flag;
+            rc = true;
+    }
+    debuglock.unLock();
+    return rc;
+}
+

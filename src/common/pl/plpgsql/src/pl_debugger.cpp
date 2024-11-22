@@ -28,6 +28,7 @@
 #include "optimizer/pgxcship.h"
 #include "nodes/readfuncs.h"
 #include "utils/plpgsql.h"
+#include "utils/pl_debug.h"
 #include "utils/memutils.h" 
 #include "utils/syscache.h"
 #include "utils/builtins.h"
@@ -52,15 +53,15 @@ static bool ActiveBPInFunction(DebugInfo* debug, Oid funcOid);
 static bool IsBreakPointExisted(DebugInfo* debug, Oid funcOid, int lineno, bool ignoreDisabled);
 static char* ResizeDebugCommBufferIfNecessary(char* buffer, int* oldSize, int needSize);
 static void set_debugger_procedure_state(int commIdx, bool state);
+static bool is_need_wait(DebugInfo* debug, PLpgSQL_execstate* estate);
 
 /* send/rec msg for server */
-static void debug_server_rec_msg(DebugInfo* debug, char* firstChar);
-static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len);
 /* server manage client msg */
 static void debug_server_attach(DebugInfo* debug, PLpgSQL_execstate* estate);
 static void debug_server_local_variables(DebugInfo* debug);
 static void debug_server_abort(DebugInfo* debug);
 static void debug_server_add_breakpoint(DebugInfo* debug);
+static void gms_debug_server_add_breakpoint(DebugInfo* debug);
 static void debug_server_delete_breakpoint(DebugInfo* debug);
 static void debug_server_enable_breakpoint(DebugInfo* debug);
 static void debug_server_disable_breakpoint(DebugInfo* debug);
@@ -69,7 +70,7 @@ static void debug_server_backtrace();
 static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estate);
 static void debug_server_info_code(DebugInfo* debug);
 static char* debug_server_add_breakpoint_invalid(DebugInfo* debug, bool* valid, int lineno, int* newIndex, char* query, char* maskquery);
-
+static void gms_debug_server_runtime_info(DebugInfo* debug, PLpgSQL_execstate* estate, int reason);
 /* close each debug function's resource if necessary */
 void PlDebugerCleanUp(int code, Datum arg)
 {
@@ -147,6 +148,7 @@ void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
     bool need_continue_into = u_sess->plsql_cxt.cur_debug_server != NULL &&
         ActiveBPInFunction(u_sess->plsql_cxt.cur_debug_server, func->fn_oid);
     bool is_stepinto = u_sess->plsql_cxt.has_step_into;
+    int gms_debug_idx = u_sess->plsql_cxt.gms_debug_idx;
     PlDebugEntry* entry = has_debug_func(func->fn_oid, &found);
     if ((found && u_sess->plsql_cxt.cur_debug_server == NULL) || is_stepinto || need_continue_into) {
 #ifndef ENABLE_MULTIPLE_NODES
@@ -183,8 +185,14 @@ void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
             /* set inner debug's state */
             if (is_stepinto) {
                 func->debug->cur_opt = DEBUG_STEP_INTO_HEADER_AFTER;
+                if (gms_debug_idx >= 0) {
+                    func->debug->cur_opt = GMS_DEBUG_STEP_INTO_HEADER_AFTER;
+                }
             } else if (need_continue_into) {
                 func->debug->cur_opt = DEBUG_CONTINUE_HEADER_AFTER;
+                if (gms_debug_idx >= 0) {
+                    func->debug->cur_opt = GMS_DEBUG_CONTINUE_HEADER_AFTER;
+                }
             }
         } else {
             if (entry != NULL) {
@@ -285,6 +293,18 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             *firstChar = DEBUG_NOTHING_HEADER;
             need_wait = !send_cur_info(debug, estate, true);
             break;
+        case GMS_DEBUG_NEXT_HEADER:
+            /* wait after execute this sql */
+            debug->stop_next_stmt = true;
+            need_wait = false;
+            *firstChar = GMS_DEBUG_NEXT_HEADER_AFTER;
+            break;
+        case GMS_DEBUG_NEXT_HEADER_AFTER:
+            *firstChar = DEBUG_NOTHING_HEADER;
+             debug->stop_next_stmt = true;
+             need_wait = !is_need_wait(debug, estate);
+             gms_debug_server_runtime_info(debug, estate, DEBUG_REASON_LINE);
+            break;
         case DEBUG_STEP_INTO_HEADER:
             /* calling inner func if has one */
             debug->stop_next_stmt = true;
@@ -298,10 +318,30 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             u_sess->plsql_cxt.has_step_into = false;
             need_wait = !send_cur_info(debug, estate, true);
             break;
+        case GMS_DEBUG_STEP_INTO_HEADER:
+            /* calling inner func if has one */
+            debug->stop_next_stmt = true;
+            u_sess->plsql_cxt.has_step_into = true;
+            need_wait = false;
+            *firstChar = GMS_DEBUG_STEP_INTO_HEADER_AFTER;
+            break;
+        case GMS_DEBUG_STEP_INTO_HEADER_AFTER:
+            /* if don't have inner func, same as next; if is inner func, return first line like attach */
+            *firstChar = DEBUG_NOTHING_HEADER;
+            u_sess->plsql_cxt.has_step_into = false;
+            debug->stop_next_stmt = true;
+            need_wait = !is_need_wait(debug, estate);
+            gms_debug_server_runtime_info(debug, estate, DEBUG_REASON_ENTER);
+            break;
         case DEBUG_FINISH_HEADER:
             debug->stop_next_stmt = false;
             need_wait = false;
             *firstChar = DEBUG_FINISH_HEADER_AFTER;
+            break;
+        case GMS_DEBUG_FINISH_HEADER:
+            debug->stop_next_stmt = false;
+            need_wait = false;
+            *firstChar = GMS_DEBUG_FINISH_HEADER_AFTER;
             break;
         case DEBUG_ABORT_HEADER:
             /* set abort flag incase has outter function */
@@ -320,10 +360,22 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             need_wait = false;
             *firstChar = DEBUG_CONTINUE_HEADER_AFTER;
             break;
+        case GMS_DEBUG_CONTINUE_HEADER:
+            debug->stop_next_stmt = false;
+            need_wait = false;
+            *firstChar = GMS_DEBUG_CONTINUE_HEADER_AFTER;
+            break;
         case DEBUG_FINISH_HEADER_AFTER:
         case DEBUG_CONTINUE_HEADER_AFTER:
             *firstChar = DEBUG_NOTHING_HEADER;
             need_wait = !send_cur_info(debug, estate, false);
+            break;
+        case GMS_DEBUG_FINISH_HEADER_AFTER:
+        case GMS_DEBUG_CONTINUE_HEADER_AFTER:
+            *firstChar = DEBUG_NOTHING_HEADER;
+            debug->stop_next_stmt = false;
+            need_wait = !is_need_wait(debug, estate);
+            gms_debug_server_runtime_info(debug, estate, DEBUG_REASON_ENTER);
             break;
         case DEBUG_ADDBREAKPOINT_HEADER:
             debug_server_add_breakpoint(debug);
@@ -348,6 +400,12 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             break;
         case DEBUG_INFOCODE_HEADER:
             debug_server_info_code(debug);
+            break;
+        case GMS_DEBUG_RUNTIMEINFO_HEADER:
+            gms_debug_server_runtime_info(debug, estate, DEBUG_REASON_NONE);
+            break;
+        case GMS_DEBUG_ADDBREAKPOINT_HEADER:
+            gms_debug_server_add_breakpoint(debug);
             break;
         default:
             ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
@@ -375,7 +433,7 @@ void server_pass_upper_debug_opt(DebugInfo* debug)
                     erraction("Contact Huawei Engineer.")));
         }
         outer_debug->cur_opt = debug->cur_opt;
-        if (debug->cur_opt == DEBUG_FINISH_HEADER_AFTER) {
+        if (debug->cur_opt == DEBUG_FINISH_HEADER_AFTER || debug->cur_opt == GMS_DEBUG_FINISH_HEADER_AFTER) { 
             outer_debug->stop_next_stmt = true;
         }
     }
@@ -409,6 +467,18 @@ void server_send_end_msg(DebugInfo* debug)
         debug->cur_opt = DEBUG_NOTHING_HEADER;
         pfree_ext(funcname);
         pfree_ext(pkgfuncname);
+    }
+}
+
+void server_send_gms_end_msg(DebugInfo* debug)
+{
+    if (debug == u_sess->plsql_cxt.cur_debug_server && IS_AFTER_OPT(debug->cur_opt)) {
+        MemoryContext old_cxt = MemoryContextSwitchTo(debug->debug_cxt);
+         /* set procedure end */
+        set_debugger_procedure_state(debug->comm->comm_idx, false);
+        gms_debug_server_runtime_info(debug, NULL, DEBUG_REASON_NONE);
+        MemoryContextSwitchTo(old_cxt);
+        debug->cur_opt = DEBUG_NOTHING_HEADER;
     }
 }
 
@@ -932,6 +1002,19 @@ static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* d
     return isend;
 }
 
+static bool is_need_wait(DebugInfo* debug, PLpgSQL_execstate* estate)
+{
+    bool isend = false;
+    char* query = get_stmt_query(estate->err_stmt);
+    if (!query) {
+        if (debug->debugStackIdx == 0) {
+            debug->stop_next_stmt = false;
+            isend = true;
+        }
+    }
+    return isend;
+}
+
 template<typename T>
 char* GetSqlString(PLpgSQL_stmt* stmt)
 {
@@ -1009,6 +1092,18 @@ static bool IsBreakPointExisted(DebugInfo* debug, Oid funcOid, int lineno, bool 
         }
     }
     return false;
+}
+
+static PLDebug_breakPoint* GetBreakPoint(DebugInfo* debug, Oid funcOid, int lineno, bool ignoreDisabled)
+{
+    ListCell* lc = NULL;
+    foreach(lc, debug->bp_list) {
+        PLDebug_breakPoint* bp = (PLDebug_breakPoint*)lfirst(lc);
+        if (bp->funcoid == funcOid && bp->lineno == lineno && !bp->deleted && (bp->active || !ignoreDisabled)) {
+            return bp;
+        }
+    }
+    return NULL;
 }
 
 static void debug_server_add_breakpoint(DebugInfo* debug)
@@ -1424,6 +1519,25 @@ bool delete_debug_func(Oid key)
     return found;
 }
 
+void add_gms_debug_func(Oid funcOid, int commIdx)
+{
+    if (unlikely(u_sess->plsql_cxt.debug_proc_htbl == NULL)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Get null pointer for variable name"),
+                errcause("Debugger session is not properly initialized."),
+                erraction("Please initialize debug session, and try again.")));
+    }
+    bool found = false;
+    PlDebugEntry* entry = (PlDebugEntry*)hash_search(u_sess->plsql_cxt.debug_proc_htbl,
+                                                     (void*)(&funcOid), HASH_ENTER, &found);
+    entry->key = funcOid;
+    if (!found) {
+        entry->commIdx = commIdx;
+        entry->func = NULL;
+    }
+}
+
 void ReleaseDebugCommIdx(int idx)
 {
     if (idx < 0 || idx >= PG_MAX_DEBUG_CONN)
@@ -1482,6 +1596,33 @@ int GetValidDebugCommIdx()
     }
     LWLockRelease(PldebugLock);
     return idx;
+}
+
+bool AcquireDebugCommIdx(int commIdx)
+{
+    bool rc = false;
+    (void)LWLockAcquire(PldebugLock, LW_EXCLUSIVE);
+    if (!g_instance.pldebug_cxt.debug_comm[commIdx].Used()) {
+            PlDebuggerComm* comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
+            comm->hasUsed = true;
+            comm->hasClientFlushed = false;
+            comm->hasServerFlushed = false;
+            comm->IsServerWaited = false;
+            comm->IsClientWaited = false;
+            comm->hasClientFlushed = false;
+            comm->hasServerFlushed = false;
+            comm->hasServerErrorOccured = false;
+            comm->hasClientErrorOccured = false;
+            comm->isProcdeureRunning = false;
+            comm->serverId = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
+            comm->clientId = 0;
+            comm->bufLen = 0;
+            comm->bufSize = 0;
+            comm->buffer = NULL; /* init buffer when need use it */
+            rc = true;
+    }
+    LWLockRelease(PldebugLock);
+    return rc;
 }
 
 bool WakeUpReceiver(int commIdx, bool isClient)
@@ -1719,7 +1860,7 @@ void RecvUnixMsg(const char* buf, int bufLen, char* destBuf, int destLen)
 }
 
 /* buffer contains : buffer size + buffer msg */
-static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len)
+void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len)
 {
     MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
 
@@ -1750,7 +1891,7 @@ static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len
     (void)MemoryContextSwitchTo(old_context);
 }
 
-static void debug_server_rec_msg(DebugInfo* debug, char* firstChar)
+void debug_server_rec_msg(DebugInfo* debug, char* firstChar)
 {
     MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
     char* copyBuf = NULL;
@@ -1892,4 +2033,120 @@ static void debug_server_info_code(DebugInfo* debug)
     }
 
     pfree(buf);
+}
+
+static void gms_debug_server_runtime_info(DebugInfo* debug, PLpgSQL_execstate* estate, int reason)
+{
+    Oid funcoid = debug->func->fn_oid;
+    char* funcname = NULL;
+    if (OidIsValid(funcoid)) {
+        funcname = get_func_name(funcoid);
+    } else {
+        funcname = pstrdup("anonymous block");
+    }
+    Oid pkgoid = debug->func->pkg_oid;
+    Assert(funcname != NULL);
+    int lineno = -1;
+    if (estate != NULL) {
+        lineno = estate->err_stmt->lineno;
+    } else {
+        lineno = debug->cur_stmt->lineno;
+    }
+    int breakpoint = -1;
+    Oid namespaceoid = get_func_namespace(funcoid);
+    int owneroid = get_func_owner(funcoid);
+    int stackdepth = debug->debugStackIdx;
+    char* pkgname = NULL;
+    if (pkgoid != InvalidOid) {
+        pkgname = GetPackageName(pkgoid);
+    }
+    char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
+    PLDebug_breakPoint* bp = GetBreakPoint(debug, funcoid, lineno, true);
+    if(bp) {
+        breakpoint = bp->bpIndex;
+        reason = DEBUG_REASON_BREAKPOINT;
+    }
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%u:%u:%u:%d:%d:%d:%d:%s", funcoid, namespaceoid, owneroid, lineno, breakpoint, stackdepth, reason, pkgfuncname);
+    debug_server_send_msg(debug, str.data, str.len);
+    pfree(str.data);
+    pfree(pkgfuncname);
+    pfree(funcname);
+}
+
+static void gms_debug_server_add_breakpoint(DebugInfo* debug)
+{
+    /* Validity of the parameter are checked on client side */
+    MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
+    
+    /* Received buffer will be in the form of <func_oid:lineno> */
+    char* psave = NULL;
+    char* fir = strtok_r(debug->comm->rec_buffer, ":", &psave);
+    const int int64Size = 10;
+    char* new_fir = TrimStr(fir);
+    if (new_fir == NULL) {
+        ReportInvalidMsg(debug->comm->rec_buffer);
+        return;
+    }
+    uint64 clientSessionId = (uint64)pg_strtouint64(new_fir, NULL, int64Size);
+    fir = strtok_r(NULL, ":", &psave);
+    new_fir = TrimStr(fir);
+    if (new_fir == NULL) {
+        ReportInvalidMsg(debug->comm->rec_buffer);
+        return;
+    }
+    Oid funcOid = (Oid)pg_strtouint64(new_fir, NULL, int64Size);
+    fir = strtok_r(NULL, ":", &psave);
+    new_fir = TrimStr(fir);
+    if (new_fir == NULL) {
+        ReportInvalidMsg(debug->comm->rec_buffer);
+        return;
+    }
+    int lineno = (int)pg_strtouint64(new_fir, NULL, int64Size);
+    char* query = pstrdup(psave);
+    char* maskquery = (query == NULL) ? NULL : maskPassword(query);
+    if (maskquery != NULL && maskquery != query) {
+        pfree_ext(query);
+        query = maskquery;
+    }
+    fir = strtok_r(NULL, ":", &psave);
+    new_fir = TrimStr(fir);
+    if (new_fir == NULL) {
+        ReportInvalidMsg(debug->comm->rec_buffer);
+        return;
+    }
+    /* set comm's session id */
+    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[debug->comm->comm_idx];
+    AutoMutexLock debuglock(&debug_comm->mutex);
+    debuglock.lock();
+    debug_comm->clientId = clientSessionId;
+    debuglock.unLock();
+
+    int newIndex = -1;
+    bool valid = true;
+    if (funcOid == InvalidOid) {
+        query = debug_server_add_breakpoint_invalid(debug, &valid, lineno, &newIndex, query, maskquery);
+    }
+
+    if (valid && !IsBreakPointExisted(debug, funcOid, lineno, false)) {
+        PLDebug_breakPoint* bp = (PLDebug_breakPoint*)makeNode(PLDebug_breakPoint);
+        bp->bpIndex = list_length(debug->bp_list);
+        bp->funcoid = funcOid;
+        bp->lineno = lineno;
+        bp->active = true;
+        bp->deleted = false;
+        bp->query = query;
+        debug->bp_list = lappend(debug->bp_list, bp);
+        newIndex = bp->bpIndex;
+    }
+
+    (void)MemoryContextSwitchTo(old_context);
+
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%d", newIndex);
+    debug_server_send_msg(debug, str.data, str.len);
+    pfree(str.data);
+    str.data = NULL;
 }

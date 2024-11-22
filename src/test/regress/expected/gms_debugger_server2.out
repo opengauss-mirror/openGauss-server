@@ -1,0 +1,46 @@
+-- setups
+create extension if not exists gms_debug;
+drop schema if exists gms_debugger_test2 cascade;
+NOTICE:  schema "gms_debugger_test2" does not exist, skipping
+create schema gms_debugger_test2;
+set search_path = gms_debugger_test2;
+-- commit/rollback in procedure
+create table tb1(a int);
+create or replace procedure test_debug2 as
+begin
+    insert into tb1 values (1000);
+    commit;
+    insert into tb1 values (2000);
+    rollback;
+end;
+/
+-- start debug
+select * from gms_debug.initialize();
+ initialize  
+-------------
+ datanode1-0
+(1 row)
+
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- start debug - 1st run
+select * from test_debug2();
+ test_debug2 
+-------------
+ 
+(1 row)
+
+-- start debug - 2nd run - to be aborted
+select * from test_debug2();
+ERROR:  receive abort message
+CONTEXT:  PL/pgSQL function test_debug2() line 2 at SQL statement
+drop schema gms_debugger_test2 cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table tb1
+drop cascades to function test_debug2()
+drop cascades to function gms_continue()
+drop cascades to function gms_next()

@@ -1651,6 +1651,11 @@ typedef struct knl_u_plpgsql_context {
 
     bool has_step_into;
 
+    /*This is a temporary comm_id, because when gms_debug is enabled, 
+    it does not immediately bind to a specific function, 
+    so a temporary id is needed as a transition.*/
+    int gms_debug_idx;
+
     /* dbe.output buffer limit */
     uint32 dbe_output_buffer_limit;
     Oid running_pkg_oid;
