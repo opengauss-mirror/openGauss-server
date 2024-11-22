@@ -88,6 +88,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
+#include "knl/knl_thread.h"
 
 const int ONE_MILLISECOND = 1;
 const int TEN_MICROSECOND = 10;
@@ -2589,6 +2590,10 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
      */
     } else if (RecoveryInProgress()) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
+        /* when in failover, should return to worker thread exit */
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+            return InvalidBuffer;
+        }
 
         /* Update cached blocks */
         if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
@@ -2785,7 +2790,7 @@ found_branch:
                             return InvalidBuffer;
                         }
                         /* when in failover, should return to worker thread exit */
-                        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
+                        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
@@ -3333,6 +3338,11 @@ retry_new_buffer:
             return buf;
         }
 
+        /* when in failover, should return to worker thread exit */
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+            ClearReadHint(buf->buf_id, true);
+            break;
+        }
         /*
          * Somebody could have pinned or re-dirtied the buffer while we were
          * doing the I/O and making the new hashtable entry.  If so, we can't
@@ -3350,11 +3360,6 @@ retry_new_buffer:
                 * need to improve.
                 */
                 if (DmsReleaseOwner(old_tag, buf->buf_id)) {
-                    ClearReadHint(buf->buf_id, true);
-                    break;
-                }
-                /* when in failover,  woker thread should return InvalidBuffer and exit */
-                if (SS_IN_FAILOVER && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
                     ClearReadHint(buf->buf_id, true);
                     break;
                 }
@@ -6355,7 +6360,7 @@ retry:
         }
         bool with_io_in_progress = true;
         /* when in failover, should return to worker thread exit */
-        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
             return;
         }
         if (IsSegmentBufferID(buf->buf_id)) {

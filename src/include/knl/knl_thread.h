@@ -82,6 +82,9 @@
 #define MAX_PATH_LEN 1024
 extern const int g_reserve_param_num;
 #define PARTKEY_VALUE_MAXNUM 64
+#define SS_AM_BACKENDS_WORKERS (t_thrd.role == WORKER || \
+                                t_thrd.role == THREADPOOL_WORKER || \
+                                t_thrd.role == TRACK_STMT_CLEANER)
 
 typedef struct ResourceOwnerData* ResourceOwner;
 typedef struct logicalLog logicalLog;

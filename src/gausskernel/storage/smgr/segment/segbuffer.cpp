@@ -34,6 +34,8 @@
 #include "pgstat.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "replication/ss_disaster_cluster.h"
+#include "knl/knl_thread.h"
+
 /* 
  * Segment buffer, used for segment meta data, e.g., segment head, space map head. We separate segment
  * meta data buffer and normal data buffer (in bufmgr.cpp) to avoid potential dead locks.
@@ -619,7 +621,7 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                             return InvalidBuffer;
                         }
                         /* when in failover, should return to worker thread exit */
-                        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
+                        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
