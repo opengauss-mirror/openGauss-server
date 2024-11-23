@@ -180,6 +180,7 @@ static void XLogWalRcvDataPageReplication(char *buf, Size len);
 static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len);
 static void XLogWalRcvSendHSFeedback(void);
 static void XLogWalRcvSendSwitchRequest(void);
+static void XLogWalRcvSendSwitchTimeoutRequest(void);
 static void WalDataRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
 static void ProcessSwitchResponse(int code);
 static void ProcessWalSndrMessage(XLogRecPtr *walEnd, TimestampTz sendTime);
@@ -474,7 +475,13 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         XLogWalRcvSendSwitchRequest();
     }
 
+    if (g_instance.stat_cxt.switchover_timeout) {
+        g_instance.stat_cxt.switchover_timeout = false;
+        XLogWalRcvSendSwitchTimeoutRequest();
+        SendPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT);
+    }
     check_and_send_slot_clean(clean_slot_sent_timestamp);
+
     /* Wait a while for data to arrive */
     if ((WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(NAPTIME_PER_CYCLE, &type, &buf, &len)) {
         *last_recv_timestamp = GetCurrentTimestamp();
@@ -2093,6 +2100,16 @@ static void XLogWalRcvSendSwitchRequest(void)
     SendPostmasterSignal(PMSIGNAL_UPDATE_WAITING);
     ereport(LOG, (errmsg("send %s switchover request to primary",
         DemoteModeDesc(t_thrd.walreceiver_cxt.request_message->demoteMode))));
+}
+
+/*
+ * Send switchover timeout request message to primary.
+ */
+static void XLogWalRcvSendSwitchTimeoutRequest(void)
+{
+    char buf = 'b';
+    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(&buf, 1);
+    ereport(LOG, (errmsg("send switchover timeout request to primary")));
 }
 
 /*

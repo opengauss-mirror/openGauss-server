@@ -88,7 +88,12 @@ NON_EXEC_STATIC void stack_perf_main()
     u_sess->proc_cxt.MyProcPort->SessionStartTime = GetCurrentTimestamp();
     pgstat_report_appname("stack perf");
     pgstat_report_activity(STATE_RUNNING, NULL);
-    get_stack_and_write_result();
+    if (g_instance.stat_cxt.print_stack_flag) {
+        g_instance.stat_cxt.print_stack_flag = false;
+        print_all_stack();
+    } else {
+        get_stack_and_write_result();
+    }
     pgstat_report_activity(STATE_IDLE, NULL);
     proc_exit(0);
 }
