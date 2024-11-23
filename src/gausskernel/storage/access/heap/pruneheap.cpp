@@ -389,6 +389,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
                 !HeapTupleHeaderIsHotUpdated(htup)) {
 
                 if (HeapKeepInvisibleTuple(&tup, RelationGetDescr(relation))) {
+                    gstrace_exit(GS_TRC_ID_heap_prune_chain);
                     return ndeleted;
                 }
 
