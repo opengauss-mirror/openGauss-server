@@ -153,6 +153,7 @@ void CBMWriterMain(void)
         t_thrd.utils_cxt.CurrentResourceOwner = cbmwriter_resourceOwner;
 
         FreeAllAllocatedDescs();
+        AtEOXact_HashTables(false);
 
         /*
          * Now return to normal top-level context and clear ErrorContext for
