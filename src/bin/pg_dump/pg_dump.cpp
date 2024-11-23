@@ -22764,7 +22764,7 @@ static void dumpSynonym(Archive* fout)
             rolname,          /* Owner */
             false,            /* with oids */
             "SYNONYM",        /* Desc */
-            SECTION_PRE_DATA, /* Section */
+            SECTION_POST_DATA,/* Section */
             q->data,          /* Create */
             delq->data,       /* Del */
             NULL,             /* Copy */
