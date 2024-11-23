@@ -624,8 +624,9 @@ char* slurpFile(const char* dir, const char* path, size_t* filesize)
     /* Zero-terminate the buffer. */
     buffer[len] = '\0';
 
-    if (filesize != NULL)
+    if (filesize != NULL) {
         *filesize = len;
+    }
     return buffer;
 }
 
@@ -886,6 +887,13 @@ int main(int argc, char **argv)
         write_stderr(_("%s: no file specified\n"), progname);
         do_advice();
         exit(1);
+    } else if (strcmp(outputFile, "-") != 0) {
+        FILE *decodeFile = NULL;
+        if ((decodeFile = fopen(outputFile, "a+")) == NULL) {
+            write_stderr(_("%s: fopen %s failed\n"), progname, outputFile);
+            exit(1);
+        }
+        (void)fclose(decodeFile);
     }
 
     if (decodePlugin == NULL) {
