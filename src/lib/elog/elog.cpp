@@ -349,7 +349,7 @@ static void remove_oldest_log(const char *prefix_name, const char *log_path, int
             rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", log_path, de->d_name);
             securec_check_ss_c(rc, "\0", "\0");
             if (stat(pathname, &fst) < 0) {
-                printf(_("%s: could not stat file %s\n"), prefix_name, pathname, gs_strerror(errno));
+                printf(_("%s: could not stat file %s! %s\n"), prefix_name, pathname, gs_strerror(errno));
                 continue;
             }
 
