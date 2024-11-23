@@ -21,6 +21,8 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_proc.h"
+#include "catalog/index.h"
+#include "catalog/pg_amop.h"
 #include "commands/trigger.h"
 #include "commands/matview.h"
 #include "commands/sequence.h"
@@ -72,6 +74,14 @@ typedef struct rewrite_event {
     CmdType event; /* type of rule being fired */
 } rewrite_event;
 
+struct SetNewRteIfExistContext {
+    Query* parsetree;
+    Oid baseRelid;
+    int resultRelation;
+    RangeTblEntry** newRte;
+    int* newRtIndex;
+};
+
 static bool acquireLocksOnSubLinks(Node* node, void* context);
 static Query* rewriteRuleAction(
     Query* parsetree, Query* rule_action, Node* rule_qual, int rt_index, CmdType event, bool* returning_flag);
@@ -91,6 +101,11 @@ static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* pa
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
 static Bitmapset* adjust_view_column_set(Bitmapset* cols, List* targetlist);
 static bool findAttrByName(const char* attributeName, List* tableElts, int maxlen);
+static const char* CommonUpdateCheck(Query* viewquery);
+static bool SetNewRteIfExist(SetNewRteIfExistContext* context, bool deleteExistingTarget);
+static int GetNewResultRelation(Node* node, List* rtable);
+extern int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation);
+extern List* RewriteQuery(Query* parsetree, List* rewrite_events);
 
 #ifdef PGXC
 typedef struct pull_qual_vars_context {
@@ -2853,7 +2868,7 @@ static const char* view_col_is_auto_updatable(RangeTblRef* rtr, TargetEntry* tle
  * represents an auto-updatable view. Returns NULL (if the view can be updated)
  * or a message string giving the reason that it cannot be.
  *
- * If check_cols is true, the view is required to have at least one updatable
+ * If checkCols is true, the view is required to have at least one updatable
  * column (necessary for INSERT/UPDATE). Otherwise the view's columns are not
  * checked for updatability. See also view_cols_are_auto_updatable.
  *
@@ -2861,11 +2876,102 @@ static const char* view_col_is_auto_updatable(RangeTblRef* rtr, TargetEntry* tle
  * We do not check whether any base relations referred to by the view are
  * updatable.
  */
-const char* view_query_is_auto_updatable(Query *viewquery, bool check_cols)
-{
-    RangeTblRef* rtr = NULL;
-    RangeTblEntry* base_rte = NULL;
 
+struct CheckQueryAutoUpdatableContext {
+    TargetEntry* tle;
+    List* rtable;
+    bool checkCols;
+    bool found;
+};
+
+static bool check_view_query_auto_updatable_walker(Node* node, CheckQueryAutoUpdatableContext* context)
+{
+    TargetEntry* tle = context->tle;
+    List* rtable = context->rtable;
+    bool checkCols = context->checkCols;
+
+    if (node == NULL || context->found) {
+        return false;
+    }
+    if (IsA(node, RangeTblRef)) {
+        RangeTblRef* rtr = (RangeTblRef*)node;
+        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, rtable);
+        if (base_rte->rtekind != RTE_SUBQUERY &&
+            (base_rte->rtekind != RTE_RELATION || (base_rte->relkind != RELKIND_RELATION &&
+             base_rte->relkind != RELKIND_FOREIGN_TABLE && base_rte->relkind != RELKIND_VIEW))) {
+            return true;
+        }
+        if (checkCols) {
+            if (view_col_is_auto_updatable(rtr, tle) == NULL) {
+                context->found = true;
+                return false;
+            }
+            context->found = false;
+        }
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_view_query_auto_updatable_walker, (void*)context);
+}
+
+struct CheckColsAutoUpdatableContext {
+    Bitmapset* required_cols;
+    Bitmapset** updatable_cols;
+    char** nonUpdatableCol;
+    List* targetList;
+    const char* colUpdateDetail;
+};
+
+static bool check_view_cols_auto_updatable_walker(Node* node, CheckColsAutoUpdatableContext* context)
+{
+    Bitmapset* required_cols = context->required_cols;
+    Bitmapset** updatable_cols = context->updatable_cols;
+    char** nonUpdatableCol = context->nonUpdatableCol;
+
+    if (node == NULL) {
+        return false;
+    }
+    if (!IsA(node, RangeTblRef)) {
+        return expression_tree_walker(node, (bool (*)())check_view_cols_auto_updatable_walker,
+                                      (void*)context);
+    }
+    RangeTblRef* rtr = (RangeTblRef*)node;
+    AttrNumber col;
+    ListCell* cell = NULL;
+
+    /* Initialize the optional return values */
+    if (updatable_cols != NULL)
+        *updatable_cols = NULL;
+    if (nonUpdatableCol != NULL)
+        *nonUpdatableCol = NULL;
+
+    /* Test each view column for updatability */
+    col = -FirstLowInvalidHeapAttributeNumber;
+    foreach (cell, context->targetList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(cell);
+        const char* colUpdateDetail;
+
+        col++;
+        colUpdateDetail = view_col_is_auto_updatable(rtr, tle);
+        if (colUpdateDetail == NULL) {
+            /* The column is updatable */
+            if (updatable_cols != NULL)
+                *updatable_cols = bms_add_member(*updatable_cols, col);
+        } else if (bms_is_member(col, required_cols)) {
+            /* The required column is not updatable */
+            if ((!IsA(tle->expr, Var)) || rtr->rtindex == ((Var*)(tle->expr))->varno) {
+                if (nonUpdatableCol != NULL)
+                    *nonUpdatableCol = tle->resname;
+                context->colUpdateDetail = colUpdateDetail;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static const char* CommonUpdateCheck(Query* viewquery)
+{
     /*----------
      * Check if the view is simply updatable.  According to SQL-92 this means:
      *	- No DISTINCT clause.
@@ -2898,23 +3004,29 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool check_cols)
      * If the base relation is a view, we'll recursively deal with it later.
      *----------
      */
-    if (viewquery->distinctClause != NIL)
+    if (viewquery->distinctClause != NIL) {
         return gettext_noop("Views containing DISTINCT are not automatically updatable.");
+    }
 
-    if (viewquery->groupClause != NIL)
+    if (viewquery->groupClause != NIL) {
         return gettext_noop("Views containing GROUP BY are not automatically updatable.");
+    }
 
-    if (viewquery->havingQual != NULL)
+    if (viewquery->havingQual != NULL) {
         return gettext_noop("Views containing HAVING are not automatically updatable.");
+    }
 
-    if (viewquery->setOperations != NULL)
+    if (viewquery->setOperations != NULL) {
         return gettext_noop("Views containing UNION, INTERSECT or EXCEPT are not automatically updatable.");
+    }
 
-    if (viewquery->cteList != NIL)
+    if (viewquery->cteList != NIL) {
         return gettext_noop("Views containing WITH are not automatically updatable.");
+    }
 
-    if (viewquery->limitOffset != NULL || viewquery->limitCount != NULL)
+    if (viewquery->limitOffset != NULL || viewquery->limitCount != NULL) {
         return gettext_noop("Views containing LIMIT or OFFSET are not automatically updatable.");
+    }
 
     /*
      * We must not allow window functions or set returning functions in the
@@ -2925,53 +3037,94 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool check_cols)
      * These restrictions ensure that each row of the view corresponds to a
      * unique row in the underlying base relation.
      */
-    if (viewquery->hasAggs)
+    if (viewquery->hasAggs) {
         return gettext_noop("Views that return aggregate functions are not automatically updatable.");
+    }
 
-    if (viewquery->hasWindowFuncs)
+    if (viewquery->hasWindowFuncs) {
         return gettext_noop("Views that return window functions are not automatically updatable.");
+    }
 
-    if (expression_returns_set((Node *) viewquery->targetList))
+    if (expression_returns_set((Node *) viewquery->targetList)) {
         return gettext_noop("Views that return set-returning functions are not automatically updatable.");
+    }
 
-    /*
-     * The view query should select from a single base relation, which must be
-     * a table or another view.
-     */
-    if (list_length(viewquery->jointree->fromlist) != 1)
-        return gettext_noop("Views that do not select from a single table or view are not automatically updatable.");
+    return NULL;
+}
 
-    rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
-    if (!IsA(rtr, RangeTblRef))
-        return gettext_noop("Views that do not select from a single table or view are not automatically updatable.");
-
-    base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
-    if (base_rte->rtekind != RTE_RELATION || (base_rte->relkind != RELKIND_RELATION &&
-        base_rte->relkind != RELKIND_FOREIGN_TABLE && base_rte->relkind != RELKIND_VIEW))
-        return gettext_noop("Views that do not select from a single table or view are not automatically updatable.");
+const char* view_query_is_auto_updatable(Query *viewquery, bool checkCols, bool isCreate)
+{
+    const char* autoUpdateDetail = CommonUpdateCheck(viewquery);
+    if (autoUpdateDetail) {
+        return autoUpdateDetail;
+    }
 
     /*
      * Check that the view has at least one updatable column. This is required
      * for INSERT/UPDATE but not for DELETE.
      */
-    if (check_cols) {
-        ListCell* cell= NULL;
-        bool found = false;
+    if (isCreate) {
+        /*
+        * The view query should select from a single base relation, which must be
+        * a table or another view.
+        */
+        if (list_length(viewquery->jointree->fromlist) != 1)
+            return gettext_noop(
+                "Views that do not select from a single table or view are not automatically updatable.");
 
+        RangeTblRef* rtr = NULL;
+        RangeTblEntry* base_rte = NULL;
+
+        rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+        if (!IsA(rtr, RangeTblRef))
+            return gettext_noop(
+                "Views that do not select from a single table or view are not automatically updatable.");
+
+        base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        if (base_rte->rtekind != RTE_RELATION || (base_rte->relkind != RELKIND_RELATION &&
+            base_rte->relkind != RELKIND_FOREIGN_TABLE && base_rte->relkind != RELKIND_VIEW))
+            return gettext_noop(
+                "Views that do not select from a single table or view are not automatically updatable.");
+
+        /*
+        * Check that the view has at least one updatable column. This is required
+        * for INSERT/UPDATE but not for DELETE.
+        */
+        if (checkCols) {
+            ListCell* cell= NULL;
+            bool found = false;
+
+            foreach (cell, viewquery->targetList) {
+                TargetEntry* tle = (TargetEntry*)lfirst(cell);
+
+                if (view_col_is_auto_updatable(rtr, tle) == NULL) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+                return gettext_noop("Views that have no updatable columns are not automatically updatable.");
+        }
+    } else {
+        CheckQueryAutoUpdatableContext context;
+        context.rtable = viewquery->rtable;
+        context.checkCols = checkCols;
+        context.found = false;
+        ListCell* cell = NULL;
         foreach (cell, viewquery->targetList) {
             TargetEntry* tle = (TargetEntry*)lfirst(cell);
-
-            if (view_col_is_auto_updatable(rtr, tle) == NULL) {
-                found = true;
-                break;
-            }
+            context.tle = tle;
+            expression_tree_walker((Node*)(viewquery->jointree->fromlist),
+                                   (bool(*)())check_view_query_auto_updatable_walker,
+                                   (void*)(&context));
+            if (context.found) break;
         }
-
-        if (!found)
+        /* No updatable column founded, the view is not updatable */
+        if (checkCols && !(context.found))
             return gettext_noop("Views that have no updatable columns are not automatically updatable.");
     }
-
-    return NULL; /* the view is simply updatable */
+    return NULL;
 }
 
 /*
@@ -2995,45 +3148,23 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool check_cols)
  * updatable.
  */
 static const char* view_cols_are_auto_updatable(Query *viewquery, Bitmapset *required_cols,
-    Bitmapset **updatable_cols, char **non_updatable_col)
+    Bitmapset **updatable_cols, char **nonUpdatableCol)
 {
-    RangeTblRef* rtr = NULL;
-    AttrNumber col;
-    ListCell* cell = NULL;
-
     /*
     * The caller should have verified that this view is auto-updatable and
     * so there should be a single base relation.
     */
-    Assert(list_length(viewquery->jointree->fromlist) == 1);
-    rtr = (RangeTblRef *) linitial(viewquery->jointree->fromlist);
-    Assert(IsA(rtr, RangeTblRef));
-
-    /* Initialize the optional return values */
-    if (updatable_cols != NULL)
-        *updatable_cols = NULL;
-    if (non_updatable_col != NULL)
-        *non_updatable_col = NULL;
-
-    /* Test each view column for updatability */
-    col = -FirstLowInvalidHeapAttributeNumber;
-    foreach (cell, viewquery->targetList) {
-        TargetEntry* tle = (TargetEntry*)lfirst(cell);
-        const char* col_update_detail;
-
-        col++;
-        col_update_detail = view_col_is_auto_updatable(rtr, tle);
-
-        if (col_update_detail == NULL) {
-            /* The column is updatable */
-            if (updatable_cols != NULL)
-                *updatable_cols = bms_add_member(*updatable_cols, col);
-        } else if (bms_is_member(col, required_cols)) {
-            /* The required column is not updatable */
-            if (non_updatable_col != NULL)
-                *non_updatable_col = tle->resname;
-            return col_update_detail;
-        }
+    CheckColsAutoUpdatableContext context;
+    context.required_cols = required_cols;
+    context.updatable_cols = updatable_cols;
+    context.nonUpdatableCol = nonUpdatableCol;
+    context.targetList = viewquery->targetList;
+    context.colUpdateDetail = NULL;
+    
+    if (expression_tree_walker((Node*)viewquery->jointree->fromlist,
+                               (bool(*)())check_view_cols_auto_updatable_walker,
+                               (void*)(&context))) {
+        return context.colUpdateDetail;
     }
 
     return NULL; /* all the required view columns are updatable */
@@ -3264,11 +3395,15 @@ static Bitmapset* adjust_view_column_set(Bitmapset* cols, List* targetlist)
 
 /*
  * If target relation is already exist in parsetree, make new_rte
- * and new_rt_index point to it, and return true.
+ * and newRtIndex point to it, and return true.
  */
-static bool setNewRteIfExist(Query* parsetree, Oid base_relid, int result_relation, RangeTblEntry** new_rte,
-    int* new_rt_index)
+static bool SetNewRteIfExist(SetNewRteIfExistContext* context, bool deleteExistingTarget = true)
 {
+    Query* parsetree = context->parsetree;
+    Oid baseRelid = context->baseRelid;
+    int resultRelation = context->resultRelation;
+    RangeTblEntry** newRte = context->newRte;
+    int* newRtIndex = context->newRtIndex;
     int rtindex = 1;
     bool targetIsExist = false;
     ListCell* lc = NULL;
@@ -3276,10 +3411,11 @@ static bool setNewRteIfExist(Query* parsetree, Oid base_relid, int result_relati
     foreach (lc, parsetree->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
 
-        if (base_relid == rte->relid && rtindex != result_relation) {
-            parsetree->resultRelations = list_delete_int(parsetree->resultRelations, result_relation);
-            *new_rt_index = rtindex;
-            *new_rte = rte;
+        if (baseRelid == rte->relid && rtindex != resultRelation) {
+            if (deleteExistingTarget && list_member_int(parsetree->resultRelations, rtindex))
+                parsetree->resultRelations = list_delete_int(parsetree->resultRelations, resultRelation);
+            *newRtIndex = rtindex;
+            *newRte = rte;
 
             targetIsExist = true;
             break;
@@ -3292,7 +3428,7 @@ static bool setNewRteIfExist(Query* parsetree, Oid base_relid, int result_relati
         foreach (l, parsetree->jointree->fromlist) {
             RangeTblRef* rtf = (RangeTblRef*)lfirst(l);
 
-            if (rtf->rtindex == result_relation) {
+            if (rtf->rtindex == resultRelation && deleteExistingTarget) {
                 parsetree->jointree->fromlist = list_delete_ptr(parsetree->jointree->fromlist, rtf);
                 break;
             }
@@ -3300,6 +3436,605 @@ static bool setNewRteIfExist(Query* parsetree, Oid base_relid, int result_relati
     }
 
     return targetIsExist;
+}
+
+struct NewRteForRewriteTargetViewContext {
+    Query* parsetree;
+    Query* viewquery;
+    int resultRelation;
+    Relation view;
+    RangeTblEntry* view_rte;
+    FromExpr* view_jointree;
+    int* newIndexes;
+    Bitmapset* base_indexes;
+    Bitmapset* visited_rtes;
+};
+
+static void GetNewRte(NewRteForRewriteTargetViewContext* context, RangeTblRef* rtr,
+    RangeTblEntry** out_base_rte, RangeTblEntry** new_rte, int* newRtIndex)
+{
+    Query* parsetree = context->parsetree;
+    Query* viewquery = context->viewquery;
+    int resultRelation = context->resultRelation;
+    int baseRtIndex = rtr->rtindex;
+    RangeTblEntry* base_rte = rt_fetch(baseRtIndex, viewquery->rtable);
+    Relation base_rel;
+
+    if (base_rte->rtekind == RTE_RELATION) {
+        /*
+        * Up to now, the base relation hasn't been touched at all in our query.
+        * We need to acquire lock on it before we try to do anything with it.
+        * (The subsequent recursive call of RewriteQuery will suppose that we
+        * already have the right lock!)  Since it will become the query target
+        * relation, RowExclusiveLock is always the right thing.
+        */
+        base_rel = heap_open(base_rte->relid, RowExclusiveLock);
+
+        /*
+        * While we have the relation open, update the RTE's relkind, just in case
+        * it changed since this view was made (cf. AcquireRewriteLocks).
+        */
+        base_rte->relkind = base_rel->rd_rel->relkind;
+
+        heap_close(base_rel, NoLock);
+
+        /*
+        * If the view query contains any sublink subqueries then we need to also
+        * acquire locks on any relations they refer to.  We know that there won't
+        * be any subqueries in the range table or CTEs, so we can skip those, as
+        * in AcquireRewriteLocks.
+        */
+        if (viewquery->hasSubLinks) {
+            (void)query_tree_walker(viewquery, (bool (*)())acquireLocksOnSubLinks, NULL, QTW_IGNORE_RC_SUBQUERIES);
+        }
+
+        /*
+        * Create a new target RTE describing the base relation, and add it to the
+        * outer query's rangetable.  (What's happening in the next few steps is
+        * very much like what the planner would do to "pull up" the view into the
+        * outer query.  Perhaps someday we should refactor things enough so that
+        * we can share code with the planner.)
+        *
+        * We will not do so if basic relation of view is already exist in rtables,
+        * cause multiple-relation modifying include views is allowed.
+        */
+    
+        SetNewRteIfExistContext setContext;
+        setContext.parsetree = parsetree;
+        setContext.baseRelid = base_rte->relid;
+        setContext.resultRelation = resultRelation;
+        setContext.newRte = new_rte;
+        setContext.newRtIndex = newRtIndex;
+        if (!SetNewRteIfExist(&setContext)) {
+            *new_rte = base_rte;
+            parsetree->rtable = lappend(parsetree->rtable, *new_rte);
+            *newRtIndex = list_length(parsetree->rtable);
+        }
+    } else if (base_rte->rtekind == RTE_SUBQUERY) {
+        *new_rte = base_rte;
+        parsetree->rtable = lappend(parsetree->rtable, *new_rte);
+        *newRtIndex = list_length(parsetree->rtable);
+    }
+    *out_base_rte = base_rte;
+}
+
+static bool NewRteForRewriteTargetView_walker(Node* node, NewRteForRewriteTargetViewContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    Query* viewquery = context->viewquery;
+    int newRtIndex = 0;
+    int baseRtIndex = 0;
+    Relation view = context->view;
+    RangeTblEntry* view_rte = context->view_rte;
+
+    if (IsA(node, RangeTblRef)) {
+        RangeTblRef* rtr = (RangeTblRef*)node;
+        RangeTblEntry* base_rte = NULL;
+        RangeTblEntry* new_rte = NULL;
+        List* view_targetlist = viewquery->targetList;
+        baseRtIndex = rtr->rtindex;
+        if (bms_is_member(baseRtIndex, context->visited_rtes)) {
+            /* skip as the rte is already handled */
+            return false;
+        }
+        context->visited_rtes = bms_add_member(context->visited_rtes, rtr->rtindex);
+        GetNewRte(context, rtr, &base_rte, &new_rte, &newRtIndex);
+        /*
+        * Adjust the view's targetlist Vars to reference the new target RTE, ie
+        * make their varnos be newRtIndex instead of baseRtIndex.  There can
+        * be no Vars for other rels in the tlist, so this is sufficient to pull
+        * up the tlist expressions for use in the outer query.  The tlist will
+        * provide the replacement expressions used by ReplaceVarsFromTargetList
+        * below.
+        */
+        context->newIndexes[baseRtIndex] = newRtIndex;
+        if (!bms_is_member(baseRtIndex, context->base_indexes)) {
+            context->base_indexes = bms_add_member(context->base_indexes, baseRtIndex);
+        }
+
+        if (base_rte->rtekind == RTE_RELATION) {
+            /*
+            * Mark the new target RTE for the permissions checks that we want to
+            * enforce against the view owner, as distinct from the query caller.  At
+            * the relation level, require the same INSERT/UPDATE/DELETE permissions
+            * that the query caller needs against the view.  We drop the ACL_SELECT
+            * bit that is presumably in new_rte->requiredPerms initially.
+            *
+            * Note: the original view RTE remains in the query's rangetable list.
+            * Although it will be unused in the query plan, we need it there so that
+            * the executor still performs appropriate permissions checks for the
+            * query caller's use of the view.
+            */
+            new_rte->checkAsUser = view->rd_rel->relowner;
+            new_rte->requiredPerms = view_rte->requiredPerms;
+
+            /*
+            * Now for the per-column permissions bits.
+            *
+            * Initially, new_rte contains selectedCols permission check bits for all
+            * base-rel columns referenced by the view, but since the view is a SELECT
+            * query its modifiedCols is empty.  We set modifiedCols to include all
+            * the columns the outer query is trying to modify, adjusting the column
+            * numbers as needed.  But we leave selectedCols as-is, so the view owner
+            * must have read permission for all columns used in the view definition,
+            * even if some of them are not read by the outer query.  We could try to
+            * limit selectedCols to only columns used in the transformed query, but
+            * that does not correspond to what happens in ordinary SELECT usage of a
+            * view: all referenced columns must have read permission, even if
+            * optimization finds that some of them can be discarded during query
+            * transformation.  The flattening we're doing here is an optional
+            * optimization, too.  (If you are unpersuaded and want to change this,
+            * note that applying adjust_view_column_set to view_rte->selectedCols is
+            * clearly *not* the right answer, since that neglects base-rel columns
+            * used in the view's WHERE quals.)
+            *
+            * This step needs the modified view targetlist, so we have to do things
+            * in this order.
+            */
+            new_rte->insertedCols = bms_add_members(new_rte->insertedCols,
+                                                    adjust_view_column_set(view_rte->insertedCols, view_targetlist));
+            new_rte->updatedCols = bms_add_members(new_rte->updatedCols,
+                                                adjust_view_column_set(view_rte->updatedCols, view_targetlist));
+            new_rte->modifiedCols = bms_union(new_rte->insertedCols, new_rte->updatedCols);
+
+            /*
+            * Move any security barrier quals from the view RTE onto the new target
+            * RTE. Any such quals should now apply to the new target RTE and will not
+            * reference the original view RTE in the rewritten query.
+            */
+            new_rte->securityQuals = list_concat(new_rte->securityQuals, view_rte->securityQuals);
+        }
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool (*)())NewRteForRewriteTargetView_walker, (void*)context);
+}
+
+static void CollectViewQuals(Node* node, Query* parsetree)
+{
+    if (node == NULL) {
+        return;
+    }
+    
+    if (IsA(node, FromExpr)) {
+        FromExpr* f = (FromExpr*)node;
+        ListCell* cell = NULL;
+
+        AddQual(parsetree, f->quals);
+        foreach(cell, f->fromlist) {
+            CollectViewQuals((Node*)lfirst(cell), parsetree);
+        }
+    } else if (IsA(node, JoinExpr)) {
+        JoinExpr* j = (JoinExpr*)node;
+
+        AddQual(parsetree, j->quals);
+        CollectViewQuals(j->larg, parsetree);
+        CollectViewQuals(j->rarg, parsetree);
+    }
+}
+
+static bool IsEqualsOperator(int operid)
+{
+    bool result = false;
+    CatCList* catlist = NULL;
+    int i;
+    /*
+     * Search pg_amop to see if the operid is registered as the "="
+     */
+    catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(operid));
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
+        if (aform->amopstrategy == BTEqualStrategyNumber) {
+            result = true;
+            break;
+        }
+    }
+    ReleaseSysCacheList(catlist);
+
+    return result;
+}
+
+/*
+ * FindTargetTable
+ * Find the possible key preserved table for a view, compare two tables at a time.
+ * The way of determining the key preserved table is basically the same as the way
+ * that function find_non_keypreservered_rels does, except that here we need to consider the
+ * possibility that one of the candidate rte is a subquery. A subquery cannnot be a key
+ * preserved table. If one of the two candidate table is a subquery and the other is not
+ * and the other has one or more unique/primary keys, the other is also a possible key preserved
+ * key. If neither of them is a subquery, the determine the key preserved table the same way
+ * as find_non_kaypreserved_rels does.
+ */
+
+struct FindTargetTableContext {
+    int rRtIndex;
+    int lRtIndex;
+    List* rtable;
+    bool rIsKey;
+    bool lIsKey;
+};
+
+static void FindKeyInRel(Relation rel, Var* var, FindTargetTableContext* context)
+{
+    int rRtIndex = context->rRtIndex;
+    List* indexoidlist = RelationGetIndexList(rel);
+    Oid relpkindex = rel->rd_pkindex;
+    ListCell* indexoidscan = NULL;
+
+    if (indexoidlist == NIL) {
+        relation_close(rel, AccessShareLock);
+        return;
+    }
+
+    foreach (indexoidscan, indexoidlist) {
+        Oid indexoid = lfirst_oid(indexoidscan);
+        Relation indexDesc = index_open(indexoid, AccessShareLock);
+        IndexInfo* indexInfo = BuildIndexInfo(indexDesc);
+        bool isPk = (indexoid == relpkindex);
+        bool isKey = indexInfo->ii_Unique && indexInfo->ii_Expressions == NIL && indexInfo->ii_Predicate == NIL;
+        int i = 0;
+
+        if (!isPk && !isKey) {
+            index_close(indexDesc, AccessShareLock);
+            continue;
+        }
+        for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
+            int attnum = indexInfo->ii_KeyAttrNumbers[i];
+            if (attnum == var->varattno) {
+                if (var->varno == rRtIndex)
+                    context->rIsKey = (isPk || (isKey && i < indexInfo->ii_NumIndexKeyAttrs));
+                else
+                    context->lIsKey = (isPk || (isKey && i < indexInfo->ii_NumIndexKeyAttrs));
+            }
+            break;
+        }
+        if (i < indexInfo->ii_NumIndexAttrs) {
+            index_close(indexDesc, AccessShareLock);
+            break;
+        }
+    }
+}
+
+static bool FindTargetTable_walker(Node* node, FindTargetTableContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    
+    int rRtIndex = context->rRtIndex;
+    int lRtIndex = context->lRtIndex;
+    List* rtable = context->rtable;
+
+    if (IsA(node, Var)) {
+        Var* var = (Var*)node;
+        RangeTblEntry* rte = NULL;
+        rte = var->varno == rRtIndex? rt_fetch(rRtIndex, rtable) :
+              var->varno == lRtIndex? rt_fetch(lRtIndex, rtable) : NULL;
+        if (rte != NULL) {
+            /* A subquery can not be a key preserved relation */
+            if (rte->rtekind == RTE_SUBQUERY) {
+                return false;
+            }
+
+            Relation rel = relation_open(rte->relid, AccessShareLock);
+            /* Fast path if definitely no indexes */
+            if (!RelationGetForm(rel)->relhasindex) {
+                relation_close(rel, AccessShareLock);
+                return false;
+            }
+            FindKeyInRel(rel, var, context);
+            relation_close(rel, AccessShareLock);
+            return false;
+        }
+    } else if (IsA(node, OpExpr)) {
+        OpExpr* op = (OpExpr*)node;
+        Oid opno = op->opno;
+        const int opArgNum = 2;
+
+        if (list_length(op->args) != opArgNum || !IsEqualsOperator(opno)) {
+            return true;
+        }
+    }
+    return expression_tree_walker(node, (bool (*)())FindTargetTable_walker, (void*)context);
+}
+
+/*
+ * GetNewResultRelation
+ * Find the result relation for deletes on a view from the view's jointree,
+ * rtable is the list that the rtr(s) on the jointree reference.
+ * The rte for delete should be the view's key preserved rel, whose unique key or primary key is
+ * also a unique key or a primary key for the view.
+ */
+
+static int ProcessFromExprForNewRel(FromExpr* f, List* rtable)
+{
+    int newRtIndex = 0;
+    ListCell* cell = NULL;
+    foreach (cell, f->fromlist) {
+        int tmp_rt_index = GetNewResultRelation((Node*)lfirst(cell), rtable);
+        if (newRtIndex == 0) {
+            newRtIndex = tmp_rt_index;
+            continue;
+        } else if (newRtIndex == -1) {
+            break;
+        } else if (newRtIndex != tmp_rt_index) {
+            FindTargetTableContext context;
+            context.rRtIndex = tmp_rt_index;
+            context.lRtIndex = newRtIndex;
+            context.rtable = rtable;
+            context.rIsKey = false;
+            context.lIsKey = false;
+            if (!expression_tree_walker((Node*)(f->quals),
+                                        (bool (*)())FindTargetTable_walker,
+                                        (void*)(&context))) {
+                newRtIndex = context.rIsKey ? newRtIndex :
+                                context.lIsKey ? tmp_rt_index : -1;
+            } else {
+                newRtIndex = -1;
+            }
+        }
+    }
+    return newRtIndex;
+}
+
+static int ProcessJoinExprForNewRel(JoinExpr* j, List* rtable)
+{
+    int newRtIndex = 0;
+    switch (j->jointype) {
+        case JOIN_LEFT:
+            newRtIndex = GetNewResultRelation(j->larg, rtable);
+            break;
+        case JOIN_RIGHT:
+            newRtIndex = GetNewResultRelation(j->rarg, rtable);
+            break;
+        case JOIN_INNER: {
+            if (j->quals == NULL) {
+                newRtIndex = -1;
+            }
+            
+            int rRtIndex = GetNewResultRelation(j->rarg, rtable);
+            int lRtIndex = GetNewResultRelation(j->larg, rtable);
+            if (rRtIndex < 0 || lRtIndex < 0) {
+                newRtIndex = -1;
+                break;
+            }
+            FindTargetTableContext context;
+            context.rRtIndex = rRtIndex;
+            context.lRtIndex = lRtIndex;
+            context.rtable = rtable;
+            context.rIsKey = false;
+            context.lIsKey = false;
+            if (!expression_tree_walker((Node*)(j->quals),
+                                        (bool (*)())FindTargetTable_walker,
+                                        (void*)(&context))) {
+                newRtIndex = context.rIsKey ? lRtIndex :
+                                context.lIsKey ? rRtIndex : -1;
+            } else {
+                newRtIndex = -1;
+            }
+            break;
+        }
+        case JOIN_FULL :
+            return -1;
+        default: break;
+    }
+    return newRtIndex;
+}
+
+static int GetNewResultRelation(Node* node, List* rtable)
+{
+    if (node==NULL) {
+        return -1;
+    }
+    int newRtIndex = 0;
+    switch (nodeTag(node)) {
+        case T_FromExpr: {
+            FromExpr* f = (FromExpr*)node;
+            newRtIndex = ProcessFromExprForNewRel(f, rtable);
+            break;
+        }
+        case T_JoinExpr: {
+            JoinExpr* j = (JoinExpr*)node;
+            newRtIndex = ProcessJoinExprForNewRel(j, rtable);
+            break;
+        }
+        case T_RangeTblRef: {
+            RangeTblRef* rtr = (RangeTblRef*)node;
+            newRtIndex = rtr->rtindex;
+            break;
+        }
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", (int) nodeTag(node))));
+            break;
+    }
+    return newRtIndex;
+}
+
+static int FindBaseRteForInsertOrUpdate(List* parse_targetlist, List* view_targetlist, int resultRelation)
+{
+    ListCell* targetCell = NULL;
+    int baseRtIndex = 0;
+    foreach (targetCell, parse_targetlist) {
+        /* view's targetlist Vars have been adjusted to reference new target RTE */
+        TargetEntry* tle = (TargetEntry*)lfirst(targetCell);
+        if (tle->resjunk || (tle->rtindex != resultRelation && tle->rtindex != 0 &&
+            u_sess->attr.attr_sql.sql_compatibility == B_FORMAT))
+            continue;
+
+        TargetEntry* view_tle = get_tle_by_resno(view_targetlist, tle->resno);
+        Var* var = NULL;
+        var = (Var*)(view_tle->expr);
+
+        if (!IsA(var, Var))
+            ereport(ERROR,
+                (errmsg("cannot update or delete on generated columns")));
+
+        if (baseRtIndex == 0) {
+            baseRtIndex = var->varno;
+        } else if (baseRtIndex != var->varno && strcmp(tle->resname, "wholerow") != 0 &&
+                !(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+            ereport(ERROR,
+                (errmsg("cannot update or delete columns from different base tables at the same time")));
+        }
+
+        /*
+        * For INSERT/UPDATE we must also update resnos in the targetlist to refer
+        * to columns of the base relation, since those indicate the target
+        * columns to be affected.
+        *
+        * Note that this destroys the resno ordering of the targetlist, but that
+        * will be fixed when we recurse through rewriteQuery, which will invoke
+        * rewriteTargetListIU again on the updated targetlist.
+        */
+        if (view_tle != NULL && !view_tle->resjunk && IsA(view_tle->expr, Var))
+            tle->resno = ((Var*)view_tle->expr)->varattno;
+        else
+            ereport(ERROR, (errmsg("attribute number %d not found in view targetlist", tle->resno)));
+    }
+    return baseRtIndex;
+}
+
+int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation)
+{
+    int baseRtIndex = 0;
+    int newRtIndex = 0;
+    Oid base_relid;
+    RangeTblEntry* base_rte = NULL;
+    List* parse_targetlist = parsetree->targetList;
+    List* view_targetlist = viewquery->targetList;
+
+    if (parsetree->commandType == CMD_DELETE) {
+        baseRtIndex = GetNewResultRelation((Node*)(viewquery->jointree), rtables);
+        if (baseRtIndex < 1) {
+            ereport(ERROR,
+                (errmsg("cannot determine an exact row for the view to update or delete")));
+        }
+    } else if (parsetree->commandType == CMD_UPDATE || parsetree->commandType == CMD_INSERT) {
+        baseRtIndex = FindBaseRteForInsertOrUpdate(parse_targetlist, view_targetlist, resultRelation);
+    }
+
+    base_rte = rt_fetch(baseRtIndex, rtables);
+    if (base_rte->rtekind == RTE_SUBQUERY && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        ereport(ERROR,
+            (errmsg("update/delete on a table in a view's subquery is not supported in B-format database")));
+    }
+    base_relid = base_rte->relid;
+
+    ListCell* rtcell = list_head(parsetree->rtable);
+    int rtindex = 1;
+    while (rtcell) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
+
+        if (base_relid == rte->relid && rtindex != resultRelation) {
+            newRtIndex = rtindex;
+            break;
+        }
+        rtcell = lnext(rtcell);
+        rtindex++;
+    }
+
+    if (newRtIndex == 0) {
+        ereport(ERROR,
+            (errmsg("cannot determine an exact row for the view to update or delete")));
+    }
+
+    return newRtIndex;
+}
+
+static List* FlattenFromlist(Query* parsetree, Node* node, Bitmapset** check_duplicate)
+{
+    if (node == NULL)
+        return NULL;
+
+    if (IsA(node, RangeTblRef)) {
+        RangeTblRef* rtf = (RangeTblRef*)node;
+        if (bms_is_member(rtf->rtindex, *check_duplicate)) {
+            return NIL;
+        } else {
+            *check_duplicate = bms_add_member(*check_duplicate, rtf->rtindex);
+            return list_make1(node);
+        }
+    } else if (IsA(node, JoinExpr)) {
+        JoinExpr* j = (JoinExpr*)node;
+        List* new_list = NIL;
+
+        List* larg = FlattenFromlist(parsetree, j->larg, check_duplicate);
+        List* rarg = FlattenFromlist(parsetree, j->rarg, check_duplicate);
+        AddQual(parsetree, j->quals);
+
+        if (larg != NIL)
+            new_list = list_concat(new_list, larg);
+        if (rarg != NIL)
+            new_list = list_concat(new_list, rarg);
+        return new_list;
+    } else if (IsA(node, FromExpr)) {
+        FromExpr* f = (FromExpr*)node;
+        ListCell* cell = NULL;
+        List* new_list = NIL;
+
+        if (f != parsetree->jointree)
+            AddQual(parsetree, f->quals);
+
+        foreach (cell, f->fromlist) {
+            List* tmp_list = FlattenFromlist(parsetree, (Node*)lfirst(cell), check_duplicate);
+
+            if (tmp_list != NIL)
+                new_list = list_concat(new_list, tmp_list);
+        }
+        return new_list;
+    }
+    return NULL;
+}
+
+static void RecurseChangeVarNodes(Query* parsetree, Query* viewquery,
+    Bitmapset** base_indexes, int* newIndexes, int baseIndex)
+{
+    if (!bms_is_member(baseIndex, *base_indexes)) {
+        return;
+    }
+
+    int newIndex = newIndexes[baseIndex];
+    if (newIndex == baseIndex) {
+        *base_indexes = bms_del_member(*base_indexes, baseIndex);
+        return;
+    }
+    /* cannot change baseRtIndex to new_rt_index until the original rtr
+     * corresponding to new_rt_index is processed */
+    RecurseChangeVarNodes(parsetree, viewquery, base_indexes, newIndexes, newIndex);
+
+    RangeTblRef* new_rtr = makeNode(RangeTblRef);
+    new_rtr->rtindex = newIndex;
+    ChangeVarNodes((Node*)viewquery->targetList, baseIndex, newIndex, 0);
+    ChangeVarNodes((Node*)viewquery->jointree, baseIndex, newIndex, 0);
+    if (parsetree->commandType != CMD_INSERT)
+        parsetree->jointree->fromlist = lappend(parsetree->jointree->fromlist, new_rtr);
+    *base_indexes = bms_del_member(*base_indexes, baseIndex);
 }
 
 /*
@@ -3318,15 +4053,12 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
 {
     Query* viewquery = NULL;
     const char* auto_update_detail = NULL;
-    RangeTblRef* rtr = NULL;
     int base_rt_index;
     int new_rt_index;
-    RangeTblEntry* base_rte = NULL;
     RangeTblEntry* view_rte = NULL;
-    RangeTblEntry* new_rte = NULL;
-    Relation base_rel;
     List* view_targetlist = NIL;
     ListCell* lc = NULL;
+    ListCell* rtcell = NULL;
 
     /*
      * Get the Query from the view's ON SELECT rule.  We're going to munge the
@@ -3336,8 +4068,42 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * have to treat it as read-only).
      */
     viewquery = (Query*)copyObject(get_view_query(view));
+    
+    PlannerInfo* root = makeNode(PlannerInfo);
+    List* base_targetList = list_copy(viewquery->targetList);
+    ListCell* base_cell;
+    ListCell* new_cell;
+    root->parse = viewquery;
+    viewquery->targetList = (List*)flatten_join_alias_vars(root, (Node*)(viewquery->targetList));
+    viewquery->jointree = (FromExpr*)flatten_join_alias_vars(root, (Node*)(viewquery->jointree));
 
-    auto_update_detail = view_query_is_auto_updatable(viewquery, parsetree->commandType != CMD_DELETE);
+    forboth(base_cell, base_targetList, new_cell, viewquery->targetList) {
+        TargetEntry* base_tle = (TargetEntry*)lfirst(base_cell);
+        TargetEntry* new_tle = (TargetEntry*)lfirst(new_cell);
+        Index base_index = ((Var*)(base_tle->expr))->varno;
+        Index new_index = ((Var*)(new_tle->expr))->varno;
+        if (base_index != new_index)
+            ChangeVarNodes((Node*)viewquery, base_index, new_index, 0);
+    }
+
+    list_free(base_targetList);
+
+    auto_update_detail =  view_query_is_auto_updatable(viewquery, parsetree->commandType != CMD_DELETE, false);
+
+    if (parsetree->commandType == CMD_INSERT) {
+        RangeTblRef* rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+        if (list_length(viewquery->jointree->fromlist) != 1 || !IsA(rtr, RangeTblRef)) {
+                auto_update_detail = gettext_noop(
+                    "Views that do not select from a single table or view are not automatically updatable.");
+        }
+
+        RangeTblEntry* rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        if (rte->rtekind != RTE_RELATION || (rte->relkind != RELKIND_RELATION &&
+            rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_VIEW)) {
+            auto_update_detail = gettext_noop(
+                "Views that do not select from a single table or view are not automatically updatable.");
+            }
+    }
 
     if (auto_update_detail) {
         /* messages here should match execMain.c's CheckValidResultRel */
@@ -3387,7 +4153,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      */
     if (parsetree->commandType != CMD_DELETE) {
         Bitmapset *modified_cols = NULL;
-        char* non_updatable_col = NULL;
+        char* nonUpdatableCol = NULL;
 
         foreach (lc, parsetree->targetList) {
             TargetEntry* tle = (TargetEntry*)lfirst(lc);
@@ -3396,7 +4162,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                 modified_cols = bms_add_member(modified_cols, tle->resno - FirstLowInvalidHeapAttributeNumber);
         }
 
-        auto_update_detail = view_cols_are_auto_updatable(viewquery, modified_cols, NULL, &non_updatable_col);
+        auto_update_detail = view_cols_are_auto_updatable(viewquery, modified_cols, NULL, &nonUpdatableCol);
         if (auto_update_detail) {
             /*
             * This is a different error, caused by an attempt to update a
@@ -3406,14 +4172,14 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                 case CMD_INSERT:
                     ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot insert into column \"%s\" of view \"%s\"", non_updatable_col,
+                            errmsg("cannot insert into column \"%s\" of view \"%s\"", nonUpdatableCol,
                                     RelationGetRelationName(view)),
                             errdetail_internal("%s", _(auto_update_detail))));
                     break;
                 case CMD_UPDATE:
                     ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot update column \"%s\" of view \"%s\"", non_updatable_col,
+                            errmsg("cannot update column \"%s\" of view \"%s\"", nonUpdatableCol,
                                     RelationGetRelationName(view)),
                             errdetail_internal("%s", _(auto_update_detail))));
                     break;
@@ -3424,128 +4190,53 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
         }
     }
 
+    rtcell = list_head(parsetree->rtable);
+    ListCell* prev_cell = NULL;
+    while (rtcell) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
+        if (rte->rtekind == RTE_JOIN) {
+            parsetree->rtable = list_delete_ptr(parsetree->rtable, rte);
+            rtcell = prev_cell == NULL? list_head(parsetree->rtable) : lnext(prev_cell);
+            continue;
+        }
+        prev_cell = rtcell;
+        rtcell = lnext(rtcell);
+    }
+
     /* Locate RTE describing the view in the outer query */
     view_rte = rt_fetch(result_relation, parsetree->rtable);
 
-    /*
-     * If we get here, view_query_is_auto_updatable() has verified that the
-     * view contains a single base relation.
-     */
+    NewRteForRewriteTargetViewContext rteContext;
+    rteContext.viewquery = viewquery;
+    rteContext.parsetree = parsetree;
+    rteContext.resultRelation = result_relation;
+    rteContext.view = view;
+    rteContext.view_rte = view_rte;
+    int size = (list_length(viewquery->rtable) + 1) * sizeof(int);
+    rteContext.newIndexes = static_cast<int*>(palloc(size));
+    errno_t rc = memset_s(rteContext.newIndexes, size, 0, size);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    rteContext.visited_rtes = NULL;
+    rteContext.base_indexes = NULL;
 
-    Assert(list_length(viewquery->jointree->fromlist) == 1);
-    rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
-    Assert(IsA(rtr, RangeTblRef));
+    expression_tree_walker((Node*)viewquery->jointree->fromlist,
+                           (bool (*)())NewRteForRewriteTargetView_walker,
+                           (void*)(&rteContext));
 
-    base_rt_index = rtr->rtindex;
-    base_rte = rt_fetch(base_rt_index, viewquery->rtable);
-    Assert(base_rte->rtekind == RTE_RELATION);
-
-    /*
-     * Up to now, the base relation hasn't been touched at all in our query.
-     * We need to acquire lock on it before we try to do anything with it.
-     * (The subsequent recursive call of RewriteQuery will suppose that we
-     * already have the right lock!)  Since it will become the query target
-     * relation, RowExclusiveLock is always the right thing.
-     */
-    base_rel = heap_open(base_rte->relid, RowExclusiveLock);
-
-    /*
-     * While we have the relation open, update the RTE's relkind, just in case
-     * it changed since this view was made (cf. AcquireRewriteLocks).
-     */
-    base_rte->relkind = base_rel->rd_rel->relkind;
-
-    heap_close(base_rel, NoLock);
-
-    /*
-     * If the view query contains any sublink subqueries then we need to also
-     * acquire locks on any relations they refer to.  We know that there won't
-      * be any subqueries in the range table or CTEs, so we can skip those, as
-     * in AcquireRewriteLocks.
-     */
-    if (viewquery->hasSubLinks) {
-        (void)query_tree_walker(viewquery, (bool (*)())acquireLocksOnSubLinks,NULL, QTW_IGNORE_RC_SUBQUERIES);
+    /* rtindex starts from 3 */
+    int i = 3;
+    while (!bms_is_empty(rteContext.base_indexes)) {
+        RecurseChangeVarNodes(parsetree, viewquery, &(rteContext.base_indexes), rteContext.newIndexes, i);
+        i++;
     }
 
-    /*
-     * Create a new target RTE describing the base relation, and add it to the
-     * outer query's rangetable.  (What's happening in the next few steps is
-     * very much like what the planner would do to "pull up" the view into the
-     * outer query.  Perhaps someday we should refactor things enough so that
-     * we can share code with the planner.)
-     *
-     * We will not do so if basic relation of view is already exist in rtables,
-     * cause multiple-relation modifying include views is allowed.
-     */
-    if (!setNewRteIfExist(parsetree, base_rte->relid, result_relation, &new_rte, &new_rt_index)) {
-        new_rte = base_rte;
-        parsetree->rtable = lappend(parsetree->rtable, new_rte);
-        new_rt_index = list_length(parsetree->rtable);
-    }
-
-    /*
-     * Adjust the view's targetlist Vars to reference the new target RTE, ie
-     * make their varnos be new_rt_index instead of base_rt_index.  There can
-     * be no Vars for other rels in the tlist, so this is sufficient to pull
-     * up the tlist expressions for use in the outer query.  The tlist will
-     * provide the replacement expressions used by ReplaceVarsFromTargetList
-     * below.
-     */
     view_targetlist = viewquery->targetList;
-
-    ChangeVarNodes((Node*)view_targetlist, base_rt_index, new_rt_index, 0);
-
-    /*
-     * Mark the new target RTE for the permissions checks that we want to
-     * enforce against the view owner, as distinct from the query caller.  At
-     * the relation level, require the same INSERT/UPDATE/DELETE permissions
-     * that the query caller needs against the view.  We drop the ACL_SELECT
-     * bit that is presumably in new_rte->requiredPerms initially.
-     *
-     * Note: the original view RTE remains in the query's rangetable list.
-     * Although it will be unused in the query plan, we need it there so that
-     * the executor still performs appropriate permissions checks for the
-     * query caller's use of the view.
-     */
-    new_rte->checkAsUser = view->rd_rel->relowner;
-    new_rte->requiredPerms = view_rte->requiredPerms;
-
-    /*
-     * Now for the per-column permissions bits.
-     *
-     * Initially, new_rte contains selectedCols permission check bits for all
-     * base-rel columns referenced by the view, but since the view is a SELECT
-     * query its modifiedCols is empty.  We set modifiedCols to include all
-     * the columns the outer query is trying to modify, adjusting the column
-     * numbers as needed.  But we leave selectedCols as-is, so the view owner
-     * must have read permission for all columns used in the view definition,
-     * even if some of them are not read by the outer query.  We could try to
-     * limit selectedCols to only columns used in the transformed query, but
-     * that does not correspond to what happens in ordinary SELECT usage of a
-     * view: all referenced columns must have read permission, even if
-     * optimization finds that some of them can be discarded during query
-     * transformation.  The flattening we're doing here is an optional
-     * optimization, too.  (If you are unpersuaded and want to change this,
-     * note that applying adjust_view_column_set to view_rte->selectedCols is
-     * clearly *not* the right answer, since that neglects base-rel columns
-     * used in the view's WHERE quals.)
-     *
-     * This step needs the modified view targetlist, so we have to do things
-     * in this order.
-     */
-    new_rte->insertedCols = bms_add_members(new_rte->insertedCols,
-                                            adjust_view_column_set(view_rte->insertedCols, view_targetlist));
-    new_rte->updatedCols = bms_add_members(new_rte->updatedCols,
-                                           adjust_view_column_set(view_rte->updatedCols, view_targetlist));
-    new_rte->modifiedCols = bms_union(new_rte->insertedCols, new_rte->updatedCols);
-
-    /*
-     * Move any security barrier quals from the view RTE onto the new target
-     * RTE. Any such quals should now apply to the new target RTE and will not
-     * reference the original view RTE in the rewritten query.
-     */
-    new_rte->securityQuals = list_concat(new_rte->securityQuals, view_rte->securityQuals);
     view_rte->securityQuals = NIL;
+
+    bms_free(rteContext.visited_rtes);
+    pfree(rteContext.newIndexes);
 
     /*
      * For UPDATE/DELETE, rewriteTargetListUD will have added a wholerow junk
@@ -3588,31 +4279,15 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * base relation instead.  Vars will not be affected since none of them
      * reference parsetree->resultRelation any longer.
      */
-    ChangeVarNodes((Node*)parsetree, result_relation, new_rt_index, 0);
+    base_rt_index = result_relation;
+    new_rt_index = ReplaceResultTargetEntry(parsetree, viewquery, parsetree->rtable, result_relation);
+    ChangeVarNodes((Node*)(parsetree), result_relation, new_rt_index, 0);
 
-    /*
-     * For INSERT/UPDATE we must also update resnos in the targetlist to refer
-     * to columns of the base relation, since those indicate the target
-     * columns to be affected.
-     *
-     * Note that this destroys the resno ordering of the targetlist, but that
-     * will be fixed when we recurse through rewriteQuery, which will invoke
-     * rewriteTargetListIU again on the updated targetlist.
-     */
-    if (parsetree->commandType != CMD_DELETE) {
-        foreach(lc, parsetree->targetList) {
-            TargetEntry* tle = (TargetEntry*)lfirst(lc);
-            TargetEntry* view_tle = NULL;
-
-            if (tle->resjunk)
-                continue;
-
-            view_tle = get_tle_by_resno(view_targetlist, tle->resno);
-            if (view_tle != NULL && !view_tle->resjunk && IsA(view_tle->expr, Var))
-                tle->resno = ((Var*)view_tle->expr)->varattno;
-            else
-                ereport(ERROR, (errmsg("attribute number %d not found in view targetlist", tle->resno)));
-        }
+    if (parsetree->commandType != CMD_INSERT) {
+        Bitmapset* check_duplicate = NULL;
+        rtcell = list_head(parsetree->jointree->fromlist);
+        parsetree->jointree->fromlist = FlattenFromlist(parsetree, (Node*)(parsetree->jointree), &check_duplicate);
+        bms_free(check_duplicate);
     }
 
     /*
@@ -3626,17 +4301,16 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * quals, so these quals are kept on the new target RTE.
      * For INSERT, the view's quals can be ignored in the main query.
      */
-    if (parsetree->commandType != CMD_INSERT && viewquery->jointree->quals != NULL) {
+
+    if (parsetree->commandType != CMD_INSERT) {
         Node* viewqual = (Node*)viewquery->jointree->quals;
 
-        ChangeVarNodes(viewqual, base_rt_index, new_rt_index, 0);
-
-        if (RelationIsSecurityView(view)) {
+        if (RelationIsSecurityView(view) && viewqual != NULL) {
             /*
             * Note: the parsetree has been mutated, so the new_rte pointer is
             * stale and needs to be re-computed.
             */
-            new_rte = rt_fetch(new_rt_index, parsetree->rtable);
+            RangeTblEntry* new_rte = rt_fetch(new_rt_index, parsetree->rtable);
             new_rte->securityQuals = lcons(viewqual, new_rte->securityQuals);
 
             /*
@@ -3646,7 +4320,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
             if (!parsetree->hasSubLinks)
                 parsetree->hasSubLinks = checkExprHasSubLink(viewqual);
         } else
-            AddQual(parsetree, (Node*)viewqual);
+            CollectViewQuals((Node*)(viewquery->jointree), parsetree);
     }
 
     /*
@@ -3751,7 +4425,7 @@ void ereport_for_each_cmdtype(CmdType event, Relation rt_entry_relation)
  * rewrite_events is a list of open query-rewrite actions, so we can detect
  * infinite recursion.
  */
-static List* RewriteQuery(Query* parsetree, List* rewrite_events)
+List* RewriteQuery(Query* parsetree, List* rewrite_events)
 {
     CmdType event = parsetree->commandType;
     bool instead = false;
@@ -3852,6 +4526,12 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
             return rewritten;
 
         rt_entry = rt_fetch(result_relation, parsetree->rtable);
+        
+        if (rt_entry->rtekind == RTE_SUBQUERY) {
+            rewritten = lappend(rewritten, parsetree);
+            return rewritten;
+        }
+
         AssertEreport(rt_entry->rtekind == RTE_RELATION, MOD_OPT, "");
 
         /*

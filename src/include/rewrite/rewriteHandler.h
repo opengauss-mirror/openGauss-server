@@ -25,7 +25,7 @@ extern void rewriteTargetListMerge(Query* parsetree, Index result_relation, List
 extern List *query_rewrite_multiset_stmt(Query* parse_tree);
 extern List *query_rewrite_set_stmt(Query* parse_tree);
 extern Query* get_view_query(Relation view);
-extern const char* view_query_is_auto_updatable(Query* viewquery, bool check_cols);
+extern const char* view_query_is_auto_updatable(Query* viewquery, bool check_cols, bool is_create = true);
 extern int relation_is_updatable(Oid reloid, bool include_triggers, Bitmapset* include_cols);
 extern bool view_has_instead_trigger(Relation view, CmdType event);
 
@@ -36,5 +36,7 @@ extern List* QueryRewriteRefresh(Query *parsetree);
 extern Node* QueryRewriteNonConstant(Node *node);
 extern List* QueryRewriteSelectIntoVarList(Node *node, int res_len);
 extern Const* processResToConst(char* value, Oid atttypid, Oid collid);
+extern int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation);
+extern List* RewriteQuery(Query* parsetree, List* rewrite_events);
 
 #endif /* REWRITEHANDLER_H */

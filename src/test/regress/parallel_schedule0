@@ -475,7 +475,7 @@ test: hw_smp
 #test: insert_update_002 insert_update_003 insert_update_008 insert_update_009 insert_update_010
 #test: insert_update_001#
 test: delete update namespace case select_having select_implicit
-test: hw_test_operate_user multi_update
+test: hw_test_operate_user multi_update update_multi_base_table_view
 test: hw_createtbl_llt multi_delete
 #test: gsqlerr#
 test: sqlLLT
