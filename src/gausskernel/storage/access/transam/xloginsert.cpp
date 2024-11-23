@@ -980,6 +980,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         } else {
             Assert(remained_size >= 2);
             *(scratch++) = XLR_BLOCK_ID_DATA_SHORT;
+            remained_size--;
             *(scratch++) = (uint8)t_thrd.xlog_cxt.mainrdata_len;
             remained_size--;
         }
