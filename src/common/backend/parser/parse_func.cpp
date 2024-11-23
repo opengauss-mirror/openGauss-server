@@ -1961,11 +1961,19 @@ static void unify_hypothetical_args(ParseState *pstate,
          * Select common type, giving preference to the aggregated argument's
          * type (we'd rather coerce the direct argument once than coerce all
          * the aggregated values).
+         * 
+         * In A compatibility, we always coerce the direct argument to the type 
+         * of the aggregated values. So that even if they are not in the same 
+         * type category, we can still do the coercing.
          */
-        commontype = select_common_type(pstate,
-                                        list_make2(args[aargpos], args[i]),
-                                        "WITHIN GROUP",
-                                        NULL);
+        if (DB_IS_CMPT(A_FORMAT)) {
+            commontype = getBaseType(exprType(args[aargpos]));
+        } else {
+            commontype = select_common_type(pstate,
+                                            list_make2(args[aargpos], args[i]),
+                                            "WITHIN GROUP",
+                                            NULL);
+        }
 
         /*
          * Perform the coercions.  We don't need to worry about NamedArgExprs
