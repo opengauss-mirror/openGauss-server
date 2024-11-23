@@ -595,6 +595,14 @@ static void sig_thread_config_handler(int &currentAuditRotationAge, int &current
     }
 }
 
+static void pgaudit_exit_clean(int code, Datum arg)
+{
+    if (t_thrd.audit.cur_thread_idx == 0) {
+        m_curlUtils.~CurlUtils();
+    }
+}
+
+
 /* audit sha code version: finished upgrade*/
 static bool pgaudit_need_sha_code()
 {
@@ -728,6 +736,7 @@ NON_EXEC_STATIC void PgAuditorMain()
     /* audit master thread */
     if (t_thrd.audit.cur_thread_idx == 0) {
         m_curlUtils.initialize(false, "", "", "");
+        on_proc_exit(pgaudit_exit_clean, 0);
         elasic_search_connection_test();
         audit_process_cxt_init();
     } else {
@@ -886,7 +895,6 @@ NON_EXEC_STATIC void PgAuditorMain()
     }
 
     if (t_thrd.audit.cur_thread_idx == 0) {
-        m_curlUtils.~CurlUtils();
         audit_process_cxt_exit();
     }
 
