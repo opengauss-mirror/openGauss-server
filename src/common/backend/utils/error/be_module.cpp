@@ -138,6 +138,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_PARTITION, "PARTITION"},
     {MOD_LWLOCK, "LWLOCK"},
     {MOD_ENCODING_CHECK, "ENCODING_CHECK"},
+    {MOD_INVAL, "INVAL"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

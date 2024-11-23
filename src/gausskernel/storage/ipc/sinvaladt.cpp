@@ -616,6 +616,8 @@ void SIInsertDataEntries(const SharedInvalidationMessage* data, int n)
         }
 
         LWLockRelease(SInvalWriteLock);
+
+        ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("insert SI messages,current maxMsgNum is %d", max)));
     }
 }
 
@@ -749,6 +751,9 @@ int SIGetDataEntries(SharedInvalidationMessage* data, int datasize, bool workses
     }
 
     LWLockRelease(SInvalReadLock);
+
+    ereport(DEBUG4, (errmodule(MOD_INVAL),
+        errmsg("obtain %d SI messages,current nextMsgNum is %d", n, stateP->nextMsgNum)));
     return n;
 }
 
@@ -865,7 +870,7 @@ void SICleanupQueue(bool callerHasWriteLock, int minFree)
         needSig->signaled = true;
         LWLockRelease(SInvalReadLock);
         LWLockRelease(SInvalWriteLock);
-        ereport(DEBUG4, (errmsg("sending sinval catchup signal to ThreadId %lu", his_pid)));
+        ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("sending sinval catchup signal to ThreadId %lu", his_pid)));
         SendProcSignal(his_pid, PROCSIG_CATCHUP_INTERRUPT, his_backendId);
 
         if (callerHasWriteLock) {

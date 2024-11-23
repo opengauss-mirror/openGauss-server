@@ -975,6 +975,7 @@ void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
         } else {
             RebuildRangePartitionMap((RangePartitionMap*)oldMap, (RangePartitionMap*)newMap);
         }
+        ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("map refcount is zero when RebuildPartitonMap ")));
     } else {
         oldMap->isDirty = true;
         SetRelCacheNeedEOXActWork(true);
