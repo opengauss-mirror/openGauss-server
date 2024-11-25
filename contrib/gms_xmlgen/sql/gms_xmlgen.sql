@@ -449,6 +449,18 @@ gms_output.put_line(xml_output);
 gms_xmlgen.closecontext(xml_cxt);
 END;
 /
+-- parameter2 null is the same as false
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setconvertspecialchars(xml_cxt, null);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
 -- error for missing parameter 2
 DECLARE
 xml_output clob;
@@ -490,6 +502,30 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setmaxrows(xml_cxt, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- set max rows 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- set max rows 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 1.9);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
 gms_xmlgen.closecontext(xml_cxt);
@@ -551,6 +587,30 @@ xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
 gms_xmlgen.setnullhandling(xml_cxt, 2);
 gms_xmlgen.restartquery(xml_cxt);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- number 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- number 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 1.9);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
 gms_xmlgen.closecontext(xml_cxt);
@@ -793,6 +853,30 @@ gms_output.put_line(xml_output);
 gms_xmlgen.closecontext(xml_cxt);
 END;
 /
+-- set skip row 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- set skip row 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1.9);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
 -- set skip row 2
 DECLARE
 xml_output clob;
@@ -957,11 +1041,11 @@ xml_output clob;
 xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -974,11 +1058,11 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setskiprows(xml_cxt, 1);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -991,11 +1075,11 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setmaxrows(xml_cxt, 2);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -1009,11 +1093,34 @@ BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setskiprows(xml_cxt, 1);
 gms_xmlgen.setmaxrows(xml_cxt, 1);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+-- getnumrowsprocessed with skip rows && max rows
+-- the second getxml should continue from the last
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 0);
+gms_xmlgen.setmaxrows(xml_cxt, 1);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;

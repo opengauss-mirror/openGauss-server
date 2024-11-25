@@ -104,7 +104,7 @@ END;
 CREATE OR REPLACE FUNCTION gms_xmlgen.set_convert_special_chars(ctx IN gms_xmlgen.ctxhandle, is_convert IN boolean)
 RETURNS void
 AS 'MODULE_PATHNAME', 'set_convert_special_chars'
-LANGUAGE C STRICT IMMUTABLE;
+LANGUAGE C IMMUTABLE;
 
 CREATE OR REPLACE PROCEDURE gms_xmlgen.setconvertspecialchars(ctx IN gms_xmlgen.ctxhandle, is_convert IN boolean)
 AS

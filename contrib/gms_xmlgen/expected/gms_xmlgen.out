@@ -1394,6 +1394,64 @@ END;
   </ROW>
 </ROWSET>
 
+-- parameter2 null is the same as false
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setconvertspecialchars(xml_cxt, null);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>"'<>&char test      </char>
+    <varchar>varchar"'<>&test</varchar>
+    <text>text test"'<>&</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{"a" : 1, "b" : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>"'<>&</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2"'<>&char test     </char>
+    <varchar>2varchar"'<>&test</varchar>
+    <text>2text test"'<>&</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&^%@</varchar>
+      <varchar>"'<>&</varchar>
+      <varchar><&y'"></varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
 -- error for missing parameter 2
 DECLARE
 xml_output clob;
@@ -1436,6 +1494,78 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setmaxrows(xml_cxt, 1);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+-- set max rows 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+-- set max rows 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setmaxrows(xml_cxt, 1.9);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
 gms_xmlgen.closecontext(xml_cxt);
@@ -1700,6 +1830,150 @@ END;
     <timestamp/>
     <json/>
     <varchar_array/>
+  </ROW>
+</ROWSET>
+
+-- number 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
+  </ROW>
+</ROWSET>
+
+-- number 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setnullhandling(xml_cxt, 1.9);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+    <integer xsi:nil="true"/>
+    <float xsi:nil="true"/>
+    <numeric xsi:nil="true"/>
+    <boolean xsi:nil="true"/>
+    <char xsi:nil="true"/>
+    <varchar xsi:nil="true"/>
+    <text xsi:nil="true"/>
+    <blob xsi:nil="true"/>
+    <raw xsi:nil="true"/>
+    <date xsi:nil="true"/>
+    <time xsi:nil="true"/>
+    <timestamp xsi:nil="true"/>
+    <json xsi:nil="true"/>
+    <varchar_array xsi:nil="true"/>
   </ROW>
 </ROWSET>
 
@@ -2237,6 +2511,82 @@ END;
   </ROW>
 </ROWSET>
 
+-- set skip row 1.4, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1.4);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
+-- set skip row 1.9, the same as 1
+DECLARE
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 1.9);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+  <ROW>
+  </ROW>
+</ROWSET>
+
 -- set skip row 2
 DECLARE
 xml_output clob;
@@ -2734,11 +3084,11 @@ xml_output clob;
 xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -2799,11 +3149,11 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setskiprows(xml_cxt, 1);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -2844,11 +3194,11 @@ xml_cxt gms_xmlgen.ctxhandle;
 BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setmaxrows(xml_cxt, 2);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
@@ -2908,16 +3258,90 @@ BEGIN
 xml_cxt := gms_xmlgen.newcontext('select * from t_types');
 gms_xmlgen.setskiprows(xml_cxt, 1);
 gms_xmlgen.setmaxrows(xml_cxt, 1);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 xml_output := gms_xmlgen.getxml(xml_cxt);
 gms_output.put_line(xml_output);
-processed_row:=gms_xmlgen.getnumrowsprocessed(xml_cxt);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
 gms_output.put_line(processed_row);
 gms_xmlgen.closecontext(xml_cxt);
 END;
 /
 0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>2</integer>
+    <float>2.23456</float>
+    <numeric>2.234567</numeric>
+    <boolean>false</boolean>
+    <char>2&quot;&apos;&lt;&gt;&amp;char test     </char>
+    <varchar>2varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>2text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>EEEE</blob>
+    <raw>FFFF</raw>
+    <date>2026-03-04T00:00:00</date>
+    <time>20:12:13</time>
+    <timestamp>2026-05-06T21:13:00</timestamp>
+    <json>[9,8,7,6]</json>
+    <varchar_array>
+      <varchar>&amp;^%@</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>&lt;&amp;y&apos;&quot;&gt;</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+1
+-- getnumrowsprocessed with skip rows && max rows
+-- the second getxml should continue from the last
+DECLARE
+processed_row number;
+xml_output clob;
+xml_cxt gms_xmlgen.ctxhandle;
+BEGIN
+xml_cxt := gms_xmlgen.newcontext('select * from t_types');
+gms_xmlgen.setskiprows(xml_cxt, 0);
+gms_xmlgen.setmaxrows(xml_cxt, 1);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+xml_output := gms_xmlgen.getxml(xml_cxt);
+gms_output.put_line(xml_output);
+processed_row := gms_xmlgen.getnumrowsprocessed(xml_cxt);
+gms_output.put_line(processed_row);
+gms_xmlgen.closecontext(xml_cxt);
+END;
+/
+0
+<?xml version="1.0"?>
+<ROWSET>
+  <ROW>
+    <integer>1</integer>
+    <float>1.23456</float>
+    <numeric>1.234567</numeric>
+    <boolean>true</boolean>
+    <char>&quot;&apos;&lt;&gt;&amp;char test      </char>
+    <varchar>varchar&quot;&apos;&lt;&gt;&amp;test</varchar>
+    <text>text test&quot;&apos;&lt;&gt;&amp;</text>
+    <blob>FF</blob>
+    <raw>ABCD</raw>
+    <date>2024-01-02T00:00:00</date>
+    <time>18:01:02</time>
+    <timestamp>2024-02-03T19:03:04</timestamp>
+    <json>{&quot;a&quot; : 1, &quot;b&quot; : 2}</json>
+    <varchar_array>
+      <varchar>abc</varchar>
+      <varchar>&quot;&apos;&lt;&gt;&amp;</varchar>
+      <varchar>你好</varchar>
+    </varchar_array>
+  </ROW>
+</ROWSET>
+
+1
 <?xml version="1.0"?>
 <ROWSET>
   <ROW>
@@ -3166,7 +3590,7 @@ GMS_xmlgen.closeContext(ctx);
 GMS_output.put_line(ctx::text);
 END;
 /
-73
+81
 DECLARE res XMLType;
 BEGIN res := GMS_XMLGEN.GETXMLTYPE('123');
 EXCEPTION

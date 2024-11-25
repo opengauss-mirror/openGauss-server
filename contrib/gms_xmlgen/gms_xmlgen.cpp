@@ -735,12 +735,9 @@ static StringInfo query_to_xml_flat(XMLGenContext *ctx)
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_CURSOR), errmsg("cursor \"%s\" does not exist", ctx->query_string)));
         }
-
-        if (ctx->max_rows < 0) {
-            SPI_cursor_fetch(portal, true, LONG_MAX);
-        } else {
-            SPI_cursor_fetch(portal, true, ctx->skip_rows + ctx->max_rows);
-        }
+        check_uint_valid(ctx->current_row + ctx->skip_rows);
+        SPI_cursor_move(portal, true, ctx->current_row + ctx->skip_rows);
+        SPI_cursor_fetch(portal, true, ctx->max_rows >= 0 ? ctx->max_rows : UINT_MAX);
     } else {
         if (SPI_execute(ctx->query_string, true, 0) != SPI_OK_SELECT) {
             pfree_ext(row_tag);
@@ -752,10 +749,9 @@ static StringInfo query_to_xml_flat(XMLGenContext *ctx)
 
     count_rows = (int64)SPI_processed;
     check_xml_valid(ctx, count_rows, SPI_tuptable->tupdesc->natts);
-    int64 start_now = skip_rows + ctx->current_row;
-    if (ctx->max_rows != 0 && count_rows > start_now) {
+    if (ctx->max_rows != 0 && count_rows > 0) {
         xml_root_element_start(result, row_set_tag == NULL ? row_tag : row_set_tag, null_flag);
-        for (int64 i = skip_rows; i < count_rows; i++) {
+        for (int64 i = 0; i < count_rows; i++) {
             SPI_sql_row_to_xml_element(i, result, null_flag, (row_set_tag == NULL || row_tag == NULL) ? NULL : row_tag,
                                        ctx->is_convert_special_chars, ctx->item_tag_name,
                                        (row_set_tag == NULL && row_tag == NULL) ? 0 : 1);
@@ -916,7 +912,7 @@ Datum close_context(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
 
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
@@ -943,7 +939,7 @@ Datum convert_xml(PG_FUNCTION_ARGS)
     }
     int64 flag = 0;
     if (!PG_ARGISNULL(1)) {
-        flag = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+        flag = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     }
 
     if (flag < 0 || flag > UINT_MAX) {
@@ -981,7 +977,7 @@ Datum convert_clob(PG_FUNCTION_ARGS)
     }
     int64 flag = 0;
     if (!PG_ARGISNULL(1)) {
-        flag = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+        flag = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     }
 
     char *xmlstr = text_to_cstring((const text *)PG_GETARG_BYTEA_PP(0));
@@ -1013,7 +1009,7 @@ Datum get_num_rows_processed(PG_FUNCTION_ARGS)
 {
     CHECK_XML_SUPPORT();
 
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1036,9 +1032,9 @@ Datum get_xml_by_ctx_id(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid gms_xmlgen context id")));
     }
 
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
-    int64 dtd_or_schema = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+    int64 dtd_or_schema = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     check_uint_valid(dtd_or_schema);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL || ctx->query_string == NULL) {
@@ -1067,7 +1063,7 @@ Datum get_xml_by_query(PG_FUNCTION_ARGS)
     }
     char *query_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
     check_query_string_valid(query_str);
-    int64 dtd_or_schema = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+    int64 dtd_or_schema = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     check_uint_valid(dtd_or_schema);
     XMLGenContext *ctx = create_xmlgen_context(0);
     ctx->query_string = query_str;
@@ -1141,7 +1137,7 @@ Datum restart_query(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid gms_xmlgen context id")));
     }
 
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1183,7 +1179,7 @@ Datum set_convert_special_chars(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     bool is_convert = PG_GETARG_BOOL(1);
@@ -1207,9 +1203,9 @@ Datum set_max_rows(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
-    int64 max_rows = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+    int64 max_rows = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     check_uint_valid(max_rows);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1234,9 +1230,9 @@ Datum set_null_handling(PG_FUNCTION_ARGS)
 {
     CHECK_XML_SUPPORT();
 
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
-    int64 flag = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+    int64 flag = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     check_uint_valid(flag);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx != NULL) {
@@ -1258,7 +1254,7 @@ Datum set_row_set_tag(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1298,7 +1294,7 @@ Datum set_row_tag(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1340,9 +1336,9 @@ Datum set_skip_rows(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
-    int64 skip_rows = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(1));
+    int64 skip_rows = get_floor_numeric_int64(PG_GETARG_DATUM(1));
     check_uint_valid(skip_rows);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
@@ -1369,7 +1365,7 @@ Datum use_item_tags_for_coll(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_VOID();
     }
-    int64 ctx_id = (int64)numeric_int16_internal(PG_GETARG_NUMERIC(0));
+    int64 ctx_id = get_floor_numeric_int64(PG_GETARG_DATUM(0));
     check_uint_valid(ctx_id);
     XMLGenContext *ctx = get_xmlgen_context(ctx_id);
     if (ctx == NULL) {
