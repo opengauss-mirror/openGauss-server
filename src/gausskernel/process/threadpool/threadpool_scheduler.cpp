@@ -116,6 +116,7 @@ ThreadPoolScheduler::ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups)
     m_gpcContext = NULL;
     m_getSIGHUP = false;
     m_canAdjustPool = true;
+    m_getKilled = false;
 }
 
 ThreadPoolScheduler::~ThreadPoolScheduler()
