@@ -982,7 +982,7 @@ Datum ScalarVector::AddCStringVar(Datum data, int aindex)
     char* src_ptr = NULL;
     int var_len;
     src_ptr = DatumGetPointer(data);
-    Size len = strlen(DatumGetPointer(data)) + 1;
+    Size len = strlen(DatumGetPointer(data));
     char* result = NULL;
 
     if ((len + VARHDRSZ_SHORT) < VARATT_SHORT_MAX) {
