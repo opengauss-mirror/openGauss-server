@@ -1910,7 +1910,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
             AtEOXact_GUC(true, save_nestlevel);
     }
     int rc = CompileWhich();
-    if ((rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) && enable_plpgsql_gsdependency_guc()) {
+    if ((rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) && enable_plpgsql_pkgfunc_lazy_delete()) {
         MemoryContext oldCxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
         u_sess->plsql_cxt.func_compiled_list = list_append_unique_oid(u_sess->plsql_cxt.func_compiled_list, retval);
         MemoryContextSwitchTo(oldCxt);

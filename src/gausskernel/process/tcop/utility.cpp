@@ -3456,6 +3456,8 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                 if (u_sess->plsql_cxt.debug_query_string) {
                     pfree_ext(u_sess->plsql_cxt.debug_query_string);
                 }
+                list_free_ext(u_sess->plsql_cxt.func_compiled_list);
+                u_sess->plsql_cxt.real_func_num = 0;
                 set_create_plsql_type_end();
                 set_function_style_none();
                 u_sess->plsql_cxt.isCreatePkg = false;

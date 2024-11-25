@@ -3216,6 +3216,7 @@ extern bool enable_plpgsql_gsdependency_guc();
 extern bool enable_plpgsql_gsdependency();
 extern bool enable_plpgsql_undefined();
 extern bool enable_plpgsql_undefined_not_check_nspoid();
+extern bool enable_plpgsql_pkgfunc_lazy_delete();
 extern void set_create_plsql_type_not_check_nsp_oid();
 extern void set_create_plsql_type_start();
 extern void set_create_plsql_type_end();

@@ -71,6 +71,8 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
 static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs);
 static void ReleaseUnusedPortalContext(List* portalContexts, bool releaseAll = false);
 static bool gspkg_is_same_pkg_spec(HeapTuple tup, const char* pkg_spec_src);
+static List* GetFunctionOidsByPackageOid(Oid pkgOid);
+static void DeleteNotExistsPkgFuncs(List* funcOids, Oid pkgOid);
 
 #define MAXSTRLEN ((1 << 11) - 1)
 
@@ -418,8 +420,9 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, pkgName);
             }
             tup = heap_modify_tuple(oldpkgtup, tupDesc, values, nulls, replaces);
-            simple_heap_update(pkgDesc, &tup->t_self, tup); 
+            simple_heap_update(pkgDesc, &tup->t_self, tup);
             ReleaseSysCache(oldpkgtup);
+            DeletePgObject(oldPkgOid, OBJECT_TYPE_PKGBODY);
             isReplaced = true;
         } 
     } else {
@@ -436,11 +439,18 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     Assert(OidIsValid(pkgOid));
 
     CatalogUpdateIndexes(pkgDesc, tup);
+
+    List* oldPkgFuncOids = NIL;
+    if (isReplaced && enable_plpgsql_pkgfunc_lazy_delete()) {
+        oldPkgFuncOids = GetFunctionOidsByPackageOid(oldPkgOid);
+    }
     if (isReplaced && !(is_same && GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC))) {
         (void)deleteDependencyRecordsFor(PackageRelationId, pkgOid, true);
         /* the 'shared dependencies' also change when update. */
         deleteSharedDependencyRecordsFor(PackageRelationId, pkgOid, 0);
-        DeleteFunctionByPackageOid(pkgOid);
+        if (!enable_plpgsql_pkgfunc_lazy_delete()) {
+            DeleteFunctionByPackageOid(pkgOid);
+        }
         DeleteTypesDenpendOnPackage(PackageRelationId, pkgOid);
     }
     heap_freetuple_ext(tup);
@@ -468,7 +478,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     /* Post creation hook for new schema */
     InvokeObjectAccessHook(OAT_POST_CREATE, PackageRelationId, pkgOid, 0, NULL);
 
-        /* Recode the procedure create time. */
+    /* Recode the procedure create time. */
     if (OidIsValid(pkgOid)) {
         if (!isReplaced) {
             PgObjectOption objectOpt = {true, true, false, false};
@@ -509,6 +519,11 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     }
     PG_END_TRY();
     u_sess->plsql_cxt.need_pkg_dependencies = false;
+
+    if (enable_plpgsql_pkgfunc_lazy_delete()) {
+        DeleteNotExistsPkgFuncs(oldPkgFuncOids, pkgOid);
+        list_free_ext(oldPkgFuncOids);
+    }
 
     /* record dependency discovered during validation */
     if (!isUpgrade && u_sess->plsql_cxt.pkg_dependencies != NIL && !enable_plpgsql_gsdependency_guc()) {
@@ -584,6 +599,7 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     tupDesc = RelationGetDescr(pkgDesc);
 
     bool pkgBodyDeclSrcIsNull = false;
+    List* oldPkgFuncOids = NIL;
     if (OidIsValid(oldPkgOid)) {
         oldpkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(oldPkgOid));
         if (!HeapTupleIsValid(oldpkgtup)) {
@@ -602,14 +618,18 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                 is_same = (0 == strcmp(pkgBodyDeclSrcStr, pkgBodySrc));
             }
         }
+        if (enable_plpgsql_pkgfunc_lazy_delete()) {
+            oldPkgFuncOids = GetFunctionOidsByPackageOid(oldPkgOid);
+        }
         if (!pkgBodyDeclSrcIsNull) {
             if (!replace) {
                 ereport(ERROR, (errcode(ERRCODE_DUPLICATE_PACKAGE), errmsg("package body already exists")));
-            } else {
+            }
+            if (!enable_plpgsql_pkgfunc_lazy_delete()) {
                 DeleteFunctionByPackageOid(oldPkgOid);
-                if (!(is_same && GetPgObjectValid(oldPkgOid, OBJECT_TYPE_PKGBODY))) {
-                    DeleteTypesDenpendOnPackage(PackageRelationId, oldPkgOid, false);
-                }
+            }
+            if (!(is_same && GetPgObjectValid(oldPkgOid, OBJECT_TYPE_PKGBODY))) {
+                DeleteTypesDenpendOnPackage(PackageRelationId, oldPkgOid, false);
             }
         }
         tup = heap_modify_tuple(oldpkgtup, tupDesc, values, nulls, replaces);
@@ -658,6 +678,10 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     u_sess->plsql_cxt.need_init = false;
     plpgsql_package_validator(oldPkgOid, false, true);
     u_sess->plsql_cxt.need_init = true;
+    if (enable_plpgsql_pkgfunc_lazy_delete()) {
+        DeleteNotExistsPkgFuncs(oldPkgFuncOids, oldPkgOid);
+        list_free_ext(oldPkgFuncOids);
+    }
     plpgsql_clear_created_pkg(oldPkgOid);
     return oldPkgOid;
 }
@@ -1988,6 +2012,40 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
                 NameListToString(stmt1->funcname))));
     }
     return true;
+}
+
+static List* GetFunctionOidsByPackageOid(Oid pkgOid)
+{
+    HeapTuple tup;
+    List* funcOids = NIL;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(pkgOid));
+    Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 1, &entry);
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        Oid funcOid = HeapTupleGetOid(tup);
+        funcOids = list_append_unique_oid(funcOids, funcOid);
+    }
+    systable_endscan(scan);
+    heap_close(relation, AccessShareLock);
+    return funcOids;
+}
+
+static void DeleteNotExistsPkgFuncs(List* funcOids, Oid pkgOid)
+{
+    List* toBeDeletedFuncs = NIL;
+    ListCell* cell = NULL;
+    toBeDeletedFuncs = list_difference_oid(funcOids, u_sess->plsql_cxt.func_compiled_list);
+    foreach (cell, toBeDeletedFuncs) {
+        Oid funcOid = lfirst_oid(cell);
+        HeapTuple tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
+        if (HeapTupleIsValid(tup)) {
+            DeleteFunctionByFuncTuple(tup);
+            ReleaseSysCache(tup);
+        }
+    }
+    list_free_ext(u_sess->plsql_cxt.func_compiled_list);
+    list_free_ext(toBeDeletedFuncs);
 }
 
 static bool gspkg_is_same_pkg_spec(HeapTuple tup, const char* pkg_spec_src)
