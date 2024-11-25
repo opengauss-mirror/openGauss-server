@@ -1855,6 +1855,7 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
     int inLoc1 = 0;
     int inLoc2 = 0;
     int length = 0;
+    int sameParamtypNum = 0;
     foreach(cell, argList1) {
         arr1[length] = (FunctionParameter*)lfirst(cell);
         if (arr1[length]->mode != FUNC_PARAM_OUT) {
@@ -1980,7 +1981,21 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
                 pfree(arr2);
                 return false;
             }
-        } else if (toid1 != toid2 || fp1->mode != fp2->mode) {
+        }
+        if (toid1 != toid2) {
+            pfree(arr1);
+            pfree(arr2);
+            return false;
+        }
+        if ((stmt1->isProcedure || stmt2->isProcedure) && (fp1->mode != fp2->mode)) {
+            if (enable_outparam_override && length1 == length2) {
+                sameParamtypNum += 1;
+            } else {
+                pfree(arr1);
+                pfree(arr2);
+                return false;
+            }
+        } else if (stmt1->isFunctionDeclare != stmt2->isFunctionDeclare && fp1->mode != fp2->mode) {
             pfree(arr1);
             pfree(arr2);
             return false;
@@ -2002,6 +2017,16 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
     }
     pfree(arr1);
     pfree(arr2);
+
+    if (enable_outparam_override && length1 == length2 && sameParamtypNum == length1  && sameParamtypNum != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                    errmsg("can not override param:%s", NameListToString(stmt1->funcname)),
+                    errcause("param's length is unequal."),
+                    erraction("please check the param's length.")));
+    }
+
     /* function delcare in package specification and define in package body must be same */
     if (!isSameName && (stmt1->isFunctionDeclare^stmt2->isFunctionDeclare)) {
         ereport(ERROR,

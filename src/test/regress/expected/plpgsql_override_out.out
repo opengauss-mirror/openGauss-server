@@ -953,6 +953,27 @@ call test_function2('','');
  <unnamed portal 2> | <unnamed portal 1> | <unnamed portal 2>
 (1 row)
 
+set behavior_compat_options = 'proc_outparam_override';
+create or replace package pck2 is
+    FUNCTION pkg_mem_case(a int,self1 int) RETURN VARCHAR2;
+    procedure pkg_mem_case(a int,self1 inout int);
+end pck2;
+/
+ERROR:  function declared in package specification and package body must be the same, function: pkg_mem_case
+set behavior_compat_options = '';
+create or replace package pck2 is
+    FUNCTION pkg_mem_case(a int,self1 int) RETURN VARCHAR2;
+    procedure pkg_mem_case(a int,self1 inout int);
+end pck2;
+/
+select count(*) from pg_proc where proname = 'pkg_mem_case';
+ count 
+-------
+     1
+(1 row)
+
+drop package pck2;
+NOTICE:  drop cascades to function plpgsql_override_out.pkg_mem_case(integer,integer)
 set plsql_compile_check_options='';
 drop package body if exists pck1;
 drop package body pck1;
@@ -979,7 +1000,7 @@ drop cascades to function f1(integer)
 drop cascades to function f3()
 drop cascades to function pro2()
 drop cascades to function plpgsql_override_out.p11()
-drop cascades to function p11()
+--?.*
 drop cascades to function plpgsql_override_out.p11()
 drop cascades to function p11(integer)
 drop cascades to table test_table2

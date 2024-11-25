@@ -710,6 +710,22 @@ $$
 LANGUAGE 'plpgsql';
 call test_function2('','');
 
+set behavior_compat_options = 'proc_outparam_override';
+create or replace package pck2 is
+    FUNCTION pkg_mem_case(a int,self1 int) RETURN VARCHAR2;
+    procedure pkg_mem_case(a int,self1 inout int);
+end pck2;
+/
+
+set behavior_compat_options = '';
+create or replace package pck2 is
+    FUNCTION pkg_mem_case(a int,self1 int) RETURN VARCHAR2;
+    procedure pkg_mem_case(a int,self1 inout int);
+end pck2;
+/
+select count(*) from pg_proc where proname = 'pkg_mem_case';
+drop package pck2;
+
 set plsql_compile_check_options='';
 drop package body if exists pck1;
 drop package body pck1;
