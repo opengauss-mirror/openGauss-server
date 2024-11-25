@@ -14985,6 +14985,89 @@ Datum dss_io_stat(PG_FUNCTION_ARGS)
     result = HeapTupleGetDatum(heap_tuple);
     PG_RETURN_DATUM(result); 
 }
+
+Datum get_realtime_build_log_ctrl_status(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("This function only supports shared storage.")));
+    }
+    const int realtimeBuildCtrlStatColumnNum = 11;
+    const int shiftSpeed = 3;
+    Datum result;
+    TupleDesc tupdesc;
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+    errno_t errorno = EOK;
+    int i = 0;
+    tupdesc = CreateTemplateTupleDesc(realtimeBuildCtrlStatColumnNum, false);
+    const char *attrNames[realtimeBuildCtrlStatColumnNum] = {
+        "ins_id", "current_rto", "prev_reply_time", "prev_calculate_time", "reply_time",
+        "period_total_build", "build_rate", "prev_build_ptr", "realtime_build_ptr",
+        "current_insert_ptr", "sleep_time"
+    };
+    Oid attr_types[realtimeBuildCtrlStatColumnNum] = {
+        INT4OID, INT8OID, TIMESTAMPTZOID, TIMESTAMPTZOID, TIMESTAMPTZOID,
+        INT8OID, INT8OID, TEXTOID, TEXTOID, TEXTOID, INT4OID
+    };
+
+    for (i = 0; i < realtimeBuildCtrlStatColumnNum; i++) {
+        TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), attrNames[i], attr_types[i], -1, 0);
+    }
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    Tuplestorestate *tupstore = tuplestore_begin_heap(rsinfo->allowedModes & SFRM_Materialize_Random,
+                                                      false, u_sess->attr.attr_memory.work_mem);
+    MemoryContextSwitchTo(oldcontext);
+
+    if (SS_PRIMARY_ENABLE_TARGET_RTO) {
+        for (int instId = 0; instId < DMS_MAX_INSTANCES; instId++) {
+            realtime_build_ctrl_t rtBuildCtrl = g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[instId];
+            if (rtBuildCtrl.replyTime == 0) {
+                continue;
+            }
+
+            Datum values[realtimeBuildCtrlStatColumnNum];
+            bool nulls[realtimeBuildCtrlStatColumnNum] = {false};
+
+            char prevBuildPtr[MAXFNAMELEN];
+            char realtimeBuildPtr[MAXFNAMELEN];
+            char currentInsertPtr[MAXFNAMELEN];
+
+            errorno = snprintf_s(prevBuildPtr, sizeof(prevBuildPtr), sizeof(prevBuildPtr) - 1, "%X/%X",
+                       (uint32)(rtBuildCtrl.prevBuildPtr >> 32), (uint32)rtBuildCtrl.prevBuildPtr);
+            securec_check_ss(errorno, "", "");
+            errorno = snprintf_s(realtimeBuildPtr, sizeof(realtimeBuildPtr), sizeof(realtimeBuildPtr) - 1, "%X/%X",
+                       (uint32)(rtBuildCtrl.realtimeBuildPtr >> 32), (uint32)rtBuildCtrl.realtimeBuildPtr);
+            securec_check_ss(errorno, "", "");
+            XLogRecPtr currentInsertLsn = GetXLogInsertEndRecPtr();
+            errorno = snprintf_s(currentInsertPtr, sizeof(currentInsertPtr), sizeof(currentInsertPtr) - 1, "%X/%X",
+                       (uint32)(currentInsertLsn >> 32), (uint32)currentInsertLsn);
+            securec_check_ss(errorno, "", "");
+            i = 0;
+            values[i++] = Int32GetDatum(instId);
+            values[i++] = Int64GetDatum(rtBuildCtrl.currentRTO);
+            values[i++] = TimestampTzGetDatum(rtBuildCtrl.prevReplyTime);
+            values[i++] = TimestampTzGetDatum(rtBuildCtrl.prevCalculateTime);
+            values[i++] = TimestampTzGetDatum(rtBuildCtrl.replyTime);
+            values[i++] = Int64GetDatum(rtBuildCtrl.periodTotalBuild);
+            values[i++] = Int64GetDatum(rtBuildCtrl.buildRate >> shiftSpeed);
+            values[i++] = CStringGetTextDatum(prevBuildPtr);
+            values[i++] = CStringGetTextDatum(realtimeBuildPtr);
+            values[i++] = CStringGetTextDatum(currentInsertPtr);
+            values[i++] = Int32GetDatum(rtBuildCtrl.sleepTime);
+
+            tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+        }
+    }
+    
+    tuplestore_donestoring(tupstore);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+    
+    return (Datum)0;
+}
+
 #ifdef ENABLE_MULTIPLE_NODES
 /* Get the head row of the view of index status */
 TupleDesc get_index_status_view_frist_row()

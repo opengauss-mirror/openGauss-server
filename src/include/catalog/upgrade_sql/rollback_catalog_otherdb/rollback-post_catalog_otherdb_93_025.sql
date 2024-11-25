@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.realtime_build_log_ctrl_status() CASCADE;
