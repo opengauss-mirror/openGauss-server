@@ -21,11 +21,23 @@ select cume_dist(3,0.2) within group (order by c1,c2) from test_aggregate;
  .357142857142857
 (1 row)
 
+select cume_dist(3,.05) within group (order by c1,c3) from test_aggregate;
+    cume_dist     
+------------------
+ .214285714285714
+(1 row)
+
 --percent_rank
 select percent_rank(3,0.2) within group (order by c1,c2) from test_aggregate;
    percent_rank   
 ------------------
  .230769230769231
+(1 row)
+
+select percent_rank(3,.05) within group (order by c1,c3) from test_aggregate;
+   percent_rank   
+------------------
+ .153846153846154
 (1 row)
 
 --dense_rank
@@ -35,11 +47,23 @@ select dense_rank(4,0.2) within group (order by c1,c2) from test_aggregate;
           6
 (1 row)
 
+select dense_rank(3,.05) within group (order by c1,c3) from test_aggregate;
+ dense_rank 
+------------
+          3
+(1 row)
+
 --rank
 select rank(4,0.2) within group (order by c1,c2) from test_aggregate;
  rank 
 ------
     7
+(1 row)
+
+select rank(3,.05) within group (order by c1,c3) from test_aggregate;
+ rank 
+------
+    3
 (1 row)
 
 -- divide by zero check
@@ -69,12 +93,12 @@ LINE 1: select rank(x) within group (order by x) from generate_serie...
                     ^
 DETAIL:  Direct arguments of an ordered-set aggregate must use only grouped columns.
 -- enable_aggr_coerce_type = off,  type conversion test
---error
 select cume_dist(3) within group (order by c3) from test_aggregate;
-ERROR:  WITHIN GROUP types character varying and integer cannot be matched
-LINE 1: select cume_dist(3) within group (order by c3) from test_agg...
-                         ^
-CONTEXT:  referenced column: cume_dist
+    cume_dist     
+------------------
+ .571428571428571
+(1 row)
+
 --error 
 select cume_dist('a') within group (order by c1) from test_aggregate;
 ERROR:  invalid input syntax for integer: "a"
@@ -101,12 +125,12 @@ select cume_dist('1') within group (order by c1) from test_aggregate;
  .142857142857143
 (1 row)
 
---error boolean
 select rank(1) within group (order by x) from (values (true),(false)) v(x);
-ERROR:  WITHIN GROUP types boolean and integer cannot be matched
-LINE 1: select rank(1) within group (order by x) from (values (true)...
-                    ^
-CONTEXT:  referenced column: rank
+ rank 
+------
+    2
+(1 row)
+
 -- enable_aggr_coerce_type = on,  type conversion test
 set enable_aggr_coerce_type = on;
 --success
@@ -151,4 +175,253 @@ select rank(1) within group (order by x) from (values (true),(false)) v(x);
 
 set enable_aggr_coerce_type = off;
 drop table test_aggregate;
+create table employees
+(empno number,salary number,commission_pct varchar2(20));
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls first) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls last) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls first) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls last) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls first, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls last, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls first, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls last, commission_pct) FROM employees;
+ rank 
+------
+    1
+(1 row)
+
+SELECT dense_rank(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls first, commission_pct) FROM employees;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT dense_rank(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls last, commission_pct) FROM employees;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT dense_rank(15500, .05) WITHIN GROUP (ORDER BY salary asc, commission_pct) FROM employees;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT dense_rank(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls first, commission_pct) FROM employees;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT dense_rank(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls last, commission_pct) FROM employees;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls first) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls last) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls first) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls last) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls first, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls last, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls first, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT PERCENT_RANK(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls last, commission_pct) FROM employees;
+ percent_rank 
+--------------
+            0
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls first) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct desc nulls last) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls first) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary, commission_pct asc nulls last) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary desc, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls first, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary desc nulls last, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary asc, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls first, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+SELECT CUME_DIST(15500, .05) WITHIN GROUP (ORDER BY salary asc nulls last, commission_pct) FROM employees;
+ cume_dist 
+-----------
+         1
+(1 row)
+
+drop table employees;
 drop schema aggregate CASCADE;
