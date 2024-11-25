@@ -1,0 +1,51 @@
+create database event_db dbcompatibility 'B';
+\c event_db
+create schema event_s;
+set current_schema = event_s;
+set dolphin.b_compatibility to on;
+create user event_a sysadmin password 'event_123';
+create definer=event_a event e1 on schedule at '2023-01-16 21:05:40' disable do select 1;
+select  job_name, nspname from pg_job where dbname='event_b';
+ job_name | nspname 
+----------+---------
+(0 rows)
+
+show events in a;
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events from a;
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events like 'e';
+ job_name | schema_name | log_user | priv_user | job_status | start_date | interval | end_date | enable | failure_msg 
+----------+-------------+----------+-----------+------------+------------+----------+----------+--------+-------------
+(0 rows)
+
+show events like 'e%';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events like 'e_';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events where job_name='e1';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+drop event if exists e1;
+drop user if exists event_a;
+reset current_schema;
+drop schema event_s;
+\c postgres
+drop database if exists event_db;
