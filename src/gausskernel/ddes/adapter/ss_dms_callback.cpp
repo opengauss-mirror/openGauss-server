@@ -1897,11 +1897,11 @@ static void FailoverCleanBackends()
 
 static void RestartRealtimeBuildCtrl()
 {
-    if (SS_IN_REFORM && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl) {
+    if (SS_IN_REFORM && g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus > DISABLE) {
         ereport(LOG, (errmsg("[SS reform][On-demand] reform happened, disable realtime build log ctrl, "
                             "and will make it enable again after reform if needed.")));
     }
-    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+    g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = DISABLE;
     SpinLockInit(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
     g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
     errno_t rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl,
@@ -2053,7 +2053,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] old cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
-    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+    g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = DISABLE;
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
     } else if (SSBackendNeedExitScenario()) {
