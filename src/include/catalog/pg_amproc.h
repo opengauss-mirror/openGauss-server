@@ -697,4 +697,7 @@ DATA(insert OID = 8973 (	8394   1560 1560 3 8469 ));
 DATA(insert OID = 8974 (	8394   1560 1560 5 8210 ));
 DATA(insert OID = 8985 (	8392   8305 8305 1 8450 ));
 DATA(insert OID = 8998 (	8397   8307 8307 1 8464 ));
+
+DATA(insert OID = 8970 (	8375   8305 8305 1 8450 ));
+DATA(insert OID = 8971 (	8376   8307 8307 1 8464 ));
 #endif   /* PG_AMPROC_H */
