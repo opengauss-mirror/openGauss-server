@@ -15,6 +15,9 @@
          ? ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("value is out of range."))) \
          : (void)0)
 
+#define get_floor_numeric_int64(val) \
+    (int64) numeric_int16_internal(DatumGetNumeric(DirectFunctionCall1(numeric_floor, val)))
+
 #define SPACE_PER_INDENTATION 2
 #define NULL_FLAG_NULL_ATTR 1
 #define NULL_FLAG_EMPTY_TAG 2
