@@ -422,6 +422,8 @@ test: temp__4 obsscaninfo
 test: create_seg_table
 #test: copy#
 
+# show_events
+test: show_events
 
 
 # ----------

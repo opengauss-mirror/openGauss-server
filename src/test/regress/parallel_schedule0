@@ -1114,6 +1114,9 @@ test: inherits01
 # show_warnings
 test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 
+# show_events
+test: show_events
+
 # test event trigger and object address
 test: test_object_alter
 test: event_trigger object_address

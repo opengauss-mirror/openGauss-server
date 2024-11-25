@@ -942,8 +942,25 @@ StmtResult *SearchEventInfo(ShowEventStmt *stmt)
     StringInfoData buf;
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT ");
+
+    char* intervalColName;
+    if (u_sess->attr.attr_sql.dolphin) {
+        intervalColName = "`interval`";
+    } else {
+        intervalColName = "interval";
+    }
     appendStringInfo(&buf,
-                     "job_name,nspname,log_user,priv_user,job_status,start_date,interval,end_date,enable,failure_msg ");
+                     "job_name,"
+                     "nspname,"
+                     "log_user,"
+                     "priv_user,"
+                     "job_status,"
+                     "start_date,"
+                     "%s,"
+                     "end_date,"
+                     "enable,"
+                     "failure_msg ",
+                     intervalColName);
     appendStringInfo(&buf, "FROM PG_JOB ");
 
     /* Concatenate where clause */
