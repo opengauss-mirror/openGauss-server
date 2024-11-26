@@ -785,9 +785,11 @@ static bool dw_batch_file_recycle(dw_batch_file_context *cxt, uint16 pages_to_wr
     if (trunc_file) {
         Assert(AmStartupProcess() || AmCheckpointerProcess() || AmBootstrapProcess() || !IsUnderPostmaster);
         /*
-         * Record min flush position for truncate because flush lock is not held during smgrsync.
+         * Record min flush position and # pages that have been flushed to dw
+         * file for truncate because flush lock is not held during smgrsync.
          */
         min_idx = get_dw_page_min_idx(cxt->id);
+        last_flush_page = cxt->flush_page;
         LWLockRelease(cxt->flush_lock);
     } else {
         Assert(AmStartupProcess() || AmPageWriterProcess());
@@ -831,8 +833,8 @@ static bool dw_batch_file_recycle(dw_batch_file_context *cxt, uint16 pages_to_wr
      */
     if (trunc_file) {
         if (min_idx == 0) {
-            file_head->start += cxt->flush_page;
-            cxt->flush_page = 0;
+            file_head->start += last_flush_page;
+            cxt->flush_page -= last_flush_page;
         } else {
             last_flush_page = min_idx - file_head->start;
             file_head->start = min_idx;
