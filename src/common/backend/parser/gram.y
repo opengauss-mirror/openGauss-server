@@ -7477,16 +7477,26 @@ maxValueList:
 maxValueItem:
 		a_expr
 			{
-				$$ = $1;
-			}
-		| MAXVALUE
-			{
-				Const *n = makeNode(Const);
-
-				n->ismaxvalue = true;
-				n->location = @1;
-
-				$$ = (Node *)n;
+				if IsA($1, ColumnRef) {
+					ColumnRef* ref = (ColumnRef*)$1;
+					List* l = (ref != NULL) ? ref->fields : NULL;
+					Node* sn = list_length(l) == 1 ? linitial_node(Node, l) : NULL;
+					if (sn != NULL && !IsA(sn, String)){
+						$$ = $1;
+					} else if (sn != NULL) {
+						char* colname = strVal(sn);
+						if (strcasecmp("maxvalue", colname) == 0) {
+							Const *n = makeNode(Const);
+							n->ismaxvalue = true;
+							n->location = @1;	
+							$$ = (Node*)n;	
+						}
+					} else {
+						$$ = $1;
+					}
+				} else {
+					$$ = $1;
+				}
 			}
 		;
 
@@ -31801,6 +31811,7 @@ unreserved_keyword:
 			| MAXEXTENTS
 			| MAXSIZE
 			| MAXTRANS
+			| MAXVALUE
 			| MEMBER
 			| MERGE
 			| MESSAGE_TEXT
@@ -32296,7 +32307,6 @@ reserved_keyword:
 			| LIMIT
 			| LOCALTIME
 			| LOCALTIMESTAMP
-			| MAXVALUE
 			| MINUS_P
 			| MODIFY_P
 			| NOCYCLE

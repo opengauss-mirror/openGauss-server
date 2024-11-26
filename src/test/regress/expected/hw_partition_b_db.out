@@ -2444,7 +2444,7 @@ PARTITION BY LIST COLUMNS(a,b)
     PARTITION p1 VALUES IN ( (0,MAXVALUE) ),
     PARTITION p2 VALUES IN ( (0,1), (0,2), (0,3), (1,1), (1,2) )
 );
-ERROR:  syntax error at or near "MAXVALUE"
+ERROR:  column "maxvalue" does not exist
 LINE 4:     PARTITION p1 VALUES IN ( (0,MAXVALUE) ),
                                         ^
 CREATE TABLE t_multi_keys_list_err (a int, b int, c int)
@@ -2462,7 +2462,7 @@ PARTITION BY LIST COLUMNS(a,b)
     PARTITION p1 VALUES IN (MAXVALUE),
     PARTITION p2 VALUES IN ( (0,1), (0,2), (0,3), (1,1), (1,2) )
 );
-ERROR:  syntax error at or near "MAXVALUE"
+ERROR:  column "maxvalue" does not exist
 LINE 4:     PARTITION p1 VALUES IN (MAXVALUE),
                                     ^
 CREATE TABLE t_multi_keys_list_err (a int, b int, c int)
