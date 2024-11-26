@@ -261,6 +261,7 @@ Datum gms_lz_uncompress_extract(PG_FUNCTION_ARGS)
     Size dst_len = 0;
     bytea *dst = NULL;
     
+    compress_cxt->context[handle].compressed_data = NULL;
     gzip_uncompress(src, src_len, (void**)&dst, &dst_len);
 
     SET_VARSIZE(dst, VARHDRSZ + dst_len);
