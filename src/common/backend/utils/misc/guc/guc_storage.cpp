@@ -7009,7 +7009,7 @@ static void assign_dcf_flow_control_rto(int newval, void *extra)
     if (ENABLE_DMS && !SS_DISASTER_CLUSTER && t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
         // clean realtime-build log ctrl cache, before realtime-build log ctrl enable.
         if (g_instance.dms_cxt.dmsInited && SS_PRIMARY_MODE && oldval == 0 && newval > 0) {
-            g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+            g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = DISABLE;
             SpinLockInit(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
             g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
             errno_t rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl,
@@ -7021,7 +7021,7 @@ static void assign_dcf_flow_control_rto(int newval, void *extra)
         g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto = newval;
         // make realtime-build logctrl disable, when recovery_time_target is set to 0;
         if (g_instance.dms_cxt.dmsInited && SS_PRIMARY_MODE && oldval > 0 && newval == 0) {
-            g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+            g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = DISABLE;
         }
 
         // notify nodes, start or stop realtime-build log ctrl.

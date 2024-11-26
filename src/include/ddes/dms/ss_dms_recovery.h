@@ -63,9 +63,9 @@
     !g_instance.attr.attr_storage.ss_enable_dorado && \
     !g_instance.attr.attr_storage.ss_stream_cluster)
 #define SS_PRIMARY_ENABLE_TARGET_RTO (ENABLE_REALTIME_BUILD_TARGET_RTO && \
-    SS_NORMAL_PRIMARY && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
+    SS_NORMAL_PRIMARY && g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus > DISABLE)
 #define SS_STANDBY_ENABLE_TARGET_RTO (SS_NORMAL_STANDBY && \
-    SS_ONDEMAND_REALTIME_BUILD_NORMAL && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl > 0)
+    SS_ONDEMAND_REALTIME_BUILD_NORMAL && g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus > DISABLE)
 #define REFORM_CTRL_VERSION 1
 typedef struct st_reformer_ctrl {
     uint32 version;
@@ -148,6 +148,12 @@ typedef struct realtime_build_log_ctrl {
     int sleepTime;
 } realtime_build_ctrl_t;
 
+typedef enum st_realtime_build_log_ctrl_status {
+    DISABLE = 0,        // realtime-build log ctrl disable
+    ENABLE_LOG_CTRL,    // primary: receive realtime-build ptr, standby: receive enable log ctrl message
+    ENABLE_REPORT_PTR   // standby: start to report realtime-build ptr
+} realtime_build_log_ctrl_status;
+
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
     volatile failover_ckpt_status_t failover_ckpt_status;
@@ -172,7 +178,7 @@ typedef struct ss_recovery_info {
     bool disaster_cluster_promoting;         // standby cluster is promoting
     volatile ondemand_recovery_pause_status_t ondemand_recovery_pause_status;
     bool realtime_build_in_reform; // used to avoid starting realtime build during reform
-    volatile bool enableRealtimeBuildLogCtrl;
+    volatile realtime_build_log_ctrl_status realtimeBuildLogCtrlStatus;
     slock_t sleepTimeSyncLock;
     volatile int globalSleepTime;
     realtime_build_ctrl_t rtBuildCtrl[DMS_MAX_INSTANCES];

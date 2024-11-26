@@ -2525,6 +2525,13 @@ static void LogCtrlReportRealtimeBuildPtr()
         g_dispatcher->reportTime = currentTime;
         return;
     }
+    if (g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus == ENABLE_LOG_CTRL) {
+        g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = ENABLE_REPORT_PTR;
+        ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS][On-demand] send primary node %d realtime-build ptr start, realtime-build %X/%X",
+                       SS_PRIMARY_ID, (uint32)(minEnd >> 32), (uint32)minEnd)));
+    }
+
     ereport(DEBUG4, (errmodule(MOD_DMS),
             errmsg("[SS][On-demand] send primary node %d realtime-build ptr start, realtime-build %X/%X",
                    SS_PRIMARY_ID, (uint32)(minEnd >> 32), (uint32)minEnd)));
