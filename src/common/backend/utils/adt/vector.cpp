@@ -528,40 +528,63 @@ inline void prefetch_L1(const void *address)
 }
 
 #ifdef __aarch64__
-VECTOR_TARGET_CLONES static float
-VectorL2SquaredDistance(int size, float *a, float *b)
+static float L2SquaredDistanceRef(int dim, float *ax, float *bx)
 {
-    float32x4_t sum = vdupq_n_f32(0.0f);
-    int prefetch_len = 8;
-    int batch_num = 4;
-    int i;
-    for (i = 0; i < size - (size % batch_num); i += batch_num) {
-        prefetch_L1(a + i + prefetch_len);
-        prefetch_L1(b + i + prefetch_len);
-        float32x4_t va = vld1q_f32(a + i);
-        float32x4_t vb = vld1q_f32(b + i);
-        float32x4_t diff = vsubq_f32(va, vb);
-        sum = vfmaq_f32(sum, diff, diff);
+    float distance = 0.0f;
+
+    for (int i = 0; i < dim; i++) {
+        float diff = ax[i] - bx[i];
+        distance += diff * diff;
     }
 
-    float scalar_sum = 0.0f;
-    if (size % batch_num > 0) {
-        int remaining_size = size % batch_num;
-        for (int j = 0; j < remaining_size; ++j) {
-            prefetch_L1(a + i + j);
-            prefetch_L1(b + i + j);
-            float value_a = a[i + j];
-            float value_b = b[i + j];
-            float diff = value_a - value_b;
-            float sq_diff = diff * diff;
-            scalar_sum += sq_diff;
-        }
+    return distance;
+}
+
+VECTOR_TARGET_CLONES static float
+VectorL2SquaredDistance(int dim, float *ax, float *bx)
+{
+    // 128 bit register = float 32*4
+    float32x4_t r1 = vdupq_n_f32(0.0);
+    float32x4_t r2 = vdupq_n_f32(0.0);
+    float32x4_t r3 = vdupq_n_f32(0.0);
+    float32x4_t r4 = vdupq_n_f32(0.0);
+    int i = 0;
+    float* pta = ax;
+    float* ptb = bx;
+    int batch1 = 16;
+    int batch2 = 4;
+    int rest = batch2 - 1;
+    for (; i + batch1 <= dim; i += batch1, pta += batch1, ptb += batch1) {
+        float32x4x4_t packdata_a = vld1q_f32_x4(pta);
+        float32x4x4_t packdata_b = vld1q_f32_x4(ptb);
+
+        float32x4_t diff0 = vsubq_f32(packdata_a.val[0], packdata_b.val[0]);
+        float32x4_t diff1 = vsubq_f32(packdata_a.val[1], packdata_b.val[1]);
+        float32x4_t diff2 = vsubq_f32(packdata_a.val[2], packdata_b.val[2]);
+        float32x4_t diff3 = vsubq_f32(packdata_a.val[3], packdata_b.val[3]);
+
+        r1 = vfmaq_f32(r1, diff0, diff0);
+        r2 = vfmaq_f32(r2, diff1, diff1);
+        r3 = vfmaq_f32(r3, diff2, diff2);
+        r4 = vfmaq_f32(r4, diff3, diff3);
     }
 
-    sum = vpaddq_f32(sum, sum);
-    sum = vpaddq_f32(sum, sum);
-    float res = vgetq_lane_f32(sum, 0);
-    return res + scalar_sum;
+    for (; i + batch2 <= dim; i += batch2, pta += batch2, ptb += batch2) {
+        float32x4_t data_a = vld1q_f32(pta);
+        float32x4_t data_b = vld1q_f32(ptb);
+        float32x4_t diff = vsubq_f32(data_a, data_b);
+        r1 = vfmaq_f32(r1, diff, diff);
+    }
+
+    r1 = vpaddq_f32(r1, r2);
+    r2 = vpaddq_f32(r3, r4);
+    r1 = vpaddq_f32(r1, r2);
+
+    float distance = vaddvq_f32(r1);
+    if (dim & rest) {
+        distance += L2SquaredDistanceRef(dim - i, ax + i, bx + i);
+    }
+    return distance;
 }
 #elif defined(__x86_64__)
 static inline __m128 masked_read(int d, const float *x)
