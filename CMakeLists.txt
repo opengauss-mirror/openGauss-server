@@ -42,6 +42,9 @@ endif()
 if("${ENABLE_MOT}" STREQUAL "")
     set(ENABLE_MOT "OFF")
 endif()
+if("${ENABLE_HTAP}" STREQUAL "")
+    set(ENABLE_HTAP "ON")
+endif()
 
 #FIXME: make it an argument
 set(openGauss ".")
@@ -113,7 +116,7 @@ install(DIRECTORY ${CMAKE_BINARY_DIR}/pg_plugin DESTINATION lib/postgresql)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/libsimsearch DESTINATION lib)
 
 if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
-    install(CODE "execute_process(COMMAND bash cmake.sh ${ENABLE_LITE_MODE} ${ENABLE_MOT} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
+    install(CODE "execute_process(COMMAND bash cmake.sh ${BUILD_TUPLE} ${ENABLE_LITE_MODE} ${ENABLE_MOT} ${ENABLE_HTAP} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
         DESTINATION share/postgresql/extension/
     )
