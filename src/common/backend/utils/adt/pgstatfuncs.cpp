@@ -1452,11 +1452,16 @@ Datum pg_stat_segment_extent_usage(PG_FUNCTION_ARGS)
     ForkNumber forknum = PG_GETARG_INT32(3);
     if (!ExtentTypeIsValid(extent_type)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
-                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 4]")));
+                        errmsg("The parameter extent_type is not valid"), errhint("extent_type should be in [1, 5]")));
     }
     if (forknum < 0 || forknum > MAX_FORKNUM) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_SEGMENT_PAGE),
                         errmsg("The forknumber is invalid"), errdetail("forknum should be in [0, %d]", MAX_FORKNUM)));
+    }
+    if (forknum == BCM_FORKNUM || forknum == INIT_FORKNUM) {
+        ereport(ERROR, (errmodule(MOD_SEGMENT_PAGE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("We do not support BCM_FORKNUM and INIT_FORKNUM yet."),
+                        errdetail("BCM_FORKNUM is 3, INIT_FORKNUM is 4.")));
     }
     FuncCallContext *funcctx = NULL;
 
