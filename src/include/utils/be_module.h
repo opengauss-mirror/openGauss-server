@@ -153,6 +153,7 @@ enum ModuleId {
     MOD_LWLOCK, /* debug info for lwlock held longer than a threshold*/
 
     MOD_ENCODING_CHECK, /* debug info for encoding check */
+    MOD_INVAL, /* debug info for invalid message */
     /*
      * Add your module id above.
      * Do not forget to fill up module_map[] about module name, and keep their ordering;

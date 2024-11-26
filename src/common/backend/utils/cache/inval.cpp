@@ -513,6 +513,7 @@ static void ThreadInvalidRelCache(SharedInvalidationMessage* msg)
 {
     if (msg->rc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->rc.dbId == InvalidOid) {
         RelationCacheInvalidateEntry(msg->rc.relId);
+        ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("process relcache invalid message, relid: %u", msg->rc.relId)));
         knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
         for (int i = 0; i < inval_cxt->relcache_callback_count; i++) {
             struct RELCACHECALLBACK* ccitem = inval_cxt->relcache_callback_list + i;

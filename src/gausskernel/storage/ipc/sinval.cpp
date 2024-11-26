@@ -162,7 +162,7 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
         getResult = SIGetDataEntries(inval_cxt->messages, MAXINVALMSGS, worksession);
         if (getResult < 0) {
             /* got a reset message */
-            ereport(DEBUG4, (errmsg("cache state reset")));
+            ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("cache state reset")));
             inval_cxt->SIMCounter++;
             resetFunction();
             break; /* nothing more to do */
@@ -195,7 +195,7 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
      */
     if (catchupInterruptPending) {
         catchupInterruptPending = false;
-        ereport(DEBUG4, (errmsg("sinval catchup complete, cleaning queue")));
+        ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("sinval catchup complete, cleaning queue")));
         SICleanupQueue(false, 0);
     }
 }
@@ -241,10 +241,10 @@ void ProcessCatchupInterrupt(void)
          * things would clean up nicely if we got an error partway through.
          */
         if (IsTransactionOrTransactionBlock()) {
-            ereport(DEBUG4, (errmsg("ProcessCatchupInterrupt inside transaction")));
+            ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("ProcessCatchupInterrupt inside transaction")));
             AcceptInvalidationMessages();
         } else {
-            ereport(DEBUG4, (errmsg("ProcessCatchupInterrupt outside transaction")));
+            ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("ProcessCatchupInterrupt outside transaction")));
             StartTransactionCommand();
             CommitTransactionCommand();
         }
