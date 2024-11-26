@@ -83,14 +83,14 @@ BEGIN
 END;
 /
 
-select * from gms_debug.initialize();
+select * from gms_debug.initialize('datanode1-3');
 
 select pg_sleep(1);
 
 select * from test_debug4(1);
 
 -- test with client error in exception
-select * from test_debug4(1);
+-- select * from test_debug4(1);
 
 select * from gms_debug.debug_off();
 

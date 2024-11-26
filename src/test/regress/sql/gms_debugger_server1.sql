@@ -80,7 +80,7 @@ select * from gms_debug.attach_session('datanode1-0');
 -- turn off without turn on
 select * from gms_debug.debug_off();
 
-select * from gms_debug.initialize();
+select * from gms_debug.initialize('datanode1-0');
 
 select pg_sleep(1);
 

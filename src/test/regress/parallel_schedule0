@@ -85,6 +85,7 @@ test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source
 test: index_advisor
+#test: pl_debugger_server pl_debugger_client
 #test: gms_debugger_server1 gms_debugger_client1
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func

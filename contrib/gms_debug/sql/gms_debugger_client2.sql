@@ -34,6 +34,7 @@ BEGIN
 END $$;
 
 set search_path = gms_debugger_test2;
+set behavior_compat_options='proc_outparam_override';
 
 CREATE or REPLACE FUNCTION gms_continue()
 returns void as $$
@@ -41,7 +42,7 @@ declare
     run_info  gms_debug.runtime_info;
     ret     binary_integer;
 begin
-    ret := gms_debug.continue(run_info, 0, 2);
+    ret := gms_debug.continue(run_info, gms_debug.break_any_return, 2);
     RAISE NOTICE 'breakpoint= %', run_info.breakpoint;
     RAISE NOTICE 'stackdepth= %', run_info.stackdepth;
     RAISE NOTICE 'line= %', run_info.line#;
@@ -56,7 +57,22 @@ declare
     run_info  gms_debug.runtime_info;
     ret     binary_integer;
 begin
-    ret := gms_debug.continue(run_info, 2, 2);
+    ret := gms_debug.continue(run_info, gms_debug.break_next_line, 2);
+    RAISE NOTICE 'breakpoint= %', run_info.breakpoint;
+    RAISE NOTICE 'stackdepth= %', run_info.stackdepth;
+    RAISE NOTICE 'line= %', run_info.line#;
+    RAISE NOTICE 'reason= %', run_info.reason;
+    RAISE NOTICE 'ret= %',ret;
+end;
+$$ LANGUAGE plpgsql;
+
+CREATE or REPLACE FUNCTION gms_step()
+returns void as $$
+declare
+    run_info  gms_debug.runtime_info;
+    ret     binary_integer;
+begin
+    ret := gms_debug.continue(run_info, gms_debug.break_any_call, 2);
     RAISE NOTICE 'breakpoint= %', run_info.breakpoint;
     RAISE NOTICE 'stackdepth= %', run_info.stackdepth;
     RAISE NOTICE 'line= %', run_info.line#;
@@ -67,7 +83,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- attach debug server
-select * from gms_debug.attach_session('datanode1-0');
+select * from gms_debug.attach_session('datanode1-1');
 
 select pg_sleep(3);
 
@@ -76,6 +92,8 @@ select gms_next();
 select gms_next();
 
 select gms_next();
+
+select gms_continue();
 
 select gms_continue();
 

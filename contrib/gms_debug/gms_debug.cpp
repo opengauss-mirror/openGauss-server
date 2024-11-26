@@ -82,7 +82,7 @@ static bool GMSInterfaceCheck(const char* funcname, bool needAttach)
 #endif
     if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_PLDEBUGGER)) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-            (errmsg("must be system admin to execute", funcname))));
+            (errmsg("must be system admin to execute %s", funcname))));
         return false;
     }
     if (u_sess->plsql_cxt.debug_client != NULL && needAttach){
@@ -100,7 +100,7 @@ static bool GMSInterfaceCheck(const char* funcname, bool needAttach)
             debuglock.unLock();
             ereport(ERROR,
             (errcode(ERRCODE_TARGET_SERVER_NOT_ATTACHED),
-                errmsg("must attach a execute func before execute", funcname),
+                errmsg("must attach a execute func before execute %s", funcname),
                 errhint("attach a execute func and retry")));
             return false;
         }
@@ -119,10 +119,8 @@ static bool GMSInterfaceCheck(const char* funcname, bool needAttach)
 Datum gms_debug_initialize(PG_FUNCTION_ARGS)
 {
     StringInfoData buf;
-    bool found = false;
     // TupleDesc tupdesc;
     int commIdx = -1;
-    const int DEBUG_TURN_ON_ATTR_NUM = 1;
     GMSInterfaceCheck("gms_debug.initialize", false);
     if (unlikely(u_sess->plsql_cxt.debug_proc_htbl == NULL)) {
         init_pldebug_htcl();
@@ -133,24 +131,25 @@ Datum gms_debug_initialize(PG_FUNCTION_ARGS)
         char *debug_session_id = text_to_cstring(PG_GETARG_VARCHAR_PP(0));
         char *psave = NULL;
         char *nodename = strtok_r(debug_session_id, "-", &psave);
+        if (nodename == NULL) {
+            ereport(ERROR, (errmsg("invalid debug_session_id  %s", debug_session_id)));
+        }
         char *fir = AssignStr(psave, false);
         char *new_fir = TrimStr(fir);
         if (new_fir == NULL) {
-            ereport(ERROR, ( (errmsg("invalid debug_session_id  %s", debug_session_id))));
+            ereport(ERROR, (errmsg("invalid debug_session_id  %s", debug_session_id)));
         }
         commIdx = pg_strtoint32(new_fir);
         if (commIdx < 0 || commIdx >= PG_MAX_DEBUG_CONN) {
-            ereport(ERROR, (  (errmsg("invalid debug_session_id  %s", debug_session_id))));
+            ereport(ERROR, (errmsg("invalid debug_session_id  %s", debug_session_id)));
         }
         if (!AcquireDebugCommIdx(commIdx)) {
-            ereport(ERROR,
-                    (  errmsg("debug_session_id %s has already been used", debug_session_id)));
+            ereport(ERROR, (errmsg("debug_session_id %s has already been used", debug_session_id)));
         }
     } else {
         commIdx = GetValidDebugCommIdx();
         if (commIdx == -1) {
-            ereport(ERROR, ( 
-                            (errmsg("max debug function is %d, turn_on function is out of range", PG_MAX_DEBUG_CONN))));
+            ereport(ERROR, (errmsg("max debug function is %d, turn_on function is out of range", PG_MAX_DEBUG_CONN)));
         }
     }
 
@@ -170,7 +169,6 @@ Datum gms_debug_attach_session(PG_FUNCTION_ARGS)
 {
     GMSInterfaceCheck("gms_debug.attach_session", false);
     char *debug_session_id = text_to_cstring(PG_GETARG_VARCHAR_PP(0));
-    int32 diagnostics = PG_GETARG_INT32(1);
     char *psave = NULL;
     int commidx = -1;
     char *nodename = strtok_r(debug_session_id, "-", &psave);
@@ -207,10 +205,6 @@ Datum gms_debug_set_breakpoint(PG_FUNCTION_ARGS)
     const int DEBUG_BREAK_TUPLE_ATTR_NUM = 2;
     Oid funcOid = PG_GETARG_OID(0);
     int32 lineno = PG_GETARG_INT32(1);
-    int32 fuzzy = PG_GETARG_INT32(2);
-    int32 iterations = PG_GETARG_INT32(3);
-    int headerlines = 0;
-    uint32 nLine = 0;
     CodeLine *lines = NULL;
     CodeLine cl;
     cl.code = NULL;
@@ -259,7 +253,7 @@ Datum gms_debug_set_breakpoint(PG_FUNCTION_ARGS)
     } else {
         ereport(WARNING, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                           errmsg("pl debugger only support function with language plpgsql"),
-                          errdetail("the given function is %lu", funcOid),
+                          errdetail("the given function is %u", funcOid),
                           errcause("pl debugger do not support the given function"),
                           erraction("use pl debugger with only plpgsql function")));
         values[0] = Int32GetDatum(ERROR_BAD_HANDLE);
@@ -412,7 +406,6 @@ static Datum build_runtime_info(DebugClientInfo *client, int err_code)
  * (a mask of the events that are of interest) to Probe in the target process.
  * It tells Probe to continue execution of the target process, 
  * and it waits until the target process runs to completion or signals an event.
- * If info_requested is not NULL, then calls GET_RUNTIME_INFO.
  */
 Datum gms_debug_continue(PG_FUNCTION_ARGS)
 {
@@ -440,10 +433,9 @@ Datum gms_debug_continue(PG_FUNCTION_ARGS)
         return build_runtime_info(client,err_code);
     }
     int32 breakflags = PG_GETARG_INT32(0);
-    int32 info_requested = PG_GETARG_INT32(1);
     char action;
     std::bitset<DEBUG_ACTION_ATTR_NUM> breakflags_bitset(breakflags);
-     for (int i = 0; i < breakflags_bitset.size(); ++i) {
+     for (std::size_t i = 0; i < breakflags_bitset.size(); ++i) {
         if (breakflags_bitset.test(i)) {
             action = actions[i]; 
         }
@@ -455,8 +447,6 @@ Datum gms_debug_continue(PG_FUNCTION_ARGS)
 
 /***
  * This function returns information about the current program. 
- * It is only needed if the info_requested parameter to SYNCHRONIZE
- * or CONTINUE was set to 0.
  */
 Datum gms_debug_get_runtime_info(PG_FUNCTION_ARGS)
 {
@@ -475,7 +465,6 @@ Datum gms_debug_get_runtime_info(PG_FUNCTION_ARGS)
         err_code = ERROR_FUNC_NOT_ATTACHED;
         return build_runtime_info(client, err_code);
     }
-    int32 info_requested = PG_GETARG_INT32(0);
     debug_client_send_msg(client, GMS_DEBUG_RUNTIMEINFO_HEADER, NULL, 0);
     debug_client_rec_msg(client);
    return build_runtime_info(client, err_code);
@@ -493,6 +482,21 @@ Datum gms_debug_off(PG_FUNCTION_ARGS)
     SetDebugCommGmsUsed(u_sess->plsql_cxt.gms_debug_idx, false);
     u_sess->plsql_cxt.gms_debug_idx = -1;
 
+    if ((u_sess->plsql_cxt.debug_proc_htbl == NULL)) {
+       PG_RETURN_VOID();
+    }
+
+    PlDebugEntry* elem = NULL;
+    HASH_SEQ_STATUS hash_seq;
+    hash_seq_init(&hash_seq, u_sess->plsql_cxt.debug_proc_htbl);
+
+    /* Fetch all debugger entry info from the hash table */
+    while ((elem = (PlDebugEntry*)hash_seq_search(&hash_seq)) != NULL) {
+         if (elem->func && elem->func->debug) {
+             clean_up_debug_server(elem->func->debug, true, false);
+          }
+    }
+
     PG_RETURN_VOID();
 }
 
@@ -505,15 +509,6 @@ Datum gms_debug_off(PG_FUNCTION_ARGS)
  */
 Datum gms_debug_detach_session(PG_FUNCTION_ARGS)
 {
-    DebugClientInfo *client = u_sess->plsql_cxt.debug_client;
-    if(client == nullptr) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TARGET_SERVER_NOT_ATTACHED),
-                errmsg("error happened in debug session, please reattach target session and try")));
-    }
-    GMSInterfaceCheck("gms_debug.detach_session",true);
-    debug_client_send_msg(client, DEBUG_ABORT_HEADER, NULL, 0);
-    debug_client_rec_msg(client);
     clean_up_debug_client();
     PG_RETURN_VOID();
 }

@@ -132,8 +132,12 @@ select * from gms_debug.attach_session('datanode1-0');
 ERROR:  target session should be init first.
 -- turn off without turn on
 select * from gms_debug.debug_off();
-ERROR:  target session should be init first
-select * from gms_debug.initialize();
+ debug_off 
+-----------
+ 
+(1 row)
+
+select * from gms_debug.initialize('datanode1-0');
  initialize  
 -------------
  datanode1-0
@@ -168,6 +172,12 @@ INFO:  cnt is 3
  0 | Happy Children's Day! | Tue Jun 01 00:00:00 2021
  1 | Happy Children's Day! | Tue Jun 01 00:00:00 2021
 (6 rows)
+
+select * from gms_debug.debug_off();
+ debug_off 
+-----------
+ 
+(1 row)
 
 drop schema gms_debugger_test1 cascade;
 NOTICE:  drop cascades to 8 other objects
