@@ -126,6 +126,7 @@ test: single_node_tablespace
 #test startwith...connect by
 test: sw_prepare
 test: sw_basic sw_icbc sw_siblings sw_bugfix-1 sw_bugfix-2 sw_by_rownum_level sw_prior
+test: outfuncs_bugfix 
 test: sw_clearup
 
 # test customer base environment hint
