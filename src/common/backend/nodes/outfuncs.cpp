@@ -579,7 +579,8 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(gather_count);
     WRITE_INT_FIELD(num_nodes);
 
-    if (t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) {
+    if ((t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) && 
+        node->nodesDefinition != NULL) {
 	    for (int i = 0; i < node->num_nodes; i++) {
 	        /* Write the field name only one time and just append the value of each field */
 	        appendStringInfo(str, " :nodesDefinition[%d]", i);
