@@ -90,9 +90,16 @@ DOCKEROPS=""
 MIN_DOCKER_VERSION_MAJOR="17"
 MIN_DOCKER_VERSION_MINOR="09"
 arch=$(case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac)
+file_arch=""
 if [ "${arch}" = "amd64" ]; then
-    DOCKERFILE="dockerfile_amd"
+    file_arch="x86_64"
+    if [ -f "/etc/openEuler-release" ];then
+      DOCKERFILE="dockerfile_x86"
     else
+      DOCKERFILE="dockerfile_amd"
+    fi
+else
+    file_arch="aarch64"
     DOCKERFILE="dockerfile_arm"
 fi
 
@@ -178,7 +185,29 @@ echo "Building image '$IMAGE_NAME' ..."
 
 # BUILD THE IMAGE (replace all environment variables)
 BUILD_START=$(date '+%s')
-docker build --force-rm=true --no-cache=true \
+
+if [ -f "/etc/openEuler-release" ];then
+    opengauss_files_tar=(openGauss-Server-*-openEuler20.03-${file_arch}.tar.bz2)
+    if [[ ${#opengauss_files_tar[@]} -ne 1 || ! -f "${opengauss_files_tar[0]}" ]]; then
+      echo "ERROR: unable to choose server pkg"
+      echo "${opengauss_files_tar[0]}"
+      exit 1
+    fi
+
+    opengauss_tar="${opengauss_files_tar[0]}"
+    opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Server-\(.*\)-openEuler20.03-${file_arch}.tar.bz2/\1/")
+else
+    opengauss_version=""
+fi
+
+echo "version number=${opengauss_version}"
+
+if [ ! test -f scws.tar.gz  ]; then
+  echo "Could not find scws.tar.gz."
+  echo "If chparser will not be used, please modify the dockerfile by removing lines containing scws."
+fi
+
+docker build --build-arg VERSION=$opengauss_version --force-rm=true --no-cache=true \
        $DOCKEROPS $PROXY_SETTINGS  \
        -t $IMAGE_NAME -f $DOCKERFILE . || {
   echo ""

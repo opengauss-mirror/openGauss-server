@@ -7,8 +7,8 @@ set -Eeo pipefail
 #  "$XYZ_DB_PASSWORD" from a file, especially for Docker's secrets feature)
 
 export GAUSSHOME=/usr/local/opengauss
-export PATH=$GAUSSHOME/bin:$PATH
-export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
+export PATH=$GAUSSHOME/bin:/scws/bin:$PATH
+export LD_LIBRARY_PATH=$GAUSSHOME/lib:/scws/lib:$LD_LIBRARY_PATH
 
 file_env() {
         local var="$1"
@@ -207,9 +207,16 @@ EOSQL
 }
 
 docker_setup_user() {
+        if [ -n "$GS_USER_PASSWORD" ]; then
+          PASSWORD_FOR_USER="$GS_USER_PASSWORD"
+        else
+          PASSWORD_FOR_USER="$GS_PASSWORD"
+        fi
+
         if [ -n "$GS_USERNAME" ]; then
-                GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set user="$GS_USERNAME" <<-'EOSQL'
+                GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$PASSWORD_FOR_USER" --set user="$GS_USERNAME" <<-'EOSQL'
                         create user :"user" with login password :"passwd" ;
+                        grant all privileges to :"user" ;
 EOSQL
         else
                 echo " default user is gaussdb"
@@ -300,6 +307,8 @@ opengauss_setup_postgresql_conf() {
                 if [ -n "$OTHER_PG_CONF" ]; then
                     echo -e "$OTHER_PG_CONF"
                 fi
+
+                echo "session_timeout = 0"
         } >> "$PGDATA/postgresql.conf"
 }
 
