@@ -53,7 +53,7 @@
 typedef struct SendStandbyPopulateParams {
     Oid relOid;
     Oid partOid;
-    List *columnlist;
+    int2 *attsNums;
     int msglen;
     int imcstoreType;
 } SendPopulateParams;
@@ -111,9 +111,6 @@ extern void AlterTableDisableImcstore(Relation rel);
 
 extern void UnPopulateImcs(Relation rel);
 
-extern void GetColNamesForStandBy(
-    Relation rel, int2vector* imcsAttsNum, int imcsNatts, List* &colList, int* nameLength);
-
 extern void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg);
 
 extern void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo inputMsg);
@@ -127,7 +124,7 @@ extern void ParsePopulateImcsParam(
 
 extern PGXCNodeHandle **GetStandbyConnections(int *connCount);
 
-extern void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, List *columnlist, int length, int type);
+extern void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int imcsNatts, int type);
 
 extern void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type);
 
