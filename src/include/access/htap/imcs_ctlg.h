@@ -33,6 +33,7 @@
 #include "postmaster/bgworker.h"
 
 #define MAX_IMCS_PAGES_ONE_CU 1024
+#define MAX_IMCS_COL_LENGTH 8192
 #define MAX_PARALLEL_WORK_NUMS 8
 #define VIRTUAL_IMCS_CTID (-1)
 #define TYPE_IMCSTORED 1

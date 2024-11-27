@@ -112,6 +112,24 @@ static FORCE_INLINE void DeDuplicateAttrNumber(int2* sortedAttsNums, int *colNum
     *colNum = curr + 1;
 }
 
+void CheckForAttrLen(Oid relOid, FormData_pg_attribute* att)
+{
+    if (att->attlen > 0) {
+        /* Fixed-length types are never over maxlen */
+        return;
+    }
+
+    int32 maxlen = type_maximum_size(att->atttypid, att->atttypmod);
+    if (maxlen < 0) {
+        ereport(ERROR, (errmsg("Max attr length of Rel [%d]: col [%s] is unknow, not supported by imcstore.",
+            relOid, att->attname.data)));
+    }
+    if (maxlen > MAX_IMCS_COL_LENGTH) {
+        ereport(ERROR, (errmsg("Max attr length [%d] of Rel [%d]: col [%s] exceeded imcs col max length: %d.",
+            maxlen, relOid, att->attname.data, MAX_IMCS_COL_LENGTH)));
+    }
+}
+
 void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts)
 {
     /* check if specify cols, yes when colCnt != 0 */
@@ -124,6 +142,7 @@ void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcs
         imcsColCnt++;
     }
 
+    FormData_pg_attribute *relAtts = rel->rd_att->attrs;
     /* only populate specified cols */
     if (imcsColCnt != 0) {
         attsNums = (int2*)palloc(sizeof(int2*) * imcsColCnt);
@@ -133,7 +152,8 @@ void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcs
             if (!AttributeNumberIsValid(attnumber)) {
                 ereport(ERROR, (errmsg("Col %s not exist in rel %d.", colName, relOid)));
             }
-            CheckForDataType(get_atttype(relOid, attnumber), get_atttypmod(relOid, attnumber));
+            CheckForDataType(relAtts[attnumber - 1].atttypid, relAtts[attnumber - 1].atttypmod);
+            CheckForAttrLen(relOid, &relAtts[attnumber - 1]);
             *(attsNums + i) = attnumber;
             i++;
         }
@@ -141,13 +161,13 @@ void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcs
         DeDuplicateAttrNumber(attsNums, &imcsColCnt);
     } else {
         /* populate all cols */
-        FormData_pg_attribute *relAtts = rel->rd_att->attrs;
-        int atts = rel->rd_att->natts;
-        for (int i = 0; i < atts; i++) {
+        int natts = rel->rd_att->natts;
+        for (i = 0; i < natts; i++) {
             if (relAtts[i].attisdropped) {
                 continue;
             }
             CheckForDataType(relAtts[i].atttypid, relAtts[i].atttypmod);
+            CheckForAttrLen(relOid, &relAtts[i]);
             imcsColCnt++;
         }
 
@@ -159,7 +179,7 @@ void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcs
 
         int j = 0;
         attsNums = (int2*)palloc(sizeof(int2*) * imcsColCnt);
-        for (int i = 0; i < atts; i++) {
+        for (i = 0; i < natts; i++) {
             *(attsNums + j) = relAtts[i].attnum;
             j++;
         }
