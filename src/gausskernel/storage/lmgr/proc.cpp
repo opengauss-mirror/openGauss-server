@@ -556,8 +556,6 @@ void PgStatCMAThreadStatus()
                 pid, callStack.data)));
         }
     }
-    /* It is abnormal that CM Agent proc List is full. */
-    Assert(allCMProcNum < NUM_CMAGENT_PROCS);
     FreeStringInfo(&callStack);
 }
 
@@ -800,8 +798,6 @@ void InitProcess(void)
             int rc = sprintf_s(cmaConnNumInfo, CONNINFOLEN, "All CMA proc [%d], uses[%d];",
                 NUM_CMAGENT_PROCS, g_instance.conn_cxt.CurCMAProcCount);
             securec_check_ss(rc, "\0", "\0");
-            /* It is abnormal that CM Agent proc List is full. */
-            Assert(g_instance.conn_cxt.CurCMAProcCount < NUM_CMAGENT_PROCS);
         }
 
         ereport(FATAL,
