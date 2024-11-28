@@ -307,3 +307,131 @@ CREATE OR REPLACE FUNCTION GMS_UTILITY.OLD_CURRENT_USER ()
 RETURNS VARCHAR2
 AS $$ SELECT CURRENT_USER::VARCHAR2 $$
 LANGUAGE SQL IMMUTABLE STRICT;
+
+/*
+* ----------------------------
+* -- FORMAT_ERROR_STACK
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.FORMAT_ERROR_STACK ()
+RETURNS VARCHAR2
+AS 'MODULE_PATHNAME','gms_format_error_stack'
+LANGUAGE C VOLATILE NOT FENCED;
+
+/*
+* ----------------------------
+* -- FORMAT_ERROR_BACKTRACE
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.FORMAT_ERROR_BACKTRACE ()
+RETURNS VARCHAR2
+AS 'MODULE_PATHNAME','gms_format_error_backtrace'
+LANGUAGE C VOLATILE NOT FENCED;
+
+/*
+* ----------------------------
+* -- FORMAT_CALL_STACK
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.FORMAT_CALL_STACK ()
+RETURNS VARCHAR2
+AS 'MODULE_PATHNAME','gms_format_call_stack'
+LANGUAGE C VOLATILE NOT FENCED;
+
+/*
+* ----------------------------
+* -- GET_TIME
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.GET_TIME ()
+RETURNS NUMBER
+AS 'MODULE_PATHNAME','gms_get_time'
+LANGUAGE C VOLATILE NOT FENCED;
+
+/*
+* ----------------------------
+* -- COMMA_TO_TABLE
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.COMMA_TO_TABLE_C_FUNC (
+    list        IN  VARCHAR2,
+    tablen      OUT BINARY_INTEGER,
+    tab         OUT VARCHAR2[]
+)
+AS 'MODULE_PATHNAME','gms_comma_to_table'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE PROCEDURE GMS_UTILITY.COMMA_TO_TABLE (
+    list        IN  VARCHAR2,
+    tablen      OUT BINARY_INTEGER,
+    tab         OUT VARCHAR2[]
+)
+AS
+    TYPE RET IS RECORD(len BINARY_INTEGER, tab VARCHAR2[]);
+    rec RET;
+BEGIN
+    rec := GMS_UTILITY.COMMA_TO_TABLE_C_FUNC(list);
+    tablen := rec.len;
+    tab := rec.tab;
+END;
+
+/*
+* ----------------------------
+* -- EXEC_DDL_STATEMENT
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.EXEC_DDL_STATEMENT_C_FUNC (
+    parse_string    IN  VARCHAR2
+) RETURNS void
+AS 'MODULE_PATHNAME','gms_exec_ddl_statement'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE PROCEDURE GMS_UTILITY.EXEC_DDL_STATEMENT (
+    parse_string    IN  VARCHAR2
+)
+AS
+BEGIN
+    GMS_UTILITY.EXEC_DDL_STATEMENT_C_FUNC(parse_string);
+END;
+
+/*
+* ----------------------------
+* -- GET_HASH_VALUE
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.GET_HASH_VALUE (
+    name        VARCHAR2,
+    base        NUMBER,
+    hash_size   NUMBER
+)
+RETURNS NUMBER
+AS 'MODULE_PATHNAME','gms_get_hash_value'
+LANGUAGE C VOLATILE NOT FENCED;
+
+/*
+* ----------------------------
+* -- TABLE_TO_COMMA
+* ----------------------------
+*/
+CREATE OR REPLACE FUNCTION GMS_UTILITY.TABLE_TO_COMMA_C_FUNC (
+    tab         IN  VARCHAR2[],
+    tablen      OUT BINARY_INTEGER,
+    list        OUT VARCHAR2
+)
+AS 'MODULE_PATHNAME','gms_table_to_comma'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE PROCEDURE GMS_UTILITY.TABLE_TO_COMMA (
+    tab         IN  VARCHAR2[],
+    tablen      OUT BINARY_INTEGER,
+    list        OUT VARCHAR2
+)
+AS
+DECLARE
+    TYPE RET IS RECORD(len BINARY_INTEGER, list VARCHAR2);
+    rec RET;
+BEGIN
+    rec := GMS_UTILITY.TABLE_TO_COMMA_C_FUNC(tab);
+    tablen := rec.len;
+    list := rec.list;
+END;

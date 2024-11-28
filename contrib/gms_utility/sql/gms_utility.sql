@@ -1,6 +1,7 @@
 reset search_path;
 create extension if not exists gms_utility;
-
+create extension gms_output;
+select gms_output.enable;
 set behavior_compat_options="bind_procedure_searchpath";
 
 -- start test db_version
@@ -386,13 +387,13 @@ create view expandv as select * from t1;
 declare
     vclobin clob := 
 'select distinct srvr_id 
-from public.expandv 
+from test_utility_est.expandv 
 where srvr_id not in 
 (select srvr_id 
-from public.expandv 
+from test_utility_est.expandv 
 minus 
 select srvr_id 
-from public.t1)';
+from test_utility_est.t1)';
     vclobout clob;
 begin
     gms_utility.expand_sql_text(vclobin, vclobout);
@@ -813,6 +814,22 @@ end;	-- ok for og, error for A
 declare
 	canon_name varchar2(100);
 begin
+	gms_utility.canonicalize('koll.#rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.$rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+
+declare
+	canon_name varchar2(100);
+begin
 	gms_utility.canonicalize('koll."_rooy".nuuop.a', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end;
@@ -1172,11 +1189,11 @@ begin
     raise info 'call a: %', a;
 end;
 /
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 alter type s_type add attribute a int;
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 call gms_utility.compile_schema('test_utility_compile', false);
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 
 create table stu(sno int, name varchar, sex varchar, cno int);
 create type r1 as (a int, c stu%rowtype);
@@ -1197,11 +1214,11 @@ declare
 end pkg;
 /
 call pkg.proc1((1,(1,'zhang','m',1)));
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 alter table stu add column b int;
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 call gms_utility.compile_schema('test_utility_compile', false);
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
 
 create view v_stu as select * from stu;
 select * from v_stu;
@@ -1220,7 +1237,7 @@ select * from v_stu;
 
 drop view v_stu;
 drop package body pkg;
-drop package pkg cascade;
+drop package pkg;
 drop type r1;
 drop table stu;
 drop procedure type_alter;
@@ -1279,7 +1296,7 @@ call test_name_tokenize('"sco  ot"   abcd.fook'); -- sco  ot 12
 -- test support special char
 call test_name_tokenize('peer._lokppe.vuumee@ookeyy'); -- ok for og, error for A
 call test_name_tokenize('peer.lokp_pe.vuumee@ookeyy');
-call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- ok for og, error for A
+call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- error
 call test_name_tokenize('peer.lokp$pe.vuumee@ookeyy');
 call test_name_tokenize('peer.lokp233pe.vuumee@ookeyy');
 call test_name_tokenize('peer.233lokppe.vuumee@ookeyy');
@@ -1551,7 +1568,439 @@ DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
 
-reset behavior_compat_options;
+---------------------------
+-- format error stack
+---------------------------
+select gms_utility.format_error_stack();
+select gms_utility.format_error_stack(100);
 
+create or replace function t_inner(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res = a / b;
+    return res;
+exception
+    when others then
+    raise exception 'expected exception';
+end;
+$$ language plpgsql;
+
+create or replace function t_outter(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res := t_inner(a, b);
+    return res;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_stack());
+    return -1;
+end;
+$$ language plpgsql;
+
+select t_outter(100, 2);
+select t_outter(100, 0);
+
+-- test stack overflow
+create or replace procedure t_recursion(count in out int)
+as
+begin
+    if count < 1000 then
+        count := count + 1;
+        t_recursion(count);
+    else
+        t_inner(100, 0);
+    end if;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_stack());
+end;
+/
+declare
+    c int := 0;
+begin
+    t_recursion(c);
+end;
+/
+
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+
+---------------------------
+-- format error backtrace
+---------------------------
+select gms_utility.format_error_backtrace();
+select gms_utility.format_error_backtrace(100);
+
+create or replace function t_inner(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res = a / b;
+    return res;
+exception
+    when others then
+    raise exception 'expected exception';
+end;
+$$ language plpgsql;
+
+create or replace function t_outter(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res := t_inner(a, b);
+    return res;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_backtrace());
+    return -1;
+end;
+$$ language plpgsql;
+
+select t_outter(100, 2);
+select t_outter(100, 0);
+
+-- test stack overflow
+create or replace procedure t_recursion(count in out int, max in int)
+as
+begin
+    if count < max then
+        count := count + 1;
+        t_recursion(count, max);
+    else
+        t_inner(100, 0);
+    end if;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_backtrace());
+end;
+/
+declare
+    c int := 0;
+begin
+    t_recursion(c, 5);
+end;
+/
+
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+
+---------------------------
+-- format call stack
+---------------------------
+select gms_utility.format_call_stack();
+select gms_utility.format_call_stack(100);
+
+create or replace function t_inner
+returns void as $$
+begin
+    gms_output.put_line('t_inner call stack: ');
+    gms_output.put_line(gms_utility.format_call_stack());
+end;
+$$ language plpgsql;
+
+create or replace function t_outter
+returns void as $$
+begin
+    t_inner();
+end;
+$$ language plpgsql;
+
+select t_inner();
+select t_outter();
+
+create or replace procedure t_recursion (count in out int, max in int) 
+as
+begin
+    if count < max then
+        count := count + 1;
+        t_recursion(count, max);
+    else
+        t_inner();
+    end if;
+end;
+/
+
+declare
+    count int := 0;
+begin
+    t_recursion(count, 5);
+end;
+/
+declare
+    count int := 0;
+begin
+    t_recursion(count, 20);
+end;
+/
+
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+
+---------------------------
+-- get time
+---------------------------
+select gms_utility.get_time();
+select gms_utility.get_time(100);
+
+declare
+    t1 number;
+    t2 number;
+    td number;
+    sum bigint := 0;
+    i int := 0;
+begin
+    t1 = gms_utility.get_time();
+    for i in 1..1000000 loop
+        sum := sum + i * 2 - i / 2;
+    end loop;
+    t2 = gms_utility.get_time();
+    td = t2 - t1;
+    gms_output.put_line('costtime: ' || td);
+end;
+/
+
+---------------------------
+-- comma to table
+---------------------------
+create or replace procedure test_comma_to_table(list in varchar2)
+as
+    tablen binary_integer := 0;
+    tab varchar2[];
+    i int;
+begin
+    gms_utility.comma_to_table(list, tablen, tab);
+    gms_output.put_line('table len: ' || tablen);
+    for i in 1..tablen loop
+        gms_output.put_line('tablename: ' || tab(i));
+    end loop;
+end;
+/
+
+call test_comma_to_table('gaussdb.dept');
+call test_comma_to_table('gaussdb.dept, gaussdb.emp, gaussdb.jobhist');
+call test_comma_to_table('  gaussdb.dept, gaussdb.emp, gaussdb.jobhist  ');
+call test_comma_to_table('gaussdb.dept,    gaussdb.emp, gaussdb.jobhist');
+
+call test_comma_to_table(NULL); -- error
+call test_comma_to_table(''); -- error
+call test_comma_to_table('    '); -- error
+call test_comma_to_table('"     "');
+call test_comma_to_table('gaus  sdb.dept'); -- error
+call test_comma_to_table('"gaus  sdb".dept');
+
+call test_comma_to_table('gaussdb.dept,,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb.dept,gaussdb.emp,'); -- error
+call test_comma_to_table('gaussdb..dept,gaussdb.emp'); -- error
+
+call test_comma_to_table('gaussdb.dept@dblink,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb.dept_dblink,gaussdb.emp');
+call test_comma_to_table('gaussdb.dept$dblink,gaussdb.emp');
+call test_comma_to_table('gaussdb.dept#dblink,gaussdb.emp');
+call test_comma_to_table('gaussdb.dept123dblink,gaussdb.emp');
+call test_comma_to_table('gaussdb._deptdblink,gaussdb.emp'); -- ok for og, error for a
+call test_comma_to_table('gaussdb.$deptdblink,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb."$deptdblink",gaussdb.emp');
+call test_comma_to_table('gaussdb.#deptdblink,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb."#deptdblink",gaussdb.emp');
+
+call test_comma_to_table('gaussdb.123deptdblink,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb."123deptdblink",gaussdb.emp');
+call test_comma_to_table('123,gaussdb.emp'); -- error
+call test_comma_to_table('123.abc,gaussdb.emp'); -- error
+
+call test_comma_to_table('gaussdb.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition,gaussdb.emp'); -- error
+
+call test_comma_to_table('gaussdb.table,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb."table",gaussdb.emp');
+call test_comma_to_table('gaussdb.column,gaussdb.emp'); -- error
+call test_comma_to_table('gaussdb."column",gaussdb.emp');
+
+call test_comma_to_table('"gaussdb.dept,gaussdb.emp"'); -- error
+call test_comma_to_table('"gauss"db.d"ept,gaussdb.emp'); -- error
+call test_comma_to_table('gauss"db".dept,gaussdb.emp'); -- error
+
+drop procedure test_comma_to_table;
+
+---------------------------
+-- exec_ddl_statement
+---------------------------
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl (c1 int, c2 text);');
+call gms_utility.exec_ddl_statement('alter table public.t_exec_ddl add column c3 boolean default true');
+
+-- test no ddl sql
+call gms_utility.exec_ddl_statement('insert into public.t_exec_ddl values (1, 234, 1)'); -- error
+call gms_utility.exec_ddl_statement('update public.t_exec_ddl set c2 = 666'); -- error
+call gms_utility.exec_ddl_statement('select * from public.t_exec_ddl;'); -- error
+
+-- test invalid sql
+call gms_utility.exec_ddl_statement('today is a good day!'); -- error
+call gms_utility.exec_ddl_statement(''); -- error
+call gms_utility.exec_ddl_statement(null); -- error
+
+call gms_utility.exec_ddl_statement('alter table public.t_exec_ddl drop column c3; alter table public.t_exec_ddl add column c3 boolean default true;');
+
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl (c1 int, c2 text);'); -- error
+call gms_utility.exec_ddl_statement('drop table public.t_exec_ddl');
+
+call gms_utility.exec_ddl_statement(); -- error
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl2 (c1 int, c2 text);', 'test'); -- error
+
+declare 
+    parse_string date:='2024-10-1';
+begin
+    gms_utility.exec_ddl_statement(parse_string);
+end; -- error
+/
+
+---------------------------
+-- get_hash_value
+---------------------------
+select gms_utility.get_hash_value('Today is a good day', 1000, 1024);
+select gms_utility.get_hash_value('Today is a good day', NULL, 2048); -- error
+select gms_utility.get_hash_value('Today is a good day', '', 2048); -- error
+select gms_utility.get_hash_value('Today is a good day', 1000, NULL); -- error
+select gms_utility.get_hash_value('Today is a good day', 1000, ''); -- error
+select gms_utility.get_hash_value('Today is a good day', 1000, 0); -- error
+select gms_utility.get_hash_value('Today is a good day', 0, 2048);
+select gms_utility.get_hash_value('Today is a good day', -1000, 2048);
+select gms_utility.get_hash_value('Today is a good day', 2147483647, 2048);
+select gms_utility.get_hash_value('Today is a good day', 2147483648, 2048); -- error, OVER int32
+select gms_utility.get_hash_value('Today is a good day', 1024, 2147483647);
+select gms_utility.get_hash_value('Today is a good day', 1024, 2147483648); -- error, OVER int32
+select gms_utility.get_hash_value('Today is a good day', 1024, -2147483648.4); -- error, OVER int32
+
+select gms_utility.get_hash_value(null, 1000, 1024);
+select gms_utility.get_hash_value('', 1000, 1024);
+
+select gms_utility.get_hash_value('select 1;', 0, 100);
+
+select gms_utility.get_hash_value(); -- error
+select gms_utility.get_hash_value('2024-11-27'); -- error
+select gms_utility.get_hash_value('2024-11-27', 'test'); -- error
+select gms_utility.get_hash_value('2024-11-27', 0); -- error
+select gms_utility.get_hash_value('2024-11-27', 0, 'test'); -- error
+select gms_utility.get_hash_value('2024-11-27', 0, 100, 200); -- error
+
+---------------------------
+-- table_to_comma
+---------------------------
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+declare
+    tablen  integer;
+    list    varchar2;
+begin
+    gms_utility.table_to_comma(NULL, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := 'build';
+    tab(2) := 'test';
+    tab(3) := 'date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '  build';
+    tab(2) := 'test  ';
+    tab(3) := '  date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '@build';
+    tab(2) := '$test  ';
+    tab(3) := '-  date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '123build';
+    tab(2) := '(test  ';
+    tab(3) := '&date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '123build';
+    tab(2) := '(test  ';
+    tab(3) := '&date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := 'table';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+declare
+    tab varchar2;
+    tablen  integer;
+    list    varchar2;
+begin
+    tab := 'table';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+begin
+    tab(1) := 'build';
+    gms_utility.table_to_comma(tab, tablen);
+end; -- error
+/
+
+reset behavior_compat_options;
+drop extension gms_output;
 drop extension gms_utility cascade;
 reset search_path;
