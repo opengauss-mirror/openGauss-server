@@ -1461,6 +1461,7 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
     bool need_rebuild = true;
     LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
     bool is_owner = DMS_BUF_CTRL_IS_OWNER(buf_ctrl);
+    buf_ctrl->seq = 0;
     LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     if (is_owner) {
         uint64 buf_state = pg_atomic_read_u64(&buf_desc->state); 
