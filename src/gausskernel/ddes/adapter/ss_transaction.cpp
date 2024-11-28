@@ -73,6 +73,9 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         if (SSBackendNeedExitScenario() && SS_AM_WORKER) {
             return NULL;
         }
+        if (SS_IN_FAILOVER && t_thrd.role == TRACK_STMT_WORKER) {
+            return NULL;
+        }
         pg_usleep(USECS_PER_SEC);
 
     } while (true);
