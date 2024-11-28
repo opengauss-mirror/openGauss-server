@@ -4425,8 +4425,7 @@ static int ServerLoop(void)
             g_instance.pid_cxt.PercentilePID == 0 &&
             pmState == PM_RUN && !SS_IN_REFORM)
             g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
-        if ((ENABLE_DMS && pmState == PM_RUN && g_instance.stat_cxt.stack_perf_start)
-            || (!ENABLE_DMS && g_instance.stat_cxt.stack_perf_start)) {
+        if (g_instance.stat_cxt.stack_perf_start) {
             g_instance.pid_cxt.StackPerfPID = initialize_util_thread(STACK_PERF_WORKER);
             g_instance.stat_cxt.stack_perf_start = false;
         }
@@ -10442,6 +10441,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
             ereport(LOG, (errmsg("standby cluster could not do switchover")));
         }
     }
+
+    /* If we got PMSIGNAL_CLEAN_BACKENDS, it means we are in pending state. */
+    if (CheckPostmasterSignal(PMSIGNAL_CLEAN_BACKENDS)) {
+        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+    }    
 
     if (CheckSwitchoverTimeoutSignal()) {
         if (WalRcvIsOnline()) {
