@@ -51,6 +51,7 @@ typedef enum {
     PMSIGNAL_START_LOGICAL_READ_WORKER,/* start logical read worker */
     PMSIGNAL_START_PARALLEL_DECODE_WORKER,/* start parallel decoding worker */
     PMSIGNAL_START_APPLY_WORKER,       /* start a apply worker */
+    PMSIGNAL_CLEAN_BACKENDS,            /* clean backends by signals */
     NUM_PMSIGNALS                      /* Must be last value of enum! */
 } PMSignalReason;
 
