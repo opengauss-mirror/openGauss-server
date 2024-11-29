@@ -286,6 +286,24 @@ DECLARE
   v_handle int;
 BEGIN
 	content := '123';
+	v_handle := GMS_COMPRESS.LZ_UNCOMPRESS_OPEN(content);
+	GMS_COMPRESS.LZ_COMPRESS_CLOSE(v_handle);
+  RAISE NOTICE 'content=%', content;
+END;
+/
+DECLARE
+  content BLOB;
+BEGIN
+	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(1);
+  RAISE NOTICE 'content=%', content;
+END;
+/
+
+DECLARE
+  content BLOB;
+  v_handle int;
+BEGIN
+	content := '123';
 	v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
   v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
   v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
