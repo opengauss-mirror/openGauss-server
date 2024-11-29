@@ -215,12 +215,13 @@ bool TimestampTypeCheck(char* str, bool can_ignore, struct pg_tm* tm, Timestamp 
     int tz;
     int dtype;
     int nf;
+    bool bc;
     char* field[MAXDATEFIELDS];
     int ftype[MAXDATEFIELDS];
     char workbuf[MAXDATELEN + MAXDATEFIELDS];
     dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
     if (dterr == 0)
-        dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
+        dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz, &bc);
     if (dterr != 0) {
         DateTimeParseError(dterr, str, "timestamp", can_ignore);
         /*
@@ -235,7 +236,7 @@ bool TimestampTypeCheck(char* str, bool can_ignore, struct pg_tm* tm, Timestamp 
                 ereport(ERROR,
                     (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range: \"%s\"", str)));
 
-            if (tm->tm_year < MIN_VALUE_YEAR || tm->tm_year > MAX_VALUE_YEAR || tm->tm_year == 0) {
+            if (tm->tm_year < MIN_VALUE_YEAR || tm->tm_year > MAX_VALUE_YEAR || (tm->tm_year == 0 && !bc)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
                             errmsg("invalid data for \"year =  %d\", value must be between -4712 and 9999,"  \

@@ -1,4 +1,15 @@
 create table tt(col1 date);
+insert into tt values('-4713-01-28');
+insert into tt values('-4712-01-28');
+insert into tt values('0000-01-28');
+insert into tt values('2024-01-28');
+insert into tt values('9999-01-28');
 insert into tt values('10000-01-28');
+insert into tt values(TO_DATE(timestamp'-4713-01-28','yyyy-mm-dd'));
+insert into tt values(TO_DATE(timestamp'-4712-01-28','yyyy-mm-dd'));
+insert into tt values(TO_DATE(timestamp'0000-01-28','yyyy-mm-dd'));
+insert into tt values(TO_DATE('2024-01-28','yyyy-mm-dd'));
+insert into tt values(TO_DATE('9999-01-28','yyyy-mm-dd'));
 insert into tt values(TO_DATE('10000-01-28','yyyy-mm-dd'));
+select col1 from tt order by col1;
 drop table tt;

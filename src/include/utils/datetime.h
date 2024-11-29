@@ -272,7 +272,8 @@ extern int date2j(int year, int month, int day);
 
 extern int ParseDateTime(
     const char* timestr, char* workbuf, size_t buflen, char** field, int* ftype, int maxfields, int* numfields);
-extern int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp);
+extern int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp,
+    bool* bc_flag = NULL);
 extern int DecodeTimeOnly(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp);
 extern int ParseIudDateTime(char* str, struct pg_tm* tm, fsec_t* fsec);
 extern int ParseIudDateOnly(char* str, struct pg_tm* tm);

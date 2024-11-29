@@ -831,7 +831,8 @@ int ParseDateTime(
  * happen if pg_time_t is just 32 bits), then assume UTC time zone - thomas
  * 1997-05-27
  */
-int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp)
+int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* tm, fsec_t* fsec, int* tzp,
+    bool* bc_flag)
 {
     unsigned int fmask = 0, tmask;
     int type;
@@ -1355,6 +1356,9 @@ int DecodeDateTime(char** field, int* ftype, int nf, int* dtype, struct pg_tm* t
         fmask |= tmask;
     } /* end loop over fields */
 
+    if (bc_flag != nullptr) {
+        *bc_flag = bc;
+    }
     /* do final checking/adjustment of Y/M/D fields */
     dterr = ValidateDate(fmask, isjulian, is2digits, bc, tm);
     if (dterr)
