@@ -1927,7 +1927,7 @@ DESCR("cosine_distance");
 DATA(insert OID = 8314 ("<+>"     PGNSP PGUID b f f  8305  8305    701  8314  0 8436 - -));
 DESCR("l1_distance");
 DATA(insert OID = 8339 ("||"      PGNSP PGUID b f f  8305  8305    8305  0  0 vector_concat - -));
-DESCR("l1_distance");
+DESCR("vector_concat");
 
 DATA(insert OID = 8319 ("<->"     PGNSP PGUID b f f 8307 8307 701 8319 0 8465 - -));
 DESCR("sparsevec_l2_distance");
@@ -1939,9 +1939,9 @@ DATA(insert OID = 8322 ("<+>"     PGNSP PGUID b f f  8307  8307    701  8322  0 
 DESCR("sparsevec_l1_distance");
 
 DATA(insert OID = 8323 ("<~>"     PGNSP PGUID b f f 1560 1560 701 8323 0 hamming_distance - -));
-DESCR("jaccard_distance");
-DATA(insert OID = 8324 ("<%>"     PGNSP PGUID b f f 1560 1560 701 8324 0 jaccard_distance - -));
 DESCR("hamming_distance");
+DATA(insert OID = 8324 ("<%>"     PGNSP PGUID b f f 1560 1560 701 8324 0 jaccard_distance - -));
+DESCR("jaccard_distance");
 
 DATA(insert OID = 8325 ("+"       PGNSP PGUID b f f 8305 8305 8305 8325 0 vector_add 0 0));
 DESCR("vector_add");
