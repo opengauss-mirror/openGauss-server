@@ -50,6 +50,13 @@ enum LWLOCK_PARTITION_ID {
     LWLOCK_PART_KIND
 };
 
+/* order should same as slru buffer num desc, see slru.h */
+enum SlruBufferID {
+    MUTLIXACT_OFFSET = 0,
+    MULTIXACT_MEMBER = 1,
+    SLRU_BUFFER_KIND
+};
+
 typedef struct knl_instance_attr_dcf {
     /* DCF switch */
     bool enable_dcf;
@@ -247,6 +254,8 @@ typedef struct knl_instance_attr_storage {
     bool uwal_async_append_switch;
 
     bool enable_hnswpq;
+    int num_slru_buffers[SLRU_BUFFER_KIND];
+    char* num_slru_buffers_str;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

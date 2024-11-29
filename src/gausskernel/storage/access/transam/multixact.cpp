@@ -64,6 +64,7 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogproc.h"
+#include "lib/ilist.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
 #include "storage/smgr/fd.h"
@@ -74,8 +75,8 @@
 
 /*
  * MultiXact state shared across all backends.	All this state is protected
- * by MultiXactGenLock.  (We also use MultiXactOffsetControlLock and
- * MultiXactMemberControlLock to guard accesses to the two sets of SLRU
+ * by MultiXactGenLock.  (We also use SLRU bank's lock of MultiXactOffset and
+ * MultiXactMemberSLRULock to guard accesses to the two sets of SLRU
  * buffers.  For concurrency's sake, we avoid holding more than one of these
  * locks at a time.)
  */
@@ -161,11 +162,13 @@ typedef struct MultiXactStateData {
  * transaction end, so we don't need to do retail freeing of entries.
  */
 typedef struct mXactCacheEnt {
-    struct mXactCacheEnt *next;
     MultiXactId multi;
     int nmembers;
+    dlist_node node;
     MultiXactMember members[FLEXIBLE_ARRAY_MEMBER];
 } mXactCacheEnt;
+
+#define MAX_CACHE_ENTRIES 256
 
 #ifdef MULTIXACT_DEBUG
 #define debug_elog2(a, b) elog(a, b)
@@ -776,11 +779,14 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nm
     int slotno;
     MultiXactOffset *offptr = NULL;
     int i;
-
-    (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
+    LWLock* lock;
+    LWLock* prevlock = NULL;
 
     pageno = (int64)MultiXactIdToOffsetPage(multi);
     entryno = MultiXactIdToOffsetEntry(multi);
+
+    lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
+    LWLockAcquire(lock, LW_EXCLUSIVE);
 
     /*
      * Note: we pass the MultiXactId to SimpleLruReadPage as the "transaction"
@@ -797,10 +803,7 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nm
 
     t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
 
-    /* Exchange our lock */
-    LWLockRelease(MultiXactOffsetControlLock);
-
-    (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
+    LWLockRelease(lock);
 
     prev_pageno = -1;
 
@@ -811,6 +814,13 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nm
         entryno = MXOffsetToMemberEntry(offset);
 
         if (pageno != prev_pageno) {
+            /*
+             * MultiXactMember SLRU page is changed so check if this new page
+             * fall into the different SLRU bank then release the old bank's
+             * lock and acquire lock on the new bank.
+             */
+            lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno);
+            SlruBankLockSwitch(prevlock, lock, LW_EXCLUSIVE);
             slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno, true, multi);
             prev_pageno = pageno;
         }
@@ -824,7 +834,9 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nm
         t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno] = true;
     }
 
-    LWLockRelease(MultiXactMemberControlLock);
+    if (prevlock != NULL) {
+        LWLockRelease(prevlock);
+    }
 }
 
 /*
@@ -929,12 +941,12 @@ int GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
     MultiXactOffset offset;
     int length;
     int truelength;
-    int i;
     MultiXactId nextMXact;
     MultiXactId tmpMXact;
     MultiXactOffset nextOffset;
     MultiXactMember *ptr = NULL;
     MultiXactId oldestMXact;
+    LWLock* lock;
 
     ereport(DEBUG2, (errmsg("GetMembers: asked for " XID_FMT, multi)));
 
@@ -1013,10 +1025,13 @@ int GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
      * time on every multixact creation.
      */
 retry:
-    (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
     pageno = MultiXactIdToOffsetPage(multi);
     entryno = MultiXactIdToOffsetEntry(multi);
+
+    /* Acquire the bank lock for the page we need. */
+    lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
+    LWLockAcquire(lock, LW_EXCLUSIVE);
 
     slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, multi);
     offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
@@ -1039,8 +1054,22 @@ retry:
         pageno = (int64)MultiXactIdToOffsetPage(tmpMXact);
         entryno = MultiXactIdToOffsetEntry(tmpMXact);
 
-        if (pageno != prev_pageno)
+        if (pageno != prev_pageno) {
+            LWLock* newLock;
+
+            /*
+             * Since we're going to access a different SLRU page, if this page
+             * falls under a different bank, release the old bank's lock and
+             * acquire the lock of the new bank.
+             */
+            newLock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
+            if (newLock != lock) {
+                LWLockRelease(lock);
+                LWLockAcquire(newLock, LW_EXCLUSIVE);
+                lock = newLock;
+            }
             slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, tmpMXact);
+        }
 
         offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
@@ -1048,7 +1077,8 @@ retry:
 
         if (nextMXOffset == 0) {
             /* Corner case 2: next multixact is still being filled in */
-            LWLockRelease(MultiXactOffsetControlLock);
+            LWLockRelease(lock);
+            lock = NULL;
             pg_usleep(1000L);
             goto retry;
         }
@@ -1056,17 +1086,15 @@ retry:
         length = nextMXOffset - offset;
     }
 
-    LWLockRelease(MultiXactOffsetControlLock);
+    LWLockRelease(lock);
+    lock = NULL;
 
     ptr = (MultiXactMember *)palloc((unsigned)length * sizeof(MultiXactMember));
     *members = ptr;
 
-    /* Now get the members themselves. */
-    (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
-
     truelength = 0;
     prev_pageno = -1;
-    for (i = 0; i < length; i++, offset++) {
+    for (int i = 0; i < length; i++, offset++) {
         TransactionId *xactptr = NULL;
         TransactionId memberXid;
 
@@ -1074,6 +1102,15 @@ retry:
         entryno = MXOffsetToMemberEntry(offset);
 
         if (pageno != prev_pageno) {
+            LWLock* newLock;
+            /*
+             * Since we're going to access a different SLRU page, if this page
+             * falls under a different bank, release the old bank's lock and
+             * acquire the lock of the new bank.
+             */
+            newLock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno);
+            SlruBankLockSwitch(lock, newLock, LW_EXCLUSIVE);
+
             slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno, true, multi);
             prev_pageno = pageno;
         }
@@ -1093,7 +1130,7 @@ retry:
         ++truelength;
     }
 
-    LWLockRelease(MultiXactMemberControlLock);
+    LWLockRelease(lock);
 
     /*
      * Copy the result into the local cache.
@@ -1154,20 +1191,23 @@ static int MXactMemberComparator(const void *arg1, const void *arg2)
  */
 static MultiXactId mXactCacheGetBySet(int nmembers, MultiXactMember *members)
 {
-    mXactCacheEnt *entry = NULL;
+    dlist_iter iter;
 
     debug_elog3(DEBUG2, "CacheGet: looking for %s", mxid_to_string(InvalidMultiXactId, nmembers, members));
 
     /* sort the array so comparison is easy */
     qsort(members, nmembers, sizeof(MultiXactMember), MXactMemberComparator);
 
-    for (entry = t_thrd.xact_cxt.MXactCache; entry != NULL; entry = entry->next) {
+    dlist_foreach(iter, &t_thrd.xact_cxt.MXactCache) {
+        mXactCacheEnt *entry = dlist_container(mXactCacheEnt, node, iter.cur);
+
         if (entry->nmembers != nmembers)
             continue;
 
         /* We assume the cache entries are sorted */
         if (memcmp(members, entry->members, (unsigned)nmembers * sizeof(MultiXactMember)) == 0) {
             ereport(DEBUG2, (errmsg("CacheGet: found " XID_FMT, entry->multi)));
+            dlist_move_head(&t_thrd.xact_cxt.MXactCache, iter.cur);
             return entry->multi;
         }
     }
@@ -1190,12 +1230,14 @@ static int mXactCacheGetById(MultiXactId multi, MultiXactMember **members)
         return -1;
     }
 
-    mXactCacheEnt *entry = NULL;
+    dlist_iter iter;
     errno_t rc = EOK;
 
     ereport(DEBUG2, (errmsg("CacheGet: looking for " XID_FMT, multi)));
 
-    for (entry = t_thrd.xact_cxt.MXactCache; entry != NULL; entry = entry->next) {
+    dlist_foreach(iter, &t_thrd.xact_cxt.MXactCache) {
+        mXactCacheEnt *entry = dlist_container(mXactCacheEnt, node, iter.cur);
+
         if (entry->multi == multi) {
             MultiXactMember *ptr = NULL;
             Size size;
@@ -1208,6 +1250,13 @@ static int mXactCacheGetById(MultiXactId multi, MultiXactMember **members)
             securec_check(rc, "", "");
 
             debug_elog3(DEBUG2, "CacheGet: found %s", mxid_to_string(multi, entry->nmembers, entry->members));
+            /*
+             * Note we modify the list while not using a modifyable iterator.
+             * This is acceptable only because we exit the iteration
+             * immediately afterwards.
+             */
+            dlist_move_head(&t_thrd.xact_cxt.MXactCache, iter.cur);
+
             return entry->nmembers;
         }
     }
@@ -1251,8 +1300,19 @@ static void mXactCachePut(MultiXactId multi, int nmembers, MultiXactMember *memb
     /* mXactCacheGetBySet assumes the entries are sorted, so sort them */
     qsort(entry->members, nmembers, sizeof(MultiXactMember), MXactMemberComparator);
 
-    entry->next = t_thrd.xact_cxt.MXactCache;
-    t_thrd.xact_cxt.MXactCache = entry;
+    dlist_push_head(&t_thrd.xact_cxt.MXactCache, &entry->node);
+    if (t_thrd.xact_cxt.MXactCacheMembers++ >= MAX_CACHE_ENTRIES) {
+        dlist_node *node;
+
+        node = dlist_tail_node(&t_thrd.xact_cxt.MXactCache);
+        dlist_delete(node);
+        t_thrd.xact_cxt.MXactCacheMembers--;
+
+        entry = dlist_container(mXactCacheEnt, node, node);
+        debug_elog3(DEBUG2, "CachePut: pruning cached multi %u", entry->multi);
+
+        pfree(entry);
+    }
 }
 
 static const char *MXStatusToString(MultiXactStatus status)
@@ -1320,7 +1380,8 @@ void AtEOXact_MultiXact(void)
      * a child of u_sess->top_transaction_mem_cxt, we needn't delete it explicitly.
      */
     t_thrd.xact_cxt.MXactContext = NULL;
-    t_thrd.xact_cxt.MXactCache = NULL;
+    dlist_init(&t_thrd.xact_cxt.MXactCache);
+    t_thrd.xact_cxt.MXactCacheMembers = 0;
 }
 
 /*
@@ -1382,7 +1443,8 @@ void PostPrepare_MultiXact(TransactionId xid)
      * Discard the local MultiXactId cache like in AtEOX_MultiXact
      */
     t_thrd.xact_cxt.MXactContext = NULL;
-    t_thrd.xact_cxt.MXactCache = NULL;
+    dlist_init(&t_thrd.xact_cxt.MXactCache);
+    t_thrd.xact_cxt.MXactCacheMembers = 0;
 }
 
 /*
@@ -1440,11 +1502,11 @@ Size MultiXactShmemSize(void)
 
     size = SHARED_MULTIXACT_STATE_SIZE;
     if (ENABLE_DSS) {
-        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTOFFSET, 0));
-        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTMEMBER, 0));
+        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTOFFSET, 0, true));
+        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTMEMBER, 0, true));
     } else {
-        size = add_size(size, SimpleLruShmemSize(NUM_MXACTOFFSET_BUFFERS, 0));
-        size = add_size(size, SimpleLruShmemSize(NUM_MXACTMEMBER_BUFFERS, 0));
+        size = add_size(size, SimpleLruShmemSize(MULTIXACT_OFFSET_BUFFERS, 0, true));
+        size = add_size(size, SimpleLruShmemSize(MULTIXACT_MEMBER_BUFFERS, 0, true));
     }
 
     return size;
@@ -1462,20 +1524,24 @@ void MultiXactShmemInit(void)
     securec_check_ss(rc, "\0", "\0");
     if (ENABLE_DSS) {
         SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
-            LWTRANCHE_MULTIXACTOFFSET_CTL, DSS_MAX_MXACTOFFSET, 0, MultiXactOffsetControlLock, path);
+                      LWTRANCHE_MULTIXACTOFFSET_CTL, LWTRANCHE_MULTIXACTOFFSET_SLRU, DSS_MAX_MXACTOFFSET, 0,
+                      MultiXactOffsetControlLock, path, 0, true);
     } else {
         SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
-            LWTRANCHE_MULTIXACTOFFSET_CTL, NUM_MXACTOFFSET_BUFFERS, 0, MultiXactOffsetControlLock, path);
+                      LWTRANCHE_MULTIXACTOFFSET_CTL, LWTRANCHE_MULTIXACTOFFSET_SLRU, MULTIXACT_OFFSET_BUFFERS, 0,
+                      MultiXactOffsetControlLock, path, 0, true);
     }
 
     rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/members", MULTIXACTDIR);
     securec_check_ss(rc, "\0", "\0");
     if (ENABLE_DSS) {
         SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
-            LWTRANCHE_MULTIXACTMEMBER_CTL, DSS_MAX_MXACTMEMBER, 0, MultiXactMemberControlLock, path);
+                      LWTRANCHE_MULTIXACTMEMBER_CTL, LWTRANCHE_MULTIXACTMEMBER_SLRU, DSS_MAX_MXACTMEMBER, 0,
+                      MultiXactMemberControlLock, path, 0, true);
     } else {
         SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
-            LWTRANCHE_MULTIXACTMEMBER_CTL, NUM_MXACTMEMBER_BUFFERS, 0, MultiXactMemberControlLock, path);
+                      LWTRANCHE_MULTIXACTMEMBER_CTL, LWTRANCHE_MULTIXACTMEMBER_SLRU, MULTIXACT_MEMBER_BUFFERS, 0,
+                      MultiXactMemberControlLock, path, 0, true);
     }
 
     /* Initialize our shared state struct */
@@ -1507,8 +1573,10 @@ void MultiXactShmemInit(void)
 void BootStrapMultiXact(void)
 {
     int slotno;
+    LWLock* lock;
 
-    (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
+    lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl,  0);
+    LWLockAcquire(lock, LW_EXCLUSIVE);
 
     /* Create and zero the first page of the offsets log */
     slotno = ZeroMultiXactOffsetPage(0, false);
@@ -1517,9 +1585,10 @@ void BootStrapMultiXact(void)
     SimpleLruWritePage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, slotno);
     Assert(!t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
-    LWLockRelease(MultiXactOffsetControlLock);
+    LWLockRelease(lock);
 
-    (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
+    lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, 0);
+    LWLockAcquire(lock, LW_EXCLUSIVE);
 
     /* Create and zero the first page of the members log */
     slotno = ZeroMultiXactMemberPage(0, false);
@@ -1528,7 +1597,7 @@ void BootStrapMultiXact(void)
     SimpleLruWritePage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, slotno);
     Assert(!t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno]);
 
-    LWLockRelease(MultiXactMemberControlLock);
+    LWLockRelease(lock);
 }
 
 /*
@@ -1544,7 +1613,7 @@ static int ZeroMultiXactOffsetPage(int64 pageno, bool writeXlog)
 {
     int slotno;
 
-    slotno = SimpleLruZeroPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
+    slotno = SimpleLruZeroPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, NULL);
 
     if (writeXlog)
         WriteMZeroPageXlogRec(pageno, XLOG_MULTIXACT_ZERO_OFF_PAGE);
@@ -1585,9 +1654,6 @@ void StartupMultiXact(void)
     int64 pageno;
     int64 entryno;
 
-    /* Clean up offsets state */
-    (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
-
     /*
      * Initialize our idea of the latest page number.
      */
@@ -1602,7 +1668,9 @@ void StartupMultiXact(void)
     if (entryno != 0) {
         int slotno;
         MultiXactOffset *offptr = NULL;
+        LWLock* lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
 
+        LWLockAcquire(lock, LW_EXCLUSIVE);
         slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, multi);
         offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
@@ -1612,12 +1680,8 @@ void StartupMultiXact(void)
         securec_check(rc, "", "");
 
         t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
+        LWLockRelease(lock);
     }
-
-    LWLockRelease(MultiXactOffsetControlLock);
-
-    /* And the same for members */
-    (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
 
     /*
      * Initialize our idea of the latest page number.
@@ -1633,7 +1697,9 @@ void StartupMultiXact(void)
     if (entryno != 0) {
         int slotno;
         TransactionId *xidptr = NULL;
+        LWLock* lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno);
 
+        LWLockAcquire(lock, LW_EXCLUSIVE);
         slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno, true, offset);
         xidptr = (TransactionId *)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
         xidptr += entryno;
@@ -1643,9 +1709,8 @@ void StartupMultiXact(void)
         securec_check(rc, "", "");
 
         t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno] = true;
+        LWLockRelease(lock);
     }
-
-    LWLockRelease(MultiXactMemberControlLock);
 
     /*
      * Initialize lastTruncationPoint to invalid, ensuring that the first
@@ -1813,6 +1878,7 @@ void MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
 static void ExtendMultiXactOffset(MultiXactId multi)
 {
     int64 pageno;
+    LWLock* lock;
 
     /*
      * No work except at first MultiXactId of a page.
@@ -1821,13 +1887,14 @@ static void ExtendMultiXactOffset(MultiXactId multi)
         return;
 
     pageno = (int64)MultiXactIdToOffsetPage(multi);
+    lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
 
-    (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(lock, LW_EXCLUSIVE);
 
     /* Zero the page and make an XLOG entry about it */
     ZeroMultiXactOffsetPage(pageno, true);
 
-    LWLockRelease(MultiXactOffsetControlLock);
+    LWLockRelease(lock);
 }
 
 /*
@@ -1854,15 +1921,17 @@ static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
         entryno = MXOffsetToMemberEntry(offset);
         if (entryno == 0) {
             int64 pageno;
+            LWLock* lock;
 
             pageno = (int64)MXOffsetToMemberPage(offset);
+            lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno);
 
-            (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
+            (void)LWLockAcquire(lock, LW_EXCLUSIVE);
 
             /* Zero the page and make an XLOG entry about it */
             ZeroMultiXactMemberPage(pageno, true);
 
-            LWLockRelease(MultiXactMemberControlLock);
+            LWLockRelease(lock);
         }
 
         /* Advance to next page (OK if nmembers goes negative) */
@@ -2107,27 +2176,32 @@ void multixact_redo(XLogReaderState *record)
     if (mask_info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
         int64 pageno = 0;
         int slotno;
+        LWLock* lock;
 
         get_multixact_pageno(info, &pageno, record);
-        (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
+        lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno);
+        LWLockAcquire(lock, LW_EXCLUSIVE);
+
         slotno = ZeroMultiXactOffsetPage(pageno, false);
         SimpleLruWritePage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, slotno);
         Assert(!t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
-        LWLockRelease(MultiXactOffsetControlLock);
+        LWLockRelease(lock);
     } else if (mask_info == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
         int64 pageno = 0;
         int slotno;
+        LWLock* lock;
 
         get_multixact_pageno(info, &pageno, record);
 
-        (void)LWLockAcquire(MultiXactMemberControlLock, LW_EXCLUSIVE);
+        lock = SimpleLruGetBankLock(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno);
+        LWLockAcquire(lock, LW_EXCLUSIVE);
 
         slotno = ZeroMultiXactMemberPage(pageno, false);
         SimpleLruWritePage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, slotno);
         Assert(!t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno]);
 
-        LWLockRelease(MultiXactMemberControlLock);
+        LWLockRelease(lock);
     } else if (mask_info == XLOG_MULTIXACT_CREATE_ID) {
         xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
         TransactionId *xidsWithStatus = xlrec->xids;
@@ -2180,12 +2254,12 @@ void SSMultiXactShmemClear(void)
     rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/offsets", MULTIXACTDIR);
     securec_check_ss(rc, "\0", "\0");
     SimpleLruSetPageEmpty(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl,
-        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL), LWTRANCHE_MULTIXACTOFFSET_CTL, DSS_MAX_MXACTOFFSET, 0,
-        MultiXactOffsetControlLock, path);
+        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL), LWTRANCHE_MULTIXACTOFFSET_CTL,
+        DSS_MAX_MXACTOFFSET, 0, path);
 
     rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/members", MULTIXACTDIR);
     securec_check_ss(rc, "\0", "\0");
     SimpleLruSetPageEmpty(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl,
-        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL), LWTRANCHE_MULTIXACTMEMBER_CTL, DSS_MAX_MXACTMEMBER, 0,
-        MultiXactMemberControlLock, path);
+        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL), LWTRANCHE_MULTIXACTMEMBER_CTL,
+        DSS_MAX_MXACTMEMBER, 0, path);
 }

@@ -393,8 +393,8 @@ void AsyncShmemInit(void)
     /*
      * Set up SLRU management of the pg_notify data.
      */
-    SimpleLruInit(AsyncCtl, GetBuiltInTrancheName(LWTRANCHE_ASYNC_CTL), LWTRANCHE_ASYNC_CTL, NUM_ASYNC_BUFFERS, 0, 
-                  AsyncCtlLock, NOTIFYDIR);
+    SimpleLruInit(AsyncCtl, GetBuiltInTrancheName(LWTRANCHE_ASYNC_CTL), 0, LWTRANCHE_ASYNC_CTL,
+                  NUM_ASYNC_BUFFERS, 0, AsyncCtlLock, NOTIFYDIR);
 
     /* Override default assumption that writes should be fsync'd */
     AsyncCtl->do_fsync = false;

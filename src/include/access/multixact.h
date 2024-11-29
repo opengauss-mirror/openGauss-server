@@ -25,10 +25,6 @@
 
 #define MULTIXACTDIR (g_instance.datadir_cxt.multixactDir)
 
-/* Number of SLRU buffers to use for multixact */
-#define NUM_MXACTOFFSET_BUFFERS 8
-#define NUM_MXACTMEMBER_BUFFERS 16
-
 /*
  * Possible multixact lock modes ("status").  The first four modes are for
  * tuple locks (FOR KEY SHARE, FOR SHARE, FOR NO KEY UPDATE, FOR UPDATE); the
@@ -94,6 +90,8 @@ typedef struct MultiXactMember {
 #define XLOG_MULTIXACT_MASK 0x70
 #define XLOG_MULTIXACT_INT64_PAGENO 0x80
 
+#define MULTIXACT_OFFSET_BUFFERS (g_instance.attr.attr_storage.num_slru_buffers[MUTLIXACT_OFFSET])
+#define MULTIXACT_MEMBER_BUFFERS (g_instance.attr.attr_storage.num_slru_buffers[MULTIXACT_MEMBER])
 
 typedef struct xl_multixact_create {
     MultiXactId mid;                           /* new MultiXact's ID */

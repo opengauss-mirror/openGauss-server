@@ -34,6 +34,7 @@
 #include "access/gin.h"
 #include "access/gtm.h"
 #include "pgxc/pgxc.h"
+#include "access/slru.h"
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
@@ -4846,6 +4847,18 @@ static void InitStorageConfigureNamesString()
             NULL,
             NULL,
             NULL},
+        {{"num_slru_buffers",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            LOCK_MANAGEMENT,
+            gettext_noop("num of simple lru buffers."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.num_slru_buffers_str,
+            "MXACT_OFFSET=16,MXACT_MEMBER=16",
+            NULL,
+            NULL,
+            NULL},
         /* Get the cross_cluster_ReplConnInfo1 from postgresql.conf and assign to cross_cluster_ReplConnArray1. */
         {{"cross_cluster_replconninfo1",
             PGC_SIGHUP,
@@ -5531,6 +5544,52 @@ void InitializeNumLwLockPartitions(void)
     CheckAndSetLWLockPartInfo(res);
     /* check range */
     CheckLWLockPartNumRange();
+
+    list_free_deep(res);
+}
+
+static bool CheckOptionCombine(char* option)
+{
+    while (*option) {
+        if (!isalnum(*option) && *option != ',' && *option != '=' && *option != '_') {
+            return false;
+        }
+        option++;
+    }
+    return true;
+}
+
+/* Initialize storage critical Simple lru buffers num */
+void InitializeNumSlruBuffers(void)
+{
+    Assert(lengthof(SLRU_BUFFER_INFO) == SLRU_BUFFER_KIND);
+    /* set default values */
+    SetSlruBufferDefaultNum();
+    /* Do str copy and remove space. */
+    char* attr = TrimStrQuote(g_instance.attr.attr_storage.num_slru_buffers_str, true);
+    if (!CheckOptionCombine(attr)) {
+        ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+            errmsg("Invalid attribute for internal slru buffers."),
+            errdetail("The attribute contains unallowed characters, "
+                      "only a-z, A-Z, 0-9, \',\', \'=\', '_' are allowed, the attribute: %s.",
+                      attr)));
+    }
+    if (attr == NULL || attr[0] == '\0') { /* use default values */
+        return;
+    }
+    const char* pdelimiter = ",";
+    List *res = NULL;
+    char* nextToken = NULL;
+    char* token = strtok_s(attr, pdelimiter, &nextToken);
+    while (token != NULL) {
+        res = lappend(res, TrimStr(token));
+        token = strtok_s(NULL, pdelimiter, &nextToken);
+    }
+    pfree(attr);
+    /* check input string and set lwlock num */
+    CheckAndSetSlruBufferInfo(res);
+    /* check range */
+    CheckSlruBufferNumRange();
 
     list_free_deep(res);
 }

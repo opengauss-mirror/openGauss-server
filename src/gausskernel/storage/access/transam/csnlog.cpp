@@ -78,9 +78,16 @@
 
 #define CsnlogCtl(n) (&t_thrd.shemem_ptr_cxt.CsnlogCtlPtr[CSNBufHashPartition(n)])
 
-#define CSN_LWLOCK_ACQUIRE(pageno, lockmode) ((void)LWLockAcquire(CSNBufMappingPartitionLock(pageno), lockmode))
+#define CSN_LWLOCK_ACQUIRE(pageno, lockmode) \
+    ((void)LWLockAcquire(SimpleLruGetBankLock(CsnlogCtl(pageno), pageno), lockmode))
 
-#define CSN_LWLOCK_RELEASE(pageno) (LWLockRelease(CSNBufMappingPartitionLock(pageno)))
+#define CSN_LWLOCK_RELEASE(pageno) (LWLockRelease(SimpleLruGetBankLock(CsnlogCtl(pageno), pageno)))
+
+/*
+ * CSNLOGShmemBuffers
+ *
+ * Return the number of buffers used by the csnlog.
+ */
 
 static int ZeroCSNLOGPage(int64 pageno);
 static void CSNLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CommitSeqNo csn, int64 pageno,
@@ -539,7 +546,8 @@ static CommitSeqNo RecursiveGetCommitSeqNo(TransactionId xid)
  */
 Size CSNLOGShmemBuffers(void)
 {
-    return Min(256, Max(BATCH_SIZE, g_instance.attr.attr_storage.NBuffers / 512));
+    return Min(MAX_SLRU_PARTITION_SIZE, Max(BATCH_SIZE,
+        g_instance.attr.attr_storage.NBuffers/ SLRU_PARTITION_SIZE_RATE)) &~ SLRU_BANK_SIZE;
 }
 
 /**
@@ -552,7 +560,7 @@ Size CSNLOGShmemSize(void)
     Size sz = 0;
 
     for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
-        sz += SimpleLruShmemSize(CSNLOGShmemBuffers(), 0);
+        sz += SimpleLruShmemSize(CSNLOGShmemBuffers(), 0, true);
     }
 
     return sz;
@@ -575,8 +583,8 @@ void CSNLOGShmemInit(void)
     for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CSNLOG Ctl", i);
         securec_check_ss(rc, "\0", "\0");
-        SimpleLruInit(CsnlogCtl(i), name, LWTRANCHE_CSNLOG_CTL, CSNLOGShmemBuffers(), 0,
-                      CSNBufMappingPartitionLockByIndex(i), CSNLOGDIR, i);
+        SimpleLruInit(CsnlogCtl(i), name, LWTRANCHE_CSNLOG_CTL, LWTRANCHE_CSNLOG_SLRU, CSNLOGShmemBuffers(), 0,
+                      NULL, CSNLOGDIR, i, true, NUM_CSNLOG_PARTITIONS);
     }
 }
 
@@ -621,7 +629,7 @@ void BootStrapCSNLOG(void)
  */
 static int ZeroCSNLOGPage(int64 pageno)
 {
-    return SimpleLruZeroPage(CsnlogCtl(pageno), pageno);
+    return SimpleLruZeroPage(CsnlogCtl(pageno), pageno, NULL);
 }
 
 /**
@@ -840,6 +848,6 @@ void SSCSNLOGShmemClear(void)
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CSNLOG Ctl", i);
         securec_check_ss(rc, "\0", "\0");
         SimpleLruSetPageEmpty(CsnlogCtl(i), name, (int)LWTRANCHE_CSNLOG_CTL, (int)CSNLOGShmemBuffers(), 0,
-            CSNBufMappingPartitionLockByIndex(i), CSNLOGDIR, i);
+            CSNLOGDIR, i);
     }
 }

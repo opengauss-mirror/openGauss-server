@@ -30,8 +30,9 @@
 #define ClogCtl(n) (&t_thrd.shemem_ptr_cxt.ClogCtl[CBufHashPartition(n)])
 #define CsnlogCtl(n) (&t_thrd.shemem_ptr_cxt.CsnlogCtlPtr[CSNBufHashPartition(n)])
 #define CSNLOG_XACTS_PER_PAGE (BLCKSZ / sizeof(CommitSeqNo))
-#define CSN_LWLOCK_ACQUIRE(pageno, lockmode) ((void)LWLockAcquire(CSNBufMappingPartitionLock(pageno), lockmode))
-#define CSN_LWLOCK_RELEASE(pageno) (LWLockRelease(CSNBufMappingPartitionLock(pageno)))
+#define CSN_LWLOCK_ACQUIRE(pageno, lockmode) \
+    ((void)LWLockAcquire(SimpleLruGetBankLock(CsnlogCtl(pageno), pageno), lockmode))
+#define CSN_LWLOCK_RELEASE(pageno) (LWLockRelease(SimpleLruGetBankLock(CsnlogCtl(pageno), pageno)))
 
 #define TransactionIdToCSNPage(xid) ((xid) / (TransactionId)CSNLOG_XACTS_PER_PAGE)
 
@@ -176,7 +177,7 @@ void CopyCLog(int64 pageno, char *pageBuffer)
     rc = memcpy_s(pageBuffer, BLCKSZ, ClogCtl(pageno)->shared->page_buffer[slotno], BLCKSZ);
     securec_check(rc, "", "");
 
-    LWLockRelease(ClogCtl(pageno)->shared->control_lock);
+    LWLockRelease(SimpleLruGetBankLock(ClogCtl(pageno), pageno));
 }
 
 void CopyCSNLog(int64 pageno, char *pageBuffer)

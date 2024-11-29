@@ -529,6 +529,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  no_audit_client                                  | string  |      |           | 
  numa_distribute_mode                             | string  |      |           | 
  num_internal_lock_partitions                     | string  |      |           | 
+ num_slru_buffers                                 | string  |      |           | 
  nvm_buffers                                      | integer | 8kB  | 0         | 1073741823
  nvm_file_path                                    | string  |      |           | 
  omit_encoding_error                              | bool    |      |           | 

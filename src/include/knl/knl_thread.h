@@ -66,6 +66,7 @@
 #include "streaming/init.h"
 #include "utils/memgroup.h"
 #include "lib/circularqueue.h"
+#include "lib/ilist.h"
 #include "pgxc/barrier.h"
 #include "communication/commproxy_basic.h"
 #include "replication/replicainternal.h"
@@ -272,7 +273,8 @@ typedef struct knl_t_xact_context {
     XLogRecPtr cachedCommitLSN;
 
     /* var in multixact.cpp*/
-    struct mXactCacheEnt* MXactCache;
+    dlist_head MXactCache;
+    int MXactCacheMembers;
     MemoryContext MXactContext;
 
     /* var in twophase.cpp*/

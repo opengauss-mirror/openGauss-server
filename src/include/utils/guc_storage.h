@@ -17,6 +17,7 @@ extern void InitStorageConfigureNames();
 extern bool check_enable_gtm_free(bool* newval, void** extra, GucSource source);
 extern void InitializeNumLwLockPartitions(void);
 extern bool need_check_repl_uuid(GucContext ctx);
+extern void InitializeNumSlruBuffers(void);
 
 #ifdef ENABLE_HTAP
 extern ReplConnInfo* GetReplConnInfo(const char* ConnInfoList, int* InfoLength);
