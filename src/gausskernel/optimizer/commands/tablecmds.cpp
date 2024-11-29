@@ -22394,16 +22394,13 @@ static void ATExecIMCSTORED(Relation rel, List* colList)
 {
     Oid relOid = RelationGetRelid(rel);
     int2vector* imcsAtts = NULL;
-    List* colNames = NIL;
     int imcsNatts = 0;
-    int nameLength = 0;
 
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
     /* standbynode populate */
     if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-        GetColNamesForStandBy(rel, imcsAtts, imcsNatts, colNames, &nameLength);
         CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
-        SendImcstoredRequest(relOid, InvalidOid, colNames, nameLength, TYPE_IMCSTORED);
+        SendImcstoredRequest(relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
     } else {
         AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
     }
@@ -22434,9 +22431,7 @@ static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, L
     Oid partOid = InvalidOid;
     Oid relOid = RelationGetRelid(rel);
     int2vector* imcsAtts = NULL;
-    List* colNames = NIL;
     int imcsNatts = 0;
-    int nameLength = 0;
 
     partOid = ImcsPartNameGetPartOid(relOid, partName);
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts, partOid);
@@ -22456,9 +22451,8 @@ static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, L
     {
         /* populate on standbynode */
         if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-            GetColNamesForStandBy(partRel, imcsAtts, imcsNatts, colNames, &nameLength);
             CreateImcsDescForPrimaryNode(partRel, imcsAtts, imcsNatts);
-            SendImcstoredRequest(relOid, partOid, colNames, nameLength, TYPE_PARTITION_IMCSTORED);
+            SendImcstoredRequest(relOid, partOid, imcsAtts->values, imcsNatts, TYPE_PARTITION_IMCSTORED);
         } else {
             /* populate on currrent node */
             AlterTableEnableImcstore(partRel, imcsAtts, imcsNatts);
