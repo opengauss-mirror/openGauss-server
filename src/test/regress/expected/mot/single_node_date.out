@@ -955,10 +955,11 @@ SELECT EXTRACT(CENTURY FROM DATE '0100-12-31 BC'); -- -1
 (1 row)
 
 SELECT EXTRACT(CENTURY FROM DATE '0001-12-31 BC'); -- -1
-ERROR:  invalid data for "year =  0", value must be between -4712 and 9999, and not be 0
-LINE 1: SELECT EXTRACT(CENTURY FROM DATE '0001-12-31 BC');
-                                         ^
-CONTEXT:  referenced column: date_part
+ date_part 
+-----------
+        -1
+(1 row)
+
 SELECT EXTRACT(CENTURY FROM DATE '0001-01-01');    --  1
  date_part 
 -----------
@@ -1005,10 +1006,11 @@ SELECT EXTRACT(CENTURY FROM CURRENT_DATE)>=21 AS True;     -- true
 -- millennium
 --
 SELECT EXTRACT(MILLENNIUM FROM DATE '0001-12-31 BC'); -- -1
-ERROR:  invalid data for "year =  0", value must be between -4712 and 9999, and not be 0
-LINE 1: SELECT EXTRACT(MILLENNIUM FROM DATE '0001-12-31 BC');
-                                            ^
-CONTEXT:  referenced column: date_part
+ date_part 
+-----------
+        -1
+(1 row)
+
 SELECT EXTRACT(MILLENNIUM FROM DATE '0001-01-01 AD'); --  1
  date_part 
 -----------
@@ -1068,10 +1070,11 @@ SELECT EXTRACT(DECADE FROM DATE '0009-12-31');    --   0
 (1 row)
 
 SELECT EXTRACT(DECADE FROM DATE '0001-01-01 BC'); --   0
-ERROR:  invalid data for "year =  0", value must be between -4712 and 9999, and not be 0
-LINE 1: SELECT EXTRACT(DECADE FROM DATE '0001-01-01 BC');
-                                        ^
-CONTEXT:  referenced column: date_part
+ date_part 
+-----------
+         0
+(1 row)
+
 SELECT EXTRACT(DECADE FROM DATE '0002-12-31 BC'); --  -1
  date_part 
 -----------
