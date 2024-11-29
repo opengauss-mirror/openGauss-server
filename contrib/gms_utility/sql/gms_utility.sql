@@ -154,6 +154,28 @@ select gms_utility.is_bit_set('12345678', 0); -- error
 select gms_utility.is_bit_set('12345678', 100);
 select gms_utility.is_bit_set('12345678', 3.14E100); -- error
 select gms_utility.is_bit_set('团团又圆圆', 20); -- error
+select gms_utility.is_bit_set('12345678AF', null);
+select gms_utility.is_bit_set('F2345678AF', null);
+select gms_utility.is_bit_set('12345678AF', '');
+select gms_utility.is_bit_set('F2345678AF', '');
+declare
+    raw_data raw(50) := hextoraw('ff11aa33');
+    bit_position number := null;
+    bit_status number;
+begin
+    bit_status := gms_utility.is_bit_set(raw_data, bit_position);
+    raise info 'bit osition is: %', bit_status;
+end;
+/
+declare
+    raw_data raw(50) := hextoraw('ff11aa33');
+    bit_position number := '';
+    bit_status number;
+begin
+    bit_status := gms_utility.is_bit_set(raw_data, bit_position);
+    raise info 'bit osition is: %', bit_status;
+end;
+/
 -- end test is_bit_set
 
 -- start test is_cluster_database

@@ -305,6 +305,50 @@ select gms_utility.is_bit_set('团团又圆圆', 20); -- error
 LINE 1: select gms_utility.is_bit_set('团团又圆圆', 20);
                                       ^
 CONTEXT:  referenced column: is_bit_set
+select gms_utility.is_bit_set('12345678AF', null);
+ is_bit_set 
+------------
+          0
+(1 row)
+
+select gms_utility.is_bit_set('F2345678AF', null);
+ is_bit_set 
+------------
+          1
+(1 row)
+
+select gms_utility.is_bit_set('12345678AF', '');
+ is_bit_set 
+------------
+          0
+(1 row)
+
+select gms_utility.is_bit_set('F2345678AF', '');
+ is_bit_set 
+------------
+          1
+(1 row)
+
+declare
+    raw_data raw(50) := hextoraw('ff11aa33');
+    bit_position number := null;
+    bit_status number;
+begin
+    bit_status := gms_utility.is_bit_set(raw_data, bit_position);
+    raise info 'bit osition is: %', bit_status;
+end;
+/
+INFO:  bit osition is: 1
+declare
+    raw_data raw(50) := hextoraw('ff11aa33');
+    bit_position number := '';
+    bit_status number;
+begin
+    bit_status := gms_utility.is_bit_set(raw_data, bit_position);
+    raise info 'bit osition is: %', bit_status;
+end;
+/
+INFO:  bit osition is: 1
 -- end test is_bit_set
 -- start test is_cluster_database
 select gms_utility.is_cluster_database();
