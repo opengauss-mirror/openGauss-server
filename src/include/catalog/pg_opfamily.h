@@ -221,6 +221,8 @@ DATA(insert OID = 8394 (8301 bit_hamming_ops PGNSP PGUID));
 DATA(insert OID = 8392 (403 vector_ops PGNSP PGUID));
 DATA(insert OID = 8397 (403 sparsevec_ops PGNSP PGUID));
 
+DATA(insert OID = 8375 (4439 vector_ops PGNSP PGUID));
+DATA(insert OID = 8376 (4439 sparsevec_ops PGNSP PGUID));
 /* ubtree index */
 #define BTREE_UBTREE_FAM_OID_DIFF 5000
 #define BTREE_UBTREE_FAM_OID_SPECIAL_DIFF 4000
