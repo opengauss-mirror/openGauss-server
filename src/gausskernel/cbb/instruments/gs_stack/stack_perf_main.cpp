@@ -94,6 +94,9 @@ NON_EXEC_STATIC void stack_perf_main()
     } else {
         get_stack_and_write_result();
     }
+    /* After printing stack, we should notify the postmaster clean backends again. */
+    ereport(LOG, (errmsg("All stack has been print, now we should terminate Backends again.")));
+    SendPostmasterSignal(PMSIGNAL_CLEAN_BACKENDS);
     pgstat_report_activity(STATE_IDLE, NULL);
     proc_exit(0);
 }

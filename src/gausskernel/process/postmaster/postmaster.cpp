@@ -9539,6 +9539,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
     }
 
+    /* If we got PMSIGNAL_CLEAN_BACKENDS, it means we are in pending state. */
+    if (CheckPostmasterSignal(PMSIGNAL_CLEAN_BACKENDS)) {
+        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+    }    
+
     if (CheckSwitchoverTimeoutSignal()) {
         if (WalRcvIsOnline()) {
             g_instance.stat_cxt.switchover_timeout = true;
