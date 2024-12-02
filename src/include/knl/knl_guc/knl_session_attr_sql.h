@@ -249,6 +249,7 @@ typedef struct knl_session_attr_sql {
 
     bool mot_allow_index_on_nullable_column;
     bool enable_default_ustore_table;
+    char* index_type;
     char* ustore_attr;
 #ifdef ENABLE_UT
     char* ustore_unit_test;

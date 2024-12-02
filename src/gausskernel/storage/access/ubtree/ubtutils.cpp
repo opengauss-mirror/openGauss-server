@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/transam.h"
@@ -987,6 +988,8 @@ bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, Offset
     return tupnatts > 0 && tupnatts <= nkeyatts;
 }
 
+
+
 /*
  *  BtCheckThirdPage() -- check whether tuple fits on a btree page at all.
  *
@@ -998,10 +1001,16 @@ bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, Offset
  * Using out of line storage would break assumptions made by suffix truncation
  * and by contrib/amcheck, though.
  */
+template void UBTreeCheckThirdPage<UBTPageOpaqueInternal>(Relation rel, Relation heap, 
+    bool needheaptidspace, Page page, IndexTuple newtup);
+template void UBTreeCheckThirdPage<UBTPCRPageOpaque>(Relation rel, Relation heap, 
+    bool needheaptidspace, Page page, IndexTuple newtup);
+
+template<typename Opaque>
 void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup)
 {
     Size itemsz;
-    UBTPageOpaqueInternal opaque;
+    Opaque opaque;
 
     itemsz = MAXALIGN(IndexTupleSize(newtup));
     /* Double check item size against limit */
@@ -1013,7 +1022,7 @@ void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Pa
      * Internal page insertions cannot fail here, because that would mean that
      * an earlier leaf level insertion that should have failed didn't
      */
-    opaque = (UBTPageOpaqueInternal) PageGetSpecialPointer(page);
+    opaque = (Opaque) PageGetSpecialPointer(page);
     if (!P_ISLEAF(opaque))
         elog(ERROR, "cannot insert oversized tuple of size %zu on internal page of index \"%s\"",
              itemsz, RelationGetRelationName(rel));

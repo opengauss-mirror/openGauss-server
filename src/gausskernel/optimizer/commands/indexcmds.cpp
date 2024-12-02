@@ -1324,7 +1324,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     reloptions = transformRelOptions((Datum)0, stmt->options, NULL, NULL, false, false);
 
     index_relopts = (StdRdOptions *)index_reloptions(amoptions, reloptions, true);
-    if (index_relopts != NULL && strcmp(accessMethodName, "btree") == 0) {
+    if (index_relopts != NULL && (strcmp(accessMethodName, "btree") == 0 || strcmp(accessMethodName, "ubtree") == 0)) {
         /* check if the table supports to create crossbucket index */
         if (is_contain_crossbucket(stmt->options) && !RELATION_HAS_BUCKET(rel) && !skip_build) {
             ereport(ERROR,

@@ -179,6 +179,9 @@ typedef struct RelationMetaData {
 #define COMPRESSION_SNAPPY "snappy"
 #define COMPRESSION_LZ4 "lz4"
 
+#define UBTREE_INDEX_TYPE_PCR "pcr"
+#define UBTREE_INDEX_TYPE_RCR "rcr"
+
 /*
  * values for different table access method types.
  */
@@ -265,6 +268,12 @@ static inline TableAmType get_tableam_from_reloptions(bytea* reloptions, char re
 
 #define RelationIsIndexsplitMethodInsertpt(_reloptions) \
     pg_strcasecmp(RelationGetIndexsplitMethod(_reloptions), INDEXSPLIT_OPT_INSERTPT) == 0
+
+#define RelationGetIndexType(_reloptions) \
+    StdRdOptionsGetStringData(_reloptions, index_type, UBTREE_INDEX_TYPE_RCR)
+
+#define RelationIndexIsPCR(_reloptions) \
+    pg_strcasecmp(RelationGetIndexType(_reloptions), UBTREE_INDEX_TYPE_PCR) == 0
 
 /*
  * @Description: get indexsplit type from Relation's reloptions data.

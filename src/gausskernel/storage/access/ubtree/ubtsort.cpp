@@ -469,12 +469,11 @@ void UBTreeBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, b
         if (hasxid) {
             /*
              * Inserting a new IndexTuple following by 16B transaction information:
-             *      the last 16B of index entries is xmin/xmax. With xid-base optimization, the
-             *      actual space occupied by this part should be only 8B, set the correct size.
+             *      the last data of index entries is IndexTupleTrxData. 
              */
-            IndexTupleSetSize(itup, itupsz - TXN_INFO_SIZE_DIFF); /* size -= 8B */
+            IndexTupleSetSize(itup, itupsz + TXN_INFO_SIZE_DIFF); /* size -= 8B */
         } else {
-            IndexTupleSetSize(itup, itupsz + TXNINFOSIZE); /* size += 8B */
+            IndexTupleSetSize(itup, itupsz + TXNINFOSIZE); /* size += 8B */ //??? 为啥要加8B
         }
     }
 
@@ -495,7 +494,7 @@ void UBTreeBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, b
      * the resered space.  This should never fail on internal pages.
      */
     if (unlikely(itupsz > UBTMaxItemSize(npage))) {
-        UBTreeCheckThirdPage(wstate->index, wstate->heap, state->btps_level == 0, npage, itup);
+        UBTreeCheckThirdPage<UBTPageOpaqueInternal>(wstate->index, wstate->heap, state->btps_level == 0, npage, itup);
     }
 
     /*

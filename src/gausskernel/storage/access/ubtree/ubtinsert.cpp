@@ -973,8 +973,9 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
     itemsz = MAXALIGN(itemsz); /* be safe, PageAddItem will do this but we
                                 * need to be consistent */
     /* Check 1/3 of a page restriction */
-    if (unlikely(itemsz > UBTMaxItemSize(page)))
-        UBTreeCheckThirdPage(rel, heapRel, itup_key->heapkeyspace, page, newtup);
+    if (unlikely(itemsz > UBTMaxItemSize(page))) {
+        UBTreeCheckThirdPage<UBTPageOpaqueInternal>(rel, heapRel, itup_key->heapkeyspace, page, newtup);
+    }
 
     Assert(P_ISLEAF(lpageop) && !P_INCOMPLETE_SPLIT(lpageop));
     Assert(!itup_key->heapkeyspace || itup_key->scantid != NULL);

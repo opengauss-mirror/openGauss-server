@@ -195,7 +195,8 @@ typedef struct BTMetaPageData {
 #define BTREE_VERSION 3      /* current version number */
 #define BTREE_MIN_VERSION 2
 #define BTREE_OLD_VERSION 2  /* old btree version with all meta fields set */
-#define UBTREE_VERSION 2     /* current ubtree version number */
+#define UBTREE_VERSION     2 /* current ubtree rcr version number */
+#define UBTREE_PCR_VERSION 4 /* current ubtree pcr version number */
 
 /* Upgrade support for btree split/delete optimization. */
 #define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136

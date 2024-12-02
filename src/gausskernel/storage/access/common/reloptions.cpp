@@ -86,6 +86,7 @@ static void ValidateStrOptStringOptimize(const char *val);
 static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
+static void validateIndexTypeOption(const char* val);
 
 
 #ifdef USE_SPQ
@@ -561,6 +562,13 @@ static relopt_string stringRelOpts[] = {
         true,
         validateViewSecurityOption,
         NULL
+    },
+    {
+        {"index_type", "rcr, pcr", RELOPT_KIND_BTREE},
+        strlen(UBTREE_INDEX_TYPE_RCR),
+        false,
+        validateIndexTypeOption,
+        UBTREE_INDEX_TYPE_RCR,
     },
     /* list terminator */
     {{NULL}}
@@ -2008,6 +2016,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "internal_mask", RELOPT_TYPE_INT, offsetof(StdRdOptions, internalMask) },
         { "orientation", RELOPT_TYPE_STRING, offsetof(StdRdOptions, orientation) },
         { "indexsplit", RELOPT_TYPE_STRING, offsetof(StdRdOptions, indexsplit) },
+        { "index_type", RELOPT_TYPE_STRING, offsetof(StdRdOptions, index_type) },
         { "compression", RELOPT_TYPE_STRING, offsetof(StdRdOptions, compression) },
         { "storage_type", RELOPT_TYPE_STRING, offsetof(StdRdOptions, storage_type) },
         { "ttl", RELOPT_TYPE_STRING, offsetof(StdRdOptions, ttl) },
@@ -3229,3 +3238,21 @@ void CheckSpqBTBuildOption(const char *val)
     }
 }
 #endif
+
+/*
+ * Brief        : Validates the ubtree index type for a index
+ * Input        : val, ubtree index type value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void validateIndexTypeOption(const char* val)
+{
+    if (pg_strcasecmp(val, UBTREE_INDEX_TYPE_PCR) != 0 && pg_strcasecmp(val, UBTREE_INDEX_TYPE_RCR) != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for \"UBTREE_INDEX_TYPE\" option."),
+                errdetail("Valid strings are \"rcr\", \"pcr\"")));
+    }
+        
+}

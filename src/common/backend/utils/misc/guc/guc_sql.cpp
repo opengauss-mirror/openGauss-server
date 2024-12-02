@@ -444,7 +444,8 @@ static const char* ustore_attr_keys[] = {
     "ustore_verify_module",
     "index_trace_level",
     "enable_log_tuple",
-    "ustore_unit_test"
+    "ustore_unit_test",
+    "index_type"
     };
 
 /*
@@ -3157,6 +3158,19 @@ static void InitSqlConfigureNamesString()
             CheckUStoreAttr,
             AssignUStoreAttr,
             NULL},
+        {{"index_type",
+             PGC_USERSET,
+             NODE_ALL,
+             CLIENT_CONN,
+             gettext_noop("Configure ubtess index type"),
+             NULL,
+             GUC_LIST_INPUT | GUC_LIST_QUOTE},
+             &u_sess->attr.attr_sql.index_type,
+             "rcr",
+             NULL,
+             NULL,
+             NULL
+        },
         {{"db4ai_snapshot_mode",
              PGC_USERSET,
              NODE_SINGLENODE,
@@ -4428,6 +4442,8 @@ static bool IsValidUstoreAttrValues(const char* keyStr, char* value)
             strcasecmp(value, "all") == 0;
     } else if (strcasecmp(keyStr, "enable_log_tuple") == 0) {
         return strcasecmp(value, "off") == 0;
+    } else if (strcasecmp(keyStr, "inde_txntype") == 0) {
+        return (strcasecmp(value, "pcr") || strcasecmp(value, "rcr"));
     }
     return false;
 }

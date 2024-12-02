@@ -110,6 +110,7 @@
 #include <limits.h>
 
 #include "access/nbtree.h"
+#include "access/ubtreepcr.h"
 #include "access/hash.h"
 #include "access/tableam.h"
 #include "access/ustore/knl_utuple.h"
@@ -1569,7 +1570,7 @@ void tuplesort_putindextuplevalues(
     MemoryContext oldcontext = MemoryContextSwitchTo(state->tuplecontext);
     SortTuple stup;
     stup.tupindex = 0;
-    stup.tuple = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
+    stup.tuple = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
 
     ((IndexTuple)stup.tuple)->t_tid = *self;
     USEMEM(state, GetMemoryChunkSpace(stup.tuple));

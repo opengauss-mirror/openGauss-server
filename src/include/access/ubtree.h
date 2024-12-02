@@ -548,7 +548,7 @@ extern bool UBTreeGetTupleInternal(IndexScanDesc scan, ScanDirection dir);
 extern BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup);
 extern IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
     ScanDirection dir, bool* continuescan, bool *needRecheck);
-extern void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup);
+template<typename Opaque> void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup);
 extern IndexTuple UBTreeTruncate(Relation rel, IndexTuple lastleft,
     IndexTuple firstright, BTScanInsert itup_key, bool itup_extended);
 extern int	UBTreeKeepNattsFast(Relation rel, IndexTuple lastleft, IndexTuple firstright);

@@ -21,6 +21,7 @@
 #include "knl/knl_variable.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/tableam.h"
@@ -97,7 +98,11 @@ Datum ubtbuild(PG_FUNCTION_ARGS)
      * inserting the sorted tuples into btree pages and (3) building the upper
      * levels.
      */
-    UBTreeLeafBuild(buildstate.spool, buildstate.spool2);
+    if (!UBTreeIndexIsPCRType(index)) {
+        UBTreeLeafBuild(buildstate.spool, buildstate.spool2);
+    } else {
+        UBTreePCRLeafBuild(buildstate.spool, buildstate.spool2);
+    }
     _bt_spooldestroy(buildstate.spool);
     if (buildstate.spool2) {
         _bt_spooldestroy(buildstate.spool2);
@@ -211,7 +216,7 @@ bool UBTreeDelete(Relation rel, Datum* values, const bool* isnull, ItemPointer h
 
     WHITEBOX_TEST_STUB("UBTreeDelete", WhiteboxDefaultErrorEmit);
 
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
     itup->t_tid = *heapTCtid;
     ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
     pfree(itup);
@@ -250,7 +255,7 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
     }
 
     /* generate an index tuple */
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
     itup->t_tid = *htCtid;
 
     /* reserve space for xmin/xmax */
@@ -1367,4 +1372,13 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
     }
     
     return hasPruned;
+}
+
+bool UBTreeIndexIsPCRType(Relation rel)
+{
+    // TODO: 判断逻辑还不完善
+    if (RelationIndexIsPCR(rel->rd_options)) {
+        return true;
+    }
+    return false;
 }
