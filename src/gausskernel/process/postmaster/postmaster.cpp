@@ -3689,7 +3689,8 @@ static int ServerLoop(void)
           */
         if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
             (pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
-            !dummyStandbyMode && !g_instance.csn_barrier_cxt.pre_parse_started) {
+            !dummyStandbyMode && !g_instance.csn_barrier_cxt.pre_parse_started &&
+            u_sess->attr.attr_storage.recovery_min_apply_delay > 0) {
             g_instance.csn_barrier_cxt.pre_parse_started = true;
             g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
         }
@@ -9616,7 +9617,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
     }
 
-    if (g_instance.pid_cxt.BarrierPreParsePID == 0 && check_start_preparse_signal()) {
+    if (g_instance.pid_cxt.BarrierPreParsePID == 0 && check_start_preparse_signal() &&
+        u_sess->attr.attr_storage.recovery_min_apply_delay > 0) {
         g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
     }
 
