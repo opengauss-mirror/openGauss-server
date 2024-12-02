@@ -104,6 +104,10 @@ CREATE VIEW v_sublink_update AS
         FROM emp_sal
         WHERE grade > 3
     );
+CREATE VIEW v_sidejoin_update AS
+    SELECT emp.*, emp_sal.grade
+    FROM emp left join emp_sal
+    ON emp.empno = emp_sal.empno;
     -- view based on full join/cross join, not allowed for deletes, but ok for updates
 CREATE VIEW v_empdept_crossjoin_update AS
     SELECT emp.empno, emp.ename, emp.job, dept.dname, dept.loc
@@ -201,6 +205,46 @@ SELECT * FROM v_empdeptsal_join_update WHERE EMPNO=7654;
 (0 rows)
 
 ROLLBACK;
+-- update view when the right(left) table of a left(right) join is empty
+BEGIN;
+TRUNCATE TABLE emp_sal;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+ empno | ename |  job  | deptno | grade 
+-------+-------+-------+--------+-------
+  7369 | SMITH | CLERK |     20 |      
+(1 row)
+
+UPDATE v_sidejoin_update SET ename='ABCD' WHERE empno=7369;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+ empno | ename |  job  | deptno | grade 
+-------+-------+-------+--------+-------
+  7369 | ABCD  | CLERK |     20 |      
+(1 row)
+
+DELETE FROM v_sidejoin_update WHERE empno=7369;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+ empno | ename | job | deptno | grade 
+-------+-------+-----+--------+-------
+(0 rows)
+
+ROLLBACK;
+CREATE USER testusr PASSWORD '1234@abcd';
+BEGIN;
+SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
+ usename | usesuper 
+---------+----------
+ testusr | f
+(1 row)
+
+UPDATE pg_user SET usesuper='t'::bool WHERE usename='testusr';
+SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
+ usename | usesuper 
+---------+----------
+ testusr | t
+(1 row)
+
+ROLLBACK;
+DROP USER testusr;
 -- 4. ERROR SITUATION
     -- update columns from multiple tables at the same time
 UPDATE v_empdept_update SET DNAME='ENGINEERING', ENAME='ABCD' WHERE EMPNO=7369;
@@ -220,7 +264,7 @@ ERROR:  cannot determine an exact row for the view to update or delete
 DELETE FROM v_empdept_fulljoin_update;
 ERROR:  cannot determine an exact row for the view to update or delete
 DROP SCHEMA IF EXISTS update_multi_base_table_view CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table dept
 drop cascades to table emp
 drop cascades to table salgrade
@@ -232,13 +276,14 @@ drop cascades to view v_empdept_join_update
 drop cascades to view v_empdeptsal_join_update
 drop cascades to view v_subqry_update
 drop cascades to view v_sublink_update
+drop cascades to view v_sidejoin_update
 drop cascades to view v_empdept_crossjoin_update
 drop cascades to view v_empdept_fulljoin_update
 -- 5. B compatibility, update multiple views at the same time
-DROP DATABASE IF EXISTS mutli_tblv_bdat;
-NOTICE:  database "mutli_tblv_bdat" does not exist, skipping
-CREATE DATABASE mutli_tblv_bdat DBCOMPATIBILITY='B';
-\c mutli_tblv_bdat
+DROP DATABASE IF EXISTS multi_tblv_bdat;
+NOTICE:  database "multi_tblv_bdat" does not exist, skipping
+CREATE DATABASE multi_tblv_bdat DBCOMPATIBILITY='B';
+\c multi_tblv_bdat
 CREATE TABLE t1(a int, b int PRIMARY KEY);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
 CREATE TABLE t2(a int, b int PRIMARY KEY);
@@ -359,4 +404,4 @@ DELETE FROM tv12, tv123 WHERE tv12.b=tv123.b;
 ERROR:  update/delete on a table in a view's subquery is not supported in B-format database
 ROLLBACK;
 \c postgres
-DROP DATABASE mutli_tblv_bdat;
+DROP DATABASE multi_tblv_bdat;

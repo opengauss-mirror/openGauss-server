@@ -118,6 +118,11 @@ CREATE VIEW v_sublink_update AS
         WHERE grade > 3
     );
 
+CREATE VIEW v_sidejoin_update AS
+    SELECT emp.*, emp_sal.grade
+    FROM emp left join emp_sal
+    ON emp.empno = emp_sal.empno;
+
     -- view based on full join/cross join, not allowed for deletes, but ok for updates
 CREATE VIEW v_empdept_crossjoin_update AS
     SELECT emp.empno, emp.ename, emp.job, dept.dname, dept.loc
@@ -164,6 +169,24 @@ DELETE FROM v_empdeptsal_join_update WHERE EMPNO=7654;
 SELECT * FROM v_empdeptsal_join_update WHERE EMPNO=7654;
 ROLLBACK;
 
+-- update view when the right(left) table of a left(right) join is empty
+BEGIN;
+TRUNCATE TABLE emp_sal;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+UPDATE v_sidejoin_update SET ename='ABCD' WHERE empno=7369;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+DELETE FROM v_sidejoin_update WHERE empno=7369;
+SELECT * FROM v_sidejoin_update WHERE empno=7369;
+ROLLBACK;
+
+CREATE USER testusr PASSWORD '1234@abcd';
+BEGIN;
+SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
+UPDATE pg_user SET usesuper='t'::bool WHERE usename='testusr';
+SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
+ROLLBACK;
+DROP USER testusr;
+
 -- 4. ERROR SITUATION
 
     -- update columns from multiple tables at the same time
@@ -182,10 +205,10 @@ DELETE FROM v_empdept_fulljoin_update;
 DROP SCHEMA IF EXISTS update_multi_base_table_view CASCADE;
 
 -- 5. B compatibility, update multiple views at the same time
-DROP DATABASE IF EXISTS mutli_tblv_bdat;
-CREATE DATABASE mutli_tblv_bdat DBCOMPATIBILITY='B';
+DROP DATABASE IF EXISTS multi_tblv_bdat;
+CREATE DATABASE multi_tblv_bdat DBCOMPATIBILITY='B';
 
-\c mutli_tblv_bdat
+\c multi_tblv_bdat
 
 CREATE TABLE t1(a int, b int PRIMARY KEY);
 CREATE TABLE t2(a int, b int PRIMARY KEY);
@@ -232,4 +255,4 @@ DELETE FROM tv12, tv123 WHERE tv12.b=tv123.b;
 ROLLBACK;
 
 \c postgres
-DROP DATABASE mutli_tblv_bdat;
+DROP DATABASE multi_tblv_bdat;

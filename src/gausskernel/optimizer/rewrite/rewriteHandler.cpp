@@ -3619,29 +3619,6 @@ static bool NewRteForRewriteTargetView_walker(Node* node, NewRteForRewriteTarget
     return expression_tree_walker(node, (bool (*)())NewRteForRewriteTargetView_walker, (void*)context);
 }
 
-static void CollectViewQuals(Node* node, Query* parsetree)
-{
-    if (node == NULL) {
-        return;
-    }
-    
-    if (IsA(node, FromExpr)) {
-        FromExpr* f = (FromExpr*)node;
-        ListCell* cell = NULL;
-
-        AddQual(parsetree, f->quals);
-        foreach(cell, f->fromlist) {
-            CollectViewQuals((Node*)lfirst(cell), parsetree);
-        }
-    } else if (IsA(node, JoinExpr)) {
-        JoinExpr* j = (JoinExpr*)node;
-
-        AddQual(parsetree, j->quals);
-        CollectViewQuals(j->larg, parsetree);
-        CollectViewQuals(j->rarg, parsetree);
-    }
-}
-
 static bool IsEqualsOperator(int operid)
 {
     bool result = false;
@@ -3973,51 +3950,6 @@ int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, 
     return newRtIndex;
 }
 
-static List* FlattenFromlist(Query* parsetree, Node* node, Bitmapset** check_duplicate)
-{
-    if (node == NULL)
-        return NULL;
-
-    if (IsA(node, RangeTblRef)) {
-        RangeTblRef* rtf = (RangeTblRef*)node;
-        if (bms_is_member(rtf->rtindex, *check_duplicate)) {
-            return NIL;
-        } else {
-            *check_duplicate = bms_add_member(*check_duplicate, rtf->rtindex);
-            return list_make1(node);
-        }
-    } else if (IsA(node, JoinExpr)) {
-        JoinExpr* j = (JoinExpr*)node;
-        List* new_list = NIL;
-
-        List* larg = FlattenFromlist(parsetree, j->larg, check_duplicate);
-        List* rarg = FlattenFromlist(parsetree, j->rarg, check_duplicate);
-        AddQual(parsetree, j->quals);
-
-        if (larg != NIL)
-            new_list = list_concat(new_list, larg);
-        if (rarg != NIL)
-            new_list = list_concat(new_list, rarg);
-        return new_list;
-    } else if (IsA(node, FromExpr)) {
-        FromExpr* f = (FromExpr*)node;
-        ListCell* cell = NULL;
-        List* new_list = NIL;
-
-        if (f != parsetree->jointree)
-            AddQual(parsetree, f->quals);
-
-        foreach (cell, f->fromlist) {
-            List* tmp_list = FlattenFromlist(parsetree, (Node*)lfirst(cell), check_duplicate);
-
-            if (tmp_list != NIL)
-                new_list = list_concat(new_list, tmp_list);
-        }
-        return new_list;
-    }
-    return NULL;
-}
-
 static void RecurseChangeVarNodes(Query* parsetree, Query* viewquery,
     Bitmapset** base_indexes, int* newIndexes, int baseIndex)
 {
@@ -4034,12 +3966,8 @@ static void RecurseChangeVarNodes(Query* parsetree, Query* viewquery,
      * corresponding to new_rt_index is processed */
     RecurseChangeVarNodes(parsetree, viewquery, base_indexes, newIndexes, newIndex);
 
-    RangeTblRef* new_rtr = makeNode(RangeTblRef);
-    new_rtr->rtindex = newIndex;
     ChangeVarNodes((Node*)viewquery->targetList, baseIndex, newIndex, 0);
     ChangeVarNodes((Node*)viewquery->jointree, baseIndex, newIndex, 0);
-    if (parsetree->commandType != CMD_INSERT)
-        parsetree->jointree->fromlist = lappend(parsetree->jointree->fromlist, new_rtr);
     *base_indexes = bms_del_member(*base_indexes, baseIndex);
 }
 
@@ -4221,9 +4149,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
     int size = (list_length(viewquery->rtable) + 1) * sizeof(int);
     rteContext.newIndexes = static_cast<int*>(palloc(size));
     errno_t rc = memset_s(rteContext.newIndexes, size, 0, size);
-    if (rc != EOK) {
-        securec_check(rc, "\0", "\0");
-    }
+    securec_check(rc, "\0", "\0");
     rteContext.visited_rtes = NULL;
     rteContext.base_indexes = NULL;
 
@@ -4237,6 +4163,9 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
         RecurseChangeVarNodes(parsetree, viewquery, &(rteContext.base_indexes), rteContext.newIndexes, i);
         i++;
     }
+
+    if (parsetree->commandType != CMD_INSERT)
+        parsetree->jointree->fromlist = list_concat(parsetree->jointree->fromlist, viewquery->jointree->fromlist);
 
     view_targetlist = viewquery->targetList;
     view_rte->securityQuals = NIL;
@@ -4285,16 +4214,22 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * base relation instead.  Vars will not be affected since none of them
      * reference parsetree->resultRelation any longer.
      */
+    if (parsetree->commandType != CMD_INSERT) {
+        ListCell* fc = NULL;
+        List* temp = parsetree->jointree->fromlist;
+        parsetree->jointree->fromlist = NIL;
+        foreach (fc, temp) {
+            Node* node = (Node*)lfirst(fc);
+            if (!IsA(node, RangeTblRef) || ((RangeTblRef*)node)->rtindex != result_relation) {
+                parsetree->jointree->fromlist = lappend(parsetree->jointree->fromlist, node);
+            }
+        }
+        list_free(temp);
+    }
+
     base_rt_index = result_relation;
     new_rt_index = ReplaceResultTargetEntry(parsetree, viewquery, parsetree->rtable, result_relation);
     ChangeVarNodes((Node*)(parsetree), result_relation, new_rt_index, 0);
-
-    if (parsetree->commandType != CMD_INSERT) {
-        Bitmapset* check_duplicate = NULL;
-        rtcell = list_head(parsetree->jointree->fromlist);
-        parsetree->jointree->fromlist = FlattenFromlist(parsetree, (Node*)(parsetree->jointree), &check_duplicate);
-        bms_free(check_duplicate);
-    }
 
     /*
      * For UPDATE/DELETE, pull up any WHERE quals from the view.  We know that
@@ -4326,7 +4261,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
             if (!parsetree->hasSubLinks)
                 parsetree->hasSubLinks = checkExprHasSubLink(viewqual);
         } else
-            CollectViewQuals((Node*)(viewquery->jointree), parsetree);
+            AddQual(parsetree, (Node*)viewqual);
     }
 
     /*

@@ -162,7 +162,9 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
      * rangetable may contain RTEs for rels not actively part of the query,
      * for example views.  We don't want to make RelOptInfos for them.
      */
-    add_base_rels_to_query(root, (Node*)parse->jointree);
+    Bitmapset* checkDuplicate = NULL;
+    add_base_rels_to_query(root, (Node*)parse->jointree, &checkDuplicate);
+    bms_free(checkDuplicate);
     check_scan_hint_validity(root);
 
     /*
