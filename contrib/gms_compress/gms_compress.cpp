@@ -129,13 +129,13 @@ Datum gms_lz_compress_close(PG_FUNCTION_ARGS)
 
     Check_Invalid_Input(compress_cxt, handle);
 
+    if (compress_cxt->context[handle].compress_level == UNCOMPRESS_LEVEL) {
+        ereport(ERROR, (errmsg("handle %d is a uncompressed handle", handle + HANDLE_OFFSET)));
+    }
+
     if (compress_cxt->context[handle].uncompressed_data == NULL) {
         free_context(handle);
         PG_RETURN_NULL();
-    }
-
-    if (compress_cxt->context[handle].compress_level == UNCOMPRESS_LEVEL) {
-        ereport(ERROR, (errmsg("handle %d is a uncompressed handle", handle + HANDLE_OFFSET)));
     }
 
     bytea *input_bytea = (bytea *)compress_cxt->context[handle].uncompressed_data;

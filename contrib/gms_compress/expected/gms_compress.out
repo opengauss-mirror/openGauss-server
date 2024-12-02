@@ -472,6 +472,27 @@ DECLARE
   v_handle int;
 BEGIN
 	content := '123';
+	v_handle := GMS_COMPRESS.LZ_UNCOMPRESS_OPEN(content);
+	GMS_COMPRESS.LZ_COMPRESS_CLOSE(v_handle);
+  RAISE NOTICE 'content=%', content;
+END;
+/
+ERROR:  handle 1 is a uncompressed handle
+CONTEXT:  SQL statement "CALL gms_compress.lz_compress_close(v_handle)"
+PL/pgSQL function inline_code_block line 6 at PERFORM
+DECLARE
+  content BLOB;
+BEGIN
+	GMS_COMPRESS.LZ_UNCOMPRESS_CLOSE(1);
+  RAISE NOTICE 'content=%', content;
+END;
+/
+NOTICE:  content=<NULL>
+DECLARE
+  content BLOB;
+  v_handle int;
+BEGIN
+	content := '123';
 	v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
   v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
   v_handle := GMS_COMPRESS.LZ_COMPRESS_OPEN(content);
