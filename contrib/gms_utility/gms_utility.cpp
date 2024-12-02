@@ -1611,7 +1611,7 @@ Datum gms_is_bit_set(PG_FUNCTION_ARGS)
     int chVal;
     uint32 result;
 
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+    if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid input value")));
     }
 
@@ -1622,7 +1622,12 @@ Datum gms_is_bit_set(PG_FUNCTION_ARGS)
     hex_encode(VARDATA_ANY(data), len, hexStr);
     len = strlen(hexStr);
 
-    pos = DirectFunctionCall1(numeric_int4, PG_GETARG_DATUM(1));
+    if (PG_ARGISNULL(1)) {
+        /* if input is null, get last bit */
+        pos = len * 4;
+    } else {
+        pos = DirectFunctionCall1(numeric_int4, PG_GETARG_DATUM(1));
+    }
     
     if (pos <= 0 || pos > INT32_MAX) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid second param value range")));
