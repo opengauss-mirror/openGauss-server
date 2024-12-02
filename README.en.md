@@ -358,6 +358,16 @@ The following OSs are supported:
 
 - openEuler-20.03-LTS (aarch64 architecture)
 
+- openEuler-20.03-LTS (x86_64 architecture)
+
+- openEuler-22.03-LTS (aarch64 architecture)
+
+- openEuler-22.03-LTS (x86_64 architecture)
+  
+- openEuler-24.03-LTS (aarch64 architecture)
+
+- openEuler-24.03-LTS (x86_64 architecture)
+
 
 The following table lists the software requirements for compiling the openGauss.
 
