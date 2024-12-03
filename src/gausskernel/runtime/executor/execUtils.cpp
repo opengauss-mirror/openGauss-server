@@ -2916,38 +2916,40 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
         case INT8RANGEOID:
         case INT4RANGEOID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(0,0)", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "(0,0)", NULL, NULL, att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case TSRANGEOID:
         case TSTZRANGEOID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "(1970-01-01 00:00:00,1970-01-01 00:00:00)", NULL, NULL,
+                att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case DATERANGEOID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "(1970-01-01,1970-01-01)", NULL, NULL, att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case HASH16OID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "0", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "0", NULL, NULL, att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case HASH32OID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "00000000000000000000000000000000", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "00000000000000000000000000000000", NULL, NULL,
+                att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }
         case TSVECTOROID: {
             Type targetType = typeidType(att_tup->atttypid);
-            result = stringTypeDatum(targetType, "", att_tup->atttypmod, true);
+            result = stringTypeDatum(targetType, "", NULL, NULL, att_tup->atttypmod, true);
             ReleaseSysCache(targetType);
             break;
         }

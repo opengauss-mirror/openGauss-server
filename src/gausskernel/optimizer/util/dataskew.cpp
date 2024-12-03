@@ -59,7 +59,7 @@
 #define IS_JOIN_PATH(path) (IsA(path, HashPath) || IsA(path, NestPath) || IsA(path, MergePath))
 
 extern Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid targettype, int32 targettypmod,
-    CoercionContext ccontext, CoercionForm cformat, int location);
+    CoercionContext ccontext, CoercionForm cformat, char* fmtstr, char* nlsfmtstr, int location);
 
 /* ========================== Public functions =========================== */
 /*
@@ -1455,7 +1455,8 @@ OpExpr* SkewInfo::createEqualExprForSkew(Node* expr, Const* con) const
 
     if (!is_compatible_type(type, con->consttype)) {
         expr2 = (Expr*)coerce_to_target_type(
-            NULL, (Node*)con, con->consttype, type, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            NULL, (Node*)con, con->consttype, type, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,
+            NULL, NULL, -1);
     }
 
     if (expr1 == NULL || expr2 == NULL)

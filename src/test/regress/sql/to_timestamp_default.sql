@@ -1,5 +1,10 @@
 -- For function TO_TIMESTAMP
 
+-- to make all the output indenpdent to env.
+SET LC_TIME = 'C';
+SET TIMEZONE TO 'UTC';
+SET DATESTYLE= 'ISO, YMD';
+
 -- float8_timestamptz
 SELECT TO_TIMESTAMP(' Infinity'::float);
 SELECT TO_TIMESTAMP('-Infinity'::float);
@@ -379,3 +384,14 @@ SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAM
 SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) + (TO_TIMESTAMP('2012-8-3 00:11:23', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
 --DAY = 0 && TIME = 0
 SELECT (TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:59:04', 'YYYY-MM-DD hh24:mi:ss.sssss')) + (TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss') - TO_TIMESTAMP('2012-8-8 00:11:23', 'YYYY-MM-DD hh24:mi:ss.sssss'));
+
+-- to test nls language.
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = American');
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = english');
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');
+SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
+
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
+
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = ENGLISH');
+SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');

@@ -1,0 +1,3546 @@
+-- Test for CAST function to support DEFAULT value ON CONVERSION ERROR.
+-- and nls language.
+--set to utc, makes the result indenpendent to local timezone.
+-- to make all the output indenpdent to env.
+SET LC_TIME = 'C';
+SET TIMEZONE TO 'UTC';
+SET DATESTYLE= 'ISO, YMD';
+CREATE TABLE IF NOT EXISTS test_cast (a INT, b char(10));
+INSERT INTO test_cast VALUES(1,'a');
+INSERT INTO test_cast VALUES(2,'b');
+-- CAST TEST 1
+SELECT CAST('1' AS INT DEFAULT '2' ON CONVERSION ERROR);
+ int4 
+------
+    1
+(1 row)
+
+SELECT CAST('1x' AS INT DEFAULT '2' ON CONVERSION ERROR);
+ int4 
+------
+    2
+(1 row)
+
+SELECT CAST('1x' AS INT DEFAULT '2x' ON CONVERSION ERROR);
+ERROR:  invalid input syntax for integer: "2x"
+LINE 1: SELECT CAST('1x' AS INT DEFAULT '2x' ON CONVERSION ERROR);
+                                        ^
+CONTEXT:  referenced column: int4
+SELECT CAST('1' AS INT);
+ int4 
+------
+    1
+(1 row)
+
+SELECT CAST('1x' AS INT);
+ERROR:  invalid input syntax for integer: "1x"
+LINE 1: SELECT CAST('1x' AS INT);
+                    ^
+CONTEXT:  referenced column: int4
+SELECT * FROM test_cast WHERE a = CAST('1x' AS INT DEFAULT '2' ON CONVERSION ERROR);
+ a |     b      
+---+------------
+ 2 | b         
+(1 row)
+
+SELECT * FROM test_cast WHERE a = CAST('1' AS INT);
+ a |     b      
+---+------------
+ 1 | a         
+(1 row)
+
+SELECT 1 + CAST('1' AS INT);
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT 1 + CAST('1x' AS INT DEFAULT '2' ON CONVERSION ERROR);
+ ?column? 
+----------
+        3
+(1 row)
+
+SELECT CAST ( 1 + 1 AS INT );
+ int4 
+------
+    2
+(1 row)
+
+SELECT CAST ( (1 + CAST('1x' AS INT DEFAULT '2' ON CONVERSION ERROR)) AS INT );
+ int4 
+------
+    3
+(1 row)
+
+SELECT CAST('9875456' AS integer ,'9999999999S');
+  int4   
+---------
+ 9875456
+(1 row)
+
+SELECT CAST('9875456' AS integer DEFAULT 999 ON CONVERSION ERROR  ,'9999999999');
+  int4   
+---------
+ 9875456
+(1 row)
+
+SELECT CAST('9875456x' AS integer DEFAULT 999 ON CONVERSION ERROR  ,'9999999999');
+  int4   
+---------
+ 9875456
+(1 row)
+
+SELECT CAST(999 AS integer DEFAULT 999 ON CONVERSION ERROR  ,'9999999999');
+ int4 
+------
+  999
+(1 row)
+
+SELECT CAST('9875456x' AS integer DEFAULT '999' ON CONVERSION ERROR  ,'9999999999');
+  int4   
+---------
+ 9875456
+(1 row)
+
+SELECT CAST('9875456x' AS integer DEFAULT '999x' ON CONVERSION ERROR  ,'9999999999');
+  int4   
+---------
+ 9875456
+(1 row)
+
+SELECT CAST(999 AS integer );
+ int4 
+------
+  999
+(1 row)
+
+SELECT CAST('January 15, 1989 ' AS DATE);  
+      timestamp      
+---------------------
+ 1989-01-15 00:00:00
+(1 row)
+
+SELECT CAST('2018-03-12 18:47:35' AS date,'YYYY-MM-dd hh24:mi:ss');
+      timestamp      
+---------------------
+ 2018-03-12 18:47:35
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -08:23' AS TIMESTAMP WITH TIME ZONE);
+      timestamptz       
+------------------------
+ 1999-12-01 19:23:00+00
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE);
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM');
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('January 15, 1989, 11:00 A.M.'  AS DATE);
+ERROR:  time zone "a.m." not recognized
+LINE 1: SELECT CAST('January 15, 1989, 11:00 A.M.'  AS DATE);
+                    ^
+CONTEXT:  referenced column: timestamp
+SELECT CAST('January 15, 1989 , 11:00 A.M.' AS DATE DEFAULT 'January 15, 1989' ON CONVERSION ERROR );
+      timestamp      
+---------------------
+ 1989-01-15 00:00:00
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1998-11-01 11:00:00 -8:00' ON CONVERSION ERROR);
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1999-13-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1998-11-01 11:00:00 -8:00' ON CONVERSION ERROR);
+      timestamptz       
+------------------------
+ 1998-11-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1998-12-01 11:00:00 -08:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1999-12-01 11:00:00 -8:00' ON CONVERSION ERROR, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = american' );
+      timestamptz       
+------------------------
+ 1998-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1999-13-01 11:00:00 -08:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1998-11-01 11:00:00 -6:00' ON CONVERSION ERROR, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = american' );
+      timestamptz       
+------------------------
+ 1998-11-01 17:00:00+00
+(1 row)
+
+SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = American');
+      timestamptz       
+------------------------
+ 1999-01-01 16:23:00+00
+(1 row)
+
+SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = english');
+      timestamptz       
+------------------------
+ 1999-01-01 16:23:00+00
+(1 row)
+
+SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = ca');
+ERROR:  invalid value "Ja" for "MM"
+LINE 1: SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP W...
+                    ^
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: timestamptz
+SELECT CAST('1999-12-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', NLS_DATE_LANGUAGE = American);
+      timestamptz       
+------------------------
+ 1999-12-01 16:23:00+00
+(1 row)
+
+SELECT CAST('2014-January-02 12:11:22' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+      timestamptz       
+------------------------
+ 2014-01-02 00:11:22+00
+(1 row)
+
+SELECT CAST('2014-January-02 12:11:22' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANG = American');
+ERROR:  invalid format: NLS_DATE_LANG
+CONTEXT:  referenced column: timestamptz
+SELECT CAST('1999-12-01 11:00:00' AS date, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+      timestamp      
+---------------------
+ 1999-12-01 11:00:00
+(1 row)
+
+SELECT CAST('1999-January-01 11:00:00' AS date, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+      timestamp      
+---------------------
+ 1999-01-01 11:00:00
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00' AS date);
+      timestamp      
+---------------------
+ 1999-12-01 11:00:00
+(1 row)
+
+SELECT CAST(CAST('1999-12-01 11:00:00 -08:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1999-11-01 11:00:00 -8:00' ON CONVERSION ERROR, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = american' ) AS DATE);
+      timestamp      
+---------------------
+ 1999-12-01 19:00:00
+(1 row)
+
+SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = American');
+      timestamptz       
+------------------------
+ 1999-01-01 16:23:00+00
+(1 row)
+
+DROP TABLE test_cast;
+-- CAST TEST 2
+CREATE TABLE test_cast(col1 varchar(30), col2 char(40));
+CREATE SEQUENCE date_strings_id_seq;
+CREATE TABLE date_strings (id INTEGER NOT NULL DEFAULT nextval('date_strings_id_seq'),  date_array TEXT[]);
+CREATE UNIQUE INDEX date_strings_pkey ON date_strings(id);
+ALTER TABLE date_strings ADD CONSTRAINT date_strings_pkey PRIMARY KEY USING INDEX date_strings_pkey;
+CREATE TABLE events ( year  TEXT, month TEXT, day   TEXT, time  TEXT);
+INSERT INTO test_cast VALUES('1999-12-01 11:00:00', '2017-08-20 00:00:00');
+SELECT CAST((SELECT col1 FROM test_cast) as date);
+      timestamp      
+---------------------
+ 1999-12-01 11:00:00
+(1 row)
+
+SELECT CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS');
+      timestamptz       
+------------------------
+ 1999-12-01 11:00:00+00
+(1 row)
+
+SELECT SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS') FROM 3);
+      substring       
+----------------------
+ 99-12-01 11:00:00+00
+(1 row)
+
+SELECT CAST(SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS') FROM 3) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS');
+ERROR:  invalid data for match  in date string
+CONTEXT:  referenced column: substring
+SELECT CAST(SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS') FROM 3) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS TZH:TZM');
+       substring        
+------------------------
+ 1999-12-01 11:00:00+00
+(1 row)
+
+SELECT CAST(SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS') FROM 3) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM');
+       substring        
+------------------------
+ 0099-12-01 11:00:00+00
+(1 row)
+
+SELECT CAST((SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = ENGLISH');
+       substring        
+------------------------
+ 0099-12-01 11:00:00+00
+(1 row)
+
+SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= english');
+      timestamptz       
+------------------------
+ 1999-12-01 11:00:00+00
+(1 row)
+
+INSERT INTO test_cast values('2000-January-01 11:00:00', '2027-september-10 01:00:00');
+SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= english');
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: timestamptz
+DELETE FROM test_cast WHERE COL1 = '1999-12-01 11:00:00';
+SELECT CAST((SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = ENGLISH');
+ERROR:  invalid data for "year =  0" ,value must be between 1 and 9999, and not be 0
+CONTEXT:  referenced column: substring
+SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= english');
+      timestamptz       
+------------------------
+ 1900-01-01 11:00:00+00
+(1 row)
+
+SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = CANADA') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= american');
+ERROR:  invalid value "Ja" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: timestamptz
+SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= canada');
+      timestamptz       
+------------------------
+ 1900-01-01 11:00:00+00
+(1 row)
+
+-- CAST ARRAY 1
+SELECT CAST(ARRAY['1999-01-01', '2023-10-23'] AS timestamp[]);
+                     array                     
+-----------------------------------------------
+ {"1999-01-01 00:00:00","2023-10-23 00:00:00"}
+(1 row)
+
+SELECT CAST(ARRAY['1999-01-01 12:00:00', '2023-10-23 15:00:00'] AS timestamp[]);
+                     array                     
+-----------------------------------------------
+ {"1999-01-01 12:00:00","2023-10-23 15:00:00"}
+(1 row)
+
+SELECT CAST(ARRAY['1999-January-01 11:00:00', '2023-January-23 11:00:00'] AS TIMESTAMP[], 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+                     array                     
+-----------------------------------------------
+ {"1999-01-01 11:00:00","2023-01-23 11:00:00"}
+(1 row)
+
+SELECT CAST((SELECT ARRAY[col1, col2] FROM test_cast) AS TIMESTAMP[], 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+                   timestamp                   
+-----------------------------------------------
+ {"2000-01-01 11:00:00","2027-09-10 01:00:00"}
+(1 row)
+
+-- ARRAY CAST 2.
+INSERT INTO date_strings (date_array) VALUES ('{"2023-january-01 10:00:00", "2023-february-01 12:00:00", "2023-03-01 14:00:00"}');
+SELECT id, CAST(date_array AS TIMESTAMP[], 'YYYY-MM-DD HH24:MI:SS', 'NLS_DATE_LANGUAGE = American') AS timestamp_array FROM date_strings;
+ id |                           timestamp_array                           
+----+---------------------------------------------------------------------
+  1 | {"2023-01-01 10:00:00","2023-02-01 12:00:00","2023-03-01 14:00:00"}
+(1 row)
+
+SELECT id, CAST(date_array AS TIMESTAMP[], 'YY-MM-DD HH24:MI:SS', 'NLS_DATE_LANGUAGE = American') AS timestamp_array FROM date_strings;
+ id |                           timestamp_array                           
+----+---------------------------------------------------------------------
+  1 | {"2023-01-01 10:00:00","2023-02-01 12:00:00","2023-03-01 14:00:00"}
+(1 row)
+
+SELECT id, CAST(date_array AS TIMESTAMP[]) AS timestamp_array FROM date_strings;
+ id |                           timestamp_array                           
+----+---------------------------------------------------------------------
+  1 | {"2023-01-01 10:00:00","2023-02-01 12:00:00","2023-03-01 14:00:00"}
+(1 row)
+
+SELECT id, CAST(date_array AS TIMESTAMP[], 'YYYY-MM-DD HH24:MI:SS') AS timestamp_array FROM date_strings;
+ERROR:  invalid value "ja" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: timestamp_array
+-- DOMAIN TYPE CAST
+CREATE DOMAIN event_timestamp AS TIMESTAMP CHECK (VALUE >= '2000-01-01 00:00:00');
+SELECT CAST('2024-10-23 15:30:00' AS event_timestamp);
+   event_timestamp   
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST('2024-10-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+   event_timestamp   
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST('24-10-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+   event_timestamp   
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST('2024-November-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS');
+   event_timestamp   
+---------------------
+ 2024-11-23 15:30:00
+(1 row)
+
+SELECT TO_CHAR(CAST('2024-10-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American'));
+       to_char       
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST(CAST('2024-10-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American') AS event_timestamp, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = english');
+   event_timestamp   
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST(TO_CHAR(CAST('2024-10-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American')) AS event_timestamp, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = english');
+       to_char       
+---------------------
+ 2024-10-23 15:30:00
+(1 row)
+
+SELECT CAST(TO_CHAR(CAST('2024-september-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American')) AS event_timestamp, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = english');
+       to_char       
+---------------------
+ 2024-09-23 15:30:00
+(1 row)
+
+SELECT CAST('2024-November-23 15:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS');
+   event_timestamp   
+---------------------
+ 2024-11-23 15:30:00
+(1 row)
+
+SELECT CAST('2024-November-23 11:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
+   event_timestamp   
+---------------------
+ 2024-11-23 11:30:00
+(1 row)
+
+SELECT CAST(TO_CHAR(CAST('2024-september-23 12:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American')) AS event_timestamp, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = english');
+       to_char       
+---------------------
+ 2024-09-23 12:30:00
+(1 row)
+
+SELECT CAST(TO_CHAR(CAST('2024-september-23 12:30:00' AS event_timestamp, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = canda')) AS event_timestamp, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = english');
+       to_char       
+---------------------
+ 2024-09-23 12:30:00
+(1 row)
+
+INSERT INTO events (year, month, day, time) VALUES ('1999', 'january', '01', '11:00:00'),('2023', 'february', '23', '08:30:00'), ('20', 'september', '23', '08:30:00');
+SELECT CAST(year || '-' || month || '-' || day || ' ' || time AS TIMESTAMP, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American') AS event_timestamp FROM  events;
+   event_timestamp   
+---------------------
+ 1999-01-01 11:00:00
+ 2023-02-23 08:30:00
+ 0020-09-23 08:30:00
+(3 rows)
+
+SELECT CAST(year || '-' || month || '-' || day || ' ' || time AS TIMESTAMP, 'YYYY-MM-DD HH:MI:SS') AS event_timestamp FROM  events;
+ERROR:  invalid value "ja" for "MM"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: event_timestamp
+SELECT CAST(year || '-' || month || '-' || day || ' ' || time AS TIMESTAMP, 'YY-MM-DD HH:MI:SS',  'NLS_DATE_LANGUAGE = American') AS event_timestamp FROM  events;
+   event_timestamp   
+---------------------
+ 1999-01-01 11:00:00
+ 2023-02-23 08:30:00
+ 2020-09-23 08:30:00
+(3 rows)
+
+SELECT CAST(year || '-' || month || '-' || day || ' ' || time AS TIMESTAMP) AS event_timestamp FROM events;
+   event_timestamp   
+---------------------
+ 1999-01-01 11:00:00
+ 2023-02-23 08:30:00
+ 2020-09-23 08:30:00
+(3 rows)
+
+DROP TABLE events;
+DROP TABLE test_cast;
+DROP TABLE date_strings;
+---another type
+SELECT cast('1,234.56' as number default 999 on conversion  error , '99999.9') AS result;
+ result 
+--------
+ 1234.5
+(1 row)
+
+SELECT cast('132654' as number default '123' on conversion error );
+ numeric 
+---------
+  132654
+(1 row)
+
+SELECT cast('132654' as number default 'a123' on conversion error );
+ numeric 
+---------
+  132654
+(1 row)
+
+SELECT cast(132,654.12 as number default 123 on conversion error ,'999,999,999.99' );
+ERROR:  syntax error at or near ","
+LINE 1: SELECT cast(132,654.12 as number default 123 on conversion e...
+                       ^
+SELECT cast(132654.12 as number default 123 on conversion error ,'999,999,999.99' );
+  numeric  
+-----------
+ 132654.12
+(1 row)
+
+SELECT cast('12,234.56' as number default 999 on conversion error ,'999G999G999.99');
+ numeric  
+----------
+ 12234.56
+(1 row)
+
+SELECT cast('1,234.56' as number default 999 on conversion  error , '999,999.99') AS result;
+ result 
+--------
+    999
+(1 row)
+
+SELECT cast(' 2022-09-21 14:13:29' as timestamp default '01-09-02 14:10:10' on conversion error,'yyyy-mm-dd hh24:mi:ss')-30/60/24;
+      ?column?       
+---------------------
+ 2022-09-21 13:43:29
+(1 row)
+
+SELECT cast('22-Sep-21 12:13:29'as timestamp)-30/60/24;
+      ?column?       
+---------------------
+ 2022-09-21 11:43:29
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '1999-12-01 11:00:00 -8:00' ON CONVERSION ERROR);
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE  DEFAULT '2000-01-01 01:00:00 -8:00' ON CONVERSION ERROR, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = American');
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('1299-12-12 12:30:00 -08:00' AS TIMESTAMP WITH TIME ZONE ,'YYYY-MM-DD HH:MI:SS TZH:TZM');
+      timestamptz       
+------------------------
+ 1299-12-12 08:30:00+00
+(1 row)
+
+SELECT CAST('1299-12-12 12:30:00 -08:00' AS TIMESTAMP WITH TIME ZONE);
+      timestamptz       
+------------------------
+ 1299-12-12 20:30:00+00
+(1 row)
+
+SELECT CAST(200 AS NUMBER DEFAULT 0 ON CONVERSION ERROR);
+ numeric 
+---------
+     200
+(1 row)
+
+SELECT CAST(TO_DATE('22-Oct-1997', 'DD-Mon-YYYY') AS TIMESTAMP WITH LOCAL TIME ZONE) ;
+ERROR:  syntax error at or near "WITH LOCAL"
+LINE 1: ...O_DATE('22-Oct-1997', 'DD-Mon-YYYY') AS TIMESTAMP WITH LOCAL...
+                                                             ^
+SELECT product_id, CAST(ad_sourcetext AS VARCHAR2(30)) text  FROM print_media   ORDER BY product_id;
+ERROR:  syntax error at or near "text"
+LINE 1: ...T product_id, CAST(ad_sourcetext AS VARCHAR2(30)) text  FROM...
+                                                             ^
+SELECT CAST(200  AS NUMBER DEFAULT 0 ON CONVERSION ERROR);
+ numeric 
+---------
+     200
+(1 row)
+
+SELECT CAST('Jan 15, 1989, 11:00 A.M.' AS DATE 'Mon dd, YYYY, HH:MI A.M.');
+ERROR:  syntax error at or near "'Mon dd, YYYY, HH:MI A.M.'"
+LINE 1: SELECT CAST('Jan 15, 1989, 11:00 A.M.' AS DATE 'Mon dd, YYYY...
+                                                       ^
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS DATE DEFAULT NULL ON CONVERSION ERROR, 'Month dd, YYYY, HH:MI A.M.');
+ timestamp 
+-----------
+ 
+(1 row)
+
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS DATE DEFAULT NULL ON CONVERSION ERROR, 'Month dd, YYYY, HH:MI A.M.', 'NLS_DATE_LANGUAGE = American');
+ timestamp 
+-----------
+ 
+(1 row)
+
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS DATE DEFAULT NULL ON CONVERSION ERROR, 'Month dd, YYYY, HH:MI A.M.');
+ timestamp 
+-----------
+ 
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -8:00' AS TIMESTAMP WITH TIME ZONE DEFAULT '2000-01-01 01:00:00 -8:00' ON CONVERSION ERROR, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = American');
+      timestamptz       
+------------------------
+ 1999-12-01 19:00:00+00
+(1 row)
+
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS DATE DEFAULT NULL ON CONVERSION ERROR, 'Month dd, YYYY, HH:MI A.M.');
+ timestamp 
+-----------
+ 
+(1 row)
+
+SELECT CAST('N/A' AS NUMBER DEFAULT '0' ON CONVERSION ERROR);
+ numeric 
+---------
+       0
+(1 row)
+
+select cast(1.35464648979849849498794546654687867987 as int) ;
+ int4 
+------
+    1
+(1 row)
+
+select cast(1.354646489798498494987945466546823525243453 as varchar2(200)) ;
+                   varchar                    
+----------------------------------------------
+ 1.354646489798498494987945466546823525243453
+(1 row)
+
+select cast(cast ('01-May-03 14:10:10.123000'  as timestamp ,'DD-Mon-RR HH24:MI:SS.FF','NLS_DATE_LANGUAGE = American') as varchar2(200),'DD-Mon-RR HH24:MI:SS.FF') ;
+         varchar         
+-------------------------
+ 2001-05-03 14:10:10.123
+(1 row)
+
+select cast(cast ('01-May-03 14:10:10.123000' as timestamp  ,'DD-Mon-RR HH24:MI:SS.FF','NLS_DATE_LANGUAGE = American') as varchar2(200));
+         varchar         
+-------------------------
+ 2001-05-03 14:10:10.123
+(1 row)
+
+select cast(cast ('29-Feb-29 14:10:10.123000'  as timestamp ,'DD-Mon-RR HH24:MI:SS.FF') as varchar2(200));
+ERROR:  date/time field value out of range: "29-Feb-29 14:10:10.123000"
+LINE 1: select cast(cast ('29-Feb-29 14:10:10.123000'  as timestamp ...
+                          ^
+CONTEXT:  referenced column: varchar
+select cast(cast ('29-Feb-29 14:10:10.123000'  as timestamp ,'DD-Mon-RR HH24:MI:SS.FF','NLS_DATE_LANGUAGE = American') as varchar2(200));
+ERROR:  date/time field value out of range: "29-Feb-29 14:10:10.123000"
+LINE 1: select cast(cast ('29-Feb-29 14:10:10.123000'  as timestamp ...
+                          ^
+CONTEXT:  referenced column: varchar
+select cast(1.35464648979849849498794546654682352524 as varchar2(2)) ;
+ varchar 
+---------
+ 1.
+(1 row)
+
+select cast(1.35464648979849849498794546654682352524 as TINYINT);
+ int1 
+------
+ 1
+(1 row)
+
+select cast(1.35464648979849849498794546654682352524 as NUMERIC);
+                 numeric                  
+------------------------------------------
+ 1.35464648979849849498794546654682352524
+(1 row)
+
+select cast(as VARCHAR2(20) 'as');
+ERROR:  syntax error at or near "as"
+LINE 1: select cast(as VARCHAR2(20) 'as');
+                    ^
+select cast('9.999999' as varchar2(20),'99999.9999999999999');
+ varchar  
+----------
+ 9.999999
+(1 row)
+
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS DATE DEFAULT NULL ON CONVERSION ERROR, 'Month dd, YYYY, HH:MI A.M.', 'NLS_DATE_LANGUAGE = American');
+ timestamp 
+-----------
+ 
+(1 row)
+
+select cast('01-May-03 14:10:10.123000'  as varchar2(200) default 20 on conversion error) ;
+          varchar          
+---------------------------
+ 01-May-03 14:10:10.123000
+(1 row)
+
+select cast(1234::varchar(4) as varchar(4));
+ varchar 
+---------
+ 1234
+(1 row)
+
+select cast(cast(1234 as varchar2(4)) as varchar2(4) );
+ varchar 
+---------
+ 1234
+(1 row)
+
+select cast(1234::varchar(2) as varchar(4));
+ varchar 
+---------
+ 12
+(1 row)
+
+select cast(cast(1234 as varchar2(2)) as varchar2(4) );
+ varchar 
+---------
+ 12
+(1 row)
+
+select cast(cast(1234 as varchar2(4)) as varchar2(2) );
+ varchar 
+---------
+ 12
+(1 row)
+
+select cast(1234 as varchar2(4) );
+ varchar 
+---------
+ 1234
+(1 row)
+
+select cast(1234::varchar(4) as varchar(2));
+ varchar 
+---------
+ 12
+(1 row)
+
+select cast(21 as varchar2(2));
+ varchar 
+---------
+ 21
+(1 row)
+
+select cast(1234 as varchar2(2)) ;
+ varchar 
+---------
+ 12
+(1 row)
+
+SELECT CAST('abc' AS NUMBER DEFAULT -1 ON CONVERSION ERROR) ;
+ numeric 
+---------
+      -1
+(1 row)
+
+EXPLAIN PLAN FOR SELECT CAST(CAST(1234 AS VARCHAR2(4)) AS VARCHAR2(2)) ;
+select cast(212 as varchar2(2));
+ varchar 
+---------
+ 21
+(1 row)
+
+select cast(122 as int default 12 on conversion error );
+ int4 
+------
+  122
+(1 row)
+
+SELECT CAST('1999-12-01 11:00:00 -08:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'nls_date_language = American');
+      timestamptz       
+------------------------
+ 1999-12-01 19:23:00+00
+(1 row)
+
+SELECT CAST('true' AS  BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST('f' AS  BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST('false' AS  BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST('t' AS  BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST('a' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "a"
+LINE 1: SELECT CAST('a' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+SELECT CAST('' AS BOOLEAN) ;
+ bool 
+------
+ 
+(1 row)
+
+SELECT CAST('1' AS BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST('0' AS BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST('-1' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "-1"
+LINE 1: SELECT CAST('-1' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+SELECT CAST('-0' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "-0"
+LINE 1: SELECT CAST('-0' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+SELECT CAST(null AS BOOLEAN) ;
+ bool 
+------
+ 
+(1 row)
+
+SELECT CAST('1.1' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "1.1"
+LINE 1: SELECT CAST('1.1' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+SELECT CAST(0 AS BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST(1 AS BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST(-1 AS BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST(-0 AS BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST(1.1 AS BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST('yes' AS BOOLEAN) ;
+ bool 
+------
+ t
+(1 row)
+
+SELECT CAST('no' AS BOOLEAN) ;
+ bool 
+------
+ f
+(1 row)
+
+SELECT CAST('accept' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "accept"
+LINE 1: SELECT CAST('accept' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+SELECT CAST('refuse' AS BOOLEAN) ;
+ERROR:  invalid input syntax for type boolean: "refuse"
+LINE 1: SELECT CAST('refuse' AS BOOLEAN) ;
+                    ^
+CONTEXT:  referenced column: bool
+select to_number('') ;
+ to_number 
+-----------
+          
+(1 row)
+
+select cast('' as number) ;
+ numeric 
+---------
+        
+(1 row)
+
+select cast(null as number) ;
+ numeric 
+---------
+        
+(1 row)
+
+select cast( as number) ;
+ERROR:  syntax error at or near "as"
+LINE 1: select cast( as number) ;
+                     ^
+select cast( as number default 999 on conversion error) ;
+ERROR:  syntax error at or near "as"
+LINE 1: select cast( as number default 999 on conversion error) ;
+                     ^
+select cast(1e38-1 as number default  999 on conversion error ) ;
+                numeric                 
+----------------------------------------
+ 99999999999999999999999999999999999999
+(1 row)
+
+select cast(1e39-1 as number default  999 on conversion error ) ;
+                 numeric                 
+-----------------------------------------
+ 999999999999999999999999999999999999999
+(1 row)
+
+select cast(1e41-1 as number default  999 on conversion error ) ;
+                  numeric                  
+-------------------------------------------
+ 99999999999999999999999999999999999999999
+(1 row)
+
+select cast(0.9999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                numeric                 
+----------------------------------------
+ .9999999999999999999999999999999999999
+(1 row)
+
+select cast(0.99999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                 numeric                 
+-----------------------------------------
+ .99999999999999999999999999999999999999
+(1 row)
+
+select cast(0.99999999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                  numeric                   
+--------------------------------------------
+ .99999999999999999999999999999999999999999
+(1 row)
+
+select cast(-1e39+1 as number default 999 on conversion error ) ;
+                 numeric                  
+------------------------------------------
+ -999999999999999999999999999999999999999
+(1 row)
+
+select cast(-1e40+1 as number default 999 on conversion error ) ;
+                  numeric                  
+-------------------------------------------
+ -9999999999999999999999999999999999999999
+(1 row)
+
+select cast(-1e40+1 as number default 999 on conversion error ) ;
+                  numeric                  
+-------------------------------------------
+ -9999999999999999999999999999999999999999
+(1 row)
+
+select cast('1e38-1' as number default  999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('1e39-1' as number default  999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('1e41-1' as number default  999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('0.9999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                numeric                 
+----------------------------------------
+ .9999999999999999999999999999999999999
+(1 row)
+
+select cast('0.99999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                 numeric                 
+-----------------------------------------
+ .99999999999999999999999999999999999999
+(1 row)
+
+select cast('0.99999999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                  numeric                   
+--------------------------------------------
+ .99999999999999999999999999999999999999999
+(1 row)
+
+select cast('-1e39+1' as number default 999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('-1e40+1' as number default 999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('-1e40+1' as number default 999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+--125
+select cast(99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                                                            numeric                                                            
+-------------------------------------------------------------------------------------------------------------------------------
+ 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+--126
+select cast(999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999  as number default 999 on conversion error ) ;
+                                                            numeric                                                             
+--------------------------------------------------------------------------------------------------------------------------------
+ 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- -125
+select cast(-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                                                            numeric                                                             
+--------------------------------------------------------------------------------------------------------------------------------
+ -99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- -126
+select cast(-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                                                              numeric                                                              
+-----------------------------------------------------------------------------------------------------------------------------------
+ -99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- 1000
+select cast(-0.99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 as number default 999 on conversion error ) ;
+                                                                                                  numeric                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ -.99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+--字符
+--125
+select cast('99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                                                            numeric                                                            
+-------------------------------------------------------------------------------------------------------------------------------
+ 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+--126
+select cast('999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999'  as number default 999 on conversion error ) ;
+                                                            numeric                                                             
+--------------------------------------------------------------------------------------------------------------------------------
+ 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- -125
+select cast('-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                                                            numeric                                                             
+--------------------------------------------------------------------------------------------------------------------------------
+ -99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- -126
+select cast('-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                                                              numeric                                                              
+-----------------------------------------------------------------------------------------------------------------------------------
+ -99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+-- 1000
+select cast('-0.99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' as number default 999 on conversion error ) ;
+                                                                                                  numeric                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ -.99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+(1 row)
+
+--带有指定位数的值
+SELECT cast('1234.56' as number default 999 on conversion error ,'99.99');
+ numeric 
+---------
+    1234
+(1 row)
+
+SELECT cast('1234.56' as number default 999 on conversion error ,'999999.99');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+SELECT cast('1234.56' as number default 999 on conversion error ,'999999');
+ numeric 
+---------
+   12345
+(1 row)
+
+--带有前导零的值
+select cast('234234.4350' as number default 999 on conversion error , '999999.0000000') ;
+   numeric   
+-------------
+ 234234.4350
+(1 row)
+
+select cast('234234.4350' as number default 999 on conversion error , '999999.0000') ;
+   numeric   
+-------------
+ 234234.4350
+(1 row)
+
+select cast('234234.4350' as number default 999 on conversion error , '999999.00') ;
+  numeric  
+-----------
+ 234234.43
+(1 row)
+
+--小数值
+SELECT cast('1234.56' as number default 999 on conversion error ,'99999.999');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+SELECT cast('1234.56' as number default 999 on conversion error ,'9999.99');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+SELECT cast('1234.56' as number default 999 on conversion error ,'99.99');
+ numeric 
+---------
+    1234
+(1 row)
+
+--分组，（千）分隔符
+SELECT cast('12,345,678.56' as number ,'999,999,999,999.99');
+ERROR:  invalid data.
+LINE 1: SELECT cast('12,345,678.56' as number ,'999,999,999,999.99')...
+                    ^
+CONTEXT:  referenced column: numeric
+SELECT cast('12,345,678.56' as number default 999 on conversion error ,'999,999,999,999.99');
+ numeric 
+---------
+     999
+(1 row)
+
+SELECT cast('12,345,678.56' as number default 999 on conversion error ,'99,999,999.99');
+   numeric   
+-------------
+ 12345678.56
+(1 row)
+
+SELECT cast('1,234.56' as number default 999 on conversion error ,'9,999.99');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+--尖括号内负值
+select cast('<1234>' as number,'9999PR') ;
+ numeric 
+---------
+   -1234
+(1 row)
+
+select cast('1234' as number,'9999PR') ;
+ numeric 
+---------
+    1234
+(1 row)
+
+--带负号的数值（使用区域设置）
+SELECT cast('-$1,234.56' as number , 'SL999999999D99') ;
+ numeric  
+----------
+ -1234.56
+(1 row)
+
+SELECT cast('$1,234.56-' as number , 'L999999999D99S');
+ numeric  
+----------
+ -1234.56
+(1 row)
+
+--货币符号
+SELECT cast('$1,234.56' as number, 'L999999999D99');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+--小数点（使用区域设置）
+SELECT cast('1234.56' as number default 999 on conversion error ,'99999D999');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+SELECT cast('1234.56' as number default 999 on conversion error ,'9999D99');
+ numeric 
+---------
+ 1234.56
+(1 row)
+
+SELECT cast('1234.56' as number default 99 on conversion error ,'99D99');
+ numeric 
+---------
+    1234
+(1 row)
+
+--分组分隔符
+SELECT cast('12,345,678.56' as number default 999 on conversion error ,'999G999G999G999D99');
+   numeric   
+-------------
+ 12345678.56
+(1 row)
+
+SELECT cast('12,345,678.56' as number default 999 on conversion error ,'99G999G999D99');
+   numeric   
+-------------
+ 12345678.56
+(1 row)
+
+SELECT cast('1,234.56' as number default 999 on conversion error ,'999D99');
+ numeric 
+---------
+  1234.5
+(1 row)
+
+--移动指定位（小数）
+SELECT cast('1413.213' as number , '9999V999') ;
+ numeric 
+---------
+  141321
+(1 row)
+
+SELECT cast('1413.213' as number , '999999V9') ;
+ numeric 
+---------
+  141321
+(1 row)
+
+SELECT cast('1413213' as number , '999V9999');
+ numeric 
+---------
+ 1413213
+(1 row)
+
+--default
+select cast('a456' as number default 999 on conversion error ) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('456+123' as number default 999 on conversion error) ;
+ numeric 
+---------
+     999
+(1 row)
+
+select cast('456+123'+123 as number default 999 on conversion error) ;
+ERROR:  invalid input syntax for integer: "456+123"
+LINE 1: select cast('456+123'+123 as number default 999 on conversio...
+                    ^
+CONTEXT:  referenced column: numeric
+select cast('132654' as number default '123' on conversion error ) ;
+ numeric 
+---------
+  132654
+(1 row)
+
+select cast('132654' as number default 'a123' on conversion error ) ;
+ numeric 
+---------
+  132654
+(1 row)
+
+select cast('iahdfoahsdf' as number DEFAULT '12414423' ON CONVERSION ERROR);
+ numeric  
+----------
+ 12414423
+(1 row)
+
+select cast('中文' as number DEFAULT 66 ON CONVERSION ERROR, '999D99');
+ numeric 
+---------
+      66
+(1 row)
+
+select cast('中文' as number DEFAULT '12414423' ON CONVERSION ERROR, '999999999999999999999999');
+ numeric  
+----------
+ 12414423
+(1 row)
+
+select cast('中文' as number DEFAULT '1241423'+123 ON CONVERSION ERROR, '999999999999999999999999');
+ numeric 
+---------
+ 1241546
+(1 row)
+
+select cast( as number DEFAULT '1241423'+123 ON CONVERSION ERROR, '999999999999999999999999');
+ERROR:  syntax error at or near "as"
+LINE 1: select cast( as number DEFAULT '1241423'+123 ON CONVERSION E...
+                     ^
+--边界
+--精度边界
+select cast(1e41-1 as number default 999 on conversion error ) ;
+                  numeric                  
+-------------------------------------------
+ 99999999999999999999999999999999999999999
+(1 row)
+
+select cast('' as number default 999 on conversion error) ;
+ numeric 
+---------
+        
+(1 row)
+
+select cast(null as number default 999 on conversion error) ;
+ numeric 
+---------
+        
+(1 row)
+
+--数字格式模型
+--输入格式
+SELECT cast('1,234.56' as number default 999 on conversion  error , '99999.9') AS result ;
+ result 
+--------
+ 1234.5
+(1 row)
+
+select cast('132654' as number default '123' on conversion error ) ;
+ numeric 
+---------
+  132654
+(1 row)
+
+select cast('132654' as number default 'a123' on conversion error ) ;
+ numeric 
+---------
+  132654
+(1 row)
+
+select cast('132,654.12' as number default 123 on conversion error ,'999,999,999.99' ) ;
+ numeric 
+---------
+     123
+(1 row)
+
+select cast('132654.12' as number default 123 on conversion error ,'999,999,999.99' ) ;
+ numeric 
+---------
+     123
+(1 row)
+
+SELECT cast('12,234.56' as number default 999 on conversion error ,'999G999G999.99');
+ numeric  
+----------
+ 12234.56
+(1 row)
+
+--复杂度
+SELECT cast('RMB1,234.56' as number default 999 on conversion error, 'L999999999D99', 'NLS_NUMERIC_CHARACTERS = ''.,''   NLS_CURRENCY = ''RMB''') AS converted_number;
+ converted_number 
+------------------
+          1234.56
+(1 row)
+
+SELECT cast('RMB1,234.56' as number, 'L999999999D99', 'NLS_NUMERIC_CHARACTERS = ''.,''   NLS_CURRENCY = ''RMB''') AS converted_number;
+ converted_number 
+------------------
+          1234.56
+(1 row)
+
+--隐式转换
+select cast('456'+123 as number) ;
+ numeric 
+---------
+     579
+(1 row)
+
+select cast('456'+123 as number default 999 on conversion error) ;
+ numeric 
+---------
+     579
+(1 row)
+
+SELECT cast('1234.56'+1231323 as number default 999 on conversion error ,'9999999999D999') ;
+ERROR:  invalid input syntax for integer: "1234.56"
+LINE 1: SELECT cast('1234.56'+1231323 as number default 999 on conve...
+                    ^
+CONTEXT:  referenced column: numeric
+SELECT cast('-$1,234.56'+6546464 as number, 'SL999999999D99', 'NLS_NUMERIC_CHARACTERS = ''.,'' NLS_CURRENCY = ''$''') AS converted_number;
+ERROR:  invalid input syntax for integer: "-$1,234.56"
+LINE 1: SELECT cast('-$1,234.56'+6546464 as number, 'SL999999999D99'...
+                    ^
+CONTEXT:  referenced column: converted_number
+SELECT cast('-$1,234.56'+6546464 as number default 999 on conversion error , 'SL999999999D99', 'NLS_NUMERIC_CHARACTERS = ''.,'' NLS_CURRENCY = ''$''') AS converted_number;
+ERROR:  invalid input syntax for integer: "-$1,234.56"
+LINE 1: SELECT cast('-$1,234.56'+6546464 as number default 999 on co...
+                    ^
+CONTEXT:  referenced column: converted_number
+select cast(''+123 as number default 999 on conversion error ) ;
+ numeric 
+---------
+        
+(1 row)
+
+select cast('1q23' as number default '122535235235234524523453245325234'+3123 on conversion error );
+ERROR:  value "122535235235234524523453245325234" is out of range for type integer
+LINE 1: select cast('1q23' as number default '1225352352352345245234...
+                                             ^
+CONTEXT:  referenced column: numeric
+SELECT cast ('01-01-2002 14:10:10.123000','DD-MM-RR HH24:MI:SS.FF');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT cast ('01-01-2002 14:10:10.123000','DD-MM-RR HH24:MI:...
+                                                 ^
+-- 创建示例表
+CREATE TABLE employee ( id NUMBER, name VARCHAR2(50), hire_date DATE ); 
+INSERT INTO employee (id, name, hire_date) VALUES (1, 'John Doe', to_date('2023-09-24 08:22:0') - 10);
+INSERT INTO employee (id, name, hire_date) VALUES (2, 'Jane Smith', to_date('2024-10-24 05:22:0') - 20);
+-- 查询并格式化 hire_date
+SELECT id, name, TO_CHAR(hire_date, 'YYYY-MM-DD HH24:MI:SS') AS default_format, TO_CHAR(hire_date, 'DD-MM-YYYY HH24:MI:SS') AS custom_format_1, TO_CHAR(hire_date, 'MM/DD/YYYY HH12:MI:SS AM') AS custom_format_2 FROM employee; 
+ id |    name    |   default_format    |   custom_format_1   |    custom_format_2     
+----+------------+---------------------+---------------------+------------------------
+  1 | John Doe   | 2023-09-14 08:22:00 | 14-09-2023 08:22:00 | 09/14/2023 08:22:00 AM
+  2 | Jane Smith | 2024-10-04 05:22:00 | 04-10-2024 05:22:00 | 10/04/2024 05:22:00 AM
+(2 rows)
+
+--timestamp
+--arg边界值检验
+--day
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+SELECT cast ('31-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2031-09-02 14:10:10.123
+(1 row)
+
+SELECT cast ('-01-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "-01-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('-01-09-02 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+SELECT cast ('1-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+SELECT cast ('131-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0131-09-02 14:10:10.123
+(1 row)
+
+SELECT cast ('001-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0001-09-02 14:10:10.123
+(1 row)
+
+SELECT cast ('-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('-09-02 14:10:10.123000'as timestamp,'DD-MM-RR ...
+                     ^
+CONTEXT:  referenced column: timestamp
+--month
+SELECT cast ('01-13-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-13-02 14:10:10.123000"
+LINE 1: SELECT cast ('01-13-02 14:10:10.123000'as timestamp,'DD-MM-R...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01--13-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01--13-02 14:10:10.123000"
+LINE 1: SELECT cast ('01--13-02 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 14:10:10.123
+(1 row)
+
+SELECT cast ('01-001-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-001-02 14:10:10.123000"
+LINE 1: SELECT cast ('01-001-02 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-111-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-111-02 14:10:10.123000"
+LINE 1: SELECT cast ('01-111-02 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01--02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01--02 14:10:10.123000"
+LINE 1: SELECT cast ('01--02 14:10:10.123000'as timestamp,'DD-MM-RR ...
+                     ^
+CONTEXT:  referenced column: timestamp
+--年
+--RR
+SELECT cast ('01-01-2002 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01-9999 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-9999 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-9999 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01-999 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-999 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-999 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01-02002 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-02002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01-20002 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-20002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-20002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT cast ('01-01 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01 14:10:10.123000"
+LINE 1: SELECT cast ('01-01 14:10:10.123000'as timestamp,'DD-MM-RR H...
+                     ^
+CONTEXT:  referenced column: timestamp
+--YYYY
+--year为YYYY
+--year为正常四位数
+SELECT cast ('01-01-2002 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为负数四位数越界
+--无S指定负号
+SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--有S指定负号
+SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-MM-SYYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01--2002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界四位数
+SELECT cast ('01-01-0000 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-0000 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-0000 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为3位数位数
+SELECT cast ('01-01-999 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-999 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-999 14:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为不越界5位数
+SELECT cast ('01-01-02002 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-02002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界五位数
+SELECT cast ('01-01-20002 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-20002 14:10:10.123000"
+LINE 1: SELECT cast ('01-01-20002 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year不输入
+SELECT cast ('01-01- 14:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01- 14:10:10.123000"
+LINE 1: SELECT cast ('01-01- 14:10:10.123000'as timestamp,'DD-MM-YYY...
+                     ^
+CONTEXT:  referenced column: timestamp
+--hour
+--hour两位数越界
+SELECT cast ('01-01-02 25:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 25:10:10.123000"
+LINE 1: SELECT cast ('01-01-02 25:10:10.123000'as timestamp,'DD-MM-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--hour两位数负数越界
+SELECT cast ('01-01-02 -20:10:10.123000'as timestamp,'DD-MM-RR SHH24:MI:SS.FF');
+ERROR:  time zone displacement out of range: "01-01-02 -20:10:10.123000"
+LINE 1: SELECT cast ('01-01-02 -20:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--hour为一位数
+SELECT cast ('01-01-02 1:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 01:10:10.123
+(1 row)
+
+--hour为越界三位数
+SELECT cast ('01-01-02 100:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 100:10:10.123000"
+LINE 1: SELECT cast ('01-01-02 100:10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--hour为不越界三位数
+SELECT cast ('01-01-02 010:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--hour不输入
+SELECT cast ('01-01-02 :10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 00:10:10.123
+(1 row)
+
+--分钟
+--两位数越界
+SELECT cast ('01-01-02 10:70:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:70:10.123000"
+LINE 1: SELECT cast ('01-01-02 10:70:10.123000'as timestamp,'DD-MM-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--负数分钟越界
+SELECT cast ('01-01-02 10:-10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01-02 10:-10:10.123000"
+LINE 1: SELECT cast ('01-01-02 10:-10:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--一位数分钟
+SELECT cast ('01-01-02 10:1:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:01:10.123
+(1 row)
+
+--三位数分钟越界
+SELECT cast ('01-01-02 10:100:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:100:10.123000"
+LINE 1: SELECT cast ('01-01-02 10:100:10.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--三位数分钟不越界
+SELECT cast ('01-01-02 10:010:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--分钟不输入
+SELECT cast ('01-01-02 10::10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:00:10.123
+(1 row)
+
+--秒
+--正常两位数秒
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--越界两位数秒
+SELECT cast ('01-01-02 10:10:70.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:10:70.123000"
+LINE 1: SELECT cast ('01-01-02 10:10:70.123000'as timestamp,'DD-MM-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--一位数秒
+SELECT cast ('01-01-02 10:10:7.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:07.123
+(1 row)
+
+--越界负两位数秒
+SELECT cast ('01-01-02 10:10:-60.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  time zone displacement out of range: "01-01-02 10:10:-60.123000"
+LINE 1: SELECT cast ('01-01-02 10:10:-60.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--不越界三位数秒
+SELECT cast ('01-01-02 10:10:050.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:50.123
+(1 row)
+
+--越界三位数秒
+SELECT cast ('01-01-02 10:10:770.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:10:770.123000"
+LINE 1: SELECT cast ('01-01-02 10:10:770.123000'as timestamp,'DD-MM-...
+                     ^
+CONTEXT:  referenced column: timestamp
+--秒不输入
+SELECT cast ('01-01-02 10:10:'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+      timestamp      
+---------------------
+ 2001-01-02 10:10:00
+(1 row)
+
+--毫秒
+--三位数壕秒
+SELECT cast ('01-01-02 10:10:40.123'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:40.123
+(1 row)
+
+--毫秒位数越界
+SELECT cast ('01-01-02 10:10:10.1239'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp         
+--------------------------
+ 2001-01-02 10:10:10.1239
+(1 row)
+
+--毫秒处不输入
+SELECT cast ('01-01-02 10:10:10'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+      timestamp      
+---------------------
+ 2001-01-02 10:10:10
+(1 row)
+
+--特殊日期检验
+--闰年2月29检验
+SELECT cast ('29-02-04 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-04 14:10:10.123
+(1 row)
+
+--普通年2月29检验
+SELECT cast ('29-02-03 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-03 14:10:10.123
+(1 row)
+
+--输入值多输入一部分数据
+--日期处随便多输入一条
+SELECT cast ('21-23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "21-23-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('21-23-09-02 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+CONTEXT:  referenced column: timestamp
+--时间处随便多输入一条
+SELECT cast ('23-09-02 14:10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "23-09-02 14:10:10:10.123000"
+LINE 1: SELECT cast ('23-09-02 14:10:10:10.123000'as timestamp,'DD-M...
+                     ^
+CONTEXT:  referenced column: timestamp
+--fmt大小写检验
+--年月日
+--fmt中的DD参数
+--fmt中的D为两位，输入为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的D有大写有小写为两位，输入值为两位
+SELECT cast ('11-01-02 10:10:10.123000'as timestamp,'Dd-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-01-02 10:10:10.123
+(1 row)
+
+--fmt中的D有大写有小写为两位，输入值为两位
+SELECT cast ('11-01-02 10:10:10.123000'as timestamp,'dD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-01-02 10:10:10.123
+(1 row)
+
+--fmt中的D全小写为两位，输入值为两位
+SELECT cast ('11-01-02 10:10:10.123000'as timestamp,'dd-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-01-02 10:10:10.123
+(1 row)
+
+--fmt中的MM参数
+--fmt中的M为两位，输入为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的M有大写有小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-Mm-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的M有大写有小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-mM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的M全小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-mm-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--opengauss
+SELECT cast ('01-Jan-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Feb-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-02-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Mar-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-03-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Apr-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-04-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-May-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-05-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jun-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-06-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jul-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-07-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Aug-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-08-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Sep-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Oct-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-10-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Nov-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-11-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Dec-02 10:10:10.123000'as timestamp,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-12-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jan-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Feb-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-02-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Mar-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-03-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Apr-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-04-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-May-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-05-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jun-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-06-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jul-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-07-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Aug-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-08-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Sep-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Oct-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-10-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Nov-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-11-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Dec-02 10:10:10.123000'as timestamp,'DD-MON-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-12-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jan-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Feb-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-02-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Mar-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-03-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Apr-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-04-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-May-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-05-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jun-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-06-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Jul-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-07-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Aug-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-08-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Sep-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Oct-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-10-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Nov-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-11-02 10:10:10.123
+(1 row)
+
+SELECT cast ('01-Dec-02 10:10:10.123000'as timestamp,'DD-mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-12-02 10:10:10.123
+(1 row)
+
+--fmt中的RR参数
+--fmt中的R为两位，输入为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的R有大写有小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-Rr HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的R有大写有小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-rR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的R全小写为两位，输入值为两位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-rr HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的YYYY参数
+--fmt中的YYYY为四位，输入为四位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的YYYY有大写有小写为四位，输入值为四位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-YyYy HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt中的YYYY全小写为四位，输入值为四位
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-yyyy HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--分时秒
+--fmt时分秒中的hour
+--fmt中的hour不指定具体数值，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR HH:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour不指定具体数值，按1-24输入
+SELECT cast ('01-01-02 14:10:10.123000'as timestamp,'DD-MM-RR HH:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 14:10:10.123
+(1 row)
+
+--fmt中的hour指定为12，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR HH12:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour指定为24，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour指定为24，按1-24输入
+SELECT cast ('01-01-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 14:10:10.123
+(1 row)
+
+--fmt中的hour指定为13，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR HH13:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour不指定具体数值且为小写，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR hh:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour不指定具体数值且为前大后小，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR Hh:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour不指定具体数值且为前小后大，按1-12输入
+SELECT cast ('01-01-02 11:10:10.123000'as timestamp,'DD-MM-RR hH:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 11:10:10.123
+(1 row)
+
+--fmt中的hour指定为24，不输入
+SELECT cast ('01-01-02 :10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 00:10:10.123
+(1 row)
+
+--fmt时分秒中的MI
+--正常MI
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--MI一大一小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:Mi:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--MI一小一大
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:mI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--MI全小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:mi:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt时分秒中的SS
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--SS一大一小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:Mi:Ss.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--SS一小一大
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:mI:sS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--SS全小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:mi:ss.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt时分秒中的FF
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--FF一大一小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.Ff');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--FF一小一大
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.fF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--FF全小
+SELECT cast ('01-01-02 10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.ff');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--fmt长短检验
+--三位数D一位数输入值
+SELECT cast ('1-09-02 14:10:10.123000'as timestamp,'DDD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数D两位数输入值
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DDD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--三位数D三位数输入值
+SELECT cast ('014-09-02 14:10:10.123000'as timestamp,'DDD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0014-09-02 14:10:10.123
+(1 row)
+
+--一位数D一位数输入值
+SELECT cast ('1-09-02 14:10:10.123000'as timestamp,'D-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--一位数D两位数输入值
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'D-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--一位数D三位数输入值
+SELECT cast ('014-09-02 14:10:10.123000'as timestamp,'D-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0014-09-02 14:10:10.123
+(1 row)
+
+--三位数M一位数输入值
+SELECT cast ('01-9-02 14:10:10.123000'as timestamp,'DD-MMM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数M两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MMM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数M三位数输入值
+SELECT cast ('01-009-02 14:10:10.123000'as timestamp,'DD-MMM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-009-02 14:10:10.123000"
+LINE 1: SELECT cast ('01-009-02 14:10:10.123000'as timestamp,'DD-MMM...
+                     ^
+CONTEXT:  referenced column: timestamp
+--一位数M一位数输入值
+SELECT cast ('01-9-02 14:10:10.123000'as timestamp,'DD-M-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--一位数M两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-M-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--一位数M三位数输入值
+SELECT cast ('01-012-02 14:10:10.123000'as timestamp,'DD-M-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-012-02 14:10:10.123000"
+LINE 1: SELECT cast ('01-012-02 14:10:10.123000'as timestamp,'DD-M-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--三位数R一位数输入值
+SELECT cast ('01-09-2 14:10:10.123000'as timestamp,'DD-MM-RRR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数R两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-RRR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数R四位数输入值
+SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM-RRR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--一位数R一位数输入值
+SELECT cast ('01-09-2 14:10:10.123000'as timestamp,'DD-MM-R HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--一位数R两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-R HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数H一位数输入值
+SELECT cast ('01-09-02 2:10:10.123000'as timestamp,'DD-MM-RR HHH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 02:10:10.123
+(1 row)
+
+--三位数H两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HHH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数H3位数输入值
+SELECT cast ('01-09-02 014:10:10.123000'as timestamp,'DD-MM-RR HHH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--一位数H一位数输入值
+SELECT cast ('01-09-02 2:10:10.123000'as timestamp,'DD-MM-RR H24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 02:10:10.123
+(1 row)
+
+--一位数H两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-RR H24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数S一位数输入值
+SELECT cast ('01-09-02 02:10:9.123000'as timestamp,'DD-MM-RR HH24:MI:SSS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 02:10:09.123
+(1 row)
+
+--三位数S两位数输入值
+SELECT cast ('01-09-02 14:10:56.123000'as timestamp,'DD-MM-RR HH24:MI:SSS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:56.123
+(1 row)
+
+--三位数S3位数输入值
+SELECT cast ('01-09-02 14:10:056.123000'as timestamp,'DD-MM-RR HH24:MI:SSS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:56.123
+(1 row)
+
+--一位数S一位数输入值
+SELECT cast ('01-09-02 02:10:9.123000'as timestamp,'DD-MM-RR HH24:MI:S.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 02:10:09.123
+(1 row)
+
+--一位数S两位数输入值
+SELECT cast ('01-09-02 14:10:56.123000'as timestamp,'DD-MM-RR HH24:MI:S.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:56.123
+(1 row)
+
+--三位数F正常输入
+SELECT cast ('01-09-02 14:10:56.123000'as timestamp,'DD-MM-YYYY HH24:MI:SS.FFF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:56.123
+(1 row)
+
+--一位数F正常输入
+SELECT cast ('01-09-02 14:10:56.123000'as timestamp,'DD-MM-RR HH24:MI:SS.F');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:56.123
+(1 row)
+
+--三位数Y一位数输入值
+SELECT cast ('01-09-2 14:10:10.123000'as timestamp,'DD-MM-YYY HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数Y两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-YYY HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--三位数Y四位数输入值
+SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM-YYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--五位数Y一位数输入值
+SELECT cast ('01-09-2 14:10:10.123000'as timestamp,'DD-MM-YYYYY HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--五位数Y两位数输入值
+SELECT cast ('01-09-02 14:10:10.123000'as timestamp,'DD-MM-YYYYY HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--五位数Y四位数输入值
+SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM-YYYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('01-09-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--fmt符号检验
+--日期符号的替换
+--符号正常
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成@符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD@MM@RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成!符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD!MM!RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成#符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD#MM#RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成$符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD$MM$RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成%符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD%MM%RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成/符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD/MM/RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成:符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD:MM:RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成?符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD?MM?RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成.符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD.MM.RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成*符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD*MM*RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成+符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD+MM+RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将-号变成=符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD=MM=RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--时间符号的替换
+--符号正常
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成-符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24-MI-SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成!符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24!MI!SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成@符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24@MI@SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成#符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24#MI#SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成$符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24$MI$SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成%符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24%MI%SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成&符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24&MI&SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成*符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24*MI*SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成/符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24/MI/SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成=符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24=MI=SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--将：号变成+符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24+MI+SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--输入值的符号与fmt不一致
+SELECT cast ('14!09*02#14$10^10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "14!09*02#14$10^10.123000"
+LINE 1: SELECT cast ('14!09*02#14$10^10.123000'as timestamp,'DD-MM-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--不同符号的替换
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DDMM%RR HH24*MI/SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--输入值与fmt不一致
+SELECT cast ('14!09%02#14$10^10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "14!09%02#14$10^10.123000"
+LINE 1: SELECT cast ('14!09%02#14$10^10.123000'as timestamp,'DD-MM-R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--fmt中的字母写错
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'pl-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--输入值与fmt都打乱
+SELECT cast ('14!09&02#14$10^10.123000'as timestamp,'DD#MM$RR^HH24*MI+SS.FF');
+ERROR:  invalid input syntax for type timestamp: "14!09&02#14$10^10.123000"
+LINE 1: SELECT cast ('14!09&02#14$10^10.123000'as timestamp,'DD#MM$R...
+                     ^
+CONTEXT:  referenced column: timestamp
+--不同符号的替换
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD@MM%RR HH24*MI/SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--fmt中的字母写错
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'pl-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--符号长度与输入值不一致
+--符号中有中文符号
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD？MM%RR HH24*MI/SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--符号加长，与输入值不对应
+SELECT cast ('14-09-02 14:10:10.123000'as timestamp,'DD??MM%RR HH24*MI/SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--输入输出中皆无分隔符号
+SELECT cast ('140902141010.123000'as timestamp,'DDMMRRHH24MISS.FF');
+ERROR:  date/time field value out of range: "140902141010.123000"
+LINE 1: SELECT cast ('140902141010.123000'as timestamp,'DDMMRRHH24MI...
+                     ^
+CONTEXT:  referenced column: timestamp
+--fmt无分隔符号
+SELECT cast ('14-09-02 14-10-10.123000'as timestamp,'DDMMRRHH24MISS.FF');
+ERROR:  invalid input syntax for type timestamp: "14-09-02 14-10-10.123000"
+LINE 1: SELECT cast ('14-09-02 14-10-10.123000'as timestamp,'DDMMRRH...
+                     ^
+CONTEXT:  referenced column: timestamp
+--输入值多输入一部分数据
+--日期处随便多输入一条
+SELECT cast ('21-23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "21-23-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('21-23-09-02 14:10:10.123000'as timestamp,'DD-M...
+                     ^
+CONTEXT:  referenced column: timestamp
+--时间处随便多输入一条
+SELECT cast ('23-09-02 14:10:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "23-09-02 14:10:10:10.123000"
+LINE 1: SELECT cast ('23-09-02 14:10:10:10.123000'as timestamp,'DD-M...
+                     ^
+CONTEXT:  referenced column: timestamp
+--fmt少写一部分，输入值不变
+--正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--DD少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--DD少写，输入值也少写
+SELECT cast ('09-02 14:10:10.123000'as timestamp,'MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "09-02 14:10:10.123000"
+LINE 1: SELECT cast ('09-02 14:10:10.123000'as timestamp,'MM-RR HH24...
+                     ^
+CONTEXT:  referenced column: timestamp
+--MM少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--MM少写，输入值也少写
+SELECT cast ('23-02 14:10:10.123000'as timestamp'DD-RR HH24:MI:SS.FF');
+ERROR:  syntax error at or near "'DD-RR HH24:MI:SS.FF'"
+LINE 1: SELECT cast ('23-02 14:10:10.123000'as timestamp'DD-RR HH24:...
+                                                        ^
+--RR少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--RR少写，输入值也少写
+SELECT cast ('23-09 14:10:10.123000'as timestamp,'DD-MM HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "23-09 14:10:10.123000"
+LINE 1: SELECT cast ('23-09 14:10:10.123000'as timestamp,'DD-MM HH24...
+                     ^
+CONTEXT:  referenced column: timestamp
+--YYYY少写，输入值正常
+SELECT cast ('23-09-2002 14:10:10.123000'as timestamp,'DD-MM HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "23-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('23-09-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--YYYY少写，输入值也少写
+SELECT cast ('23-09-2002 14:10:10.123000'as timestamp,'DD-MM HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "23-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('23-09-2002 14:10:10.123000'as timestamp,'DD-MM...
+                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--HH少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR MI:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--HH少写，输入值少写
+SELECT cast ('23-09-02 14:10:10'as timestamp,'DD-MM-RR MI:SS.FF');
+      timestamp      
+---------------------
+ 2023-09-02 14:10:10
+(1 row)
+
+--MI少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--MI少写，输入值少写
+SELECT cast ('23-09-02 14:10.123000'as timestamp,'DD-MM-RR HH24:SS.FF');
+        timestamp        
+-------------------------
+ 2023-09-02 00:14:10.123
+(1 row)
+
+--SS少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--SS少写，输入值少写
+SELECT cast ('23-09-02 14:10:.123000'as timestamp,'DD-MM-RR HH24:MI:FF');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:00.123
+(1 row)
+
+--FF少写，输入值正常
+SELECT cast ('23-09-02 14:10:10.123000'as timestamp,'DD-MM-RR HH24:MI:SS');
+        timestamp        
+-------------------------
+ 2023-09-02 14:10:10.123
+(1 row)
+
+--FF少写，输入值少写
+SELECT cast ('23-09-02 14:10:10'as timestamp,'DD-MM-RR HH24:MI:SS');
+      timestamp      
+---------------------
+ 2023-09-02 14:10:10
+(1 row)
+
+--fmt和arg参数同时少写
+SELECT cast ('05-02 14:10' as timestamp,'MM-RR HH24:MI');
+ERROR:  invalid input syntax for type timestamp: "05-02 14:10"
+LINE 1: SELECT cast ('05-02 14:10' as timestamp,'MM-RR HH24:MI');
+                     ^
+CONTEXT:  referenced column: timestamp
+SELECT cast ('140902141010.123000'as timestamp,'DDMMRRHH24MISS.FF');
+ERROR:  date/time field value out of range: "140902141010.123000"
+LINE 1: SELECT cast ('140902141010.123000'as timestamp,'DDMMRRHH24MI...
+                     ^
+CONTEXT:  referenced column: timestamp
+--fmt多写一部分，输入值与之对应
+--多写一段DD
+SELECT cast ('14-23-09-02 14:10:10.123000'as timestamp,'DD-DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "14-23-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('14-23-09-02 14:10:10.123000'as timestamp,'DD-D...
+                     ^
+CONTEXT:  referenced column: timestamp
+--default部分
+--正常
+SELECT cast ('10-09-02 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2010-09-02 14:10:10.123
+(1 row)
+
+--输入值部分异常，fmt正常，default正常
+--越界异常，default正确
+--day正数越界
+SELECT cast ('31-09-02 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2031-09-02 14:10:10.123
+(1 row)
+
+--day负数数越界
+SELECT cast ('-01-09-02 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+--day不输入
+SELECT cast ('09-02 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+--MM越界
+SELECT cast ('02-13-02 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+--YYYY越界
+SELECT cast ('02-13-9999 14:10:10.123000'as timestamp DEFAULT '11-09-2003 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-YYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "11-09-2003 14:10:10.123000"
+LINE 1: ...('02-13-9999 14:10:10.123000'as timestamp DEFAULT '11-09-200...
+                                                             ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--特殊日期
+--闰年2月29检验
+SELECT cast ('29-02-04 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-04 14:10:10.123
+(1 row)
+
+--普通年2月29检验
+SELECT cast ('29-02-03 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-03 14:10:10.123
+(1 row)
+
+--符号错误
+SELECT cast ('29？02-03 14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+SELECT cast ('29-02-03？14:10:10.123000'as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+--空值检验null
+SELECT cast (null as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ timestamp 
+-----------
+ 
+(1 row)
+
+--空字符串''
+SELECT cast (''  as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ timestamp 
+-----------
+ 
+(1 row)
+
+--什么都不输入
+SELECT cast (  as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  syntax error at or near "as"
+LINE 1: SELECT cast (  as timestamp DEFAULT '11-09-11 14:10:10.12300...
+                       ^
+--fmt输入异常，default正常，输入值中正常
+--DD多输一段，输入值也多输一段
+SELECT cast ('21-31-09-02 14:10:10.123000'  as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2011-09-11 14:10:10.123
+(1 row)
+
+--DD多输一段，输入值正常
+SELECT cast ('31-09-02 14:10:10.123000' as timestamp  DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2031-09-02 14:10:10.123
+(1 row)
+
+--fmt中的字母错误
+SELECT cast ('09-09-02 14:10:10.123000' as timestamp  DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'pl-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt中的符号错误
+SELECT cast ('09-09-02 14:10:10.123000'  as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD--MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt为空
+SELECT cast ('09-09-02 14:10:10.123000'  as timestamp DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR);
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt为null
+SELECT cast ('09-09-02 14:10:10.123000' as timestamp  DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,null);
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt为''
+SELECT cast ('09-09-02 14:10:10.123000' as timestamp  DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'');
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt正常，输入值异常，default正常
+SELECT cast ('.123000'  as timestamp DEFAULT '14-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2014-09-02 14:10:10.123
+(1 row)
+
+--fmt正常，输入值正常，default越界
+SELECT cast ('09-09-02 14:10:10.123000' as timestamp  DEFAULT '29-02-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt正常，输入值正常，default正常
+SELECT cast ('09-09-02 14:10:10.123000'  as timestamp DEFAULT '28-02-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2009-09-02 14:10:10.123
+(1 row)
+
+--fmt正常，输入值异常，default异常
+--fmt中的格式正确，边界检验
+--day正数越界
+SELECT cast ('.123000' as timestamp  DEFAULT '31-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2031-09-02 14:10:10.123
+(1 row)
+
+--day负数越界
+SELECT cast ('.123000'  as timestamp DEFAULT '-01-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "-01-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '-01-09-02 14:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--day为单数
+SELECT cast ('.123000'  as timestamp DEFAULT '1-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-02 14:10:10.123
+(1 row)
+
+--day为越界三位数
+SELECT cast ('.123000'  as timestamp DEFAULT '131-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0131-09-02 14:10:10.123
+(1 row)
+
+--day为正常三位数
+SELECT cast ('.123000'  as timestamp DEFAULT '001-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 0001-09-02 14:10:10.123
+(1 row)
+
+--day不输入
+SELECT cast ('.123000' as timestamp  DEFAULT '-09-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF')l;
+ERROR:  invalid input syntax for type timestamp: "-09-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '-09-02 14:10:1...
+                                                     ^
+CONTEXT:  referenced column: l
+--month正数越界
+SELECT cast ('.123000' as timestamp  DEFAULT '01-13-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-13-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-13-02 14:10...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--month负数越界
+SELECT cast ('.123000'  as timestamp DEFAULT '01--13-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01--13-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01--13-02 14:1...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--month为01
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 14:10:10.123
+(1 row)
+
+--month为正常三位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-001-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-001-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-001-02 14:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--month为越界三位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-111-02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-111-02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-111-02 14:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--month不输入
+SELECT cast ('.123000'  as timestamp DEFAULT '01--02 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01--02 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01--02 14:10:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--year为RR
+--year为正常四位数
+SELECT cast ('.123000' as timestamp  DEFAULT '11-09-2002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "11-09-2002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '11-09-2002 14:...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为负数四位数越界
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01--2002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01--2002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界四位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-9999 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-9999 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-9999 14:...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为三位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-999 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-999 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-999 14:1...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为不越界5位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界5位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-20002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-20002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-20002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year不输入
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01 14:10:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--year为YYYY
+--year为正常四位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-2002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-2002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-2002 14:...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为负数四位数越界
+--无S指定负号
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01--2002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01--2002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--有S指定负号
+SELECT cast ('dasd' as timestamp default'01-01--2002 14:10:10.123000'on conversion error,'DD-MM-SYYYY HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01--2002 14:10:10.123000"
+LINE 1: SELECT cast ('dasd' as timestamp default'01-01--2002 14:10:1...
+                                                ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界四位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-9999 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-9999 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-9999 14:...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为3位数位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-999 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-999 14:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-999 14:1...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为不越界5位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year为越界五位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-20002 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-20002 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-20002 14...
+                                                     ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+--year不输入
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01 14:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01 14:10:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--hour两位数越界
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 25:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 25:10:10.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 25:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--hour两位数负数越界
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 -20:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF') ;
+ERROR:  time zone displacement out of range: "01-01-02 -20:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 -20:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--hour为一位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 1:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF') ;
+        timestamp        
+-------------------------
+ 2001-01-02 01:10:10.123
+(1 row)
+
+--hour为越界三位数
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 100:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 100:10:10.123000"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 100:1...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--hour为不越界三位数
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 010:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--hour不输入
+SELECT cast ('.123000' as timestamp DEFAULT '01-01-02 :10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 00:10:10.123
+(1 row)
+
+--两位数越界
+SELECT cast ('dasd' as timestamp default'01-01-02 10:70:10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:70:10.123000"
+LINE 1: SELECT cast ('dasd' as timestamp default'01-01-02 10:70:10.1...
+                                                ^
+CONTEXT:  referenced column: timestamp
+--负数分钟越界
+SELECT cast ('dasd' as timestamp default'01-01-02 10:-10:10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "01-01-02 10:-10:10.123000"
+LINE 1: SELECT cast ('dasd' as timestamp default'01-01-02 10:-10:10....
+                                                ^
+CONTEXT:  referenced column: timestamp
+--一位数分钟
+SELECT cast ('dasd' as timestamp default'01-01-02 10:1:10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:01:10.123
+(1 row)
+
+--三位数分钟越界
+SELECT cast ('dasd' as timestamp default'01-01-02 10:100:10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:100:10.123000"
+LINE 1: SELECT cast ('dasd' as timestamp default'01-01-02 10:100:10....
+                                                ^
+CONTEXT:  referenced column: timestamp
+--三位数分钟不越界
+SELECT cast ('dasd' as timestamp default'01-01-02 10:010:10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--分钟不输入
+SELECT cast ('dasd' as timestamp default'01-01-02 10::10.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:00:10.123
+(1 row)
+
+--正常两位数秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:10.123
+(1 row)
+
+--越界两位数秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:70.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:10:70.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--一位数秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:7.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:07.123
+(1 row)
+
+--越界负两位数秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:-60.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  time zone displacement out of range: "01-01-02 10:10:-60.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--不越界三位数秒
+SELECT cast ('dasd' as timestamp default'01-01-02 10:10:050.123000'on conversion error,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:50.123
+(1 row)
+
+--越界三位数秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:770.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  date/time field value out of range: "01-01-02 10:10:770.123000"
+LINE 1: SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--秒不输入
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+      timestamp      
+---------------------
+ 2001-01-02 10:10:00
+(1 row)
+
+--三位数壕秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:40.123' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-02 10:10:40.123
+(1 row)
+
+--毫秒位数越界
+SELECT cast ('.123000'  as timestamp DEFAULT '01-01-02 10:10:10.123987892374' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+         timestamp          
+----------------------------
+ 2001-01-02 10:10:10.123988
+(1 row)
+
+--毫秒位数为0
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02 10:10:10' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+      timestamp      
+---------------------
+ 2001-01-02 10:10:10
+(1 row)
+
+--少输入年月日
+SELECT cast ('.123000'  as timestamp DEFAULT '10:10:10.123974' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  invalid input syntax for type timestamp: "10:10:10.123974"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT '10:10:10.12397...
+                                                     ^
+CONTEXT:  referenced column: timestamp
+--少输入时分秒
+SELECT cast ('.123000' as timestamp  DEFAULT '01-01-02' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+      timestamp      
+---------------------
+ 2001-01-02 00:00:00
+(1 row)
+
+--default空值检验
+--为null
+SELECT cast ('.123000' as timestamp  DEFAULT null ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ timestamp 
+-----------
+ 
+(1 row)
+
+--为''
+SELECT cast ('.123000' as timestamp  DEFAULT '' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ timestamp 
+-----------
+ 
+(1 row)
+
+--什么都不输
+SELECT cast ('.123000'  as timestamp DEFAULT ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+ERROR:  syntax error at or near "ON CONVERSION ERROR"
+LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT ON CONVERSION E...
+                                                     ^
+--特殊日期检验
+--闰年2月29检验
+SELECT cast ('4:10:10.123000' as timestamp  DEFAULT '29-02-04 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-04 14:10:10.123
+(1 row)
+
+--普通年2月29检验
+SELECT cast ('2914:10:10.123000' as timestamp  DEFAULT '29-02-03 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2029-02-03 14:10:10.123
+(1 row)
+
+--sqlplan检验
+SELECT cast ('01-Jan-03 14:10:10.123000'as timestamp DEFAULT '11-Jan-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-01-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Feb-03 14:10:10.123000' as timestamp DEFAULT '11-Feb-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-02-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Mar-03 14:10:10.123000' as timestamp DEFAULT '11-Mar-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-03-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Apr-03 14:10:10.123000' as timestamp DEFAULT '11-Apr-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-04-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-May-03 14:10:10.123000' as timestamp DEFAULT '11-May-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-05-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Jun-03 14:10:10.123000' as timestamp DEFAULT '11-Jun-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-06-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Jul-03 14:10:10.123000' as timestamp DEFAULT '11-Jul-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-07-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Aug-03 14:10:10.123000' as timestamp DEFAULT '11-Aug-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-08-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Sep-03 14:10:10.123000' as timestamp DEFAULT '11-Sep-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-09-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Oct-03 14:10:10.123000' as timestamp DEFAULT '11-Oct-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-10-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Nov-03 14:10:10.123000' as timestamp DEFAULT '11-Nov-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-11-03 14:10:10.123
+(1 row)
+
+SELECT cast ('01-Dec-03 14:10:10.123000' as timestamp DEFAULT '11-Dec-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+        timestamp        
+-------------------------
+ 2001-12-03 14:10:10.123
+(1 row)
+

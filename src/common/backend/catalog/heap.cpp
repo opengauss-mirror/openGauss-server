@@ -4794,7 +4794,7 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
                     pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1, attcollation);
         } else {
             expr = coerce_to_target_type(pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT,
-                COERCE_IMPLICIT_CAST, -1);
+                COERCE_IMPLICIT_CAST, NULL, NULL, -1);
             if (expr == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("column \"%s\" is of type %s but %s expression is of type %s", attname, format_type_be(atttypid),

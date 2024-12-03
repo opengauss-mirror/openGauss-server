@@ -935,13 +935,17 @@ Oid typeTypeCollation(Type typ)
  * With param can_ignore == true, truncation or transformation may be cast
  * for input string if string is invalid for target type.
  */
-Datum stringTypeDatum(Type tp, char* string, int32 atttypmod, bool can_ignore)
+Datum stringTypeDatum(Type tp, char* string, char* fmtstr, char* nlsfmtstr, int32 atttypmod, bool can_ignore)
 {
     Form_pg_type typform = (Form_pg_type)GETSTRUCT(tp);
     Oid typinput = typform->typinput;
     Oid typioparam = getTypeIOParam(tp);
     Datum result;
 
+    if (u_sess) {
+        u_sess->parser_cxt.fmt_str = fmtstr;
+        u_sess->parser_cxt.nls_fmt_str = nlsfmtstr;
+    }
     switch (typinput) {
     case F_DATE_IN:
         result = input_date_in(string, can_ignore);

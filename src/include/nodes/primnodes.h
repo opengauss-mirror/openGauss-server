@@ -467,7 +467,9 @@ typedef struct FuncExpr {
     CoercionForm funcformat; /* how to display this function call */
     Oid funccollid;          /* OID of collation of result */
     Oid inputcollid;         /* OID of collation that function should use */
-    List* args;              /* arguments to the function */
+    char* fmtstr;            /* fmt string */
+    char* nlsfmtstr;         /* nls fmt string */
+    List* args;              /* arguments to the function */  
     int location;            /* token location, or -1 if unknown */
     Oid refSynOid;           /* PG_SYNONYM OID of the referenced synonym */
 } FuncExpr;
@@ -799,6 +801,8 @@ typedef struct RelabelType {
 typedef struct CoerceViaIO {
     Expr xpr;
     Expr* arg;      /* input expression */
+    char* fmtstr;
+    char* nlsfmtstr;
     Oid resulttype; /* output type of coercion */
     /* output typmod is not stored, but is presumed -1 */
     Oid resultcollid;          /* OID of collation, or InvalidOid if none */
@@ -820,6 +824,8 @@ typedef struct CoerceViaIO {
 typedef struct ArrayCoerceExpr {
     Expr xpr;
     Expr* arg;                 /* input expression (yields an array) */
+    char* fmtstr;              /* fmr string */
+    char* nlsfmtstr;           /*  nls fmt string */
     Oid elemfuncid;            /* OID of element coercion function, or 0 */
     Oid resulttype;            /* output type of coercion (an array type) */
     int32 resulttypmod;        /* output typmod (also element typmod) */

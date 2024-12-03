@@ -314,10 +314,20 @@ Datum numeric_in(PG_FUNCTION_ARGS)
 #endif
     int32 typmod = PG_GETARG_INT32(2);
     Numeric res;
-    const char* cp = NULL;
-
-    /* Skip leading spaces */
+    const char* cp = nullptr;
+    char* formattedStr = nullptr;
+    unsigned int precision, scale;    
+    if (u_sess && u_sess->parser_cxt.fmt_str) {
+        text* sourceValue = cstring_to_text(str);
+        text* fmt = cstring_to_text(u_sess->parser_cxt.fmt_str);
+        formattedStr = format_numeric_with_fmt(sourceValue, fmt, false, PG_GET_COLLATION(), &precision, &scale);
+        if (!formattedStr) {
+            PG_RETURN_NUMERIC(0);
+        }
+        str = formattedStr;
+    }
     cp = str;
+    /* Skip leading spaces */
     while (*cp) {
         if (!isspace((unsigned char)*cp))
             break;
@@ -331,6 +341,7 @@ Datum numeric_in(PG_FUNCTION_ARGS)
 
         zero_var(&value);
         res = make_result(&value);
+        pfree_ext(formattedStr);
         PG_RETURN_NUMERIC(res);
     }
 
@@ -345,6 +356,7 @@ Datum numeric_in(PG_FUNCTION_ARGS)
         cp += 3;
         while (*cp) {
             if (!isspace((unsigned char)*cp)) {
+                pfree_ext(formattedStr);
                 ereport(level,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("invalid input syntax for type numeric: \"%s\"", str)));
@@ -387,7 +399,7 @@ Datum numeric_in(PG_FUNCTION_ARGS)
         res = make_result(&value);
         free_var(&value);
     }
-
+    pfree_ext(formattedStr);
     PG_RETURN_NUMERIC(res);
 }
 

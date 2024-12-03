@@ -194,7 +194,7 @@ static void base_yyerror(YYLTYPE *yylloc, core_yyscan_t yyscanner,
 						 const char *msg);
 static Node *makeColumnRef(char *colname, List *indirection,
 						   int location, core_yyscan_t yyscanner);
-static Node *makeTypeCast(Node *arg, TypeName *typname, int location);
+static Node *makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *default_expr, int location);
 static Node *makeStringConst(char *str, int location);
 static Node *makeStringConstCast(char *str, int location, TypeName *typname);
 static Node *makeIntConst(int val, int location);
@@ -673,7 +673,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %type <node>	def_arg columnElem where_clause where_or_current_clause start_with_expr connect_by_expr
                                 a_expr b_expr c_expr c_expr_noparen AexprConst indirection_el siblings_clause
                                 columnref in_expr start_with_clause having_clause func_table array_expr set_ident_expr set_expr set_expr_extension
-				ExclusionWhereClause func_table_with_table
+				ExclusionWhereClause func_table_with_table default_on_err_expr
 %type <list>	ExclusionConstraintList ExclusionConstraintElem
 %type <list>	func_arg_list
 %type <node>	func_arg_expr on_error_clause opt_on_error_clause
@@ -2998,7 +2998,7 @@ set_expr_extension:
 					}
 				}
 			| b_expr TYPECAST Typename
-				{ $$ = makeTypeCast($1, $3, @2); }
+				{ $$ = makeTypeCast($1, $3, NULL, NULL, NULL, @2); }
 			| '@' b_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "@", NULL, $2, @1); }
 			| b_expr '+' b_expr
@@ -16684,7 +16684,7 @@ every_interval:
 					t = SystemTypeName("interval");
 					t->typmods = $2;
 					Node *num = makeIntConst($1, @1);
-		            $$ = makeTypeCast(num, t, -1);	
+		            $$ = makeTypeCast(num, t, NULL, NULL, NULL, -1);	
 				}
 				| Sconst event_interval_unit
 				{
@@ -16692,7 +16692,7 @@ every_interval:
 					t = SystemTypeName("interval");
 					t->typmods = $2;
 					Node *num = makeStringConst($1, @1);
-					$$ = makeTypeCast(num, t, -1);
+					$$ = makeTypeCast(num, t, NULL, NULL, NULL, -1);
 				}
 				| FCONST event_interval_unit
 				{
@@ -16700,7 +16700,7 @@ every_interval:
 					t = SystemTypeName("interval");
 					t->typmods = $2;
 					Node *num = makeStringConst($1, @1);
-					$$ = makeTypeCast(num, t, -1);
+					$$ = makeTypeCast(num, t, NULL, NULL, NULL, -1);
 				}
 			;
 
@@ -16810,13 +16810,13 @@ functime_expr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("timestamptz");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP
 				{
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
-					$$ = makeTypeCast(n, SystemTypeName("timestamp"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("timestamp"), NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP '(' Iconst ')'
 				{
@@ -16825,7 +16825,7 @@ functime_expr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("timestamp");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| SYSDATE
 				{
@@ -27929,7 +27929,7 @@ a_expr:		c_expr									{ $$ = $1; }
                                     $$ = (Node *)funcNode;
                                 }
 			| a_expr TYPECAST Typename
-					{ $$ = makeTypeCast($1, $3, @2); }
+					{ $$ = makeTypeCast($1, $3, NULL, NULL, NULL, @2); }
 			| a_expr COLLATE collate_name
 				{
 					CollateClause *n = makeNode(CollateClause);
@@ -28210,28 +28210,28 @@ a_expr:		c_expr									{ $$ = $1; }
 			| a_expr IS NAN_P
 			    {
 					NanTest *n = makeNode(NanTest);
-					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), NULL, NULL, NULL, @1);
 					n->nantesttype = IS_NAN;
 					$$ = (Node *)n;
 				}
 			| a_expr IS NOT NAN_P
 			    {
 					NanTest *n = makeNode(NanTest);
-					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), NULL, NULL, NULL, @1);
 					n->nantesttype = IS_NOT_NAN;
 					$$ = (Node *)n;
 				}
 			| a_expr IS INFINITE_P
 			    {
 					InfiniteTest *n = makeNode(InfiniteTest);
-					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), NULL, NULL, NULL, @1);
 					n->infinitetesttype = IS_INFINITE;
 					$$ = (Node *)n;
 				}
 			| a_expr IS NOT INFINITE_P
 			    {
 					InfiniteTest *n = makeNode(InfiniteTest);
-					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), @1);
+					n->arg = (Expr *) makeTypeCast($1, SystemTypeName("float8"), NULL, NULL, NULL, @1);
 					n->infinitetesttype = IS_NOT_INFINITE;
 					$$ = (Node *)n;
 				}
@@ -28473,12 +28473,12 @@ a_expr:		c_expr									{ $$ = $1; }
 			| FCONST_F
 				{
 					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float4"), @1);	
+					$$ = makeTypeCast(num, SystemTypeName("float4"), NULL, NULL, NULL, @1);	
 				}
 			| FCONST_D
 				{
 					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float8"), @1);	
+					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);	
 				}
 		;
 
@@ -28494,7 +28494,7 @@ a_expr:		c_expr									{ $$ = $1; }
 b_expr:		c_expr
 				{ $$ = $1; }
 			| b_expr TYPECAST Typename
-				{ $$ = makeTypeCast($1, $3, @2); }
+				{ $$ = makeTypeCast($1, $3, NULL, NULL, NULL, @2); }
 			| '+' b_expr					%prec UMINUS
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "+", NULL, $2, @1); }
 			| '-' b_expr					%prec UMINUS
@@ -29281,9 +29281,31 @@ func_application_special:	func_name '(' ')'
 				}
 			| func_name '(' func_arg_list DEFAULT func_arg_expr ON CONVERSION_P ERROR_P opt_default_fmt_clause opt_default_nls_clause ')'
 				{
-					ereport(ERROR,
-                               (errcode(ERRCODE_SYNTAX_ERROR),
-                               errmsg("Syntax with nls condition is not supported.")));
+					FuncCall *n = makeNode(FuncCall);
+                    n->funcname = $1;
+
+					// args: 
+					//   input_expr, default_val, 
+					//   is DEFAULT gramy, default expr is column ref,
+					//   fmt constraints, nls param constraints
+                    n->args = lappend($3, $5);
+					// is DEFAULT gramy
+					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
+					// default expr is column ref
+					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					// There may be fmt constraints
+                    n->args = lappend(n->args, $9);
+					// nls param constraints is NULL
+                    n->args = lappend(n->args, $10);
+					
+					n->agg_order = NIL;
+                    n->agg_star = FALSE;
+                    n->agg_distinct = FALSE;
+                    n->func_variadic = FALSE;
+                    n->over = NULL;
+                    n->location = @1;
+                    n->call_func = false;
+                    $$ = (Node *) n;
 				}
 			| func_name '(' VARIADIC func_arg_expr opt_sort_clause ')'
 				{
@@ -29543,7 +29565,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
-					$$ = makeTypeCast(n, SystemTypeName("timetz"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("timetz"), NULL, NULL, NULL, @1);
 				}
 			| CURRENT_TIME '(' Iconst ')'
 				{
@@ -29556,7 +29578,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("timetz");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| CURRENT_TIMESTAMP
 				{
@@ -29587,7 +29609,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("timestamptz");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}		
 			| CURSOR_EXPR SelectStmt ')'
 			    {
@@ -29616,7 +29638,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
-					$$ = makeTypeCast((Node *)n, SystemTypeName("time"), @1);
+					$$ = makeTypeCast((Node *)n, SystemTypeName("time"), NULL, NULL, NULL, @1);
 				}
 			| LOCALTIME '(' Iconst ')'
 				{
@@ -29629,7 +29651,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("time");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast((Node *)n, d, @1);
+					$$ = makeTypeCast((Node *)n, d, NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP
 				{
@@ -29639,7 +29661,7 @@ func_expr_common_subexpr:
 					 */
 					Node *n;
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
-					$$ = makeTypeCast(n, SystemTypeName("timestamp"), @1);
+					$$ = makeTypeCast(n, SystemTypeName("timestamp"), NULL, NULL, NULL, @1);
 				}
 			| LOCALTIMESTAMP '(' Iconst ')'
 				{
@@ -29652,7 +29674,7 @@ func_expr_common_subexpr:
 					n = makeStringConstCast("now", -1, SystemTypeName("text"));
 					d = SystemTypeName("timestamp");
 					d->typmods = list_make1(makeIntConst($3, @3));
-					$$ = makeTypeCast(n, d, @1);
+					$$ = makeTypeCast(n, d, NULL, NULL, NULL, @1);
 				}
 			| SYSDATE
 				{
@@ -29751,7 +29773,17 @@ func_expr_common_subexpr:
 					$$ = (Node *)n;
 				}
 			| CAST '(' a_expr AS Typename ')'
-				{ $$ = makeTypeCast($3, $5, @1); }
+				{ $$ = makeTypeCast($3, $5, NULL, NULL, NULL, @1); }
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause')'
+				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }		
+			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause ')'
+				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }												
+			| CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause ')'
+				{ $$ = makeTypeCast($3, $5, $7, NULL, $6, @1); }				
+			| CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause opt_default_nls_clause ')'
+				{ $$ = makeTypeCast($3, $5, $7, $8, $6, @1); }
+			| CAST '(' a_expr AS Typename default_on_err_expr ')'
+				{ $$ = makeTypeCast($3, $5, NULL, NULL, $6, @1); }					
 			| EXTRACT '(' extract_list ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -30060,6 +30092,11 @@ func_expr_common_subexpr:
 				}
 		;
 
+default_on_err_expr:
+	DEFAULT a_expr ON CONVERSION_P ERROR_P {
+		$$ = $2;
+	}
+	;
 /*
  * SQL/XML support
  */
@@ -30686,7 +30723,7 @@ substr_list:
 					 */
 					$$ = list_make3($1, makeIntConst(1, -1),
 									makeTypeCast($2,
-												 SystemTypeName("int4"), -1));
+												 SystemTypeName("int4"), NULL, NULL, NULL, -1));
 				}
 			| expr_list
 				{
@@ -32413,11 +32450,14 @@ makeColumnRef(char *colname, List *indirection,
 }
 
 static Node *
-makeTypeCast(Node *arg, TypeName *typname, int location)
+makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *default_expr, int location)
 {
 	TypeCast *n = makeNode(TypeCast);
 	n->arg = arg;
 	n->typname = typname;
+	n->fmt_str = fmt_list;
+	n->nls_fmt_str = nls_fmt;
+	n->default_expr = default_expr;	
 	n->location = location;
 	return (Node *) n;
 }
@@ -32492,7 +32532,7 @@ makeStringConstCast(char *str, int location, TypeName *typname)
 {
 	Node *s = makeStringConst(str, location);
 
-	return makeTypeCast(s, typname, -1);
+	return makeTypeCast(s, typname, NULL, NULL, NULL, -1);
 }
 
 static Node *
@@ -32567,7 +32607,7 @@ makeBoolAConst(bool state, int location)
 	n->val.val.str = (char *)(state ? "t" : "f");
 	n->location = location;
 
-	return makeTypeCast((Node *)n, SystemTypeName("bool"), -1);
+	return makeTypeCast((Node *)n, SystemTypeName("bool"), NULL, NULL, NULL, -1);
 }
 
 /* check_qualified_name --- check the result of qualified_name production

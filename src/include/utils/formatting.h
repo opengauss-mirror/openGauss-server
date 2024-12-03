@@ -107,6 +107,7 @@ extern Datum float8_to_char(PG_FUNCTION_ARGS);
 #include "pgtime.h"
 #include "datatype/timestamp.h"
 extern Datum to_timestamp_default_format(PG_FUNCTION_ARGS);
+extern Datum to_timestamp_with_fmt_nls(PG_FUNCTION_ARGS);
 extern Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS);
 typedef struct TmToChar {
     struct pg_tm tm; /* classic 'tm' struct */
@@ -150,4 +151,8 @@ extern void general_to_timestamp_from_user_format(struct pg_tm* tm, fsec_t* fsec
 extern void optimized_to_timestamp_from_user_format(struct pg_tm* tm, fsec_t* fsec, char* date_str, void* in_format);
 #endif
 
+extern Datum to_numeric_to_number(text* value, text* fmt, Oid fncollation, bool *resultNull);
+extern void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec, int* tz);
+extern char* format_numeric_with_fmt(text* sourceValue, text* fmt, bool withDefault, Oid fncollation,
+    unsigned int* precision, unsigned int* scale);
 #endif

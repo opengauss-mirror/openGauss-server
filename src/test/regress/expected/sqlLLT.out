@@ -3037,7 +3037,8 @@ select to_timestamp('20120930 09:30 11111', 'yyyymmdd hh:MI SSSSS');
 ERROR:   minutes of hour conflicts with seconds in day
 CONTEXT:  referenced column: to_timestamp
 select to_timestamp('20120930 09:30 11111 TZ', 'yyyymmdd hh:MI SSSSS TZ');
-ERROR:  "TZ"/"tz" format patterns are not supported in to_date
+ERROR:  invalid value "TZ" for "TZ"
+DETAIL:  Value must be an integer.
 CONTEXT:  referenced column: to_timestamp
 select to_timestamp('20120930 09:30 111 B.C.', 'yyyymmdd hh:MI US B.C.');
           to_timestamp           

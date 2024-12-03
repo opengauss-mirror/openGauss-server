@@ -2819,6 +2819,10 @@ static FuncExpr* _copyFuncExpr(const FuncExpr* from)
     COPY_SCALAR_FIELD(funcformat);
     COPY_SCALAR_FIELD(funccollid);
     COPY_SCALAR_FIELD(inputcollid);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COPY_STRING_FIELD(fmtstr);
+        COPY_STRING_FIELD(nlsfmtstr);
+    }
     COPY_NODE_FIELD(args);
     COPY_LOCATION_FIELD(location);
     COPY_SCALAR_FIELD(refSynOid);
@@ -3035,6 +3039,10 @@ static CoerceViaIO* _copyCoerceViaIO(const CoerceViaIO* from)
 
     COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COPY_STRING_FIELD(fmtstr);
+        COPY_STRING_FIELD(nlsfmtstr);
+    }
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(resultcollid);
     COPY_SCALAR_FIELD(coerceformat);
@@ -3052,6 +3060,10 @@ static ArrayCoerceExpr* _copyArrayCoerceExpr(const ArrayCoerceExpr* from)
 
     COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COPY_STRING_FIELD(fmtstr);
+        COPY_STRING_FIELD(nlsfmtstr);
+    }
     COPY_SCALAR_FIELD(elemfuncid);
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(resulttypmod);
@@ -4386,6 +4398,11 @@ static TypeCast* _copyTypeCast(const TypeCast* from)
 
     COPY_NODE_FIELD(arg);
     COPY_NODE_FIELD(typname);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        COPY_NODE_FIELD(fmt_str);
+        COPY_NODE_FIELD(nls_fmt_str);
+        COPY_NODE_FIELD(default_expr);
+    }
     COPY_LOCATION_FIELD(location);
 
     return newnode;

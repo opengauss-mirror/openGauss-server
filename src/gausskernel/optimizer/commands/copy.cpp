@@ -2284,7 +2284,7 @@ static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid,
     expr = transformExpr(pstate, expr, EXPR_KIND_VALUES);
     exprtype = exprType(expr);
     expr = coerce_to_target_type(pstate, expr, exprtype, attroid, attrmod,
-                                 COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, -1);
+                                 COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, NULL, NULL, -1);
     if (expr == NULL) {
         ereport(ERROR,
                 (errmodule(MOD_OPT),

@@ -466,6 +466,9 @@ typedef struct knl_u_parser_context {
     bool has_equal_uservar;
     bool is_straight_join;
     int cursor_expr_level;
+
+    char* fmt_str;
+    char* nls_fmt_str;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {

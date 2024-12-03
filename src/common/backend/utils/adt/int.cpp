@@ -39,6 +39,8 @@
 #include "libpq/pqformat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/numeric.h"
+#include "utils/formatting.h"
 
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 
@@ -296,7 +298,23 @@ Datum int4in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INT32(pg_strtoint32(num, fcinfo->can_ignore));
+    char* fmtStr = NULL;
+    if (u_sess) {
+        fmtStr = u_sess->parser_cxt.fmt_str;
+    }
+    if (!fmtStr) {
+        PG_RETURN_INT32(pg_strtoint32(num, fcinfo->can_ignore));
+    }
+
+    Datum result;
+    bool resultNull = false;
+    text* numTxt = cstring_to_text(num);
+    text* fmtTxt = cstring_to_text(fmtStr);
+    result = to_numeric_to_number(numTxt, fmtTxt, PG_GET_COLLATION(), &resultNull);
+    if (resultNull) {
+        PG_RETURN_NULL();
+    }
+    return DatumGetInt32(DirectFunctionCall1(numeric_int4, NumericGetDatum(result)));
 }
 
 /*

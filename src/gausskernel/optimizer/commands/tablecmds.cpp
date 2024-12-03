@@ -9027,6 +9027,8 @@ static Node* GetGeneratedAdbin(Relation rel, AttrNumber myattnum)
             atttypmod,
             COERCION_ASSIGNMENT,
             COERCE_IMPLICIT_CAST,
+            NULL,
+            NULL,
             -1);
 
         /*
@@ -9233,6 +9235,8 @@ static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation re
                 attTup->atttypmod,
                 COERCION_ASSIGNMENT,
                 COERCE_IMPLICIT_CAST,
+                NULL,
+                NULL,
                 -1);
             if (transform == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -11505,6 +11509,12 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
             TypeCast *newexpr = (TypeCast *)copyObject(expr);
             Node *expr_arg = UpdateVarattnoAfterAddColumn(expr->arg, startattnum, endattnum, is_increase);
             newexpr->arg = expr_arg;
+            Node* frmt_str = UpdateVarattnoAfterAddColumn(expr->fmt_str, startattnum, endattnum, is_increase);
+            newexpr->fmt_str = frmt_str;
+            Node* nls_fmt_str = UpdateVarattnoAfterAddColumn(expr->nls_fmt_str, startattnum, endattnum, is_increase);
+            newexpr->nls_fmt_str = nls_fmt_str;
+            Node* default_expr = UpdateVarattnoAfterAddColumn(expr->default_expr, startattnum, endattnum, is_increase);
+            newexpr->default_expr = default_expr;            
             return (Node *)newexpr;
         }
         case T_ArrayExpr: {
@@ -13536,7 +13546,8 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
             defval = (Expr*)makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
             if (GetDomainConstraints(typeOid) != NIL) {
                 defval = (Expr*)coerce_to_target_type(
-                    NULL, (Node*)defval, baseTypeId, typeOid, typmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                    NULL, (Node*)defval, baseTypeId, typeOid, typmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+                    NULL, NULL, -1);
                 if (defval == NULL) /* should not happen */
                     ereport(ERROR,
                         (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("failed to coerce base type to domain")));
@@ -17185,6 +17196,8 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
             targettypmod,
             COERCION_ASSIGNMENT,
             COERCE_IMPLICIT_CAST,
+            NULL,
+            NULL,
             -1);
         if (transform == NULL)
             ereport(ERROR,
@@ -17958,6 +17971,8 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
                     targettypmod,
                     COERCION_ASSIGNMENT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
                 if (defaultexpr == NULL) {
                     if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
@@ -24633,7 +24648,8 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool 
     }
 
     expr = (Node*)coerce_to_target_type(
-        NULL, (Node*)src, exprType((Node*)src), target_oid, target_mod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        NULL, (Node*)src, exprType((Node*)src), target_oid, target_mod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
     if (expr == NULL) {
         return NULL;
     }
@@ -34607,6 +34623,8 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
         targettypmod,
         COERCION_ASSIGNMENT,
         COERCE_IMPLICIT_CAST,
+        NULL,
+        NULL,
         -1);
     return (Node*)aexpr;
 }

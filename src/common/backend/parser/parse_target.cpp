@@ -232,7 +232,8 @@ void resolveTargetListUnknowns(ParseState* pstate, List* targetlist)
         Oid restype = exprType((Node*)tle->expr);
         if (UNKNOWNOID == restype) {
             tle->expr = (Expr*)coerce_type(
-                pstate, (Node*)tle->expr, restype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                pstate, (Node*)tle->expr, restype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,
+                NULL, NULL, -1);
         }
     }
 }
@@ -516,14 +517,17 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         if (type_is_set(attrtype)) {
             Node* orig_expr = (Node*)expr;
             expr = (Expr*)coerce_to_settype(
-                    pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1, attrcollation);
+                pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+                    -1, attrcollation);
         } else if (is_all_satisfied) {
             expr = (Expr*)coerce_to_target_type(
-                pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_EXPLICIT_CAST, -1);
+                pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_EXPLICIT_CAST,
+                NULL, NULL, -1);
             pstate->tdTruncCastStatus = TRUNC_CAST_QUERY;
         } else {
             expr = (Expr*)coerce_to_target_type(
-                pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+                NULL, NULL, -1);
         }
         if (expr == NULL) {
             /* if we are in create proc - change input parameter type  */
@@ -532,14 +536,14 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
                 pstate->p_create_proc_insert_hook(pstate, param_no, attrtype, RelationGetRelid(rd), colname);
                 type_id = attrtype;
                 expr = (Expr*)coerce_to_target_type(pstate, orig_expr, type_id, attrtype, attrtypmod,
-                    COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                    COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, NULL, NULL, -1);
             }
         }
         if (expr == NULL) {
             bool invalid_encrypted_column = 
                 ((attrtype == BYTEAWITHOUTORDERWITHEQUALCOLOID || attrtype == BYTEAWITHOUTORDERCOLOID) &&
                 coerce_to_target_type(pstate, orig_expr, type_id, attrtypmod, -1, COERCION_ASSIGNMENT,
-                    COERCE_IMPLICIT_CAST, -1));
+                    COERCE_IMPLICIT_CAST, NULL, NULL, -1));
             if (invalid_encrypted_column) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA),
                     errmsg("column \"%s\" is of type %s"
@@ -780,7 +784,8 @@ static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, 
     /* base case: just coerce RHS to match target type ID */
 
     result = coerce_to_target_type(
-        pstate, rhs, exprType(rhs), targetTypeId, targetTypMod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        pstate, rhs, exprType(rhs), targetTypeId, targetTypMod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
     if (result == NULL) {
         if (targetIsArray) {
             ereport(ERROR,
@@ -858,6 +863,8 @@ static Node* transformAssignmentSubscripts(ParseState* pstate, Node* basenode, c
             targetTypMod,
             COERCION_ASSIGNMENT,
             COERCE_IMPLICIT_CAST,
+            NULL,
+            NULL,
             -1);
         /* probably shouldn't fail, but check */
         if (result == NULL) {
@@ -1599,6 +1606,16 @@ static int FigureColnameInternal(Node* node, char** name)
         } break;    
         case T_TypeCast:
             strength = FigureColnameInternal(((TypeCast*)node)->arg, name);
+            if (strength <= 1) {
+                if (((TypeCast*)node)->typname != NULL) {
+                    *name = strVal(llast(((TypeCast*)node)->typname->names));
+                    return 1;
+                }
+            }
+            if (!((TypeCast*)node)->default_expr) {
+                break;
+            }
+            strength = FigureColnameInternal(((TypeCast*)node)->default_expr, name);
             if (strength <= 1) {
                 if (((TypeCast*)node)->typname != NULL) {
                     *name = strVal(llast(((TypeCast*)node)->typname->names));

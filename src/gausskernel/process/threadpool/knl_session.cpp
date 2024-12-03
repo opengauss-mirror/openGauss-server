@@ -284,6 +284,8 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->isForbidTruncate = false;
     parser_cxt->isPerform = false;
     parser_cxt->stmt = NULL;
+    parser_cxt->fmt_str = NULL;
+    parser_cxt->nls_fmt_str = NULL;
 }
 
 static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 

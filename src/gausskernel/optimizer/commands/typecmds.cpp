@@ -141,14 +141,7 @@ static Node *makeAArrayExpr(List *elements, int location)
     n->location = location;
     return (Node *) n;
 }
-static Node *makeTypeCast(Node *arg, TypeName *typname, int location)
-{
-    TypeCast *n = makeNode(TypeCast);
-    n->arg = arg;
-    n->typname = typname;
-    n->location = location;
-    return (Node *) n;
-}
+
 /*
  * DefineType
  *		Registers a new base type.

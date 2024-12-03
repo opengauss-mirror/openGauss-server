@@ -90,6 +90,8 @@
 #define DAYS_PER_COMMON_YEAR 365
 #define DAYS_PER_LEAP_YEAR 366
 
+constexpr int N_TIMESTAMP_FUNC_ARGS = 4;
+constexpr int FMT_INDX_TIMESTAMP_FUNC_ARGS = 3;
 /* NaN and Infinity Macro used in interval_mul and interval_div*/
 /*
  * Actually, when this macro is used, it probabily means interval overflow/underflow.
@@ -287,21 +289,29 @@ Datum timestamp_in(PG_FUNCTION_ARGS)
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
     int dterr;
-    char* timestamp_fmt = NULL;
+    char* timestampFmt = nullptr;
 
     /*
-     * this case is used for timestamp format is specified.
+     * this case is used for timestamp format is specified. here, # of params is different
+     * to its definition in builtin_funcs.ini, which has only 3 params. But, in some case,
+     * just like copy stateme: `COPY xxx FROM STDIN with(delimiter ',',timestamp_format
+      'yyyymondd')`. it calls this one directly with 4 params, ref to `InputFunctionCallForBulkload`.
      */
-    if (4 == PG_NARGS()) {
-        timestamp_fmt = PG_GETARG_CSTRING(3);
-        if (timestamp_fmt == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_DATETIME_FORMAT), errmsg("specified timestamp format is null")));
-        }
-
-        /* the following logic shared from to_timestamp(). */
+    if (PG_NARGS() == N_TIMESTAMP_FUNC_ARGS || u_sess->parser_cxt.fmt_str) {
         int tz = 0;
-        to_timestamp_from_format(tm, &fsec, str, (void*)timestamp_fmt);
-
+        if (PG_NARGS() == N_TIMESTAMP_FUNC_ARGS) {
+            timestampFmt = PG_GETARG_CSTRING(FMT_INDX_TIMESTAMP_FUNC_ARGS);
+            if (timestampFmt == nullptr) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
+                                errmsg("specified timestamp format is null")));
+            }
+            to_timestamp_from_format(tm, &fsec, str, (void*)timestampFmt);
+        } else {
+            /* the following logic shared from to_timestamp(). */
+            text* fmt_txt = cstring_to_text(u_sess->parser_cxt.fmt_str);
+            text* date_txt = cstring_to_text(str);
+            do_to_timestamp(date_txt, fmt_txt, tm, &fsec, &tz);
+        }
         if (tm2timestamp(tm, fsec, &tz, &result) != 0) {
             ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
         }
@@ -327,10 +337,17 @@ Datum input_timestamp_in(char* str, Oid typioparam, int32 typmod, bool can_ignor
     Timestamp result;
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
+    int tz;
     int dterr;
 
     if (u_sess->attr.attr_common.enable_iud_fusion) {
-        dterr = ParseIudDateTime(str, tm, &fsec);
+        if (u_sess && u_sess->parser_cxt.fmt_str) {
+            text* fmt_txt = cstring_to_text(u_sess->parser_cxt.fmt_str);
+            text* date_txt = cstring_to_text(str);
+            do_to_timestamp(date_txt, fmt_txt, tm, &fsec, &tz);
+        } else {
+            dterr = ParseIudDateTime(str, tm, &fsec);
+        }
         if (dterr == 0) {
             if (tm2timestamp(tm, fsec, NULL, &result) != 0) {
                 ereport(ERROR,
@@ -480,7 +497,7 @@ Datum smalldatetime_in(PG_FUNCTION_ARGS)
     /*
      * this case is used for timestamp format is specified.
      */
-    if (4 == PG_NARGS()) {
+    if (PG_NARGS() == N_TIMESTAMP_FUNC_ARGS) {
         smalldatetime_fmt = PG_GETARG_CSTRING(3);
         if (smalldatetime_fmt == NULL) {
             ereport(
@@ -826,7 +843,7 @@ Datum timestamptz_in(PG_FUNCTION_ARGS)
     TimestampTz result;
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
-    int tz;
+    int tz = 0;
     int dtype;
     int nf;
     int dterr;
@@ -834,15 +851,22 @@ Datum timestamptz_in(PG_FUNCTION_ARGS)
     int ftype[MAXDATEFIELDS];
     char workbuf[MAXDATELEN + MAXDATEFIELDS];
 
-    dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
-    if (dterr == 0)
-        dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
-    if (dterr != 0) {
-        DateTimeParseError(dterr, str, "timestamp with time zone", fcinfo->can_ignore);
-        /*
-         * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
-         */
-        PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
+    if (u_sess && u_sess->parser_cxt.fmt_str) { // with frmt, shared from to_timestamp
+        text* fmt_txt = cstring_to_text_with_len(u_sess->parser_cxt.fmt_str, strlen(u_sess->parser_cxt.fmt_str));
+        text* date_txt = cstring_to_text_with_len(str, strlen(str));
+        do_to_timestamp(date_txt, fmt_txt, tm, &fsec, &tz);
+        dtype = DTK_DATE;
+    } else {
+        dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
+        if (dterr == 0)
+            dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
+        if (dterr != 0) {
+            DateTimeParseError(dterr, str, "timestamp with time zone", fcinfo->can_ignore);
+            /*
+            * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
+            */
+            PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
+        }
     }
 
     switch (dtype) {

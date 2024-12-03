@@ -1368,6 +1368,8 @@ static Node* ReplaceVarsFromTargetList_callback(Var* var, replace_rte_variables_
                                         -1,
                                         var->vartype,
                                         COERCE_IMPLICIT_CAST,
+                                        NULL,
+                                        NULL,
                                         -1,
                                         false,
                                         false);

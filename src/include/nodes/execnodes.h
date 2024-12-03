@@ -945,6 +945,8 @@ typedef struct ArrayRefExprState {
 typedef struct FuncExprState {
     ExprState xprstate;
     List* args; /* states of argument expressions */
+    char* fmtstr;    /* format string */
+    char* nlsfmtstr; /* nls format string */
     char prokind;
     /*
      * Function manager's lookup info for the target function.  If func.fn_oid
@@ -1122,6 +1124,8 @@ typedef struct FieldStoreState {
 typedef struct CoerceViaIOState {
     ExprState xprstate;
     ExprState* arg;   /* input expression */
+    char* fmtstr;     /* format string */
+    char* nlsfmtstr;  /* nls format string */
     FmgrInfo outfunc; /* lookup info for source output function */
     FmgrInfo infunc;  /* lookup info for result input function */
     Oid intypioparam; /* argument needed for input function */
@@ -1134,6 +1138,8 @@ typedef struct CoerceViaIOState {
 typedef struct ArrayCoerceExprState {
     ExprState xprstate;
     ExprState* arg;     /* input array value */
+    char* fmtstr;       /* format string */
+    char* nlsfmtstr;    /* nsl format string */
     Oid resultelemtype; /* element type of result array */
     FmgrInfo elemfunc;  /* lookup info for element coercion function */
     /* use struct pointer to avoid including array.h here */

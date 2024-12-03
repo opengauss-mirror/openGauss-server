@@ -616,7 +616,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         given_type_id = exprType(expr);
 
         expr = coerce_to_target_type(
-            pstate, expr, given_type_id, expected_type_id, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+            pstate, expr, given_type_id, expected_type_id, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST,
+            NULL, NULL, -1);
 
         if (expr == NULL)
             ereport(ERROR,

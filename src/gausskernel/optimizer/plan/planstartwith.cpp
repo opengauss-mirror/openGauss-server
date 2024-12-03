@@ -697,6 +697,9 @@ static bool ReplaceFakeConstWalker(Node *node, ReplaceFakeConstContext *context)
         case T_TypeCast: {
             TypeCast* tc = (TypeCast*) node;
             tc->arg = tryReplaceFakeConstWithTarget(tc->arg, context);
+            tc->fmt_str = tryReplaceFakeConstWithTarget(tc->fmt_str, context);
+            tc->nls_fmt_str = tryReplaceFakeConstWithTarget(tc->nls_fmt_str, context);
+            tc->default_expr = tryReplaceFakeConstWithTarget(tc->default_expr, context);
             break;
         }
         case T_ScalarArrayOpExpr: {

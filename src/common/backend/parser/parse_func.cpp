@@ -251,6 +251,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
             rettype_orig,
             COERCION_EXPLICIT,
             COERCE_EXPLICIT_CALL,
+            NULL,
+            NULL,
             location);
     } else if (fdresult == FUNCDETAIL_NORMAL) {
         /*
@@ -1988,6 +1990,8 @@ static void unify_hypothetical_args(ParseState *pstate,
                               commontype, -1,
                               COERCION_IMPLICIT,
                               COERCE_IMPLICIT_CAST,
+                              NULL,
+                              NULL,
                               -1);
         actual_arg_types[i] = commontype;
         args[aargpos] = coerce_type(pstate,
@@ -1996,6 +2000,8 @@ static void unify_hypothetical_args(ParseState *pstate,
                                     commontype, -1,
                                     COERCION_IMPLICIT,
                                     COERCE_IMPLICIT_CAST,
+                                    NULL,
+                                    NULL,
                                     -1);
         actual_arg_types[aargpos] = commontype;
     }
@@ -2044,6 +2050,8 @@ void make_fn_arguments(ParseState* pstate, List* fargs, Oid* actual_arg_types, O
                     -1,
                     COERCION_IMPLICIT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
                 na->arg = (Expr*)node;
             } else if (IsA(node, UserVar)) {
@@ -2056,6 +2064,8 @@ void make_fn_arguments(ParseState* pstate, List* fargs, Oid* actual_arg_types, O
                     -1,
                     COERCION_IMPLICIT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
                 uvar->value = (Expr*)node;
             } else {
@@ -2066,6 +2076,8 @@ void make_fn_arguments(ParseState* pstate, List* fargs, Oid* actual_arg_types, O
                     -1,
                     COERCION_IMPLICIT,
                     COERCE_IMPLICIT_CAST,
+                    NULL,
+                    NULL,
                     -1);
                 lfirst(current_fargs) = node;
             }

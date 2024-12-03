@@ -52,6 +52,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/plpgsql.h"
+#include "utils/tzparser.h"
 #include "utils/xml.h"
 #include "funcapi.h"
 #include "utils/guc.h"
@@ -458,6 +459,10 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
                 if (OidIsValid(elementType)) {
                     tc = (TypeCast*)copyObject(tc);
                     tc->arg = transformArrayExpr(pstate, (A_ArrayExpr*)tc->arg, targetType, elementType, targetTypmod);
+                    if (tc->default_expr && IsA(tc->default_expr, A_ArrayExpr)) {
+                        tc->default_expr = transformArrayExpr(pstate, (A_ArrayExpr*)tc->default_expr, targetType,
+                            elementType, targetTypmod);
+                    }
                 }
             }
 
@@ -2238,6 +2243,9 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
                 TypeCast *n = makeNode(TypeCast);
                 n->arg = defResNode;
                 n->typname = makeTypeNameFromOid(ptype, -1);
+                n->fmt_str = NULL;
+                n->nls_fmt_str = NULL;
+                n->default_expr = NULL;
                 n->location = -1;
                 newc->defresult = (Expr*)n;
             } else {
@@ -2548,7 +2556,7 @@ static Node* transformArrayExpr(ParseState* pstate, A_ArrayExpr* a, Oid array_ty
 
         if (coerce_hard) {
             newe = coerce_to_target_type(
-                pstate, e, exprType(e), coerce_type, typmod, COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, -1);
+                pstate, e, exprType(e), coerce_type, typmod, COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, NULL, NULL, -1);
             if (newe == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_CANNOT_COERCE),
@@ -2836,7 +2844,8 @@ static Node* transformXmlSerialize(ParseState* pstate, XmlSerialize* xs)
      * fit in.
      */
     result = coerce_to_target_type(
-        pstate, (Node*)xexpr, TEXTOID, targetType, targetTypmod, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+        pstate, (Node*)xexpr, TEXTOID, targetType, targetTypmod, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST,
+        NULL, NULL, -1);
     if (result == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_CANNOT_COERCE),
@@ -3080,6 +3089,11 @@ static Node* transformTypeCast(ParseState* pstate, TypeCast* tc)
 {
     Node* result = NULL;
     Node* expr = transformExprRecurse(pstate, tc->arg);
+    Node *default_expr = NULL;
+    if (tc->default_expr) {
+        default_expr = transformExprRecurse(pstate, tc->default_expr);
+    }
+    
     Oid inputType = exprType(expr);
     Oid targetType;
     int32 targetTypmod;
@@ -3099,8 +3113,39 @@ static Node* transformTypeCast(ParseState* pstate, TypeCast* tc)
     if (location < 0) {
         location = tc->typname->location;
     }
-    result = coerce_to_target_type(
-        pstate, expr, inputType, targetType, targetTypmod, COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, location);
+
+    char* fmtStr = NULL;
+    char* nlsFmtStr = NULL;
+
+    if (tc->fmt_str && IsA(tc->fmt_str, A_Const) &&
+        ((A_Const*)tc->fmt_str)->val.type == T_String) {
+        fmtStr = ((A_Const*)tc->fmt_str)->val.val.str;
+    }
+    if (tc->nls_fmt_str && IsA(tc->nls_fmt_str, A_Const) &&
+        ((A_Const*)tc->nls_fmt_str)->val.type == T_String) {
+        char* source = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
+        nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", source);
+    }
+    PG_TRY(); {
+        result = coerce_to_target_type(pstate, expr, inputType, targetType, targetTypmod, COERCION_EXPLICIT,
+            COERCE_EXPLICIT_CAST, fmtStr, nlsFmtStr, location);
+    }
+    PG_CATCH(); {
+        if (result == NULL && default_expr) { // cast error, using default expr to try again.
+            FlushErrorState();
+            // to clearup sys cache of types previous.
+            ResourceOwnerReleaseLocalCatCTup(t_thrd.utils_cxt.TopTransactionResourceOwner, false);
+
+            inputType = exprType(default_expr);
+            pstate->p_has_ignore = false;
+            result = coerce_to_target_type(
+                pstate, default_expr, inputType, targetType, targetTypmod, COERCION_EXPLICIT, COERCE_EXPLICIT_CAST,
+                fmtStr, nlsFmtStr, location);
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
     if (result == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_CANNOT_COERCE),
@@ -3139,9 +3184,11 @@ static Node* transformCharsetClause(ParseState* pstate, CharsetClause* c)
     } else {
         /* treate string as binary datatype: bytea */
         if (c->is_binary) {
-            result = coerce_type(pstate, result, exprType(result), BYTEAOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, c->location);
+            result = coerce_type(pstate, result, exprType(result), BYTEAOID, -1, COERCION_IMPLICIT,
+            COERCE_IMPLICIT_CAST, NULL, NULL, c->location);
         } else {
-            result = coerce_type(pstate, result, exprType(result), TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, c->location);
+            result = coerce_type(pstate, result, exprType(result), TEXTOID, -1, COERCION_IMPLICIT,
+            COERCE_IMPLICIT_CAST, NULL, NULL, c->location);
         }
     }
 
@@ -4032,6 +4079,9 @@ static Node* transformStringCast(ParseState* pstate, char *str, int location, Ty
 
     TypeCast *tc = makeNode(TypeCast);
     tc->arg = (Node *)n;
+    tc->fmt_str = NULL;
+    tc->nls_fmt_str = NULL;
+    tc->default_expr = NULL;
     tc->typname = typname;
     tc->location = location;
 

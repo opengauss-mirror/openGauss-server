@@ -2708,6 +2708,10 @@ static void _outFuncExpr(StringInfo str, FuncExpr* node)
     WRITE_ENUM_FIELD(funcformat, CoercionForm);
     WRITE_OID_FIELD(funccollid);
     WRITE_OID_FIELD(inputcollid);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        WRITE_STRING_FIELD(fmtstr);
+        WRITE_STRING_FIELD(nlsfmtstr);
+    }
     WRITE_NODE_FIELD(args);
     /*
      * If we decide to push the nextval call to DN, we can not
@@ -2928,6 +2932,10 @@ static void _outCoerceViaIO(StringInfo str, CoerceViaIO* node)
     WRITE_NODE_TYPE("COERCEVIAIO");
 
     WRITE_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        WRITE_STRING_FIELD(fmtstr);
+        WRITE_STRING_FIELD(nlsfmtstr);
+    }
     WRITE_OID_FIELD(resulttype);
     WRITE_OID_FIELD(resultcollid);
     WRITE_ENUM_FIELD(coerceformat, CoercionForm);
@@ -2941,6 +2949,10 @@ static void _outArrayCoerceExpr(StringInfo str, ArrayCoerceExpr* node)
     WRITE_NODE_TYPE("ARRAYCOERCEEXPR");
 
     WRITE_NODE_FIELD(arg);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        WRITE_STRING_FIELD(fmtstr);
+        WRITE_STRING_FIELD(nlsfmtstr);
+    }
     WRITE_OID_FIELD(elemfuncid);
     WRITE_OID_FIELD(resulttype);
     WRITE_INT_FIELD(resulttypmod);
@@ -4470,6 +4482,11 @@ static void _outTypeCast(StringInfo str, TypeCast* node)
 
     WRITE_NODE_FIELD(arg);
     WRITE_NODE_FIELD(typname);
+    if (t_thrd.proc->workingVersionNum >= CAST_FUNC_VERSION_NUMBER) {
+        WRITE_NODE_FIELD(fmt_str);
+        WRITE_NODE_FIELD(nls_fmt_str);
+        WRITE_NODE_FIELD(default_expr);
+    }
     WRITE_LOCATION_FIELD(location);
 }
 
