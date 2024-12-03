@@ -179,7 +179,19 @@ const char *g_reserve_param[] = {
     "uwal_rpc_flowcontrol_switch",
     "uwal_rpc_flowcontrol_value",
     "uwal_truncate_interval",
-    "uwal_async_append_switch"
+    "uwal_async_append_switch",
+    "ss_enable_dss",
+    "ss_enable_dms",
+    "ss_enable_catalog_centralized",
+    "ss_instance_id",
+    "ss_dss_vg_name",
+    "ss_dss_conn_path",
+    "ss_rdma_work_config",
+    "ss_ock_log_path",
+    "ss_scrlock_server_port",
+    "ss_enable_ondemand_recovery",
+    "ss_enable_ondemand_realtime_build",
+    "ss_disaster_mode"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);

@@ -23,7 +23,7 @@ endif
 
 OBJS = ss_dms_bufmgr.o ss_dms_callback.o ss_dms_recovery.o ss_dms.o ss_init.o \
 	ss_reform_common.o ss_switchover.o ss_transaction.o ss_aio.o ss_txnstatus.o \
-  ss_xmin.o ss_dms_auxiliary.o ss_dms_fi.o
+  ss_xmin.o ss_dms_auxiliary.o ss_dms_fi.o ss_sync_auxiliary.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

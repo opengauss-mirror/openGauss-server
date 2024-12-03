@@ -202,7 +202,7 @@ call func_multi_node_write_0032('t_multi_node_write_0032');
 ERROR:  function "func_multi_node_write_0032" doesn't exist 
 commit;
 select * from t_multi_node_write_0032;
-ERROR:  relation "t_multi_node_write_0032" does not exist on datanode2
+ERROR:  relation "t_multi_node_write_0032" does not exist on datanode1
 LINE 1: select * from t_multi_node_write_0032;
                       ^
 create or replace function func_multi_node_write_0032(tb_name varchar) return varchar is
