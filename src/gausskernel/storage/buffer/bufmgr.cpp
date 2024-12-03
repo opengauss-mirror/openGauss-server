@@ -2755,6 +2755,11 @@ found_branch:
                         TerminateBufferIO(bufHdr, false, 0);
                     }
                     pg_usleep(5000L);
+                    /* when in failover, should return to worker thread exit */
+                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                        SSUnPinBuffer(bufHdr);
+                        return InvalidBuffer;
+                    }
                     continue;
                 }
 
@@ -2762,6 +2767,11 @@ found_branch:
                 if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
+                    }
+                    /* when in failover, should return to worker thread exit */
+                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                        SSUnPinBuffer(bufHdr);
+                        return InvalidBuffer;
                     }
                     continue;
                 }
