@@ -19897,6 +19897,13 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
     }
 
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES && CheckDefListContainsCompressedOptions(defList) && RelHasImcs(RelationGetRelid(rel))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("CompressdOptions can not be not modified for imcstore table, please unpopulate first.")));
+    }
+#endif
+
     // we have to handle psort tuple's options if this is an index relation using PSORT method.
     // it's identifyed by access method whose oid is PSORT_AM_OID.
     // and the psort tuple id is saved in index relation's relcudescrelid field.
