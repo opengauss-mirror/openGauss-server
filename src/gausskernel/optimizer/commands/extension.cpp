@@ -1183,10 +1183,16 @@ ObjectAddress CreateExtension(CreateExtensionStmt* stmt)
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
         ereport(ERROR,
-            (errmsg("please create extension \"%s\" with B type DBCOMPATIBILITY", stmt->extname)));
-    } else if (pg_strcasecmp(stmt->extname, "whale") == 0 && !DB_IS_CMPT(A_FORMAT)) {
-        ereport(ERROR,
-            (errmsg("please create extension \"%s\" with A type DBCOMPATIBILITY", stmt->extname)));
+            (errmsg("extension \"%s\" is only supported in B type database", stmt->extname)));
+    } else if (!DB_IS_CMPT(A_FORMAT)) {
+        static const char *aPlugins[] = {"whale", "gms_xmlgen"};
+        int len = lengthof(aPlugins);
+        for (int i = 0; i < len; i++) {
+            if (pg_strcasecmp(stmt->extname, aPlugins[i]) == 0) {
+                ereport(ERROR,
+                    (errmsg("extension \"%s\" is only supported in A type database", stmt->extname)));
+            }
+        }
     }
 #endif
 
