@@ -178,7 +178,7 @@ test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 
 # test event trigger and object address
 test: test_object_alter
-test: event_trigger object_address
+test: event_trigger object_address drop_triggers
 test: event_trigger_dump_restore
 
 # partition expression key
