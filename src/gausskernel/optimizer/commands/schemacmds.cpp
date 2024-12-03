@@ -133,6 +133,17 @@ Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
                 errdetail("The prefix \"gs_role_\" is reserved.")));
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!g_instance.attr.attr_common.allowSystemTableMods &&
+        stmt->temptype == Temp_None &&
+        (isTempNamespaceName(stmt->schemaname) || isToastTempNamespaceName(stmt->schemaname))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
+                errmsg("unacceptable schema name \"%s\"", schemaName),
+                errdetail("The prefix \"pg_temp_\" is reserved.")));
+    }
+#endif
+
     /*
      * Who is supposed to own the new schema?
      */
