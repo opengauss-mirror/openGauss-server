@@ -1,7 +1,7 @@
 drop schema if exists dams_ci;
 NOTICE:  schema "dams_ci" does not exist, skipping
 drop trigger if exists insert_trigger on test_trigger_src_tbl;
-ERROR:  relation "test_trigger_src_tbl" does not exist
+NOTICE:  trigger "test_trigger_src_tbl.insert_trigger" for table "test_trigger_src_tbl" does not exist, skipping
 drop table if exists test_trigger_des_tbl;
 NOTICE:  table "test_trigger_des_tbl" does not exist, skipping
 drop table if exists test_trigger_src_tbl;
