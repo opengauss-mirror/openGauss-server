@@ -3056,6 +3056,11 @@ retry:
         if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY &&
             ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
             UnpinBuffer(buf, true);
+            while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                ONDEMAND_HASHMAP_ENTRY_REDOING && SS_PRIMARY_MODE) {
+                pg_usleep(TEN_MICROSECOND);
+            }
+
             goto retry;
         }
 
@@ -3295,6 +3300,10 @@ retry_new_buffer:
                 if (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING &&
                     SS_PRIMARY_ONDEMAND_RECOVERY) {
                     UnpinBuffer(buf, true);
+                    while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                        ONDEMAND_HASHMAP_ENTRY_REDOING && SS_PRIMARY_MODE) {
+                        pg_usleep(TEN_MICROSECOND);
+                    }
                     goto retry_new_buffer;
                 }
             } else {
