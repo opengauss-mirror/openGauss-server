@@ -596,6 +596,22 @@ end;
 declare
 	canon_name varchar2(100);
 begin
+	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."ro oy".nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+
+declare
+	canon_name varchar2(100);
+begin
 	gms_utility.canonicalize('    .abcd', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end;	-- error
@@ -663,6 +679,14 @@ begin
 	gms_utility.canonicalize('koll.rooy#_$nuuop.a', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end;
+/
+
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.ro,oy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
 /
 
 declare
@@ -807,6 +831,86 @@ begin
 	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 20);
 	raise info 'canon_name: %', canon_name;
 end;	-- error
+/
+
+declare
+   v_input_name   varchar2(255) := 'agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 200;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'original name length: %', length(v_input_name);
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end; -- error
+/
+
+declare
+   v_input_name   varchar2(255) := 'abc.test,c.f';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 100;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end; -- error
+/
+
+declare
+   v_input_name   varchar2(255) := '123';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+  gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+
+  raise info 'original name: %', v_input_name;
+  raise info 'canonicalized name: %', v_canon_name;
+  raise info 'canonicalized name length: %', length(v_canon_name);
+end;
+/
+declare
+   v_input_name   varchar2(255) := 'exam  ple';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+  gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+  raise info 'original name: %', v_input_name;
+  raise info 'canonicalized name: %', v_canon_name;
+  raise info 'canonicalized name length: %', length(v_canon_name);
+end;
+/
+declare
+   v_input_name   varchar2(255) := 'exa mple.tab_na me';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end;
 /
 
 drop schema test_utility_canonicalize;

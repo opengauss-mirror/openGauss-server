@@ -48,7 +48,7 @@ PG_MODULE_MAGIC;
 
 static const char CANON_INVALID_CHARS[] = 
     {'`', '~', '!', '@', '%', '^', '&', '*', '(', ')', '-', '=', '+', '[', ']', 
-     '{', '}', '/', '\\', '|', ';', ':', '?', '<', '>'};
+     '{', '}', '/', '\\', '|', ';', ':', '?', '<', '>', ','};
 static const char VALID_IDENT_CHARS[] = {'#', '$', '_'};
 
 static const char TOKENIZE_DANGER_CHARS[] = {'`', '~', '%', '\\', ';', '?'};
@@ -534,7 +534,7 @@ static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
 {
     if (strlen(w) >= NAMEDATALEN) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("identifier too long, max length is %d", NAMEDATALEN)));
+                        errmsg("identifier too long, max length is %d", (NAMEDATALEN - 1))));
     }
     /* For gms_canonicalize, legual identy must not start with digit */
     if (checkDigital && isdigit(*w)) {
@@ -543,6 +543,34 @@ static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
     if (checkKeyword && DetectKeyword(w)) {
         return false;
     }
+    return true;
+}
+
+static void TrimEndSpace(char* str)
+{
+    if (str == NULL) {
+        return;
+    }
+
+    int i = 0;
+    int len = strlen(str);
+
+    for (i = len - 1; i >= 0 && isspace((unsigned char)str[i]); i--);
+
+    str[i + 1] = '\0';
+}
+
+static bool CheckAllDigital(char* w)
+{
+    if (w == NULL) {
+        return false;
+    }
+
+    char* p = w;
+    for (; *p != '\0' && !isdigit(*p); p++) {
+        return false;
+    }
+
     return true;
 }
 
@@ -584,7 +612,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
         traveLen++;
         name++;
 
-        if (!IS_QUOTE_STARTED(quoteState) && curChar == ' ') {
+        if (!IS_QUOTE_STARTED(quoteState) && curChar == ' ' && tmp->len == 0) {
             continue;
         } else if (curChar == '"') {
             if (BEFORE_QUOTE_STARTED(quoteState)) {
@@ -613,6 +641,11 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
                             (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Invalid paramter value \"%s\" with special words", (name - traveLen))));
                 }
+                TrimEndSpace(tmp->data);
+                if (BEFORE_QUOTE_STARTED(quoteState) && strstr(tmp->data, " ") != NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
+                }
                 if (tmp->len == 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                     errmsg("Invalid paramter value \"%s\" with zero length", (name - traveLen))));
@@ -625,8 +658,9 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
             if (IS_QUOTE_STARTED(quoteState)) {
                 appendStringInfoChar(tmp, curChar);
             } else if (IS_QUOTE_END(quoteState)) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid parameter value \"%s\" after quotation", (name - traveLen))));
+                if (curChar == ' ') continue;
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid parameter value \"%s\" after quotation", (name - traveLen))));
             } else {
                 if (InvalidCanonChars(curChar)) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
@@ -645,8 +679,14 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
     }
+    TrimEndSpace(tmp->data);
+    if (BEFORE_QUOTE_STARTED(quoteState) && strstr(tmp->data, " ") != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
+    }
     if (tmp->len > 0) {
-        if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true, dotted)) {
+        if (!(!dotted && CheckAllDigital(tmp->data))
+             && BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true, dotted)) {
             ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("Invalid paramter value \"%s\" with special words", (name - traveLen))));

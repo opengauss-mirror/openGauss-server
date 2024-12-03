@@ -1099,6 +1099,25 @@ INFO:  canon_name:
 declare
 	canon_name varchar2(100);
 begin
+	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+ERROR:  Invalid paramter value "koll.ro oy.nuuop.a"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.ro oy.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll."ro oy".nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: "KOLL"."ro oy"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
 	gms_utility.canonicalize('    .abcd', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end;	-- error
@@ -1177,6 +1196,17 @@ begin
 end;
 /
 INFO:  canon_name: "KOLL"."ROOY#_$NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.ro,oy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+ERROR:  Invalid paramter value "koll.ro,oy.nuuop.a" with special character
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.ro,oy.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
 declare
 	canon_name varchar2(100);
 begin
@@ -1306,7 +1336,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;
 /
-ERROR:  identifier too long, max length is 64
+ERROR:  identifier too long, max length is 63
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1355,6 +1385,106 @@ end;	-- error
 /
 ERROR:  value too long for type character varying(10)
 CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+   v_input_name   varchar2(255) := 'agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 200;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'original name length: %', length(v_input_name);
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end; -- error
+/
+ERROR:  identifier too long, max length is 63
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
+   )"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+declare
+   v_input_name   varchar2(255) := 'abc.test,c.f';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 100;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end; -- error
+/
+ERROR:  Invalid paramter value "abc.test,c.f" with special character
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
+   )"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+declare
+   v_input_name   varchar2(255) := '123';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+  gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+
+  raise info 'original name: %', v_input_name;
+  raise info 'canonicalized name: %', v_canon_name;
+  raise info 'canonicalized name length: %', length(v_canon_name);
+end;
+/
+INFO:  original name: 123
+INFO:  canonicalized name: 123
+INFO:  canonicalized name length: 3
+declare
+   v_input_name   varchar2(255) := 'exam  ple';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+  gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+  raise info 'original name: %', v_input_name;
+  raise info 'canonicalized name: %', v_canon_name;
+  raise info 'canonicalized name length: %', length(v_canon_name);
+end;
+/
+ERROR:  Invalid paramter value "exam  ple"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
+   )"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+declare
+   v_input_name   varchar2(255) := 'exa mple.tab_na me';
+   v_canon_name   varchar2(255);
+   v_canon_len    binary_integer := 255;
+begin
+   gms_utility.canonicalize(
+      name        => v_input_name,
+      canon_name  => v_canon_name,
+      canon_len   => v_canon_len
+   );
+   raise info 'original name: %', v_input_name;
+   raise info 'canonicalized name: %', v_canon_name;
+   raise info 'canonicalized name length: %', length(v_canon_name);
+end;
+/
+ERROR:  Invalid paramter value "exa mple.tab_na me"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
+   )"
+PL/pgSQL function inline_code_block line 5 at SQL statement
 drop schema test_utility_canonicalize;
 ---------------------------
 -- compile schema
@@ -2404,7 +2534,7 @@ begin
     raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
 end;    -- error
 /
-ERROR:  identifier too long, max length is 64
+ERROR:  identifier too long, max length is 63
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function inline_code_block line 8 at SQL statement
