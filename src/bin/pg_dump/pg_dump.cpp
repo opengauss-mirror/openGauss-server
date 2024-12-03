@@ -150,7 +150,7 @@ typedef unsigned short uint16_t;
 #define TARGET_V1 (strcasecmp("v1", optarg) == 0 ? true : false)
 #define TARGET_V5 (strcasecmp("v5", optarg) == 0 ? true : false)
 #define if_exists (targetV1 || targetV5) ? "IF EXISTS " : ""
-#define if_cascade (targetV1 || targetV5) ? " CASCADE" : ""
+#define if_cascade (targetV1 || targetV5 || force_clean) ? " CASCADE" : ""
 #define INTERVAL_UNITE_OFFSET 3
 
 #define USING_STR_OFFSET 7
@@ -273,6 +273,7 @@ static const char* dumpencoding = NULL;
 static const char* pghost = NULL;
 static const char* pgport = NULL;
 static int exclude_with = 0;
+static int force_clean = 0;
 static char* use_role = NULL;
 static char* rolepasswd = NULL;
 static enum trivalue prompt_password = TRI_DEFAULT;
@@ -675,6 +676,7 @@ int main(int argc, char** argv)
         {"include-depend-objs", no_argument, &include_depend_objs, 1},
         {"exclude-with", no_argument, &exclude_with, 1},
         {"exclude-function", no_argument, &exclude_function, 1},
+        {"force-clean", no_argument, &force_clean, 1},
 #ifdef DUMPSYSLOG
         {"syslog", no_argument, &dump_syslog, 1},
 #endif
@@ -1817,6 +1819,11 @@ void validatedumpoptions()
     if ((NULL != binary_upgrade_oldowner || NULL != binary_upgrade_newowner) && !binary_upgrade) {
         write_stderr(_("%s: options --binary-upgrade-usermap should be used with --binary-upgrade option\n"), progname);
         write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
+        exit_nicely(1);
+    }
+
+    if (force_clean && !outputClean) {
+        write_stderr(_("%s: options --force-clean should be used with -c option.\n"), progname);
         exit_nicely(1);
     }
 
