@@ -972,6 +972,7 @@ StmtResult *SearchEventInfo(ShowEventStmt *stmt)
         char *schema_name = get_real_search_schema();
         appendStringInfo(&buf, "nspname=\'%s\' ", schema_name);
     }
+    appendStringInfo(&buf, " AND job_name IS NOT NULL ");
     if (stmt->where_clause) {
         appendStringInfo(&buf, " AND ");
         appendStringInfo(&buf, " %s ", stmt->where_clause);

@@ -14,6 +14,15 @@ show events like 'e';
 show events like 'e%';
 show events like 'e_';
 show events where job_name='e1';
+
+create table event_t(c1 int);
+select pkg_service.job_submit(1111,'insert into event_t values(1);',to_date('2060-11-11'),'''1min''::interval');
+show events;
+show events like 'e%';
+show events where job_name='e1';
+
+select pkg_service.job_cancel(1111);
+drop table event_t;
 drop event if exists e1;
 drop user if exists event_a;
 
