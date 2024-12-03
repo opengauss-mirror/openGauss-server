@@ -65,6 +65,7 @@ public:
 
     // Get tuple deleted information from VC CU description.
     void GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot) override;
+    void FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid);
 
     // Get CU data.
     // Note that the CU is pinned

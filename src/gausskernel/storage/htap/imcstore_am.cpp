@@ -522,13 +522,37 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     }
 
     CU* cu = NULL;
-    pthread_rwlock_rdlock(&rowgroup->m_mutex);
     int slotId = CACHE_BLOCK_INVALID_IDX;
-    if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
-        m_isCtidCU = true;
-        cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
-        m_isCtidCU = false;
+
+    PG_TRY();
+    {
+        pthread_rwlock_rdlock(&rowgroup->m_mutex);
+        if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
+            m_isCtidCU = true;
+            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
+            m_isCtidCU = false;
+        }
+        FormCUDeleteMask(rowgroup, cu, cuid);
+        pthread_rwlock_unlock(&rowgroup->m_mutex);
+        m_imcstoreDesc->UnReferenceRowGroup();
+        if (IsValidCacheSlotID(slotId)) {
+            IMCU_CACHE->UnPinDataBlock(slotId);
+        }
     }
+    PG_CATCH();
+    {
+        pthread_rwlock_unlock(&rowgroup->m_mutex);
+        m_imcstoreDesc->UnReferenceRowGroup();
+        if (IsValidCacheSlotID(slotId)) {
+            IMCU_CACHE->UnPinDataBlock(slotId);
+        }
+    }
+    PG_END_TRY();
+}
+
+void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid)
+{
+    Assert(rowgroup && rowgroup->m_delta && rowgroup->m_cuDescs && rowgroup->m_cuDescs[m_ctidCol]);
     DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
     ItemPointer item = NULL;
     DeltaOperationType ctidtpye;
@@ -539,11 +563,11 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
         uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
         m_cuDeltaMask[idx >> 3] |= (1 << (idx % 8));
         m_deltaMaskMax = Max(idx, m_deltaMaskMax);
-        if (cu == NULL) {
+        if (cuPtr == NULL) {
             continue;
         }
 
-        int rowIdx = FindRowIDByCtid(cu, item, rowgroup->m_cuDescs[m_ctidCol]->row_count);
+        int rowIdx = FindRowIDByCtid(cuPtr, item, rowgroup->m_cuDescs[m_ctidCol]->row_count);
         if (rowIdx < 0) {
             continue;
         }
@@ -554,13 +578,6 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
         }
         m_cuDelMask[rowIdx >> 3] |= (1 << (rowIdx % 8));
     }
-
-    pthread_rwlock_unlock(&rowgroup->m_mutex);
-    m_imcstoreDesc->UnReferenceRowGroup();
-    if (IsValidCacheSlotID(slotId)) {
-        IMCU_CACHE->UnPinDataBlock(slotId);
-    }
-    return;
 }
 
 // Put the CU in the cache and return a pointer to the CU data.
