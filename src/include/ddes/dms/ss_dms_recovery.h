@@ -98,6 +98,7 @@ typedef struct st_reform_info {
     TimestampTz reform_ver;
     TimestampTz reform_ver_startup_wait;
     bool switchover_demote_failure_signal_handled;
+    bool needSyncConfig;
 } ss_reform_info_t;
 
 typedef enum st_reform_ckpt_status {

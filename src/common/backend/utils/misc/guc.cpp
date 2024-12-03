@@ -137,6 +137,7 @@
 #include "storage/procarray.h"
 #include "storage/standby.h"
 #include "storage/remote_adapter.h"
+#include "storage/file/fio_device.h"
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "tsearch/ts_cache.h"
@@ -232,6 +233,13 @@
 #define NUM_KEYS 2
 #define AUDITFILE_THRESHOLD_LOWER_BOUND 100
 const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92735;
+#define DSS_BYTE_AGAINST 512
+#define TRY_COUNT 3
+
+#define POSTGRESQL_CONF_LOCAL g_instance.attr.attr_common.ConfigFileName
+#define POSTGRESQL_CONF_SHARED g_instance.datadir_cxt.configFilePath
+#define HBA_CONF_SHARED g_instance.datadir_cxt.hbaConfigFilePath
+#define HBA_CONF_LOCAL g_instance.attr.attr_common.HbaFileName
 
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
@@ -12868,6 +12876,490 @@ ErrCode write_guc_file(const char* path, char** lines)
     }
     out_file = NULL;
     return retcode;
+}
+
+static int copy_file_dss(char *scpath, char *despath)
+{
+    int fd_source, fd_target;
+    int res = 0;
+    ssize_t step_size = DSS_BYTE_AGAINST;
+    ssize_t read_size = DSS_BYTE_AGAINST;
+    struct stat statbuf;
+    char buffer[step_size];
+    off_t offset = 0;
+
+    if (lstat(despath, &statbuf) == 0) {
+        if (remove(despath) != 0) {
+            ereport(LOG, (errmsg("could not remove file: %s", despath)));
+            return -1;
+        }
+    }
+
+    fd_source = open(scpath, O_RDONLY, 0644);
+    if (fd_source < 0) {
+        ereport(LOG, (errmsg("could not open file: %s", scpath)));
+        return -1;
+    }   
+    fd_target = open(despath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd_target < 0) {
+        ereport(LOG, (errmsg("could not open file: %s", despath)));
+        close(fd_source);
+        return -1;
+    }
+    int size = lseek(fd_source, 0, SEEK_END);
+
+    lseek(fd_source, 0, SEEK_SET);
+    while (offset < size) {
+        if (offset + step_size > size) {
+            read_size = size - offset;
+            errno_t rc = memset_s(buffer, step_size, ' ', step_size);
+            securec_check(rc, "\0", "\0");
+            buffer[read_size] = '\n';
+        }
+        res = pread(fd_source, buffer, step_size, offset);
+        if (res != read_size && res != step_size) {
+            ereport(LOG, (errmsg("read %s, failed, errno: %s", scpath, strerror(errno))));
+            close(fd_source);
+            close(fd_target);
+            return -1;
+        }
+        res = pwrite(fd_target, buffer, step_size, offset);
+        if (res != step_size) {
+            ereport(LOG, (errmsg("write %s, failed, errno: %s", despath, strerror(errno))));
+            close(fd_source);
+            close(fd_target);
+            return -1;
+        }
+        offset += step_size;
+    }
+
+    res = ftruncate(fd_target, size);
+    if (res != 0) {
+        close(fd_source);
+        close(fd_target);
+        ereport(LOG, (errmsg("truncate %s, failed, errno: %s", despath, strerror(errno))));
+        return -1;
+    }
+    
+    close(fd_source);
+    close(fd_target);
+    return 0;
+}
+
+static int update_hba_file(char *scpath, char *despath)
+{
+    struct stat statbuf;
+    if (lstat(scpath, &statbuf) < 0 || statbuf.st_size == 0) {
+        ereport(LOG,
+                (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", scpath)));
+        return -1;
+    }
+
+    bool isWriteLocalFile = (strcmp(scpath, HBA_CONF_SHARED) == 0) ? true : false;
+    char conf_bak[MAXPGPATH];
+    int count = 0;
+    int ret = 0;
+    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                     g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, HBA_BAK_FILENAME_PM);
+    securec_check_ss(ret, "\0", "\0");
+    while (lstat(conf_bak, &statbuf) == 0) {
+        if (count >= TRY_COUNT) {
+            if (isWriteLocalFile) {
+                /*source file is shered hba config file*/
+                ereport(LOG, (errmsg("the shared hba config file %s is being written", conf_bak)));
+                return -1;
+            } else {
+                break;
+            }
+        }
+        count++;
+        pg_usleep(200000L); /* sleep 200ms for stat next time */
+    }
+
+    if (isWriteLocalFile) {
+        ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, HBA_BAK_FILENAME_PM);
+        securec_check_ss(ret, "\0", "\0");
+    }
+
+    /* copy the hba file to the temporary file and rename */
+    ret = copy_file_dss(scpath, conf_bak);
+    if (ret != 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("update temporary config file \"%s\" failed", conf_bak)));
+        return -1;
+    } else {
+        if (rename(conf_bak, despath) != 0) {
+            ereport(LOG,
+                    (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\"", conf_bak, despath)));
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static char** read_local_guc_file(char *path)
+{
+    char **lines = nullptr;
+    bool read_guc_file_success = true;
+    
+    PG_TRY();
+    {
+        lines = read_guc_file(path);
+    }
+    PG_CATCH();
+    {
+        read_guc_file_success = false;
+        EmitErrorReport();
+        FlushErrorState();
+    }
+    PG_END_TRY();
+    if (!read_guc_file_success) {
+        /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
+        return NULL;
+    }
+    if (lines == NULL) {
+        ereport(LOG, (errmsg("the config file has no data,please check it.")));
+        return NULL;
+    }
+    return lines;
+}
+
+static char** read_shared_guc_file(char *path) 
+{
+    int infileFd = 0;
+    int maxlength = 1, linelen = 0;
+    int nlines = 0;
+    char** result;
+    char* buffer = NULL;
+    int res = 0;
+    ssize_t step_size = DSS_BYTE_AGAINST;
+    char temp_buffer[step_size];
+    off_t offset = 0;
+    const int limit_of_length = 100000;  // limit of maxlength and nlines
+    infileFd = open(path, O_RDONLY, 0644);
+    if (infileFd < 0) {
+        ereport(LOG, (errmsg("could not open file: %s", path)));
+        return NULL;
+    }
+    int size = lseek(infileFd, 0, SEEK_END);
+    lseek(infileFd, 0, SEEK_SET);
+
+    while (offset < size) {
+        errno_t rc = memset_s(temp_buffer, step_size, '\0', step_size);
+        securec_check(rc, "\0", "\0");
+        res = pread(infileFd, temp_buffer, step_size, offset);
+        if (res != step_size) {
+            ereport(LOG, (errmsg("config file read failed: %s", strerror(errno))));
+            close(infileFd);
+            return NULL;
+        }
+
+        for (int i = 0; i < step_size; i++) {
+            if (temp_buffer[i] == '\0') {
+                break;
+            }
+            linelen++;
+            if (temp_buffer[i] == '\n') {
+                nlines++;
+                if (linelen > maxlength) {
+                    maxlength = linelen;
+                }
+                linelen = 0;
+            }
+        }
+        offset += step_size;
+    }
+
+    /* handle last line without a terminating newline (yuck) */
+    if (linelen) {
+        nlines++;
+    }
+    if (linelen > maxlength) {
+        maxlength = linelen;
+    }
+    if (maxlength <= 1) {
+        close(infileFd);
+        infileFd = 0;
+        return NULL;
+    }
+    if (maxlength > limit_of_length || nlines > limit_of_length) {
+        close(infileFd);
+        infileFd = 0;
+        ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR), errmsg("Length of file or line is too long.")));
+    }
+
+    /* set up the result and the line buffer */
+    result = (char**)pg_malloc((nlines + 2) * sizeof(char*));  /* Reserve one extra for alter system set. */
+    buffer = (char*)pg_malloc(maxlength + 1);
+
+    /* now reprocess the file and store the lines */
+    lseek(infileFd, 0, SEEK_SET);
+    int appendIndex = 0;
+    nlines = 0;
+    offset = 0;
+    errno_t rc = memset_s(buffer, maxlength + 1, '\0', maxlength + 1);
+    securec_check(rc, "\0", "\0");
+    while (offset < size) {
+        errno_t rc = memset_s(temp_buffer, step_size, '\0', step_size);
+        securec_check(rc, "\0", "\0");
+        res = pread(infileFd, temp_buffer, step_size, offset);
+        if (res != step_size) {
+            ereport(LOG, (errmsg("config file read failed: %s", strerror(errno))));
+            close(infileFd);
+            return NULL;
+        }
+
+        for (int i = 0; i < step_size; i++) {
+            if (temp_buffer[i] == '\0') {
+                break;
+            }
+            buffer[appendIndex++] = temp_buffer[i];
+            if (temp_buffer[i] == '\n') {
+                result[nlines++] = xstrdup(buffer);
+                appendIndex = 0;
+                errno_t rc = memset_s(buffer, maxlength + 1, '\0', maxlength + 1);
+                securec_check(rc, "\0", "\0");
+            }
+        }
+
+        offset += step_size;
+    }
+
+    (void)close(infileFd);
+    pfree(buffer);
+    result[nlines] = result[nlines + 1] = NULL;
+
+    return result;
+}
+
+static int write_shared_guc_file(char *path, char *buffer, int size)
+{
+    int fd_target;
+    off_t offset = 0;
+    struct stat statbuf;
+    int res = 0;
+ 
+    if (lstat(path, &statbuf) == 0) {
+        if (remove(path) != 0) {
+            ereport(LOG, (errmsg("could not remove file: %s", path)));
+            return -1;
+        }
+    }
+    fd_target = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd_target < 0) {
+        ereport(LOG, (errmsg("could not open file: %s", path)));
+        return -1;
+    }
+
+    res = pwrite(fd_target, buffer, size, offset);
+    if (res != size) {
+        ereport(LOG, (errmsg("write failed: %s", strerror(errno))));
+        close(fd_target);
+        return -1;
+    }
+
+    close(fd_target);
+
+    return 0;
+}
+
+static int update_shared_guc_file(char *path)
+{
+    struct stat statbuf;
+    if (lstat(g_instance.attr.attr_common.ConfigFileName, &statbuf) < 0 || statbuf.st_size == 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\"",
+                                                        g_instance.attr.attr_common.ConfigFileName)));
+        return -1;
+    }
+
+    char **lines = nullptr;
+    char *temp_buf = nullptr;
+    int temp_buf_len = 0;
+    char conf_bak[MAXPGPATH];
+    int ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                         g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, CONFIG_BAK_FILENAME_PM);
+    securec_check_ss(ret, "\0", "\0");
+
+    lines = read_local_guc_file(g_instance.attr.attr_common.ConfigFileName);
+    if (lines == nullptr) {
+        return -1;
+    }
+    comment_guc_lines(lines, g_reserve_param);
+    temp_buf_len = add_guc_optlines_to_buffer(lines, &temp_buf);
+    release_opt_lines(lines);
+    Assert(temp_buf_len != 0);
+
+    ret = write_shared_guc_file(conf_bak,temp_buf,temp_buf_len);
+    pfree(temp_buf);
+    temp_buf = NULL;
+    if (ret != 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("write \"%s\" failed", conf_bak)));
+        return -1;
+    }else {
+        if (rename(conf_bak, path) != 0) {
+            ereport(LOG, (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\"", conf_bak, path)));
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static bool proc_config_content(char *buf, Size len)
+{
+    struct stat statbuf;
+    ErrCode retcode = CODE_OK;
+    char conf_bak[MAXPGPATH];
+    char **reserve_item = NULL;
+    int ret = 0;
+
+    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME_PM);
+    securec_check_ss(ret, "\0", "\0");
+
+    if (lstat(g_instance.attr.attr_common.ConfigFileName, &statbuf) != 0) {
+        if (errno != ENOENT)
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m",
+                                                              g_instance.attr.attr_common.ConfigFileName)));
+        return false;
+    }
+
+    reserve_item = alloc_opt_lines(g_reserve_param_num);
+    if (reserve_item == NULL) {
+        ereport(LOG, (errmsg("Alloc mem for reserved parameters failed")));
+        return false;
+    }
+
+    /* 1. load reserved parameters to reserve_item(array in memeory) */
+    retcode = copy_asyn_lines(g_instance.attr.attr_common.ConfigFileName, reserve_item, g_reserve_param);
+    if (retcode != CODE_OK) {
+        release_opt_lines(reserve_item);
+        ereport(LOG, (errmsg("copy asynchronization items failed: %s\n", gs_strerror(retcode))));
+        return false;
+    }
+
+    /* 2. genreate temp files and fill it with content from primary. */
+    retcode = generate_temp_file(buf, conf_bak, len);
+    if (retcode != CODE_OK) {
+        release_opt_lines(reserve_item);
+        ereport(LOG, (errmsg("create %s failed: %s\n", conf_bak, gs_strerror(retcode))));
+        return false;
+    }
+
+    /* 3. adjust the info with reserved parameters, and sync to temp file. */
+    retcode = update_temp_file(conf_bak, reserve_item, g_reserve_param);
+    if (retcode != CODE_OK) {
+        release_opt_lines(reserve_item);
+        ereport(LOG, (errmsg("update gaussdb config file failed: %s\n", gs_strerror(retcode))));
+        return false;
+    } else {
+        ereport(LOG, (errmsg("update gaussdb config file success")));
+        if (rename(conf_bak, g_instance.attr.attr_common.ConfigFileName) != 0) {
+            release_opt_lines(reserve_item);
+            ereport(LOG, (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\"", conf_bak,
+                                                            g_instance.attr.attr_common.ConfigFileName)));
+            return false;
+        }
+    }
+
+    release_opt_lines(reserve_item);
+
+    return true;
+}
+
+static int update_local_guc_file(char *path)
+{
+    struct stat statbuf;
+    if (lstat(g_instance.datadir_cxt.configFilePath, &statbuf) < 0 || statbuf.st_size == 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", \
+                g_instance.datadir_cxt.configFilePath)));
+        return -1;
+    }
+
+    char **lines = nullptr;
+    bool read_guc_file_success = true;
+    char *temp_buf = nullptr;
+    int temp_buf_len = 0;
+    int count = 0;
+    char conf_bak[MAXPGPATH];
+    int ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+                         g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, CONFIG_BAK_FILENAME_PM);
+    securec_check_ss(ret, "\0", "\0");
+
+    while (lstat(conf_bak, &statbuf) == 0) {
+        if (count >= TRY_COUNT) {
+            ereport(LOG, (errmsg("the shared hba config file \"%s\" is being written", conf_bak)));
+            return -1;
+        }
+        count++;
+        pg_usleep(200000L);  /* sleep 200ms for lstat next time */
+    }
+
+    PG_TRY();
+    {
+        lines = read_shared_guc_file(g_instance.datadir_cxt.configFilePath);
+    }
+    PG_CATCH();
+    {
+        read_guc_file_success = false;
+        EmitErrorReport();
+        FlushErrorState();
+    }
+    PG_END_TRY();
+    if (!read_guc_file_success) {
+        /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
+        return -1;
+    }
+    if (lines == nullptr) {
+        ereport(LOG, (errmsg("the shared config file \"%s\" has no data, please check it.",
+                             g_instance.datadir_cxt.configFilePath)));
+        return -1;
+    }
+
+    temp_buf_len = add_guc_optlines_to_buffer(lines, &temp_buf);
+    release_opt_lines(lines);
+    Assert(temp_buf_len != 0);
+
+    if (true != proc_config_content(temp_buf, temp_buf_len)) {
+        ereport(LOG, (errmsg("PM update config file \"%s\" failed", path)));
+    }
+    pfree(temp_buf);
+    temp_buf = NULL;
+    return 0;
+}
+
+void sync_config_file()
+{
+    if (g_instance.dms_cxt.SSReformInfo.needSyncConfig) {
+        /* new primary node reads the shared configuration file during reform */
+        g_instance.dms_cxt.SSReformInfo.needSyncConfig = false;
+        if (update_local_guc_file(POSTGRESQL_CONF_LOCAL) == 0 &&
+            update_hba_file(HBA_CONF_SHARED, HBA_CONF_LOCAL) == 0) {
+            ereport(LOG, (errmsg("new primary node synchronize configuration files successfully")));
+        }else {
+            ereport(LOG, (errmsg("new primary node synchronize configuration files failed")));
+        }
+    } else if (SS_PRIMARY_MODE && ENABLE_DSS && ENABLE_DMS) {
+        /* 
+         * primary node updates the shared configuration file
+         * with the contents of the local configuration file 
+         */
+        if (update_shared_guc_file(POSTGRESQL_CONF_SHARED) == 0 &&
+            update_hba_file(HBA_CONF_LOCAL, HBA_CONF_SHARED) == 0) {
+            ereport(LOG, (errmsg("primary node synchronize configuration files successfully")));
+        }else {
+            ereport(LOG, (errmsg("primary node synchronize configuration files failed")));
+        }
+    } else if (SS_STANDBY_MODE && ENABLE_DSS && ENABLE_DMS) {
+        /* 
+         * standby node updates the local configuration file
+         * with the contents of the shared configuration file 
+         */
+        if (update_local_guc_file(POSTGRESQL_CONF_LOCAL) == 0 &&
+            update_hba_file(HBA_CONF_SHARED, HBA_CONF_LOCAL) == 0) {
+            ereport(LOG, (errmsg("standby node synchronize configuration files successfully")));
+        }else {
+            ereport(LOG, (errmsg("standby node synchronize configuration files failed")));
+        }
+    }
 }
 
 /*

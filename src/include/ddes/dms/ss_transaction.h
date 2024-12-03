@@ -105,6 +105,10 @@ typedef struct SSBroadcastRealtimeBuildPtr {
     int srcInstId;
 } SSBroadcastRealtimeBuildPtr;
 
+typedef struct SSBroadcastSyncGUCst {
+    SSBroadcastOp type; // must be first
+} SSBroadcastSyncGUCst;
+
 Snapshot SSGetSnapshotData(Snapshot snapshot);
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync);
@@ -114,6 +118,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
 bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
 void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform);
 bool SSReportRealtimeBuildPtr(XLogRecPtr realtimeBuildPtr);
+void SSBroadcastSyncGUC();
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
@@ -140,5 +145,5 @@ void SSRequestAllStandbyReloadReformCtrlPage();
 bool SSCanFetchLocalSnapshotTxnRelatedInfo();
 int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len);
 int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len);
-
+int SSUpdateLocalConfFile(char* data, uint32 len);
 #endif

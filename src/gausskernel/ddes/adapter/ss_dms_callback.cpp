@@ -1342,6 +1342,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_REPORT_REALTIME_BUILD_PTR:
                 ret = SSGetStandbyRealtimeBuildPtr(data, len);
                 break;
+            case BCAST_CONFIG_SYNC:
+                ret = SSUpdateLocalConfFile(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast operate type")));
                 ret = DMS_ERROR;

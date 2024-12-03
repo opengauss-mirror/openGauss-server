@@ -11157,6 +11157,16 @@ void StartupXLOG(void)
         LWLockRelease(ProcArrayLock);
     }
 
+    /* notify the PM to synchronize */
+    if (SS_IN_REFORM && !SS_PRIMARY_DEMOTING && ENABLE_DMS && ENABLE_DSS && SS_PRIMARY_MODE) {
+        if (SS_STANDBY_PROMOTING || SS_STANDBY_FAILOVER) {
+            g_instance.dms_cxt.SSReformInfo.needSyncConfig = true;
+        }
+        if (gs_signal_send(PostmasterPid, SIGHUP) != 0) {
+            ereport(WARNING, (errmsg("[SS Reform]send SIGHUP to PM failed when reform is ending")));
+        }
+    }
+
     if (SS_PERFORMING_SWITCHOVER && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING) {
         ereport(LOG, (errmsg("[SS switchover] Standby promote: StartupXLOG finished, promote success")));
         Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING);
