@@ -1099,6 +1099,14 @@ Datum subvector(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
     }
 
+    /* Indexing starts at 1, like substring */
+    if (start < 1) {
+        ereport(WARNING, (errmsg("when the start position is less than 1, it will begin with the first dimension")));
+        start = 1;
+    } else if (start > a->dim) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
+    }
+
     /*
      * Check if (start + count > a->dim), avoiding integer overflow. a->dim
      * and count are both positive, so a->dim - count won't overflow.
@@ -1107,13 +1115,6 @@ Datum subvector(PG_FUNCTION_ARGS)
         end = a->dim + 1;
     } else {
         end = start + count;
-    }
-
-    /* Indexing starts at 1, like substring */
-    if (start < 1) {
-        start = 1;
-    } else if (start > a->dim) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
     }
 
     dim = end - start;
