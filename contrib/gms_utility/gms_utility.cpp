@@ -87,7 +87,6 @@ static List* GetIndexColName(List* colnamesList, Oid relid, int2 attnum)
         return colnamesList;
     }
 
-    char* colname = NULL;
     Form_pg_attribute pgAttributeTuple = NULL;
     HeapTuple attrTuple;
 
@@ -546,18 +545,23 @@ static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
     return true;
 }
 
-static void TrimEndSpace(char* str)
+static bool ExistsInnerSpace(char* w)
 {
-    if (str == NULL) {
-        return;
+    if (w == NULL) {
+        return false;
     }
 
     int i = 0;
-    int len = strlen(str);
+    char lastChar = '\0';
 
-    for (i = len - 1; i >= 0 && isspace((unsigned char)str[i]); i--);
+    for (; w[i] != '\0'; i++) {
+        if (lastChar == ' ' && w[i] != ' ') {
+            return true;
+        }
+        lastChar = w[i];
+    }
 
-    str[i + 1] = '\0';
+    return false;
 }
 
 static bool CheckAllDigital(char* w)
@@ -641,8 +645,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
                             (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Invalid paramter value \"%s\" with special words", (name - traveLen))));
                 }
-                TrimEndSpace(tmp->data);
-                if (BEFORE_QUOTE_STARTED(quoteState) && strstr(tmp->data, " ") != NULL) {
+                if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                     errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
                 }
@@ -679,8 +682,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
     }
-    TrimEndSpace(tmp->data);
-    if (BEFORE_QUOTE_STARTED(quoteState) && strstr(tmp->data, " ") != NULL) {
+    if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
     }
@@ -819,6 +821,35 @@ Datum gms_compile_schema(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
+static void ExpandSqlTableAclCheck(List* rewriteList)
+{
+    List* plantreeList = NIL;
+    PlannedStmt* plan = NULL;
+    ListCell* rteLc = NULL;
+    RangeTblEntry* rte = NULL;
+    Oid relId = InvalidOid;
+    AclResult aclResult = ACLCHECK_OK;
+
+    plantreeList = pg_plan_queries(rewriteList, 0, NULL);
+    if (plantreeList == NIL || list_length(plantreeList) == 0) {
+        return;
+    }
+
+    plan = (PlannedStmt *) linitial(plantreeList);
+    foreach (rteLc, plan->rtable) {
+        rte = (RangeTblEntry *) lfirst(rteLc);
+        if (rte->rtekind != RTE_RELATION) {
+            continue;
+        }
+        relId = rte->relid;
+
+        aclResult = pg_class_aclcheck(relId, GetUserId(), ACL_SELECT);
+        if (aclResult != ACLCHECK_OK) {
+            aclcheck_error(aclResult, ACL_KIND_CLASS, rte->relname);
+        }
+    }
+}
+
 Datum gms_expand_sql_text(PG_FUNCTION_ARGS)
 {
     text* inputSqlText;
@@ -852,12 +883,15 @@ Datum gms_expand_sql_text(PG_FUNCTION_ARGS)
 
     rewriteList = pg_analyze_and_rewrite(parseNode, inputSql, NULL, 0);
     query = (Query *) linitial(rewriteList);
+
     buf = makeStringInfo();
 #ifdef PGXC
     deparse_query(query, buf, NIL, false, false);
 #else
     get_query_def(query, buf, NIL, NULL, PRETTYFLAG_PAREN, WRAP_COLUMN_DEFAULT, 0);
 #endif
+
+    ExpandSqlTableAclCheck(rewriteList);
 
     result = cstring_to_text(buf->data);
 
@@ -925,8 +959,7 @@ Datum gms_get_sql_hash(PG_FUNCTION_ARGS)
     BlessTupleDesc(tupdesc);
 
     if (!pg_md5_hash(VARDATA_ANY(sqlText), len, hexsum)) {
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
-                        errmsg("out of memory")));
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
 
     values[0] = DirectFunctionCall1(rawin, CStringGetDatum(hexsum));

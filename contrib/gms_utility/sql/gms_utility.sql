@@ -400,11 +400,35 @@ end;
 
 -- test privileges
 create user user01 password 'utility@123';
+grant select on test_utility_est.view3 to user01;
 set session AUTHORIZATION user01 password 'utility@123';
 set search_path to test_utility_est;
 
 declare
  input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+END;
+/
+
+RESET SESSION AUTHORIZATION;
+
+grant usage on schema test_utility_est to user01;
+set session AUTHORIZATION user01 password 'utility@123';
+set search_path to test_utility_est;
+
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+END;
+/
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view2';
  output_sql_text1 clob;
 begin
   gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
