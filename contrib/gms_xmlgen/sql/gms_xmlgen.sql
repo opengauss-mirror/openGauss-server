@@ -1287,3 +1287,10 @@ END;
 
 reset search_path;
 drop schema gms_xmlgen_test cascade;
+
+create database test_b dbcompatibility='B';
+\c test_b
+create extension GMS_XMLGEN;
+
+\c contrib_regression
+drop database test_b;
