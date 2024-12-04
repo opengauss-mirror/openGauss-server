@@ -177,7 +177,7 @@ NOTICE:  trigger "test_exists.test_trigger_exists" for table "test_exists" does 
 DROP TRIGGER test_trigger_exists ON no_such_table;
 ERROR:  relation "no_such_table" does not exist
 DROP TRIGGER IF EXISTS test_trigger_exists ON no_such_table;
-ERROR:  relation "no_such_table" does not exist
+NOTICE:  trigger "no_such_table.test_trigger_exists" for table "no_such_table" does not exist, skipping
 CREATE TRIGGER test_trigger_exists
     BEFORE UPDATE ON test_exists
     FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
