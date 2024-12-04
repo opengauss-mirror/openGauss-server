@@ -2557,7 +2557,8 @@ static bool clause_relate_to_prefixkey(RestrictInfo* rinfo, Index relid, Bitmaps
 {
     Bitmapset* columns = NULL;
 
-    if (prefixkeys == NULL || bms_is_empty(prefixkeys) || !bms_is_member(relid, rinfo->clause_relids)) {
+    if (prefixkeys == NULL || bms_is_empty(prefixkeys) || !bms_is_member(relid, rinfo->clause_relids) ||
+        (rinfo->clause != NULL && IsA(rinfo->clause, NullTest))) {
         return false;
     }
     pull_varattnos((Node*)rinfo->clause, relid, &columns);
@@ -2651,12 +2652,12 @@ static Scan* create_indexscan_plan(
             continue; /* we may drop pseudoconstants here */
         opquals = lappend(opquals, rinfo->clause);
 
-        if (list_member_ptr(indexquals, rinfo))
-            continue; /* simple duplicate */
         if (clause_relate_to_prefixkey(rinfo, baserelid, prefixkeys)) {
             qpqual = lappend(qpqual, rinfo);
             continue;
         }
+        if (list_member_ptr(indexquals, rinfo))
+            continue; /* simple duplicate */
         if (is_redundant_derived_clause(rinfo, indexquals))
             continue; /* derived from same EquivalenceClass */
         if (!contain_mutable_functions((Node*)rinfo->clause)) {
@@ -2844,12 +2845,12 @@ static BitmapHeapScan* create_bitmap_scan_plan(
         Assert(IsA(rinfo, RestrictInfo));
         if (rinfo->pseudoconstant)
             continue; /* we may drop pseudoconstants here */
-        if (CheckBitmapScanQualExists(root, indexquals, clause))
-            continue; /* simple duplicate */
         if (clause_relate_to_prefixkey(rinfo, baserelid, prefixkeys)) {
             qpqual = lappend(qpqual, rinfo);
             continue;
         }
+        if (CheckBitmapScanQualExists(root, indexquals, clause))
+            continue; /* simple duplicate */
         if (rinfo->parent_ec && list_member_ptr(indexECs, rinfo->parent_ec))
             continue; /* derived from same EquivalenceClass */
         if (!contain_mutable_functions(clause)) {
@@ -5539,14 +5540,20 @@ static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol
                 indexkey = (Node*)lfirst(indexpr_item);
                 if (indexkey && IsA(indexkey, RelabelType))
                     indexkey = (Node*)((RelabelType*)indexkey)->arg;
-                if (indexkey && IsA(indexkey, PrefixKey)) {
+                if (indexkey && IsA(indexkey, PrefixKey) && IsA(node, Var) &&
+                    ((Var*)node)->varno == ((Var*)((PrefixKey*)indexkey)->arg)->varno &&
+                    ((Var*)node)->varattno == ((Var*)((PrefixKey*)indexkey)->arg)->varattno) {
                     indexkey = (Node*)((PrefixKey*)indexkey)->arg;
                     if (prefixkeys != NULL) {
                         *prefixkeys = bms_add_member(*prefixkeys,
                             ((Var*)indexkey)->varattno - FirstLowInvalidHeapAttributeNumber);
                     }
-                }
-                if (equal(node, indexkey)) {
+
+                    result = (Var *)copyObject(indexkey);
+                    result->varno = INDEX_VAR;
+                    result->varattno = indexcol + 1;
+                    return (Node *)result;
+                } else if (equal(node, indexkey)) {
                     result = makeVar(INDEX_VAR,
                         indexcol + 1,
                         exprType((Node*)lfirst(indexpr_item)),

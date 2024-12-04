@@ -984,5 +984,41 @@ INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库
 INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210'); -- duplicate key
 DROP TABLE test_prefix_table;
 
+create table my_table_1262526(id int, obj nvarchar2(20));
+create index idx_1264285_2 on my_table_1262526(obj(4));
+INSERT INTO my_table_1262526 (id, obj) VALUES (1, 'AAAA');
+INSERT INTO my_table_1262526 (id, obj) VALUES (2, 'AAAAAAA');
+
+explain (costs off) select * from my_table_1262526 where obj = 'AAAA';
+select * from my_table_1262526 where obj = 'AAAA';
+drop table my_table_1262526;
+
+-- fix error: index key does not match expected index column
+DROP TABLE IF EXISTS hbom_t;
+CREATE TABLE hbom_t (
+inventory_item_status_code character varying(10)NOT NULL, 
+last_update_date timestamp(0) without time zone NOT NULL,
+last_updated_by bigint NOT NULL
+); 
+CREATE INDEX hbom_t_n1 ON hbom_t (inventory_item_status_code);
+ 
+ 
+DROP TABLE IF EXISTS bmsql_prefixkey;
+CREATE TABLE bmsql_prefixkey (
+c_w_id integer NOT NULL,
+c_phone character(2) ,
+c_last character varying(16) , 
+c_first character varying(16)
+);
+CREATE INDEX bmsql_prefixkey_idx4 ON bmsql_prefixkey (c_last(10), c_first(10));
+ 
+EXPLAIN (costs off)
+SELECT * FROM hbom_t AS T1 INNER JOIN bmsql_prefixkey AS T2 
+    ON T2.c_phone like T1.inventory_item_status_code 
+WHERE T2.c_phone in ('N','L','8','X','u','e','S','2','t','p','C')
+    AND T2.c_last = upper(reverse(1.65446039349123 || '1979-02-20'));
+DROP TABLE IF EXISTS hbom_t;
+DROP TABLE IF EXISTS bmsql_prefixkey;
+
 \c regression
 drop database prefix_index_db;
