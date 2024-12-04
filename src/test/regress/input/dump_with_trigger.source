@@ -1,6 +1,10 @@
 create database dump_with_trigger;
 \c dump_with_trigger
 
+create database dump_with_trigger2;
+\c dump_with_trigger2
+\c dump_with_trigger
+
 CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT, id3 INT);
 CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT, id3 INT);
 
@@ -19,6 +23,42 @@ CREATE TRIGGER insert_trigger
            EXECUTE PROCEDURE tri_insert_func();
 
 
+CREATE TABLE test_trigger_src_tbl2(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl2(id1 INT, id2 INT, id3 INT);
+
+CREATE OR REPLACE FUNCTION tri_insert_func2() RETURNS TRIGGER AS
+$$
+    DECLARE
+    BEGIN
+        INSERT INTO test_trigger_des_tbl2 VALUES(NEW.id1, NEW.id2, NEW.id3);
+        RETURN NEW;
+    END
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER insert_trigger2
+    BEFORE INSERT ON test_trigger_src_tbl2
+    FOR EACH ROW
+    EXECUTE PROCEDURE tri_insert_func2();
+		   
+
+CREATE TABLE test_trigger_src_tbl3(id1 INT, id2 INT, id3 INT);
+CREATE TABLE test_trigger_des_tbl3(id1 INT, id2 INT, id3 INT);
+
+CREATE OR REPLACE FUNCTION tri_insert_func3() RETURNS TRIGGER AS
+$$
+    DECLARE
+    BEGIN
+        INSERT INTO test_trigger_des_tbl3 VALUES(NEW.id1, NEW.id2, NEW.id3);
+        RETURN NEW;
+    END
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER insert_trigger3
+    BEFORE INSERT ON test_trigger_src_tbl3
+    FOR EACH ROW
+    EXECUTE PROCEDURE tri_insert_func3();
+
+
 \! @abs_bindir@/gs_dump dump_with_trigger -p @portstring@ -f @abs_bindir@/dump_with_trigger.sql -w -c -t test_trigger_src_tbl >/dev/null 2>&1; echo $?
 drop table test_trigger_src_tbl;
 \! @abs_bindir@/gsql -ddump_with_trigger -p @portstring@ -f "@abs_bindir@/dump_with_trigger.sql";
@@ -34,5 +74,12 @@ SELECT tgname AS trigger_name,
        tgqual AS qualifier
 FROM pg_trigger order by 1;
 
+
+\! @abs_bindir@/gs_dump -p @portstring@ -v -f @abs_bindir@/dump_with_trigger2.csv -b dump_with_trigger -c  -t "test_trigger_src_tbl*" >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gsql -d dump_with_trigger2 -p @portstring@ -f "@abs_bindir@/dump_with_trigger2.csv";
+\! @abs_bindir@/gsql -d dump_with_trigger -p @portstring@ -f "@abs_bindir@/dump_with_trigger2.csv";
+
+
 \c postgres
 drop database dump_with_trigger;
+drop database dump_with_trigger2;
