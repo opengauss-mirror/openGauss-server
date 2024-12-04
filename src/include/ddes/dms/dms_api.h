@@ -26,6 +26,7 @@
 
 #include <stdlib.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,7 +36,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           172
+#define DMS_LOCAL_VERSION           174
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -424,47 +425,45 @@ typedef struct st_dms_broadcast_context {
     unsigned int *output_msg_len;
 } dms_broadcast_context_t;
 
-// make sure dms_buf_ctrl is aligned by cach line size in V3
-#ifndef OPENGAUSS
-#ifdef WIN32
-typedef struct st_dms_buf_ctrl
-#else
-typedef struct __attribute__((aligned(128))) st_dms_buf_ctrl
-#endif
-#else
-typedef struct st_dms_buf_ctrl
-#endif
+#define DMS_BUF_CTRL_PADDING_SIZE 128
+typedef union st_dms_buf_ctrl
 {
-    volatile unsigned char lock_mode;       // used only in DMS, 0: Null, 1: Shared lock, 2: Exclusive lock
-    // used only in DMS, 0: no, 1: yes, this page is old version,
-    // can be discard only after latest version in other instance is cleaned
-    volatile unsigned char is_edp;
-    volatile unsigned char force_request;   // force to request page from remote
-    volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
-    volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
-    volatile unsigned char release_conflict;
-    volatile unsigned char is_reform_visit;
-    volatile unsigned char unused;
-    unsigned long long edp_lsn;
-    unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
-    unsigned long long edp_map;             // records edp instance
-    long long last_ckpt_time; // last time when local edp page is added to group.
-    volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm
-    unsigned long long seq; // for dms page swap message-sequence
-#ifdef OPENGAUSS
-    int buf_id;
-    unsigned int state;
-    unsigned int pblk_relno;
-    unsigned int pblk_blkno;
-    unsigned long long  pblk_lsn;
-    unsigned char seg_fileno;
-    unsigned int seg_blockno;
-    void *ctrl_lock;
-    volatile unsigned char need_check_pincount;
-    volatile unsigned int pinned_count;
-    volatile unsigned long long lsn_on_disk;
-#endif
+    struct {
+        volatile unsigned char lock_mode;       // used only in DMS, 0: Null, 1: Shared lock, 2: Exclusive lock
+        // used only in DMS, 0: no, 1: yes, this page is old version,
+        // can be discard only after latest version in other instance is cleaned
+        volatile unsigned char is_edp;
+        volatile unsigned char force_request;   // force to request page from remote
+        volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
+        volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
+        volatile unsigned char release_conflict;
+        volatile unsigned char is_reform_visit;
+        volatile unsigned char unused;
+        unsigned long long edp_lsn;
+        unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
+        unsigned long long edp_map;             // records edp instance
+        long long last_ckpt_time; // last time when local edp page is added to group.
+        volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm
+        unsigned long long seq; // for dms page swap message-sequence
+        void *buf_ctrl;
+    #ifdef OPENGAUSS
+        int buf_id;
+        unsigned int state;
+        unsigned int pblk_relno;
+        unsigned int pblk_blkno;
+        unsigned long long  pblk_lsn;
+        unsigned char seg_fileno;
+        unsigned int seg_blockno;
+        void *ctrl_lock;
+        volatile unsigned char need_check_pincount;
+        volatile unsigned int pinned_count;
+        volatile unsigned long long lsn_on_disk;
+    #endif
+    };
+    char padding[DMS_BUF_CTRL_PADDING_SIZE];
 } dms_buf_ctrl_t;
+
+static_assert(sizeof(dms_buf_ctrl_t) == DMS_BUF_CTRL_PADDING_SIZE, "dms_buf_ctrl_t is not cacheline aligned!");
 
 typedef struct st_dms_ctrl_info {
     char                pageid[DMS_PAGEID_SIZE];
@@ -837,30 +836,30 @@ typedef int(*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
 typedef unsigned char(*dms_recovery_in_progress)(void *db_handle);
 typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE]);
 typedef unsigned int(*dms_inc_and_get_srsn)(unsigned int sess_id);
-typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *buf_ctrl);
-typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
-typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *buf_ctrl, dms_buf_stats_type_e stats_type);
-typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
+typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *dms_ctrl);
+typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_status_t dms_buf_load_status);
+typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *dms_ctrl, dms_buf_stats_type_e stats_type);
+typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
 typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn,
     unsigned long long *node_data, unsigned int len);
-typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *buf_ctrl, unsigned long long lastest_lfn);
-typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *buf_ctrl);
-typedef unsigned long long (*dms_get_page_scn)(dms_buf_ctrl_t *buf_ctrl);
+typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *dms_ctrl, unsigned long long lastest_lfn);
+typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *dms_ctrl);
+typedef unsigned long long (*dms_get_page_scn)(dms_buf_ctrl_t *dms_ctrl);
 typedef unsigned long long(*dms_get_global_lfn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
 typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn,
     unsigned long long *node_data, unsigned int len);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
-    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl, unsigned long long seq);
+    dms_lock_mode_t mode, dms_buf_ctrl_t **dms_ctrl, unsigned long long seq);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
-    dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl);
-typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *buf_ctrl);
-typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
-typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
-typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
+    dms_lock_mode_t mode, dms_buf_ctrl_t **dms_ctrl);
+typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *dms_ctrl);
+typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
+typedef void(*dms_get_pageid)(dms_buf_ctrl_t *dms_ctrl, char **pageid, unsigned int *size);
+typedef char *(*dms_get_page)(dms_buf_ctrl_t *dms_ctrl);
 typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
     unsigned long long seq);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index, dms_session_type_e session_type);
@@ -990,6 +989,7 @@ typedef int (*dms_standby_stop_server)(void *db_handle);
 typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
+typedef int (*dms_calibrate_log_file)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
 typedef int (*dms_az_switchover_demote_stop_ckpt)(void *db_handle);
 typedef int (*dms_az_switchover_demote_update_node_ctrl)(void *db_handle, unsigned long long online_list);
@@ -1186,6 +1186,7 @@ typedef struct st_dms_callback {
     dms_standby_resume_server standby_resume_server;
     dms_start_lrpl start_lrpl;
     dms_stop_lrpl stop_lrpl;
+    dms_calibrate_log_file calibrate_log_file;
 
     // for az switchover and az failover
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
