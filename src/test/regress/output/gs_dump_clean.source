@@ -1,0 +1,66 @@
+create database aaa;
+\c aaa
+create schema envision01;
+set search_path to envision01;
+CREATE TABLE IF NOT EXISTS yx_channel (
+  yx_id          bigint       NOT NULL,
+  channel        tinyint      NOT NULL,
+  raw_data       tinyint      DEFAULT NULL,
+  q             bigint       DEFAULT NULL,
+  ld_alias       varchar(64) DEFAULT NULL,
+  order_no       smallint     DEFAULT '-1',
+  gin           bigint       DEFAULT NULL,
+  source_mode   tinyint      DEFAULT NULL,
+  change_time   bigint       DEFAULT '0',
+  PRIMARY KEY (yx_id, channel)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "yx_channel_pkey" for table "yx_channel"
+CREATE or replace FUNCTION "ti_yx_channel_trigger_function"() RETURNS "trigger"
+    LANGUAGE "plpgsql" NOT SHIPPABLE
+AS $$
+DECLARE
+    num1 INTEGER;
+BEGIN
+    IF NEW.ld_alias IS NOT NULL AND NEW.order_no >= 0 THEN
+        SELECT COUNT(*) INTO num1 FROM yx_channel
+          WHERE channel = NEW.channel AND ld_alias = NEW.ld_alias AND order_no = NEW.order_no ;
+        IF num1 > 0 THEN
+        END IF ;
+    END IF ;
+    RETURN NEW;
+END$$;
+CREATE TRIGGER "ti_yx_channel" BEFORE INSERT ON "yx_channel" FOR EACH ROW EXECUTE PROCEDURE "ti_yx_channel_trigger_function"();
+\! @abs_bindir@/gs_dump -p @portstring@  -E=utf8 -n envision01 --lock-wait-timeout=300000 -c --force-clean aaa -f before_clean.sql >/dev/null;
+create table t1(aaa int);
+\! @abs_bindir@/gsql -daaa -p @portstring@ -f "before_clean.sql";
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+DROP TRIGGER
+ALTER TABLE
+DROP TABLE
+DROP FUNCTION
+DROP SCHEMA
+SET
+CREATE SCHEMA
+ALTER SCHEMA
+SET
+CREATE FUNCTION
+ALTER FUNCTION
+SET
+SET
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE TRIGGER
+--?.*
+\! @abs_bindir@/gs_dump -p @portstring@ -s -E=utf8 -n envision01 --lock-wait-timeout=300000 --force-clean aaa -f before_clean.sql;
+gs_dump: options --force-clean should be used with -c option.
+\c regression
+drop database aaa;
