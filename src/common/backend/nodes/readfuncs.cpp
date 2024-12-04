@@ -2590,6 +2590,14 @@ static ScalarArrayOpExpr* _readScalarArrayOpExpr(void)
     READ_OID_FIELD(opno);
     READ_OPINFO_FIELD(opno);
     READ_OID_FIELD(opfuncid);
+
+    IF_EXIST(hashfuncid) {
+        READ_OID_FIELD(hashfuncid);
+    };
+    IF_EXIST(negfuncid) {
+        READ_OID_FIELD(negfuncid);
+    };
+
     READ_FUNCINFO_FIELD(opfuncid);
 
     /*

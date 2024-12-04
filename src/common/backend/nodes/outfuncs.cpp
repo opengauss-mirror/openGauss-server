@@ -2812,7 +2812,10 @@ static void _outScalarArrayOpExpr(StringInfo str, ScalarArrayOpExpr* node)
     WRITE_OPINFO_FEILD(opno);
     WRITE_OID_FIELD(opfuncid);
     WRITE_FUNCINFO_FIELD(opfuncid);
-
+    if (t_thrd.proc->workingVersionNum >= HASH_SAOP_VERSION_NUMBER) {
+        WRITE_OID_FIELD(hashfuncid);
+        WRITE_OID_FIELD(negfuncid);
+    }
     WRITE_BOOL_FIELD(useOr);
     WRITE_OID_FIELD(inputcollid);
     WRITE_NODE_FIELD(args);

@@ -909,6 +909,8 @@ Expr* make_scalar_array_op(ParseState* pstate, List* opname, bool useOr, Node* l
     result = makeNode(ScalarArrayOpExpr);
     result->opno = oprid(tup);
     result->opfuncid = opform->oprcode;
+    result->hashfuncid = InvalidOid;
+    result->negfuncid = InvalidOid;
     result->useOr = useOr;
     /* inputcollid will be set by parse_collate.c */
     result->args = args;

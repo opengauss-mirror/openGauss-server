@@ -4935,16 +4935,23 @@ static bool cost_qual_eval_walker(Node* node, cost_qual_eval_context* context)
         set_opfuncid((OpExpr*)node);
         context->total.per_tuple += get_func_cost(((OpExpr*)node)->opfuncid) * u_sess->attr.attr_sql.cpu_operator_cost;
     } else if (IsA(node, ScalarArrayOpExpr)) {
-        /*
-         * Estimate that the operator will be applied to about half of the
-         * array elements before the answer is determined.
-         */
         ScalarArrayOpExpr* saop = (ScalarArrayOpExpr*)node;
         Node* arraynode = (Node*)lsecond(saop->args);
+        int estarraylen = estimate_array_length(arraynode);
+        Cost opfunccost;
 
         set_sa_opfuncid(saop);
-        context->total.per_tuple += get_func_cost(saop->opfuncid) * u_sess->attr.attr_sql.cpu_operator_cost *
-                                    estimate_array_length(arraynode) * 0.5;
+        opfunccost = get_func_cost(saop->opfuncid);
+        if (OidIsValid(saop->hashfuncid)) {
+            Cost hashfunccost = get_func_cost(saop->hashfuncid);
+            context->total.startup += hashfunccost * u_sess->attr.attr_sql.cpu_operator_cost * estarraylen;
+            context->total.per_tuple +=
+                (opfunccost * u_sess->attr.attr_sql.cpu_operator_cost) +
+                (hashfunccost * u_sess->attr.attr_sql.cpu_operator_cost);
+        } else {
+            constexpr float half = 0.5;
+            context->total.per_tuple += opfunccost * u_sess->attr.attr_sql.cpu_operator_cost * estarraylen * half;
+        }
     } else if (IsA(node, Aggref) || IsA(node, WindowFunc)) {
         /*
          * Aggref and WindowFunc nodes are (and should be) treated like Vars,

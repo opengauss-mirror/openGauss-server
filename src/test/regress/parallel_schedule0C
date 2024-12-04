@@ -192,7 +192,7 @@ test: user_host_test
 
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
-#keep func
+test: hw_expression
 test: keep_dense_rank
 # to_number func
 test: to_number_default

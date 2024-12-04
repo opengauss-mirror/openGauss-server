@@ -367,6 +367,7 @@ test: hw_partition_cluster1_0 hw_partition_cluster1_2
 test: hw_partition_lock
 test: hw_partition_llt
 test: hw_expression_alias
+test: hw_expression
 test: hw_analyze_percent hw_analyze_percent_1 hw_analyze_percent_2
 
 # test dbms_job

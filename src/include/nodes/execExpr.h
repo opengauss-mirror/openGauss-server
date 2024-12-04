@@ -214,6 +214,7 @@ typedef enum ExprEvalOp
 	/* evaluate assorted special-purpose expression types */
 	EEOP_CONVERT_ROWTYPE,
 	EEOP_SCALARARRAYOP,
+	EEOP_HASHED_SCALARARRAYOP,
 	EEOP_XMLEXPR,
 	EEOP_AGGREF,
 	EEOP_GROUPING_FUNC,
@@ -568,6 +569,16 @@ typedef struct ExprEvalStep
 			PGFunction	fn_addr;	/* actual call address */
 		}			scalararrayop;
 
+        /* for EEOP_HASHED_SCALARARRAYOP */
+        struct {
+            bool has_nulls;
+            bool inclause; /* true for IN and false for NOT IN */
+            struct ScalarArrayOpExprHashTable *elements_tab;
+            FmgrInfo *finfo;              /* function's lookup data */
+            FunctionCallInfo fcinfo_data; /* arguments etc */
+            ScalarArrayOpExpr *saop;
+        } hashedscalararrayop;
+
 		/* for EEOP_XMLEXPR */
 		struct
 		{
@@ -768,6 +779,8 @@ extern void ExecEvalArrayRefAssign(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalConvertRowtype(ExprState *state, ExprEvalStep *op,
 					   ExprContext *econtext);
 extern void ExecEvalScalarArrayOp(ExprState *state, ExprEvalStep *op);
+extern void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op,
+										ExprContext *econtext);
 extern void ExecEvalConstraintNotNull(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalConstraintCheck(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalXmlExpr(ExprState *state, ExprEvalStep *op);

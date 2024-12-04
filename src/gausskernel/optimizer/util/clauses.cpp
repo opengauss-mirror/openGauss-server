@@ -113,6 +113,7 @@ static bool contain_leaky_functions_walker(Node* node, void* context);
 static Relids find_nonnullable_rels_walker(Node* node, bool top_level);
 static List* find_nonnullable_vars_walker(Node* node, bool top_level);
 static bool is_strict_saop(ScalarArrayOpExpr* expr, bool falseOK);
+static bool convert_saop_to_hashed_saop_walker(Node *node);
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context);
 static List* simplify_or_arguments(
     List* args, eval_const_expressions_context* context, bool* haveNull, bool* forceTrue);
@@ -2414,6 +2415,102 @@ Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo b
     context.estimate = true; /* unsafe transformations OK */
 
     return eval_const_expressions_mutator(node, &context);
+}
+
+/*--------------------
+ * convert_saop_to_hashed_saop
+ *
+ * Recursively search 'node' for ScalarArrayOpExprs and fill in the hash
+ * function for any ScalarArrayOpExpr that looks like it would be useful to
+ * evaluate using a hash table rather than a linear search.
+ *
+ * We'll use a hash table if all of the following conditions are met:
+ * 1. The 2nd argument of the array contain only Consts.
+ * 2. useOr is true or there is a valid negator operator for the
+ *	  ScalarArrayOpExpr's opno.
+ * 3. There's valid hash function for both left and righthand operands and
+ *	  these hash functions are the same.
+ * 4. If the array contains enough elements for us to consider it to be
+ *	  worthwhile using a hash table rather than a linear search.
+ */
+void convert_saop_to_hashed_saop(Node *node)
+{
+    (void)convert_saop_to_hashed_saop_walker(node);
+}
+
+static bool convert_saop_to_hashed_saop_walker(Node *node)
+{
+    constexpr int minArraySizeForHashedSaop = 9;
+
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, ScalarArrayOpExpr)) {
+        ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *)node;
+        Expr *arrayarg = (Expr *)lsecond(saop->args);
+        Oid lefthashfunc;
+        Oid righthashfunc;
+
+        if (arrayarg && IsA(arrayarg, Const) && !((Const *)arrayarg)->constisnull) {
+            if (saop->useOr) {
+                Oid hashfunc = get_op_hash_functions(saop->opno, &lefthashfunc, &righthashfunc);
+                if (hashfunc && lefthashfunc == righthashfunc) {
+                    Datum arrdatum = ((Const *)arrayarg)->constvalue;
+                    ArrayType *arr = (ArrayType *)DatumGetPointer(arrdatum);
+                    int nitems;
+
+                    /*
+                     * Only fill in the hash functions if the array looks
+                     * large enough for it to be worth hashing instead of
+                     * doing a linear search.
+                     */
+                    nitems = ArrayGetNItems(ARR_NDIM(arr), ARR_DIMS(arr));
+                    if (nitems >= minArraySizeForHashedSaop) {
+                        /* Looks good. Fill in the hash functions */
+                        saop->hashfuncid = lefthashfunc;
+                        return true;
+                    }
+                    return false;
+                }
+            } else {
+                /* !saop->useOr */
+                Oid negator = get_negator(saop->opno);
+                /*
+                 * Check if this is a NOT IN using an operator whose negator
+                 * is hashable.  If so we can still build a hash table and
+                 * just ensure the lookup items are not in the hash table.
+                 */
+                if (OidIsValid(negator) && get_op_hash_functions(negator, &lefthashfunc, &righthashfunc) &&
+                    lefthashfunc == righthashfunc) {
+                    Datum arrdatum = ((Const *)arrayarg)->constvalue;
+                    ArrayType *arr = (ArrayType *)DatumGetPointer(arrdatum);
+                    int nitems;
+
+                    /*
+                     * Only fill in the hash functions if the array looks
+                     * large enough for it to be worth hashing instead of
+                     * doing a linear search.
+                     */
+                    nitems = ArrayGetNItems(ARR_NDIM(arr), ARR_DIMS(arr));
+                    if (nitems >= minArraySizeForHashedSaop) {
+                        /* Looks good. Fill in the hash functions */
+                        saop->hashfuncid = lefthashfunc;
+
+                        /*
+                         * Also set the negfuncid.  The executor will need
+                         * that to perform hashtable lookups.
+                         */
+                        saop->negfuncid = get_opcode(negator);
+                        return true;
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())convert_saop_to_hashed_saop_walker, (void *)NULL);
 }
 
 /* --------------------
