@@ -8031,6 +8031,25 @@ static void SeparateNonAutoIncrementIndex(TableInfo* tbinfo, ConstraintInfo* con
     }
 }
 
+
+char* TrimEndWithsStr(char* input, const char* endwith)
+{
+    if (input == NULL || endwith == NULL) {
+        return input;
+    }
+    int inputLen = strlen(input);
+    int endwithLen = strlen(endwith);
+
+    if (inputLen < endwithLen) {
+        return input;
+    }
+
+    if (strcmp(input + inputLen - endwithLen, endwith) == 0) {
+        input[inputLen - endwithLen] = '\0';
+    }
+    return input;
+}
+
 /*
  * getIndexes
  *	  get information about every index on a dumpable table
@@ -8355,7 +8374,12 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
                 constrinfo[j].contable = tbinfo;
                 constrinfo[j].condomain = NULL;
                 constrinfo[j].contype = contype;
-                constrinfo[j].condef = gs_strdup(PQgetvalue(res, j, i_condef));
+                if (contype == 'u') {
+                    /* unique cannot be used with not valid */
+                    constrinfo[j].condef = TrimEndWithsStr(gs_strdup(PQgetvalue(res, j, i_condef)), " NOT VALID"); 
+                } else {
+                    constrinfo[j].condef = gs_strdup(PQgetvalue(res, j, i_condef));
+                }
                 constrinfo[j].confrelid = InvalidOid;
                 constrinfo[j].conindex = indxinfo[j].dobj.dumpId;
                 constrinfo[j].condeferrable = *(PQgetvalue(res, j, i_condeferrable)) == 't';
