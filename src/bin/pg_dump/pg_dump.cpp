@@ -6483,6 +6483,85 @@ AggInfo* getAggregates(Archive* fout, int* numAggs)
     return agginfo;
 }
 
+
+Oid* getTriggerFuncOid(Archive* fout, int* triggerFuncOidNum, SimpleOidList tableOid)
+{
+    Oid* triggerFuncOid = NULL;
+    PQExpBuffer query = createPQExpBuffer();
+    SimpleOidListCell* cell = NULL;
+
+    /* Make sure we are in proper schema */
+    selectSourceSchema(fout, "pg_catalog");
+        
+    PGresult* res = NULL;
+    appendPQExpBuffer(query, "select tgfoid FROM pg_catalog.pg_trigger");
+
+
+    if (tableOid.head != NULL) {
+        appendPQExpBuffer(query, " where tgrelid in (");
+        for (cell = tableOid.head; cell != NULL; cell = cell->next) {
+            appendPQExpBuffer(query, "%u", cell->val);
+            if (cell->next != NULL) {
+                appendPQExpBuffer(query, ", ");
+            }
+        }
+        appendPQExpBuffer(query, ")");
+    }
+
+    appendPQExpBuffer(query, " order by tgfoid");
+    
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    int ntups = 0;
+    int j = 0;
+    int i_oid = 0;
+    
+    ntups = PQntuples(res);
+    *triggerFuncOidNum = ntups;
+    if (0 == ntups) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return NULL;
+    }
+
+    triggerFuncOid = (Oid*)pg_malloc(ntups * sizeof(Oid));
+    i_oid = PQfnumber(res, "tgfoid");
+    for (j = 0; j < ntups; j++) {
+        triggerFuncOid[j] = atooid(PQgetvalue(res, j, i_oid));
+    }
+
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return triggerFuncOid;
+}
+
+bool checkOidExist(Oid* src, int oidNumber, Oid target)
+{
+    int low;
+    int high;
+
+    if (oidNumber <= 0) {
+        return false;
+    }
+    low = 0;
+    high = oidNumber - 1;
+    while (low <= high) {
+        Oid middle;
+        int difference;
+
+        middle = low + (high - low) / 2;
+        difference = oidcmp(src[middle], target);
+        if (difference == 0)
+            return true;
+        else if (difference < 0)
+            low = middle + 1;
+        else
+            high = middle - 1;
+    }
+    return false;
+}
+
+
+
 /*
  * getFuncs:
  *	  read all the user-defined functions in the system catalogs and
@@ -6508,6 +6587,12 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     int i_proargtypes;
     int i_prorettype;
     int i_proacl;
+    Oid* triggerFuncOid = NULL;
+    int triggerFuncOidNum = 0;
+
+    if (outputClean && table_include_oids.head != NULL) {
+        triggerFuncOid = getTriggerFuncOid(fout, &triggerFuncOidNum, table_include_oids);
+    }
 
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
@@ -6633,13 +6718,21 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
             parseOidArray(PQgetvalue(res, i, i_proargtypes), finfo[i].argtypes, finfo[i].nargs);
         }
 
-        /* Decide whether we want to dump it */
-        selectDumpableFuncs(&(finfo[i]), fout);
+        if (triggerFuncOid != NULL && checkOidExist(triggerFuncOid, triggerFuncOidNum, finfo[i].dobj.catId.oid)) {
+            finfo[i].dobj.dump = true;
+        } else {
+            /* Decide whether we want to dump it */
+            selectDumpableFuncs(&(finfo[i]), fout);
+        }
     }
 
     PQclear(res);
 
     destroyPQExpBuffer(query);
+
+    if (triggerFuncOid != NULL) {
+        free(triggerFuncOid);
+    }
 
     return finfo;
 }
@@ -11322,7 +11415,7 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
             break;
         case DO_TRIGGER: {
             /* -t condition will not dump trigger without trigger function. */
-            if (gTableCount == 0)
+            if (gTableCount == 0 || outputClean)
                 dumpTrigger(fout, (TriggerInfo*)dobj);
             break;
         }

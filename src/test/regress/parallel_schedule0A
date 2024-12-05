@@ -63,7 +63,7 @@ test: set_transaction_test
 test: select_into_user_defined_variables
 test: select_into_file
 
-test: gs_dump_package trigger_dump gs_dump_synonym dump_trigger_definer gs_dump_clean
+test: gs_dump_package trigger_dump gs_dump_synonym dump_trigger_definer dump_with_trigger gs_dump_clean
 test: out_param_func out_param_func_overload
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
