@@ -134,4 +134,7 @@ extern Datum generate_series_step_int8(PG_FUNCTION_ARGS);
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/varchar.inl"
 #endif
 
+template <bool is_unsigned>
+extern int64 PgStrToIntInternal(const char* s, bool errOk, uint64 max, int64 min, const char* typname);
+
 #endif /* INT8_H */

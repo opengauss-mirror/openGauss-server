@@ -1,0 +1,79 @@
+set behavior_compat_options ='accept_float_str_as_int';
+create table test_accept_float_str_as_int(c2 int2, c3 int, c4 int8);
+insert into test_accept_float_str_as_int values ('1.49', '1.49', '1.59');
+insert into test_accept_float_str_as_int values ('1.50', '1.50', '1.50');
+insert into test_accept_float_str_as_int values ('-1.59', '-1.49', '-1.49');
+insert into test_accept_float_str_as_int values ('-1.50', '-1.50', '-1.50');
+select * from test_accept_float_str_as_int order by 1;
+ c2 | c3 | c4 
+----+----+----
+ -2 | -1 | -1
+ -2 | -2 | -2
+  1 |  1 |  2
+  2 |  2 |  2
+(4 rows)
+
+select * from test_accept_float_str_as_int where c2 = '1.5';
+ c2 | c3 | c4 
+----+----+----
+(0 rows)
+
+select * from test_accept_float_str_as_int where c2 = '1.5'::varchar;
+ c2 | c3 | c4 
+----+----+----
+(0 rows)
+
+select * from test_accept_float_str_as_int where c2 = '1.5'::text;
+ c2 | c3 | c4 
+----+----+----
+(0 rows)
+
+select * from test_accept_float_str_as_int where c2 = '1.0';
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+select * from test_accept_float_str_as_int where c2 = '1.0'::varchar;
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+select * from test_accept_float_str_as_int where c2 = '1.0'::text;
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+select * from test_accept_float_str_as_int where c2 = '1';
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+select * from test_accept_float_str_as_int where c2 = '1'::varchar;
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+select * from test_accept_float_str_as_int where c2 = '1'::text;
+ c2 | c3 | c4 
+----+----+----
+  1 |  1 |  2
+(1 row)
+
+create table test_accept_float_str_as_int2(c1 int1);
+insert into test_accept_float_str_as_int2 values ('1.49');
+insert into test_accept_float_str_as_int2 values ('1.50');
+select * from test_accept_float_str_as_int2;
+ c1 
+----
+ 1
+ 2
+(2 rows)
+
+drop table test_accept_float_str_as_int;
+drop table test_accept_float_str_as_int2;
+reset behavior_compat_options;

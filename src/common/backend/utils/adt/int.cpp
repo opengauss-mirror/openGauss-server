@@ -56,6 +56,131 @@ typedef struct {
  *	 USER I/O ROUTINES														 *
  *****************************************************************************/
 
+static void CheckSpaceAndDotInternal(char& digitAfterDot, const char** ptr, bool checkDecimal = true,
+    int endChar = '\0')
+{
+    if (checkDecimal && **ptr == '.') {
+        (*ptr)++;
+        while (**ptr != '\0' && **ptr != endChar && isdigit(**ptr)) {
+            if (digitAfterDot == '\0') {
+                digitAfterDot = **ptr;
+            }
+            (*ptr)++;
+        }
+    }
+
+    while (**ptr != '\0' && **ptr != endChar) {
+        if (!isspace(**ptr)) {
+            return;
+        }
+        (*ptr)++;
+    }
+}
+
+template <bool is_unsigned>
+int64 PgStrToIntInternal(const char* s, bool errOk, uint64 max, int64 min, const char* typname)
+{
+    const char* ptr = s;
+    int128 tmp = 0;
+    bool neg = false;
+    char digitAfterDot = '\0';
+    int errlevel = errOk ? WARNING : ERROR;
+    const int baseDecimal = 10;
+
+    if (*s == 0) {
+        goto invalid_syntax;
+    }
+
+    /* skip leading spaces */
+    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    /* handle sign */
+    if (*ptr == '-') {
+        ptr++;
+        neg = true;
+    } else if (*ptr == '+')
+        ptr++;
+
+    /* require at least one digit */
+    if (unlikely(!isdigit((unsigned char)*ptr))) {
+        goto invalid_syntax;
+    }
+
+    /* process digits */
+    while (*ptr && isdigit((unsigned char)*ptr)) {
+        int8 digit = (*ptr++ - '0');
+        if (is_unsigned) {
+            tmp = tmp * baseDecimal + digit;
+            if (tmp > max) {
+                goto out_of_range;
+            }
+        } else {
+            tmp = tmp * baseDecimal - digit;
+            if (tmp < min || tmp > max) {
+                goto out_of_range;
+            }
+        }
+    }
+
+    /* allow trailing whitespace, but not other trailing chars */
+    CheckSpaceAndDotInternal(digitAfterDot, &ptr);
+
+    /* could fail if input is most negative number */
+    if (is_unsigned) {
+        if (neg && tmp > min) {
+            goto out_of_range;
+        }
+    } else if (!neg) {
+        if (unlikely(tmp == min)) {
+            goto out_of_range;
+        }
+        tmp = -tmp;
+    }
+
+    if ((isdigit(digitAfterDot)) && digitAfterDot >= '5') {
+        if (is_unsigned) {
+            if (tmp == max) {
+                ereport(errlevel, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s", s, typname)));
+            }
+            if (!neg && tmp < max) {
+                tmp++;
+            }
+        } else {
+            if (tmp == max || tmp == min) {
+                ereport(errlevel,
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("value \"%s\" is out of range for type %s", s, typname)));
+            }
+            if (!neg && tmp < max) {
+                tmp++;
+            } else if (neg && tmp > min) {
+                tmp--;
+            }
+        }
+    }
+
+    /* we check *ptr at last */
+    if (unlikely(*ptr != '\0')) {
+        goto invalid_syntax;
+    }
+
+    return (int64)tmp;
+
+out_of_range:
+    ereport(errlevel,
+        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("value \"%s\" is out of range for type %s", s, typname)));
+    return neg ? min : (int64)max;
+
+invalid_syntax:
+    ereport(errlevel,
+        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for %s: \"%s\"", typname, s)));
+    return (int64)tmp;
+}
+
 /*
  *		int2in			- converts "num" to short
  */
@@ -63,7 +188,12 @@ Datum int2in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INT16(pg_strtoint16(num, fcinfo->can_ignore));
+    if (DB_IS_CMPT(A_FORMAT) && ACCEPT_FLOAT_STR_AS_INT) {
+        PG_RETURN_INT16(PgStrToIntInternal<false>(num, fcinfo->can_ignore,
+            PG_INT16_MAX, PG_INT16_MIN, "smallint"));
+    } else {
+        PG_RETURN_INT16(pg_strtoint16(num, fcinfo->can_ignore));
+    }
 }
 
 /*
@@ -303,7 +433,12 @@ Datum int4in(PG_FUNCTION_ARGS)
         fmtStr = u_sess->parser_cxt.fmt_str;
     }
     if (!fmtStr) {
-        PG_RETURN_INT32(pg_strtoint32(num, fcinfo->can_ignore));
+        if (DB_IS_CMPT(A_FORMAT) && ACCEPT_FLOAT_STR_AS_INT) {
+            PG_RETURN_INT32(PgStrToIntInternal<false>(num, fcinfo->can_ignore,
+                PG_INT32_MAX, PG_INT32_MIN, "integer"));
+        } else {
+            PG_RETURN_INT32(pg_strtoint32(num, fcinfo->can_ignore));
+        }
     }
 
     Datum result;
@@ -1242,7 +1377,12 @@ Datum int1in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0', fcinfo->can_ignore));
+    if (DB_IS_CMPT(A_FORMAT) && ACCEPT_FLOAT_STR_AS_INT) {
+        PG_RETURN_UINT8(PgStrToIntInternal<true>(num, fcinfo->can_ignore,
+            PG_UINT8_MAX, 0, "tinyint"));
+    } else {
+        PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0', fcinfo->can_ignore));
+    }
 }
 
 // int1out - converts uint8 to "num"

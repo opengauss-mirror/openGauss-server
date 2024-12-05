@@ -373,6 +373,12 @@ bool IsIntType(Oid typeoid)
     }
 }
 
+bool IsTextType(Oid attr_type)
+{
+    return (attr_type == UNKNOWNOID) || IsCharType(attr_type);
+}
+
+
 /* oper() -- search for a binary operator
  * Given operator name, types of arg1 and arg2, return oper struct.
  *
@@ -398,6 +404,12 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
 
     if (inNumeric && u_sess->attr.attr_sql.convert_string_to_digit &&
         ((IsIntType(ltypeId) && IsCharType(rtypeId)) || (IsIntType(rtypeId) && IsCharType(ltypeId)))) {
+        ltypeId = NUMERICOID;
+        rtypeId = NUMERICOID;
+    }
+
+    if (DB_IS_CMPT(A_FORMAT) && ACCEPT_FLOAT_STR_AS_INT &&
+        ((IsIntType(ltypeId) && IsTextType(rtypeId)) || (IsIntType(rtypeId) && IsTextType(ltypeId)))) {
         ltypeId = NUMERICOID;
         rtypeId = NUMERICOID;
     }
