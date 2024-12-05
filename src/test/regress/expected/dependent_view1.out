@@ -1,0 +1,1375 @@
+create schema test_view_table_depend;
+set current_schema to 'test_view_table_depend';
+create table t1 (c1 int);
+create view v1 as select * from t1;
+drop table t1;
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+create table t1 (c1 int);
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+select valid = true from pg_class join pg_object on oid = object_oid where relname = 'v1';
+ ?column? 
+----------
+ t
+(1 row)
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+create table t1 (c1 int);
+create view v1 as select * from t1;
+drop table t1;
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t2 (c1 int);
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+drop table t2;
+create table t1 (c2 int);
+select * from v1;
+ c1 
+----
+(0 rows)
+
+drop table t1;
+create table t1 (c1 int);
+insert into t1 values(1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+drop table t1;
+create table t1 (c1 varchar);
+insert into t1 values('a');
+select * from v1;
+ c1 
+----
+ a
+(1 row)
+
+\d v1;
+    View "test_view_table_depend.v1"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ c1     | character varying | 
+
+\d+ v1;
+                View "test_view_table_depend.v1"
+ Column |       Type        | Modifiers | Storage  | Description 
+--------+-------------------+-----------+----------+-------------
+ c1     | character varying |           | extended | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+create table t1 (c1 int);
+create view v1 as select * from t1;
+insert into t1 values(1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+drop table t1;
+create table t1 (c2 int, c3 int, c1 int);
+insert into t1 values(2, 3, 1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+create table t1 (c1 int, c2 int, c3 int);
+create view v1 as select * from t1;
+insert into t1 values(1, 2, 3);
+select * from v1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+ c2     | integer | 
+ c3     | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+ c2     | integer |           | plain   | 
+ c3     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+drop table t1;
+create table t1 (c2 int);
+insert into t1 values(2);
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+ c2     | integer | 
+ c3     | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+ c2     | integer |           | plain   | 
+ c3     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+drop view v1;
+drop table t1 cascade;
+create table t1 (c1 int);
+create view v1 as select * from t1;
+create view v2 as select * from v1;
+insert into t1 values(1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+select * from v2;
+ c1 
+----
+  1
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d v2;
+View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+\d+ v2;
+           View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM v1;
+
+drop table t1;
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d v2;
+View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+\d+ v2;
+WARNING:  View v2 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM v1;
+
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+select * from v2;
+ERROR:  The view v2 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t1 (c1 varchar);
+insert into t1 values('a');
+select * from v1;
+ c1 
+----
+ a
+(1 row)
+
+select * from v2;
+ c1 
+----
+ a
+(1 row)
+
+\d v1;
+    View "test_view_table_depend.v1"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ c1     | character varying | 
+
+\d v2;
+    View "test_view_table_depend.v2"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ c1     | character varying | 
+
+\d+ v1;
+                View "test_view_table_depend.v1"
+ Column |       Type        | Modifiers | Storage  | Description 
+--------+-------------------+-----------+----------+-------------
+ c1     | character varying |           | extended | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+\d+ v2;
+                View "test_view_table_depend.v2"
+ Column |       Type        | Modifiers | Storage  | Description 
+--------+-------------------+-----------+----------+-------------
+ c1     | character varying |           | extended | 
+View definition:
+ SELECT v1.c1
+   FROM v1;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v2
+create table t1 (c1 int);
+create view v1 as select c1 from t1;
+create view v2 as select c1 + 1 from v1;
+insert into t1 values(1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+select * from v2;
+ ?column? 
+----------
+        2
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d v2;
+View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+\d+ v2;
+            View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT v1.c1 + 1 AS "?column?"
+   FROM v1;
+
+drop table t1;
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d v2;
+View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+\d+ v2;
+WARNING:  View v2 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+            View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT v1.c1 + 1 AS "?column?"
+   FROM v1;
+
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+select * from v2;
+ERROR:  The view v2 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t1 (c1 int);
+insert into t1 values(1);
+select * from v1;
+ c1 
+----
+  1
+(1 row)
+
+select * from v2;
+ ?column? 
+----------
+        2
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+
+\d v2;
+View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ c1     | integer |           | plain   | 
+View definition:
+ SELECT t1.c1
+   FROM t1;
+
+\d+ v2;
+            View "test_view_table_depend.v2"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT v1.c1 + 1 AS "?column?"
+   FROM v1;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v2
+create table t1 (c1 int);
+create view v1 as select c1 + 1 from t1;
+insert into t1 values(1);
+select * from v1;
+ ?column? 
+----------
+        2
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + 1 AS "?column?"
+   FROM t1;
+
+drop table t1;
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + 1 AS "?column?"
+   FROM t1;
+
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t1 (c1 int);
+insert into t1 values(1);
+select * from v1;
+ ?column? 
+----------
+        2
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + 1 AS "?column?"
+   FROM t1;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+create table t1 (c1 int);
+create table t2 (c2 int);
+create view v1 as select c1 + c2 from t1, t2;
+insert into t1 values(1);
+insert into t2 values(2);
+select * from v1;
+ ?column? 
+----------
+        3
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + t2.c2 AS "?column?"
+   FROM t1, t2;
+
+drop table t1;
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + t2.c2 AS "?column?"
+   FROM t1, t2;
+
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t1 (c1 int);
+insert into t1 values(1);
+select * from v1;
+ ?column? 
+----------
+        3
+(1 row)
+
+\d v1;
+View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers 
+----------+---------+-----------
+ ?column? | integer | 
+
+\d+ v1;
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT t1.c1 + t2.c2 AS "?column?"
+   FROM t1, t2;
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+drop table t2 cascade;
+-- partition table
+create table partition_t1 (a int, b int)
+partition by range(a)
+(
+partition p1 values less than (100),
+partition p2 values less than (200),
+partition p3 values less than (MAXVALUE)
+);
+insert into partition_t1 values(99,1),(180,2),(300,4);
+create view partition_v1 as select * from partition_t1 partition(p1);
+select * from partition_v1;
+ a  | b 
+----+---
+ 99 | 1
+(1 row)
+
+\d+ partition_v1
+      View "test_view_table_depend.partition_v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p1);
+
+drop table partition_t1;
+select * from partition_v1;
+ERROR:  The view partition_v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v1
+WARNING:  View partition_v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+      View "test_view_table_depend.partition_v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p1);
+
+create table partition_t1 (a int, b int)
+partition by range(a)
+(
+partition p1 values less than (100),
+partition p2 values less than (200),
+partition p3 values less than (MAXVALUE)
+);
+select * from partition_v1;
+ a | b 
+---+---
+(0 rows)
+
+\d+ partition_v1
+      View "test_view_table_depend.partition_v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+View definition:
+ SELECT partition_t1.a, partition_t1.b
+   FROM partition_t1 PARTITION(p1);
+
+-- less partition and different partition type
+drop table partition_t1;
+create table partition_t1 (a char(20), b char(20))
+partition by list(a)
+(
+partition p1 values ('100'),
+partition p2 values ('200')
+);
+insert into partition_t1 values('100','1'),('200','2'),('200','3');
+select * from partition_v1;
+          a           |          b           
+----------------------+----------------------
+ 100                  | 1                   
+(1 row)
+
+\d+ partition_v1
+         View "test_view_table_depend.partition_v1"
+ Column |     Type      | Modifiers | Storage  | Description 
+--------+---------------+-----------+----------+-------------
+ a      | character(20) |           | extended | 
+ b      | character(20) |           | extended | 
+View definition:
+ SELECT partition_t1.a, partition_t1.b
+   FROM partition_t1 PARTITION(p1);
+
+drop table partition_t1 cascade;
+NOTICE:  drop cascades to view partition_v1
+-- secondary partition
+CREATE TABLE partition_t1
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201901' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into partition_t1 values('201901', '1', '1', 1);
+insert into partition_t1 values('201901', '2', '1', 1);
+insert into partition_t1 values('201902', '1', '1', 1);
+insert into partition_t1 values('201902', '2', '1', 1);
+create view partition_v1 as select * from partition_t1 partition (p_201901);
+create view partition_v2 as select * from partition_t1 partition (p_201902);
+create view partition_v3 as select * from partition_t1 partition for ('201901');
+create view partition_v4 as select * from partition_t1 subpartition (p_201902_a);
+create view partition_v5 as select * from partition_t1 subpartition for ('201902', '2');
+select * from partition_v1;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v1
+               View "test_view_table_depend.partition_v1"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p_201901);
+
+select * from partition_v2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v2
+               View "test_view_table_depend.partition_v2"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p_201902);
+
+select * from partition_v3;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v3
+               View "test_view_table_depend.partition_v3"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION FOR('201901'::character varying(30));
+
+select * from partition_v4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+(1 row)
+
+\d+ partition_v4
+               View "test_view_table_depend.partition_v4"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 SUBPARTITION(p_201902_a);
+
+select * from partition_v5;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+\d+ partition_v5
+               View "test_view_table_depend.partition_v5"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 SUBPARTITION FOR('201902'::character varying(30) ,'2'::character varying(30));
+
+drop table partition_t1;
+select * from partition_v1;
+ERROR:  The view partition_v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v1
+WARNING:  View partition_v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v1"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p_201901);
+
+select * from partition_v2;
+ERROR:  The view partition_v2 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v2
+WARNING:  View partition_v2 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v2"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION(p_201902);
+
+select * from partition_v3;
+ERROR:  The view partition_v3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v3
+WARNING:  View partition_v3 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v3"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 PARTITION FOR('201901'::character varying(30));
+
+select * from partition_v4;
+ERROR:  The view partition_v4 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v4
+WARNING:  View partition_v4 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v4"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 SUBPARTITION(p_201902_a);
+
+select * from partition_v5;
+ERROR:  The view partition_v5 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v5
+WARNING:  View partition_v5 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v5"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT  *
+   FROM partition_t1 SUBPARTITION FOR('201902'::character varying(30) ,'2'::character varying(30));
+
+CREATE TABLE partition_t1
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201901' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into partition_t1 values('201901', '1', '1', 1);
+insert into partition_t1 values('201901', '2', '1', 1);
+insert into partition_t1 values('201902', '1', '1', 1);
+insert into partition_t1 values('201902', '2', '1', 1);
+select * from partition_v1;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v1
+               View "test_view_table_depend.partition_v1"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 PARTITION(p_201901);
+
+select * from partition_v2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v2
+               View "test_view_table_depend.partition_v2"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 PARTITION(p_201902);
+
+select * from partition_v3;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(2 rows)
+
+\d+ partition_v3
+               View "test_view_table_depend.partition_v3"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 PARTITION FOR('201901'::character varying(30));
+
+select * from partition_v4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+(1 row)
+
+\d+ partition_v4
+               View "test_view_table_depend.partition_v4"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 SUBPARTITION(p_201902_a);
+
+select * from partition_v5;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+\d+ partition_v5
+               View "test_view_table_depend.partition_v5"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 SUBPARTITION FOR('201902'::character varying(30) ,'2'::character varying(30));
+
+-- less subpartition and different partition type
+drop table partition_t1;
+CREATE TABLE partition_t1
+(
+    month_code int  NOT NULL ,
+    dept_code  int  NOT NULL ,
+    user_no    int  NOT NULL ,
+    sales_amt  varchar( 30 )
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN ( 2019 )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN ( 2 )
+  ),
+  PARTITION p_201902 VALUES LESS THAN ( 2020 )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN ( 3 )
+  )
+);
+insert into partition_t1 values(2018, 1, 1, 'a');
+insert into partition_t1 values(2019, 2, 1, 'b');
+select * from partition_v1;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+       2018 |         1 |       1 | a
+(1 row)
+
+\d+ partition_v1
+               View "test_view_table_depend.partition_v1"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | integer               |           | plain    | 
+ dept_code  | integer               |           | plain    | 
+ user_no    | integer               |           | plain    | 
+ sales_amt  | character varying(30) |           | extended | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 PARTITION(p_201901);
+
+select * from partition_v2;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+       2019 |         2 |       1 | b
+(1 row)
+
+\d+ partition_v2
+               View "test_view_table_depend.partition_v2"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | integer               |           | plain    | 
+ dept_code  | integer               |           | plain    | 
+ user_no    | integer               |           | plain    | 
+ sales_amt  | character varying(30) |           | extended | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 PARTITION(p_201902);
+
+select * from partition_v3;
+ERROR:  The view partition_v3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v3
+ERROR:  The view partition_v3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+CONTEXT:  referenced column: pg_get_viewdef
+select * from partition_v4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+       2019 |         2 |       1 | b
+(1 row)
+
+\d+ partition_v4
+               View "test_view_table_depend.partition_v4"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | integer               |           | plain    | 
+ dept_code  | integer               |           | plain    | 
+ user_no    | integer               |           | plain    | 
+ sales_amt  | character varying(30) |           | extended | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 SUBPARTITION(p_201902_a);
+
+select * from partition_v5;
+ERROR:  The view partition_v5 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ partition_v5
+WARNING:  View partition_v5 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+               View "test_view_table_depend.partition_v5"
+   Column   |         Type          | Modifiers | Storage  | Description 
+------------+-----------------------+-----------+----------+-------------
+ month_code | character varying(30) |           | extended | 
+ dept_code  | character varying(30) |           | extended | 
+ user_no    | character varying(30) |           | extended | 
+ sales_amt  | integer               |           | plain    | 
+View definition:
+ SELECT partition_t1.month_code, partition_t1.dept_code, partition_t1.user_no, 
+    partition_t1.sales_amt
+   FROM partition_t1 SUBPARTITION FOR('201902'::character varying(30) ,'2'::character varying(30));
+
+drop table partition_t1 cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to view partition_v1
+drop cascades to view partition_v2
+drop cascades to view partition_v4
+drop cascades to view partition_v5
+create table t1 (c1 int, c2 int);
+create view v1 as select * from t1;
+drop table t1;
+create table t1 (c2 int, c3 int, c4 int, c1 int);
+insert into t1 values (2, 3, 4, 1);
+select * from v1;
+ c1 | c2 
+----+----
+  1 |  2
+(1 row)
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+--test cte
+create table t1 (a int);
+create view v1 as with tmp as (select * from t1) select * from tmp;
+drop table t1;
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ v1
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ WITH tmp AS (
+         SELECT  *
+           FROM t1
+        )
+ SELECT  *
+   FROM tmp;
+
+create table t1 (a int);
+\d+ v1
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ WITH tmp AS (
+         SELECT  *
+           FROM t1
+        )
+ SELECT  *
+   FROM tmp;
+
+select * from v1;
+ a 
+---
+(0 rows)
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+-- test setop
+create table t1 (a int);
+create view v1 as select 1 union select a from t1;
+drop table t1;
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ v1
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+         SELECT 1 AS "?column?"
+UNION 
+         SELECT t1.a AS "?column?"
+           FROM t1;
+
+create table t1 (a int);
+\d+ v1
+            View "test_view_table_depend.v1"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+         SELECT 1 AS "?column?"
+UNION 
+         SELECT t1.a AS "?column?"
+           FROM t1;
+
+select * from v1;
+ ?column? 
+----------
+        1
+(1 row)
+
+drop table t1 cascade;
+NOTICE:  drop cascades to view v1
+-- test subquery
+create table t1 (a int);
+create table t2 (a int);
+insert into t1 values (1);
+insert into t2 values (1);
+create view v1 as select * from (select * from t1);
+create view v2 as select * from t1 where exists (select * from t1 inner join t2 on t1.a = t2.a);
+drop table t1;
+select * from v1;
+ERROR:  The view v1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ v1
+WARNING:  View v1 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM ( SELECT  *
+           FROM t1) __unnamed_subquery__;
+
+select * from v2;
+ERROR:  The view v2 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+\d+ v2
+WARNING:  View v2 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1
+  WHERE (EXISTS ( SELECT  *
+           FROM t1
+      JOIN t2 ON t1.a = t2.a));
+
+create table t1 (a int);
+insert into t1 values (1);
+\d+ v1
+           View "test_view_table_depend.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM ( SELECT  *
+           FROM t1) __unnamed_subquery__;
+
+select * from v1;
+ a 
+---
+ 1
+(1 row)
+
+\d+ v2
+           View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM t1
+  WHERE (EXISTS ( SELECT  *
+           FROM t1
+      JOIN t2 ON t1.a = t2.a));
+
+select * from v2;
+ a 
+---
+ 1
+(1 row)
+
+drop table t2;
+\d+ v2
+WARNING:  View v2 references invalid table(s), view(s) or column(s).
+CONTEXT:  referenced column: pg_get_viewdef
+           View "test_view_table_depend.v2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT t1.a
+   FROM t1
+  WHERE (EXISTS ( SELECT t1.a, t2.a
+           FROM t1
+      JOIN t2 ON t1.a = t2.a));
+
+select * from v2;
+ERROR:  The view v2 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+create table t2 (b int, a int);
+insert into t2 values (2, 1);
+select * from v2;
+ a 
+---
+ 1
+(1 row)
+
+drop view v1;
+drop view v2;
+drop table t1;
+drop table t2;
+drop schema test_view_table_depend cascade;
+NOTICE:  drop cascades to view partition_v3
+reset current_schema;

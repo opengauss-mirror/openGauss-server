@@ -904,6 +904,26 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
     add_exact_object_address_extra(object, &extra, targetObjects);
 }
 
+/* if type is belongs to invalid view, it should not be deleted */
+static bool shouldDeletePgTypeEntry(Oid typeOid, Oid viewOid)
+{
+    if (!OidIsValid(viewOid)) {
+        return true;
+    }
+    /* array case */
+    Oid searchOid = get_element_type(typeOid);
+    if (!OidIsValid(searchOid)) {
+        /* record case */
+        searchOid = typeOid;
+    }
+
+    if (get_typ_typrelid(searchOid) == viewOid) {
+        return false;
+    }
+
+    return true;
+}
+
 /*
  * reportDependentObjects - report about dependencies, and fail if RESTRICT
  *
@@ -955,11 +975,10 @@ void reportDependentObjects(
      * In restrict mode, we check targetObjects, remove object entries related to views from targetObjects,
      * and ensure that no errors are reported due to deleting table fields that have view references.
      */
-    if (behavior == DROP_RESTRICT &&
-        ((origObject != NULL && origObject->objectSubId != 0) || u_sess->attr.attr_sql.dolphin)) {
+    if (behavior == DROP_RESTRICT && (origObject == NULL || getObjectClass(origObject) == OCLASS_CLASS)) {
         ObjectAddresses* newTargetObjects = new_object_addresses();
         const ObjectAddress* originalObj = NULL;
-        const int typeOidOffset = 2;
+        Oid viewOid = InvalidOid;
         for (i = targetObjects->numrefs - 1; i >= 0; i--) {
             const ObjectAddress* obj = &targetObjects->refs[i];
             const ObjectAddressExtra* extra = &targetObjects->extras[i];
@@ -972,16 +991,16 @@ void reportDependentObjects(
             if (objClass == OCLASS_CLASS && obj == originalObj) {
                 add_exact_object_address_extra(obj, extra, newTargetObjects);
             } else if (objClass == OCLASS_CLASS && (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW)) {
+                viewOid = obj->objectId;
                 SetPgObjectValid(obj->objectId,
                                  relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW, false);
-            } else if (objClass == OCLASS_TYPE && originalObj != NULL &&
-                       ((originalObj->objectId + 1) == obj->objectId ||
-                       (originalObj->objectId + typeOidOffset) == obj->objectId)) {
-                // delete pg_type entry
-                add_exact_object_address_extra(obj, extra, newTargetObjects);
+            } else if (objClass == OCLASS_TYPE && originalObj != NULL) {
+                if (shouldDeletePgTypeEntry(obj->objectId, viewOid)) {
+                    // delete pg_type entry
+                    add_exact_object_address_extra(obj, extra, newTargetObjects);
+                }
             } else if (objClass != OCLASS_REWRITE ||
-                        (u_sess->attr.attr_sql.dolphin &&
-                            originalObj != NULL && extra->dependee.objectId == originalObj->objectId)) {
+                       (originalObj != NULL && extra->dependee.objectId == originalObj->objectId)) {
                 // delete constraint and so on
                 add_exact_object_address_extra(obj, extra, newTargetObjects);
             }
