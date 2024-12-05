@@ -1,6 +1,8 @@
 reset search_path;
 create extension if not exists gms_utility;
 
+set behavior_compat_options="bind_procedure_searchpath";
+
 -- start test db_version
 declare
     version varchar2(50);
@@ -618,6 +620,22 @@ end;
 declare
 	canon_name varchar2(100);
 begin
+	gms_utility.canonicalize('''''', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('"''''"', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+
+declare
+	canon_name varchar2(100);
+begin
 	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end; -- error
@@ -1205,499 +1223,95 @@ drop schema test_utility_compile cascade;
 create schema test_utility_tokenize;
 set search_path to test_utility_tokenize;
 
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
+create or replace procedure test_name_tokenize(name in varchar2)
+as
+  a varchar2(100);
+  b varchar2(100);
+  c varchar2(100);
+  dblink varchar2(100);
+  nextpos int;
 begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+  gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+  raise info 'a: [%], b: [%], c: [%], dblink: [%], nextpos: %', a, b, c, dblink, nextpos;
 end;
 /
 
--- test empty character
-declare
-    name varchar2(50) := NULL;
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := '';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := '""';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := '  .  ';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := '"  .  "';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.   lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer."   lokppe.vuumee"@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy');
+
+call test_name_tokenize(NULL); -- error
+call test_name_tokenize(''); -- error
+call test_name_tokenize('""'); -- error
+call test_name_tokenize('  .  '); -- error
+call test_name_tokenize('"  .  "');
+call test_name_tokenize('peer.   lokppe.vuumee@ookeyy');
+call test_name_tokenize('peer."   lokppe.vuumee"@ookeyy');
+call test_name_tokenize('sco  ot');  -- SCO 5
+call test_name_tokenize('"sco  ot"');
+call test_name_tokenize('sco  ot.foook'); -- SCO 5
+call test_name_tokenize('"sco  ot".fook');
+call test_name_tokenize('"sco  ot"   .fook');
+call test_name_tokenize('"sco  ot"   abcd.fook'); -- sco  ot 12
 
 -- test support special char
-declare
-    name varchar2(50) := 'peer._lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-declare
-    name varchar2(50) := 'peer.lokp_pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.$lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-declare
-    name varchar2(50) := 'peer.lokp$pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.lokp233pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.233lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = , c = , dblink = , nextpos = 4
-/
-declare
-    name varchar2(50) := 'peer.-lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer."-lokppe".vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.lokp-pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
-/
-declare
-    name varchar2(50) := 'peer.lokp=pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
-/
-declare
-    name varchar2(50) := 'peer.=lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokp`pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokp~pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokp%pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer._lokppe.vuumee@ookeyy'); -- ok for og, error for A
+call test_name_tokenize('peer.lokp_pe.vuumee@ookeyy');
+call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- ok for og, error for A
+call test_name_tokenize('peer.lokp$pe.vuumee@ookeyy');
+call test_name_tokenize('peer.lokp233pe.vuumee@ookeyy');
+call test_name_tokenize('peer.233lokppe.vuumee@ookeyy');
+call test_name_tokenize('peer.-lokppe.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer."-lokppe".vuumee@ookeyy');
+call test_name_tokenize('peer.lokp-pe.vuumee@ookeyy'); -- 9
+call test_name_tokenize('peer.lokp=pe.vuumee@ookeyy'); -- 9
+call test_name_tokenize('peer.=lokppe.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer.lokp`pe.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer.lokp~pe.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer.lokp%pe.vuumee@ookeyy'); -- error
+call test_name_tokenize('123_abc'); -- error
+call test_name_tokenize('"123_abc"');
+call test_name_tokenize('123'); -- error
+call test_name_tokenize('"123"');
+call test_name_tokenize(''''''); -- error
+call test_name_tokenize('"''''"');
+call test_name_tokenize(''''); -- error
+call test_name_tokenize('"''"'); 
+call test_name_tokenize('peer,lokppe,vuumee@ookeyy'); 
+call test_name_tokenize('peer.lokppe,vuumee@ookeyy');
 
 -- test keyword
-declare
-    name varchar2(50) := 'peer.table.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.table.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer."table".vuumee@ookeyy');
+call test_name_tokenize('peer.column.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer."column".vuumee@ookeyy');
 
 -- test @
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@_ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@"_ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@$ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@"$ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@123ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy.zk';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := '@vuumee';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ook=eyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOK, nextpos = 22
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@=ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ook%eyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.lokppe.vuumee@'); -- error
+call test_name_tokenize('peer.lokppe.vuumee@_ookeyy'); -- ok for og, error for A
+call test_name_tokenize('peer.lokppe.vuumee@"_ookeyy"');
+call test_name_tokenize('peer.lokppe.vuumee@$ookeyy');
+call test_name_tokenize('peer.lokppe.vuumee@"$ookeyy"');
+call test_name_tokenize('peer.lokppe.vuumee@123ookeyy'); -- error
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy.zk');
+call test_name_tokenize('@vuumee'); -- error
+call test_name_tokenize('peer.lokppe.vuumee@ook=eyy');
+call test_name_tokenize('peer.lokppe.vuumee@=ookeyy'); -- error
+call test_name_tokenize('peer.lokppe.vuumee@ook eyy');
+call test_name_tokenize('peer.lokppe.vuumee@ook%eyy'); -- error
+call test_name_tokenize('"scott@db1"');
+call test_name_tokenize('"scott.@db1"');
+call test_name_tokenize('peer."@test"."@name"@dblink');
+call test_name_tokenize('test."name#!^&*()-=+[]{}/|:<>@"scott@ins');
 
 -- test double quote
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee"@ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = , nextpos = 18
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vu"ume"e@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VU, dblink = , nextpos = 14
-/
-declare
-    name varchar2(50) := 'peer.lokppe."vu"ume"e@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = vu, dblink = , nextpos = 16
-/
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee.aking@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.lokppe.vuumee"@ookeyy"');
+call test_name_tokenize('peer.lokppe.vu"ume"e@ookeyy');
+call test_name_tokenize('peer.lokppe."vu"ume"e@ookeyy');
+call test_name_tokenize('peer.lokppe.vuumee.aking@ookeyy'); -- error
 
 -- test idnetifier overlength. og >= 64, A >= 128
-declare
-    name varchar2(100) := 'peer.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.vuumee.aking@ookeyy';
-    a   varchar2(100);
-    b   varchar2(100);
-    c   varchar2(100);
-    dblink  varchar2(100);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.vuumee@ookeyy'); -- error
 
+drop procedure test_name_tokenize;
 drop schema test_utility_tokenize;
 
 ---------------------------
@@ -1782,736 +1396,116 @@ CREATE OR REPLACE SYNONYM public.syn_tg FOR log_resolve_after_insert;
 CREATE OR REPLACE SYNONYM public.syn_pkg FOR t_pkg;
 CREATE OR REPLACE SYNONYM public.syn_typ FOR t_typ;
 
+create or replace procedure test_name_resolve(input in varchar2, context in numeric)
+as
+  schema varchar2(100);
+  part1 varchar2(100);
+  part2 varchar2(100);
+  dblink varchar2(100);
+  part1_type number;
+  object_number number;
+begin
+  gms_utility.name_resolve(input, context, schema, part1, part2, dblink, part1_type, object_number);
+  raise info 'schema: [%], part1: [%], part2: [%], dblink: [%], part1_type: %, object_number: %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
 
 -- test table
-declare 
-    name varchar2 := 'public.t_resolve';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 't_resolve';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_tbl';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 'syn_tbl';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.t_resolve', 0);
+call test_name_resolve('public.t_resolve', NULL);
+call test_name_resolve('t_resolve', 0);
+call test_name_resolve('t_resolve', NULL);
+call test_name_resolve('public.syn_tbl', 0);
+call test_name_resolve('public.syn_tbl', NULL);
+call test_name_resolve('syn_tbl', 0);
+call test_name_resolve('syn_tbl', NULL);
+call test_name_resolve('public.t_resolve', 2);
+call test_name_resolve('public.t_resolve', 7);
+call test_name_resolve('public.t_resolve', 9); -- error
+
 -- test PL/SQL
-declare
-    name varchar2 := 'public.add_numbers';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 'add_numbers';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_fun';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_fun';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.insert_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 'insert_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_pro';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 'syn_pro';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.add_numbers', 1);
+call test_name_resolve('add_numbers', 1);
+call test_name_resolve('public.syn_fun', 1);
+call test_name_resolve('syn_fun', 1);
+call test_name_resolve('public.insert_val', 1);
+call test_name_resolve('insert_val', 1);
+call test_name_resolve('public.syn_pro', 1);
+call test_name_resolve('syn_pro', 1);
+
 -- test package
-declare
-    name varchar2 := 'public.t_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.t_pkg.delete_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.t_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 't_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 't_pkg.delete_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 't_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_pkg.delete_var';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_pkg.delete_var';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.t_pkg.multi_number', 1);
+call test_name_resolve('public.t_pkg.delete_val', 1);
+call test_name_resolve('public.t_pkg.qwer', 1);
+call test_name_resolve('t_pkg.multi_number', 1);
+call test_name_resolve('t_pkg.delete_val', 1);
+call test_name_resolve('t_pkg.qwer', 1);
+call test_name_resolve('public.syn_pkg.multi_number', 1);
+call test_name_resolve('public.syn_pkg.delete_var', 1);
+call test_name_resolve('public.syn_pkg.qwer', 1);
+call test_name_resolve('syn_pkg.multi_number', 1);
+call test_name_resolve('syn_pkg.delete_var', 1);
+call test_name_resolve('syn_pkg.qwer', 1);
 
 --  test trigger
-declare
-    name varchar2 := 'public.log_resolve_after_insert';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_tg';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
-declare
-    name varchar2 := 'log_resolve_after_insert';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_tg';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+call test_name_resolve('public.log_resolve_after_insert', 3);
+call test_name_resolve('public.syn_tg', 3); -- error
+call test_name_resolve('log_resolve_after_insert', 3);
+call test_name_resolve('syn_tg', 3); -- error
 
 -- test sequence
-declare
-    name varchar2 := 'public.t_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 't_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare 
-    name varchar2 := 'syn_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.t_seq', 2);
+call test_name_resolve('public.syn_seq', 2);
+call test_name_resolve('t_seq', 2);
+call test_name_resolve('syn_seq', 2);
+call test_name_resolve('public.t_seq', 0); -- error
+call test_name_resolve('public.t_seq', 7);
+call test_name_resolve('public.t_seq', 9); -- error
 
 -- test type
-declare
-    name varchar2 := 'public.t_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 't_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.t_typ', 7);
+call test_name_resolve('public.syn_typ', 7);
+call test_name_resolve('t_typ', 7);
+call test_name_resolve('syn_typ', 7);
+call test_name_resolve('public.t_typ', 0); -- error
+call test_name_resolve('public.t_typ', 2); -- error
+call test_name_resolve('public.t_typ', 9); -- error
 
 -- test index
-declare
-    name varchar2 := 'public.t_resolve_c1_udx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.syn_idx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
-declare
-    name varchar2 := 't_resolve_c1_udx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'syn_idx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+call test_name_resolve('public.t_resolve_c1_udx', 9);
+call test_name_resolve('public.syn_idx', 9); -- error
+call test_name_resolve('t_resolve_c1_udx', 9);
+call test_name_resolve('syn_idx', 9); -- error
+call test_name_resolve('public.t_resolve_c1_udx', 0); -- error
+call test_name_resolve('public.t_resolve_c1_udx', 2); -- error
 
 -- test java
-declare
-    name varchar2 := 'public.java.class';
-    context number := 4;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.java.class';
-    context number := 5;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.java.class';
-    context number := 6;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'public.java.class';
-    context number := 8;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.java.class', 4);
+call test_name_resolve('public.java.class', 5);
+call test_name_resolve('public.java.class', 6);
+call test_name_resolve('public.java.class', 8);
 
 -- test with dblink
-declare
-    name varchar2 := 'peer.lokppe.vuumee@ookeyy';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'peer@ookeyy';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'peer@ookeyy';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'peer.@ookeyy';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 10;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 0);
+call test_name_resolve('peer@ookeyy', 1);
+call test_name_resolve('peer@ookeyy', 2);
+call test_name_resolve('peer.@ookeyy', 3); -- error
+call test_name_resolve('peer.lokppe@ookeyy', 7);
+call test_name_resolve('peer.lokppe@ookeyy', 9);
+call test_name_resolve('peer.lokppe@ookeyy', 10);
+call test_name_resolve('"look"@"dblink"', 0);
+call test_name_resolve('lo ok@dbli nk', 0); -- error
+call test_name_resolve('lo=ok@dbli nk', 0); -- error
+call test_name_resolve('"123bac"@dblink', 0);
+call test_name_resolve('"@bac"@dblink', 0);
+call test_name_resolve('"!#$%^&*()_-+={}@[]|\:;'',<>./?~`"@dblink', 0);
+
+-- test context float
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 1.5);
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 3.0);
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 3.05);
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 11);
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', -1);
 
 DROP SYNONYM syn_tbl;
 DROP SYNONYM syn_idx;
@@ -2532,6 +1526,8 @@ DROP INDEX public.t_resolve_c1_udx;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
+
+reset behavior_compat_options;
 
 drop extension gms_utility cascade;
 reset search_path;

@@ -1,5 +1,6 @@
 reset search_path;
 create extension if not exists gms_utility;
+set behavior_compat_options="bind_procedure_searchpath";
 -- start test db_version
 declare
     version varchar2(50);
@@ -1143,6 +1144,25 @@ INFO:  canon_name:
 declare
 	canon_name varchar2(100);
 begin
+	gms_utility.canonicalize('''''', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end; -- error
+/
+ERROR:  Invalid paramter value "''" with special character
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('''''',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('"''''"', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;
+/
+INFO:  canon_name: ''
+declare
+	canon_name varchar2(100);
+begin
 	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
 	raise info 'canon_name: %', canon_name;
 end; -- error
@@ -2002,586 +2022,421 @@ drop cascades to function test_utility_compile.proc1(undefined)
 ---------------------------
 create schema test_utility_tokenize;
 set search_path to test_utility_tokenize;
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
+create or replace procedure test_name_tokenize(name in varchar2)
+as
+  a varchar2(100);
+  b varchar2(100);
+  c varchar2(100);
+  dblink varchar2(100);
+  nextpos int;
 begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
+  gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
+  raise info 'a: [%], b: [%], c: [%], dblink: [%], nextpos: %', a, b, c, dblink, nextpos;
 end;
 /
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 25
--- test empty character
-declare
-    name varchar2(50) := NULL;
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 25
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize(NULL); -- error
 ERROR:  Invalid input value
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := '';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize(''); -- error
 ERROR:  Invalid input value
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := '""';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('""'); -- error
 ERROR:  Invalid input value """" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := '  .  ';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('  .  '); -- error
 ERROR:  Invalid input value "  .  " with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := '"  .  "';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a =   .  , b = <NULL>, c = <NULL>, dblink = <NULL>, nextpos = 7
-declare
-    name varchar2(50) := 'peer.   lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 28
-declare
-    name varchar2(50) := 'peer."   lokppe.vuumee"@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b =    lokppe.vuumee, c = <NULL>, dblink = OOKEYY, nextpos = 30
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"  .  "');
+INFO:  a: [  .  ], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 7
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.   lokppe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer."   lokppe.vuumee"@ookeyy');
+INFO:  a: [PEER], b: [   lokppe.vuumee], c: [<NULL>], dblink: [OOKEYY], nextpos: 30
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('sco  ot');  -- SCO 5
+INFO:  a: [SCO], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 5
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"sco  ot"');
+INFO:  a: [sco  ot], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 9
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('sco  ot.foook'); -- SCO 5
+INFO:  a: [SCO], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 5
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"sco  ot".fook');
+INFO:  a: [sco  ot], b: [FOOK], c: [<NULL>], dblink: [<NULL>], nextpos: 14
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"sco  ot"   .fook');
+INFO:  a: [sco  ot], b: [FOOK], c: [<NULL>], dblink: [<NULL>], nextpos: 17
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"sco  ot"   abcd.fook'); -- sco  ot 12
+INFO:  a: [sco  ot], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 12
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
 -- test support special char
-declare
-    name varchar2(50) := 'peer._lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-INFO:  a = PEER, b = _LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.lokp_pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKP_PE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.$lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-INFO:  a = PEER, b = $LOKPPE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.lokp$pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKP$PE, c = VUUMEE, dblink = OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.lokp233pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKP233PE, c = VUUMEE, dblink = OOKEYY, nextpos = 28
-declare
-    name varchar2(50) := 'peer.233lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = , c = , dblink = , nextpos = 4
-/
-INFO:  a = PEER, b = <NULL>, c = <NULL>, dblink = <NULL>, nextpos = 4
-declare
-    name varchar2(50) := 'peer.-lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer._lokppe.vuumee@ookeyy'); -- ok for og, error for A
+INFO:  a: [PEER], b: [_LOKPPE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokp_pe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKP_PE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- ok for og, error for A
+INFO:  a: [PEER], b: [$LOKPPE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokp$pe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKP$PE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokp233pe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKP233PE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.233lokppe.vuumee@ookeyy');
+INFO:  a: [PEER], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 4
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.-lokppe.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "eer.-lokppe.vuumee@ookeyy"
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer."-lokppe".vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = -lokppe, c = VUUMEE, dblink = OOKEYY, nextpos = 28
-declare
-    name varchar2(50) := 'peer.lokp-pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
-/
-INFO:  a = PEER, b = LOKP, c = <NULL>, dblink = <NULL>, nextpos = 9
-declare
-    name varchar2(50) := 'peer.lokp=pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKP, c = , dblink = , nextpos = 9
-/
-INFO:  a = PEER, b = LOKP, c = <NULL>, dblink = <NULL>, nextpos = 9
-declare
-    name varchar2(50) := 'peer.=lokppe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer."-lokppe".vuumee@ookeyy');
+INFO:  a: [PEER], b: [-lokppe], c: [VUUMEE], dblink: [OOKEYY], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokp-pe.vuumee@ookeyy'); -- 9
+INFO:  a: [PEER], b: [LOKP], c: [<NULL>], dblink: [<NULL>], nextpos: 9
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokp=pe.vuumee@ookeyy'); -- 9
+INFO:  a: [PEER], b: [LOKP], c: [<NULL>], dblink: [<NULL>], nextpos: 9
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.=lokppe.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "eer.=lokppe.vuumee@ookeyy"
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokp`pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokp`pe.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "peer.lokp`pe.vuumee@ookeyy" with special character
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokp~pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokp~pe.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "peer.lokp~pe.vuumee@ookeyy" with special character
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokp%pe.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokp%pe.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "peer.lokp%pe.vuumee@ookeyy" with special character
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('123_abc'); -- error
+ERROR:  Invalid Input value "123_abc"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"123_abc"');
+INFO:  a: [123_abc], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 9
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('123'); -- error
+ERROR:  Invalid Input value "123"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"123"');
+INFO:  a: [123], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 5
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize(''''''); -- error
+ERROR:  Invalid input value "''" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"''''"');
+INFO:  a: [''], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 4
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize(''''); -- error
+ERROR:  Invalid input value "'" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"''"'); 
+INFO:  a: ['], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 3
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer,lokppe,vuumee@ookeyy'); 
+INFO:  a: [PEER], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 4
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe,vuumee@ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [<NULL>], dblink: [<NULL>], nextpos: 11
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
 -- test keyword
-declare
-    name varchar2(50) := 'peer.table.vuumee@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.table.vuumee@ookeyy'); -- error
 ERROR:  Invalid input value "peer.table.vuumee@ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer."table".vuumee@ookeyy');
+INFO:  a: [PEER], b: [table], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.column.vuumee@ookeyy'); -- error
+ERROR:  Invalid input value "peer.column.vuumee@ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer."column".vuumee@ookeyy');
+INFO:  a: [PEER], b: [column], c: [VUUMEE], dblink: [OOKEYY], nextpos: 27
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
 -- test @
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.lokppe.vuumee@'); -- error
 ERROR:  Invalid input value "peer.lokppe.vuumee@" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@_ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = _OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@"_ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = _ookeyy, nextpos = 28
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@$ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- ok for og, error for A
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = $OOKEYY, nextpos = 26
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@"$ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = $ookeyy, nextpos = 28
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@123ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokppe.vuumee@_ookeyy'); -- ok for og, error for A
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [_OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@"_ookeyy"');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [_ookeyy], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@$ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [$OOKEYY], nextpos: 26
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@"$ookeyy"');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [$ookeyy], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@123ookeyy'); -- error
 ERROR:  Invalid dblink value "peer.lokppe.vuumee@123ookeyy"
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ookeyy.zk';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOKEYY.ZK, nextpos = 28
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
-ERROR:  Invalid input value "peer.lokppe.vuumee@" with special words
-CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
-SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := '@vuumee';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy.zk');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOKEYY.ZK], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('@vuumee'); -- error
 ERROR:  Invalid input value "@vuumee" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ook=eyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOK, nextpos = 22
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = OOK, nextpos = 22
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@=ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokppe.vuumee@ook=eyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOK], nextpos: 22
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@=ookeyy'); -- error
 ERROR:  Invalid input value "eer.lokppe.vuumee@=ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee@ook%eyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.lokppe.vuumee@ook eyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOK], nextpos: 23
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee@ook%eyy'); -- error
 ERROR:  Invalid input value "peer.lokppe.vuumee@ook%eyy" with special character
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"scott@db1"');
+INFO:  a: [scott@db1], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 11
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"scott.@db1"');
+INFO:  a: [scott.@db1], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 12
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer."@test"."@name"@dblink');
+INFO:  a: [PEER], b: [@test], c: [@name], dblink: [DBLINK], nextpos: 27
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('test."name#!^&*()-=+[]{}/|:<>@"scott@ins');
+INFO:  a: [TEST], b: [name#!^&*()-=+[]{}/|:<>@], c: [<NULL>], dblink: [<NULL>], nextpos: 31
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
 -- test double quote
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee"@ookeyy"';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VUUMEE, dblink = , nextpos = 18
-/
-INFO:  a = PEER, b = LOKPPE, c = VUUMEE, dblink = <NULL>, nextpos = 18
-declare
-    name varchar2(50) := 'peer.lokppe.vu"ume"e@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = VU, dblink = , nextpos = 14
-/
-INFO:  a = PEER, b = LOKPPE, c = VU, dblink = <NULL>, nextpos = 14
-declare
-    name varchar2(50) := 'peer.lokppe."vu"ume"e@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- a = PEER, b = LOKPPE, c = vu, dblink = , nextpos = 16
-/
-INFO:  a = PEER, b = LOKPPE, c = vu, dblink = <NULL>, nextpos = 16
-declare
-    name varchar2(50) := 'peer.lokppe.vuumee.aking@ookeyy';
-    a   varchar2(50);
-    b   varchar2(50);
-    c   varchar2(50);
-    dblink  varchar2(50);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.lokppe.vuumee"@ookeyy"');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [<NULL>], nextpos: 18
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vu"ume"e@ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [VU], dblink: [<NULL>], nextpos: 14
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe."vu"ume"e@ookeyy');
+INFO:  a: [PEER], b: [LOKPPE], c: [vu], dblink: [<NULL>], nextpos: 16
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('peer.lokppe.vuumee.aking@ookeyy'); -- error
 ERROR:  Invalid input value "peer.lokppe.vuumee.aking@ookeyy"
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
 -- test idnetifier overlength. og >= 64, A >= 128
-declare
-    name varchar2(100) := 'peer.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.vuumee.aking@ookeyy';
-    a   varchar2(100);
-    b   varchar2(100);
-    c   varchar2(100);
-    dblink  varchar2(100);
-    nextpos integer;
-begin
-    gms_utility.name_tokenize(name, a, b, c, dblink, nextpos);
-    raise info 'a = %, b = %, c = %, dblink = %, nextpos = %', a, b, c, dblink, nextpos;
-end;    -- error
-/
+call test_name_tokenize('peer.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.vuumee@ookeyy'); -- error
 ERROR:  identifier too long, max length is 63
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function inline_code_block line 8 at SQL statement
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+drop procedure test_name_tokenize;
 drop schema test_utility_tokenize;
 ---------------------------
 -- name resolve
@@ -2659,807 +2514,522 @@ CREATE OR REPLACE SYNONYM public.syn_pro FOR insert_val;
 CREATE OR REPLACE SYNONYM public.syn_tg FOR log_resolve_after_insert;
 CREATE OR REPLACE SYNONYM public.syn_pkg FOR t_pkg;
 CREATE OR REPLACE SYNONYM public.syn_typ FOR t_typ;
+create or replace procedure test_name_resolve(input in varchar2, context in numeric)
+as
+  schema varchar2(100);
+  part1 varchar2(100);
+  part2 varchar2(100);
+  dblink varchar2(100);
+  part1_type number;
+  object_number number;
+begin
+  gms_utility.name_resolve(input, context, schema, part1, part2, dblink, part1_type, object_number);
+  raise info 'schema: [%], part1: [%], part2: [%], dblink: [%], part1_type: %, object_number: %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
 -- test table
-declare 
-    name varchar2 := 'public.t_resolve';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
-declare 
-    name varchar2 := 't_resolve';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
-declare
-    name varchar2 := 'public.syn_tbl';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
-declare 
-    name varchar2 := 'syn_tbl';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number =.*
+call test_name_resolve('public.t_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_resolve', NULL);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_resolve', NULL);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_tbl', 0);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_tbl', NULL);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_tbl', 0);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_tbl', NULL);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_resolve', 2);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_resolve', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_resolve', 9); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test PL/SQL
-declare
-    name varchar2 := 'public.add_numbers';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
-declare 
-    name varchar2 := 'add_numbers';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
-declare
-    name varchar2 := 'public.syn_fun';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
-declare
-    name varchar2 := 'syn_fun';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = ADD_NUMBERS, dblink = <NULL>, part1_type = 8, object_number =.*
-declare
-    name varchar2 := 'public.insert_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
-declare 
-    name varchar2 := 'insert_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
-declare
-    name varchar2 := 'public.syn_pro';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
-declare 
-    name varchar2 := 'syn_pro';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = <NULL>, part2 = INSERT_VAL, dblink = <NULL>, part1_type = 7, object_number =.*
+call test_name_resolve('public.add_numbers', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [ADD_NUMBERS], dblink: [<NULL>], part1_type: 8, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('add_numbers', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [ADD_NUMBERS], dblink: [<NULL>], part1_type: 8, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_fun', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [ADD_NUMBERS], dblink: [<NULL>], part1_type: 8, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_fun', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [ADD_NUMBERS], dblink: [<NULL>], part1_type: 8, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.insert_val', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [INSERT_VAL], dblink: [<NULL>], part1_type: 7, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('insert_val', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [INSERT_VAL], dblink: [<NULL>], part1_type: 7, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_pro', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [INSERT_VAL], dblink: [<NULL>], part1_type: 7, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_pro', 1);
+--?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [INSERT_VAL], dblink: [<NULL>], part1_type: 7, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
 -- test package
-declare
-    name varchar2 := 'public.t_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'public.t_pkg.delete_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAL, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'public.t_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare 
-    name varchar2 := 't_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare 
-    name varchar2 := 't_pkg.delete_val';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAL, dblink = <NULL>, part1_type = 9, object_number =.*
-declare 
-    name varchar2 := 't_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'public.syn_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'public.syn_pkg.delete_var';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAR, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'public.syn_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'syn_pkg.multi_number';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = MULTI_NUMBER, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'syn_pkg.delete_var';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = DELETE_VAR, dblink = <NULL>, part1_type = 9, object_number =.*
-declare
-    name varchar2 := 'syn_pkg.qwer';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_PKG, part2 = QWER, dblink = <NULL>, part1_type = 9, object_number =.*
+call test_name_resolve('public.t_pkg.multi_number', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [MULTI_NUMBER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_pkg.delete_val', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [DELETE_VAL], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_pkg.qwer', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [QWER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_pkg.multi_number', 1);
+--?INFO:  schema: [public], part1: [T_PKG], part2: [MULTI_NUMBER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_pkg.delete_val', 1);
+--?INFO:  schema: [public], part1: [T_PKG], part2: [DELETE_VAL], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_pkg.qwer', 1);
+--?INFO:  schema: [public], part1: [T_PKG], part2: [QWER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_pkg.multi_number', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [MULTI_NUMBER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_pkg.delete_var', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [DELETE_VAR], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_pkg.qwer', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [QWER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_pkg.multi_number', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [MULTI_NUMBER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_pkg.delete_var', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [DELETE_VAR], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_pkg.qwer', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [QWER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
 --  test trigger
-declare
-    name varchar2 := 'public.log_resolve_after_insert';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = LOG_RESOLVE_AFTER_INSERT, part2 = <NULL>, dblink = <NULL>, part1_type = 12, object_number =.*
-declare
-    name varchar2 := 'public.syn_tg';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+call test_name_resolve('public.log_resolve_after_insert', 3);
+--?INFO:  schema: [PUBLIC], part1: [LOG_RESOLVE_AFTER_INSERT], part2: [<NULL>], dblink: [<NULL>], part1_type: 12, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_tg', 3); -- error
 ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 'log_resolve_after_insert';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = LOG_RESOLVE_AFTER_INSERT, part2 = <NULL>, dblink = <NULL>, part1_type = 12, object_number =.*
-declare
-    name varchar2 := 'syn_tg';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('log_resolve_after_insert', 3);
+--?INFO:  schema: [PUBLIC], part1: [LOG_RESOLVE_AFTER_INSERT], part2: [<NULL>], dblink: [<NULL>], part1_type: 12, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_tg', 3); -- error
 ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test sequence
-declare
-    name varchar2 := 'public.t_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
-declare
-    name varchar2 := 'public.syn_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
-declare 
-    name varchar2 := 't_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
-declare 
-    name varchar2 := 'syn_seq';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_SEQ, part2 = <NULL>, dblink = <NULL>, part1_type = 6, object_number =.*
+call test_name_resolve('public.t_seq', 2);
+--?INFO:  schema: [PUBLIC], part1: [T_SEQ], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_seq', 2);
+--?INFO:  schema: [PUBLIC], part1: [T_SEQ], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_seq', 2);
+--?INFO:  schema: [PUBLIC], part1: [T_SEQ], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_seq', 2);
+--?INFO:  schema: [PUBLIC], part1: [T_SEQ], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_seq', 0); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_seq', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_SEQ], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_seq', 9); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test type
-declare
-    name varchar2 := 'public.t_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
-declare
-    name varchar2 := 'public.syn_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
-declare
-    name varchar2 := 't_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
-declare
-    name varchar2 := 'syn_typ';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_TYP, part2 = <NULL>, dblink = <NULL>, part1_type = 13, object_number =.*
+call test_name_resolve('public.t_typ', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_TYP], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_typ', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_TYP], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_typ', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_TYP], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_typ', 7);
+--?INFO:  schema: [PUBLIC], part1: [T_TYP], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_typ', 0); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_typ', 2); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_typ', 9); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test index
-declare
-    name varchar2 := 'public.t_resolve_c1_udx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE_C1_UDX, part2 = <NULL>, dblink = <NULL>, part1_type = 1, object_number =.*
-declare
-    name varchar2 := 'public.syn_idx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+call test_name_resolve('public.t_resolve_c1_udx', 9);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE_C1_UDX], part2: [<NULL>], dblink: [<NULL>], part1_type: 1, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_idx', 9); -- error
 ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 't_resolve_c1_udx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
---?INFO:  schema = PUBLIC, part1 = T_RESOLVE_C1_UDX, part2 = <NULL>, dblink = <NULL>, part1_type = 1, object_number =.*
-declare
-    name varchar2 := 'syn_idx';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('t_resolve_c1_udx', 9);
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE_C1_UDX], part2: [<NULL>], dblink: [<NULL>], part1_type: 1, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_idx', 9); -- error
 ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_resolve_c1_udx', 0); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_resolve_c1_udx', 2); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test java
-declare
-    name varchar2 := 'public.java.class';
-    context number := 4;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+call test_name_resolve('public.java.class', 4);
 ERROR:  Unsupported context type: 4
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 'public.java.class';
-    context number := 5;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.java.class', 5);
 ERROR:  Unsupported context type: 5
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 'public.java.class';
-    context number := 6;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.java.class', 6);
 ERROR:  Unsupported context type: 6
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 'public.java.class';
-    context number := 8;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.java.class', 8);
 ERROR:  Unsupported context type: 8
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test with dblink
-declare
-    name varchar2 := 'peer.lokppe.vuumee@ookeyy';
-    context number := 0;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = LOKPPE, part2 = VUUMEE, dblink = OOKEYY, part1_type = 0, object_number = 0
-declare
-    name varchar2 := 'peer@ookeyy';
-    context number := 1;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = <NULL>, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
-declare
-    name varchar2 := 'peer@ookeyy';
-    context number := 2;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = <NULL>, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
-declare
-    name varchar2 := 'peer.@ookeyy';
-    context number := 3;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;    -- error
-/
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 0);
+INFO:  schema: [PEER], part1: [LOKPPE], part2: [VUUMEE], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer@ookeyy', 1);
+INFO:  schema: [PEER], part1: [<NULL>], part2: [<NULL>], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer@ookeyy', 2);
+INFO:  schema: [PEER], part1: [<NULL>], part2: [<NULL>], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer.@ookeyy', 3); -- error
 ERROR:  Invalid input value "peer.@ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
-SQL statement "CALL gms_utility.name_resolve(name,context,schema,part1,part2,dblink,part1_type,object_number)"
-PL/pgSQL function inline_code_block line 10 at SQL statement
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 7;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 9;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
-declare
-    name varchar2 := 'peer.lokppe@ookeyy';
-    context number := 10;
-    schema  varchar2;
-    part1   varchar2;
-    part2   varchar2;
-    dblink  varchar2;
-    part1_type  number;
-    object_number   number;
-begin
-    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
-    raise info 'schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
-end;
-/
-INFO:  schema = PEER, part1 = LOKPPE, part2 = <NULL>, dblink = OOKEYY, part1_type = 0, object_number = 0
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('peer.lokppe@ookeyy', 7);
+INFO:  schema: [PEER], part1: [LOKPPE], part2: [<NULL>], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer.lokppe@ookeyy', 9);
+INFO:  schema: [PEER], part1: [LOKPPE], part2: [<NULL>], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer.lokppe@ookeyy', 10);
+INFO:  schema: [PEER], part1: [LOKPPE], part2: [<NULL>], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('"look"@"dblink"', 0);
+INFO:  schema: [look], part1: [<NULL>], part2: [<NULL>], dblink: [dblink], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('lo ok@dbli nk', 0); -- error
+ERROR:  Invalid input value "lo ok@dbli nk" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('lo=ok@dbli nk', 0); -- error
+ERROR:  Invalid input value "lo=ok@dbli nk" with special character
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('"123bac"@dblink', 0);
+INFO:  schema: [123bac], part1: [<NULL>], part2: [<NULL>], dblink: [DBLINK], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('"@bac"@dblink', 0);
+INFO:  schema: [@bac], part1: [<NULL>], part2: [<NULL>], dblink: [DBLINK], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('"!#$%^&*()_-+={}@[]|\:;'',<>./?~`"@dblink', 0);
+INFO:  schema: [!#$%^&*()_-+={}@[]|\:;',<>./?~`], part1: [<NULL>], part2: [<NULL>], dblink: [DBLINK], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+-- test context float
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 1.5);
+ERROR:  context argument must be integer number
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 3.0);
+INFO:  schema: [PEER], part1: [LOKPPE], part2: [VUUMEE], dblink: [OOKEYY], part1_type: 0, object_number: 0
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 3.05);
+ERROR:  context argument must be integer number
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', 11);
+ERROR:  context argument must be number 0 to 10
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('peer.lokppe.vuumee@ookeyy', -1);
+ERROR:  context argument must be number 0 to 10
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 DROP SYNONYM syn_tbl;
 DROP SYNONYM syn_idx;
 DROP SYNONYM syn_seq;
@@ -3482,6 +3052,7 @@ DROP INDEX public.t_resolve_c1_udx;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
+reset behavior_compat_options;
 drop extension gms_utility cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table gms_utility.t_into

@@ -48,12 +48,12 @@ PG_MODULE_MAGIC;
 
 static const char CANON_INVALID_CHARS[] = 
     {'`', '~', '!', '@', '%', '^', '&', '*', '(', ')', '-', '=', '+', '[', ']', 
-     '{', '}', '/', '\\', '|', ';', ':', '?', '<', '>', ','};
+     '{', '}', '/', '\\', '|', ';', ':', '?', '<', '>', ',', '\''};
 static const char VALID_IDENT_CHARS[] = {'#', '$', '_'};
 
-static const char TOKENIZE_DANGER_CHARS[] = {'`', '~', '%', '\\', ';', '?'};
+static const char TOKENIZE_DANGER_CHARS[] = {'`', '~', '%', '\\', ';', '?', '\''};
 static const char TOKENIZE_TRUNCATE_CHARS[] = 
-    {'!', '^', '&', '*', '(', ')', '-', '=', '+', '[', ']', '{', '}', '/', '|', ':', '<', '>'};
+    {'!', '^', '&', '*', '(', ')', '-', '=', '+', '[', ']', '{', '}', '/', '|', ':', '<', '>', ','};
 
 typedef Oid (*SearchOidByName)(Oid namespaceId, char* name, NameResolveVar* var);
 
@@ -64,7 +64,7 @@ static bool DetectKeyword(char* words);
 static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword);
 static TokenizeVar* MakeTokenizeVar();
 static void DestoryTokenizeVar(TokenizeVar* var);
-static TokenizeVar* NameParseInternal(char* name, int len);
+static TokenizeVar* NameParseInternal(char* name, int len, bool truncated);
 static void ResolveContextName(NameResolveContext context, Oid namespaceId, char* resolveName,
                                NameResolveVar* var, SearchOidByName searchmtd);
 
@@ -983,15 +983,14 @@ static bool IsTruncateChars(char ch)
     return false;
 }
 
-static TokenizeVar* NameParseInternal(char* name, int len)
+static TokenizeVar* NameParseInternal(char* name, int len, bool truncated)
 {
     List* list = NIL;
     int traveLen = 0;
     bits8 quoteState = QUOTE_NONE;
     char curChar = '\0';
+    char lastChar = '\0';
     bool startLink = false;
-    char* token = NULL;
-    errno_t rc;
     TokenizeVar* var;
     StringInfo tmp = makeStringInfo();
 
@@ -1003,6 +1002,9 @@ static TokenizeVar* NameParseInternal(char* name, int len)
         name++;
 
         if (!IS_QUOTE_STARTED(quoteState) && curChar == ' ') {
+            if (tmp->len > 0) {
+                lastChar = curChar;
+            }
             continue;
         } else if (curChar == '"') {
             if (BEFORE_QUOTE_STARTED(quoteState)) {
@@ -1039,23 +1041,27 @@ static TokenizeVar* NameParseInternal(char* name, int len)
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                     errmsg("Invalid input value \"%s\"", (name - traveLen))));
                 }
-                if (isdigit(*(tmp->data))) {
+                if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
                     /* If word start with digit, end read. */
                     break;
                 }
-                token = (char *) palloc0(tmp->len + 1);
-                rc = strcpy_s(token, tmp->len + 1, tmp->data);
-                securec_check(rc, "\0", "\0");
-                list = lappend(list, token);
+                list = lappend(list, pstrdup(tmp->data));
                 resetStringInfo(tmp);
                 quoteState = QUOTE_NONE;
-            }
-            if (curChar == '@') {
-                startLink = true;
+                if (curChar == '@') {
+                    startLink = true;
+                }
             }
         } else {
             if (IS_QUOTE_STARTED(quoteState)) {
                 appendStringInfoChar(tmp, curChar);
+            } else if (lastChar == ' ' && curChar != ' ') {
+                if (!truncated) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
+                }
+                traveLen--;
+                break;
             } else if (IS_QUOTE_END(quoteState)) {
                 traveLen--;
                 break;
@@ -1065,6 +1071,10 @@ static TokenizeVar* NameParseInternal(char* name, int len)
                                     errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
                 }
                 if (IsTruncateChars(curChar)) {
+                    if (!truncated) {
+                        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
+                    }
                     /* If meet special char, end read. */
                     traveLen--;
                     break;
@@ -1072,6 +1082,7 @@ static TokenizeVar* NameParseInternal(char* name, int len)
                 appendStringInfoChar(tmp, pg_toupper(curChar));
             }
         }
+        lastChar = curChar;
     }
 
     if (IS_QUOTE_STARTED(quoteState)) {
@@ -1083,15 +1094,14 @@ static TokenizeVar* NameParseInternal(char* name, int len)
                         errmsg("Invalid input value \"%s\"", (name - traveLen))));
     }
     if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, false, true)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_SYNTAX_ERROR),
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("Invalid input value \"%s\" with special words", (name - traveLen))));
     }
     if (startLink) {
         if (tmp->len == 0) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("dblink is empty \"%s\"", (name - traveLen))));
-        } else if (isdigit(*(tmp->data))) {
+        } else if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Invalid dblink value \"%s\"", (name - traveLen))));
         } else {
@@ -1104,13 +1114,10 @@ static TokenizeVar* NameParseInternal(char* name, int len)
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Invalid input value \"%s\"", (name - traveLen))));
         }
-        if (isdigit(*(tmp->data))) {
+        if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
             traveLen -= (tmp->len + 2);
         } else {
-            token = (char *) palloc0(tmp->len + 1);
-            rc = strcpy_s(token, tmp->len + 1, tmp->data);
-            securec_check(rc, "\0", "\0");
-            list = lappend(list, token);
+            list = lappend(list, pstrdup(tmp->data));
         }
     }
 
@@ -1141,7 +1148,7 @@ Datum gms_name_tokenize(PG_FUNCTION_ARGS)
     name = TextDatumGetCString(PG_GETARG_TEXT_P(0));
     len = VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0));
     
-    var = NameParseInternal(name, len);
+    var = NameParseInternal(name, len, true);
 
     if (var->list == NIL || list_length(var->list) == 0 || list_length(var->list) > 3) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid Input value \"%s\"", name)));
@@ -1191,7 +1198,6 @@ static NameResolveVar* MakeNameResolveVar(List* list, char* name)
 
     foreach (lc, list) {
         char* token = (char *) lfirst(lc);
-        token = pg_strtolower(token);
         if (c == 0) {
             rc = strcpy_s(var->schema, NAMEDATALEN, token);
         } else if (c == 1) {
@@ -1241,7 +1247,9 @@ static List* GetFillSchemaList()
 
 static Oid GetSchemaOidWithErrHandled(char* schemaName, NameResolveVar* var, HeapTuple synTuple = NULL)
 {
-    Oid namespaceId = get_namespace_oid(schemaName, true);
+    char* tmpSchemaName = pstrdup(schemaName);
+    Oid namespaceId = get_namespace_oid(pg_strtolower(tmpSchemaName), true);
+    pfree_ext(tmpSchemaName);
     if (!OidIsValid(namespaceId)) {
         if (synTuple != NULL) {
             ReleaseSysCache(synTuple);
@@ -1348,17 +1356,62 @@ static Oid SearchProcOidByName(Oid namespaceId, char* procName, NameResolveVar* 
 
 static Oid SearchRelOidByName(Oid namespaceId, char* relName, NameResolveVar* var)
 {
-    Oid relOid = InvalidOid;
-    AclResult aclResult;
+    HeapTuple relTuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(relName), ObjectIdGetDatum(namespaceId));
+    if (!HeapTupleIsValid(relTuple)) {
+        return InvalidOid;
+    }
+    Form_pg_class classForm = (Form_pg_class) GETSTRUCT(relTuple);
+    if (classForm->relkind != RELKIND_RELATION) {
+        ReleaseSysCache(relTuple);
+        return InvalidOid;
+    }
 
-    relOid =  get_relname_relid(relName, namespaceId);
-    if (OidIsValid(relOid)) {
-        aclResult = pg_class_aclcheck(relOid, GetUserId(), ACL_SELECT);
-        if (aclResult != ACLCHECK_OK) {
-            ReportNameResolveAclErr(var);
-        }
+    Oid relOid = HeapTupleGetOid(relTuple);
+    ReleaseSysCache(relTuple);
+
+    AclResult aclResult = pg_class_aclcheck(relOid, GetUserId(), ACL_SELECT);
+    if (aclResult != ACLCHECK_OK) {
+        ReportNameResolveAclErr(var);
     }
     return relOid;
+}
+
+static Oid SearchSeqOidByName(Oid namespaceId, char* seqName, NameResolveVar* var)
+{
+    HeapTuple seqTuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(seqName), ObjectIdGetDatum(namespaceId));
+    if (!HeapTupleIsValid(seqTuple)) {
+        return InvalidOid;
+    }
+    Form_pg_class classForm = (Form_pg_class) GETSTRUCT(seqTuple);
+    if (!(classForm->relkind == RELKIND_RELATION || classForm->relkind == RELKIND_SEQUENCE)) {
+        ReleaseSysCache(seqTuple);
+        return InvalidOid;
+    }
+
+    Oid relOid = HeapTupleGetOid(seqTuple);
+    ReleaseSysCache(seqTuple);
+
+    AclResult aclResult = pg_class_aclcheck(relOid, GetUserId(), ACL_SELECT);
+    if (aclResult != ACLCHECK_OK) {
+        ReportNameResolveAclErr(var);
+    }
+    return relOid;
+}
+
+static Oid SearchIndexOidByName(Oid namespaceId, char* indName, NameResolveVar* var)
+{
+    HeapTuple relTuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(indName), ObjectIdGetDatum(namespaceId));
+    if (!HeapTupleIsValid(relTuple)) {
+        return InvalidOid;
+    }
+    Form_pg_class classForm = (Form_pg_class) GETSTRUCT(relTuple);
+    if (classForm->relkind != RELKIND_INDEX) {
+        ReleaseSysCache(relTuple);
+        return InvalidOid;
+    }
+    ReleaseSysCache(relTuple);
+
+    return HeapTupleGetOid(relTuple);
 }
 
 static Oid SearchTriggerOidByName(Oid namespaceId, char* triggerName, NameResolveVar* var)
@@ -1417,34 +1470,42 @@ static void ResolveContextName(NameResolveContext context, Oid namespaceId, char
     Oid id = InvalidOid;
     HeapTuple synTuple;
     Oid newNamespaceId = InvalidOid;
+    char* tmpResolveName = NULL;
 
-    id = searchmtd(namespaceId, resolveName, var);
+    tmpResolveName = pstrdup(resolveName);
+    id = searchmtd(namespaceId, pg_strtolower(tmpResolveName), var);
     if (OidIsValid(id)) {
+        pfree_ext(tmpResolveName);
         var->objectId = id;
         return;
     }
 
     if (!(context == NR_CONTEXT_PLSQL || context == NR_CONTEXT_TABLE || context == NR_CONTEXT_SEQUENCES
         || context == NR_CONTEXT_TYPE)) {
+        pfree_ext(tmpResolveName);
         return;
     }
     /* Search synonym */
-    synTuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(resolveName), ObjectIdGetDatum(namespaceId));
+    synTuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(tmpResolveName), ObjectIdGetDatum(namespaceId));
+    pfree_ext(tmpResolveName);
     if (!HeapTupleIsValid(synTuple)) {
         return;
     }
     Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(synTuple);
     newNamespaceId = GetSchemaOidWithErrHandled(NameStr(synForm->synobjschema), var, synTuple);
-    id = searchmtd(newNamespaceId, NameStr(synForm->synobjname), var);
+    tmpResolveName = pstrdup(NameStr(synForm->synobjname));
+    id = searchmtd(newNamespaceId, pg_strtolower(tmpResolveName), var);
     if (OidIsValid(id)) {
         /* Replace synonym to real name, and do it for schema too. */
-        errno_t rc = strcpy_s(var->schema, NAMEDATALEN, NameStr(synForm->synobjschema));
+        errno_t rc = strcpy_s(var->schema, NAMEDATALEN, pg_strtoupper(NameStr(synForm->synobjschema)));
         securec_check(rc, "\0", "\0");
-        rc = strcpy_s(var->part1, NAMEDATALEN, NameStr(synForm->synobjname));
+        rc = strcpy_s(var->part1, NAMEDATALEN, pg_strtoupper(tmpResolveName));
         securec_check(rc, "\0", "\0");
+
         var->objectId = id;
         var->synonym = true;
     }
+    pfree_ext(tmpResolveName);
     ReleaseSysCache(synTuple);
 }
 
@@ -1458,12 +1519,16 @@ static void ResolveObjectNameByContext(NameResolveContext context, Oid namespace
             ResolveContextName(context, namespaceId, resolveName, var, SearchProcOidByName);
             break;
         case NR_CONTEXT_TABLE:
-        case NR_CONTEXT_SEQUENCES:
-        case NR_CONTEXT_INDEX:
             ResolveContextName(context, namespaceId, resolveName, var, SearchRelOidByName);
-            var->part1Type = context == NR_CONTEXT_TABLE ? NAME_RESOLVE_TYPE_TABLE
-                             : context == NR_CONTEXT_INDEX ? NAME_RESOLVE_TYPE_INDEX
-                             : NAME_RESOLVE_TYPE_SEQUENCE;
+            var->part1Type = NAME_RESOLVE_TYPE_TABLE;
+            break;
+        case NR_CONTEXT_SEQUENCES:
+            ResolveContextName(context, namespaceId, resolveName, var, SearchSeqOidByName);
+            var->part1Type = NAME_RESOLVE_TYPE_SEQUENCE;
+            break;
+        case NR_CONTEXT_INDEX:
+            ResolveContextName(context, namespaceId, resolveName, var, SearchIndexOidByName);
+            var->part1Type = NAME_RESOLVE_TYPE_INDEX;
             break;
         case NR_CONTEXT_TRIGGER:
             ResolveContextName(context, namespaceId, resolveName, var, SearchTriggerOidByName);
@@ -1485,7 +1550,7 @@ static void ResolveObjectNameByContext(NameResolveContext context, Oid namespace
     if (var->len == 1 && !var->synonym) {
         rc = strcpy_s(var->part1, NAMEDATALEN, var->schema);
         securec_check(rc, "\0", "\0");
-        rc = strcpy_s(var->schema, NAMEDATALEN, get_namespace_name(namespaceId));
+        rc = strcpy_s(var->schema, NAMEDATALEN, pg_strtoupper(get_namespace_name(namespaceId)));
         securec_check(rc, "\0", "\0");
     }
 
@@ -1501,7 +1566,25 @@ static void ResolveObjectNameByContext(NameResolveContext context, Oid namespace
 
 static NameResolveContext GetNameResolveContext(Numeric num)
 {
-    int32 contextNumber = DatumGetInt32(DirectFunctionCall1(numeric_int4, NumericGetDatum(num)));
+    bool dotted = false;
+    int32 contextNumber;
+    char* number = NULL;
+    char curChar = '\0';
+
+    contextNumber = DatumGetInt32(DirectFunctionCall1(numeric_int4, NumericGetDatum(num)));
+    number = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+
+    while ((curChar = *number) != '\0') {
+        if (curChar == '.') {
+            dotted = true;
+        } else if (dotted) {
+            if (curChar - '0' != 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("context argument must be integer number")));
+            }
+        }
+        number++;
+    }
+
     if (contextNumber < 0 || contextNumber > 10) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("context argument must be number 0 to 10")));
     }
@@ -1516,15 +1599,15 @@ static NameResolveContext GetNameResolveContext(Numeric num)
 static void SetResultValues(Datum* values, bool* isnull, NameResolveVar* var)
 {
     if (var->schema != NULL && strlen(var->schema) > 0) {
-        values[0] = CStringGetTextDatum(pg_strtoupper(var->schema));
+        values[0] = CStringGetTextDatum(var->schema);
         isnull[0] = false;
     }
     if (var->part1 != NULL && strlen(var->part1) > 0) {
-        values[1] = CStringGetTextDatum(pg_strtoupper(var->part1));
+        values[1] = CStringGetTextDatum(var->part1);
         isnull[1] = false;
     }
     if (var->part2 != NULL && strlen(var->part2) > 0) {
-        values[2] = CStringGetTextDatum(pg_strtoupper(var->part2));
+        values[2] = CStringGetTextDatum(var->part2);
         isnull[2] = false;
     }
 }
@@ -1543,14 +1626,18 @@ Datum gms_name_resolve(PG_FUNCTION_ARGS)
     int listLen;
     Oid namespaceId = InvalidOid;
 
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+    if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input value")));
     }
     name = TextDatumGetCString(PG_GETARG_TEXT_P(0));
     len = VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0));
-    context = GetNameResolveContext(PG_GETARG_NUMERIC(1));
+    if (PG_ARGISNULL(1)) {
+        context = NR_CONTEXT_TABLE;
+    } else {
+        context = GetNameResolveContext(PG_GETARG_NUMERIC(1));
+    }
     
-    tokenizeVar = NameParseInternal(name, len);
+    tokenizeVar = NameParseInternal(name, len, false);
     listLen = list_length(tokenizeVar->list);
 
     if (tokenizeVar->list == NIL || listLen == 0 || listLen > 3) {
