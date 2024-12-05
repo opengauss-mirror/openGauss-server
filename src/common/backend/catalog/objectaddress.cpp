@@ -767,7 +767,7 @@ ObjectAddress get_object_address(
                 break;
             case OBJECT_DEFAULT:
                 address =
-                    get_object_address_attrdef(objtype, objname,                                                                                                                              
+                    get_object_address_attrdef(objtype, objname,
                                                &relation, lockmode,
                                                missing_ok);
                 break;
@@ -1337,7 +1337,19 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
 
         /* Extract relation name and open relation, here allow it is synonym object. */
         relname = list_truncate(list_copy(objname), nnames - 1);
-        relation = HeapOpenrvExtended(makeRangeVarFromNameList(relname), AccessShareLock, false, true);
+
+        if (objtype == OBJECT_TRIGGER && missing_ok == true) {
+            relation = HeapOpenrvExtended(makeRangeVarFromNameList(relname), AccessShareLock, true, true);
+            if (relation == NULL) {
+                address.classId = InvalidOid;
+                address.objectId = InvalidOid;
+                address.objectSubId = InvalidOid;
+                *relp = relation;
+                return address;
+            }
+        } else {
+            relation = HeapOpenrvExtended(makeRangeVarFromNameList(relname), AccessShareLock, false, true);
+        }
         reloid = RelationGetRelid(relation);
 
         switch (objtype) {
