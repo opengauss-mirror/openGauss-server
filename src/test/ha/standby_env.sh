@@ -3,8 +3,8 @@
 
 export g_base_port=8888
 # Remove the trailing slash from the path: 
-while [ "${GAUSSHOME: -1}" == "/" ]; do
-    GAUSSHOME="${GAUSSHOME%/}"
+while [ "${PREFIX_HOME: -1}" == "/" ]; do
+    PREFIX_HOME="${PREFIX_HOME%/}"
 done
 export prefix=${PREFIX_HOME}
 export g_pooler_base_port=`expr $g_base_port \+ 410`
