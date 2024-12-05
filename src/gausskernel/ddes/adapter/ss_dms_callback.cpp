@@ -1901,6 +1901,7 @@ static void FailoverCleanBackends()
         if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && !CheckpointInProgress()) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] backends exit successfully, "
                 "wait_time = %ds", wait_time / FAILOVER_TIME_CONVERT)));
+            g_instance.dms_cxt.SSRecoveryInfo.failover_to_job = true;
             break;
         }
 
