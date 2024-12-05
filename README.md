@@ -568,6 +568,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 | -h    | 请勿使用此选项。             | -                                      | 帮助菜单。                                        |
 | -m    | release                      | [debug &#124; release &#124; memcheck] | 选择目标版本。                                    |
 | -3rd  | ${Code directory}/binarylibs | [binarylibs path]                      | 指定binarylibs路径。该路径必须是绝对路径。        |
+| --cmake  | -             | -                                      | 使用cmake方式编译。                      |
 | -pkg  | 请勿使用此选项。             | -                                      | 将代码编译结果压缩至安装包。                      |
 | -nopt | 请勿使用此选项。             | -                                      | 如果使用此功能，则对鲲鹏平台的相关CPU不进行优化。 |
 
@@ -591,6 +592,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 ```
 [user@linux openGauss-server]$ sh build.sh       # 编译安装release版本的openGauss。需代码目录下有binarylibs或者其软链接，否则将会失败。
 [user@linux openGauss-server]$ sh build.sh -m debug -3rd /sda/binarylibs    # 编译安装debug版本的openGauss
+[user@linux openGauss-server]$ sh build.sh -m debug -3rd /sda/binarylibs --cmake    # 使用cmake方式编译代码，不加--cmake参数，默认使用make方式
 ```
 
 编译后的软件安装路径为：**/sda/openGauss-server/dest**
@@ -602,6 +604,10 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 
 ##### 使用命令编译代码
+
+使用命令编译代码提供make和cmake两种编译方式，选择其中一种方式即可。
+
+**make编译方式：**
 
 1.获取对应的开源三方库二进制文件：
 
@@ -681,8 +687,63 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 - 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
+**cmake编译方式：**
+
+1.获取对应的开源三方库二进制文件
+
+2.配置环境变量
 
 
+   ```
+    #### 选择版本、平台信息
+    export DEBUG_TYPE=release
+    export BUILD_TUPLE=aarch64
+    export GCC_VERSION=10.3.1
+    ##### 导入三方库环境变量 
+    export THIRD_BIN_PATH=________ 
+    export JAVA_HOME=$THIRD_BIN_PATH/kernel/platform/openjdk8/${BUILD_TUPLE}/jdk/
+    export PATH=${JAVA_HOME}/bin:$PATH
+    export APPEND_FLAGS="-g3 -w -fPIC"
+    export GCCFOLDER=$THIRD_BIN_PATH/buildtools/gcc10.3
+    export CC=$GCCFOLDER/gcc/bin/gcc
+    export CXX=$GCCFOLDER/gcc/bin/g++
+    export LD_LIBRARY_PATH=$GCCFOLDER/gcc/lib64:$GCCFOLDER/isl/lib:$GCCFOLDER/mpc/lib/:$GCCFOLDER/mpfr/lib/:$GCCFOLDER/gmp/lib/:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$THIRD_BIN_PATH/kernel/dependency/kerberos/comm/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$THIRD_BIN_PATH/kernel/dependency/libcgroup/comm/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$THIRD_BIN_PATH/kernel/dependency/openssl/comm/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$THIRD_BIN_PATH/kernel/dependency/libcurl/comm/lib:$LD_LIBRARY_PATH
+    export PATH=$GCCFOLDER/gcc/bin:$PATH
+    export PREFIX_HOME=________
+    export GAUSSHOME=$PREFIX_HOME
+    export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
+    export PATH=$GAUSSHOME/bin:$PATH
+
+   ```
+3.选择一个版本进行配置
+
+   ```
+   # cmake编译版本选择由第二步中 DEBUG_TYPE 环境变量配置
+   mkdir cmake_build && cd cmake_build
+   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON
+   # openEuler22.03或openEuler24.03版本
+   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON -DENABLE_OPENEULER_MAJOR=ON
+   ```
+
+> **注意**
+> 
+> - openEuler22.03和openEuler24.03版本需要加 **-DENABLE_OPENEULER_MAJOR=ON**
+
+4.执行以下命令编译
+
+   ```
+   [user@linux cmake_build]$ make -sj && make install -sj
+   ```
+
+5.编译完成
+
+- 编译后的软件安装路径为: **$GAUSSHOME**。
+
+- 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
 ### 编译安装包 
 
