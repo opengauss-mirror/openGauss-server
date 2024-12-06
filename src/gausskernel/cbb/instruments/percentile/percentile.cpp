@@ -274,6 +274,10 @@ bool PercentileSpace::is_enable_percentile_thread(void)
         return false;
     }
 
+    if (pmState == PM_WAIT_BACKENDS) {
+        return false;
+    }
+
     if (IS_SINGLE_NODE) {
         return true;
     }
