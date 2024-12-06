@@ -155,7 +155,12 @@ Datum int8in(PG_FUNCTION_ARGS)
     char* str = PG_GETARG_CSTRING(0);
     int64 result;
 
-    (void)scanint8(str, false, &result, fcinfo->can_ignore);
+    if (DB_IS_CMPT(A_FORMAT) && ACCEPT_FLOAT_STR_AS_INT) {
+        result = PgStrToIntInternal<false>(str, fcinfo->can_ignore,
+            PG_INT64_MAX, PG_INT64_MIN, "bigint");
+    } else {
+        (void)scanint8(str, false, &result, fcinfo->can_ignore);
+    }
     PG_RETURN_INT64(result);
 }
 
