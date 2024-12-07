@@ -1240,7 +1240,13 @@ static void StartupStreamThread(StreamState* node)
     Assert(pair->producerList != NULL);
 
     StreamTxnContext transactionCxt;
-    transactionCxt.txnId = GetCurrentTransactionId();
+
+    if (IS_SPQ_RUNNING || nodeTag(node->ss.ps.plan->lefttree) != T_ModifyTable) {
+        transactionCxt.txnId = GetCurrentTransactionIdIfAny();
+    } else {
+        transactionCxt.txnId = GetCurrentTransactionId();
+    }
+    
     transactionCxt.snapshot = node->ss.ps.state->es_snapshot;
     StreamSaveTxnContext(&transactionCxt);
 
