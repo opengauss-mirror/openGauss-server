@@ -110,7 +110,7 @@ IMMUTABLE STRICT;
 DROP FUNCTION IF EXISTS pg_catalog.binary_quantize(vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8201;
 CREATE FUNCTION pg_catalog.binary_quantize(vector)
-RETURNS bit
+RETURNS varbit
 AS 'binary_quantize'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
@@ -312,42 +312,48 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8417;
 CREATE FUNCTION pg_catalog.ivfflatbuild(internal, internal, internal)
 RETURNS internal
 AS 'ivfflatbuild'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatbuildempty(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8418;
 CREATE FUNCTION pg_catalog.ivfflatbuildempty(internal)
 RETURNS void
 AS 'ivfflatbuildempty'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatinsert(internal, internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8412;
 CREATE FUNCTION pg_catalog.ivfflatinsert(internal, internal, internal, internal, internal, internal)
 RETURNS boolean
 AS 'ivfflatinsert'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatbulkdelete(internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8419;
 CREATE FUNCTION pg_catalog.ivfflatbulkdelete(internal, internal, internal, internal)
 RETURNS internal
 AS 'ivfflatbulkdelete'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatvacuumcleanup(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8420;
 CREATE FUNCTION pg_catalog.ivfflatvacuumcleanup(internal, internal)
 RETURNS internal
 AS 'ivfflatvacuumcleanup'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatcostestimate(internal, internal, internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8421;
 CREATE FUNCTION pg_catalog.ivfflatcostestimate(internal, internal, internal, internal, internal, internal, internal)
 RETURNS void
 AS 'ivfflatcostestimate'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatoptions(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8422;
@@ -362,84 +368,96 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8205;
 CREATE FUNCTION pg_catalog.ivfflatvalidate(internal)
 RETURNS boolean
 AS 'ivfflatvalidate'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatbeginscan(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8413;
 CREATE FUNCTION pg_catalog.ivfflatbeginscan(internal, internal, internal)
 RETURNS internal
 AS 'ivfflatbeginscan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatrescan(internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8415;
 CREATE FUNCTION pg_catalog.ivfflatrescan(internal, internal, internal, internal, internal)
 RETURNS void
 AS 'ivfflatrescan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatgettuple(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8414;
 CREATE FUNCTION pg_catalog.ivfflatgettuple(internal, internal)
 RETURNS boolean
 AS 'ivfflatgettuple'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatendscan(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8416;
 CREATE FUNCTION pg_catalog.ivfflatendscan(internal)
 RETURNS void
 AS 'ivfflatendscan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflathandler(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8206;
 CREATE FUNCTION pg_catalog.ivfflathandler(internal)
 RETURNS internal
 AS 'ivfflathandler'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswbuild(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8406;
 CREATE FUNCTION pg_catalog.hnswbuild(internal, internal, internal)
 RETURNS internal
 AS 'hnswbuild'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswbuildempty(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8407;
 CREATE FUNCTION pg_catalog.hnswbuildempty(internal)
 RETURNS void
 AS 'hnswbuildempty'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswinsert(internal, internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8401;
 CREATE FUNCTION pg_catalog.hnswinsert(internal, internal, internal, internal, internal, internal)
 RETURNS boolean
 AS 'hnswinsert'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswbulkdelete(internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8408;
 CREATE FUNCTION pg_catalog.hnswbulkdelete(internal, internal, internal, internal)
 RETURNS internal
 AS 'hnswbulkdelete'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswvacuumcleanup(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8409;
 CREATE FUNCTION pg_catalog.hnswvacuumcleanup(internal, internal)
 RETURNS internal
 AS 'hnswvacuumcleanup'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswcostestimate(internal, internal, internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8410;
 CREATE FUNCTION pg_catalog.hnswcostestimate(internal, internal, internal, internal, internal, internal, internal)
 RETURNS void
 AS 'hnswcostestimate'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswoptions(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8411;
@@ -454,49 +472,56 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8207;
 CREATE FUNCTION pg_catalog.hnswvalidate(internal)
 RETURNS boolean
 AS 'hnswvalidate'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswbeginscan(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8402;
 CREATE FUNCTION pg_catalog.hnswbeginscan(internal, internal, internal)
 RETURNS internal
 AS 'hnswbeginscan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswrescan(internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8404;
 CREATE FUNCTION pg_catalog.hnswrescan(internal, internal, internal, internal, internal)
 RETURNS void
 AS 'hnswrescan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswdelete(internal, internal, internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8429;
 CREATE FUNCTION pg_catalog.hnswdelete(internal, internal, internal, internal, internal)
 RETURNS boolean
 AS 'hnswdelete'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswgettuple(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8403;
 CREATE FUNCTION pg_catalog.hnswgettuple(internal, internal)
 RETURNS boolean
 AS 'hnswgettuple'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswendscan(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8405;
 CREATE FUNCTION pg_catalog.hnswendscan(internal)
 RETURNS void
 AS 'hnswendscan'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.hnswhandler(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8208;
 CREATE FUNCTION pg_catalog.hnswhandler(internal)
 RETURNS internal
 AS 'hnswhandler'
-LANGUAGE INTERNAL;
+LANGUAGE INTERNAL
+STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflat_bit_support(internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8210;
@@ -595,7 +620,7 @@ DROP FUNCTION IF EXISTS pg_catalog.l2_distance(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8465;
 CREATE FUNCTION pg_catalog.l2_distance(sparsevec, sparsevec)
 RETURNS float8
-AS 'l2_distance'
+AS 'sparsevec_l2_distance'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
@@ -603,7 +628,7 @@ DROP FUNCTION IF EXISTS pg_catalog.inner_product(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8471;
 CREATE FUNCTION pg_catalog.inner_product(sparsevec, sparsevec)
 RETURNS float8
-AS 'inner_product'
+AS 'sparsevec_inner_product'
 LANGUAGE INTERNAL
 STABLE STRICT;
 
@@ -611,7 +636,7 @@ DROP FUNCTION IF EXISTS pg_catalog.cosine_distance(sparsevec, sparsevec) CASCADE
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8466;
 CREATE FUNCTION pg_catalog.cosine_distance(sparsevec, sparsevec)
 RETURNS float8
-AS 'cosine_distance'
+AS 'sparsevec_cosine_distance'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
@@ -619,7 +644,7 @@ DROP FUNCTION IF EXISTS pg_catalog.l1_distance(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8467;
 CREATE FUNCTION pg_catalog.l1_distance(sparsevec, sparsevec)
 RETURNS float8
-AS 'l1_distance'
+AS 'sparsevec_l1_distance'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
@@ -627,7 +652,7 @@ DROP FUNCTION IF EXISTS pg_catalog.l2_norm(sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8478;
 CREATE FUNCTION pg_catalog.l2_norm(sparsevec)
 RETURNS float8
-AS 'l2_norm'
+AS 'sparsevec_l2_norm'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
@@ -635,7 +660,7 @@ DROP FUNCTION IF EXISTS pg_catalog.l2_normalize(sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8211;
 CREATE FUNCTION pg_catalog.l2_normalize(sparsevec)
 RETURNS sparsevec
-AS 'l2_normalize'
+AS 'sparsevec_l2_normalize'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
@@ -929,7 +954,8 @@ CREATE OPERATOR pg_catalog.+(
 DROP OPERATOR IF EXISTS pg_catalog.-(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8326;
 CREATE OPERATOR pg_catalog.-(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_sub
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_sub,
+	COMMUTATOR = '-'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.*(vector, vector) CASCADE;
@@ -964,7 +990,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8331;
 CREATE OPERATOR pg_catalog.=(
 	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_eq,
 	COMMUTATOR = '=' ,
-	RESTRICT = eqsel, JOIN = eqjoinsel
+	RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<>(vector, vector) CASCADE;
@@ -972,7 +998,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8332;
 CREATE OPERATOR pg_catalog.<>(
 	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_ne,
 	COMMUTATOR = '<>' , NEGATOR = '=' ,
-	RESTRICT = eqsel, JOIN = eqjoinsel
+	RESTRICT = neqsel, JOIN = neqjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.>=(vector, vector) CASCADE;
@@ -1052,7 +1078,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8337;
 CREATE OPERATOR pg_catalog.=(
 	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_eq,
 	COMMUTATOR = '=' ,
-	RESTRICT = eqsel, JOIN = eqjoinsel
+	RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<>(sparsevec, sparsevec) CASCADE;
@@ -1060,7 +1086,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8338;
 CREATE OPERATOR pg_catalog.<>(
 	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_ne,
 	COMMUTATOR = '<>' , NEGATOR = '=' ,
-	RESTRICT = eqsel, JOIN = eqjoinsel
+	RESTRICT = neqsel, JOIN = neqjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.>=(sparsevec, sparsevec) CASCADE;
@@ -1294,7 +1320,7 @@ CREATE OPERATOR FAMILY sparsevec_l2_ops USING hnsw;
 DROP OPERATOR CLASS IF EXISTS sparsevec_l2_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8910;
 CREATE OPERATOR CLASS sparsevec_l2_ops
-	DEFAULT FOR TYPE sparsevec USING hnsw AS
+	FOR TYPE sparsevec USING hnsw AS
 	OPERATOR 1 pg_catalog.<->(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.sparsevec_l2_squared_distance(sparsevec, sparsevec),
 	FUNCTION 3 pg_catalog.hnsw_sparsevec_support(internal);
