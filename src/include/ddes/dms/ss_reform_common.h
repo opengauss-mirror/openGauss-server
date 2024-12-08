@@ -46,14 +46,9 @@ typedef struct SSBroadcastCancelTrx {
 int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf,
     int readLen);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
-void SSGetRecoveryXlogPath();
-char* SSGetNextXLogPath(TimeLineID tli, XLogRecPtr startptr);
-void SSDisasterGetXlogPathList();
 void SSUpdateReformerCtrl();
-void SSReadControlFile(int id, bool updateDmsCtx = false);
+void SSReadReformerCtrl();
 void SSClearSegCache();
-int SSCancelTransactionOfAllStandby(SSBroadcastOp type);
-int SSProcessCancelTransaction(SSBroadcastOp type);
 int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
 void SSStandbySetLibpqswConninfo();
 void SSDisasterRefreshMode();
@@ -64,6 +59,6 @@ bool SSPrimaryRestartScenario();
 bool SSBackendNeedExitScenario();
 void SSWaitStartupExit(bool send_signal = true);
 void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt);
-char* SSGetLogHeaderTypeStr();
+char *SSGetLogHeaderTypeStr();
 void ProcessNoCleanBackendsScenario();
 void SSProcessForceExit();

@@ -68,7 +68,7 @@ typedef enum BTPS_State {
     BTPARALLEL_ADVANCING,
     BTPARALLEL_IDLE,
     BTPARALLEL_DONE
-};
+} BTPS_State;
 
 /*
  * BTParallelScanDescData contains btree specific shared information required

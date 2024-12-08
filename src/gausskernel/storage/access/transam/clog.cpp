@@ -761,7 +761,6 @@ void StartupCLOG(void)
 void TrimCLOG(void)
 {
     if (SS_STANDBY_MODE) {
-        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't trim clog status")));
         return;
     }
 

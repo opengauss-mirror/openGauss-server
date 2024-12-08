@@ -869,50 +869,6 @@ tryAgain:
     return -1; /* failure */
 }
 
-
-/* 
-* When SS_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
-* because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
-*/
-int SSErgodicOpenXlogFile(XLogSegNo segno, int fileFlags, int fileMode)
-{
-    char xlog_file_name[MAXPGPATH];
-    char xlog_file_full_path[MAXPGPATH];
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
-    DIR* dir;
-    int fd;
-    struct dirent *entry;
-    errno_t errorno = EOK;
-
-    errorno = snprintf_s(xlog_file_name, MAXPGPATH, MAXPGPATH - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
-                         (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-    securec_check_ss(errorno, "", "");
-
-    dir = opendir(dssdir);
-    if (dir == NULL) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("Error opening dssdir %s", dssdir)));                                                  
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-            errorno = snprintf_s(xlog_file_full_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s", dssdir, entry->d_name, xlog_file_name);
-            securec_check_ss(errorno, "", "");
-
-            fd = BasicOpenFile(xlog_file_full_path, fileFlags, fileMode);
-            if (fd >= 0) {
-                return fd;
-            }
-        }
-    }
-
-    if (fd < 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" (log segment %s): %m", xlog_file_name,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
-    }
-
-    return fd;
-}
-
 #if defined(FDDEBUG)
 
 static void _dump_lru(void)

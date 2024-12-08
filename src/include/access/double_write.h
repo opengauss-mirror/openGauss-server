@@ -28,6 +28,7 @@
 #include "double_write_basic.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/checksum_impl.h"
+#include "ddes/dms/ss_common_attr.h"
 
 typedef enum BufTagVer {
     ORIGIN_TAG = 0,
@@ -271,7 +272,7 @@ void dw_ext_init();
  */
 inline bool dw_enabled()
 {
-    return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write);
+    return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write && !SS_STANDBY_MODE);
 }
 
 /**

@@ -3448,12 +3448,6 @@ typedef struct knl_t_dms_context {
     bool in_ondemand_redo;
 } knl_t_dms_context;
 
-typedef struct knl_t_ondemand_xlog_copy_context {
-    int openLogFile;
-    XLogSegNo openLogSegNo;
-    uint32 openLogOff;
-} knl_t_ondemand_xlog_copy_context;
-
 typedef struct knl_t_dms_auxiliary_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_dms_auxiliary_context;
@@ -3633,7 +3627,6 @@ typedef struct knl_thrd_context {
     knl_t_cfs_shrinker_context cfs_shrinker_cxt;
     knl_t_sql_patch_context sql_patch_cxt;
     knl_t_dms_context dms_cxt;
-    knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
 #ifdef USE_SPQ
     knl_t_spq_context spq_ctx;

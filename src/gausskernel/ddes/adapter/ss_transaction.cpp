@@ -531,7 +531,7 @@ int SSReloadReformCtrlPage(uint32 len)
         return DMS_ERROR;
     }
 
-    SSReadControlFile(REFORM_CTRL_PAGE);
+    SSReadReformerCtrl();
     return DMS_SUCCESS;
 }
 
@@ -1090,7 +1090,6 @@ bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, Commi
     SSBroadcastSnapshot latest_snapshot;
     dms_broadcast_info_t dms_broad_info;
     SSBroadcastXmin xmin_data;
-    int ret;
     if (ENABLE_SS_BCAST_SNAPSHOT) {
         latest_snapshot.xmin = xmin;
         latest_snapshot.xmax = xmax;
@@ -1126,20 +1125,15 @@ bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, Commi
     pg_atomic_write_u64(&g_instance.dms_cxt.xminAck, MaxTransactionId);
 
     bool bcast_snapshot = ENABLE_SS_BCAST_SNAPSHOT;
-    do {
-        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
-        if (ret == DMS_SUCCESS) {
-            return true;
-        }
-
+    while (dms_broadcast_msg(&dms_ctx, &dms_broad_info) != DMS_SUCCESS) {
         if (bcast_snapshot) {
             pg_usleep(5000L);
         } else {
             return false;
         }
-    } while (ret != DMS_SUCCESS);
+    }
+    return true;
 }
-
 /* broadcast to standby node update realtime-build logctrl enable */
 void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform)
 {

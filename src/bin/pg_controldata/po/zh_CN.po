@@ -168,11 +168,11 @@ msgstr "参数wal_level的值无法识别"
 #, c-format
 msgid ""
 "\n"
-"pg_control data (instance id %d)\n"
+"pg_control data\n"
 "\n"
 msgstr ""
 "\n"
-"pg_control data (实例id %d)\n"
+"控制文件数据\n"
 "\n"
 
 #: pg_controldata.cpp:166 pg_controldata.cpp:269

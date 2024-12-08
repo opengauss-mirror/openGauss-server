@@ -1478,12 +1478,7 @@ void delete_datadir(const char* dirname)
      * this is to keep the basedir/pg_xlog, and delete all files and
      * directories under it.
      */
-    if (strncmp(dirname, "+", 1) == 0 ) {
-        nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog%d", dirname,
-        ss_instance_config.dss.instance_id);
-    } else {
-        nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog", dirname);
-    }
+    nRet = snprintf_s(xlogpath, MAXPGPATH, sizeof(xlogpath) - 1, "%s/pg_xlog", dirname);
     securec_check_ss_c(nRet, "", "");
 
     if (lstat(xlogpath, &stbuf) == 0) {
@@ -1691,12 +1686,7 @@ void fsync_pgdata(const char *pg_data)
     char pg_tblspc[MAXPGPATH] = {0};
     errno_t errorno = EOK;
 
-    if (is_dss_file(pg_data)) {
-        errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", pg_data,
-                             ss_instance_config.dss.instance_id);
-    } else {
-        errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
-    }
+    errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
     securec_check_ss_c(errorno, "\0", "\0");
     errorno = snprintf_s(pg_tblspc, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", pg_data);
     securec_check_ss_c(errorno, "\0", "\0");

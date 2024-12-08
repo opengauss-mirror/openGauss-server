@@ -550,7 +550,6 @@ void index_parallelscan_initialize(Relation heap_relation, Relation index_relati
     if (!target) {
         return;
     }
-    Size offset;
     RELATION_CHECKS;
 
     target->ps_relid = RelationGetRelid(heap_relation);
