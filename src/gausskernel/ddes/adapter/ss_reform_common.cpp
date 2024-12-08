@@ -84,14 +84,6 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
             return fd;
         }
 
-        /* 
-        * When SS_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
-        * because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
-        */
-        if (fd < 0 && SS_DORADO_CLUSTER) {
-            return -1;
-        }
-
         if (!FILE_POSSIBLY_DELETED(errno)) { 
             ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m,"
                     " %s", path, XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
@@ -181,81 +173,6 @@ XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private
     return state;
 }
 
-void SSGetRecoveryXlogPath()
-{
-    errno_t rc = EOK;
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
-
-    rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
-        dssdir, g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id);
-    securec_check_ss(rc, "", "");
-}
-
-char* SSGetNextXLogPath(TimeLineID tli, XLogRecPtr startptr)
-{
-    static int index = 0;
-    char path[MAXPGPATH];
-    char fileName[MAXPGPATH];
-    errno_t rc = EOK;
-    XLogSegNo segno;
-    XLByteToSeg(startptr, segno);
-    rc = snprintf_s(fileName, MAXPGPATH, MAXPGPATH - 1, "%08X%08X%08X", tli,
-                    (uint32)((segno) / XLogSegmentsPerXLogId),
-                    (uint32)((segno) % XLogSegmentsPerXLogId));
-    securec_check_ss_c(rc, "\0", "\0");
-
-    while (true) { 
-        index++;
-        if (index >= DMS_MAX_INSTANCE || (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index][0] == '\0')) {
-            index = 0;
-            break;
-        }
-
-        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index], fileName);
-        securec_check_ss_c(rc, "\0", "\0");
-
-        struct stat buffer;
-        if (stat(path, &buffer) == 0) {
-            break;
-        }
-    }
-
-    return g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index];
-}
-
-void SSDisasterGetXlogPathList()
-{
-    errno_t rc = EOK;
-    for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
-        rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, '\0', MAXPGPATH);
-        securec_check_c(rc, "\0", "\0");
-    }
-    struct dirent *entry;
-    
-    DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name);
-    if (dssdir == NULL) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] Error opening dssdir %s", 
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name)));                                                  
-    }
-
-    uint8_t len = strlen("pg_xlog");
-    uint8_t index = 0;
-    while ((entry = readdir(dssdir)) != NULL) {
-        if (strncmp(entry->d_name, "pg_xlog", len) == 0) {
-            if (strlen(entry->d_name) > len) {
-                rc = memmove_s(entry->d_name, MAX_PATH, entry->d_name + len, strlen(entry->d_name) - len + 1);
-                securec_check_c(rc, "\0", "\0");
-                rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index++], MAXPGPATH, MAXPGPATH - 1,
-                    "%s/%s%d", g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name, "pg_xlog", atoi(entry->d_name));
-                securec_check_ss(rc, "", "");
-            }
-        } else {
-            continue;
-        }
-    }
-    closedir(dssdir);
-}
-
 void SSUpdateReformerCtrl()
 {
     Assert(SS_PRIMARY_MODE || SS_DISASTER_CLUSTER);
@@ -298,102 +215,55 @@ void SSUpdateReformerCtrl()
     }
 }
 
-void SSReadControlFile(int id, bool updateDmsCtx)
+void SSReadReformerCtrl()
 {
     pg_crc32c crc;
     errno_t rc = EOK;
     int fd = -1;
-    char *fname = NULL;
+    char *fname = XLOG_CONTROL_FILE;
     bool retry = false;
-    int read_size = 0;
-    int len = 0;
-    fname = XLOG_CONTROL_FILE;
-    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 
 loop:
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         LWLockRelease(ControlFileLock);
         ereport(FATAL, (errcode_for_file_access(), errmsg("[SS] could not open control file \"%s\": %m", fname)));
     }
 
-    off_t seekpos = (off_t)BLCKSZ * id;
-
-    if (id == REFORM_CTRL_PAGE) {
-        len = sizeof(ss_reformer_ctrl_t);
-    } else {
-        len = sizeof(ControlFileData);
-    }
-
-    read_size = (int)BUFFERALIGN(len);
+    off_t seekpos = (off_t)BLCKSZ * REFORM_CTRL_PAGE;
+    int len = sizeof(ss_reformer_ctrl_t);
+    int read_size = (int)BUFFERALIGN(len);
     char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
     if (pread(fd, buffer, read_size, seekpos) != read_size) {
         LWLockRelease(ControlFileLock);
         ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not read from control file: %m")));
     }
 
-    if (id == REFORM_CTRL_PAGE) {
-        rc = memcpy_s(&g_instance.dms_cxt.SSReformerControl, len, buffer, len);
-        securec_check(rc, "", "");
-        if (close(fd) < 0) {
+    rc = memcpy_s(&g_instance.dms_cxt.SSReformerControl, len, buffer, len);
+    securec_check(rc, "", "");
+    if (close(fd) < 0) {
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
+    }
+
+    /* Now check the CRC. */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, (char *)&g_instance.dms_cxt.SSReformerControl, offsetof(ss_reformer_ctrl_t, crc));
+    FIN_CRC32C(crc);
+
+    if (!EQ_CRC32C(crc, g_instance.dms_cxt.SSReformerControl.crc)) {
+        if (!retry) {
+            ereport(WARNING, (errmsg("[SS] control file \"%s\" contains incorrect checksum, try backup file", fname)));
+            fname = XLOG_CONTROL_FILE_BAK;
+            retry = true;
             LWLockRelease(ControlFileLock);
-            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
-        }
-
-        /* Now check the CRC. */
-        INIT_CRC32C(crc);
-        COMP_CRC32C(crc, (char *)&g_instance.dms_cxt.SSReformerControl, offsetof(ss_reformer_ctrl_t, crc));
-        FIN_CRC32C(crc);
-
-        if (!EQ_CRC32C(crc, g_instance.dms_cxt.SSReformerControl.crc)) {
-            if (retry == false) {
-                ereport(WARNING, (errmsg("[SS] control file \"%s\" contains incorrect checksum, try backup file", fname)));
-                fname = XLOG_CONTROL_FILE_BAK;
-                retry = true;
-                goto loop;
-            } else {
-                LWLockRelease(ControlFileLock);
-                ereport(FATAL, (errmsg("[SS] incorrect checksum in control file")));
-            }
-        }
-        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = g_instance.dms_cxt.SSReformerControl.clusterStatus;
-    } else {
-        ControlFileData* controlFile = NULL;
-        ControlFileData tempControlFile;
-        if (updateDmsCtx) {
-            controlFile = &tempControlFile;
+            goto loop;
         } else {
-            controlFile = t_thrd.shemem_ptr_cxt.ControlFile;
-        }
-
-        rc = memcpy_s(controlFile, (size_t)len, buffer, (size_t)len);
-        securec_check(rc, "", "");
-        if (close(fd) < 0) {
             LWLockRelease(ControlFileLock);
-            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
-        }
-
-        /* Now check the CRC. */
-        INIT_CRC32C(crc);
-        COMP_CRC32C(crc, (char *)controlFile, offsetof(ControlFileData, crc));
-        FIN_CRC32C(crc);
-
-        if (!EQ_CRC32C(crc, controlFile->crc)) {
-            if (retry == false) {
-                ereport(WARNING, (errmsg("[SS] control file \"%s\" contains incorrect checksum, try backup file", fname)));
-                fname = XLOG_CONTROL_FILE_BAK;
-                retry = true;
-                goto loop;
-            } else {
-                LWLockRelease(ControlFileLock);
-                ereport(FATAL, (errmsg("[SS] incorrect checksum in control file")));
-            }
-        }
-
-        if (XLByteLE(g_instance.dms_cxt.ckptRedo, controlFile->checkPointCopy.redo)) {
-            g_instance.dms_cxt.ckptRedo = controlFile->checkPointCopy.redo;
+            ereport(FATAL, (errmsg("[SS] incorrect checksum in control file")));
         }
     }
+    g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = g_instance.dms_cxt.SSReformerControl.clusterStatus;
     LWLockRelease(ControlFileLock);
 }
 

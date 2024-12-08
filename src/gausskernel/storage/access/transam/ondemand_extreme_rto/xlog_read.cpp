@@ -79,52 +79,6 @@ inline static XLogReaderState *ReadNextRecordFromQueue(int emode)
     return xlogreader;
 }
 
-/*
-* in ss dorado double cluster, we need read xlogpath ergodic，
-* we will read xlog in path where last read success
-*/
-XLogRecord *SSExtremeXLogReadRecordFromAllNodes(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
-{
-    XLogRecord *record = NULL;
-    errno_t errorno = 0;
-
-    for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
-            break;
-        }
-        char *curPath = g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i];
-        record = ParallelReadRecord(state, InvalidXLogRecPtr, errormsg, curPath);
-        if (record != NULL) {
-            /* read success, exchange index */
-            if (i != 0) {
-                /* read success, exchange index */
-                char exPath[MAXPGPATH];
-                errorno = snprintf_s(exPath, MAXPGPATH, MAXPGPATH - 1, curPath);
-                securec_check_ss(errorno, "", "");
-                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, MAXPGPATH - 1,
-                    g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0]);
-                securec_check_ss(errorno, "", "");
-                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0], MAXPGPATH, MAXPGPATH - 1, exPath);
-                securec_check_ss(errorno, "", "");
-            }
-            break;
-        } else {
-            if (t_thrd.xlog_cxt.readFile >= 0) {
-                close(t_thrd.xlog_cxt.readFile);
-                t_thrd.xlog_cxt.readFile = -1;
-            }
-
-            /* If record which is read from file is NULL, when preReadStartPtr is not set InvalidXlogPreReadStartPtr
-             * then exhchanging file, due to preread 64M now RecPtr < preReadStartPtr, so record still is got from
-             * preReadBuf and record still is bad. Therefore, preReadStartPtr need to set InvalidXlogPreReadStartPtr
-             * so that record is read from next file on disk instead of preReadBuf.
-             */
-            state->preReadStartPtr = InvalidXlogPreReadStartPtr;
-        }
-    }
-    return record;
-}
-
 XLogRecord *ReadNextXLogRecord(XLogReaderState **xlogreaderptr, int emode)
 {
     XLogRecord *record = NULL;
@@ -304,18 +258,8 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
         if (readSource & XLOG_FROM_STREAM && !SS_DISASTER_STANDBY_CLUSTER) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
-            if (SS_DORADO_CLUSTER) {
-                readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
-                    xlogreader->readBuf, readTLI, xlogPath);
-            } else {
-                readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
-                    xlogreader->readBuf, readTLI, NULL);
-            }
-        }
-        
-        /* current path haven't xlog file for this xlog */
-        if (SS_DORADO_CLUSTER && readLen < 0) {
-            return -1;
+            readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, xlogreader->readBuf,
+                                     readTLI, xlogPath);
         }
 
         if (readLen > 0 || t_thrd.xlog_cxt.recoveryTriggered || !t_thrd.xlog_cxt.StandbyMode || DoEarlyExit()) {
@@ -369,7 +313,8 @@ int ParallelReadPageInternal(XLogReaderState *state, XLogRecPtr pageptr, int req
 
     /* still not enough */
     if (readLen < (int)XLogPageHeaderSize(hdr)) {
-        readLen = ParallelXLogPageRead(state, pageptr, XLogPageHeaderSize(hdr), state->currRecPtr, &state->readPageTLI, xlogPath);
+        readLen = ParallelXLogPageRead(state, pageptr, XLogPageHeaderSize(hdr), state->currRecPtr,
+                                       &state->readPageTLI, xlogPath);
         if (readLen < 0) {
             goto err;
         }
@@ -697,7 +642,6 @@ err:
 XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
 {
     XLogRecord *record = NULL;
-    uint32 streamFailCount = 0;
     int retry = 0;
 
     /* This is the first try to read this page. */
@@ -705,11 +649,7 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
     for (;;) {
         char *errormsg = NULL;
 
-        if (SS_DORADO_CLUSTER) {
-            record = SSExtremeXLogReadRecordFromAllNodes(xlogreader, InvalidXLogRecPtr, &errormsg);
-        } else {
-            record = ParallelReadRecord(xlogreader, InvalidXLogRecPtr, &errormsg, NULL);
-        }
+        record = ParallelReadRecord(xlogreader, InvalidXLogRecPtr, &errormsg, SS_XLOGDIR);
         t_thrd.xlog_cxt.ReadRecPtr = xlogreader->ReadRecPtr;
         t_thrd.xlog_cxt.EndRecPtr = xlogreader->EndRecPtr;
         g_instance.comm_cxt.predo_cxt.redoPf.read_ptr = t_thrd.xlog_cxt.ReadRecPtr;

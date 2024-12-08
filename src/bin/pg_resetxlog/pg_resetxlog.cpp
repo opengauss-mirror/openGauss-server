@@ -70,7 +70,7 @@ static void DssParaInit(void);
 static void SetGlobalDssParam(void);
 static int  ReadNonDssControlFile(int *fd, char * buffer);
 static int  ReadDssControlFile(int *fd, char *buffer);
-static bool ReadControlFile(void);
+static bool TryReadControlFile(void);
 static void GuessControlValues(void);
 static bool GetGucValue(const char *key, char *value);
 static bool CheckConfigFileStatus(void);
@@ -374,7 +374,7 @@ int main(int argc, char* argv[])
     /*
      * Attempt to read the existing pg_control file
      */
-    if (!ReadControlFile()) {
+    if (!TryReadControlFile()) {
         GuessControlValues();
     }
 
@@ -604,7 +604,7 @@ static int ReadDssControlFile(int *fd, char *buffer)
  * This routine is also responsible for updating old pg_control versions
  * to the current format.  (Currently we don't do anything of the sort.)
  */
-static bool ReadControlFile(void)
+static bool TryReadControlFile(void)
 {
     int fd = -1;
     int len = 0;
@@ -640,10 +640,11 @@ static bool ReadControlFile(void)
         fd = -1;
         exit(1);
     }
-    if (dss.enable_dss)
+    if (dss.enable_dss) {
         len = ReadDssControlFile(&fd, buffer);
-    else
+    } else {
         len = ReadNonDssControlFile(&fd, buffer);
+    }
     close(fd);
     fd = -1;
 

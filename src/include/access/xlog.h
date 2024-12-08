@@ -918,7 +918,8 @@ bool NewDataIsInBuf(XLogRecPtr expectedRecPtr);
 bool rescanLatestTimeLine(void);
 int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources);
 int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path = NULL);
+void ReadControlFile(void);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 

@@ -620,7 +620,7 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *hashmapBlockS
 
     // step1: read record
     XLogRecord *record = XLogReadRecord(xlogreader, hashmapBlockState->blockparse.blockhead.start_ptr, &errormsg,
-        true, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir);
+        true, SS_XLOGDIR);
     if (record == NULL) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("[On-demand] reload xlog record failed at %X/%X, spc/db/rel/bucket "

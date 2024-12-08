@@ -153,7 +153,7 @@ static void display_control_page(ControlFileData ControlFile, int instance_id, b
 
     /* display instance id in shared storage mode */
     if (enable_dss) {
-        printf(_("\npg_control data (instance id %d)\n\n"), instance_id);
+        printf(_("\npg_control data\n\n"));
     }
 
     /* Check the CRC. */
@@ -274,7 +274,6 @@ static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
     printf(_("Reform control version number:        %u\n"), reformerCtrl.version);
     printf(_("Stable instances list:                %lu\n"), reformerCtrl.list_stable);
     printf(_("Primary instance ID:                  %d\n"), reformerCtrl.primaryInstId);
-    printf(_("Recovery instance ID:                 %d\n"), reformerCtrl.recoveryInstId);
     printf(_("Cluster status:                       %s\n"), SSClusterState(reformerCtrl.clusterStatus));
     printf(_("Cluster run mode:                     %s\n"), SSClusterRunMode(reformerCtrl.clusterRunMode));
 }

@@ -55,6 +55,7 @@
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
+#include "utils/elog.h"
 
 static void ReleaseResource();
 
@@ -513,7 +514,7 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
     PG_TRY();
     {
         for (int ntries = 0;; ntries++) {
-            SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
+            SSReadReformerCtrl(); /* need to double check */
             if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
                 g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
                 ereport(LOG, (errmodule(MOD_DMS),
@@ -525,8 +526,8 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
                 if (dms_reform_failed()) {
                     ereport(ERROR,
                         (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                            "control file indicates primary is %d, list_stable%llu; dms reform failed.",
-                            type_string, (int)primary_id, list_stable,
+                            "control file indicates primary is %d, list_stable%lu; dms reform failed.",
+                            type_string, primary_id, list_stable,
                             g_instance.dms_cxt.SSReformerControl.primaryInstId,
                             g_instance.dms_cxt.SSReformerControl.list_stable)));
                     ret = DMS_ERROR;
@@ -535,7 +536,7 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
                 if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                     ereport(ERROR,
                         (errmodule(MOD_DMS), errmsg("%s Failed to confirm new primary: %d, list_stable:%llu, "
-                            " control file indicates primary is %d, list_stable%llu; wait timeout.",
+                            " control file indicates primary is %d, list_stable%lu; wait timeout.",
                             type_string, (int)primary_id, list_stable,
                             g_instance.dms_cxt.SSReformerControl.primaryInstId,
                             g_instance.dms_cxt.SSReformerControl.list_stable)));
@@ -1524,8 +1525,7 @@ static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index
 static int32 CBDrcBufValidate(void *db_handle)
 {
     /* Load Control File */
-    int src_id = SSGetPrimaryInstId();
-    SSReadControlFile(src_id, true);
+    ReadControlFile();
     int buf_cnt = 0;
 
     uint64 buf_state;
@@ -1750,7 +1750,7 @@ static int CBFlushCopy(void *db_handle, char *pageid)
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         buf_ctrl->state |= BUF_DIRTY_NEED_FLUSH;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][%u/%u/%u/%d %d-%u] mark need flush in flush copy:"
-                             "page lsn (0x%llx), buf_ctrl.state: %lu",
+                             "page lsn (0x%llx), buf_ctrl.state: %u",
                             tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                             tag->forkNum, tag->blockNum, (unsigned long long)pagelsn, buf_ctrl->state)));
     } else {
@@ -2083,8 +2083,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         SSGrantDSSWritePermission();
     }
-    int old_primary = SSGetPrimaryInstId();
-    SSReadControlFile(old_primary, true);
+    ReadControlFile();
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] old cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 

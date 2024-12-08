@@ -3072,7 +3072,7 @@ int PostmasterMain(int argc, char* argv[])
      */
     if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
         /* load primary id and reform stable list from control file */
-        SSReadControlFile(REFORM_CTRL_PAGE);
+        SSReadReformerCtrl();
         if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
@@ -10305,7 +10305,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
          * in case failover has been performed between two dorado cluster.
          */
         if (SS_DISASTER_CLUSTER) {
-            SSReadControlFile(REFORM_CTRL_PAGE);
+            SSReadReformerCtrl();
         }
         if (SS_DISASTER_MAIN_STANDBY_NODE) {
             ereport(LOG,

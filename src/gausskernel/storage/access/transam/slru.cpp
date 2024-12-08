@@ -873,7 +873,6 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
     }
     
     if (SS_STANDBY_PROMOTING) {
-        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't write slru page for switchover")));
         return true;
     }
 

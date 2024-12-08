@@ -173,19 +173,18 @@ static void WalSndLastCycleHandler(SIGNAL_ARGS);
 
 static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *cmd_string);
 static void HandleWalReplicationCommand(const char *cmd_string, ReplicationCxt* repCxt);
-typedef void (*WalSndSendDataCallback)(char*);
-static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath = NULL);
+typedef void (*WalSndSendDataCallback)(void);
+static int WalSndLoop(WalSndSendDataCallback send_data);
 static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
 
-
-static void XLogSendLSN(char* xlogPath = NULL);
-static void XLogSendPhysical(char* xlogPath = NULL);
-static void XLogSendUwalLSN(char* xlogPath = NULL);
-static void XLogSendLogical(char* xlogPath = NULL);
-static void XLogSendUwalStatus(char* xlogPath = NULL);
-static void XLogSendParallelLogical(char* xlogPath = NULL);
+static void XLogSendLSN(void);
+static void XLogSendPhysical(void);
+static void XLogSendUwalLSN(void);
+static void XLogSendLogical(void);
+static void XLogSendUwalStatus(void);
+static void XLogSendParallelLogical(void);
 
 static void IdentifySystem(void);
 static void IdentifyVersion(void);
@@ -232,7 +231,7 @@ static void WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, Tran
 static void WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
 static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc);
 
-static void XLogRead(char *buf, XLogRecPtr startptr, Size count, char* xlogPath = NULL);
+static void XLogRead(char *buf, XLogRecPtr startptr, Size count);
 
 static void SetWalSndPeerMode(ServerMode mode);
 static void SetWalSndPeerDbstate(DbState state);
@@ -260,7 +259,7 @@ void wal_snd_clean_slot(char *msgbuf, char *slot_name);
 
 char *DataDir = ".";
 
-static void XLogSendLSN(char* xlogPath)
+static void XLogSendLSN(void)
 {
     PrimaryKeepaliveMessage keepalive_message;
     volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
@@ -516,12 +515,7 @@ int WalSenderMain(void)
     else {
         if (USE_PHYSICAL_XLOG_SEND) {
             if (!g_instance.attr.attr_storage.enable_uwal) {
-                if (SS_DISASTER_CLUSTER && walsnd->sendRole != SNDROLE_PRIMARY_BUILDSTANDBY) {
-                    return WalSndLoop(XLogSendPhysical, 
-                            SSGetNextXLogPath(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sentPtr));
-                } else {
-                    return WalSndLoop(XLogSendPhysical);
-                }
+                return WalSndLoop(XLogSendPhysical);
             } else {
                 return WalSndLoop(XLogSendUwalStatus);
             }
@@ -3922,7 +3916,7 @@ static void WSDataSendInit()
 }
 
 /* Main loop of walsender process */
-static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
+static int WalSndLoop(WalSndSendDataCallback send_data)
 {
     bool first_startup = true;
     bool sync_config_needed = false;
@@ -3949,9 +3943,6 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
     if (strcmp(u_sess->attr.attr_common.application_name, "gs_probackup") == 0 &&
         t_thrd.walsender_cxt.timeoutCheckInternal < MINUTE_30) {
         t_thrd.walsender_cxt.timeoutCheckInternal = MINUTE_30;
-    }
-    if (SS_STREAM_CLUSTER && xlogPath != NULL) {
-        ereport(LOG, (errmsg("walsender will send xlog in %s", xlogPath)));
     }
 
     ResourceOwner tmpOwner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -4185,7 +4176,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
                 ChooseStartPointForDummyStandby();
 
                 if (!pq_is_send_pending()) {
-                    send_data(xlogPath);
+                    send_data();
                 } else {
                     t_thrd.walsender_cxt.walSndCaughtUp = false;
                 }
@@ -4209,7 +4200,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
              */
             LogCtrlSleep();
             if (!pq_is_send_pending())
-                send_data(xlogPath);
+                send_data();
             else
                 t_thrd.walsender_cxt.walSndCaughtUp = false;
 
@@ -4294,7 +4285,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
                 if (AmWalSenderToDummyStandby() && WalSndInProgress(SNDROLE_PRIMARY_STANDBY))
                     ; /* nothing to do */
                 else {
-                    send_data(xlogPath);
+                    send_data();
                 }
 
                 if (t_thrd.walsender_cxt.walSndCaughtUp && !pq_is_send_pending()) {
@@ -4851,7 +4842,7 @@ static void WalSndShutdown(void)
  * more than one.
  */
 
-static void XLogRead(char *buf, XLogRecPtr startptr, Size count, char* xlogPath)
+static void XLogRead(char *buf, XLogRecPtr startptr, Size count)
 {
     char *p = NULL;
     XLogRecPtr recptr;
@@ -4925,16 +4916,7 @@ retry:
             }
 
             XLByteToSeg(recptr, t_thrd.walsender_cxt.sendSegNo);
-
-            if (xlogPath == NULL) {
-                XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo);
-            } else {
-                int nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X",
-                                    xlogPath, t_thrd.xlog_cxt.ThisTimeLineID,
-                                    (uint32)((t_thrd.walsender_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                                    (uint32)((t_thrd.walsender_cxt.sendSegNo) % XLogSegmentsPerXLogId));
-                securec_check_ss_c(nRet, "\0", "\0");        
-            }
+            XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo);
 
             t_thrd.walsender_cxt.sendFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
             if (t_thrd.walsender_cxt.sendFile < 0) {
@@ -5220,7 +5202,7 @@ void LogicalLogHandle(ParallelReorderBuffer *prb, logicalLog *logChange)
 /*
  * Get the logical logs in logical queue in turn, and send them after processing.
  */
-static void XLogSendParallelLogical(char* xlogPath)
+static void XLogSendParallelLogical(void)
 {
     int slotId = t_thrd.walsender_cxt.LogicalSlot;
 
@@ -5299,7 +5281,7 @@ static void XLogSendParallelLogical(char* xlogPath)
 /*
  * Stream out logically decoded data.
  */
-static void XLogSendLogical(char* xlogPath)
+static void XLogSendLogical(void)
 {
     XLogRecord *record = NULL;
     char *errm = NULL;
@@ -5355,7 +5337,7 @@ static void XLogSendLogical(char* xlogPath)
  * If there is no unsent WAL remaining, *caughtup is set to true, otherwise
  * *caughtup is set to false.
  */
-static void XLogSendPhysical(char* xlogPath)
+static void XLogSendPhysical(void)
 {
     XLogRecPtr SendRqstPtr = InvalidXLogRecPtr;
     XLogRecPtr startptr = InvalidXLogRecPtr;
@@ -5373,9 +5355,6 @@ static void XLogSendPhysical(char* xlogPath)
     errno_t errorno = EOK;
 
     t_thrd.walsender_cxt.catchup_threshold = 0;
-    if (SS_STREAM_CLUSTER && xlogPath != NULL) {
-        ereport(LOG, (errmsg("ss stream cluster primary node will send xlog in %s", xlogPath)));
-    }
     /*
      * Attempt to send all data that's already been written out and fsync'd to
      * disk.  We cannot go further than what's been written out given the
@@ -5507,7 +5486,7 @@ static void XLogSendPhysical(char* xlogPath)
         t_thrd.walsender_cxt.output_xlog_message[0] = 'C';
         XLogCompression(&compressedSize, startptr, nbytes);
     } else {
-        XLogRead(t_thrd.walsender_cxt.output_xlog_message + 1 + sizeof(WalDataMessageHeader), startptr, nbytes, xlogPath);
+        XLogRead(t_thrd.walsender_cxt.output_xlog_message + 1 + sizeof(WalDataMessageHeader), startptr, nbytes);
         ereport(DEBUG5, (errmsg("conninfo:(%s,%d) start: %X/%X, end: %X/%X, %lu bytes",
                                 t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localhost,
                                 t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localport, (uint32)(startptr >> 32),
@@ -5596,7 +5575,7 @@ static void XLogSendPhysical(char* xlogPath)
     return;
 }
 
-static void XLogSendUwalLSN(char* xlogPath)
+static void XLogSendUwalLSN(void)
 {
     PrimaryKeepaliveMessage keepalive_message;
     volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
@@ -5652,16 +5631,16 @@ static void XLogSendUwalLSN(char* xlogPath)
         WalSndShutdown();
 }
 
-static void XLogSendUwalStatus(char* xlogPath)
+static void XLogSendUwalStatus(void)
 {
     if (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
-        return XLogSendPhysical(xlogPath);
+        return XLogSendPhysical();
     } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_UWALCATCHUP) {
-        return XLogSendPhysical(xlogPath);
+        return XLogSendPhysical();
     } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_STREAMING) {
         return;
     } else {
-        return XLogSendUwalLSN(xlogPath);
+        return XLogSendUwalLSN();
     }
 }
 
