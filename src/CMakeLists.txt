@@ -282,10 +282,12 @@ install(FILES ${GCC_LIB_PATH}/lib64/libgcc_s.so.1 DESTINATION lib)
 install(DIRECTORY ${GCC_LIB_PATH}/lib64/ DESTINATION lib
     FILES_MATCHING PATTERN "libgomp.so*")
 
-file(GLOB libstdc_files ${GCC_LIB_PATH}/lib64/libstdc++.so.6*)
+file(GLOB libstdc_files ${GCC_LIB_PATH}/lib64/libstdc++.so.6.0.*)
 file(GLOB to_remove ${GCC_LIB_PATH}/lib64/libstdc++.so.6.*.py)
 list(REMOVE_ITEM libstdc_files ${to_remove})
-install(FILES ${libstdc_files} DESTINATION lib)
+install(CODE "execute_process(
+    COMMAND cp ${libstdc_files} ${prefix_home}/lib/libstdc++.so.6)"
+)
 
 # install(DIRECTORY ${LIBCGROUP_LIB_PATH} DESTINATION . FILES_MATCHING PATTERN "libcgroup.so*")
 install(CODE "execute_process(
