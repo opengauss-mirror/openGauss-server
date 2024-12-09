@@ -29,12 +29,7 @@
 #include "knl/knl_instance.h"
 
 #ifdef ENABLE_HTAP
-
-#ifdef ENABLE_HTAP
 #define HAVE_HTAP_TABLES (pg_atomic_read_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt) != 0)
-#else
-#define HAVE_HTAP_TABLES (false)
-#endif
 
 #define DEFAULT_DELTAPAGE_SIZE (8192)
 
