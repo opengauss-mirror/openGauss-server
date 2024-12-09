@@ -443,7 +443,7 @@ typedef union st_dms_buf_ctrl
         unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
         unsigned long long edp_map;             // records edp instance
         long long last_ckpt_time; // last time when local edp page is added to group.
-        volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm
+        volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm and ss_buf_try_remote
         unsigned long long seq; // for dms page swap message-sequence
         void *buf_ctrl;
     #ifdef OPENGAUSS
