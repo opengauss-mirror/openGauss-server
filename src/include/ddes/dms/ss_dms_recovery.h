@@ -170,6 +170,7 @@ typedef struct ss_recovery_info {
     bool in_failover;      // used to detemin failover scenario, especially for the non-promoting node
     bool in_flushcopy;
     bool no_backend_left;
+    bool failover_to_job;
     bool startup_need_exit_normally;        //used in alive failover
     bool recovery_trapped_in_page_request;   //used in alive failover
     bool in_ondemand_recovery;

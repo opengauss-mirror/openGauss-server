@@ -6382,6 +6382,12 @@ retry:
         if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
             return;
         }
+        /* the old job schedule thread should exit */
+        if (t_thrd.role == JOB_SCHEDULER && g_instance.dms_cxt.SSRecoveryInfo.failover_to_job) {
+            g_instance.dms_cxt.SSRecoveryInfo.failover_to_job = false;
+            return;
+        }
+
         if (IsSegmentBufferID(buf->buf_id)) {
             tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode, &with_io_in_progress);
         } else {

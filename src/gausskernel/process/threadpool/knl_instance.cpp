@@ -208,6 +208,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.in_failover = false;
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
+    dms_cxt->SSRecoveryInfo.failover_to_job = false;
     dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
     dms_cxt->SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
     dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
