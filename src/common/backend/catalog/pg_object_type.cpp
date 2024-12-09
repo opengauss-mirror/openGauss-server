@@ -47,6 +47,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_object_type.h"
 #include "fmgr.h"
 #include "fmgr/fmgr_comp.h"
@@ -269,5 +270,21 @@ bool isObjectTypeAttributes(Oid objtypeid, char* attr)
         }
     }
     ReleaseTupleDesc(tupleDesc);
+    return false;
+}
+
+bool isObjectTypeClassFunction(Oid funcid)
+{
+    HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(funcid), CharGetDatum(OBJECT_TYPE_PROC));
+    char proctype = OBJECTTYPE_NULL_PROC;
+    if (HeapTupleIsValid(objTuple)) {
+        bool isnull = true;
+        Datum object_options = SysCacheGetAttr(PGOBJECTID, objTuple, Anum_pg_object_options, &isnull);
+        proctype = GET_PROTYPEKIND(object_options);
+        ReleaseSysCache(objTuple);
+    }
+    if (proctype == OBJECTTYPE_MEMBER_PROC || proctype == OBJECTTYPE_STATIC_PROC) {
+        return true;
+    }
     return false;
 }

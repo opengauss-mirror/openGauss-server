@@ -5721,12 +5721,21 @@ static CreateFunctionStmt* _copyCreateFunctionStmt(const CreateFunctionStmt* fro
     COPY_SCALAR_FIELD(replace);
     COPY_SCALAR_FIELD(isOraStyle);
     COPY_SCALAR_FIELD(isProcedure);
+    COPY_SCALAR_FIELD(isPrivate);
+    COPY_SCALAR_FIELD(isFunctionDeclare);
+    COPY_SCALAR_FIELD(isExecuted);
+    COPY_SCALAR_FIELD(startLineNumber);
+    COPY_SCALAR_FIELD(firstLineNumber);
+    COPY_SCALAR_FIELD(isfinal);
+    COPY_SCALAR_FIELD(typfunckind);
     COPY_NODE_FIELD(funcname);
     COPY_NODE_FIELD(parameters);
     COPY_NODE_FIELD(returnType);
     COPY_NODE_FIELD(options);
     COPY_NODE_FIELD(withClause);
     COPY_STRING_FIELD(inputHeaderSrc);
+    COPY_STRING_FIELD(funcHeadSrc);
+    COPY_STRING_FIELD(queryStr);
     if (t_thrd.proc->workingVersionNum >= CREATE_FUNCTION_DEFINER_VERSION) {
         COPY_STRING_FIELD(definer);
     }

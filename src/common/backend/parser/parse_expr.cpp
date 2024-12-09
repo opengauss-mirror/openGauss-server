@@ -1793,8 +1793,9 @@ static bool NeedExtractOutParam(FuncCall* fn, Node* result)
      * When proc_outparam_override is on, extract all but select func
      */
     FuncExpr* funcexpr = (FuncExpr*)result;
+    Oid funcid = funcexpr->funcid;
     Oid schema_oid = get_func_namespace(funcexpr->funcid);
-    if (IsAformatStyleFunctionOid(schema_oid) && enable_out_param_override()) {
+    if (IsAformatStyleFunctionOid(schema_oid, funcid) && enable_out_param_override()) {
         return false;
     }
     if (is_function_with_plpgsql_language_and_outparam(funcexpr->funcid) && !fn->call_func) {

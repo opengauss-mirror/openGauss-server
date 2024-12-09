@@ -119,6 +119,8 @@ SET
 CREATE SCHEMA
 ALTER SCHEMA
 SET
+CREATE PACKAGE
+CREATE PACKAGE BODY
 CREATE TYPE
 ALTER TYPE
 CREATE TYPE
@@ -135,8 +137,6 @@ CREATE TABLE
 ALTER TABLE
 CREATE FUNCTION
 ALTER FUNCTION
-CREATE PACKAGE
-CREATE PACKAGE BODY
 --?.*
 -- pipelined function check
 select * from get_tab_ptf(2);
@@ -284,7 +284,9 @@ select unnest(get_table_of_int_autom(2));
 
 drop schema plpgsql_dump cascade;
 NOTICE:  drop cascades to 10 other objects
-DETAIL:  drop cascades to type t_tf_row
+--?.*
+drop cascades to function plpgsql_dump.table_of_rec(integer)
+drop cascades to type t_tf_row
 drop cascades to type t_tf_tab
 drop cascades to function t_tf_tab(t_tf_row[])
 drop cascades to function get_tab_ptf(numeric)
@@ -292,7 +294,5 @@ drop cascades to function get_tab_ptf_autom(numeric)
 drop cascades to function get_table_of_int_autom(numeric)
 drop cascades to table stocktable
 drop cascades to function stockpivot_pl()
---?.*
-drop cascades to function plpgsql_dump.table_of_rec(integer)
 \c postgres
 drop database plpgsql_dump;

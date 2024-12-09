@@ -21,10 +21,13 @@ WHERE (p1.typnamespace = 0 OR
     NOT p1.typisdefined OR
     (p1.typalign not in ('c', 's', 'i', 'd')) OR
     (p1.typstorage not in ('p', 'x', 'e', 'm'))) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
- oid  |  typname  
-------+-----------
- 4408 | undefined
-(1 row)
+  oid  |  typname   
+-------+------------
+  4408 | undefined
+--? anytype.*
+--? anydata.*
+--? anydataset.*
+(4 rows)
 
 -- Look for "pass by value" types that can't be passed by value.
 SELECT p1.oid, p1.typname
@@ -53,9 +56,12 @@ SELECT p1.oid, p1.typname
 FROM pg_type as p1
 WHERE (p1.typtype = 'c' AND p1.typrelid = 0) OR
     (p1.typtype != 'c' AND p1.typrelid != 0);
- oid | typname 
------+---------
-(0 rows)
+  oid  |  typname   
+-------+------------
+--? anytype.*
+--? anydata.*
+--? anydataset.*
+(3 rows)
 
 -- Look for types that should have an array type according to their typtype,
 -- but don't.  We exclude composites here because we have not bothered to
@@ -68,15 +74,18 @@ WHERE p1.typtype not in ('c','d','p') AND p1.typname NOT LIKE E'\\_%'
     (SELECT 1 FROM pg_type as p2
      WHERE p2.typname = ('_' || p1.typname)::name AND
            p2.typelem = p1.oid and p1.typarray = p2.oid) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table') order by p1.oid;
- oid  |     typname      
-------+------------------
-   32 | oidvector_extend
-  194 | pg_node_tree
-  210 | smgr
-  705 | unknown
- 3272 | anyset
- 4408 | undefined
-(6 rows)
+  oid  |     typname      
+-------+------------------
+    32 | oidvector_extend
+   194 | pg_node_tree
+   210 | smgr
+   705 | unknown
+  3272 | anyset
+  4408 | undefined
+--? anytype.*
+--? anydata.*
+--? anydataset.*
+(9 rows)
 
 -- Make sure typarray points to a varlena array type of our own base
 SELECT p1.oid, p1.typname as basetype, p2.typname as arraytype,
@@ -170,13 +179,14 @@ WHERE p1.typtype not in ('b', 'p', 'o')
 ORDER BY 1;
  typtype |  typinput   
 ---------+-------------
+ a       | record_in
  c       | record_in
  d       | domain_in
  e       | enum_in
  r       | range_in
  s       | anyset_in
  u       | undefinedin
-(6 rows)
+(7 rows)
 
 -- Check for bogus typoutput routines
 -- As of 8.0, this check finds refcursor, which is borrowing
@@ -212,12 +222,13 @@ WHERE p1.typtype not in ('b', 'd', 'p', 'o')
 ORDER BY 1;
  typtype |  typoutput   
 ---------+--------------
+ a       | record_out
  c       | record_out
  e       | enum_out
  r       | range_out
  s       | anyset_out
  u       | undefinedout
-(5 rows)
+(6 rows)
 
 -- Domains should have same typoutput as their base types
 SELECT p1.oid, p1.typname, p2.oid, p2.typname
@@ -289,12 +300,13 @@ WHERE p1.typtype not in ('b', 'p', 'o', 's')
 ORDER BY 1;
  typtype |  typreceive   
 ---------+---------------
+ a       | record_recv
  c       | record_recv
  d       | domain_recv
  e       | enum_recv
  r       | range_recv
  u       | undefinedrecv
-(5 rows)
+(6 rows)
 
 -- Check for bogus typsend routines
 -- As of 7.4, this check finds refcursor, which is borrowing
@@ -331,11 +343,12 @@ WHERE p1.typtype not in ('b', 'd', 'p', 'o', 's')
 ORDER BY 1;
  typtype |    typsend    
 ---------+---------------
+ a       | record_send
  c       | record_send
  e       | enum_send
  r       | range_send
  u       | undefinedsend
-(4 rows)
+(5 rows)
 
 -- Domains should have same typsend as their base types
 SELECT p1.oid, p1.typname, p2.oid, p2.typname

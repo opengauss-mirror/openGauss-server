@@ -88,4 +88,5 @@ extern int ObjectIntanceCmp(Datum arg1, Datum arg2, Oid mapid, Oid orderid);
 
 Datum object_table_value(FunctionCallInfo fcinfo);
 extern bool isObjectTypeAttributes(Oid objectypeid, char* attr);
+extern bool isObjectTypeClassFunction(Oid funcid);
 #endif /* PG_OBJECT_TYPE_H */

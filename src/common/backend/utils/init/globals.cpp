@@ -76,7 +76,7 @@ bool will_shutdown = false;
  *       NEXT   |  93000   |     ?      |     ?
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 93027;
+const uint32 GRAND_VERSION_NUM = 93028;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE

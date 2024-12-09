@@ -230,7 +230,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
         cur_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
     }
 
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && yyextra->lookahead_num == 0) {
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && yyextra->lookahead_num == 0 && !IsInitdb) {
         bool is_last_colon;
         if (cur_token == int(';')) {
             is_last_colon = true;

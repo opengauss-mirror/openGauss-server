@@ -57,6 +57,7 @@
 #include "catalog/pg_extension_data_source.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_snapshot.h"
+#include "catalog/pg_object_type.h"
 #include "commands/tablespace.h"
 #include "commands/directory.h"
 #include "cstore.h"
@@ -1298,30 +1299,19 @@ bool IsPldeveloper(Oid nspnamespace)
     }
     return false;
 }
-bool IsAformatStyleFunctionOid(Oid relnamespace)
+bool IsAformatStyleFunctionOid(Oid relnamespace, Oid funcid)
 {
-    char* schemaName = get_namespace_name(relnamespace);
-    if (schemaName == NULL) {
+    if (relnamespace == PG_DBEPERF_NAMESPACE) {
+        return true;
+    }
+
+    if (relnamespace != PG_CATALOG_NAMESPACE) {
         return false;
     }
-    return IsAformatStyleFunctionName(schemaName);
+
+    return !isObjectTypeClassFunction(funcid);
 }
  
-bool IsAformatStyleFunctionName(const char* schemaName)
-{
-    const char* packageSchemaList[] = {
-        "pg_catalog",
-        "dbe_perf"
-    };
-    int schemaNum = lengthof(packageSchemaList);
-    for (int i = 0; i < schemaNum; ++i) {
-        if (strcmp(schemaName, packageSchemaList[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /*
  * Description: Get records in pg_attribte for system catalogs
  * Returns: Datum

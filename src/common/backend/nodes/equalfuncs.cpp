@@ -1640,11 +1640,23 @@ static bool _equalIndexStmt(const IndexStmt* a, const IndexStmt* b)
 static bool _equalCreateFunctionStmt(const CreateFunctionStmt* a, const CreateFunctionStmt* b)
 {
     COMPARE_SCALAR_FIELD(replace);
+    COMPARE_SCALAR_FIELD(isOraStyle);
+    COMPARE_SCALAR_FIELD(isProcedure);
+    COMPARE_SCALAR_FIELD(isPrivate);
+    COMPARE_SCALAR_FIELD(isFunctionDeclare);
+    COMPARE_SCALAR_FIELD(isExecuted);
+    COMPARE_SCALAR_FIELD(startLineNumber);
+    COMPARE_SCALAR_FIELD(firstLineNumber);
+    COMPARE_SCALAR_FIELD(isfinal);
+    COMPARE_SCALAR_FIELD(typfunckind);
     COMPARE_NODE_FIELD(funcname);
     COMPARE_NODE_FIELD(parameters);
     COMPARE_NODE_FIELD(returnType);
     COMPARE_NODE_FIELD(options);
     COMPARE_NODE_FIELD(withClause);
+    COMPARE_STRING_FIELD(inputHeaderSrc);
+    COMPARE_STRING_FIELD(funcHeadSrc);
+    COMPARE_STRING_FIELD(queryStr);
     if (t_thrd.proc->workingVersionNum >= CREATE_FUNCTION_DEFINER_VERSION) {
         COMPARE_STRING_FIELD(definer);
     }

@@ -191,7 +191,7 @@ bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
     }
     pfree(funclang);
     Oid schema_oid = get_func_namespace(funcid);
-    if (IsAformatStyleFunctionOid(schema_oid)) {
+    if (IsAformatStyleFunctionOid(schema_oid, funcid)) {
         return false;
     }
     HeapTuple tp;

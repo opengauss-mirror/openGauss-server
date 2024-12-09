@@ -69,7 +69,7 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator,
     rc = memset_s(replaces, sizeof(replaces), true, sizeof(replaces));
     securec_check_c(rc, "\0", "\0");
 
-    if (IsInitdb) {
+    if (IsInitdb && object_options == 0) {
         return;
     }
     Datum nowtime = TimeGetDatum(GetCurrentTransactionStartTimestamp());
