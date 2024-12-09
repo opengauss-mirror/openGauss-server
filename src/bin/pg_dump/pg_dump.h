@@ -584,6 +584,7 @@ extern void getDumpableObjects(DumpableObject*** objs, int* numObjs);
 
 extern void addObjectDependency(DumpableObject* dobj, DumpId refId);
 extern void removeObjectDependency(DumpableObject* dobj, DumpId refId);
+extern bool repairDependencyPkgLoops(DumpableObject** loop, int nLoop);
 
 extern TableInfo* findTableByOid(Oid oid);
 extern TypeInfo* findTypeByOid(Oid oid);
