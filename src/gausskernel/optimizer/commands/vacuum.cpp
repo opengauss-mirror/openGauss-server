@@ -39,6 +39,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
+#include "catalog/pg_statistic_history.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
@@ -327,6 +328,7 @@ void vacuum(
         t_thrd.vacuum_cxt.VacuumPageHit = 0;
         t_thrd.vacuum_cxt.VacuumPageMiss = 0;
         t_thrd.vacuum_cxt.VacuumPageDirty = 0;
+        t_thrd.vacuum_cxt.vacuumAnalyzeTime = GetCurrentTimestamp();
 
         /*
          * Loop to process each selected relation.
@@ -406,6 +408,7 @@ void vacuum(
     }
     PG_CATCH();
     {
+        t_thrd.vacuum_cxt.vacuumAnalyzeTime = 0;
         t_thrd.vacuum_cxt.in_vacuum = false;
         /* Make sure cost accounting is turned off after error */
         list_free_deep(relations);
@@ -414,6 +417,7 @@ void vacuum(
     }
     PG_END_TRY();
 
+    t_thrd.vacuum_cxt.vacuumAnalyzeTime = 0;
     t_thrd.vacuum_cxt.in_vacuum = false;
     /*
      * Reset query cancel signal here to prevent hange 
@@ -1459,6 +1463,10 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
 
         if (nctup)
             heap_freetuple(nctup);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= STATISTIC_HISTORY_VERSION_NUMBER) {
+        InsertClassStatisHistory(RelationGetRelid(relation), num_pages, num_tuples);
     }
 }
 
@@ -3116,6 +3124,11 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
             heap_freetuple(nparttup);
     }
     heap_close(rd, RowExclusiveLock);
+
+    if (t_thrd.proc->workingVersionNum >= STATISTIC_HISTORY_VERSION_NUMBER) {
+        InsertPartitionStatisticHistory(PartitionGetRelid(part), PartitionGetPartid(part),
+                                        (double)num_pages, num_tuples);
+    }
 }
 
 static void vac_open_global_indexs(

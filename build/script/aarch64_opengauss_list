@@ -133,6 +133,8 @@
 ./share/postgresql/extension/gms_lob--1.0.sql
 ./share/postgresql/extension/gms_lob.control
 ./share/postgresql/extension/gms_stats--1.0.sql
+./share/postgresql/extension/gms_stats--1.0--1.1.sql
+./share/postgresql/extension/gms_stats--1.1.sql
 ./share/postgresql/extension/gms_stats.control
 ./share/postgresql/extension/gms_tcp--1.0.sql
 ./share/postgresql/extension/gms_tcp.control

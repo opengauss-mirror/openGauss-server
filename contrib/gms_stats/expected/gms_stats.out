@@ -15,9 +15,6 @@ begin
 gms_stats.gather_schema_stats('gms_stats_test');
 end;
 /
-NOTICE:  PL/SQL procedure successfully completed.
-CONTEXT:  SQL statement "CALL gms_stats.gather_schema_stats('gms_stats_test')"
-PL/pgSQL function inline_code_block line 2 at PERFORM
 select schemaname, tablename, attname, avg_width, most_common_vals, most_common_freqs from pg_stats where schemaname='gms_stats_test' order by tablename, attname;
    schemaname   |    tablename    | attname | avg_width | most_common_vals | most_common_freqs 
 ----------------+-----------------+---------+-----------+------------------+-------------------
@@ -31,7 +28,6 @@ select schemaname, tablename, attname, avg_width, most_common_vals, most_common_
 create table normal_table2(a int, b char(10));
 insert into normal_table2 select generate_series(1,700), 'abc';
 call gms_stats.gather_schema_stats('gms_stats_test');
-NOTICE:  PL/SQL procedure successfully completed.
  gather_schema_stats 
 ---------------------
  
@@ -55,3 +51,2808 @@ DETAIL:  drop cascades to table normal_table
 drop cascades to table partition_table
 drop cascades to materialized view mv_tb
 drop cascades to table normal_table2
+create schema sc_stats;
+set current_schema = sc_stats;
+create or replace procedure prepare_data() as
+begin
+    drop table if exists t_stats;
+    create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id));
+
+    insert into t_stats values (generate_series(1, 100), 'aabbcc', 'Y');
+    insert into t_stats values (generate_series(101, 200), '123dfg', 'N');
+    insert into t_stats values (generate_series(201, 300), '人面桃花相映红', 'N');
+    insert into t_stats values (generate_series(301, 400), 'fortunate', 'Y');
+    insert into t_stats values (generate_series(401, 500), 'open@gauss', 'Y');
+    insert into t_stats values (generate_series(501, 600), '127.0.0.1', 'N');
+    insert into t_stats values (generate_series(601, 700), '!@#$!%#!', 'N');
+    insert into t_stats values (generate_series(701, 800), '[1,2,3,4]', 'Y');
+    insert into t_stats values (generate_series(801, 900), '{"name":"张三","age":18}', 'Y');
+    insert into t_stats values (generate_series(901, 1000), '', 'N');
+end;
+/
+create or replace procedure prepare_part() as
+begin
+    drop table if exists t_part;
+    create table t_part(c1 int, c2 char(1), c3 text)
+    partition by list(c2) (
+        partition t_part_list_r values ('r'),
+        partition t_part_list_v values ('v'),
+        partition t_part_list_i values ('i')
+    );
+
+    insert into t_part values (generate_series(1, 100), 'r', 'aabbcc');
+    insert into t_part values (generate_series(101, 200), 'v', '123dfg');
+    insert into t_part values (generate_series(201, 300), 'i', '人面桃花相映红');
+    insert into t_part values (generate_series(301, 400), 'r', 'fortunate');
+    insert into t_part values (generate_series(401, 500), 'v', 'open@gauss');
+    insert into t_part values (generate_series(501, 600), 'i', '127.0.0.1');
+    insert into t_part values (generate_series(601, 700), 'r', '!@#$!%#!');
+    insert into t_part values (generate_series(701, 800), 'v', '{"name":"张三","age":18}');
+    insert into t_part values (generate_series(801, 900), 'i', '');
+    insert into t_part values (generate_series(901, 920), 'r', 'Hello');
+    insert into t_part values (generate_series(921, 960), 'v', 'Kitty');
+    insert into t_part values (generate_series(961, 1000), 'v', 'Cats');
+    insert into t_part values (1001, 'i', 'Dog');
+end;
+/
+create or replace procedure prepare_subpart() as
+begin
+    drop table if exists t_sub_part;
+    create table t_sub_part(c1 int, c2 char(1), c3 varchar2(100))
+    partition by range(c1) subpartition by list(c2) (
+        partition p_less_300 values less than(300) (
+            subpartition subp_less_300_r values ('r'),
+            subpartition subp_less_300_v values ('v'),
+            subpartition subp_less_300_i values ('i')
+        ),
+        partition p_less_600 values less than(600) (
+            subpartition subp_less_600_r values ('r'),
+            subpartition subp_less_600_v values ('v'),
+            subpartition subp_less_600_i values ('i')
+        ),
+        partition p_max values less than(maxvalue) (
+            subpartition subp_max_r values ('r'),
+            subpartition subp_max_v values ('v'),
+            subpartition subp_max_i values ('i')
+        )
+    );
+
+    insert into t_sub_part values (generate_series(1, 100), 'r', 'aabbcc');
+    insert into t_sub_part values (generate_series(101, 200), 'v', '123dfg');
+    insert into t_sub_part values (generate_series(201, 300), 'i', '人面桃花相映红');
+    insert into t_sub_part values (generate_series(301, 400), 'r', 'fortunate');
+    insert into t_sub_part values (generate_series(401, 500), 'v', 'open@gauss');
+    insert into t_sub_part values (generate_series(501, 600), 'i', '127.0.0.1');
+    insert into t_sub_part values (generate_series(601, 700), 'r', '!@#$!%#!');
+    insert into t_sub_part values (generate_series(701, 800), 'v', '{"name":"张三","age":18}');
+    insert into t_sub_part values (generate_series(801, 900), 'i', '');
+    insert into t_sub_part values (generate_series(901, 920), 'r', 'Hello');
+    insert into t_sub_part values (generate_series(921, 960), 'v', 'Kitty');
+    insert into t_sub_part values (generate_series(961, 1000), 'v', 'Cats');
+    insert into t_sub_part values (1001, 'i', 'Dog');
+end;
+/
+create or replace procedure prepare_ustore() as
+begin
+    drop table if exists t_stats_us;
+    create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore);
+
+    insert into t_stats_us values (generate_series(1, 100), 'aabbcc', 'Y');
+    insert into t_stats_us values (generate_series(101, 200), '123dfg', 'N');
+    insert into t_stats_us values (generate_series(201, 300), '人面桃花相映红', 'N');
+    insert into t_stats_us values (generate_series(301, 400), 'fortunate', 'Y');
+    insert into t_stats_us values (generate_series(401, 500), 'open@gauss', 'Y');
+    insert into t_stats_us values (generate_series(501, 600), '127.0.0.1', 'N');
+    insert into t_stats_us values (generate_series(601, 700), '!@#$!%#!', 'N');
+    insert into t_stats_us values (generate_series(701, 800), '[1,2,3,4]', 'Y');
+    insert into t_stats_us values (generate_series(801, 900), '{"name":"张三","age":18}', 'Y');
+    insert into t_stats_us values (generate_series(901, 1000), '', 'N');
+end;
+/
+create or replace procedure prepare_column() as
+begin
+    drop table if exists t_stats_col;
+    create table t_stats_col (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1))
+    with (orientation = column);
+
+    insert into t_stats_col values (generate_series(1, 100), 'aabbcc', 'Y');
+    insert into t_stats_col values (generate_series(101, 200), '123dfg', 'N');
+    insert into t_stats_col values (generate_series(201, 300), '人面桃花相映红', 'N');
+    insert into t_stats_col values (generate_series(301, 400), 'fortunate', 'Y');
+    insert into t_stats_col values (generate_series(401, 500), 'open@gauss', 'Y');
+    insert into t_stats_col values (generate_series(501, 600), '127.0.0.1', 'N');
+    insert into t_stats_col values (generate_series(601, 700), '!@#$!%#!', 'N');
+    insert into t_stats_col values (generate_series(701, 800), '[1,2,3,4]', 'Y');
+    insert into t_stats_col values (generate_series(801, 900), '{"name":"张三","age":18}', 'Y');
+    insert into t_stats_col values (generate_series(901, 1000), '', 'N');
+end;
+/
+call prepare_data();
+NOTICE:  table "t_stats" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t_stats"
+PL/pgSQL function prepare_data() line 2 at SQL statement
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
+CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id))"
+PL/pgSQL function prepare_data() line 3 at SQL statement
+ prepare_data 
+--------------
+ 
+(1 row)
+
+call prepare_ustore();
+NOTICE:  table "t_stats_us" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t_stats_us"
+PL/pgSQL function prepare_ustore() line 2 at SQL statement
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_us_pk" for table "t_stats_us"
+CONTEXT:  SQL statement "create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore)"
+PL/pgSQL function prepare_ustore() line 3 at SQL statement
+ prepare_ustore 
+----------------
+ 
+(1 row)
+
+call gms_stats.create_stat_table('sc_stats', 't_tmp_stats');
+ create_stat_table 
+-------------------
+ 
+(1 row)
+
+call gms_stats.create_stat_table('sc_stats', 't_tmp_stats2');
+ create_stat_table 
+-------------------
+ 
+(1 row)
+
+select gms_stats.get_stats_history_retention;
+ get_stats_history_retention 
+-----------------------------
+                          31
+(1 row)
+
+select gms_stats.get_stats_history_retention();
+ get_stats_history_retention 
+-----------------------------
+                          31
+(1 row)
+
+select gms_stats.get_stats_history_retention(1234); -- error
+ERROR:  function gms_stats.get_stats_history_retention(integer) does not exist
+LINE 1: select gms_stats.get_stats_history_retention(1234);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_stats_history_retention
+declare
+    exists_flag boolean;
+begin
+    select exists (select gms_stats.get_stats_history_availability()) into exists_flag;
+    if exists_flag then
+        raise info 'execute succeed, select gms_stats.get_stats_history_availability()';
+    else
+        raise exception 'execute failed, select gms_stats.get_stats_history_availability()';
+    end if;
+end;
+/
+INFO:  execute succeed, select gms_stats.get_stats_history_availability()
+select gms_stats.get_stats_history_availability(1234); -- error
+ERROR:  function gms_stats.get_stats_history_availability(integer) does not exist
+LINE 1: select gms_stats.get_stats_history_availability(1234);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_stats_history_availability
+-- TEST LOCK
+call gms_stats.lock_table_stats('sc_stats', 't_stats');
+ lock_table_stats 
+------------------
+ 
+(1 row)
+
+select c.nspname, a.stalocktype, b.relname, a.lock  from pg_statistic_lock a, pg_class b, pg_namespace c where a.namespaceid = c.Oid and a.relid = b.Oid and b.relname = 't_stats' and a.stalocktype = 't';
+ nspname  | stalocktype | relname | lock 
+----------+-------------+---------+------
+ sc_stats | t           | t_stats | t
+(1 row)
+
+call gms_stats.gather_database_stats(); -- t_stats should skip
+ gather_database_stats 
+-----------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum | stanullfrac | stadistinct 
+------------+------------+-----------+-------------+-------------
+ t_stats_us | c          |         1 |           0 |          -1
+ t_stats_us | c          |         2 |          .1 |           9
+ t_stats_us | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.gather_schema_stats('sc_stats'); -- t_stats should skip
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum | stanullfrac | stadistinct 
+------------+------------+-----------+-------------+-------------
+ t_stats_us | c          |         1 |           0 |          -1
+ t_stats_us | c          |         2 |          .1 |           9
+ t_stats_us | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.gather_schema_stats('sc_stats', force=>true);
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_gather_table_stats(ownname,tabname,partname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.gather_table_stats(character varying,character varying,character varying,numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,boolean,character varying,boolean,text,character varying) line 2 at PERFORM
+call gms_stats.gather_table_stats('sc_stats', 't_stats', force=>true);
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_index_stats('sc_stats', 't_stats_pk'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_gather_table_stats(ownname,tabname,partname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.gather_table_stats(character varying,character varying,character varying,numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,boolean,character varying,boolean,text,character varying) line 2 at PERFORM
+SQL statement "CALL gms_stats.gather_table_stats(ownname,tabname,stattab:=stattab,statid:=statid,statown:=statown,force=>force)"
+PL/pgSQL function gms_stats.gather_index_stats(character varying,character varying,character varying,numeric,character varying,character varying,character varying,numeric,character varying,boolean,boolean) line 17 at PERFORM
+call gms_stats.gather_index_stats('sc_stats', 't_stats_pk', force=>true);
+ gather_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats'); -- skip t_stats
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum 
+---------+------------+-----------
+ t_stats | c          |         1
+ t_stats | c          |         2
+ t_stats | c          |         3
+(3 rows)
+
+call gms_stats.delete_schema_stats('sc_stats', force=>true);
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum 
+---------+------------+-----------
+(0 rows)
+
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pk'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_index_stats(ownname,indname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_index_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,character varying,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pk', force=>true);
+ delete_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.delete_column_stats('sc_stats', 't_stats', 'c3'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_column_stats(ownname,tabname,colname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_column_stats('sc_stats', 't_stats', 'c3', force=>true);
+ delete_column_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_table_stats(ownname,tabname,partname,stattab,statid,cascade_parts,cascade_columns,cascade_indexes,statown,force)"
+PL/pgSQL function gms_stats.delete_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,boolean,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_table_stats('sc_stats', 't_stats', force=>true);
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats', numrows:='1100'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_table_stats(ownname,tabname,partname,stattab,statid,numrows,numblks,statown,force)"
+PL/pgSQL function gms_stats.set_table_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,boolean,numeric,numeric,numeric) line 2 at PERFORM
+call gms_stats.set_table_stats('sc_stats', 't_stats', numrows:='1100', force=>true);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_pk', numdist:=1000); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_index_stats(ownname,indname,stattab,statid,numdist,statown,force)"
+PL/pgSQL function gms_stats.set_index_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,numeric,boolean) line 2 at PERFORM
+call gms_stats.set_index_stats('sc_stats', 't_stats_pk', numdist:=1000, force=>true);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', nullcnt=>0.2); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_column_stats(ownname,tabname,colname,stattab,statid,distcnt,nullcnt,statown,force)"
+PL/pgSQL function gms_stats.set_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,text,numeric,numeric,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', nullcnt=>0.2, force=>true);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats', force=>true);
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.create_stat_table('sc_stats', 't_tmp_stats');
+ERROR:  relation "t_tmp_stats" already exists in schema "sc_stats"
+DETAIL:  creating new table with existing name in the same schema
+CONTEXT:  SQL statement "CREATE TABLE sc_stats.t_tmp_stats (namespaceid oid, starelid oid, partid oid, statype "char",starelkind "char", staattnum smallint, stainherit boolean, stanullfrac real, stawidth integer,stadistinct real, reltuples double precision, relpages double precision, stakind1 smallint, stakind2 smallint,stakind3 smallint, stakind4 smallint, stakind5 smallint, staop1 oid, staop2 oid, staop3 oid, staop4 oid,staop5 oid, stanumbers1 real[], stanumbers2 real[], stanumbers3 real[], stanumbers4 real[],stanumbers5 real[],stavalues1 anyarray, stavalues2 anyarray, stavalues3 anyarray, stavalues4 anyarray, stavalues5 anyarray,stadndistinct real, staextinfo text);"
+SQL statement "CALL gms_stats.gs_create_stat_table(ownname,stattab,tblspace,global_temporary)"
+PL/pgSQL function gms_stats.create_stat_table(character varying,character varying,character varying,boolean) line 2 at PERFORM
+call gms_stats.gather_schema_stats('sc_stats', stattab=>'t_tmp_stats', force=>true);
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us');
+  relname   | statype | staattnum 
+------------+---------+-----------
+ t_stats    | t       |          
+ t_stats    | c       |         1
+ t_stats    | c       |         2
+ t_stats    | c       |         3
+ t_stats_us | t       |          
+ t_stats_us | c       |         1
+ t_stats_us | c       |         2
+ t_stats_us | c       |         3
+(8 rows)
+
+call gms_stats.import_schema_stats('sc_stats', stattab=>'t_tmp_stats'); -- skip t_stats
+ import_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum 
+------------+------------+-----------
+ t_stats_us | c          |         1
+ t_stats_us | c          |         2
+ t_stats_us | c          |         3
+(3 rows)
+
+call gms_stats.import_schema_stats('sc_stats', stattab=>'t_tmp_stats', force=>true);
+ import_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum 
+------------+------------+-----------
+ t_stats    | c          |         1
+ t_stats    | c          |         2
+ t_stats    | c          |         3
+ t_stats_us | c          |         1
+ t_stats_us | c          |         2
+ t_stats_us | c          |         3
+(6 rows)
+
+call gms_stats.import_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_index_stats(ownname,indname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_index_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats', force=>true);
+ import_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.import_column_stats('sc_stats', 't_stats', 'c3', stattab=>'t_tmp_stats'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_column_stats(ownname,tabname,colname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_column_stats('sc_stats', 't_stats', 'c3', stattab=>'t_tmp_stats', force=>true);
+ import_column_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.import_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats'); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_table_stats(ownname,tabname,partname,stattab,cascade,statown,force)"
+PL/pgSQL function gms_stats.import_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats', force=>true);
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.restore_schema_stats('sc_stats', now()); -- skip t_stats
+ restore_schema_stats 
+----------------------
+ 
+(1 row)
+
+call gms_stats.restore_schema_stats('sc_stats', now(), force=>true);
+ restore_schema_stats 
+----------------------
+ 
+(1 row)
+
+call gms_stats.restore_table_stats('sc_stats', 't_stats', now()); -- error, locked
+ERROR:  Relation "sc_stats"."t_stats" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_restore_table_stats(ownname,tabname,as_of_timestamp,force)"
+PL/pgSQL function gms_stats.restore_table_stats(character varying,character varying,timestamp with time zone,boolean,boolean,boolean) line 2 at PERFORM
+call gms_stats.restore_table_stats('sc_stats', 't_stats', now(), force=>true);
+ restore_table_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us');
+  relname   | reltuples | relpages 
+------------+-----------+----------
+ t_stats    |      1000 |        6
+ t_stats_us |      1000 |        5
+(2 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum | stanullfrac | stadistinct 
+------------+------------+-----------+-------------+-------------
+ t_stats    | c          |         1 |           0 |          -1
+ t_stats    | c          |         2 |          .1 |           9
+ t_stats    | c          |         3 |           0 |           2
+ t_stats_us | c          |         1 |           0 |          -1
+ t_stats_us | c          |         2 |          .1 |           9
+ t_stats_us | c          |         3 |           0 |           2
+(6 rows)
+
+select b.relname, a.statype, a.staattnum from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us') order by b.relname, a.statype, a.staattnum;
+  relname   | statype | staattnum 
+------------+---------+-----------
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         1
+ t_stats    | c       |         2
+ t_stats    | c       |         2
+ t_stats    | c       |         2
+ t_stats    | c       |         2
+ t_stats    | c       |         2
+ t_stats    | c       |         2
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | c       |         3
+ t_stats    | t       |          
+ t_stats    | t       |          
+ t_stats    | t       |          
+ t_stats    | t       |          
+ t_stats    | t       |          
+ t_stats    | t       |          
+ t_stats_us | c       |         1
+ t_stats_us | c       |         1
+ t_stats_us | c       |         1
+ t_stats_us | c       |         1
+ t_stats_us | c       |         1
+ t_stats_us | c       |         1
+ t_stats_us | c       |         2
+ t_stats_us | c       |         2
+ t_stats_us | c       |         2
+ t_stats_us | c       |         2
+ t_stats_us | c       |         2
+ t_stats_us | c       |         2
+ t_stats_us | c       |         3
+ t_stats_us | c       |         3
+ t_stats_us | c       |         3
+ t_stats_us | c       |         3
+ t_stats_us | c       |         3
+ t_stats_us | c       |         3
+ t_stats_us | t       |          
+ t_stats_us | t       |          
+ t_stats_us | t       |          
+ t_stats_us | t       |          
+ t_stats_us | t       |          
+ t_stats_us | t       |          
+(50 rows)
+
+call gms_stats.unlock_table_stats('sc_stats', 't_stats');
+ unlock_table_stats 
+--------------------
+ 
+(1 row)
+
+select c.nspname, a.stalocktype, b.relname, a.lock  from pg_statistic_lock a, pg_class b, pg_namespace c where a.namespaceid = c.Oid and a.relid = b.Oid and b.relname = 't_stats' and a.stalocktype = 't';
+ nspname  | stalocktype | relname | lock 
+----------+-------------+---------+------
+ sc_stats | t           | t_stats | f
+(1 row)
+
+-- lock for partition
+call prepare_part();
+NOTICE:  table "t_part" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t_part"
+PL/pgSQL function prepare_part() line 2 at SQL statement
+ prepare_part 
+--------------
+ 
+(1 row)
+
+call gms_stats.lock_partition_stats('sc_stats', 't_part', 't_part_list_r');
+ lock_partition_stats 
+----------------------
+ 
+(1 row)
+
+select c.nspname, a.stalocktype, b.relname, d.relname partname, a.lock from pg_statistic_lock a, pg_class b, pg_namespace c, pg_partition d 
+    where a.namespaceid = c.Oid and a.relid = b.Oid and a.partid = d.Oid and b.relname = 't_part' and d.relname = 't_part_list_r' and a.stalocktype = 'p';
+ nspname  | stalocktype | relname |   partname    | lock 
+----------+-------------+---------+---------------+------
+ sc_stats | p           | t_part  | t_part_list_r | t
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r'); -- error
+ERROR:  Partition "t_part_list_r" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_gather_table_stats(ownname,tabname,partname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.gather_table_stats(character varying,character varying,character varying,numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,boolean,character varying,boolean,text,character varying) line 2 at PERFORM
+call gms_stats.delete_table_stats('sc_stats', 't_part', 't_part_list_r'); -- error
+ERROR:  Partition "t_part_list_r" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_table_stats(ownname,tabname,partname,stattab,statid,cascade_parts,cascade_columns,cascade_indexes,statown,force)"
+PL/pgSQL function gms_stats.delete_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,boolean,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', numrows=>1100); -- error
+ERROR:  Partition "t_part_list_r" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_table_stats(ownname,tabname,partname,stattab,statid,numrows,numblks,statown,force)"
+PL/pgSQL function gms_stats.set_table_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,boolean,numeric,numeric,numeric) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats'); -- error
+ERROR:  Partition "t_part_list_r" has been locked
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_table_stats(ownname,tabname,partname,stattab,cascade,statown,force)"
+PL/pgSQL function gms_stats.import_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.unlock_partition_stats('sc_stats', 't_part', 't_part_list_r');
+ unlock_partition_stats 
+------------------------
+ 
+(1 row)
+
+select c.nspname, a.stalocktype, b.relname, d.relname partname, a.lock from pg_statistic_lock a, pg_class b, pg_namespace c, pg_partition d 
+    where a.namespaceid = c.Oid and a.relid = b.Oid and a.partid = d.Oid and b.relname = 't_part' and d.relname = 't_part_list_r' and a.stalocktype = 'p';
+ nspname  | stalocktype | relname |   partname    | lock 
+----------+-------------+---------+---------------+------
+ sc_stats | p           | t_part  | t_part_list_r | f
+(1 row)
+
+-- TEST GATHER_* AND DELETE_*
+call prepare_data();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
+CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id))"
+PL/pgSQL function prepare_data() line 3 at SQL statement
+ prepare_data 
+--------------
+ 
+(1 row)
+
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+call prepare_subpart();
+NOTICE:  table "t_sub_part" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t_sub_part"
+PL/pgSQL function prepare_subpart() line 2 at SQL statement
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+call prepare_ustore();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_us_pk" for table "t_stats_us"
+CONTEXT:  SQL statement "create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore)"
+PL/pgSQL function prepare_ustore() line 3 at SQL statement
+ prepare_ustore 
+----------------
+ 
+(1 row)
+
+call prepare_column();
+NOTICE:  table "t_stats_col" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t_stats_col"
+PL/pgSQL function prepare_column() line 2 at SQL statement
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_col_pk" for table "t_stats_col"
+CONTEXT:  SQL statement "create table t_stats_col (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1))
+    with (orientation = column)"
+PL/pgSQL function prepare_column() line 3 at SQL statement
+ prepare_column 
+----------------
+ 
+(1 row)
+
+call gms_stats.gather_database_stats();
+ gather_database_stats 
+-----------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |      1001 |        7
+ t_stats     |      1000 |        6
+ t_stats_col |      1000 |      131
+ t_stats_us  |      1000 |        5
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_part      | c          |         1 |           0 |          -1
+ t_part      | c          |         2 |           0 |           3
+ t_part      | c          |         3 |    .0999001 |          12
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |          .1 |           9
+ t_stats     | c          |         3 |           0 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |          .1 |           9
+ t_stats_us  | c          |         3 |           0 |           2
+(12 rows)
+
+call gms_stats.delete_schema_stats('sc_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |         0 |        0
+ t_stats     |         0 |        0
+ t_stats_col |         0 |        0
+ t_stats_us  |         0 |        0
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_schema_stats('sc_stats');
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |      1001 |        7
+ t_stats     |      1000 |        6
+ t_stats_col |      1000 |      131
+ t_stats_us  |      1000 |        5
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_part      | c          |         1 |           0 |          -1
+ t_part      | c          |         2 |           0 |           3
+ t_part      | c          |         3 |    .0999001 |          12
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |          .1 |           9
+ t_stats     | c          |         3 |           0 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |          .1 |           9
+ t_stats_us  | c          |         3 |           0 |           2
+(12 rows)
+
+call gms_stats.delete_schema_stats('sc_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |         0 |        0
+ t_stats     |         0 |        0
+ t_stats_col |         0 |        0
+ t_stats_us  |         0 |        0
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
+   relname   | count 
+-------------+-------
+ t_part      |     8
+ t_stats     |     8
+ t_stats_col |     8
+ t_stats_us  |     8
+(4 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |      1000 |        6
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+ t_stats | c          |         1 |           0 |          -1
+ t_stats | c          |         2 |          .1 |           9
+ t_stats | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats_us';
+  relname   | reltuples | relpages 
+------------+-----------+----------
+ t_stats_us |      1000 |        5
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' order by a.starelkind, a.staattnum;
+  relname   | starelkind | staattnum | stanullfrac | stadistinct 
+------------+------------+-----------+-------------+-------------
+ t_stats_us | c          |         1 |           0 |          -1
+ t_stats_us | c          |         2 |          .1 |           9
+ t_stats_us | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats_us');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats_us';
+  relname   | reltuples | relpages 
+------------+-----------+----------
+ t_stats_us |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_col');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats_col';
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_stats_col |      1000 |      131
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' order by a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats_col');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats_col';
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_stats_col |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_part';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_part  |      1001 |        7
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+ t_part  | c          |         1 |           0 |          -1
+ t_part  | c          |         2 |           0 |           3
+ t_part  | c          |         3 |    .0999001 |          12
+(3 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_part');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_part';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_part  |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
+   relname   | count 
+-------------+-------
+ t_part      |    12
+ t_stats     |    12
+ t_stats_col |    12
+ t_stats_us  |    12
+(4 rows)
+
+call gms_stats.gather_index_stats('sc_stats', 't_stats_pk'); -- gather index performs same like gather table
+ gather_index_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |      1000 |        6
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+ t_stats | c          |         1 |           0 |          -1
+ t_stats | c          |         2 |          .1 |           9
+ t_stats | c          |         3 |           0 |           2
+(3 rows)
+
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pk');
+ delete_index_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |      1000 |        6
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+ t_stats | c          |         2 |          .1 |           9
+ t_stats | c          |         3 |           0 |           2
+(2 rows)
+
+call gms_stats.delete_column_stats('sc_stats', 't_stats', 'c3');
+ delete_column_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname = 't_stats' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |      1000 |        6
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+ t_stats | c          |         2 |          .1 |           9
+(1 row)
+
+-- gather to user-table
+call gms_stats.delete_schema_stats('sc_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats2');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart')  order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |         0 |        0
+ t_stats     |         0 |        0
+ t_stats_col |         0 |        0
+ t_stats_us  |         0 |        0
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart')  order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart')  order by b.relname, a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
+   relname   | count 
+-------------+-------
+ t_part      |    12
+ t_stats     |    16
+ t_stats_col |    12
+ t_stats_us  |    12
+(4 rows)
+
+call gms_stats.gather_database_stats(stattab=>'t_tmp_stats', statown=>'sc_stats');
+ gather_database_stats 
+-----------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart')  order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |         0 |        0
+ t_stats     |         0 |        0
+ t_stats_col |         0 |        0
+ t_stats_us  |         0 |        0
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_part      | c       |         1 |          |           |           0 |          -1
+ t_part      | c       |         2 |          |           |           0 |           3
+ t_part      | c       |         3 |          |           |    .0999001 |          12
+ t_part      | t       |           |        7 |      1001 |             |            
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |          .1 |           9
+ t_stats     | c       |         3 |          |           |           0 |           2
+ t_stats     | t       |           |        6 |      1000 |             |            
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |          .1 |           9
+ t_stats_col | c       |         3 |          |           |           0 |           2
+ t_stats_col | t       |           |      131 |      1000 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |          .1 |           9
+ t_stats_us  | c       |         3 |          |           |           0 |           2
+ t_stats_us  | t       |           |        5 |      1000 |             |            
+(16 rows)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart')  order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_part      |         0 |        0
+ t_stats     |         0 |        0
+ t_stats_col |         0 |        0
+ t_stats_us  |         0 |        0
+(4 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_part      | c       |         1 |          |           |           0 |          -1
+ t_part      | c       |         2 |          |           |           0 |           3
+ t_part      | c       |         3 |          |           |    .0999001 |          12
+ t_part      | t       |           |        7 |      1001 |             |            
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |          .1 |           9
+ t_stats     | c       |         3 |          |           |           0 |           2
+ t_stats     | t       |           |        6 |      1000 |             |            
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |          .1 |           9
+ t_stats_col | c       |         3 |          |           |           0 |           2
+ t_stats_col | t       |           |      131 |      1000 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |          .1 |           9
+ t_stats_us  | c       |         3 |          |           |           0 |           2
+ t_stats_us  | t       |           |        5 |      1000 |             |            
+(16 rows)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') order by b.relname, a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats') order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         1 |          |           |           0 |          -1
+ t_stats | c       |         2 |          |           |          .1 |           9
+ t_stats | c       |         3 |          |           |           0 |           2
+ t_stats | t       |           |        6 |      1000 |             |            
+(4 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats'order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+insert into t_stats values (generate_series(1001, 1500), 'Noooo!!!', NULL);
+call gms_stats.gather_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats') order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         1 |          |           |           0 |          -1
+ t_stats | c       |         2 |          |           |    .0666667 |          10
+ t_stats | c       |         3 |          |           |     .333333 |           2
+ t_stats | t       |           |        9 |      1500 |             |            
+(4 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats_us') order by relname;
+  relname   | reltuples | relpages 
+------------+-----------+----------
+ t_stats_us |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' order by a.statype, a.staattnum;
+  relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats_us | c       |         1 |          |           |           0 |          -1
+ t_stats_us | c       |         2 |          |           |          .1 |           9
+ t_stats_us | c       |         3 |          |           |           0 |           2
+ t_stats_us | t       |           |        5 |      1000 |             |            
+(4 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us'order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_col', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats_col') order by relname;
+   relname   | reltuples | relpages 
+-------------+-----------+----------
+ t_stats_col |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' order by a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |          .1 |           9
+ t_stats_col | c       |         3 |          |           |           0 |           2
+ t_stats_col | t       |           |      131 |      1000 |             |            
+(4 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats_col', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col'order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_part') order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_part  |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_part  | c       |         1 |          |           |           0 |          -1
+ t_part  | c       |         2 |          |           |           0 |           3
+ t_part  | c       |         3 |          |           |    .0999001 |          12
+ t_part  | t       |           |        7 |      1001 |             |            
+(4 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_part', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part'order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.gather_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats');
+ gather_index_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname in ('t_stats') order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ t_stats |         0 |        0
+(1 row)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by b.relname, a.starelkind, a.staattnum;
+ relname | starelkind | staattnum | stanullfrac | stadistinct 
+---------+------------+-----------+-------------+-------------
+(0 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         1 |          |           |           0 |          -1
+ t_stats | c       |         2 |          |           |    .0666667 |          10
+ t_stats | c       |         3 |          |           |     .333333 |           2
+ t_stats | t       |           |        9 |      1500 |             |            
+(4 rows)
+
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats');
+ delete_index_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         2 |          |           |    .0666667 |          10
+ t_stats | c       |         3 |          |           |     .333333 |           2
+ t_stats | t       |           |        9 |      1500 |             |            
+(3 rows)
+
+call gms_stats.delete_column_stats('sc_stats', 't_stats', 'c3', stattab=>'t_tmp_stats');
+ delete_column_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.statype, a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         2 |          |           |    .0666667 |          10
+ t_stats | t       |           |        9 |      1500 |             |            
+(2 rows)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
+   relname   | count 
+-------------+-------
+ t_part      |    24
+ t_stats     |    36
+ t_stats_col |    24
+ t_stats_us  |    24
+(4 rows)
+
+-- TEST HISTORY, drop table will drop history info
+call prepare_data();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
+CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id))"
+PL/pgSQL function prepare_data() line 3 at SQL statement
+ prepare_data 
+--------------
+ 
+(1 row)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' group by b.relname order by b.relname;
+ relname | count 
+---------+-------
+(0 rows)
+
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname = 't_part' group by b.relname order by b.relname;
+ relname | count 
+---------+-------
+(0 rows)
+
+call prepare_subpart();
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname = 't_subpart' group by b.relname order by b.relname;
+ relname | count 
+---------+-------
+(0 rows)
+
+call prepare_ustore();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_us_pk" for table "t_stats_us"
+CONTEXT:  SQL statement "create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore)"
+PL/pgSQL function prepare_ustore() line 3 at SQL statement
+ prepare_ustore 
+----------------
+ 
+(1 row)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' group by b.relname order by b.relname;
+ relname | count 
+---------+-------
+(0 rows)
+
+call prepare_column();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_col_pk" for table "t_stats_col"
+CONTEXT:  SQL statement "create table t_stats_col (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1))
+    with (orientation = column)"
+PL/pgSQL function prepare_column() line 3 at SQL statement
+ prepare_column 
+----------------
+ 
+(1 row)
+
+select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' group by b.relname order by b.relname;
+ relname | count 
+---------+-------
+(0 rows)
+
+-- TEST SET
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_col');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_stats_col', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        6 |      1000
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |          .1 |           9
+ t_stats     | c          |         3 |           0 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |          .1 |           9
+ t_stats_us  | c          |         3 |           0 |           2
+(9 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats', numrows=>2345);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats';
+ relname | relkind | relpages | reltuples 
+---------+---------+----------+-----------
+ t_stats | r       |        6 |      2345
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats', numblks=>16);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats';
+ relname | relkind | relpages | reltuples 
+---------+---------+----------+-----------
+ t_stats | r       |       16 |      2345
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_us', numrows=>1234);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_us';
+  relname   | relkind | relpages | reltuples 
+------------+---------+----------+-----------
+ t_stats_us | r       |        5 |      1234
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_us', numblks=>8);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_us';
+  relname   | relkind | relpages | reltuples 
+------------+---------+----------+-----------
+ t_stats_us | r       |        8 |      1234
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_col', numrows=>789);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_col';
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats_col | r       |      131 |       789
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_col', numblks=>15);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_col';
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats_col | r       |       15 |       789
+(1 row)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_pk', numdist=>100);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass and staattnum = 1;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |         100
+(1 row)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_us_pk', numdist=>200);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_us'::regclass and staattnum = 1;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |         200
+(1 row)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_col_pk', numdist=>300);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_col'::regclass and staattnum = 1;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |         300
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |           9
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |        1000
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_us', 'c2', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_us'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |           9
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_us', 'c2', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_us'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |        1000
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_col', 'c2', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_col'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |           9
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_col', 'c2', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats_col'::regclass and staattnum = 2;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         2 |          .2 |        1000
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |          .1 |           9
+ t_stats     | c       |         3 |          |           |           0 |           2
+ t_stats     | t       |           |        6 |      1000 |             |            
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |          .1 |           9
+ t_stats_col | c       |         3 |          |           |           0 |           2
+ t_stats_col | t       |           |      131 |      1000 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |          .1 |           9
+ t_stats_us  | c       |         3 |          |           |           0 |           2
+ t_stats_us  | t       |           |        5 |      1000 |             |            
+(12 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats', numrows=>1100);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |        6 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats', numrows=>1100);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_us'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |        5 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_us'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_col', stattab=>'t_tmp_stats', numrows=>1100);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_col'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |      131 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_table_stats('sc_stats', 't_stats_col', stattab=>'t_tmp_stats', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_col'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats', numdist=>100);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         100
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_us_pk', stattab=>'t_tmp_stats', numdist=>200);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_us'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         200
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_col_pk', stattab=>'t_tmp_stats', numdist=>300);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_col'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         300
+         2 |          |           |          .1 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         100
+         2 |          |           |          .2 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         100
+         2 |          |           |          .2 |        1000
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_us', 'c2', stattab=>'t_tmp_stats', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_us'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         200
+         2 |          |           |          .2 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_us', 'c2', stattab=>'t_tmp_stats', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_us'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         200
+         2 |          |           |          .2 |        1000
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_col', 'c2', stattab=>'t_tmp_stats', nullcnt=>0.2);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_col'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         300
+         2 |          |           |          .2 |           9
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats_col', 'c2', stattab=>'t_tmp_stats', distcnt=>1000);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats_col'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |         300
+         2 |          |           |          .2 |        1000
+         3 |          |           |           0 |           2
+           |       10 |      1100 |             |            
+(4 rows)
+
+-- TEST IMPORT AND EXPORT
+call prepare_data();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
+CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id))"
+PL/pgSQL function prepare_data() line 3 at SQL statement
+ prepare_data 
+--------------
+ 
+(1 row)
+
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+call prepare_subpart();
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+call prepare_ustore();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_us_pk" for table "t_stats_us"
+CONTEXT:  SQL statement "create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore)"
+PL/pgSQL function prepare_ustore() line 3 at SQL statement
+ prepare_ustore 
+----------------
+ 
+(1 row)
+
+call prepare_column();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_col_pk" for table "t_stats_col"
+CONTEXT:  SQL statement "create table t_stats_col (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1))
+    with (orientation = column)"
+PL/pgSQL function prepare_column() line 3 at SQL statement
+ prepare_column 
+----------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_col');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ export_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |          .1 |           9
+ t_stats     | c       |         3 |          |           |           0 |           2
+ t_stats     | t       |           |        6 |      1000 |             |            
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |          .1 |           9
+ t_stats_col | c       |         3 |          |           |           0 |           2
+ t_stats_col | t       |           |      131 |      1000 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |          .1 |           9
+ t_stats_us  | c       |         3 |          |           |           0 |           2
+ t_stats_us  | t       |           |        5 |      1000 |             |            
+(12 rows)
+
+insert into t_stats values (generate_series(1001, 1500), 'Noooo!!!', NULL);
+insert into t_stats_us values (generate_series(1001, 1800), 'YES', NULL);
+insert into t_stats_col values (generate_series(1001, 1300), 'BBBBBBYY', NULL);
+call gms_stats.gather_table_stats('sc_stats', 't_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_col');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_schema_stats('sc_stats', stattab=>'t_tmp_stats2');
+ export_schema_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats2 a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |    .0666667 |          10
+ t_stats     | c       |         3 |          |           |     .333333 |           2
+ t_stats     | t       |           |        9 |      1500 |             |            
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |    .0769231 |          10
+ t_stats_col | c       |         3 |          |           |     .230769 |           2
+ t_stats_col | t       |           |      124 |      1300 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |    .0555556 |          10
+ t_stats_us  | c       |         3 |          |           |     .444444 |           2
+ t_stats_us  | t       |           |        7 |      1800 |             |            
+(12 rows)
+
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        9 |      1500
+ t_stats_col | r       |      124 |      1300
+ t_stats_us  | r       |        7 |      1800
+(3 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |    .0666667 |          10
+ t_stats     | c          |         3 |     .333333 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |    .0769231 |          10
+ t_stats_col | c          |         3 |     .230769 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |    .0555556 |          10
+ t_stats_us  | c          |         3 |     .444444 |           2
+(9 rows)
+
+call gms_stats.import_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ import_schema_stats 
+---------------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        6 |      1000
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |          .1 |           9
+ t_stats     | c          |         3 |           0 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |          .1 |           9
+ t_stats_us  | c          |         3 |           0 |           2
+(9 rows)
+
+call gms_stats.import_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats2');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        9 |      1500
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.starelkind, a.staattnum;
+   relname   | starelkind | staattnum | stanullfrac | stadistinct 
+-------------+------------+-----------+-------------+-------------
+ t_stats     | c          |         1 |           0 |          -1
+ t_stats     | c          |         2 |    .0666667 |          10
+ t_stats     | c          |         3 |     .333333 |           2
+ t_stats_col | c          |         1 |           0 |          -1
+ t_stats_col | c          |         2 |          .1 |           9
+ t_stats_col | c          |         3 |           0 |           2
+ t_stats_us  | c          |         1 |           0 |          -1
+ t_stats_us  | c          |         2 |          .1 |           9
+ t_stats_us  | c          |         3 |           0 |           2
+(9 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats2');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats2 a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |    .0769231 |          10
+ t_stats_col | c       |         3 |          |           |     .230769 |           2
+ t_stats_col | t       |           |      124 |      1300 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |    .0555556 |          10
+ t_stats_us  | c       |         3 |          |           |     .444444 |           2
+ t_stats_us  | t       |           |        7 |      1800 |             |            
+(8 rows)
+
+call gms_stats.export_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats2');
+ export_index_stats 
+--------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats2 a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |    .0769231 |          10
+ t_stats_col | c       |         3 |          |           |     .230769 |           2
+ t_stats_col | t       |           |      124 |      1300 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |    .0555556 |          10
+ t_stats_us  | c       |         3 |          |           |     .444444 |           2
+ t_stats_us  | t       |           |        7 |      1800 |             |            
+(9 rows)
+
+call gms_stats.export_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats2');
+ export_column_stats 
+---------------------
+ 
+(1 row)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats2 a left join pg_class b on a.starelid = b.Oid 
+    where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, a.statype, a.staattnum;
+   relname   | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-------------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats     | c       |         1 |          |           |           0 |          -1
+ t_stats     | c       |         2 |          |           |    .0666667 |          10
+ t_stats_col | c       |         1 |          |           |           0 |          -1
+ t_stats_col | c       |         2 |          |           |    .0769231 |          10
+ t_stats_col | c       |         3 |          |           |     .230769 |           2
+ t_stats_col | t       |           |      124 |      1300 |             |            
+ t_stats_us  | c       |         1 |          |           |           0 |          -1
+ t_stats_us  | c       |         2 |          |           |    .0555556 |          10
+ t_stats_us  | c       |         3 |          |           |     .444444 |           2
+ t_stats_us  | t       |           |        7 |      1800 |             |            
+(10 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+(0 rows)
+
+call gms_stats.import_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats');
+ import_index_stats 
+--------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |          -1
+(1 row)
+
+call gms_stats.import_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats');
+ import_column_stats 
+---------------------
+ 
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |          -1
+         2 |          .1 |           9
+(2 rows)
+
+-- drop column then export or import
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats2');
+ delete_schema_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats';
+ relname | relkind | relpages | reltuples 
+---------+---------+----------+-----------
+ t_stats | r       |        9 |      1500
+(1 row)
+
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |          -1
+         2 |          .1 |           9
+         3 |     .333333 |           2
+(3 rows)
+
+select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac, a.stadistinct from t_tmp_stats a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by a.staattnum;
+ relname | statype | staattnum | relpages | reltuples | stanullfrac | stadistinct 
+---------+---------+-----------+----------+-----------+-------------+-------------
+ t_stats | c       |         1 |          |           |           0 |          -1
+ t_stats | c       |         2 |          |           |    .0666667 |          10
+ t_stats | c       |         3 |          |           |     .333333 |           2
+ t_stats | t       |           |        9 |      1500 |             |            
+(4 rows)
+
+alter table t_stats drop c3; -- do drop column
+call gms_stats.import_table_stats('sc_stats', 't_stats', stattab:='t_tmp_stats'); -- skip c3
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.import_column_stats('sc_stats', 't_stats', 'c3', stattab:='t_tmp_stats'); -- error
+ERROR:  Column "c3" is not exists in relation sc_stats.t_stats
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_column_stats(ownname,tabname,colname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |          -1
+         2 |    .0666667 |          10
+(2 rows)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |    .0666667 |          10
+         3 |          |           |     .333333 |           2
+           |        9 |      1500 |             |            
+(4 rows)
+
+call gms_stats.export_table_stats('sc_stats', 't_stats', stattab:='t_tmp_stats'); -- delete c3 in t_tmp_stats
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_column_stats('sc_stats', 't_stats', 'c3', stattab:='t_tmp_stats'); -- error
+ERROR:  Column "c3" is not exists in relation sc_stats.t_stats
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_column_stats(ownname,tabname,colname,stattab,statown)"
+PL/pgSQL function gms_stats.export_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | stanullfrac | stadistinct 
+-----------+-------------+-------------
+         1 |           0 |          -1
+         2 |    .0666667 |          10
+(2 rows)
+
+select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats where starelid = 't_stats'::regclass order by staattnum;
+ staattnum | relpages | reltuples | stanullfrac | stadistinct 
+-----------+----------+-----------+-------------+-------------
+         1 |          |           |           0 |          -1
+         2 |          |           |    .0666667 |          10
+           |        9 |      1500 |             |            
+(3 rows)
+
+-- PURGE AND RESTORE
+call prepare_data();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
+CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), constraint t_stats_pk primary key (id))"
+PL/pgSQL function prepare_data() line 3 at SQL statement
+ prepare_data 
+--------------
+ 
+(1 row)
+
+call prepare_ustore();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_us_pk" for table "t_stats_us"
+CONTEXT:  SQL statement "create table t_stats_us (c1 int, c2 text, c3 char(1), constraint t_stats_us_pk primary key (c1))
+    with (storage_type=ustore)"
+PL/pgSQL function prepare_ustore() line 3 at SQL statement
+ prepare_ustore 
+----------------
+ 
+(1 row)
+
+call prepare_column();
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_col_pk" for table "t_stats_col"
+CONTEXT:  SQL statement "create table t_stats_col (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1))
+    with (orientation = column)"
+PL/pgSQL function prepare_column() line 3 at SQL statement
+ prepare_column 
+----------------
+ 
+(1 row)
+
+call gms_stats.gather_schema_stats('sc_stats');
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+insert into t_stats values (generate_series(1001, 1500), 'Noooo!!!', NULL);
+insert into t_stats_us values (generate_series(1001, 1800), 'YES', NULL);
+insert into t_stats_col values (generate_series(1001, 1300), 'BBBBBBYY', NULL);
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        6 |      1000
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, staattnum;
+   relname   | staattnum | stanullfrac | stadistinct 
+-------------+-----------+-------------+-------------
+ t_stats     |         1 |           0 |          -1
+ t_stats     |         2 |          .1 |           9
+ t_stats     |         3 |           0 |           2
+ t_stats_col |         1 |           0 |          -1
+ t_stats_col |         2 |          .1 |           9
+ t_stats_col |         3 |           0 |           2
+ t_stats_us  |         1 |           0 |          -1
+ t_stats_us  |         2 |          .1 |           9
+ t_stats_us  |         3 |           0 |           2
+(9 rows)
+
+declare
+    asOfTime timestamp with time zone;
+begin
+    -- get first analyze time
+    select current_analyzetime into asOfTime from pg_statistic_history where starelid = 't_stats'::regclass order by current_analyzetime limit 1;
+    -- restore
+    gms_stats.restore_table_stats('sc_stats', 't_stats', asOfTime);
+end;
+/
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats' order by relname;
+ relname | relkind | relpages | reltuples 
+---------+---------+----------+-----------
+ t_stats | r       |        6 |      1000
+(1 row)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats' order by staattnum;
+ relname | staattnum | stanullfrac | stadistinct 
+---------+-----------+-------------+-------------
+ t_stats |         1 |           0 |          -1
+ t_stats |         2 |          .1 |           9
+ t_stats |         3 |           0 |           2
+(3 rows)
+
+declare
+    asOfTime timestamp with time zone;
+begin
+    -- get first analyze time
+    select current_analyzetime into asOfTime from pg_statistic_history where starelid = 't_stats_us'::regclass order by current_analyzetime limit 1;
+    -- restore
+    gms_stats.restore_table_stats('sc_stats', 't_stats_us', asOfTime);
+end;
+/
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_us' order by relname;
+  relname   | relkind | relpages | reltuples 
+------------+---------+----------+-----------
+ t_stats_us | r       |        5 |      1000
+(1 row)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_us' order by staattnum;
+  relname   | staattnum | stanullfrac | stadistinct 
+------------+-----------+-------------+-------------
+ t_stats_us |         1 |           0 |          -1
+ t_stats_us |         2 |          .1 |           9
+ t_stats_us |         3 |           0 |           2
+(3 rows)
+
+declare
+    asOfTime timestamp with time zone;
+begin
+    -- get first analyze time
+    select current_analyzetime into asOfTime from pg_statistic_history where starelid = 't_stats_col'::regclass order by current_analyzetime limit 1;
+    -- restore
+    gms_stats.restore_table_stats('sc_stats', 't_stats_col', asOfTime);
+end;
+/
+select relname, relkind, relpages, reltuples from pg_class where relname = 't_stats_col' order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats_col | r       |      131 |      1000
+(1 row)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname = 't_stats_col' order by staattnum;
+   relname   | staattnum | stanullfrac | stadistinct 
+-------------+-----------+-------------+-------------
+ t_stats_col |         1 |           0 |          -1
+ t_stats_col |         2 |          .1 |           9
+ t_stats_col |         3 |           0 |           2
+(3 rows)
+
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        6 |      1000
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, staattnum;
+   relname   | staattnum | stanullfrac | stadistinct 
+-------------+-----------+-------------+-------------
+ t_stats     |         1 |           0 |          -1
+ t_stats     |         2 |          .1 |           9
+ t_stats     |         3 |           0 |           2
+ t_stats_col |         1 |           0 |          -1
+ t_stats_col |         2 |          .1 |           9
+ t_stats_col |         3 |           0 |           2
+ t_stats_us  |         1 |           0 |          -1
+ t_stats_us  |         2 |          .1 |           9
+ t_stats_us  |         3 |           0 |           2
+(9 rows)
+
+select b.relname, a.statype, a.staattnum, a.stanullfrac, a.stadistinct, a.reltuples, a.relpages, stalocktype 
+    from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, current_analyzetime, a.statype, a.staattnum;
+   relname   | statype | staattnum | stanullfrac | stadistinct | reltuples | relpages | stalocktype 
+-------------+---------+-----------+-------------+-------------+-----------+----------+-------------
+ t_stats     | c       |         1 |           0 |          -1 |           |          | 
+ t_stats     | c       |         2 |          .1 |           9 |           |          | 
+ t_stats     | c       |         3 |           0 |           2 |           |          | 
+ t_stats     | t       |           |             |             |      1000 |        6 | 
+ t_stats_col | c       |         1 |           0 |          -1 |           |          | 
+ t_stats_col | c       |         2 |          .1 |           9 |           |          | 
+ t_stats_col | c       |         3 |           0 |           2 |           |          | 
+ t_stats_col | t       |           |             |             |      1000 |      131 | 
+ t_stats_us  | c       |         1 |           0 |          -1 |           |          | 
+ t_stats_us  | c       |         2 |          .1 |           9 |           |          | 
+ t_stats_us  | c       |         3 |           0 |           2 |           |          | 
+ t_stats_us  | t       |           |             |             |      1000 |        5 | 
+(12 rows)
+
+declare
+    asOfTime timestamp with time zone;
+begin
+    -- get first analyze time
+    select current_analyzetime into asOfTime from pg_statistic_history where starelid in ('t_stats'::regclass, 't_stats_us'::regclass, 't_stats_col'::regclass) order by current_analyzetime limit 1;
+    asOfTime := asOfTime - INTERVAL '1 hour';
+    -- restore
+    gms_stats.restore_schema_stats('sc_stats', asOfTime);
+end;
+/
+select relname, relkind, relpages, reltuples from pg_class where relname in ('t_stats', 't_stats_us', 't_stats_col') order by relname;
+   relname   | relkind | relpages | reltuples 
+-------------+---------+----------+-----------
+ t_stats     | r       |        6 |      1000
+ t_stats_col | r       |      131 |      1000
+ t_stats_us  | r       |        5 |      1000
+(3 rows)
+
+select b.relname, staattnum, stanullfrac, stadistinct from pg_statistic a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col') order by b.relname, staattnum;
+   relname   | staattnum | stanullfrac | stadistinct 
+-------------+-----------+-------------+-------------
+ t_stats     |         1 |           0 |          -1
+ t_stats     |         2 |          .1 |           9
+ t_stats     |         3 |           0 |           2
+ t_stats_col |         1 |           0 |          -1
+ t_stats_col |         2 |          .1 |           9
+ t_stats_col |         3 |           0 |           2
+ t_stats_us  |         1 |           0 |          -1
+ t_stats_us  |         2 |          .1 |           9
+ t_stats_us  |         3 |           0 |           2
+(9 rows)
+
+-- TEST PRIVILEGES
+create user user01 password 'stats@1234';
+grant all privileges on schema sc_stats to user01;
+grant select on table sc_stats.t_stats to user01;
+grant vacuum on table sc_stats.t_stats_us to user01;
+set session authorization user01 password 'stats@1234';
+create table t_stats_pri (c1 int, c2 varchar2(100), constraint t_stats_pri_pk primary key (c1));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pri_pk" for table "t_stats_pri"
+insert into t_stats_pri values (generate_series(1, 2000), 'OK');
+-- gather table need vacuum or dba
+call gms_stats.gather_table_stats('sc_stats', 't_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_gather_table_stats(ownname,tabname,partname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.gather_table_stats(character varying,character varying,character varying,numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,boolean,character varying,boolean,text,character varying) line 2 at PERFORM
+call gms_stats.gather_table_stats('sc_stats', 't_stats_us');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_stats_pri');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+-- gather_database
+call gms_stats.gather_database_stats(); -- error
+ERROR:  Permission denied. Need dba or databaseowner to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_gather_database_stats(stattab,statid,statown,gather_sys)"
+PL/pgSQL function gms_stats.gather_database_stats(numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,public.objecttab,character varying,boolean,boolean,public.objecttab) line 2 at PERFORM
+-- set_* need class owner or dba privileges
+call gms_stats.set_table_stats('sc_stats', 't_stats', numblks=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_table_stats(ownname,tabname,partname,stattab,statid,numrows,numblks,statown,force)"
+PL/pgSQL function gms_stats.set_table_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,boolean,numeric,numeric,numeric) line 2 at PERFORM
+call gms_stats.set_table_stats('sc_stats', 't_stats_us', numblks=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_table_stats(ownname,tabname,partname,stattab,statid,numrows,numblks,statown,force)"
+PL/pgSQL function gms_stats.set_table_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,boolean,numeric,numeric,numeric) line 2 at PERFORM
+call gms_stats.set_table_stats('sc_stats', 't_stats_pri', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+call gms_stats.set_index_stats('sc_stats', 't_stats_pk', numdist=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_index_stats(ownname,indname,stattab,statid,numdist,statown,force)"
+PL/pgSQL function gms_stats.set_index_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,numeric,boolean) line 2 at PERFORM
+call gms_stats.set_index_stats('sc_stats', 't_stats_us_pk', numdist=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_index_stats(ownname,indname,stattab,statid,numdist,statown,force)"
+PL/pgSQL function gms_stats.set_index_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,numeric,boolean) line 2 at PERFORM
+call gms_stats.set_index_stats('sc_stats', 't_stats_pri_pk', numdist=>10);
+ set_index_stats 
+-----------------
+ 
+(1 row)
+
+call gms_stats.set_column_stats('sc_stats', 't_stats', 'c2', distcnt=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_column_stats(ownname,tabname,colname,stattab,statid,distcnt,nullcnt,statown,force)"
+PL/pgSQL function gms_stats.set_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,text,numeric,numeric,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.set_column_stats('sc_stats', 't_stats_us', 'c2', distcnt=>10); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_set_column_stats(ownname,tabname,colname,stattab,statid,distcnt,nullcnt,statown,force)"
+PL/pgSQL function gms_stats.set_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,text,numeric,numeric,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.set_column_stats('sc_stats', 't_stats_pri', 'c2', distcnt=>10);
+ set_column_stats 
+------------------
+ 
+(1 row)
+
+-- delete_* need classowner or dba
+call gms_stats.delete_table_stats('sc_stats', 't_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_table_stats(ownname,tabname,partname,stattab,statid,cascade_parts,cascade_columns,cascade_indexes,statown,force)"
+PL/pgSQL function gms_stats.delete_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,boolean,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_table_stats('sc_stats', 't_stats_us'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_table_stats(ownname,tabname,partname,stattab,statid,cascade_parts,cascade_columns,cascade_indexes,statown,force)"
+PL/pgSQL function gms_stats.delete_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,boolean,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_table_stats('sc_stats', 't_stats_pri');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pk'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_index_stats(ownname,indname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_index_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,character varying,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_index_stats('sc_stats', 't_stats_us_pk'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_index_stats(ownname,indname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_index_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,character varying,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_index_stats('sc_stats', 't_stats_pri_pk');
+ delete_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.delete_column_stats('sc_stats', 't_stats', 'c2'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_column_stats(ownname,tabname,colname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_column_stats('sc_stats', 't_stats_us', 'c2'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_column_stats(ownname,tabname,colname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_column_stats('sc_stats', 't_stats_pri', 'c2');
+ delete_column_stats 
+---------------------
+ 
+(1 row)
+
+call gms_stats.delete_schema_stats('sc_stats'); -- error
+ERROR:  Permission denied. Need dba or databaseowner to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_delete_schema_stats(ownname,stattab,statid,statown,force)"
+PL/pgSQL function gms_stats.delete_schema_stats(character varying,character varying,character varying,character varying,boolean,boolean,character varying) line 2 at PERFORM
+-- export_* need classowner or dba
+call gms_stats.export_schema_stats('sc_stats', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need dba or databaseowner to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_schema_stats(ownname,stattab,statown)"
+PL/pgSQL function gms_stats.export_schema_stats(character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_table_stats(ownname,tabname,partname,stattab,statown,cascade)"
+PL/pgSQL function gms_stats.export_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_table_stats(ownname,tabname,partname,stattab,statown,cascade)"
+PL/pgSQL function gms_stats.export_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_table_stats('sc_stats', 't_stats_pri', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_index_stats(ownname,indname,stattab,statown)"
+PL/pgSQL function gms_stats.export_index_stats(character varying,character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_index_stats('sc_stats', 't_stats_us_pk', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_index_stats(ownname,indname,stattab,statown)"
+PL/pgSQL function gms_stats.export_index_stats(character varying,character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_index_stats('sc_stats', 't_stats_pri_pk', stattab=>'t_tmp_stats');
+ export_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_column_stats(ownname,tabname,colname,stattab,statown)"
+PL/pgSQL function gms_stats.export_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_column_stats('sc_stats', 't_stats_us', 'c2', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_export_column_stats(ownname,tabname,colname,stattab,statown)"
+PL/pgSQL function gms_stats.export_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying) line 2 at PERFORM
+call gms_stats.export_column_stats('sc_stats', 't_stats_pri', 'c2', stattab=>'t_tmp_stats');
+ export_column_stats 
+---------------------
+ 
+(1 row)
+
+-- import_* need classowner or dba
+call gms_stats.import_schema_stats('sc_stats', stattab=>'t_tmp_stats');
+ERROR:  Permission denied. Need dba or databaseowner to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_schema_stats(ownname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_schema_stats(character varying,character varying,character varying,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_stats', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_table_stats(ownname,tabname,partname,stattab,cascade,statown,force)"
+PL/pgSQL function gms_stats.import_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_stats_us', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_table_stats(ownname,tabname,partname,stattab,cascade,statown,force)"
+PL/pgSQL function gms_stats.import_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_stats_pri', stattab=>'t_tmp_stats');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.import_index_stats('sc_stats', 't_stats_pk', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_index_stats(ownname,indname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_index_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_index_stats('sc_stats', 't_stats_us_pk', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_index_stats(ownname,indname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_index_stats(character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_index_stats('sc_stats', 't_stats_pri_pk', stattab=>'t_tmp_stats');
+ import_index_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.import_column_stats('sc_stats', 't_stats', 'c2', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_column_stats(ownname,tabname,colname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_column_stats('sc_stats', 't_stats_us', 'c2', stattab=>'t_tmp_stats'); -- error
+ERROR:  Permission denied. Need classowner or dba to call.
+CONTEXT:  SQL statement "CALL gms_stats.gs_import_column_stats(ownname,tabname,colname,stattab,statown,force)"
+PL/pgSQL function gms_stats.import_column_stats(character varying,character varying,character varying,character varying,character varying,character varying,character varying,boolean,boolean) line 2 at PERFORM
+call gms_stats.import_column_stats('sc_stats', 't_stats_pri', 'c2', stattab=>'t_tmp_stats');
+ import_column_stats 
+---------------------
+ 
+(1 row)
+
+drop table t_stats_pri;
+reset session authorization;
+revoke create, drop on schema sc_stats from user01;
+set session authorization user01 password 'stats@1234';
+call gms_stats.drop_stat_table('sc_stats', 't_tmp_stats'); -- error
+ERROR:  permission denied for relation t_tmp_stats
+DETAIL:  N/A
+CONTEXT:  SQL statement "DROP TABLE sc_stats.t_tmp_stats;"
+SQL statement "CALL gms_stats.gs_drop_stat_table(ownname,stattab)"
+PL/pgSQL function gms_stats.drop_stat_table(character varying,character varying) line 2 at PERFORM
+reset session authorization;
+drop user user01 cascade;
+call gms_stats.drop_stat_table('sc_stats', 't_tmp_stats');
+ drop_stat_table 
+-----------------
+ 
+(1 row)
+
+call gms_stats.drop_stat_table('sc_stats', 't_tmp_stats2');
+ drop_stat_table 
+-----------------
+ 
+(1 row)
+
+drop table if exists t_stats;
+drop table if exists t_part;
+drop table if exists t_sub_part;
+drop table if exists t_stats_us;
+drop table if exists t_stats_col;
+drop procedure prepare_data();
+drop procedure prepare_part();
+drop procedure prepare_subpart();
+drop procedure prepare_ustore();
+drop procedure prepare_column();
+reset current_schema;
+drop schema sc_stats cascade;
