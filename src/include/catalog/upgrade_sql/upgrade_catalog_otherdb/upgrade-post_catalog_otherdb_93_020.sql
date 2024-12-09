@@ -20,12 +20,16 @@ COMMENT ON FUNCTION pg_catalog.corr_sk_trans_fn_no3(internal, float8, float8) IS
 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 5561;
 CREATE AGGREGATE pg_catalog.corr_s(float8, float8, text) (SFUNC=corr_sk_trans_fn, STYPE= internal, finalfunc = corr_s_final_fn);
+COMMENT ON FUNCTION pg_catalog.corr_s(float8, float8, text) IS 'Calculates Spearman''s rank correlation with text parameter';
 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 5566;
 CREATE AGGREGATE pg_catalog.corr_s(float8, float8) (SFUNC=corr_sk_trans_fn_no3, STYPE= internal, finalfunc = corr_s_final_fn);
+COMMENT ON FUNCTION pg_catalog.corr_s(float8, float8) IS 'Calculates Spearman''s rank correlation without text parameter';
 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 5562;
 CREATE AGGREGATE pg_catalog.corr_k(float8, float8, text) (SFUNC=corr_sk_trans_fn, STYPE= internal, finalfunc = corr_k_final_fn);
+COMMENT ON FUNCTION pg_catalog.corr_k(float8, float8, text) IS 'Calculates Kendall''s tau correlation with text parameter';
 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 5567;
 CREATE AGGREGATE pg_catalog.corr_k(float8, float8) (SFUNC=corr_sk_trans_fn_no3, STYPE= internal, finalfunc = corr_k_final_fn);
+COMMENT ON FUNCTION pg_catalog.corr_k(float8, float8) IS 'Calculates Kendall''s tau correlation without text parameter';
