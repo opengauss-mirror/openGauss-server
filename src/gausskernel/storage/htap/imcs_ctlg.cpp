@@ -112,6 +112,36 @@ static FORCE_INLINE void DeDuplicateAttrNumber(int2* sortedAttsNums, int *colNum
     *colNum = curr + 1;
 }
 
+
+int32 TypeMaximumSize(Oid type_oid, int32 typemod)
+{
+    if (typemod < 0)
+        return -1;
+
+    switch (type_oid) {
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+            /* typemod includes varlena header */
+
+            /* typemod is in characters not bytes */
+            return (typemod - VARHDRSZ) * pg_encoding_max_length(GetDatabaseEncoding()) + VARHDRSZ;
+
+        case NUMERICOID:
+            return numeric_maximum_size(typemod);
+
+        case VARBITOID:
+        case BITOID:
+            /* typemod is the (max) number of bits */
+            return (typemod + (BITS_PER_BYTE - 1)) / BITS_PER_BYTE + 2 * sizeof(int32);
+        default:
+            break;
+    }
+
+    /* Unknown type, or unlimited-width type such as 'text' */
+    return -1;
+}
+
 void CheckForAttrLen(Oid relOid, FormData_pg_attribute* att)
 {
     if (att->attlen > 0) {
@@ -119,7 +149,7 @@ void CheckForAttrLen(Oid relOid, FormData_pg_attribute* att)
         return;
     }
 
-    int32 maxlen = type_maximum_size(att->atttypid, att->atttypmod);
+    int32 maxlen = TypeMaximumSize(att->atttypid, att->atttypmod);
     if (maxlen < 0) {
         ereport(ERROR, (errmsg("Max attr length of Rel [%d]: col [%s] is unknow, not supported by imcstore.",
             relOid, att->attname.data)));
