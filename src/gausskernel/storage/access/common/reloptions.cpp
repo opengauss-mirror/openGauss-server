@@ -266,7 +266,7 @@ static relopt_int intRelOpts[] = {
     {{ "pq_ksub", "Number of centroids for each PQ subquantizer", RELOPT_KIND_HNSW },
      HNSW_DEFAULT_PQ_KSUB,
      HNSW_MIN_PQ_KSUB,
-     HNSW_MIN_PQ_KSUB },
+     HNSW_MAX_PQ_KSUB },
     {{ "lists", "Number of inverted lists", RELOPT_KIND_IVFFLAT },
      IVFFLAT_DEFAULT_LISTS,
      IVFFLAT_MIN_LISTS,

@@ -43,6 +43,8 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     int m;
     HnswElement entryPoint;
     char *base = NULL;
+    PQParams *params = &so->params;
+    bool enablePQ = so->enablePQ;
 
     /* Get m and entry point */
     HnswGetMetaPageInfo(index, &m, &entryPoint);
@@ -50,15 +52,45 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     if (entryPoint == NULL)
         return NIL;
 
-    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, scan));
+    if (enablePQ) {
+        uint8* qPQCode;
+        PQSearchInfo pqinfo;
+        float *query = DatumGetVector(q)->x;
 
-    for (int lc = entryPoint->level; lc >= 1; lc--) {
-        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, scan);
-        ep = w;
+        pqinfo.params = *params;
+        if (params->pqMode == HNSW_PQMODE_SDC) {
+            qPQCode = (uint8 *)palloc(params->pqM * sizeof(uint8));
+            ComputeVectorPQCode(query, params, qPQCode);
+            pqinfo.qPQCode = qPQCode;
+            pqinfo.pqDistanceTable = index->pqDistanceTable;
+        } else {
+            pqinfo.qPQCode = NULL;
+            pqinfo.pqDistanceTable = (float*) palloc(params->pqM * params->pqKsub * sizeof(float));
+            GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable);
+        }
+
+        pqinfo.lc = entryPoint->level;
+        ep = list_make1(HnswEntryCandidate(
+                        base, entryPoint, q, index, procinfo, collation, true, NULL, enablePQ, &pqinfo));
+        for (int lc = entryPoint->level; lc >= 1; lc--) {
+            pqinfo.lc = lc;
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, true, NULL, NULL, enablePQ, &pqinfo);
+            ep = w;
+        }
+        int hnsw_ef_search = u_sess->datavec_ctx.hnsw_ef_search;
+        pqinfo.lc = 0;
+        w = HnswSearchLayer(base, q, ep, hnsw_ef_search, 0, index, procinfo, collation, m,
+                            true, NULL, NULL, enablePQ, &pqinfo);
+    } else {
+        ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
+        for (int lc = entryPoint->level; lc >= 1; lc--) {
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL);
+            ep = w;
+        }
+        int hnsw_ef_search = u_sess->datavec_ctx.hnsw_ef_search;
+        w = HnswSearchLayer(base, q, ep, hnsw_ef_search, 0, index, procinfo, collation, m, false, NULL);
     }
-
-    int hnsw_ef_search = u_sess->datavec_ctx.hnsw_ef_search;
-    return HnswSearchLayer(base, q, ep, hnsw_ef_search, 0, index, procinfo, collation, m, false, NULL, scan);
+    return w;
 }
 
 /*
@@ -94,6 +126,8 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
 {
     IndexScanDesc scan;
     HnswScanOpaque so;
+    PQParams params;
+    int dim;
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
 
@@ -110,6 +144,10 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
     so->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
     so->collation = index->rd_indcollation[0];
+
+    dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ);
+    so->params = params;
 
     scan->opaque = so;
 
