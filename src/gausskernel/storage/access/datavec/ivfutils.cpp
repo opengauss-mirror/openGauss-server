@@ -29,34 +29,8 @@
 #include "access/datavec/halfutils.h"
 #include "access/datavec/halfvec.h"
 #include "access/datavec/ivfflat.h"
+#include "access/datavec/utils.h"
 #include "storage/buf/bufmgr.h"
-
-/*
- * Allocate a vector array
- */
-VectorArray VectorArrayInit(int maxlen, int dimensions, Size itemsize)
-{
-    VectorArray res = (VectorArray)palloc(sizeof(VectorArrayData));
-
-    /* Ensure items are aligned to prevent UB */
-    itemsize = MAXALIGN(itemsize);
-
-    res->length = 0;
-    res->maxlen = maxlen;
-    res->dim = dimensions;
-    res->itemsize = itemsize;
-    res->items = (char *)palloc_extended(maxlen * itemsize, MCXT_ALLOC_ZERO | MCXT_ALLOC_HUGE);
-    return res;
-}
-
-/*
- * Free a vector array
- */
-void VectorArrayFree(VectorArray arr)
-{
-    pfree(arr->items);
-    pfree(arr);
-}
 
 /*
  * Get the number of lists in the index
@@ -229,84 +203,6 @@ void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage
         GenericXLogAbort(state);
         UnlockReleaseBuffer(buf);
     }
-}
-
-static Size VectorItemSize(int dimensions)
-{
-    return VECTOR_SIZE(dimensions);
-}
-
-static Size HalfvecItemSize(int dimensions)
-{
-    return HALFVEC_SIZE(dimensions);
-}
-
-static Size BitItemSize(int dimensions)
-{
-    return VARBITTOTALLEN(dimensions);
-}
-
-static void VectorUpdateCenter(Pointer v, int dimensions, float *x)
-{
-    Vector *vec = (Vector *)v;
-
-    SET_VARSIZE(vec, VECTOR_SIZE(dimensions));
-    vec->dim = dimensions;
-
-    for (int k = 0; k < dimensions; k++)
-        vec->x[k] = x[k];
-}
-
-static void HalfvecUpdateCenter(Pointer v, int dimensions, float *x)
-{
-    HalfVector *vec = (HalfVector *)v;
-
-    SET_VARSIZE(vec, HALFVEC_SIZE(dimensions));
-    vec->dim = dimensions;
-
-    for (int k = 0; k < dimensions; k++)
-        vec->x[k] = Float4ToHalfUnchecked(x[k]);
-}
-
-static void BitUpdateCenter(Pointer v, int dimensions, float *x)
-{
-    VarBit *vec = (VarBit *)v;
-    unsigned char *nx = VARBITS(vec);
-
-    SET_VARSIZE(vec, VARBITTOTALLEN(dimensions));
-    VARBITLEN(vec) = dimensions;
-
-    for (uint32 k = 0; k < VARBITBYTES(vec); k++) {
-        nx[k] = 0;
-    }
-
-    for (int k = 0; k < dimensions; k++) {
-        nx[k / 8] |= (x[k] > 0.5 ? 1 : 0) << (7 - (k % 8));
-    }
-}
-
-static void VectorSumCenter(Pointer v, float *x)
-{
-    Vector *vec = (Vector *)v;
-
-    for (int k = 0; k < vec->dim; k++)
-        x[k] += vec->x[k];
-}
-
-static void HalfvecSumCenter(Pointer v, float *x)
-{
-    HalfVector *vec = (HalfVector *)v;
-
-    for (int k = 0; k < vec->dim; k++)
-        x[k] += HalfToFloat4(vec->x[k]);
-}
-
-static void BitSumCenter(Pointer v, float *x)
-{
-    VarBit *vec = (VarBit *)v;
-
-    for (int k = 0; k < VARBITLEN(vec); k++)
-        x[k] += (float)(((VARBITS(vec)[k / 8]) >> (7 - (k % 8))) & 0x01);
 }
 
 /*

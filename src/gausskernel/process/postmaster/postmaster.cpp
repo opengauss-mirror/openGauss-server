@@ -275,6 +275,7 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_auxiliary.h"
 #include "storage/gs_uwal/gs_uwal.h"
+#include "access/datavec/utils.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -3130,6 +3131,15 @@ int PostmasterMain(int argc, char* argv[])
             }
             MoveUwalFile();
         }
+    }
+
+    /* init datavec hnswpq */
+    if (g_instance.attr.attr_storage.enable_hnswpq) {
+        int ret = HNSWPQInit();
+        if (ret != 0) {
+            ereport(PANIC, (errmsg("datavec HNSWPQ init failed, ret: %d", ret)));
+        }
+        ereport(LOG, (errmsg("datavec HNSWPQ init success.")));
     }
 
     /* init sharestorge(dorado) */
@@ -9688,6 +9698,7 @@ void ExitPostmaster(int status)
      * MUST		-- vadim 05-10-1999
      */
     DMSUninit();
+    HNSWPQUinit();
 
     CloseGaussPidDir();
 

@@ -2920,6 +2920,8 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     } else {
         relation->rd_ind_partition_all_usable = true; /* trivial for non-partitioned index */
     }
+    relation->pqTable = NULL;
+    relation->pqDistanceTable = NULL;
 }
 
 /*

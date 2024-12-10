@@ -1120,6 +1120,8 @@ void knl_instance_init()
     knl_g_datadir_init(&g_instance.datadir_cxt);
     knl_g_listen_sock_init(&g_instance.listen_cxt);
 
+    g_instance.hnswpq_inited = false;
+
 #ifdef USE_SPQ
     knl_g_spq_context_init(&g_instance.spq_cxt);
 #endif

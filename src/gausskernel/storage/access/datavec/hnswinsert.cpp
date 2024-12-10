@@ -574,6 +574,9 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const boo
     Oid collation = index->rd_indcollation[0];
     LOCKMODE lockmode = ShareLock;
     char *base = NULL;
+    PQParams params;
+    bool enablePQ;
+    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
     /*
      * Get a shared lock. This allows vacuum to ensure no in-flight inserts
@@ -602,8 +605,18 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const boo
         entryPoint = HnswGetEntryPoint(index);
     }
 
+    InitPQParamsOnDisk(&params, index, procinfo, dim, &enablePQ);
+
+    Pointer codePtr = NULL;
+    if (enablePQ) {
+        Size codesize = params.pqM * sizeof(uint8);
+        codePtr = (Pointer)HnswAlloc(NULL, codesize);
+    }
+    HnswPtrStore(base, element->pqcodes, codePtr);
+
     /* Find neighbors for element */
-    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation, m, efConstruction, false);
+    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation, m,
+                             efConstruction, false, enablePQ, &params);
 
     /* Update graph on disk */
     UpdateGraphOnDisk(index, procinfo, collation, element, m, efConstruction, entryPoint, building);
