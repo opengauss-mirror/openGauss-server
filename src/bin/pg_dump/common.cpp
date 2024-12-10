@@ -22,6 +22,7 @@
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
 #endif
+#define FirstNormalObjectId 16384
 
 /*
  * Variables for mapping DumpId to DumpableObject
@@ -723,6 +724,25 @@ void removeObjectDependency(DumpableObject* dobj, DumpId refId)
             dobj->dependencies[j++] = dobj->dependencies[i];
     }
     dobj->nDeps = j;
+}
+
+
+bool repairDependencyPkgLoops(DumpableObject** loop, int nLoop)
+{
+    if (nLoop == 3 && loop[0]->objType == DO_FUNC && loop[1]->objType == DO_PACKAGE &&
+        loop[2]->objType == DO_PRE_DATA_BOUNDARY) {
+        for (int i = 0; i < loop[0]->nDeps; i++) {
+            DumpId dumpId = loop[0]->dependencies[i];
+            DumpableObject* funcObj = dumpIdMap[dumpId];
+            if (funcObj->catId.oid > FirstNormalObjectId && funcObj->objType != DO_NAMESPACE &&
+                funcObj->objType != DO_PACKAGE) {
+                return false;
+            }
+        }
+        removeObjectDependency(loop[1], loop[2]->dumpId);
+        return true;
+    }
+    return false;
 }
 
 /*

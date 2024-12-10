@@ -1,0 +1,100 @@
+create database dump_package_func;
+create database restore_package_func;
+\c dump_package_func
+CREATE SCHEMA mysche;
+CREATE TABLE mysche.t1(a int);
+CREATE OR REPLACE PACKAGE mysche.EAST_COMM IS
+function ADD_NUM(a int) RETURN int;
+END EAST_COMM;
+/
+CREATE OR REPLACE PACKAGE BODY mysche.EAST_COMM IS
+FUNCTION ADD_NUM(a int) RETURN int as
+BEGIN
+	RETURN a + 10;
+END;
+END EAST_COMM;
+/
+CREATE VIEW mysche.v_add AS
+SELECT a, mysche.EAST_COMM.ADD_NUM(a) AS RESULT FROM mysche.t1;
+CREATE VIEW mysche.v_add1 AS
+SELECT a, mysche.EAST_COMM.ADD_NUM(a) AS RESULT FROM mysche.t1;
+CREATE VIEW mysche.v_add2 AS
+SELECT a, mysche.EAST_COMM.ADD_NUM(a) AS RESULT FROM mysche.t1;
+CREATE VIEW mysche.v_add3 AS
+SELECT a, mysche.EAST_COMM.ADD_NUM(a) AS RESULT FROM mysche.t1;
+CREATE VIEW mysche.v_add4 AS
+SELECT a, mysche.EAST_COMM.ADD_NUM(a) AS RESULT FROM mysche.t1;
+CREATE VIEW mysche.v_other AS
+SELECT a from mysche.t1;
+CREATE VIEW mysche.v_other1 AS
+SELECT a from mysche.t1;
+CREATE VIEW mysche.v_other2 AS
+SELECT a from mysche.t1;
+CREATE VIEW mysche.v_other3 AS
+SELECT a from mysche.t1;
+CREATE VIEW mysche.v_other4 AS
+SELECT a from mysche.t1;
+\! @abs_bindir@/gs_dump dump_package_func -p @portstring@ -f @abs_bindir@/dump_package.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_package_func -p @portstring@ @abs_bindir@/dump_package.tar >/dev/null 2>&1; echo $?
+0
+\c restore_package_func
+select mysche.EAST_COMM.ADD_NUM(0);
+ add_num 
+---------
+      10
+(1 row)
+
+SELECT * from mysche.v_add;
+ a | result 
+---+--------
+(0 rows)
+
+SELECT * from mysche.v_add1;
+ a | result 
+---+--------
+(0 rows)
+
+SELECT * from mysche.v_add2;
+ a | result 
+---+--------
+(0 rows)
+
+SELECT * from mysche.v_add3;
+ a | result 
+---+--------
+(0 rows)
+
+SELECT * from mysche.v_add4;
+ a | result 
+---+--------
+(0 rows)
+
+SELECT * from mysche.v_other;
+ a 
+---
+(0 rows)
+
+SELECT * from mysche.v_other1;
+ a 
+---
+(0 rows)
+
+SELECT * from mysche.v_other2;
+ a 
+---
+(0 rows)
+
+SELECT * from mysche.v_other3;
+ a 
+---
+(0 rows)
+
+SELECT * from mysche.v_other4;
+ a 
+---
+(0 rows)
+
+\c regression
+drop database dump_package_func;
+drop database restore_package_func;

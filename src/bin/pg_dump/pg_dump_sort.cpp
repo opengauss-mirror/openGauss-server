@@ -942,6 +942,9 @@ static void repairDependencyLoop(DumpableObject** loop, int nLoop)
         return;
     if (true == repairDependencyDomainConstraintLoops(loop, nLoop))
         return;
+    if (true == repairDependencyPkgLoops(loop, nLoop)) {
+        return;
+    }
 
     /*
      * Loop of table with itself --- just ignore it.
