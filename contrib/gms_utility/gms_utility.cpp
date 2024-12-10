@@ -26,6 +26,7 @@
 #include "funcapi.h"
 #include "fmgr.h"
 
+#include "access/hash.h"
 #include "access/skey.h"
 #include "access/heapam.h"
 #include "catalog/indexing.h"
@@ -35,13 +36,17 @@
 #include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "libpq/md5.h"
+#include "nodes/nodes.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "tcop/tcopprot.h"
+#include "tcop/utility.h"
 #include "parser/keywords.h"
+#include "executor/lightProxy.h"
+#include "nodes/parsenodes_common.h"
 #include "gms_utility.h"
 
 PG_MODULE_MAGIC;
@@ -60,6 +65,7 @@ typedef Oid (*SearchOidByName)(Oid namespaceId, char* name, NameResolveVar* var)
 static List* GetRelationsInSchema(char *namespc);
 static void DoAnalyzeSchemaStatistic(char* schema, AnalyzeVar* var, AnalyzeMethodOpt methodOpt);
 static void DoDeleteSchemaStatistic(char* schema);
+static char* CanonNameParseInternal(char* name, int len, bool allowAllDigital);
 static bool DetectKeyword(char* words);
 static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword);
 static TokenizeVar* MakeTokenizeVar();
@@ -79,6 +85,14 @@ PG_FUNCTION_INFO_V1(gms_name_tokenize);
 PG_FUNCTION_INFO_V1(gms_name_resolve);
 PG_FUNCTION_INFO_V1(gms_is_bit_set);
 PG_FUNCTION_INFO_V1(gms_old_current_schema);
+PG_FUNCTION_INFO_V1(gms_format_error_stack);
+PG_FUNCTION_INFO_V1(gms_format_error_backtrace);
+PG_FUNCTION_INFO_V1(gms_format_call_stack);
+PG_FUNCTION_INFO_V1(gms_get_time);
+PG_FUNCTION_INFO_V1(gms_comma_to_table);
+PG_FUNCTION_INFO_V1(gms_exec_ddl_statement);
+PG_FUNCTION_INFO_V1(gms_get_hash_value);
+PG_FUNCTION_INFO_V1(gms_table_to_comma);
 
 static List* GetIndexColName(List* colnamesList, Oid relid, int2 attnum)
 {
@@ -539,6 +553,10 @@ static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
     if (checkDigital && isdigit(*w)) {
         return false;
     }
+    /* '_' '$' '#' are legal chars, but only '_' can be the first char of a string */
+    if (*w == '$' || *w == '#') {
+        return false;
+    }
     if (checkKeyword && DetectKeyword(w)) {
         return false;
     }
@@ -578,38 +596,18 @@ static bool CheckAllDigital(char* w)
     return true;
 }
 
-Datum gms_canonicalize(PG_FUNCTION_ARGS)
+static char* CanonNameParseInternal(char* name, int len, bool allowAllDigital)
 {
-    char* name;
-    int32 canonLen;
-    int len;
-    bool dotted = false;
-    StringInfo tmp;
+    char* format = NULL;
     StringInfo result;
+    StringInfo tmp;
     bits8 quoteState = QUOTE_NONE;
     char curChar = '\0';
     int traveLen = 0;
-    text* output;
+    bool dotted = false;
 
-    if (PG_ARGISNULL(0)) {
-        PG_RETURN_NULL();
-    }
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Input parameter \"canon_len\" is NULL")));
-    }
-
-    name = TextDatumGetCString(PG_GETARG_TEXT_P(0));
-    len = VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0));
-    canonLen = PG_GETARG_INT32(1);
-
-    if (canonLen < 0) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Input parameter \"canon_len\" value \"%d\" is less than zero", canonLen)));
-    }
-
-    tmp = makeStringInfo();
     result = makeStringInfo();
+    tmp = makeStringInfo();
 
     while (*name != '\0' && traveLen < len) {
         curChar = *name;
@@ -628,7 +626,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
             } else if (IS_QUOTE_STARTED(quoteState)) {
                 if (tmp->len == 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid paramter value \"%s\" with zero length", (name - traveLen))));
+                                    errmsg("Invalid parameter value \"%s\" with zero length", (name - traveLen))));
                 }
                 quoteState = QUOTE_ENDED;
             } else {
@@ -651,7 +649,11 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
                 }
                 if (tmp->len == 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid paramter value \"%s\" with zero length", (name - traveLen))));
+                                    errmsg("Invalid parameter value \"%s\" with zero length", (name - traveLen))));
+                }
+                if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
                 }
                 appendStringInfo(result, dotted ? "\"%s\"." : "%s.", tmp->data);
                 resetStringInfo(tmp);
@@ -667,7 +669,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
             } else {
                 if (InvalidCanonChars(curChar)) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid paramter value \"%s\" with special character", (name - traveLen))));
+                                errmsg("Invalid parameter value \"%s\" with special character", (name - traveLen))));
                 }
                 appendStringInfoChar(tmp, pg_toupper(curChar));
             }
@@ -676,32 +678,67 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
 
     if (IS_QUOTE_STARTED(quoteState)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid paramter value \"%s\" with quotation not closed", (name - traveLen))));
+                        errmsg("Invalid parameter value \"%s\" with quotation not closed", (name - traveLen))));
     }
     if (dotted && tmp->len == 0) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
+                        errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
     }
     if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
+                        errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
     }
     if (tmp->len > 0) {
-        if (!(!dotted && CheckAllDigital(tmp->data))
+        if (!(allowAllDigital && !dotted && CheckAllDigital(tmp->data))
              && BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true, dotted)) {
             ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("Invalid paramter value \"%s\" with special words", (name - traveLen))));
+                    errmsg("Invalid parameter value \"%s\" with special words", (name - traveLen))));
         }
         appendStringInfo(result, dotted ? "\"%s\"" : "%s", tmp->data);
     }
 
-    traveLen = strlen(result->data);
-    canonLen = canonLen < traveLen ? canonLen : traveLen;
-    output = cstring_to_text_with_len(result->data, canonLen);
+    format = pstrdup(result->data);
 
-    DestroyStringInfo(tmp);
     DestroyStringInfo(result);
+    DestroyStringInfo(tmp);
+
+    return format;
+}
+
+Datum gms_canonicalize(PG_FUNCTION_ARGS)
+{
+    char* name;
+    int32 canonLen;
+    int len;
+    char* result = NULL;
+    int traveLen = 0;
+    text* output;
+
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Input parameter \"canon_len\" is NULL")));
+    }
+
+    name = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+    len = VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0));
+    canonLen = PG_GETARG_INT32(1);
+
+    if (canonLen < 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("Input parameter \"canon_len\" value \"%d\" should be greater than or equal to 0 ", canonLen)));
+    }
+
+    result = CanonNameParseInternal(name, len, true);
+
+    traveLen = strlen(result);
+    canonLen = canonLen < traveLen ? canonLen : traveLen;
+    output = cstring_to_text_with_len(result, canonLen);
+
+    pfree_ext(result);
 
     PG_RETURN_TEXT_P(output);
 }
@@ -1820,4 +1857,322 @@ Datum gms_old_current_schema(PG_FUNCTION_ARGS)
 {
     Name schemaName = DatumGetName(OidFunctionCall0(CURRENTSCHEMAFUNCOID));
     return CStringGetTextDatum(schemaName->data);
+}
+
+Datum gms_format_error_stack(PG_FUNCTION_ARGS)
+{
+    ErrorData* errData = NULL;
+    char* errMsg = NULL;
+    char* errContext = NULL;
+    char* errCode = NULL;
+    char* format = NULL;
+    text* result;
+    int codeLen = 12;   /* errcode len */
+    int len = 0;
+    errno_t rc = EOK;
+
+    if (u_sess->plsql_cxt.cur_exception_cxt == NULL) {
+        PG_RETURN_NULL();
+    }
+    errData = u_sess->plsql_cxt.cur_exception_cxt->cur_edata;
+    if (errData == NULL) {
+        PG_RETURN_NULL();
+    }
+    errMsg = errData->message;
+    errContext = errData->context;
+    errCode = (char *) palloc0(codeLen);
+    pg_ltoa(errData->sqlerrcode, errCode);
+
+    len = codeLen + strlen(errMsg) + strlen(errContext);
+    format = (char *) palloc0(len + 1);
+
+    rc = strcat_s(format, len, errCode);
+    securec_check(rc, "\0", "\0");
+    rc = strcat_s(format, len, ": ");
+    securec_check(rc, "\0", "\0");
+    rc = strcat_s(format, len, errMsg);
+    securec_check(rc, "\0", "\0");
+
+    if (!(errData->sqlerrcode == SQL_ERRCODE_STACK_OVERFLOW
+          && 0 == pg_strcasecmp("stack depth limit exceeded", errMsg))) {
+        /* If stack overflow, don't print context info */
+        rc = strcat_s(format, len, "\n");
+        securec_check(rc, "\0", "\0");
+        rc = strcat_s(format, len, errContext);
+        securec_check(rc, "\0", "\0");
+    }
+
+    result = cstring_to_text(format);
+    pfree_ext(errCode);
+    pfree_ext(format);
+
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum gms_format_error_backtrace(PG_FUNCTION_ARGS)
+{
+    ErrorData* errData = NULL;
+    text* result;
+    char* errContext = NULL;
+    char* errCode = NULL;
+    const int codeLen = 12;
+    StringInfo tmp;
+    char* token = NULL;
+    char* psave = NULL;
+    char* tmpStr = NULL;
+    const char* delimiter = "\n";
+
+    if (u_sess->plsql_cxt.cur_exception_cxt == NULL) {
+        PG_RETURN_NULL();
+    }
+    errData = u_sess->plsql_cxt.cur_exception_cxt->cur_edata;
+    if (errData == NULL) {
+        PG_RETURN_NULL();
+    }
+    errContext = pg_strdup(errData->context);
+    errCode = (char *) palloc0(codeLen);
+    pg_ltoa(errData->sqlerrcode, errCode);
+
+    tmp = makeStringInfo();
+
+    tmpStr = strstr(errContext, "PL/pgSQL");
+    if (tmpStr != NULL) {
+        token = strtok_r(tmpStr, delimiter, &psave);
+    } else {
+        token = strtok_r(errContext, delimiter, &psave);
+    }
+    while (token != NULL && *token != '\0') {
+        appendStringInfo(tmp, "%s: ", errCode);
+        appendStringInfo(tmp, "%s\n", token);
+        tmpStr = strstr(psave, "PL/pgSQL");
+        token = strtok_r(tmpStr, delimiter, &psave);
+    }
+
+    result = cstring_to_text_with_len(tmp->data, tmp->len);
+
+    free(errContext);
+    pfree_ext(errCode);
+    DestroyStringInfo(tmp);
+
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum gms_format_call_stack(PG_FUNCTION_ARGS)
+{
+    FormatCallStack* callStack;
+    StringInfo tmp;
+    text* result;
+    PLpgSQL_execstate* estate;
+
+    tmp = makeStringInfo();
+
+    for (callStack = t_thrd.log_cxt.call_stack; callStack != NULL; callStack = callStack->prev) {
+        estate = (PLpgSQL_execstate *) (callStack->elem);
+        appendStringInfo(tmp, "%10d    ", estate->err_stmt->lineno);
+        appendStringInfo(tmp, "%s\n", estate->func->fn_signature);
+    }
+
+    result = cstring_to_text_with_len(tmp->data, tmp->len);
+    DestroyStringInfo(tmp);
+
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum gms_get_time(PG_FUNCTION_ARGS)
+{
+    struct timeval timeval;
+    int64 secOf100th = 0;
+
+    gettimeofday(&timeval, NULL);
+
+    secOf100th = ((int64) timeval.tv_sec * 1000 + (int64) timeval.tv_usec / 1000) / 10;
+    return DirectFunctionCall1(int4_numeric, Int32GetDatum((int32)secOf100th));
+}
+
+Datum gms_comma_to_table(PG_FUNCTION_ARGS)
+{
+    char* namelist = NULL;
+    const char separator = ',';
+    int start = 0;
+    int end = 0;
+    int tokenLen = 0;
+    char* token = NULL;
+    char* tmp = NULL;
+    ArrayBuildState *astate = NULL;
+    TupleDesc tupdesc;
+    Datum values[2];
+    bool nulls[2];
+    int len = 0;
+
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
+    }
+
+    namelist = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+
+    /* skip leading space */
+    while (namelist[start] != '\0' && isspace((unsigned char) namelist[start])) {
+        start++;
+    }
+    end = start;
+
+    while (namelist[end] != '\0') {
+        if (namelist[end] == separator) {
+            if (start == end) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
+            }
+            tokenLen = end - start;
+            token = pnstrdup(&namelist[start], tokenLen);
+            tmp = CanonNameParseInternal(token, tokenLen, false);
+            if (tmp == NULL || *tmp == '\0') {
+                pfree_ext(token);
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
+            }
+            astate = accumArrayResult(astate, CStringGetDatum(token), false, CSTRINGOID, CurrentMemoryContext);
+            pfree(tmp);
+            pfree(token);
+
+            start = ++end;
+            len++;
+        } else {
+            end++;
+        }
+    }
+    if (start == end) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
+    }
+
+    tokenLen = end - start;
+    token = pnstrdup(&namelist[start], tokenLen);
+    tmp = CanonNameParseInternal(token, tokenLen, false);
+    if (tmp == NULL || *tmp == '\0') {
+        pfree_ext(token);
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
+    }
+    astate = accumArrayResult(astate, CStringGetDatum(token), false, CSTRINGOID, CurrentMemoryContext);
+    pfree(tmp);
+    pfree(token);
+    len++;
+
+    tupdesc = CreateTemplateTupleDesc(2, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "tablen", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "tab", CSTRINGARRAYOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+
+    values[0] = Int32GetDatum(len);
+    nulls[0] = false;
+    values[1] = makeArrayResult(astate, CurrentMemoryContext);
+    nulls[1] = false;
+
+    return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls));
+}
+
+Datum gms_exec_ddl_statement(PG_FUNCTION_ARGS)
+{
+    text* inputSqlText;
+    char* inputSql = NULL;
+    List* parsetreeList = NIL;
+    Node* parseNode;
+    const char* commandTag = NULL;
+    CmdType queryType = CMD_UNKNOWN;
+
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Invalid input value")));
+    }
+
+    inputSqlText = PG_GETARG_TEXT_P(0);
+    FUNC_CHECK_HUGE_POINTER(false, inputSqlText, "gms_exec_ddl_statement");
+
+    inputSql = TextDatumGetCString(inputSqlText);
+    parsetreeList = pg_parse_query(inputSql);
+
+    if (list_length(parsetreeList) != 1) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Exec_ddl_statement only support one query")));
+    }
+
+    parseNode = (Node*) linitial(parsetreeList);
+    commandTag = CreateCommandTag(parseNode);
+    queryType = set_command_type_by_commandTag(commandTag);
+    if (CMD_DDL != queryType) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Unsupported query type, only support DDL query")));
+    }
+
+    if (SPI_connect() < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("SPI_connect failed")));
+    }
+
+    (void)SPI_execute(inputSql, false, 0);
+
+    if (SPI_finish() != SPI_OK_FINISH) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
+    }
+
+    PG_RETURN_VOID();
+}
+
+Datum gms_get_hash_value(PG_FUNCTION_ARGS)
+{
+    text* input;
+    char* name = NULL;
+    int32 base = 0;
+    int32 hashSize = 0;
+    uint32 hashKey = 0;
+    uint32 resultHash = 0;
+
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input parameter \"base\" ")));
+    }
+    if (PG_ARGISNULL(2)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input parameter \"hash_size\" ")));
+    }
+
+    base = DatumGetInt32(DirectFunctionCall1(numeric_int4, PG_GETARG_DATUM(1)));
+    hashSize = DatumGetInt32(DirectFunctionCall1(numeric_int4, PG_GETARG_DATUM(2)));
+
+    if (hashSize <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Param \"hash_size\" can't less than 0")));
+    }
+
+    if (PG_ARGISNULL(0)) {
+        hashKey = DatumGetUInt32(hash_any((unsigned char*) "", 0));
+    } else {
+        input = PG_GETARG_TEXT_P(0);
+        name = TextDatumGetCString(input);
+        hashKey = DatumGetUInt32(hash_any((unsigned char*) name, VARSIZE_ANY_EXHDR(input)));
+    }
+
+    resultHash += base + (int32) (hashKey % (uint32) hashSize);
+    return DirectFunctionCall1(int4_numeric, Int32GetDatum(resultHash));
+}
+
+Datum gms_table_to_comma(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Datum values[2];
+    bool nulls[2];
+    FmgrInfo flinfo;
+    char* result = NULL;
+
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid Input value")));
+    }
+
+    tupdesc = CreateTemplateTupleDesc(2, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "tablen", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "list", CSTRINGOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+
+    fmgr_info(ARRAYTOSTRINGFUNCOID, &flinfo);
+
+    values[0] = DirectFunctionCall2(array_length, PG_GETARG_DATUM(0), Int32GetDatum(1));
+    nulls[0] = false;
+
+    result = TextDatumGetCString(FunctionCall2Coll(&flinfo, InvalidOid, PG_GETARG_DATUM(0), CStringGetTextDatum(",")));
+    values[1] = CStringGetDatum(result);
+    nulls[1] = false;
+
+    return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls));
 }

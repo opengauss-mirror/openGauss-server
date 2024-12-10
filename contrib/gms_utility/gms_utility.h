@@ -97,6 +97,8 @@ typedef enum {
 
 #define NAME_TOKENIZE_MAX_ITEM_COUNT 3
 
+#define SQL_ERRCODE_STACK_OVERFLOW 16777477
+
 extern "C" Datum gms_analyze_schema(PG_FUNCTION_ARGS);
 extern "C" Datum gms_canonicalize(PG_FUNCTION_ARGS);
 extern "C" Datum gms_compile_schema(PG_FUNCTION_ARGS);
@@ -108,6 +110,14 @@ extern "C" Datum gms_name_tokenize(PG_FUNCTION_ARGS);
 extern "C" Datum gms_name_resolve(PG_FUNCTION_ARGS);
 extern "C" Datum gms_is_bit_set(PG_FUNCTION_ARGS);
 extern "C" Datum gms_old_current_schema(PG_FUNCTION_ARGS);
+extern "C" Datum gms_format_error_stack(PG_FUNCTION_ARGS);
+extern "C" Datum gms_format_error_backtrace(PG_FUNCTION_ARGS);
+extern "C" Datum gms_format_call_stack(PG_FUNCTION_ARGS);
+extern "C" Datum gms_get_time(PG_FUNCTION_ARGS);
+extern "C" Datum gms_comma_to_table(PG_FUNCTION_ARGS);
+extern "C" Datum gms_exec_ddl_statement(PG_FUNCTION_ARGS);
+extern "C" Datum gms_get_hash_value(PG_FUNCTION_ARGS);
+extern "C" Datum gms_table_to_comma(PG_FUNCTION_ARGS);
 
 extern void RecompileSingleFunction(Oid func_oid, bool is_procedure);
 extern void RecompileSinglePackage(Oid package_oid, bool is_spec);

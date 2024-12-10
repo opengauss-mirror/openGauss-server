@@ -1,5 +1,12 @@
 reset search_path;
 create extension if not exists gms_utility;
+create extension gms_output;
+select gms_output.enable;
+ enable 
+--------
+ 
+(1 row)
+
 set behavior_compat_options="bind_procedure_searchpath";
 -- start test db_version
 declare
@@ -617,25 +624,20 @@ create view expandv as select * from t1;
 declare
     vclobin clob := 
 'select distinct srvr_id 
-from public.expandv 
+from test_utility_est.expandv 
 where srvr_id not in 
 (select srvr_id 
-from public.expandv 
+from test_utility_est.expandv 
 minus 
 select srvr_id 
-from public.t1)';
+from test_utility_est.t1)';
     vclobout clob;
 begin
     gms_utility.expand_sql_text(vclobin, vclobout);
     raise info 'output_sql_text: %', vclobout; 
 end;
 /
-ERROR:  relation "public.expandv" does not exist on datanode1
-LINE 1: CALL gms_utility.expand_sql_text(vclobin,vclobout)
-                                      ^
-QUERY:  CALL gms_utility.expand_sql_text(vclobin,vclobout)
-CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
-PL/pgSQL function inline_code_block line 12 at SQL statement
+INFO:  output_sql_text: SELECT DISTINCT srvr_id FROM (SELECT t1.srvr_id FROM test_utility_est.t1) expandv WHERE NOT (srvr_id IN (SELECT expandv.srvr_id FROM (SELECT t1.srvr_id FROM test_utility_est.t1) expandv EXCEPT SELECT t1.srvr_id FROM test_utility_est.t1))
 -- test privileges
 create user user01 password 'utility@123';
 grant select on test_utility_est.view3 to user01;
@@ -1160,7 +1162,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value """" with zero length
+ERROR:  Invalid parameter value """" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('""',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1179,7 +1181,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end; -- error
 /
-ERROR:  Invalid paramter value "''" with special character
+ERROR:  Invalid parameter value "''" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('''''',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1198,7 +1200,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end; -- error
 /
-ERROR:  Invalid paramter value "koll.ro oy.nuuop.a"
+ERROR:  Invalid parameter value "koll.ro oy.nuuop.a"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.ro oy.nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1217,7 +1219,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "    .abcd" with special words
+ERROR:  Invalid parameter value "    .abcd" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('    .abcd',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1228,7 +1230,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "koll..nuuop.a" with special words
+ERROR:  Invalid parameter value "koll..nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll..nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1239,7 +1241,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "koll."".nuuop.a" with zero length
+ERROR:  Invalid parameter value "koll."".nuuop.a" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll."".nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1298,7 +1300,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end; -- error
 /
-ERROR:  Invalid paramter value "koll.ro,oy.nuuop.a" with special character
+ERROR:  Invalid parameter value "koll.ro,oy.nuuop.a" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.ro,oy.nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1320,7 +1322,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "koll.rooy.nuuop."
+ERROR:  Invalid parameter value "koll.rooy.nuuop."
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1353,7 +1355,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "koll."rooy"."nuuop." with quotation not closed
+ERROR:  Invalid parameter value "koll."rooy"."nuuop." with quotation not closed
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll."rooy"."nuuop.',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1365,7 +1367,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Invalid paramter value "koll.123rooy.nuuop.a" with special words
+ERROR:  Invalid parameter value "koll.123rooy.nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.123rooy.nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1377,6 +1379,28 @@ begin
 end;	-- ok for og, error for A
 /
 INFO:  canon_name: "KOLL"."_ROOY"."NUUOP"."A"
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.#rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid parameter value "koll.#rooy.nuuop.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.#rooy.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
+declare
+	canon_name varchar2(100);
+begin
+	gms_utility.canonicalize('koll.$rooy.nuuop.a', canon_name, 100);
+	raise info 'canon_name: %', canon_name;
+end;	-- error
+/
+ERROR:  Invalid parameter value "koll.$rooy.nuuop.a" with special words
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize('koll.$rooy.nuuop.a',canon_name,100)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
 declare
 	canon_name varchar2(100);
 begin
@@ -1400,7 +1424,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end; -- error
 /
-ERROR:  Invalid paramter value "koll.rooy.table.a" with special words
+ERROR:  Invalid parameter value "koll.rooy.table.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.rooy.table.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1419,7 +1443,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end; -- error
 /
-ERROR:  Invalid paramter value "koll.column.nuuop.a" with special words
+ERROR:  Invalid parameter value "koll.column.nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.column.nuuop.a',canon_name,100)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1443,7 +1467,7 @@ begin
 	raise info 'canon_name: %', canon_name;
 end;	-- error
 /
-ERROR:  Input parameter "canon_len" value "-10" is less than zero
+ERROR:  Input parameter "canon_len" value "-10" should be greater than or equal to 0 
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name,-10)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
@@ -1516,7 +1540,7 @@ begin
    raise info 'canonicalized name length: %', length(v_canon_name);
 end; -- error
 /
-ERROR:  Invalid paramter value "abc.test,c.f" with special character
+ERROR:  Invalid parameter value "abc.test,c.f" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
    )"
@@ -1555,7 +1579,7 @@ begin
   raise info 'canonicalized name length: %', length(v_canon_name);
 end;
 /
-ERROR:  Invalid paramter value "exam  ple"
+ERROR:  Invalid parameter value "exam  ple"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
    )"
@@ -1575,7 +1599,7 @@ begin
    raise info 'canonicalized name length: %', length(v_canon_name);
 end;
 /
-ERROR:  Invalid paramter value "exa mple.tab_na me"
+ERROR:  Invalid parameter value "exa mple.tab_na me"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
 SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
    )"
@@ -1877,16 +1901,18 @@ begin
     raise info 'call a: %', a;
 end;
 /
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ t
+(1 row)
 
 alter type s_type add attribute a int;
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ f
+(1 row)
 
 call gms_utility.compile_schema('test_utility_compile', false);
  compile_schema 
@@ -1894,10 +1920,11 @@ call gms_utility.compile_schema('test_utility_compile', false);
  
 (1 row)
 
-select valid from pg_object where object_type='p' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='P' and object_oid in (select oid from pg_proc where propackageid = 0 and proname='type_alter' and pronamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ t
+(1 row)
 
 create table stu(sno int, name varchar, sex varchar, cno int);
 create type r1 as (a int, c stu%rowtype);
@@ -1924,16 +1951,18 @@ INFO:  call p_in: (1,"(1,zhang,m,1)")
  
 (1 row)
 
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ t
+(1 row)
 
 alter table stu add column b int;
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ f
+(1 row)
 
 call gms_utility.compile_schema('test_utility_compile', false);
  compile_schema 
@@ -1941,10 +1970,11 @@ call gms_utility.compile_schema('test_utility_compile', false);
  
 (1 row)
 
-select valid from pg_object where object_type='b' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
+select valid from pg_object where object_type='B' and object_oid in (select oid from gs_package where pkgname='pkg' and pkgnamespace = (select oid from pg_namespace where nspname = 'test_utility_compile'));
  valid 
 -------
-(0 rows)
+ t
+(1 row)
 
 create view v_stu as select * from stu;
 select * from v_stu;
@@ -2009,10 +2039,8 @@ select * from v_stu;
 
 drop view v_stu;
 drop package body pkg;
-drop package pkg cascade;
-ERROR:  syntax error at or near "cascade"
-LINE 1: drop package pkg cascade;
-                         ^
+drop package pkg;
+NOTICE:  drop cascades to function test_utility_compile.proc1(r1)
 drop type r1;
 drop table stu;
 drop procedure type_alter;
@@ -2045,9 +2073,6 @@ select valid from pg_object where object_type='p' and object_oid in (select oid 
 
 drop procedure proc_err;
 drop schema test_utility_compile cascade;
-NOTICE:  drop cascades to 2 other objects
---?DETAIL:  drop cascades to package.*
-drop cascades to function test_utility_compile.proc1(undefined)
 ---------------------------
 -- name tokenize
 ---------------------------
@@ -2170,13 +2195,11 @@ INFO:  a: [PEER], b: [LOKP_PE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
  
 (1 row)
 
-call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- ok for og, error for A
-INFO:  a: [PEER], b: [$LOKPPE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
- test_name_tokenize 
---------------------
- 
-(1 row)
-
+call test_name_tokenize('peer.$lokppe.vuumee@ookeyy'); -- error
+ERROR:  Invalid input value "peer.$lokppe.vuumee@ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
 call test_name_tokenize('peer.lokp$pe.vuumee@ookeyy');
 INFO:  a: [PEER], b: [LOKP$PE], c: [VUUMEE], dblink: [OOKEYY], nextpos: 26
  test_name_tokenize 
@@ -2352,12 +2375,10 @@ INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [_ookeyy], nextpos: 28
 (1 row)
 
 call test_name_tokenize('peer.lokppe.vuumee@$ookeyy');
-INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [$OOKEYY], nextpos: 26
- test_name_tokenize 
---------------------
- 
-(1 row)
-
+ERROR:  Invalid input value "peer.lokppe.vuumee@$ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
 call test_name_tokenize('peer.lokppe.vuumee@"$ookeyy"');
 INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [$ookeyy], nextpos: 28
  test_name_tokenize 
@@ -3083,7 +3104,887 @@ DROP INDEX public.t_resolve_c1_udx;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
+---------------------------
+-- format error stack
+---------------------------
+select gms_utility.format_error_stack();
+ format_error_stack 
+--------------------
+ 
+(1 row)
+
+select gms_utility.format_error_stack(100);
+ERROR:  function gms_utility.format_error_stack(integer) does not exist
+LINE 1: select gms_utility.format_error_stack(100);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: format_error_stack
+create or replace function t_inner(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res = a / b;
+    return res;
+exception
+    when others then
+    raise exception 'expected exception';
+end;
+$$ language plpgsql;
+create or replace function t_outter(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res := t_inner(a, b);
+    return res;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_stack());
+    return -1;
+end;
+$$ language plpgsql;
+select t_outter(100, 2);
+ t_outter 
+----------
+       50
+(1 row)
+
+select t_outter(100, 0);
+16777248: expected exception
+PL/pgSQL function t_outter(integer,integer) line 5 at assignment
+referenced column: t_outter
+ t_outter 
+----------
+       -1
+(1 row)
+
+-- test stack overflow
+create or replace procedure t_recursion(count in out int)
+as
+begin
+    if count < 1000 then
+        count := count + 1;
+        t_recursion(count);
+    else
+        t_inner(100, 0);
+    end if;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_stack());
+end;
+/
+declare
+    c int := 0;
+begin
+    t_recursion(c);
+end;
+/
+16777477: stack depth limit exceeded
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+---------------------------
+-- format error backtrace
+---------------------------
+select gms_utility.format_error_backtrace();
+ format_error_backtrace 
+------------------------
+ 
+(1 row)
+
+select gms_utility.format_error_backtrace(100);
+ERROR:  function gms_utility.format_error_backtrace(integer) does not exist
+LINE 1: select gms_utility.format_error_backtrace(100);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: format_error_backtrace
+create or replace function t_inner(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res = a / b;
+    return res;
+exception
+    when others then
+    raise exception 'expected exception';
+end;
+$$ language plpgsql;
+create or replace function t_outter(a int, b int)
+returns int as $$
+declare
+    res int := 0;
+begin
+    res := t_inner(a, b);
+    return res;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_backtrace());
+    return -1;
+end;
+$$ language plpgsql;
+select t_outter(100, 2);
+ t_outter 
+----------
+       50
+(1 row)
+
+select t_outter(100, 0);
+16777248: PL/pgSQL function t_outter(integer,integer) line 5 at assignment
+16777248: referenced column: t_outter
+
+ t_outter 
+----------
+       -1
+(1 row)
+
+-- test stack overflow
+create or replace procedure t_recursion(count in out int, max in int)
+as
+begin
+    if count < max then
+        count := count + 1;
+        t_recursion(count, max);
+    else
+        t_inner(100, 0);
+    end if;
+exception
+    when others then
+    gms_output.put_line(gms_utility.format_error_backtrace());
+end;
+/
+declare
+    c int := 0;
+begin
+    t_recursion(c, 5);
+end;
+/
+16777248: PL/pgSQL function t_recursion(integer,integer) line 6 at PERFORM
+16777248: PL/pgSQL function t_recursion(integer,integer) line 4 at SQL statement
+16777248: PL/pgSQL function t_recursion(integer,integer) line 4 at SQL statement
+16777248: PL/pgSQL function t_recursion(integer,integer) line 4 at SQL statement
+16777248: PL/pgSQL function t_recursion(integer,integer) line 4 at SQL statement
+16777248: PL/pgSQL function t_recursion(integer,integer) line 4 at SQL statement
+16777248: PL/pgSQL function inline_code_block line 3 at SQL statement
+
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+---------------------------
+-- format call stack
+---------------------------
+select gms_utility.format_call_stack();
+ format_call_stack 
+-------------------
+ 
+(1 row)
+
+select gms_utility.format_call_stack(100);
+ERROR:  function gms_utility.format_call_stack(integer) does not exist
+LINE 1: select gms_utility.format_call_stack(100);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: format_call_stack
+create or replace function t_inner
+returns void as $$
+begin
+    gms_output.put_line('t_inner call stack: ');
+    gms_output.put_line(gms_utility.format_call_stack());
+end;
+$$ language plpgsql;
+create or replace function t_outter
+returns void as $$
+begin
+    t_inner();
+end;
+$$ language plpgsql;
+select t_inner();
+t_inner call stack: 
+         4    t_inner()
+
+ t_inner 
+---------
+ 
+(1 row)
+
+select t_outter();
+t_inner call stack: 
+         4    t_inner()
+         3    t_outter()
+
+ t_outter 
+----------
+ 
+(1 row)
+
+create or replace procedure t_recursion (count in out int, max in int) 
+as
+begin
+    if count < max then
+        count := count + 1;
+        t_recursion(count, max);
+    else
+        t_inner();
+    end if;
+end;
+/
+declare
+    count int := 0;
+begin
+    t_recursion(count, 5);
+end;
+/
+t_inner call stack: 
+         4    t_inner()
+         6    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         3    inline_code_block
+
+declare
+    count int := 0;
+begin
+    t_recursion(count, 20);
+end;
+/
+t_inner call stack: 
+         4    t_inner()
+         6    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         4    t_recursion(integer,integer)
+         3    inline_code_block
+
+drop procedure t_recursion;
+drop function t_outter;
+drop function t_inner;
+---------------------------
+-- get time
+---------------------------
+select gms_utility.get_time();
+  get_time  
+------------
+--?.*
+(1 row)
+
+select gms_utility.get_time(100);
+ERROR:  function gms_utility.get_time(integer) does not exist
+LINE 1: select gms_utility.get_time(100);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_time
+declare
+    t1 number;
+    t2 number;
+    td number;
+    sum bigint := 0;
+    i int := 0;
+begin
+    t1 = gms_utility.get_time();
+    for i in 1..1000000 loop
+        sum := sum + i * 2 - i / 2;
+    end loop;
+    t2 = gms_utility.get_time();
+    td = t2 - t1;
+    gms_output.put_line('costtime: ' || td);
+end;
+/
+--?costtime:.*
+---------------------------
+-- comma to table
+---------------------------
+create or replace procedure test_comma_to_table(list in varchar2)
+as
+    tablen binary_integer := 0;
+    tab varchar2[];
+    i int;
+begin
+    gms_utility.comma_to_table(list, tablen, tab);
+    gms_output.put_line('table len: ' || tablen);
+    for i in 1..tablen loop
+        gms_output.put_line('tablename: ' || tab(i));
+    end loop;
+end;
+/
+call test_comma_to_table('gaussdb.dept');
+table len: 1
+tablename: gaussdb.dept
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept, gaussdb.emp, gaussdb.jobhist');
+table len: 3
+tablename: gaussdb.dept
+tablename:  gaussdb.emp
+tablename:  gaussdb.jobhist
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('  gaussdb.dept, gaussdb.emp, gaussdb.jobhist  ');
+table len: 3
+tablename: gaussdb.dept
+tablename:  gaussdb.emp
+tablename:  gaussdb.jobhist  
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept,    gaussdb.emp, gaussdb.jobhist');
+table len: 3
+tablename: gaussdb.dept
+tablename:     gaussdb.emp
+tablename:  gaussdb.jobhist
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table(NULL); -- error
+ERROR:  Invalid comma-separated list
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table(''); -- error
+ERROR:  Invalid comma-separated list
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('    '); -- error
+ERROR:  Invalid comma-separated list
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"     "');
+table len: 1
+tablename: "     "
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaus  sdb.dept'); -- error
+ERROR:  Invalid parameter value "gaus  sdb.dept"
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"gaus  sdb".dept');
+table len: 1
+tablename: "gaus  sdb".dept
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept,,gaussdb.emp'); -- error
+ERROR:  Invalid comma-separated list
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb.dept,gaussdb.emp,'); -- error
+ERROR:  Invalid comma-separated list
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb..dept,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb..dept" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb.dept@dblink,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.dept@dblink" with special character
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb.dept_dblink,gaussdb.emp');
+table len: 2
+tablename: gaussdb.dept_dblink
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept$dblink,gaussdb.emp');
+table len: 2
+tablename: gaussdb.dept$dblink
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept#dblink,gaussdb.emp');
+table len: 2
+tablename: gaussdb.dept#dblink
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.dept123dblink,gaussdb.emp');
+table len: 2
+tablename: gaussdb.dept123dblink
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb._deptdblink,gaussdb.emp'); -- ok for og, error for a
+table len: 2
+tablename: gaussdb._deptdblink
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.$deptdblink,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.$deptdblink" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."$deptdblink",gaussdb.emp');
+table len: 2
+tablename: gaussdb."$deptdblink"
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.#deptdblink,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.#deptdblink" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."#deptdblink",gaussdb.emp');
+table len: 2
+tablename: gaussdb."#deptdblink"
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.123deptdblink,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.123deptdblink" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."123deptdblink",gaussdb.emp');
+table len: 2
+tablename: gaussdb."123deptdblink"
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('123,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "123" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('123.abc,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "123.abc" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition,gaussdb.emp'); -- error
+ERROR:  identifier too long, max length is 63
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb.table,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.table" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."table",gaussdb.emp');
+table len: 2
+tablename: gaussdb."table"
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('gaussdb.column,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gaussdb.column" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."column",gaussdb.emp');
+table len: 2
+tablename: gaussdb."column"
+tablename: gaussdb.emp
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('"gaussdb.dept,gaussdb.emp"'); -- error
+ERROR:  Invalid parameter value ""gaussdb.dept" with quotation not closed
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"gauss"db.d"ept,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value ""gauss"db.d"ept" after quotation
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gauss"db".dept,gaussdb.emp'); -- error
+ERROR:  Invalid parameter value "gauss"db".dept" before quotation
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+drop procedure test_comma_to_table;
+---------------------------
+-- exec_ddl_statement
+---------------------------
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl (c1 int, c2 text);');
+ exec_ddl_statement 
+--------------------
+ 
+(1 row)
+
+call gms_utility.exec_ddl_statement('alter table public.t_exec_ddl add column c3 boolean default true');
+ exec_ddl_statement 
+--------------------
+ 
+(1 row)
+
+-- test no ddl sql
+call gms_utility.exec_ddl_statement('insert into public.t_exec_ddl values (1, 234, 1)'); -- error
+ERROR:  Unsupported query type, only support DDL query
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement('update public.t_exec_ddl set c2 = 666'); -- error
+ERROR:  Unsupported query type, only support DDL query
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement('select * from public.t_exec_ddl;'); -- error
+ERROR:  Unsupported query type, only support DDL query
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+-- test invalid sql
+call gms_utility.exec_ddl_statement('today is a good day!'); -- error
+ERROR:  syntax error at or near "today"
+LINE 1: CALL gms_utility.exec_ddl_statement_c_func(parse_string)
+        ^
+QUERY:  CALL gms_utility.exec_ddl_statement_c_func(parse_string)
+CONTEXT:  PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement(''); -- error
+ERROR:  Invalid input value
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement(null); -- error
+ERROR:  Invalid input value
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement('alter table public.t_exec_ddl drop column c3; alter table public.t_exec_ddl add column c3 boolean default true;');
+ERROR:  Exec_ddl_statement only support one query
+CONTEXT:  SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl (c1 int, c2 text);'); -- error
+ERROR:  relation "t_exec_ddl" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
+CONTEXT:  SQL statement "create table public.t_exec_ddl (c1 int, c2 text);"
+SQL statement "CALL gms_utility.exec_ddl_statement_c_func(parse_string)"
+PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+call gms_utility.exec_ddl_statement('drop table public.t_exec_ddl');
+ exec_ddl_statement 
+--------------------
+ 
+(1 row)
+
+call gms_utility.exec_ddl_statement(); -- error
+ERROR:  function "exec_ddl_statement" with 0 parameters doesn't exist 
+call gms_utility.exec_ddl_statement('create table public.t_exec_ddl2 (c1 int, c2 text);', 'test'); -- error
+ERROR:  function "exec_ddl_statement" with 2 parameters doesn't exist 
+declare 
+    parse_string date:='2024-10-1';
+begin
+    gms_utility.exec_ddl_statement(parse_string);
+end; -- error
+/
+ERROR:  syntax error at or near "Tue"
+LINE 1: CALL gms_utility.exec_ddl_statement_c_func(parse_string)
+        ^
+QUERY:  CALL gms_utility.exec_ddl_statement_c_func(parse_string)
+CONTEXT:  PL/pgSQL function gms_utility.exec_ddl_statement(character varying) line 2 at PERFORM
+SQL statement "CALL gms_utility.exec_ddl_statement(parse_string)"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+---------------------------
+-- get_hash_value
+---------------------------
+select gms_utility.get_hash_value('Today is a good day', 1000, 1024);
+ get_hash_value 
+----------------
+           1054
+(1 row)
+
+select gms_utility.get_hash_value('Today is a good day', NULL, 2048); -- error
+ERROR:  Invalid input parameter "base" 
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', '', 2048); -- error
+ERROR:  Invalid input parameter "base" 
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 1000, NULL); -- error
+ERROR:  Invalid input parameter "hash_size" 
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 1000, ''); -- error
+ERROR:  Invalid input parameter "hash_size" 
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 1000, 0); -- error
+ERROR:  Param "hash_size" can't less than 0
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 0, 2048);
+ get_hash_value 
+----------------
+             54
+(1 row)
+
+select gms_utility.get_hash_value('Today is a good day', -1000, 2048);
+ get_hash_value 
+----------------
+           -946
+(1 row)
+
+select gms_utility.get_hash_value('Today is a good day', 2147483647, 2048);
+ get_hash_value 
+----------------
+    -2147483595
+(1 row)
+
+select gms_utility.get_hash_value('Today is a good day', 2147483648, 2048); -- error, OVER int32
+ERROR:  integer out of range
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 1024, 2147483647);
+ get_hash_value 
+----------------
+      675812406
+(1 row)
+
+select gms_utility.get_hash_value('Today is a good day', 1024, 2147483648); -- error, OVER int32
+ERROR:  integer out of range
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('Today is a good day', 1024, -2147483648.4); -- error, OVER int32
+ERROR:  Param "hash_size" can't less than 0
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value(null, 1000, 1024);
+ get_hash_value 
+----------------
+           1621
+(1 row)
+
+select gms_utility.get_hash_value('', 1000, 1024);
+ get_hash_value 
+----------------
+           1621
+(1 row)
+
+select gms_utility.get_hash_value('select 1;', 0, 100);
+ get_hash_value 
+----------------
+             21
+(1 row)
+
+select gms_utility.get_hash_value(); -- error
+ERROR:  function gms_utility.get_hash_value() does not exist
+LINE 1: select gms_utility.get_hash_value();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('2024-11-27'); -- error
+ERROR:  function gms_utility.get_hash_value(unknown) does not exist
+LINE 1: select gms_utility.get_hash_value('2024-11-27');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('2024-11-27', 'test'); -- error
+ERROR:  function gms_utility.get_hash_value(unknown, unknown) does not exist
+LINE 1: select gms_utility.get_hash_value('2024-11-27', 'test');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('2024-11-27', 0); -- error
+ERROR:  function gms_utility.get_hash_value(unknown, integer) does not exist
+LINE 1: select gms_utility.get_hash_value('2024-11-27', 0);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('2024-11-27', 0, 'test'); -- error
+ERROR:  invalid input syntax for type numeric: "test"
+LINE 1: select gms_utility.get_hash_value('2024-11-27', 0, 'test');
+                                                           ^
+CONTEXT:  referenced column: get_hash_value
+select gms_utility.get_hash_value('2024-11-27', 0, 100, 200); -- error
+ERROR:  function gms_utility.get_hash_value(unknown, integer, integer, integer) does not exist
+LINE 1: select gms_utility.get_hash_value('2024-11-27', 0, 100, 200)...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_hash_value
+---------------------------
+-- table_to_comma
+---------------------------
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+ERROR:  function 395 returned NULL
+CONTEXT:  PL/pgSQL function gms_utility.table_to_comma(character varying[]) line 5 at assignment
+SQL statement "CALL gms_utility.table_to_comma(tab,tablen,list)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+declare
+    tablen  integer;
+    list    varchar2;
+begin
+    gms_utility.table_to_comma(NULL, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+ERROR:  Invalid Input value
+CONTEXT:  PL/pgSQL function gms_utility.table_to_comma(character varying[]) line 5 at assignment
+SQL statement "CALL gms_utility.table_to_comma(NULL,tablen,list)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := 'build';
+    tab(2) := 'test';
+    tab(3) := 'date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 3, result: build,test,date
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '  build';
+    tab(2) := 'test  ';
+    tab(3) := '  date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 3, result:   build,test  ,  date
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '@build';
+    tab(2) := '$test  ';
+    tab(3) := '-  date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 3, result: @build,$test  ,-  date
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '123build';
+    tab(2) := '(test  ';
+    tab(3) := '&date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 3, result: 123build,(test  ,&date
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '123build';
+    tab(2) := '(test  ';
+    tab(3) := '&date';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 3, result: 123build,(test  ,&date
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := 'table';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end;
+/
+tablen: 1, result: table
+declare
+    tab varchar2;
+    tablen  integer;
+    list    varchar2;
+begin
+    tab := 'table';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
+end; -- error
+/
+ERROR:  function gms_utility.table_to_comma(character varying) does not exist
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  SQL statement "CALL gms_utility.table_to_comma(tab,tablen,list)"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+declare
+    tab varchar2[];
+    tablen  integer;
+begin
+    tab(1) := 'build';
+    gms_utility.table_to_comma(tab, tablen);
+end; -- error
+/
+ERROR:  function "table_to_comma" with 2 parameters doesn't exist 
+CONTEXT:  SQL statement "CALL gms_utility.table_to_comma(tab,tablen)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
 reset behavior_compat_options;
+drop extension gms_output;
 drop extension gms_utility cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table gms_utility.t_into
