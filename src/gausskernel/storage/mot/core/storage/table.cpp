@@ -525,25 +525,25 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
 PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombstone, GC_OPERATION_TYPE gcOper)
 {
     MaxKey key;
-    PrimarySentinel* OutputSentinel = nullptr;
-    Row* VersionRow = tombstone->GetNextVersion();
-    if (VersionRow == nullptr) {
+    PrimarySentinel* outputSentinel = nullptr;
+    Row* versionRow = tombstone->GetNextVersion();
+    if (versionRow == nullptr) {
         return nullptr;
     }
-    uint64_t version_csn = VersionRow->GetCommitSequenceNumber();
+    uint64_t versionCsn = versionRow->GetCommitSequenceNumber();
     uint32_t numIndexes = GetNumIndexes();
     Sentinel* currSentinel = nullptr;
     // Build keys and mark sentinels for delete
     for (uint16_t i = 0; i < numIndexes; i++) {
         MOT::Index* ix = GetIndex(i);
         // Check if the scheme is matching the current row
-        if (version_csn <= ix->GetSnapshot()) {
+        if (versionCsn <= ix->GetSnapshot()) {
             continue;
         }
         switch (ix->GetIndexOrder()) {
             case IndexOrder::INDEX_ORDER_PRIMARY: {
                 key.InitKey(ix->GetKeyLength());
-                ix->BuildKey(this, VersionRow, &key);
+                ix->BuildKey(this, versionRow, &key);
                 currSentinel = ix->IndexReadImpl(&key, 0);
                 MOT_ASSERT(currSentinel != nullptr);
                 MOT_ASSERT(currSentinel->GetData() != nullptr);
@@ -552,7 +552,7 @@ PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombsto
                 RC rc = currSentinel->RefCountUpdate(DEC);
                 if (rc == RC::RC_INDEX_DELETE) {
                     // At this point the sentinel is detached from the tree!
-                    OutputSentinel = static_cast<PrimarySentinel*>(currSentinel);
+                    outputSentinel = static_cast<PrimarySentinel*>(currSentinel);
                     currSentinel = ix->IndexRemove(&key, 0);
                     MOT_ASSERT(currSentinel->GetCounter() == 0);
                     MOT_ASSERT(tombstone->GetPrimarySentinel() == currSentinel);
@@ -571,7 +571,7 @@ PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombsto
             }
             case IndexOrder::INDEX_ORDER_SECONDARY: {
                 key.InitKey(ix->GetKeyLength());
-                ix->BuildKey(this, VersionRow, &key);
+                ix->BuildKey(this, versionRow, &key);
                 currSentinel = ix->IndexReadImpl(&key, 0);
                 if (currSentinel != nullptr) {
                     RC rc = currSentinel->RefCountUpdate(DEC);
@@ -589,7 +589,7 @@ PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombsto
             }
             case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE: {
                 key.InitKey(ix->GetKeyLength());
-                ix->BuildKey(this, VersionRow, &key);
+                ix->BuildKey(this, versionRow, &key);
                 currSentinel = ix->IndexReadImpl(&key, 0);
                 if (currSentinel != nullptr) {
                     GCRemoveSecondaryUnique(deletes, tombstone, gcOper, ix, currSentinel, &key);
@@ -600,7 +600,7 @@ PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombsto
                 break;
         }
     }
-    return OutputSentinel;
+    return outputSentinel;
 }
 
 void Table::GCRemoveSecondaryUnique(GcQueue::DeleteVector* deletes, Row* tombstone, GC_OPERATION_TYPE gcOper,
