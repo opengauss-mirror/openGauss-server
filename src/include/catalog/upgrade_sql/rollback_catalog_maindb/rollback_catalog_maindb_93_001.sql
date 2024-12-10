@@ -1,5 +1,13 @@
 SET search_path TO information_schema;
 
+UPDATE pg_class
+set reloptions = (CASE WHEN array_length(array_remove(reloptions, 'segment=on'), 1) = 0
+                     then NULL
+                     else array_remove(reloptions, 'segment=on')
+                     END
+                )
+WHERE relkind = 'v';
+
 CREATE OR REPLACE FUNCTION information_schema._pg_char_max_length(typid oid, typmod int4) RETURNS integer
     LANGUAGE sql
     IMMUTABLE
