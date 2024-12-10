@@ -638,6 +638,7 @@ CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignme
 PL/pgSQL function inline_code_block line 12 at SQL statement
 -- test privileges
 create user user01 password 'utility@123';
+grant select on test_utility_est.view3 to user01;
 set session AUTHORIZATION user01 password 'utility@123';
 set search_path to test_utility_est;
 declare
@@ -654,6 +655,36 @@ LINE 1: CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_...
 DETAIL:  N/A
 QUERY:  CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_text1)
 CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+PL/pgSQL function inline_code_block line 4 at SQL statement
+RESET SESSION AUTHORIZATION;
+grant usage on schema test_utility_est to user01;
+set session AUTHORIZATION user01 password 'utility@123';
+set search_path to test_utility_est;
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view3';
+ output_sql_text1 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+END;
+/
+ERROR:  permission denied for relation view3
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_text1)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+declare
+ input_sql_text1 clob := 'select * from test_utility_est.view2';
+ output_sql_text1 clob;
+begin
+  gms_utility.expand_sql_text(input_sql_text1, output_sql_text1);
+  raise info 'output_sql_text1: %', output_sql_text1;
+END;
+/
+ERROR:  permission denied for relation view2
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
+SQL statement "CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_text1)"
 PL/pgSQL function inline_code_block line 4 at SQL statement
 RESET SESSION AUTHORIZATION;
 drop view view4;
