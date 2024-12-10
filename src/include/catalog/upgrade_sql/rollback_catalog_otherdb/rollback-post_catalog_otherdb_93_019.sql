@@ -137,6 +137,9 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.vector_accum(_float8, vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector(vector, int4, boolean) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_float4(vector, int4, boolean) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_int4(vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_float8(vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector, int4) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_sparsevec(vector, int4, boolean) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<->(vector, vector) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<#>(vector, vector) CASCADE;
