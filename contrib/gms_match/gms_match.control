@@ -1,0 +1,5 @@
+# gms_match extension
+comment = 'match two records'
+default_version = '1.0'
+module_pathname = '$libdir/gms_match'
+relocatable = false

@@ -1,0 +1,3775 @@
+create extension gms_raw;
+create schema gms_raw_test;
+set search_path=gms_raw_test;
+-- bit_and
+select gms_raw.bit_and('10','01');
+ bit_and 
+---------
+ 00
+(1 row)
+
+select gms_raw.bit_and('01','10');
+ bit_and 
+---------
+ 00
+(1 row)
+
+select gms_raw.bit_and('1010','01');
+ bit_and 
+---------
+ 0010
+(1 row)
+
+select gms_raw.bit_and('01','1010');
+ bit_and 
+---------
+ 0010
+(1 row)
+
+select gms_raw.bit_and('01000111','101011');
+ bit_and  
+----------
+ 00000111
+(1 row)
+
+select gms_raw.bit_and(null,'01');
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and('','01');
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and('01',null);
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and('01','');
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and(null,null);
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and('','');
+ bit_and 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_and('0123456789','0123456789');
+  bit_and   
+------------
+ 0123456789
+(1 row)
+
+select gms_raw.bit_and('012','0123456');
+ bit_and  
+----------
+ 00123456
+(1 row)
+
+select gms_raw.bit_and('012abc','0123456defg');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_and('012abc','0123456defg');
+                                        ^
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('abcdefghijklmnopqrst','abcdefghijklmnopqrst');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_and('abcdefghijklmnopqrst','abcdefghijklm...
+                               ^
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('我爱你中国','我爱你中国');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select gms_raw.bit_and('我爱你中国','我爱你中国');
+                               ^
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('10', time'01:00:00');
+ERROR:  function gms_raw.bit_and(unknown, time without time zone) does not exist
+LINE 1: select gms_raw.bit_and('10', time'01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('10', '01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.bit_and('10', '01:00');
+                                     ^
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and();
+ERROR:  function gms_raw.bit_and() does not exist
+LINE 1: select gms_raw.bit_and();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('10');
+ERROR:  function gms_raw.bit_and(unknown) does not exist
+LINE 1: select gms_raw.bit_and('10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_and
+select gms_raw.bit_and('10','10','10');
+ERROR:  function gms_raw.bit_and(unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.bit_and('10','10','10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_and
+-- bit_or
+select gms_raw.bit_or('10','01');
+ bit_or 
+--------
+ 11
+(1 row)
+
+select gms_raw.bit_or('01','10');
+ bit_or 
+--------
+ 11
+(1 row)
+
+select gms_raw.bit_or('1010','01');
+ bit_or 
+--------
+ 1110
+(1 row)
+
+select gms_raw.bit_or('01','1010');
+ bit_or 
+--------
+ 1110
+(1 row)
+
+select gms_raw.bit_or('01000111','101011');
+  bit_or  
+----------
+ 11101111
+(1 row)
+
+select gms_raw.bit_or(null,'01');
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or('','01');
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or('01',null);
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or('01','');
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or(null,null);
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or('','');
+ bit_or 
+--------
+ 
+(1 row)
+
+select gms_raw.bit_or('0123456789','0123456789');
+   bit_or   
+------------
+ 0123456789
+(1 row)
+
+select gms_raw.bit_or('012','0123456');
+  bit_or  
+----------
+ 00123456
+(1 row)
+
+select gms_raw.bit_or('012abc','0123456defg');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_or('012abc','0123456defg');
+                                       ^
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('abcdefghijklmnopqrst','abcdefghijklmnopqrst');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_or('abcdefghijklmnopqrst','abcdefghijklmn...
+                              ^
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('我爱你中国','我爱你中国');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select gms_raw.bit_or('我爱你中国','我爱你中国');
+                              ^
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('10', time'01:00:00');
+ERROR:  function gms_raw.bit_or(unknown, time without time zone) does not exist
+LINE 1: select gms_raw.bit_or('10', time'01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('10', '01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.bit_or('10', '01:00');
+                                    ^
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or();
+ERROR:  function gms_raw.bit_or() does not exist
+LINE 1: select gms_raw.bit_or();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('10');
+ERROR:  function gms_raw.bit_or(unknown) does not exist
+LINE 1: select gms_raw.bit_or('10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_or
+select gms_raw.bit_or('10','10','10');
+ERROR:  function gms_raw.bit_or(unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.bit_or('10','10','10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_or
+-- bit_xor
+select gms_raw.bit_xor('10','01');
+ bit_xor 
+---------
+ 11
+(1 row)
+
+select gms_raw.bit_xor('01','10');
+ bit_xor 
+---------
+ 11
+(1 row)
+
+select gms_raw.bit_xor('1010','01');
+ bit_xor 
+---------
+ 1110
+(1 row)
+
+select gms_raw.bit_xor('01','1010');
+ bit_xor 
+---------
+ 1110
+(1 row)
+
+select gms_raw.bit_xor('01000111','101011');
+ bit_xor  
+----------
+ 11101011
+(1 row)
+
+select gms_raw.bit_xor(null,'01');
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor('','01');
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor('01',null);
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor('01','');
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor(null,null);
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor('','');
+ bit_xor 
+---------
+ 
+(1 row)
+
+select gms_raw.bit_xor('0123456789','0123456789');
+  bit_xor   
+------------
+ 0000000000
+(1 row)
+
+select gms_raw.bit_xor('012','0123456');
+ bit_xor  
+----------
+ 00003456
+(1 row)
+
+select gms_raw.bit_xor('012abc','0123456defg');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_xor('012abc','0123456defg');
+                                        ^
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('abcdefghijklmnopqrst','abcdefghijklmnopqrst');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_xor('abcdefghijklmnopqrst','abcdefghijklm...
+                               ^
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('我爱你中国','我爱你中国');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select gms_raw.bit_xor('我爱你中国','我爱你中国');
+                               ^
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('10', time'01:00:00');
+ERROR:  function gms_raw.bit_xor(unknown, time without time zone) does not exist
+LINE 1: select gms_raw.bit_xor('10', time'01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('10', '01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.bit_xor('10', '01:00');
+                                     ^
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor();
+ERROR:  function gms_raw.bit_xor() does not exist
+LINE 1: select gms_raw.bit_xor();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('10');
+ERROR:  function gms_raw.bit_xor(unknown) does not exist
+LINE 1: select gms_raw.bit_xor('10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_xor
+select gms_raw.bit_xor('10','10','10');
+ERROR:  function gms_raw.bit_xor(unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.bit_xor('10','10','10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_xor
+-- bit_complement
+select gms_raw.bit_complement('1010');
+ bit_complement 
+----------------
+ EFEF
+(1 row)
+
+select gms_raw.bit_complement('01');
+ bit_complement 
+----------------
+ FE
+(1 row)
+
+select gms_raw.bit_complement('01000111');
+ bit_complement 
+----------------
+ FEFFFEEE
+(1 row)
+
+select gms_raw.bit_complement(null);
+ bit_complement 
+----------------
+ 
+(1 row)
+
+select gms_raw.bit_complement('');
+ bit_complement 
+----------------
+ 
+(1 row)
+
+select gms_raw.bit_complement('0123456789');
+ bit_complement 
+----------------
+ FEDCBA9876
+(1 row)
+
+select gms_raw.bit_complement('012');
+ bit_complement 
+----------------
+ FFED
+(1 row)
+
+select gms_raw.bit_complement('012abc');
+ bit_complement 
+----------------
+ FED543
+(1 row)
+
+select gms_raw.bit_complement('abcdefghijklmnopqrst');
+ERROR:  invalid hexadecimal digit: "g"
+LINE 1: select gms_raw.bit_complement('abcdefghijklmnopqrst');
+                                      ^
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement('我爱你中国');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select gms_raw.bit_complement('我爱你中国');
+                                      ^
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement(time'01:00:00');
+ERROR:  function gms_raw.bit_complement(time without time zone) does not exist
+LINE 1: select gms_raw.bit_complement(time'01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement('01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.bit_complement('01:00');
+                                      ^
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement();
+ERROR:  function gms_raw.bit_complement() does not exist
+LINE 1: select gms_raw.bit_complement();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement('10','10');
+ERROR:  function gms_raw.bit_complement(unknown, unknown) does not exist
+LINE 1: select gms_raw.bit_complement('10','10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_complement
+select gms_raw.bit_complement('10','10', '10');
+ERROR:  function gms_raw.bit_complement(unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.bit_complement('10','10', '10');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bit_complement
+-- cast_from_binary_double
+select * from gms_raw.cast_from_binary_double(3.14);
+ cast_from_binary_double 
+-------------------------
+ 40091EB851EB851F
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14, 1);
+ cast_from_binary_double 
+-------------------------
+ 40091EB851EB851F
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14, 2);
+ cast_from_binary_double 
+-------------------------
+ 1F85EB51B81E0940
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14, 3);
+ cast_from_binary_double 
+-------------------------
+ 1F85EB51B81E0940
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14, 4);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+select * from gms_raw.cast_from_binary_double(0, 3);
+ cast_from_binary_double 
+-------------------------
+ 0000000000000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(0.0, 3);
+ cast_from_binary_double 
+-------------------------
+ 0000000000000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3, 3);
+ cast_from_binary_double 
+-------------------------
+ 0000000000000840
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.1415844050, 3);
+ cast_from_binary_double 
+-------------------------
+ F9C92801F7210940
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.145690, 3);
+ cast_from_binary_double 
+-------------------------
+ 7CD5CA845F2A0940
+(1 row)
+
+select * from gms_raw.cast_from_binary_double('3.145690', 3);
+ cast_from_binary_double 
+-------------------------
+ 7CD5CA845F2A0940
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(1256456.603, 3);
+ cast_from_binary_double 
+-------------------------
+ 3F355E9A082C3341
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14e-5, 3);
+ cast_from_binary_double 
+-------------------------
+ 7FB7E5C86F76003F
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14e+5, 3);
+ cast_from_binary_double 
+-------------------------
+ 00000000402A1341
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(NULL, NULL);
+ cast_from_binary_double 
+-------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(NULL, 1);
+ cast_from_binary_double 
+-------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_double('', '');
+ cast_from_binary_double 
+-------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_double('', 1);
+ cast_from_binary_double 
+-------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_double('abc', 1);
+ERROR:  invalid input syntax for type double precision: "abc"
+LINE 1: select * from gms_raw.cast_from_binary_double('abc', 1);
+                                                      ^
+select * from gms_raw.cast_from_binary_double(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_from_binary_double(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_double(time '01:00:00...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_double('01:00', 1);
+ERROR:  invalid input syntax for type double precision: "01:00"
+LINE 1: select * from gms_raw.cast_from_binary_double('01:00', 1);
+                                                      ^
+select * from gms_raw.cast_from_binary_double();
+ERROR:  function gms_raw.cast_from_binary_double() does not exist
+LINE 1: select * from gms_raw.cast_from_binary_double();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_double(1, 2, 3);
+ERROR:  function gms_raw.cast_from_binary_double(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_double(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_from_binary_float
+select * from gms_raw.cast_from_binary_float(3.14);
+ cast_from_binary_float 
+------------------------
+ 4048F5C3
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14, 1);
+ cast_from_binary_float 
+------------------------
+ 4048F5C3
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14, 2);
+ cast_from_binary_float 
+------------------------
+ C3F54840
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14, 3);
+ cast_from_binary_float 
+------------------------
+ C3F54840
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14, 4);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+select * from gms_raw.cast_from_binary_float(0, 3);
+ cast_from_binary_float 
+------------------------
+ 00000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(0.0, 3);
+ cast_from_binary_float 
+------------------------
+ 00000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3, 3);
+ cast_from_binary_float 
+------------------------
+ 00004040
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.1415844050, 3);
+ cast_from_binary_float 
+------------------------
+ B80F4940
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.145690, 3);
+ cast_from_binary_float 
+------------------------
+ FC524940
+(1 row)
+
+select * from gms_raw.cast_from_binary_float('3.145690', 3);
+ cast_from_binary_float 
+------------------------
+ FC524940
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(1256456.603, 3);
+ cast_from_binary_float 
+------------------------
+ 45609949
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14e-5, 3);
+ cast_from_binary_float 
+------------------------
+ 7EB30338
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14e+5, 3);
+ cast_from_binary_float 
+------------------------
+ 00529948
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(NULL, NULL);
+ cast_from_binary_float 
+------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(NULL, 1);
+ cast_from_binary_float 
+------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_float('', '');
+ cast_from_binary_float 
+------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_float('', 1);
+ cast_from_binary_float 
+------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_float('abc', 1);
+ERROR:  invalid input syntax for type double precision: "abc"
+LINE 1: select * from gms_raw.cast_from_binary_float('abc', 1);
+                                                     ^
+select * from gms_raw.cast_from_binary_float(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_from_binary_float(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_float(time '01:00:00'...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_float('01:00', 1);
+ERROR:  invalid input syntax for type double precision: "01:00"
+LINE 1: select * from gms_raw.cast_from_binary_float('01:00', 1);
+                                                     ^
+select * from gms_raw.cast_from_binary_float();
+ERROR:  function gms_raw.cast_from_binary_float() does not exist
+LINE 1: select * from gms_raw.cast_from_binary_float();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_float(1, 2, 3);
+ERROR:  function gms_raw.cast_from_binary_float(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_float(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_from_binary_integer
+-- A库针对两个入参转化为小数会进行截断，openGauss进行四舍五入
+-- A库超过bigint的值会转换为int上下界对应的值，openGauss会报错，bigint out of range
+select * from gms_raw.cast_from_binary_integer(3);
+ cast_from_binary_integer 
+--------------------------
+ 00000003
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3, 1);
+ cast_from_binary_integer 
+--------------------------
+ 00000003
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3, 2);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3, 3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3, 4);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+select * from gms_raw.cast_from_binary_integer(35687, 3);
+ cast_from_binary_integer 
+--------------------------
+ 678B0000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer('35687', 3);
+ cast_from_binary_integer 
+--------------------------
+ 678B0000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(33453455, 3);
+ cast_from_binary_integer 
+--------------------------
+ 8F75FE01
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(0, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(0.0, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3e10, 3);
+ cast_from_binary_integer 
+--------------------------
+ FFFFFF7F
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(2.9, 3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3.3, 3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3.5, 3);
+ cast_from_binary_integer 
+--------------------------
+ 04000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3.6, 3);
+ cast_from_binary_integer 
+--------------------------
+ 04000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3.3, 3.3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(3.3, 3.8);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+select * from gms_raw.cast_from_binary_integer(33333333333333333333333333333, 3);
+ERROR:  bigint out of range
+-- test boundary value [-2147483648, 2147483647]
+select * from gms_raw.cast_from_binary_integer(2147483646, 3);
+ cast_from_binary_integer 
+--------------------------
+ FEFFFF7F
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(2147483647, 3);
+ cast_from_binary_integer 
+--------------------------
+ FFFFFF7F
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(2147483648, 3);
+ cast_from_binary_integer 
+--------------------------
+ FFFFFF7F
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(-2147483646, 3);
+ cast_from_binary_integer 
+--------------------------
+ 02000080
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(-2147483647, 3);
+ cast_from_binary_integer 
+--------------------------
+ 01000080
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(-2147483648, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000080
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(-2147483649, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000080
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(NULL, NULL);
+ cast_from_binary_integer 
+--------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer(NULL, 1);
+ cast_from_binary_integer 
+--------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer('', '');
+ cast_from_binary_integer 
+--------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer('', 1);
+ cast_from_binary_integer 
+--------------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_binary_integer('abc', 1);
+ERROR:  invalid input syntax for type bigint: "abc"
+LINE 1: select * from gms_raw.cast_from_binary_integer('abc', 1);
+                                                       ^
+select * from gms_raw.cast_from_binary_integer(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_from_binary_integer(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_integer(time '01:00:0...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_integer('01:00', 1);
+ERROR:  invalid input syntax for type bigint: "01:00"
+LINE 1: select * from gms_raw.cast_from_binary_integer('01:00', 1);
+                                                       ^
+select * from gms_raw.cast_from_binary_integer();
+ERROR:  function gms_raw.cast_from_binary_integer() does not exist
+LINE 1: select * from gms_raw.cast_from_binary_integer();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_binary_integer(1, 2, 3);
+ERROR:  function gms_raw.cast_from_binary_integer(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_binary_integer(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_from_number
+-- 针对小数，返回的结果与A库不同
+select * from gms_raw.cast_from_number(3.14);
+ cast_from_number 
+------------------
+ 008103007805
+(1 row)
+
+select * from gms_raw.cast_from_number(3.1415926);
+ cast_from_number 
+------------------
+ 8083030087052C24
+(1 row)
+
+select * from gms_raw.cast_from_number(100);
+ cast_from_number 
+------------------
+ 00806400
+(1 row)
+
+select * from gms_raw.cast_from_number(3e100);
+ cast_from_number 
+------------------
+ 19800300
+(1 row)
+
+select * from gms_raw.cast_from_number(3e500); -- overflow
+ERROR:  number overflow at or near "3e500"
+LINE 1: select * from gms_raw.cast_from_number(3e500);
+                                               ^
+select * from gms_raw.cast_from_number(3.1234e500); -- overflow
+ERROR:  number overflow at or near "3.1234e500"
+LINE 1: select * from gms_raw.cast_from_number(3.1234e500);
+                                               ^
+select * from gms_raw.cast_from_number(NULL);
+ cast_from_number 
+------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_number('');
+ cast_from_number 
+------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_from_number('abc');
+ERROR:  invalid input syntax for type numeric: "abc"
+LINE 1: select * from gms_raw.cast_from_number('abc');
+                                               ^
+select * from gms_raw.cast_from_number(time '01:00:00');
+ERROR:  function gms_raw.cast_from_number(time without time zone) does not exist
+LINE 1: select * from gms_raw.cast_from_number(time '01:00:00');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_number('01:00');
+ERROR:  invalid input syntax for type numeric: "01:00"
+LINE 1: select * from gms_raw.cast_from_number('01:00');
+                                               ^
+select * from gms_raw.cast_from_number();
+ERROR:  function gms_raw.cast_from_number() does not exist
+LINE 1: select * from gms_raw.cast_from_number();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_number(1, 2);
+ERROR:  function gms_raw.cast_from_number(integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_number(1, 2);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_from_number(1, 2, 3);
+ERROR:  function gms_raw.cast_from_number(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_from_number(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_to_binary_double
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.14, 1), 1);
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14, 1);
+ cast_from_binary_double 
+-------------------------
+ 40091EB851EB851F
+(1 row)
+
+select gms_raw.cast_to_binary_double('40091EB851EB851F'); --3.14
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select gms_raw.cast_to_binary_double('40091EB851EB851F', 1);
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select gms_raw.cast_to_binary_double('1F85EB51B81E0940', 2);
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select gms_raw.cast_to_binary_double('1F85EB51B81E0940', 3);
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.14, 1), 3); -- other value
+ cast_to_binary_double 
+-----------------------
+  7.9824696849641e-157
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(7.9824696849641e-157, 1), 3); -- 3.14
+ cast_to_binary_double 
+-----------------------
+                  3.14
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.1415844050, 3);
+ cast_from_binary_double 
+-------------------------
+ F9C92801F7210940
+(1 row)
+
+select gms_raw.cast_to_binary_double('F9C92801F7210940', 3);
+ cast_to_binary_double 
+-----------------------
+           3.141584405
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.1415844050, 1), 1);
+ cast_to_binary_double 
+-----------------------
+           3.141584405
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.145690, 3);
+ cast_from_binary_double 
+-------------------------
+ 7CD5CA845F2A0940
+(1 row)
+
+select gms_raw.cast_to_binary_double('7CD5CA845F2A0940', 3);
+ cast_to_binary_double 
+-----------------------
+               3.14569
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.145690, 1), 1);
+ cast_to_binary_double 
+-----------------------
+               3.14569
+(1 row)
+
+select * from gms_raw.cast_from_binary_double('3.145690', 3);
+ cast_from_binary_double 
+-------------------------
+ 7CD5CA845F2A0940
+(1 row)
+
+select gms_raw.cast_to_binary_double('7CD5CA845F2A0940', 3);
+ cast_to_binary_double 
+-----------------------
+               3.14569
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double('3.145690', 1), 1);
+ cast_to_binary_double 
+-----------------------
+               3.14569
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(1256456.603, 3);
+ cast_from_binary_double 
+-------------------------
+ 3F355E9A082C3341
+(1 row)
+
+select gms_raw.cast_to_binary_double('3F355E9A082C3341', 3);
+ cast_to_binary_double 
+-----------------------
+           1256456.603
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(1256456.603, 1), 1);
+ cast_to_binary_double 
+-----------------------
+           1256456.603
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14e-5, 3);
+ cast_from_binary_double 
+-------------------------
+ 7FB7E5C86F76003F
+(1 row)
+
+select gms_raw.cast_to_binary_double('7FB7E5C86F76003F', 3);
+ cast_to_binary_double 
+-----------------------
+              3.14e-05
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.14e-5, 1), 1);
+ cast_to_binary_double 
+-----------------------
+              3.14e-05
+(1 row)
+
+select * from gms_raw.cast_from_binary_double(3.14e+5, 3);
+ cast_from_binary_double 
+-------------------------
+ 00000000402A1341
+(1 row)
+
+select gms_raw.cast_to_binary_double('00000000402A1341', 3);
+ cast_to_binary_double 
+-----------------------
+                314000
+(1 row)
+
+select gms_raw.cast_to_binary_double(gms_raw.cast_from_binary_double(3.14e+5, 1), 1);
+ cast_to_binary_double 
+-----------------------
+                314000
+(1 row)
+
+select gms_raw.cast_to_binary_double('402A134111112222', 3);
+ cast_to_binary_double 
+-----------------------
+ 2.89367789189001e-144
+(1 row)
+
+select gms_raw.cast_to_binary_double('402A13411111222211',3); -- exceeds 8 bytes, will be truncated
+ cast_to_binary_double 
+-----------------------
+ 2.89367789189001e-144
+(1 row)
+
+select gms_raw.cast_to_binary_double('402A1341111122221122', 3); -- exceeds 8 bytes, will be truncated
+ cast_to_binary_double 
+-----------------------
+ 2.89367789189001e-144
+(1 row)
+
+select gms_raw.cast_to_binary_double('402A134111112222112233', 3); -- exceeds 8 bytes, will be truncated
+ cast_to_binary_double 
+-----------------------
+ 2.89367789189001e-144
+(1 row)
+
+select gms_raw.cast_to_binary_double('12345678', 3); -- error, when not enough 8 bytes
+ERROR:  The value of first parameter is invalid
+CONTEXT:  referenced column: cast_to_binary_double
+select gms_raw.cast_to_binary_double('34567812345678', 3); -- error, when not enough 8 bytes
+ERROR:  The value of first parameter is invalid
+CONTEXT:  referenced column: cast_to_binary_double
+select gms_raw.cast_to_binary_double('134567812345678', 3); -- 15 hex digits, will add 0 in the front
+ cast_to_binary_double 
+-----------------------
+ 4.69197536052336e+271
+(1 row)
+
+select gms_raw.cast_to_binary_double('0134567812345678', 3); -- same result as the above result
+ cast_to_binary_double 
+-----------------------
+ 4.69197536052336e+271
+(1 row)
+
+select * from gms_raw.cast_to_binary_double(NULL, NULL);
+ cast_to_binary_double 
+-----------------------
+                      
+(1 row)
+
+select * from gms_raw.cast_to_binary_double(NULL, 1);
+ cast_to_binary_double 
+-----------------------
+                      
+(1 row)
+
+select * from gms_raw.cast_to_binary_double('', '');
+ cast_to_binary_double 
+-----------------------
+                      
+(1 row)
+
+select * from gms_raw.cast_to_binary_double('', 1);
+ cast_to_binary_double 
+-----------------------
+                      
+(1 row)
+
+select * from gms_raw.cast_to_binary_double('abc', 1);
+ERROR:  The value of first parameter is invalid
+select * from gms_raw.cast_to_binary_double(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_to_binary_double(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_binary_double(time '01:00:00',...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_binary_double('01:00', 1);
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select * from gms_raw.cast_to_binary_double('01:00', 1);
+                                                    ^
+select * from gms_raw.cast_to_binary_double();
+ERROR:  function gms_raw.cast_to_binary_double() does not exist
+LINE 1: select * from gms_raw.cast_to_binary_double();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_binary_double(1, 2, 3);
+ERROR:  function gms_raw.cast_to_binary_double(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_binary_double(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_to_binary_float
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14));
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 1), 1);
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 2), 2);
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 3), 4);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+CONTEXT:  referenced column: cast_to_binary_float
+select * from gms_raw.cast_from_binary_float(3.14, 1);
+ cast_from_binary_float 
+------------------------
+ 4048F5C3
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C3'); -- 3.14
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C3', 1);
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float('C3F54840', 2);
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float('C3F54840', 3);
+ cast_to_binary_float 
+----------------------
+                 3.14
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 1), 3); -- other value
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(-490.564, 1), 3); -- not 3.14, there may be a loss of accuracy
+ cast_to_binary_float 
+----------------------
+          2.92435e-09
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 1), 2); -- not 3.14
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14, 1), 3); -- not 3.14
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_from_binary_float(3.14, 1);
+ cast_from_binary_float 
+------------------------
+ 4048F5C3
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C3',3);
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.1415844050, 3);
+ cast_from_binary_float 
+------------------------
+ B80F4940
+(1 row)
+
+select gms_raw.cast_to_binary_float('B80F4940', 3);
+ cast_to_binary_float 
+----------------------
+              3.14158
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.1415844050, 1), 1);
+ cast_to_binary_float 
+----------------------
+              3.14158
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.145690, 3);
+ cast_from_binary_float 
+------------------------
+ FC524940
+(1 row)
+
+select gms_raw.cast_to_binary_float('FC524940', 3);
+ cast_to_binary_float 
+----------------------
+              3.14569
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.145690, 1), 1);
+ cast_to_binary_float 
+----------------------
+              3.14569
+(1 row)
+
+select * from gms_raw.cast_from_binary_float('3.145690', 3);
+ cast_from_binary_float 
+------------------------
+ FC524940
+(1 row)
+
+select gms_raw.cast_to_binary_float('FC524940', 3);
+ cast_to_binary_float 
+----------------------
+              3.14569
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float('3.145690', 1), 1);
+ cast_to_binary_float 
+----------------------
+              3.14569
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(1256456.603, 3);
+ cast_from_binary_float 
+------------------------
+ 45609949
+(1 row)
+
+select gms_raw.cast_to_binary_float('45609949', 3);
+ cast_to_binary_float 
+----------------------
+          1.25646e+06
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(1256456.603, 1), 1);
+ cast_to_binary_float 
+----------------------
+          1.25646e+06
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14e-5, 3);
+ cast_from_binary_float 
+------------------------
+ 7EB30338
+(1 row)
+
+select gms_raw.cast_to_binary_float('7EB30338', 3);
+ cast_to_binary_float 
+----------------------
+             3.14e-05
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14e-5, 1), 1);
+ cast_to_binary_float 
+----------------------
+             3.14e-05
+(1 row)
+
+select * from gms_raw.cast_from_binary_float(3.14e+5, 3);
+ cast_from_binary_float 
+------------------------
+ 00529948
+(1 row)
+
+select gms_raw.cast_to_binary_float('00529948', 3);
+ cast_to_binary_float 
+----------------------
+               314000
+(1 row)
+
+select gms_raw.cast_to_binary_float(gms_raw.cast_from_binary_float(3.14e+5, 1), 1);
+ cast_to_binary_float 
+----------------------
+               314000
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C3', 3);
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C31122',3); -- exceeds 4 bytes, will be truncated
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C3112230', 3); -- exceeds 4 bytes, will be truncated
+ cast_to_binary_float 
+----------------------
+             -490.564
+(1 row)
+
+select gms_raw.cast_to_binary_float('04048F5C311223', 3); -- exceeds 4 bytes, will be truncated
+ cast_to_binary_float 
+----------------------
+          3.22043e+17
+(1 row)
+
+select gms_raw.cast_to_binary_float('4048F5C311223', 3); -- odd numbers will be padded with 0 in the front
+ cast_to_binary_float 
+----------------------
+          3.22043e+17
+(1 row)
+
+select gms_raw.cast_to_binary_float('1234', 3); -- error, when not enough 4 bytes
+ERROR:  The value of first parameter is invalid
+CONTEXT:  referenced column: cast_to_binary_float
+select gms_raw.cast_to_binary_float('345678', 3); -- error, when not enough 4 bytes
+ERROR:  The value of first parameter is invalid
+CONTEXT:  referenced column: cast_to_binary_float
+select gms_raw.cast_to_binary_float('1234567', 3); -- 7 hex digits, will add 0 in the front
+ cast_to_binary_float 
+----------------------
+          9.30952e+23
+(1 row)
+
+select gms_raw.cast_to_binary_float('01234567', 3); --same result as the above result
+ cast_to_binary_float 
+----------------------
+          9.30952e+23
+(1 row)
+
+select * from gms_raw.cast_to_binary_float(NULL, NULL);
+ cast_to_binary_float 
+----------------------
+                     
+(1 row)
+
+select * from gms_raw.cast_to_binary_float(NULL, 1);
+ cast_to_binary_float 
+----------------------
+                     
+(1 row)
+
+select * from gms_raw.cast_to_binary_float('', '');
+ cast_to_binary_float 
+----------------------
+                     
+(1 row)
+
+select * from gms_raw.cast_to_binary_float('', 1);
+ cast_to_binary_float 
+----------------------
+                     
+(1 row)
+
+select * from gms_raw.cast_to_binary_float('abc', 1);
+ERROR:  The value of first parameter is invalid
+select * from gms_raw.cast_to_binary_float(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_to_binary_float(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_binary_float(time '01:00:00', ...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_binary_float('01:00', 1);
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select * from gms_raw.cast_to_binary_float('01:00', 1);
+                                                   ^
+select * from gms_raw.cast_to_binary_float();
+ERROR:  function gms_raw.cast_to_binary_float() does not exist
+LINE 1: select * from gms_raw.cast_to_binary_float();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_binary_float(1, 2, 3);
+ERROR:  function gms_raw.cast_to_binary_float(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_binary_float(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_to_binary_integer
+select gms_raw.cast_from_binary_integer(3);
+ cast_from_binary_integer 
+--------------------------
+ 00000003
+(1 row)
+
+select gms_raw.cast_to_binary_integer('00000003');
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer('00000003', 1);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 2);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 4);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_from_binary_integer(35687, 3);
+ cast_from_binary_integer 
+--------------------------
+ 678B0000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('678B0000', 3);
+ cast_to_binary_integer 
+------------------------
+                  35687
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(35687, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                  35687
+(1 row)
+
+select gms_raw.cast_from_binary_integer('35687', 3);
+ cast_from_binary_integer 
+--------------------------
+ 678B0000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('678B0000', 3);
+ cast_to_binary_integer 
+------------------------
+                  35687
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer('35687', 3), 3);
+ cast_to_binary_integer 
+------------------------
+                  35687
+(1 row)
+
+select gms_raw.cast_from_binary_integer(33453455, 3);
+ cast_from_binary_integer 
+--------------------------
+ 8F75FE01
+(1 row)
+
+select gms_raw.cast_to_binary_integer('8F75FE01', 3);
+ cast_to_binary_integer 
+------------------------
+               33453455
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(33453455, 3), 3);
+ cast_to_binary_integer 
+------------------------
+               33453455
+(1 row)
+
+select gms_raw.cast_from_binary_integer(0, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('00000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      0
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(0, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      0
+(1 row)
+
+select gms_raw.cast_from_binary_integer(0.0, 3);
+ cast_from_binary_integer 
+--------------------------
+ 00000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('00000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      0
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(0.0, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      0
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3e10, 3);
+ cast_from_binary_integer 
+--------------------------
+ FFFFFF7F
+(1 row)
+
+select gms_raw.cast_to_binary_integer('FFFFFF7F', 3);
+ cast_to_binary_integer 
+------------------------
+             2147483647
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3e10, 3), 3); -- 2147483647
+ cast_to_binary_integer 
+------------------------
+             2147483647
+(1 row)
+
+select gms_raw.cast_from_binary_integer(2.9, 3); -- 四舍五入，结果为3
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(2.9, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3.3, 3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3.3, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3.5, 3); -- 四舍五入，结果为4
+ cast_from_binary_integer 
+--------------------------
+ 04000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('04000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      4
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3.5, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      4
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3.6, 3);
+ cast_from_binary_integer 
+--------------------------
+ 04000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('04000000', 3);
+ cast_to_binary_integer 
+------------------------
+                      4
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3.6, 3), 3);
+ cast_to_binary_integer 
+------------------------
+                      4
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3.3, 3.3);
+ cast_from_binary_integer 
+--------------------------
+ 03000000
+(1 row)
+
+select gms_raw.cast_to_binary_integer('03000000', 3.3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3.3, 3.3), 3.3);
+ cast_to_binary_integer 
+------------------------
+                      3
+(1 row)
+
+select gms_raw.cast_from_binary_integer(3.3, 3.8); --四舍五入，第二个参数为4，报错
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+CONTEXT:  referenced column: cast_from_binary_integer
+select gms_raw.cast_to_binary_integer('03000000', 3.8);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(3.3, 3.8), 3.8);
+ERROR:  The value of second parameter is invalid, it should be 1 for big_endian, 2 for little_endian or 3 for machine_endian.
+CONTEXT:  referenced column: cast_to_binary_integer
+-- test boundary value [-2147483648, 2147483647]
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(2147483646, 3), 3);
+ cast_to_binary_integer 
+------------------------
+             2147483646
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(2147483647, 3), 3);
+ cast_to_binary_integer 
+------------------------
+             2147483647
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(2147483648, 3), 3);
+ cast_to_binary_integer 
+------------------------
+             2147483647
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(-2147483646, 3), 3);
+ cast_to_binary_integer 
+------------------------
+            -2147483646
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(-2147483647, 3), 3);
+ cast_to_binary_integer 
+------------------------
+            -2147483647
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(-2147483648, 3), 3);
+ cast_to_binary_integer 
+------------------------
+            -2147483648
+(1 row)
+
+select gms_raw.cast_to_binary_integer(gms_raw.cast_from_binary_integer(-2147483649, 3), 3);
+ cast_to_binary_integer 
+------------------------
+            -2147483648
+(1 row)
+
+select gms_raw.cast_to_binary_integer(NULL, NULL);
+ cast_to_binary_integer 
+------------------------
+                       
+(1 row)
+
+select gms_raw.cast_to_binary_integer(NULL, 1);
+ cast_to_binary_integer 
+------------------------
+                       
+(1 row)
+
+select gms_raw.cast_to_binary_integer('', '');
+ cast_to_binary_integer 
+------------------------
+                       
+(1 row)
+
+select gms_raw.cast_to_binary_integer('', 1);
+ cast_to_binary_integer 
+------------------------
+                       
+(1 row)
+
+select gms_raw.cast_to_binary_integer('zzzzzzzz', 1);
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.cast_to_binary_integer('zzzzzzzz', 1);
+                                              ^
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_to_binary_integer(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_to_binary_integer(time without time zone, integer) does not exist
+LINE 1: select gms_raw.cast_to_binary_integer(time '01:00:00', 1);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_to_binary_integer('01:00', 1);
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.cast_to_binary_integer('01:00', 1);
+                                              ^
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_to_binary_integer();
+ERROR:  function gms_raw.cast_to_binary_integer() does not exist
+LINE 1: select gms_raw.cast_to_binary_integer();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: cast_to_binary_integer
+select gms_raw.cast_to_binary_integer(1, 2, 3);
+ERROR:  function gms_raw.cast_to_binary_integer(integer, integer, integer) does not exist
+LINE 1: select gms_raw.cast_to_binary_integer(1, 2, 3);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: cast_to_binary_integer
+-- cast_to_number
+select * from gms_raw.cast_from_number(3.14);
+ cast_from_number 
+------------------
+ 008103007805
+(1 row)
+
+select * from gms_raw.cast_to_number('008103007805');
+ cast_to_number 
+----------------
+           3.14
+(1 row)
+
+select * from gms_raw.cast_to_number('08103007805'); -- when odd number, add 0 in the front
+ cast_to_number 
+----------------
+           3.14
+(1 row)
+
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(3.14));
+ cast_to_number 
+----------------
+           3.14
+(1 row)
+
+select * from gms_raw.cast_from_number(3.1415926);
+ cast_from_number 
+------------------
+ 8083030087052C24
+(1 row)
+
+select * from gms_raw.cast_to_number('8083030087052C24');
+ cast_to_number 
+----------------
+      3.1415926
+(1 row)
+
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(3.1415926));
+ cast_to_number 
+----------------
+      3.1415926
+(1 row)
+
+select * from gms_raw.cast_to_number('8083030087052C241111');
+ cast_to_number 
+----------------
+      3.1415926
+(1 row)
+
+select * from gms_raw.cast_to_number('8083030087052C2411');
+ cast_to_number 
+----------------
+      3.1415926
+(1 row)
+
+select * from gms_raw.cast_from_number(100);
+ cast_from_number 
+------------------
+ 00806400
+(1 row)
+
+select * from gms_raw.cast_to_number('00806400');
+ cast_to_number 
+----------------
+            100
+(1 row)
+
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(100));
+ cast_to_number 
+----------------
+            100
+(1 row)
+
+select * from gms_raw.cast_from_number(3e100);
+ cast_from_number 
+------------------
+ 19800300
+(1 row)
+
+select * from gms_raw.cast_to_number('19800300');
+                                            cast_to_number                                             
+-------------------------------------------------------------------------------------------------------
+ 30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(3e100));
+                                            cast_to_number                                             
+-------------------------------------------------------------------------------------------------------
+ 30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+select * from gms_raw.cast_from_number(3e500); -- overflow
+ERROR:  number overflow at or near "3e500"
+LINE 1: select * from gms_raw.cast_from_number(3e500);
+                                               ^
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(3e500));
+ERROR:  number overflow at or near "3e500"
+LINE 1: ...rom gms_raw.cast_to_number(gms_raw.cast_from_number(3e500));
+                                                               ^
+select * from gms_raw.cast_from_number(3.1234e500); -- overflow
+ERROR:  number overflow at or near "3.1234e500"
+LINE 1: select * from gms_raw.cast_from_number(3.1234e500);
+                                               ^
+select * from gms_raw.cast_to_number(gms_raw.cast_from_number(3.1234e500));
+ERROR:  number overflow at or near "3.1234e500"
+LINE 1: ...m gms_raw.cast_to_number(gms_raw.cast_from_number(3.1234e500...
+                                                             ^
+select * from gms_raw.cast_to_number(NULL);
+ cast_to_number 
+----------------
+               
+(1 row)
+
+select * from gms_raw.cast_to_number('');
+ cast_to_number 
+----------------
+               
+(1 row)
+
+select * from gms_raw.cast_to_number(time '01:00:00');
+ERROR:  function gms_raw.cast_to_number(time without time zone) does not exist
+LINE 1: select * from gms_raw.cast_to_number(time '01:00:00');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_number('01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select * from gms_raw.cast_to_number('01:00');
+                                             ^
+select * from gms_raw.cast_to_number('你好');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select * from gms_raw.cast_to_number('你好');
+                                             ^
+select * from gms_raw.cast_to_number();
+ERROR:  function gms_raw.cast_to_number() does not exist
+LINE 1: select * from gms_raw.cast_to_number();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_number(1, 2);
+ERROR:  function gms_raw.cast_to_number(integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_number(1, 2);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_number(1, 2, 3);
+ERROR:  function gms_raw.cast_to_number(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_number(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_to_nvarchar2
+select * from gms_raw.cast_to_nvarchar2('12345678');
+ cast_to_nvarchar2 
+-------------------
+ \x124Vx
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('0000');
+ cast_to_nvarchar2 
+-------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('0012');
+ cast_to_nvarchar2 
+-------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('001234');
+ cast_to_nvarchar2 
+-------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('1234');
+ cast_to_nvarchar2 
+-------------------
+ \x124
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('655655');
+ cast_to_nvarchar2 
+-------------------
+ eVU
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('');
+ cast_to_nvarchar2 
+-------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2(NULL);
+ cast_to_nvarchar2 
+-------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_nvarchar2('\x124Vx');
+ERROR:  invalid hexadecimal digit: "\"
+LINE 1: select * from gms_raw.cast_to_nvarchar2('\x124Vx');
+                                                ^
+select * from gms_raw.cast_to_nvarchar2('x124Vx');
+ERROR:  invalid hexadecimal digit: "x"
+LINE 1: select * from gms_raw.cast_to_nvarchar2('x124Vx');
+                                                ^
+select * from gms_raw.cast_to_nvarchar2(time '01:00:00');
+ERROR:  function gms_raw.cast_to_nvarchar2(time without time zone) does not exist
+LINE 1: select * from gms_raw.cast_to_nvarchar2(time '01:00:00');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_nvarchar2('01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select * from gms_raw.cast_to_nvarchar2('01:00');
+                                                ^
+select * from gms_raw.cast_to_nvarchar2('你好');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select * from gms_raw.cast_to_nvarchar2('你好');
+                                                ^
+select * from gms_raw.cast_to_nvarchar2();
+ERROR:  function gms_raw.cast_to_nvarchar2() does not exist
+LINE 1: select * from gms_raw.cast_to_nvarchar2();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_nvarchar2(1, 2);
+ERROR:  function gms_raw.cast_to_nvarchar2(integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_nvarchar2(1, 2);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_nvarchar2(1, 2, 3);
+ERROR:  function gms_raw.cast_to_nvarchar2(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_nvarchar2(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cat_to_raw
+select * from gms_raw.cast_to_raw('12345');
+ cast_to_raw 
+-------------
+ 3132333435
+(1 row)
+
+select * from gms_raw.cast_to_raw('abcdefghijklmn');
+         cast_to_raw          
+------------------------------
+ 6162636465666768696A6B6C6D6E
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好明天');
+       cast_to_raw        
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好openGauss');
+          cast_to_raw           
+--------------------------------
+ E4BDA0E5A5BD6F70656E4761757373
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好：（&%￥$)');
+              cast_to_raw               
+----------------------------------------
+ E4BDA0E5A5BDEFBC9AEFBC882625EFBFA52429
+(1 row)
+
+select * from gms_raw.cast_to_raw(NULL);
+ cast_to_raw 
+-------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_raw('');
+ cast_to_raw 
+-------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_raw(' ');
+ cast_to_raw 
+-------------
+ 20
+(1 row)
+
+select * from gms_raw.cast_to_raw('    ');
+ cast_to_raw 
+-------------
+ 20202020
+(1 row)
+
+select * from gms_raw.cast_to_raw();
+ERROR:  function gms_raw.cast_to_raw() does not exist
+LINE 1: select * from gms_raw.cast_to_raw();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_raw(1, 2);
+ERROR:  function gms_raw.cast_to_raw(integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_raw(1, 2);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_raw(1, 2, 3);
+ERROR:  function gms_raw.cast_to_raw(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_raw(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- cast_to_varchar2
+select * from gms_raw.cast_to_raw('12345');
+ cast_to_raw 
+-------------
+ 3132333435
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('3132333435');
+ cast_to_varchar2 
+------------------
+ 12345
+(1 row)
+
+select gms_raw.cast_to_varchar2(gms_raw.cast_to_raw('12345'));
+ cast_to_varchar2 
+------------------
+ 12345
+(1 row)
+
+select * from gms_raw.cast_to_raw('abcdefghijklmn');
+         cast_to_raw          
+------------------------------
+ 6162636465666768696A6B6C6D6E
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('6162636465666768696A6B6C6D6E');
+ cast_to_varchar2 
+------------------
+ abcdefghijklmn
+(1 row)
+
+select gms_raw.cast_to_varchar2(gms_raw.cast_to_raw('abcdefghijklmn'));
+ cast_to_varchar2 
+------------------
+ abcdefghijklmn
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好明天');
+       cast_to_raw        
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('E4BDA0E5A5BDE6988EE5A4A9');
+ cast_to_varchar2 
+------------------
+ 你好明天
+(1 row)
+
+select gms_raw.cast_to_varchar2(gms_raw.cast_to_raw('你好明天'));
+ cast_to_varchar2 
+------------------
+ 你好明天
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好openGauss');
+          cast_to_raw           
+--------------------------------
+ E4BDA0E5A5BD6F70656E4761757373
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('E4BDA0E5A5BD6F70656E4761757373');
+ cast_to_varchar2 
+------------------
+ 你好openGauss
+(1 row)
+
+select gms_raw.cast_to_varchar2(gms_raw.cast_to_raw('你好openGauss'));
+ cast_to_varchar2 
+------------------
+ 你好openGauss
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好：（&%￥$)');
+              cast_to_raw               
+----------------------------------------
+ E4BDA0E5A5BDEFBC9AEFBC882625EFBFA52429
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('E4BDA0E5A5BDEFBC9AEFBC882625EFBFA52429');
+ cast_to_varchar2 
+------------------
+ 你好：（&%￥$)
+(1 row)
+
+select gms_raw.cast_to_varchar2(gms_raw.cast_to_raw('你好：（&%￥$)'));
+ cast_to_varchar2 
+------------------
+ 你好：（&%￥$)
+(1 row)
+
+select * from gms_raw.cast_to_varchar2(NULL);
+ cast_to_varchar2 
+------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('');
+ cast_to_varchar2 
+------------------
+ 
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('zzzmmmnnn');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select * from gms_raw.cast_to_varchar2('zzzmmmnnn');
+                                               ^
+select * from gms_raw.cast_to_varchar2('你好openGauss');
+ERROR:  invalid hexadecimal digit: "�"
+LINE 1: select * from gms_raw.cast_to_varchar2('你好openGauss');
+                                               ^
+select * from gms_raw.cast_to_varchar2(time '01:00:00');
+ERROR:  function gms_raw.cast_to_varchar2(time without time zone) does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2(time '01:00:00');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_varchar2(time '01:00:00', 1);
+ERROR:  function gms_raw.cast_to_varchar2(time without time zone, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2(time '01:00:00', 1);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_varchar2('01:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select * from gms_raw.cast_to_varchar2('01:00');
+                                               ^
+select * from gms_raw.cast_to_varchar2('01:00', 1);
+ERROR:  function gms_raw.cast_to_varchar2(unknown, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2('01:00', 1);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_varchar2();
+ERROR:  function gms_raw.cast_to_varchar2() does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2();
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_varchar2(1, 2);
+ERROR:  function gms_raw.cast_to_varchar2(integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2(1, 2);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from gms_raw.cast_to_varchar2(1, 2, 3);
+ERROR:  function gms_raw.cast_to_varchar2(integer, integer, integer) does not exist
+LINE 1: select * from gms_raw.cast_to_varchar2(1, 2, 3);
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- compare
+select gms_raw.compare(NULL, NULL, NULL);
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare(NULL, '01');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare(NULL, '01', NULL);
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', NULL);
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', NULL, NULL);
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('', '', '');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('', '01');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('', '01', NULL);
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', '');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', '', '');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', '', '0');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', '', '01');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('01', '', '012');
+ compare 
+---------
+       1
+(1 row)
+
+select gms_raw.compare('01', '', '0123');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('01', '0123', '0');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0100', '01');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0111', '012');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0110', '0123');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0111', '11');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('1', '0101', '1');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('1', '101', '1');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('1', '101', '10');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0123', '1');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0100', '11');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0111', '112');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('01', '0110', '1123');
+ compare 
+---------
+       2
+(1 row)
+
+select gms_raw.compare('112233445566', '1122334455', '66');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('112233445566', '1122', '12');
+ compare 
+---------
+       3
+(1 row)
+
+select gms_raw.compare('112233445566', '11223344556677', '77');
+ compare 
+---------
+       0
+(1 row)
+
+select gms_raw.compare('01zzzz', '0123', '01');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.compare('01zzzz', '0123', '01');
+                               ^
+CONTEXT:  referenced column: compare
+select gms_raw.compare('01', '0123zzz', '01');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.compare('01', '0123zzz', '01');
+                                     ^
+CONTEXT:  referenced column: compare
+select gms_raw.compare('01', '0123', '0123zzz');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.compare('01', '0123', '0123zzz');
+                                             ^
+CONTEXT:  referenced column: compare
+select gms_raw.compare();
+ERROR:  function gms_raw.compare() does not exist
+LINE 1: select gms_raw.compare();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: compare
+select gms_raw.compare('12');
+ERROR:  function gms_raw.compare(unknown) does not exist
+LINE 1: select gms_raw.compare('12');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: compare
+select gms_raw.compare('12', '12', '12', '233');
+ERROR:  function gms_raw.compare(unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.compare('12', '12', '12', '233');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: compare
+select gms_raw.compare('12', 'time 12:00:00', '12');
+ERROR:  invalid hexadecimal digit: "t"
+LINE 1: select gms_raw.compare('12', 'time 12:00:00', '12');
+                                     ^
+CONTEXT:  referenced column: compare
+select gms_raw.compare('time 12:00:00', '12', '12');
+ERROR:  invalid hexadecimal digit: "t"
+LINE 1: select gms_raw.compare('time 12:00:00', '12', '12');
+                               ^
+CONTEXT:  referenced column: compare
+select gms_raw.compare('12', '12', 'time 12:00:00');
+ERROR:  invalid hexadecimal digit: "t"
+LINE 1: select gms_raw.compare('12', '12', 'time 12:00:00');
+                                           ^
+CONTEXT:  referenced column: compare
+-- concat
+select gms_raw.concat();
+ concat 
+--------
+ 
+(1 row)
+
+select gms_raw.concat('11'); 
+ concat 
+--------
+ 11
+(1 row)
+
+select gms_raw.concat('00', '11');
+ concat 
+--------
+ 0011
+(1 row)
+
+select gms_raw.concat('0', '1');
+ concat 
+--------
+ 0001
+(1 row)
+
+select gms_raw.concat('01', '01');
+ concat 
+--------
+ 0101
+(1 row)
+
+select gms_raw.concat('11', '22', '33');
+ concat 
+--------
+ 112233
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44');
+  concat  
+----------
+ 11223344
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55');
+   concat   
+------------
+ 1122334455
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66');
+    concat    
+--------------
+ 112233445566
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77');
+     concat     
+----------------
+ 11223344556677
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88');
+      concat      
+------------------
+ 1122334455667788
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99');
+       concat       
+--------------------
+ 112233445566778899
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00');
+        concat        
+----------------------
+ 11223344556677889900
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa');
+         concat         
+------------------------
+ 11223344556677889900AA
+(1 row)
+
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+          concat          
+--------------------------
+ 11223344556677889900AABB
+(1 row)
+
+select gms_raw.concat(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+ concat 
+--------
+ 
+(1 row)
+
+select gms_raw.concat('', '', '', '', '', '', '', '', '', '', '', '');
+ concat 
+--------
+ 
+(1 row)
+
+select gms_raw.concat('01', '0110', '1123', '01', '0110', '1123', '01', '0110', '1123', '01', '0110', '1123');
+                  concat                  
+------------------------------------------
+ 0101101123010110112301011011230101101123
+(1 row)
+
+select gms_raw.concat('11', '22', '33', NULL, NULL);
+ concat 
+--------
+ 112233
+(1 row)
+
+select gms_raw.concat('11', '22', '33', NULL, NULL, NULL, NULL);
+ concat 
+--------
+ 112233
+(1 row)
+
+select gms_raw.concat('11', '22', '33', NULL, NULL, NULL, NULL, '', '', '');
+ concat 
+--------
+ 112233
+(1 row)
+
+select gms_raw.concat('zz', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.concat('zz', '22', '33', '44', '55', '66', '7...
+                              ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', 'zz', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.concat('11', 'zz', '33', '44', '55', '66', '7...
+                                    ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', 'zz', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.concat('11', '22', 'zz', '44', '55', '66', '7...
+                                          ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', 'zz', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.concat('11', '22', '33', 'zz', '55', '66', '7...
+                                                ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', 'zz', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.concat('11', '22', '33', '44', 'zz', '66', '7...
+                                                      ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', 'zz', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ...lect gms_raw.concat('11', '22', '33', '44', '55', 'zz', '77'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', 'zz', '88', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ...ms_raw.concat('11', '22', '33', '44', '55', '66', 'zz', '88'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', 'zz', '99', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ....concat('11', '22', '33', '44', '55', '66', '77', 'zz', '99'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', 'zz', '00', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ...t('11', '22', '33', '44', '55', '66', '77', '88', 'zz', '00'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', 'zz', 'aa', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ..., '22', '33', '44', '55', '66', '77', '88', '99', 'zz', 'aa'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'zz', 'bb');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ..., '33', '44', '55', '66', '77', '88', '99', '00', 'zz', 'bb'...
+                                                             ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'zz');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: ...'33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'zz');
+                                                                 ^
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb', 'cc');
+ERROR:  function gms_raw.concat(unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.concat('11', '22', '33', '44', '55', '66', '7...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: concat
+select gms_raw.concat(time '01:00:00', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  function gms_raw.concat(time without time zone, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.concat(time '01:00:00', '22', '33', '44', '55...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', time '01:00:00', '66', '77', '88', '99', '00', 'aa', 'bb');
+ERROR:  function gms_raw.concat(unknown, unknown, unknown, unknown, time without time zone, unknown, unknown, unknown, unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.concat('11', '22', '33', '44', time '01:00:00...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: concat
+select gms_raw.concat('11', '22', '33', '44', '55', '66', '77', '88', '99', '00', 'aa', time '01:00:00');
+ERROR:  function gms_raw.concat(unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, time without time zone) does not exist
+LINE 1: select gms_raw.concat('11', '22', '33', '44', '55', '66', '7...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: concat
+--convert
+select gms_raw.convert('31', 'utf8', 'utf8');
+ convert 
+---------
+ 31
+(1 row)
+
+select gms_raw.convert('31', 'gbk', 'utf8'); --openGauss gbk等价于A库ZHS16GBK
+ convert 
+---------
+ 31
+(1 row)
+
+select gms_raw.convert('31', 'gbk', 'gbk');
+ convert 
+---------
+ 31
+(1 row)
+
+select gms_raw.convert('31', 'utf8', 'gbk');
+ convert 
+---------
+ 31
+(1 row)
+
+select * from gms_raw.cast_to_raw('你好明天');
+       cast_to_raw        
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.convert('E4BDA0E5A5BDE6988EE5A4A9', 'gbk', 'gbk');
+         convert          
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.convert('E4BDA0E5A5BDE6988EE5A4A9', 'utf8', 'utf8');
+         convert          
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.convert('E4BDA0E5A5BDE6988EE5A4A9', 'utf8', 'gbk');
+               convert                
+--------------------------------------
+ E6B5A3E78AB2E382BDE98F84E5BAA1E38189
+(1 row)
+
+select * from gms_raw.convert('E6B5A3E78AB2E382BDE98F84E5BAA1E38189', 'gbk', 'utf8');
+         convert          
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.convert('E4BDA0E5A5BDE6988EE5A4A9', 'gbk', 'utf8');
+     convert      
+------------------
+ C4E3BAC3C3F7CCEC
+(1 row)
+
+select * from gms_raw.convert('C4E3BAC3C3F7CCEC', 'utf8', 'gbk');
+         convert          
+--------------------------
+ E4BDA0E5A5BDE6988EE5A4A9
+(1 row)
+
+select * from gms_raw.cast_to_varchar2('E4BDA0E5A5BDE6988EE5A4A9');
+ cast_to_varchar2 
+------------------
+ 你好明天
+(1 row)
+
+select gms_raw.convert(time '01:00:00', 'utf8', 'gbk');
+ERROR:  function gms_raw.convert(time without time zone, unknown, unknown) does not exist
+LINE 1: select gms_raw.convert(time '01:00:00', 'utf8', 'gbk');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('01:00', 'utf8', 'gbk');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.convert('01:00', 'utf8', 'gbk');
+                               ^
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11', 'charset', 'utf8');
+ERROR:  invalid destination encoding name "charset"
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11', 'utf8', 'charset');
+ERROR:  invalid source encoding name "charset"
+CONTEXT:  referenced column: convert
+select gms_raw.convert(NULL, NULL, NULL);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('', '', '');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11', NULL, NULL);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: convert
+select gms_raw.convert(NULL, 'utf8', 'gbk');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: convert
+select gms_raw.convert();
+ERROR:  function gms_raw.convert() does not exist
+LINE 1: select gms_raw.convert();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11');
+ERROR:  function gms_raw.convert(unknown) does not exist
+LINE 1: select gms_raw.convert('11');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11', 'to_charset');
+ERROR:  function gms_raw.convert(unknown, unknown) does not exist
+LINE 1: select gms_raw.convert('11', 'to_charset');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: convert
+select gms_raw.convert('11', 'to_charset', 'from_charset', 'param4');
+ERROR:  function gms_raw.convert(unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.convert('11', 'to_charset', 'from_charset', '...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: convert
+-- copies
+select gms_raw.copies('001122', 1);
+ copies 
+--------
+ 001122
+(1 row)
+
+select gms_raw.copies('001122', 3);
+       copies       
+--------------------
+ 001122001122001122
+(1 row)
+
+select gms_raw.copies('00112233', 3);
+          copies          
+--------------------------
+ 001122330011223300112233
+(1 row)
+
+select gms_raw.copies('0011223344', 4);
+                  copies                  
+------------------------------------------
+ 0011223344001122334400112233440011223344
+(1 row)
+
+select gms_raw.copies('123', 3);
+    copies    
+--------------
+ 012301230123
+(1 row)
+
+select gms_raw.copies('00112233', 3.2); -- 小数四舍五入，和A库一致
+          copies          
+--------------------------
+ 001122330011223300112233
+(1 row)
+
+select gms_raw.copies('00112233', 3.6);
+              copies              
+----------------------------------
+ 00112233001122330011223300112233
+(1 row)
+
+select gms_raw.copies('', 2);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies(NULL, 2);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('1234', NULL);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('1234', '');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('00112233', 0);
+ERROR:  The second parameter is less than 1 or more than the max value 1073733617, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('00112233', -1);
+ERROR:  The second parameter is less than 1 or more than the max value 1073733617, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies();
+ERROR:  function gms_raw.copies() does not exist
+LINE 1: select gms_raw.copies();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('0011223344');
+ERROR:  function gms_raw.copies(unknown) does not exist
+LINE 1: select gms_raw.copies('0011223344');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('0011223344', 1, 2);
+ERROR:  function gms_raw.copies(unknown, integer, integer) does not exist
+LINE 1: select gms_raw.copies('0011223344', 1, 2);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('0011zzmmnn', 4);
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.copies('0011zzmmnn', 4);
+                              ^
+CONTEXT:  referenced column: copies
+select gms_raw.copies('01:00:00', 4);
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.copies('01:00:00', 4);
+                              ^
+CONTEXT:  referenced column: copies
+select gms_raw.copies(time '01:00:00', 4);
+ERROR:  function gms_raw.copies(time without time zone, integer) does not exist
+LINE 1: select gms_raw.copies(time '01:00:00', 4);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('12', 1073733623); -- param2 more than max value
+ERROR:  The second parameter is less than 1 or more than the max value 1073733617, please check the parameter.
+CONTEXT:  referenced column: copies
+select gms_raw.copies('1122', 1073733615); -- total length more than max value
+ERROR:  The total hexadecimal string length is more than the max value 1073733617, please check the parameter.
+CONTEXT:  referenced column: copies
+-- reverse
+select gms_raw.reverse('1');
+ reverse 
+---------
+ 01
+(1 row)
+
+select gms_raw.reverse('01');
+ reverse 
+---------
+ 01
+(1 row)
+
+select gms_raw.reverse('1122');
+ reverse 
+---------
+ 2211
+(1 row)
+
+select gms_raw.reverse('11223344');
+ reverse  
+----------
+ 44332211
+(1 row)
+
+select gms_raw.reverse('12345678');
+ reverse  
+----------
+ 78563412
+(1 row)
+
+select gms_raw.reverse('');
+ERROR:  The input parameter contaions null value, please check the parameter.
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse(NULL);
+ERROR:  The input parameter contaions null value, please check the parameter.
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse(time '01:00:00');
+ERROR:  function gms_raw.reverse(time without time zone) does not exist
+LINE 1: select gms_raw.reverse(time '01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse('01:00:00');
+ERROR:  invalid hexadecimal digit: ":"
+LINE 1: select gms_raw.reverse('01:00:00');
+                               ^
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse('zzzz');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.reverse('zzzz');
+                               ^
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse();
+ERROR:  function gms_raw.reverse() does not exist
+LINE 1: select gms_raw.reverse();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse('11', 2);
+ERROR:  function gms_raw.reverse(unknown, integer) does not exist
+LINE 1: select gms_raw.reverse('11', 2);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: reverse
+select gms_raw.reverse('11', 2, 3);
+ERROR:  function gms_raw.reverse(unknown, integer, integer) does not exist
+LINE 1: select gms_raw.reverse('11', 2, 3);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: reverse
+-- translate
+select gms_raw.translate('1100110011', '11', '12');
+ translate  
+------------
+ 1200120012
+(1 row)
+
+select gms_raw.translate('1100110011', '1100', '12');
+ translate 
+-----------
+ 121212
+(1 row)
+
+select gms_raw.translate('1110011100111', '111', '12');
+ translate 
+-----------
+ 12001012
+(1 row)
+
+select gms_raw.translate('1110011100111', '111', '1234');
+   translate    
+----------------
+ 12340034101234
+(1 row)
+
+select gms_raw.translate('01110011100111','0111','123456');
+   translate    
+----------------
+ 12340034101234
+(1 row)
+
+select gms_raw.translate('01110011100111','011111','123434');
+   translate    
+----------------
+ 12340034101234
+(1 row)
+
+select gms_raw.translate('01110011100111','011111','123456'); -- 以第一次出现为准，11对应34，不是56
+   translate    
+----------------
+ 12340034101234
+(1 row)
+
+select gms_raw.translate('aabbccddeeffaabbccddeeff','aaaabbbbcccc', 'bbccaaffeeaa');
+        translate         
+--------------------------
+ BBAAEEDDEEFFBBAAEEDDEEFF
+(1 row)
+
+select gms_raw.translate('1011', '00ff', '00');
+ translate 
+-----------
+ 1011
+(1 row)
+
+select gms_raw.translate('1011', '1011', '1011');
+ translate 
+-----------
+ 1011
+(1 row)
+
+select gms_raw.translate('1011', '1011', '3344');
+ translate 
+-----------
+ 3344
+(1 row)
+
+select gms_raw.translate('aabbccdd001122','aabbccdd','eeff'); -- ccdd将被删除
+ translate  
+------------
+ EEFF001122
+(1 row)
+
+select gms_raw.translate('aabbccdd001122','aabbccdd','eeff001133'); -- 33没有对应的
+   translate    
+----------------
+ EEFF0011001122
+(1 row)
+
+select gms_raw.translate('aabbccdd001122','aaaabbcc','eeff0011'); -- aa对应ee
+   translate    
+----------------
+ EE0011DD001122
+(1 row)
+
+select gms_raw.translate('1122', '1122', '3344');
+ translate 
+-----------
+ 3344
+(1 row)
+
+select gms_raw.translate('', '1122', '3344');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate(NULL, '1122', '3344');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '', '3344');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', NULL, '3344');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '1122', '');
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '1122', NULL);
+ERROR:  The input parameters contaion null value, please check the parameter.
+CONTEXT:  referenced column: translate
+select gms_raw.translate(time '01:00:00', '1122', '3344');
+ERROR:  function gms_raw.translate(time without time zone, unknown, unknown) does not exist
+LINE 1: select gms_raw.translate(time '01:00:00', '1122', '3344');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', time '01:00:00', '3344');
+ERROR:  function gms_raw.translate(unknown, time without time zone, unknown) does not exist
+LINE 1: select gms_raw.translate('1122', time '01:00:00', '3344');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '1122', time '01:00:00');
+ERROR:  function gms_raw.translate(unknown, unknown, time without time zone) does not exist
+LINE 1: select gms_raw.translate('1122', '1122', time '01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('aabbccddmmnngg','aabbccdd','eeff');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: select gms_raw.translate('aabbccddmmnngg','aabbccdd','eeff')...
+                                 ^
+CONTEXT:  referenced column: translate
+select gms_raw.translate('aabbccdd','aabbccddmm','eeffgghhii');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: select gms_raw.translate('aabbccdd','aabbccddmm','eeffgghhii...
+                                            ^
+CONTEXT:  referenced column: translate
+select gms_raw.translate('aabbccdd','aaaabbcc','eeffmm');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: select gms_raw.translate('aabbccdd','aaaabbcc','eeffmm');
+                                                       ^
+CONTEXT:  referenced column: translate
+select gms_raw.translate();
+ERROR:  function gms_raw.translate() does not exist
+LINE 1: select gms_raw.translate();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122');
+ERROR:  function gms_raw.translate(unknown) does not exist
+LINE 1: select gms_raw.translate('1122');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '3344');
+ERROR:  function gms_raw.translate(unknown, unknown) does not exist
+LINE 1: select gms_raw.translate('1122', '3344');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+select gms_raw.translate('1122', '3344', '5566', '7788');
+ERROR:  function gms_raw.translate(unknown, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.translate('1122', '3344', '5566', '7788');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: translate
+-- transliterate
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff'); -- If from is null, replace all with pad
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL);
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '');
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, NULL);
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', '');
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, NULL, NULL);
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', '', '');
+      transliterate       
+--------------------------
+ 000000000000000000000000
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, NULL, 'aa');
+      transliterate       
+--------------------------
+ AAAAAAAAAAAAAAAAAAAAAAAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', '', 'aa');
+      transliterate       
+--------------------------
+ AAAAAAAAAAAAAAAAAAAAAAAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, 'bb', NULL);
+      transliterate       
+--------------------------
+ AA00CCDDEEFFAA00CCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', 'bb', '');
+      transliterate       
+--------------------------
+ AA00CCDDEEFFAA00CCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, 'bb', 'cc');
+      transliterate       
+--------------------------
+ AACCCCDDEEFFAACCCCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', 'bb', 'cc');
+      transliterate       
+--------------------------
+ AACCCCDDEEFFAACCCCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', NULL, 'bb', 'aa');
+      transliterate       
+--------------------------
+ AAAACCDDEEFFAAAACCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '', 'bb', 'aa');
+      transliterate       
+--------------------------
+ AAAACCDDEEFFAAAACCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', 'bb', NULL, 'aa');
+      transliterate       
+--------------------------
+ AAAAAAAAAAAAAAAAAAAAAAAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', 'bb', '', 'aa');
+      transliterate       
+--------------------------
+ AAAAAAAAAAAAAAAAAAAAAAAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '11', 'bb', NULL);
+      transliterate       
+--------------------------
+ AA11CCDDEEFFAA11CCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff', '11', 'bb', '');
+      transliterate       
+--------------------------
+ AA11CCDDEEFFAA11CCDDEEFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddee','bb', 'cc', 'aa');
+ transliterate 
+---------------
+ AABBBBDDEE
+(1 row)
+
+select gms_raw.transliterate('aabbccddee','bb', 'ccee', 'aa');
+ transliterate 
+---------------
+ AABBBBDDAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddee','bb', 'ccee', 'aabb');
+ transliterate 
+---------------
+ AABBBBDDAA
+(1 row)
+
+select gms_raw.transliterate('aabbccddee','bbddff', 'ccee', 'aa');
+ transliterate 
+---------------
+ AABBBBDDDD
+(1 row)
+
+select gms_raw.transliterate('aabbccddee','bbddff', 'ccee', 'aabb');
+ transliterate 
+---------------
+ AABBBBDDDD
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeff','bbddff', 'ccee', 'aabb');
+ transliterate 
+---------------
+ AABBBBDDDDFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeff','bbddff11', 'cceeccee', 'aabb');
+ transliterate 
+---------------
+ AABBBBDDDDFF
+(1 row)
+
+select gms_raw.transliterate('aabbccddeeffaabbccddeeff','bbddff11', 'cceeccee', 'aabb');
+      transliterate       
+--------------------------
+ AABBBBDDDDFFAABBBBDDDDFF
+(1 row)
+
+select gms_raw.transliterate('1122');
+ transliterate 
+---------------
+ 0000
+(1 row)
+
+select gms_raw.transliterate('1122', '3344');
+ transliterate 
+---------------
+ 0000
+(1 row)
+
+select gms_raw.transliterate('1122', '3344', '5566');
+ transliterate 
+---------------
+ 1122
+(1 row)
+
+select gms_raw.transliterate('1122', '3344', '5566', '7788');
+ transliterate 
+---------------
+ 1122
+(1 row)
+
+select gms_raw.transliterate(time '01:00:00', '1122', '3344', '5566');
+ERROR:  function gms_raw.transliterate(time without time zone, unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.transliterate(time '01:00:00', '1122', '3344'...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('1122', time '01:00:00', '3344', '5566');
+ERROR:  function gms_raw.transliterate(unknown, time without time zone, unknown, unknown) does not exist
+LINE 1: select gms_raw.transliterate('1122', time '01:00:00', '3344'...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('1122', '1122', time '01:00:00', '5566');
+ERROR:  function gms_raw.transliterate(unknown, unknown, time without time zone, unknown) does not exist
+LINE 1: select gms_raw.transliterate('1122', '1122', time '01:00:00'...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('1122', '1122', '3344', time '01:00:00');
+ERROR:  function gms_raw.transliterate(unknown, unknown, unknown, time without time zone) does not exist
+LINE 1: select gms_raw.transliterate('1122', '1122', '3344', time '0...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('aabbccddmmnngg','aabbccdd','eeff', '1122');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: select gms_raw.transliterate('aabbccddmmnngg','aabbccdd','ee...
+                                     ^
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('aabbccdd','aabbccddmm','eeffgghhii', '1122');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: select gms_raw.transliterate('aabbccdd','aabbccddmm','eeffgg...
+                                                ^
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('aabbccdd','aaaabbcc','eeffmm', '1122');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: ...elect gms_raw.transliterate('aabbccdd','aaaabbcc','eeffmm', ...
+                                                             ^
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('aabbccdd','aaaabbcc','eeff', '1122mm');
+ERROR:  invalid hexadecimal digit: "m"
+LINE 1: ...s_raw.transliterate('aabbccdd','aaaabbcc','eeff', '1122mm');
+                                                             ^
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate();
+ERROR:  function gms_raw.transliterate() does not exist
+LINE 1: select gms_raw.transliterate();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate(NULL);
+ERROR:  The first parameter is null, please check the parameter.
+CONTEXT:  referenced column: transliterate
+select gms_raw.transliterate('');
+ERROR:  The first parameter is null, please check the parameter.
+CONTEXT:  referenced column: transliterate
+-- xrange
+select gms_raw.xrange(); -- A库显示超过255个字符会截断，openGauss不会截断，全部显示
+                                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange(NULL, NULL);
+                                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('', '');
+                                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange(NULL, '08');
+       xrange       
+--------------------
+ 000102030405060708
+(1 row)
+
+select gms_raw.xrange('', '08');
+       xrange       
+--------------------
+ 000102030405060708
+(1 row)
+
+select gms_raw.xrange('1F', NULL);
+                                                                                                                                                                                                                               xrange                                                                                                                                                                                                                               
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('1F', '');
+                                                                                                                                                                                                                               xrange                                                                                                                                                                                                                               
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('10');
+                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('00', 'ff');
+                                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('0012', 'ff33');
+                                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF
+(1 row)
+
+select gms_raw.xrange('00', '33');
+                                                  xrange                                                  
+----------------------------------------------------------------------------------------------------------
+ 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F30313233
+(1 row)
+
+select gms_raw.xrange('10', '10');
+ xrange 
+--------
+ 10
+(1 row)
+
+select gms_raw.xrange('1', 'f');
+             xrange             
+--------------------------------
+ 0102030405060708090A0B0C0D0E0F
+(1 row)
+
+select gms_raw.xrange('01', '0f');
+             xrange             
+--------------------------------
+ 0102030405060708090A0B0C0D0E0F
+(1 row)
+
+select gms_raw.xrange('33', '33');
+ xrange 
+--------
+ 33
+(1 row)
+
+select gms_raw.xrange('33', '44');
+                xrange                
+--------------------------------------
+ 333435363738393A3B3C3D3E3F4041424344
+(1 row)
+
+select gms_raw.xrange('44', '33');
+                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 4445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F30313233
+(1 row)
+
+select gms_raw.xrange('10', '14');
+   xrange   
+------------
+ 1011121314
+(1 row)
+
+select gms_raw.xrange('14', '10');
+                                                                                                                                                                                                                                                           xrange                                                                                                                                                                                                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF000102030405060708090A0B0C0D0E0F10
+(1 row)
+
+select gms_raw.xrange('4411', '3311');
+                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 4445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F30313233
+(1 row)
+
+select gms_raw.xrange('441122', '331122');
+                                                                                                                                                                                                                                              xrange                                                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 4445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F30313233
+(1 row)
+
+select gms_raw.xrange('1', '2', '3');
+ERROR:  function gms_raw.xrange(unknown, unknown, unknown) does not exist
+LINE 1: select gms_raw.xrange('1', '2', '3');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: xrange
+select gms_raw.xrange(time '01:00:00', '11');
+ERROR:  function gms_raw.xrange(time without time zone, unknown) does not exist
+LINE 1: select gms_raw.xrange(time '01:00:00', '11');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: xrange
+select gms_raw.xrange('11', time '01:00:00');
+ERROR:  function gms_raw.xrange(unknown, time without time zone) does not exist
+LINE 1: select gms_raw.xrange('11', time '01:00:00');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: xrange
+select gms_raw.xrange('zzz', '11');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.xrange('zzz', '11');
+                              ^
+CONTEXT:  referenced column: xrange
+select gms_raw.xrange('11', 'zzz');
+ERROR:  invalid hexadecimal digit: "z"
+LINE 1: select gms_raw.xrange('11', 'zzz');
+                                    ^
+CONTEXT:  referenced column: xrange
+SELECT GMS_RAW.BIT_AND(GMS_raw.cast_to_raw('1010'), GMS_raw.cast_to_raw('1111')) AS result;
+  result  
+----------
+ 31303130
+(1 row)
+
+SELECT GMS_RAW.BIT_COMPLEMENT(GMS_raw.cast_to_raw('1010')) AS result;
+  result  
+----------
+ CECFCECF
+(1 row)
+
+SELECT GMS_RAW.BIT_OR(GMS_raw.cast_to_raw('1010'), GMS_raw.cast_to_raw('1111')) AS result;
+  result  
+----------
+ 31313131
+(1 row)
+
+SELECT GMS_RAW.BIT_XOR(GMS_raw.cast_to_raw('1010'), GMS_raw.cast_to_raw('1111')) AS result;
+  result  
+----------
+ 00010001
+(1 row)
+
+SELECT GMS_RAW.CAST_FROM_BINARY_DOUBLE(1.1) AS result;
+      result      
+------------------
+ 3FF199999999999A
+(1 row)
+
+SELECT GMS_RAW.CAST_FROM_BINARY_FLOAT(1.22) AS result;
+  result  
+----------
+ 3F9C28F6
+(1 row)
+
+SELECT GMS_RAW.CAST_FROM_BINARY_INTEGER(3) AS result;
+  result  
+----------
+ 00000003
+(1 row)
+
+SELECT GMS_RAW.CAST_FROM_NUMBER(33.34) AS result;
+    result    
+--------------
+ 00812100480D
+(1 row)
+
+SELECT GMS_RAW.CAST_TO_RAW('Hello') AS raw_value;
+ raw_value  
+------------
+ 48656C6C6F
+(1 row)
+
+SELECT GMS_raw.cast_to_binary_float('42F6E666');
+ cast_to_binary_float 
+----------------------
+               123.45
+(1 row)
+
+SELECT GMS_raw.cast_to_binary_float('42F6E666');
+ cast_to_binary_float 
+----------------------
+               123.45
+(1 row)
+
+SELECT GMS_raw.cast_to_binary_integer('00000064');
+ cast_to_binary_integer 
+------------------------
+                    100
+(1 row)
+
+SELECT GMS_raw.cast_to_number('C202');
+                                                                                                                                                                                                                                                                                                                                                           cast_to_number                                                                                                                                                                                                                                                                                                                                                            
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ .0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT GMS_raw.cast_to_varchar2('213421342134213421342134');
+ cast_to_varchar2 
+------------------
+ !4!4!4!4!4!4
+(1 row)
+
+SELECT GMS_raw.cast_to_nvarchar2('213421342134213421342134');
+ cast_to_nvarchar2 
+-------------------
+ !4!4!4!4!4!4
+(1 row)
+
+SELECT GMS_RAW.COMPARE(GMS_raw.cast_to_raw('Hello'), GMS_raw.cast_to_raw('Hello')) AS comparison_result;
+ comparison_result 
+-------------------
+                 0
+(1 row)
+
+SELECT GMS_RAW.CONCAT(GMS_raw.cast_to_raw('Hello'), GMS_raw.cast_to_raw('World')) AS concatenated_value;
+  concatenated_value  
+----------------------
+ 48656C6C6F576F726C64
+(1 row)
+
+SELECT GMS_RAW.CONVERT(GMS_raw.cast_to_raw('Hello'), 'UTF8', 'US7ASCII') AS converted_value; -- ERROR, US7ASCII编码集og没有, 换成GBK结果一致
+ERROR:  invalid source encoding name "US7ASCII"
+CONTEXT:  referenced column: converted_value
+SELECT GMS_RAW.CONVERT(GMS_raw.cast_to_raw('Hello'), 'UTF8', 'GBK') AS converted_value;
+ converted_value 
+-----------------
+ 48656C6C6F
+(1 row)
+
+SELECT GMS_RAW.COPIES(GMS_raw.cast_to_raw('Hello'), 3) AS repeated_value;
+         repeated_value         
+--------------------------------
+ 48656C6C6F48656C6C6F48656C6C6F
+(1 row)
+
+SELECT GMS_RAW.REVERSE(GMS_raw.cast_to_raw('Hello')) AS reversed_value;
+ reversed_value 
+----------------
+ 6F6C6C6548
+(1 row)
+
+SELECT GMS_RAW.XRANGE(GMS_raw.cast_to_raw('A'), GMS_raw.cast_to_raw('Z')) AS range_value;
+                     range_value                      
+------------------------------------------------------
+ 4142434445464748494A4B4C4D4E4F505152535455565758595A
+(1 row)
+
+CREATE OR REPLACE FUNCTION trans_demo(pin IN VARCHAR2)
+RETURN VARCHAR2 IS
+ r_in  RAW(2000);
+ r_out RAW(2000);
+ r_ul  RAW(64);
+ r_lu  RAW(64);
+BEGIN
+  r_in := GMS_raw.cast_to_raw(pin);
+  r_ul := GMS_raw.cast_to_raw('ABCDEFabcdef');
+  r_lu := GMS_raw.cast_to_raw('abcdefABCDEF');
+
+  r_out := GMS_raw.translate(r_in , r_ul, r_lu);
+
+  return(GMS_raw.cast_to_varchar2(r_out));
+END ;
+/
+select trans_demo('ABCDEFGabcdefg');
+   trans_demo   
+----------------
+ abcdefGABCDEFg
+(1 row)
+
+CREATE OR REPLACE FUNCTION tl_demo(pin IN VARCHAR2)
+RETURN VARCHAR2 AUTHID DEFINER IS
+ r_in  RAW(2000);
+ r_out RAW(2000);
+ r_up  RAW(64);
+ r_lo  RAW(64);
+ r_un  RAW(64) := GMS_raw.cast_to_raw('_');
+BEGIN
+  r_in := GMS_raw.cast_to_raw(pin);
+  r_up := GMS_raw.cast_to_raw('ABCDEF. ');
+  r_lo := GMS_raw.cast_to_raw('abcdef');
+
+  r_out := GMS_raw.transliterate(r_in , r_lo, r_up, r_un);
+
+  return(GMS_raw.cast_to_varchar2(r_out));
+END ;
+/
+select tl_demo('ABCDEFG. abcdefg');
+     tl_demo      
+------------------
+ abcdefG__abcdefg
+(1 row)
+
+drop schema gms_raw;
+ERROR:  cannot drop schema gms_raw because extension gms_raw requires it
+HINT:  You can drop extension gms_raw instead.
+drop schema gms_raw cascade;
+ERROR:  cannot drop schema gms_raw because extension gms_raw requires it
+HINT:  You can drop extension gms_raw instead.
+drop extension gms_raw;
+-- test create again
+create extension gms_raw;
+drop extension gms_raw;

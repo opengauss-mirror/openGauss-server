@@ -1,0 +1,5 @@
+# gms_raw extension
+comment = 'process raw type data for PL/SQL applications'
+default_version = '1.0'
+module_pathname = '$libdir/gms_raw'
+relocatable = false

@@ -81,6 +81,10 @@
 ./share/postgresql/extension/gms_inaddr.control
 ./share/postgresql/extension/gms_debug--1.0.sql
 ./share/postgresql/extension/gms_debug.control
+./share/postgresql/extension/gms_raw--1.0.sql
+./share/postgresql/extension/gms_raw.control
+./share/postgresql/extension/gms_match--1.0.sql
+./share/postgresql/extension/gms_match.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -778,6 +782,8 @@
 ./lib/postgresql/gms_i18n.so
 ./lib/postgresql/gms_inaddr.so
 ./lib/postgresql/gms_debug.so
+./lib/postgresql/gms_raw.so
+./lib/postgresql/gms_match.so
 ./lib/libxgboost.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
