@@ -247,6 +247,7 @@ typedef struct knl_instance_attr_storage {
     bool uwal_async_append_switch;
 
     int parallel_recovery_dispatch_algorithm;
+    bool enable_hnswpq;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

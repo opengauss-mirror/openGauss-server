@@ -34,6 +34,7 @@
 #include "sampling.h"
 #include "utils/tuplesort.h"
 #include "access/datavec/vector.h"
+#include "access/datavec/utils.h"
 #include "postmaster/bgworker.h"
 
 #ifdef IVFFLAT_BENCH
@@ -92,16 +93,6 @@
 #define RandomDouble() (((double)random()) / MAX_RANDOM_VALUE)
 #define RandomInt() random()
 
-typedef struct VectorArrayData {
-    int length;
-    int maxlen;
-    int dim;
-    Size itemsize;
-    char *items;
-} VectorArrayData;
-
-typedef VectorArrayData *VectorArray;
-
 typedef struct ListInfo {
     BlockNumber blkno;
     OffsetNumber offno;
@@ -155,7 +146,7 @@ typedef struct IvfflatTypeInfo {
     int maxDimensions;
     Datum (*normalize)(PG_FUNCTION_ARGS);
     Size (*itemSize)(int dimensions);
-    void (*updateCenter)(Pointer v, int dimensions, float *x);
+    void (*updateCenter)(Pointer v, int dimensions, const float *x);
     void (*sumCenter)(Pointer v, float *x);
 } IvfflatTypeInfo;
 
@@ -264,24 +255,7 @@ typedef struct IvfflatScanOpaqueData {
 
 typedef IvfflatScanOpaqueData *IvfflatScanOpaque;
 
-#define VECTOR_ARRAY_SIZE(_length, _size) (sizeof(VectorArrayData) + (_length) * MAXALIGN(_size))
-
-/* Use functions instead of macros to avoid double evaluation */
-
-static inline Pointer VectorArrayGet(VectorArray arr, int offset)
-{
-    return ((char *)arr->items) + (offset * arr->itemsize);
-}
-
-static inline void VectorArraySet(VectorArray arr, int offset, Pointer val)
-{
-    errno_t rc = memcpy_s(VectorArrayGet(arr, offset),  VARSIZE_ANY(val), val, VARSIZE_ANY(val));
-    securec_check(rc, "\0", "\0");
-}
-
 /* Methods */
-VectorArray VectorArrayInit(int maxlen, int dimensions, Size itemsize);
-void VectorArrayFree(VectorArray arr);
 void IvfflatKmeans(Relation index, VectorArray samples, VectorArray centers, const IvfflatTypeInfo *typeInfo);
 FmgrInfo *IvfflatOptionalProcInfo(Relation index, uint16 procnum);
 Datum IvfflatNormValue(const IvfflatTypeInfo *typeInfo, Oid collation, Datum value);

@@ -122,7 +122,7 @@ Datum hnswhandler(PG_FUNCTION_ARGS)
     IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
     amroutine->amstrategies = 0;
-    amroutine->amsupport = 3;
+    amroutine->amsupport = HNSW_FUNC_NUM;
     amroutine->amcanorder = false;
     amroutine->amcanorderbyop = true;
     amroutine->amcanbackward = false; /* can change direction mid-scan */

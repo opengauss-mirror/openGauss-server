@@ -46,7 +46,7 @@ static bool DeletedContains(tidhash_hash *deleted, ItemPointer indextid)
  */
 static void RemoveHeapTids(HnswVacuumState *vacuumstate)
 {
-    BlockNumber blkno = HNSW_HEAD_BLKNO;
+    BlockNumber blkno = vacuumstate->hnswHeadBlkno;
     HnswElement highestPoint = &vacuumstate->highestPoint;
     Relation index = vacuumstate->index;
     BufferAccessStrategy bas = vacuumstate->bas;
@@ -213,7 +213,8 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
     element->heaptidsLength = 0;
 
     /* Find neighbors for element, skipping itself */
-    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation, m, efConstruction, true);
+    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation,
+                             m, efConstruction, true, false, NULL);
 
     /* Zero memory for each element */
     MemSet(ntup, 0, HNSW_TUPLE_ALLOC_SIZE);
@@ -321,7 +322,7 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
 {
     Relation index = vacuumstate->index;
     BufferAccessStrategy bas = vacuumstate->bas;
-    BlockNumber blkno = HNSW_HEAD_BLKNO;
+    BlockNumber blkno = vacuumstate->hnswHeadBlkno;
 
     /*
      * Wait for inserts to complete. Inserts before this point may have
@@ -428,7 +429,7 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
  */
 static void MarkDeleted(HnswVacuumState *vacuumstate)
 {
-    BlockNumber blkno = HNSW_HEAD_BLKNO;
+    BlockNumber blkno = vacuumstate->hnswHeadBlkno;
     BlockNumber insertPage = InvalidBlockNumber;
     Relation index = vacuumstate->index;
     BufferAccessStrategy bas = vacuumstate->bas;
@@ -549,6 +550,8 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
                             IndexBulkDeleteCallback callback, void *callbackState)
 {
     Relation index = info->index;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
 
     if (stats == NULL)
         stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
@@ -567,6 +570,8 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
 
     /* Get m from metapage */
     HnswGetMetaPageInfo(index, &vacuumstate->m, NULL);
+    HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
+    vacuumstate->hnswHeadBlkno = HNSW_PQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
 
     /* Create hash table */
     vacuumstate->deleted = tidhash_create(CurrentMemoryContext, 256, NULL);
