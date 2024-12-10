@@ -179,6 +179,11 @@ UPDATE v_empdept_gencol_update SET EMPNO=7369 WHERE EMPNO=7370;
 DELETE FROM v_empdept_crossjoin_update;
 DELETE FROM v_empdept_fulljoin_update;
 
+insert into sys_dummy ((select * from sys_dummy) union (select * from sys_dummy));
+insert into  sys_dummy ((select * from sys_dummy) union select * from sys_dummy);
+insert into sys_dummy (select * from sys_dummy union (select * from sys_dummy));
+insert into sys_dummy (select * from sys_dummy union select * from sys_dummy);
+
 DROP SCHEMA IF EXISTS update_multi_base_table_view CASCADE;
 
 -- 5. B compatibility, update multiple views at the same time

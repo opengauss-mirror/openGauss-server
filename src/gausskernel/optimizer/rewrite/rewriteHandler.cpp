@@ -4096,20 +4096,30 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
 
     auto_update_detail =  view_query_is_auto_updatable(viewquery, parsetree->commandType != CMD_DELETE, false);
 
-    if (parsetree->commandType == CMD_INSERT) {
-        RangeTblRef* rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
-        if (list_length(viewquery->jointree->fromlist) != 1 || !IsA(rtr, RangeTblRef)) {
+    do {
+        if (parsetree->commandType == CMD_INSERT) {
+            if (list_length(viewquery->jointree->fromlist) != 1) {
                 auto_update_detail = gettext_noop(
                     "Views that do not select from a single table or view are not automatically updatable.");
-        }
-
-        RangeTblEntry* rte = rt_fetch(rtr->rtindex, viewquery->rtable);
-        if (rte->rtekind != RTE_RELATION || (rte->relkind != RELKIND_RELATION &&
-            rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_VIEW)) {
-            auto_update_detail = gettext_noop(
-                "Views that do not select from a single table or view are not automatically updatable.");
+                break;
             }
-    }
+
+            RangeTblRef* rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+            if (!IsA(rtr, RangeTblRef)) {
+                auto_update_detail = gettext_noop(
+                    "Views that do not select from a single table or view are not automatically updatable.");
+                break;
+            }
+
+            RangeTblEntry* rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+            if (rte->rtekind != RTE_RELATION || (rte->relkind != RELKIND_RELATION &&
+                rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_VIEW)) {
+                auto_update_detail = gettext_noop(
+                    "Views that do not select from a single table or view are not automatically updatable.");
+                break;
+            }
+        }
+    } while (0);
 
     if (auto_update_detail) {
         /* messages here should match execMain.c's CheckValidResultRel */
