@@ -1250,14 +1250,19 @@ int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len)
     XLogRecPtr realtimePtr = receiveMessage->realtimeBuildPtr;
     int srcId = receiveMessage->srcInstId;
 
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
     if (g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus == DISABLE) {
         g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = ENABLE_LOG_CTRL;
         ereport(LOG, (errmodule(MOD_DMS),
             errmsg("[SS][On-demand] Get realtime-build ptr from standby inst_id: %d,"
                    "enable realtime-build log ctrl, replayEndRecPtr: %X/%X",
                    srcId, (uint32)(realtimePtr >> 32), (uint32)realtimePtr)));
+    } else if (rtBuildCtrl->replyTime == 0) {
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Get realtime-build ptr from standby inst_id: %d first time, "
+                   "replayEndRecPtr: %X/%X",
+                   srcId, (uint32)(realtimePtr >> 32), (uint32)realtimePtr)));
     }
-    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
 
     // If the time interval betwen two reply < 100 ms, ignore this reply.
     TimestampTz currentTime = GetCurrentTimestamp();
