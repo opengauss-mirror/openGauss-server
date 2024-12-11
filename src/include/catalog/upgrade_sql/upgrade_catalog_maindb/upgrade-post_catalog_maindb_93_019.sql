@@ -1263,7 +1263,8 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8999;
 CREATE OPERATOR CLASS vector_ip_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<#>(vector, vector) FOR ORDER BY float_ops,
-	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector);
+	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
+	FUNCTION 4 pg_catalog.vector_norm(vector);
 
 DROP OPERATOR FAMILY IF EXISTS vector_cosine_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8373;
@@ -1275,7 +1276,8 @@ CREATE OPERATOR CLASS vector_cosine_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<=>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
-	FUNCTION 2 pg_catalog.vector_norm(vector);
+	FUNCTION 2 pg_catalog.vector_norm(vector),
+	FUNCTION 4 pg_catalog.vector_norm(vector);
 
 DROP OPERATOR FAMILY IF EXISTS vector_l1_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8374;
