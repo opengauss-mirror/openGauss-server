@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -3450,7 +3450,7 @@ static void CheckExtremeRtoGUCConflicts(void)
             ereport(ERROR,
                 (errcode(ERRCODE_SYSTEM_ERROR),
                     errmsg("ondemand extreme rto not support in shared storage double cluster mode."),
-                    errhint("Either turn off ss_stream_cluster/ss_enable_dorado, or turn off ss_enable_ondemand_recovery.")));
+                    errhint("Either turn ss_disaster_mode to single, or turn off ss_enable_ondemand_recovery.")));
         }
 
         if (g_instance.attr.attr_storage.recovery_parse_workers <= 1) {

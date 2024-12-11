@@ -341,8 +341,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
  enable_sortgroup_agg                             | bool    |      |           | 
- ss_enable_dorado                                 | bool    |      |           | 
- ss_stream_cluster                                | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 

@@ -231,8 +231,7 @@ typedef struct knl_instance_attr_storage {
     bool enable_batch_dispatch;
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
-    bool ss_enable_dorado;
-    bool ss_stream_cluster;
+    int ss_disaster_mode;
     
     bool enable_uwal;
     char* uwal_config;

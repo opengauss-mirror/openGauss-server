@@ -476,8 +476,7 @@ bool ss_read_config(const char* pg_data)
 {
     char config_file[MAXPGPATH] = {0};
     char enable_dss[MAXPGPATH] = {0};
-    char enable_dorado[MAXPGPATH] = {0};
-    char enable_stream[MAXPGPATH] = {0};
+    char disaster_mode[MAXPGPATH] = {0};
     char inst_id[MAXPGPATH] = {0};
     char interconnect_url[MAXPGPATH] = {0};
     char** optlines = NULL;
@@ -497,13 +496,10 @@ bool ss_read_config(const char* pg_data)
         return false;
     }
 
-    (void)find_guc_optval((const char**)optlines, "ss_enable_dorado", enable_dorado);
-    if (strcmp(enable_dorado, "on") == 0) {
+    (void)find_guc_optval((const char**)optlines, "ss_disaster_mode", disaster_mode);
+    if (strcmp(disaster_mode, "dorado") == 0) {
         ss_instance_config.dss.enable_dorado = true;
-    }
-
-    (void)find_guc_optval((const char**)optlines, "ss_stream_cluster", enable_stream);
-    if (strcmp(enable_stream, "on") == 0) {
+    } else if (strcmp(disaster_mode, "stream") == 0) {
         ss_instance_config.dss.enable_stream = true;
     }
 
