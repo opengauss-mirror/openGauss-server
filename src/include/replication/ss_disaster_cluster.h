@@ -29,9 +29,15 @@
 #include "replication/walprotocol.h"
 #include "knl/knl_instance.h"
 
+typedef enum {
+    SS_DISASTER_SINGLE = 0,
+    SS_DISASTER_STREAM = 1,
+    SS_DISASTER_DORADO = 2,
+} SSDisasterMode;
+
 /* stream cluster in share storage mode */
 #define SS_STREAM_CLUSTER \
-        (ENABLE_DSS && g_instance.attr.attr_storage.ss_stream_cluster)
+        (ENABLE_DSS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_STREAM)
 
 /* Primary Cluster in SS disaster */
 #define SS_STREAM_PRIMARY_CLUSTER \
@@ -66,7 +72,7 @@
 const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
 
 #define SS_DORADO_CLUSTER \
-        (ENABLE_DMS && ENABLE_DSS && g_instance.attr.attr_storage.ss_enable_dorado)
+        (ENABLE_DMS && ENABLE_DSS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_DORADO)
 
 /* Primary Cluster in SS replication */
 #define SS_DORADO_PRIMARY_CLUSTER \

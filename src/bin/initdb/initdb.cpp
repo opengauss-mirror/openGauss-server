@@ -1611,9 +1611,9 @@ static void setup_config(void)
     }
 
     if (ss_enable_dorado) {
-        nRet = strcpy_s(repltok, sizeof(repltok), "ss_enable_dorado = on");
+        nRet = strcpy_s(repltok, sizeof(repltok), "ss_disaster_mode = dorado");
         securec_check_c(nRet, "\0", "\0");
-        conflines = replace_token(conflines, "#ss_enable_dorado = off", repltok);
+        conflines = replace_token(conflines, "#ss_disaster_mode = single", repltok);
 
         nRet = strcpy_s(repltok, sizeof(repltok), "wal_buffers = 1GB");
         securec_check_c(nRet, "\0", "\0");

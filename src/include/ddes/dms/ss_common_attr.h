@@ -43,11 +43,11 @@
 #define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
 #define ENABLE_SS_BCAST_SNAPSHOT                                                  \
     (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot && \
-        !g_instance.attr.attr_storage.ss_enable_dorado)
+        g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
 #define ENABLE_SS_BCAST_GETOLDESTXMIN                                    \
     (g_instance.attr.attr_storage.dms_attr.enable_bcast_getoldestxmin && \
-        !g_instance.attr.attr_storage.ss_enable_dorado)
-#define SS_SINGLE_CLUSTER (ENABLE_DMS && !g_instance.attr.attr_storage.ss_enable_dorado)
+        g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
+#define SS_SINGLE_CLUSTER (ENABLE_DMS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
 #endif
 
 #define SS_REFORM_REFORMER                                                  \

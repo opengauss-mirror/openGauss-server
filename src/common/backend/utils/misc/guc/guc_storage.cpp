@@ -223,9 +223,6 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
-static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source);
-static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source);
-static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source);
 
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
@@ -324,6 +321,13 @@ static const struct config_enum_entry ConflictResolvers[] = {
     {"error", RESOLVE_ERROR, false},
     {"apply_remote", RESOLVE_APPLY_REMOTE, false},
     {"keep_local", RESOLVE_KEEP_LOCAL, false},
+    {NULL, 0, false}
+};
+
+static const struct config_enum_entry ss_disaster_mode_options[] = {
+    {"single", SS_DISASTER_SINGLE, false},
+    {"stream", SS_DISASTER_STREAM, false},
+    {"dorado", SS_DISASTER_DORADO, false},
     {NULL, 0, false}
 };
 
@@ -1224,32 +1228,6 @@ static void InitStorageConfigureNamesBool()
             &g_instance.attr.attr_storage.dms_attr.enable_scrlock_sleep_mode,
             true,
             NULL,
-            NULL,
-            NULL},
-
-        {{"ss_enable_dorado",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            WAL,
-            gettext_noop("Use to enabel dorado replication in share storage mode."),
-            NULL,
-            GUC_SUPERUSER_ONLY},
-            &g_instance.attr.attr_storage.ss_enable_dorado,
-            false,
-            check_ss_cluster_replication_control_para,
-            NULL,
-            NULL},
-
-        {{"ss_stream_cluster",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            WAL,
-            gettext_noop("Use to enabel disaster in ss disaster recovery cluster mode."),
-            NULL,
-            GUC_SUPERUSER_ONLY},
-            &g_instance.attr.attr_storage.ss_stream_cluster,
-            false,
-            check_ss_cluster_disaster_control_para,
             NULL,
             NULL},
 
@@ -4958,7 +4936,7 @@ static void InitStorageConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.xlog_file_path,
             NULL,
-            check_normal_cluster_replication_config_para,
+            NULL,
             NULL,
             NULL},
         {{"hadr_super_user_record_path",
@@ -5362,6 +5340,19 @@ static void InitStorageConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
+        {{"ss_disaster_mode",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            REPLICATION,
+            gettext_noop("Use to enabel dorado/stream/single disaster recovery mode in share storage mode."),
+            NULL},
+            &g_instance.attr.attr_storage.ss_disaster_mode,
+            SS_DISASTER_SINGLE,
+            ss_disaster_mode_options,
+            NULL,
+            NULL,
+            NULL},
+
 #ifndef ENABLE_MULTIPLE_NODES
         {{"dcf_log_file_permission",
             PGC_POSTMASTER,
@@ -6634,75 +6625,6 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
         return true;
     }
     return false;
-}
-
-static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source)
-{
-    if (newval == NULL || *newval == NULL || **newval == '\0') {
-        return true;
-    }
-
-    if (g_instance.attr.attr_storage.ss_enable_dorado) {
-        ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
-            "and ss cluster repliction with \"ss_enable_dorado\" = %d", \
-            g_instance.attr.attr_storage.ss_enable_dorado)));
-        return false; 
-    }
-
-    if (g_instance.attr.attr_storage.ss_stream_cluster) {
-        ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
-            "and disaster replication with \"ss_stream_cluster\" = %d", \
-            g_instance.attr.attr_storage.ss_stream_cluster)));
-        return false;
-    }
-
-    return true;
-}
-
-static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source)
-{
-    if (!(*newval)) {
-        return true;
-    }
-
-    if (*newval && g_instance.attr.attr_storage.ss_stream_cluster) {
-        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
-            "and disaster replication with \"ss_stream_cluster\" = %d", \
-            g_instance.attr.attr_storage.ss_stream_cluster)));
-        return false;
-    }
-
-    if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
-        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
-            "and normal cluster repliction with \"xlog_file_path\" = %s", \
-            g_instance.attr.attr_storage.xlog_file_path)));
-        return false;
-    }
-
-    return true;
-}
-
-static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source)
-{
-    if (!(*newval)) {
-        return true;
-    }
-    
-    if (g_instance.attr.attr_storage.ss_enable_dorado) {
-        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
-            "and dorado replication with \"ss_enable_dorado\" = %d", \
-            g_instance.attr.attr_storage.ss_enable_dorado)));
-        return false;
-    }
-
-    if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
-        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
-            "and normal cluster replication with \"xlog_file_path\" = %s", \
-            g_instance.attr.attr_storage.xlog_file_path)));
-        return false;
-    }
-
-    return true;
 }
 
 extern bool check_special_character(char c);
