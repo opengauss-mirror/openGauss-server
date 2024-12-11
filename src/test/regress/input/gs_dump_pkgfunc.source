@@ -38,8 +38,8 @@ SELECT a from mysche.t1;
 CREATE VIEW mysche.v_other4 AS
 SELECT a from mysche.t1;
 
-\! @abs_bindir@/gs_dump dump_package_func -p @portstring@ -f @abs_bindir@/dump_package.tar -F t >/dev/null 2>&1; echo $?
-\! @abs_bindir@/gs_restore -d restore_package_func -p @portstring@ @abs_bindir@/dump_package.tar >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_dump dump_package_func -p @portstring@ -f @abs_bindir@/dump_packagefunc.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_package_func -p @portstring@ @abs_bindir@/dump_packagefunc.tar >/dev/null 2>&1; echo $?
 \c restore_package_func
 select mysche.EAST_COMM.ADD_NUM(0);
 
