@@ -801,6 +801,18 @@ static void check_threads_num_option()
 #endif
 }
 
+void sync_file_with_permissions(char* filepath, mode_t original_permissions) 
+{
+    (void)chmod(filepath, S_IRUSR | S_IWUSR);
+    
+    if (fio_sync(filepath, FIO_BACKUP_HOST) != 0) {
+        (void)chmod(filepath, original_permissions);
+        elog(ERROR, "Cannot sync file \"%s\": %s", filepath, strerror(errno));
+    }
+    
+    (void)chmod(filepath, original_permissions);
+}
+
 int main(int argc, char *argv[])
 {
     char       *command = NULL,

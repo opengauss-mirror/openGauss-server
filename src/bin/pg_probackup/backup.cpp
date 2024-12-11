@@ -545,7 +545,6 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
     parray_free(xlog_files_list);
 }
 
-
 static void sync_files(parray *database_map, const char *database_path, parray *external_dirs,
                        const char *dssdata_path, const char *external_prefix, bool no_sync)
 {
@@ -654,8 +653,15 @@ static void sync_files(parray *database_map, const char *database_path, parray *
             else
                 join_path_components(to_fullpath, database_path, file->rel_path);
 
-            if (fio_sync(to_fullpath, FIO_BACKUP_HOST) != 0)
-                elog(ERROR, "Cannot sync file \"%s\": %s", to_fullpath, strerror(errno));
+            if (fio_sync(to_fullpath, FIO_BACKUP_HOST) != 0) {
+                /* Handling the file permission issue for gs_secure_files/version.cfg */
+                if (strstr(to_fullpath, GS_SECURE_FILES_VERSION_CFG)) {
+                    mode_t permissions = file->mode & FILE_PERMISSION_MASK_ALL;
+                    sync_file_with_permissions(to_fullpath, permissions);
+                } else {
+                    elog(ERROR, "Cannot sync file \"%s\": %s", to_fullpath, strerror(errno));
+                }
+            }
         }
 
         time(&end_time);
