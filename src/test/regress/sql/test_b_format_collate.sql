@@ -710,3 +710,20 @@ clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;
 DROP DATABASE IF EXISTS test_collate_A;
 DROP DATABASE IF EXISTS test_collate_B;
+
+create database test_collate_B dbcompatibility 'B' encoding 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C';
+\c test_collate_B
+set b_format_behavior_compat_options = 'enable_multi_charset';
+CREATE TABLE db_proc_invoke_log (
+    id character varying(36) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci NOT NULL,
+    trace_id character varying(36) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci DEFAULT ''::character varying NOT NULL,
+    log_content text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,
+    create_time timestamp(0) with time zone DEFAULT (pg_systimestamp())::timestamp(0) with time zone NOT NULL
+)
+CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"
+WITH (orientation=row, compression=no);
+
+insert into db_proc_invoke_log ("id","log_content") values ('dsadassdadas00000sadasda', 'dsadwqedwqedsada');
+\c regression
+clean connection to all force for database test_collate_B;
+DROP DATABASE IF EXISTS test_collate_B;
