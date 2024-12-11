@@ -277,10 +277,10 @@ Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, 
     /* construct a convert FuncExpr */
     const char* expr_charset_name = pg_encoding_to_char(exprcharset);
     const char* target_charset_name = pg_encoding_to_char(target_charset);
-    cons = makeConst(NAMEOID, -1, InvalidOid, sizeof(const char*), NameGetDatum(expr_charset_name), false, true);
+    cons = makeConst(NAMEOID, -1, InvalidOid, -2, NameGetDatum(expr_charset_name), false, false);
     args = lappend(args, cons);
 
-    cons = makeConst(NAMEOID, -1, InvalidOid, sizeof(const char*), NameGetDatum(target_charset_name), false, true);
+    cons = makeConst(NAMEOID, -1, InvalidOid, -2, NameGetDatum(target_charset_name), false, false);
     args = lappend(args, cons);
 
     fexpr = makeFuncExpr(CONVERTFUNCOID, TEXTOID, args, target_collation, InvalidOid, COERCE_IMPLICIT_CAST);
