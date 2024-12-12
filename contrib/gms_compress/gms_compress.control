@@ -2,4 +2,4 @@
 comment = 'provides a set of data compression utilities'
 default_version = '1.0'
 module_pathname = '$libdir/gms_compress'
-relocatable = true
+relocatable = false

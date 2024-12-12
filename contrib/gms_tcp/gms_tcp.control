@@ -2,4 +2,4 @@
 comment = 'provides TCP/IP client=side access functionality in PL/SQL'
 default_version = '1.0'
 module_pathname = '$libdir/gms_tcp'
-relocatable = true
+relocatable = false

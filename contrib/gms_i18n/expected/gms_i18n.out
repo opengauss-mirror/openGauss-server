@@ -141,5 +141,14 @@ LINE 1: select gms_i18n.string_to_raw();
                ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: string_to_raw
+create database db_i18n;
+\c db_i18n
+create schema s1_02;
+create extension gms_i18n;
+alter extension gms_i18n set schema s1_02;
+ERROR:  extension "gms_i18n" does not support SET SCHEMA
+\c contrib_regression
+drop database if exists db_i18n;
 reset search_path;
 drop schema gms_i18n_test cascade;
+drop extension gms_i18n;
