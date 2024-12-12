@@ -77,7 +77,7 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92970;
+const uint32 GRAND_VERSION_NUM = 92971;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
