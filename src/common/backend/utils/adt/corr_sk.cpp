@@ -254,6 +254,7 @@ float8 calculate_standard_deviation(const float8 data[], uint32 size, float8 mea
     return sqrt(sumOfSquares / (size - 1));
 }
 
+
 Datum corr_s_final_fn(PG_FUNCTION_ARGS)
 {
     float8 result;
@@ -268,15 +269,18 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
+    ModeType mode = state->mode;
+
+    if (mode == ModeType::ILLEGAL) {
+        ereport(ERROR, (errmsg("illegal argument for function")));
+    }
+
     uint32 n = state->count;
     Datum* x_data = state->x_data_array;
     Datum* y_data = state->y_data_array;
 
     float8* x_ranks = (float8*)palloc(n * sizeof(float8));
     float8* y_ranks = (float8*)palloc(n * sizeof(float8));
-    float8* x_rank_m = (float8*)palloc(n * sizeof(float8));
-    float8* y_rank_m = (float8*)palloc(n * sizeof(float8));
-    float8* diff = (float8*)palloc(n * sizeof(float8));
 
     calculate_ranks(x_data, x_ranks, n);
     calculate_ranks(y_data, y_ranks, n);
@@ -284,53 +288,49 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
     // Spearman's correlation coefficient
     float8 mean_rank = ((float8)((1 + n) * n) / 2.0) / n;
     float8 sum_diff = 0.0;
-    
+        
     for (uint32 i = 0; i < n; i++) {
-        x_rank_m[i] = x_ranks[i] - mean_rank;
-        y_rank_m[i] = y_ranks[i] - mean_rank;
-        diff[i] = x_rank_m[i] * y_rank_m[i];
-        sum_diff += diff[i];
+        sum_diff += (x_ranks[i] - mean_rank) * (y_ranks[i] - mean_rank);
     }
     float8 covariance = sum_diff / (float8)(n - 1);
     float8 xr_st_dev = calculate_standard_deviation(x_ranks, n, mean_rank);
     float8 yr_st_dev = calculate_standard_deviation(y_ranks, n, mean_rank);
     float8 spearman_rho_corr = covariance / (xr_st_dev * yr_st_dev);
 
-    // T-statistic
-    float8 t_stat = calculate_t_statistic(spearman_rho_corr, n);
-
-    // T-distribution
-    float8 df = n - 2;
-    boost::math::students_t_distribution<float8> t_dist(df);
-
-    float8 one_sided_p_value_pos = 1 - boost::math::cdf(t_dist, t_stat);
-    float8 one_sided_p_value_neg = 1 - one_sided_p_value_pos;
-    float8 one_sided_p_value;
-    if (one_sided_p_value_pos < HALF) {
-        one_sided_p_value = one_sided_p_value_pos;
-    } else {
-        one_sided_p_value = one_sided_p_value_neg;
-    }
-    float8 two_sided_p_value = 2 * one_sided_p_value;
-
-    pfree(x_ranks);
-    pfree(y_ranks);
-    pfree(x_rank_m);
-    pfree(y_rank_m);
-    pfree(diff);
-
-    ModeType mode = state->mode;
     if (mode == ModeType::COEFFICIENT) {
         result = spearman_rho_corr;
-    } else if (mode == ModeType::ONE_SIDED_SIG || mode == ModeType::ONE_SIDED_SIG_POS) {
-        result = one_sided_p_value_pos;
-    } else if (mode == ModeType::ONE_SIDED_SIG_NEG) {
-        result = one_sided_p_value_neg;
-    } else if (mode == ModeType::TWO_SIDED_SIG) {
-        result = two_sided_p_value;
-    } else { // mode == ModeType::ILLEGAL
-        ereport(ERROR, (errmsg("illegal argument for function")));
+    } else {
+        if (fabs(spearman_rho_corr) == 1) {
+            result = 0;
+        } else {
+            // T-statistic
+            float8 t_stat = calculate_t_statistic(spearman_rho_corr, n);
+
+            // T-distribution
+            float8 df = n - 2;
+            boost::math::students_t_distribution<float8> t_dist(df);
+
+            float8 one_sided_p_value_pos = 1 - boost::math::cdf(t_dist, t_stat);
+            float8 one_sided_p_value_neg = 1 - one_sided_p_value_pos;
+            float8 one_sided_p_value;
+            if (one_sided_p_value_pos < HALF) {
+                one_sided_p_value = one_sided_p_value_pos;
+            } else {
+                one_sided_p_value = one_sided_p_value_neg;
+            }
+            float8 two_sided_p_value = 2 * one_sided_p_value;
+
+            if (mode == ModeType::ONE_SIDED_SIG_NEG) {
+                result = one_sided_p_value_neg;
+            } else if (mode == ModeType::TWO_SIDED_SIG) {
+                result = two_sided_p_value;
+            } else { // mode == ModeType::ONE_SIDED_SIG || mode == ModeType::ONE_SIDED_SIG_POS
+                result = one_sided_p_value_pos;
+            }
+        }
     }
+    pfree(x_ranks);
+    pfree(y_ranks);
 
     PG_RETURN_DATUM(Float8GetDatum(result));
 }
