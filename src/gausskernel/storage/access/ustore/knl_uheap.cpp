@@ -505,6 +505,32 @@ template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer
     }
 }
 
+void UHeapUpdateFSM(Relation relation, Buffer buf, bool usePotentialFreeSpace)
+{
+    if (!BufferIsInvalid(buf)) {
+        return;
+    }
+
+    Size freespace = 0;
+    Page page = BufferGetPage(buf);
+    UHeapPageHeader hdr = (UHeapPageHeader)page;
+    BlockNumber blkno = BufferGetBlockNumber(buf);
+    if (usePotentialFreeSpace) {
+        freespace = hdr->potential_freespace;
+    } else {
+        freespace = PageGetUHeapFreeSpace(page);
+    }
+
+    RecordPageWithFreeSpace(relation, blkno, freespace);
+    int delta = UHeapGetFreespaceDelta((UHeapPageHeader)page);
+    if (FSMUpdateHeuristic(delta)) {
+#ifdef DEBUG_UHEAP
+        UHEAPSTAT_COUNT_OP_PRUNEPAGE_SPC(del, freespace);
+#endif
+        UpdateFreeSpaceMap(relation, blkno, blkno, freespace, false);
+    }
+}
+
 void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Page page, BlockNumber blkno)
 {
     bool hasPruned = UHeapPagePruneOptPage(relation, buffer, fxid);
@@ -516,16 +542,7 @@ void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Pag
 #endif
 
     if (hasPruned) {
-        Size freespace = PageGetUHeapFreeSpace(page);
-        double thres = RelationGetTargetPageFreeSpacePrune(relation, UHEAP_DEFAULT_FILLFACTOR);
-        double prob = FSM_UPDATE_HEURISTI_PROBABILITY * freespace / thres;
-        RecordPageWithFreeSpace(relation, blkno, freespace);
-        if (rand() % 100 >= 100.0 - prob * 100.0) {
-#ifdef DEBUG_UHEAP
-            UHEAPSTAT_COUNT_OP_PRUNEPAGE_SPC(del, freespace);
-#endif
-            UpdateFreeSpaceMap(relation, blkno, blkno, freespace, false);
-        }
+        UHeapUpdateFSM(relation, buffer, false);
     }
 }
 
@@ -621,7 +638,6 @@ reacquire_buffer:
         RelationGetRelationName(rel), buffer, phdr->pd_upper - phdr->pd_lower, tuple->disk_tuple_size)));
 
     blkno = BufferGetBlockNumber(buffer);
-    UHeapPagePruneFSM(rel, buffer, fxid, page, blkno);
 
     /* Prepare Undo record before buffer lock since undo record length is fixed */
     UndoPersistence persistence = UndoPersistenceForRelation(rel);
@@ -723,6 +739,7 @@ reacquire_buffer:
             ItemPointerGetOffsetNumber(&(tuple->ctid)));
         UndoRecordVerify(undorec);
     }
+    UHeapUpdateFSM(rel, buffer, true);
     UHeapFinalizeDML<UHEAP_INSERT>(rel, buffer, NULL, utuple, tuple, NULL, false, false);
 
     return InvalidOid;
@@ -2032,8 +2049,6 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
     RowPtr *rp = UPageGetRowPtr(page, offnum);
     Assert(RowPtrIsNormal(rp) || RowPtrIsDeleted(rp));
 
-    UHeapPagePruneFSM(relation, buffer, fxid, page, blkno);
-
     UHeapResetWaitTimeForTDSlot();
 
 check_tup_satisfies_update:
@@ -2314,8 +2329,7 @@ check_tup_satisfies_update:
         UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
         UndoRecordVerify(undorec);
     }
-
-    
+    UHeapUpdateFSM(relation, buffer, true);
     UHeapFinalizeDML<UHEAP_DELETE>(relation, buffer, NULL, &utuple, NULL, &(utuple.ctid), hasTupLock, false);
 
     return TM_Ok;
@@ -3324,7 +3338,10 @@ check_tup_satisfies_update:
         UndoRecord *newundorec = (*urecvec)[1];
         UndoRecordVerify(newundorec);
     }
-
+    UHeapUpdateFSM(relation, buffer, true);
+    if (!useInplaceUpdate) {
+        UHeapUpdateFSM(relation, newbuf, true);
+    }
     UHeapFinalizeDML<UHEAP_UPDATE>(relation, buffer, &newbuf, newtup, uheaptup, &(oldtup.ctid),
         haveTupleLock, useInplaceUpdate);
     if (oldKeyTuple != NULL && isOldTupleCopied) {
@@ -3900,6 +3917,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
          * We just extended the number of slots.
          * Return first slot from the extended ones.
          */
+        UHeapRecordPotentialFreeSpace(buf, -1 * nExtended * sizeof(TD));
         ereport(DEBUG5, (errmsg("TD array extended by %d slots for Rel: %s, blkno: %d",
             nExtended, RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
         pgstat_report_waitstatus(oldStatus);
@@ -4268,9 +4286,10 @@ void UHeapFreezeOrInvalidateTuples(Buffer buf, int nSlots, const int *slots, boo
                         /*
                          
                          * the corresponding slot is being marked as frozen.
-                         * So, marking it as dead.
+                         * So, marking it as unused.
                          */
-                        RowPtrSetDead(rowptr);
+                        RowPtrSetUnused(rowptr);
+                        UPageSetHasFreeLinePointers(page);
                     } else {
                         tupHdr = (UHeapDiskTuple)UPageGetRowData(page, rowptr);
                         UHeapTupleHeaderSetTDSlot(tupHdr, UHEAPTUP_SLOT_FROZEN);
