@@ -2638,6 +2638,18 @@ opt_cursor_returntype:  /* empty */
                             }
                             $$ = $2;
                         }
+                    | K_RETURN record_var
+                        {
+                            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                                const char* message = "cursor return type is only supposed in A compatibility";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                        (errcode(ERRCODE_SYNTAX_ERROR),
+                                         errmsg("cursor return type is only supposed in A compatibility")));
+                            }
+                            PLpgSQL_type* var_type = (PLpgSQL_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$2];
+                            $$ = var_type;
+                        }
                     ;
 
 
