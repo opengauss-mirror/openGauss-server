@@ -364,7 +364,12 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             if (p2walker((Node*)((TidScan*)node)->tidquals, context))
                 return true;
             break;
-
+        case T_TidRangeScan:
+            if (walk_scan_node_fields((Scan*)node, walker, context))
+                return true;
+            if (p2walker((Node*)((TidRangeScan*)node)->tidrangequals, context))
+                return true;
+            break;
         case T_VecSubqueryScan:
         case T_SubqueryScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))

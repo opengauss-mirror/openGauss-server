@@ -2628,6 +2628,42 @@ TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals)
 }
 
 /*
+ * create_tidrangescan_path
+ *	  Creates a path corresponding to a scan by a range of TIDs, returning
+ *	  the pathnode.
+ */
+TidRangePath* create_tidrangescan_path(PlannerInfo* root, RelOptInfo* rel, List* tidrangequals)
+{
+    TidRangePath* pathnode = makeNode(TidRangePath);
+
+    pathnode->path.pathtype = T_TidRangeScan;
+    pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
+    pathnode->path.param_info = NULL; /* never parameterized at present */
+    pathnode->path.pathkeys = NIL;    /* always unordered */
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
+
+    pathnode->tidrangequals = tidrangequals;
+
+#ifdef STREAMPLAN
+    if (IS_STREAM_PLAN) {
+        pathnode->path.distribute_keys = rel->distribute_keys;
+        pathnode->path.locator_type = rel->locator_type;
+        pathnode->path.rangelistOid = rel->rangelistOid;
+
+        /* add location information for TID scan path */
+        RangeTblEntry* rte = root->simple_rte_array[rel->relid];
+        Distribution* distribution = ng_get_baserel_data_distribution(rte->relid, rte->relkind);
+        ng_copy_distribution(&pathnode->path.distribution, distribution);
+    }
+#endif
+
+    cost_tidrangescan(&pathnode->path, root, rel, tidrangequals, pathnode->path.param_info);
+
+    return pathnode;
+}
+
+/*
  * append_collect_upper_params
  *    Collect the upper params from the sub-path list.
  */

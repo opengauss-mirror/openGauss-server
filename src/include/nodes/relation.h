@@ -749,6 +749,8 @@ typedef struct PlannerTargets {
 /* Convenience macro to get a sort/group refno from a PathTarget */
 #define get_pathtarget_sortgroupref(target, colno) ((target)->sortgrouprefs ? (target)->sortgrouprefs[colno] : (Index)0)
 
+/* Bitmask of flags supported by table AMs */
+#define AMFLAG_HAS_TID_RANGE (1 << 0)
 typedef struct RelOptInfo {
     NodeTag type;
 
@@ -856,6 +858,9 @@ typedef struct RelOptInfo {
     List* varEqRatio;
 
     bool is_ustore;
+
+    uint32  amflags;		/* Bitmask of optional features supported by
+                                 * the table AM */
 
     /*
      * The alternative rel for cost-based query rewrite
@@ -1317,6 +1322,18 @@ typedef struct TidPath {
     Path path;
     List* tidquals; /* qual(s) involving CTID = something */
 } TidPath;
+
+/*
+ * TidRangePath represents a scan by a continguous range of TIDs
+ *
+ * tidrangequals is an implicitly AND'ed list of qual expressions of the form
+ * "CTID relop pseudoconstant", where relop is one of >,>=,<,<=.
+ */
+typedef struct TidRangePath
+{
+    Path		path;
+    List	   *tidrangequals;
+} TidRangePath;
 
 /*
  * SubqueryScanPath represents a scan of an unflattened subquery-in-FROM

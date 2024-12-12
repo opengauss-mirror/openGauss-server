@@ -69,6 +69,10 @@ typedef struct TableScanDescData
     ScanKey         rs_key;       /* array of scan key descriptors */
     bool rs_pageatatime;  /* verify visibility page-at-a-time? */
 
+    /* Range of ItemPointers for tableam_scan_getnextslot_tidrange() to scan. */
+    ItemPointerData rs_mintid;
+    ItemPointerData rs_maxtid;
+
     /*
      * Information about type and behaviour of the scan, a bitmask of members
      * of the ScanOptions enum (see tableam.h).
@@ -78,6 +82,8 @@ typedef struct TableScanDescData
     /* state set up at initscan time */
     BlockNumber rs_nblocks;           /* number of blocks to scan */
     BlockNumber rs_startblock;        /* block # to start at */
+    BlockNumber rs_numblocks;         /* max number of blocks to scan */
+
     BufferAccessStrategy rs_strategy; /* access strategy for reads */
     bool rs_syncscan;                 /* report location to syncscan logic? */
 
@@ -498,6 +504,11 @@ extern bool ResolveCminCmaxDuringDecoding(
     struct HTAB* tuplecid_data, Snapshot snapshot, HeapTuple htup, Buffer buffer, CommandId* cmin, CommandId* cmax);
 extern TableScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     uint32 flags, ParallelHeapScanDesc parallel_scan, RangeScanInRedis rangeScanInRedis = {false, 0, 0});
+extern void heap_set_tidrange(TableScanDesc sscan, ItemPointer mintid,
+                              ItemPointer maxtid);
+extern bool heap_getnextslot_tidrange(TableScanDesc sscan,
+                                      ScanDirection direction,
+                                      TupleTableSlot *slot);
 #ifdef USE_SPQ
 extern Relation try_table_open(Oid relationId, LOCKMODE lockmode);
 #endif

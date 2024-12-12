@@ -44,7 +44,7 @@ typedef enum ScanOptions {
     SO_TYPE_SAMPLESCAN = 1 << 2,
     SO_TYPE_ANALYZE = 1 << 3,
     SO_TYPE_TIDSCAN = 1 << 8,
-
+    SO_TYPE_TIDRANGESCAN = 1 << 9,
     /* several of SO_ALLOW_* may be specified */
     /* allow or disallow use of access strategy */
     SO_ALLOW_STRAT = 1 << 4,
@@ -388,6 +388,35 @@ typedef struct TableAmRoutine {
         bool allow_sync, RangeScanInRedis rangeScanInRedis);
 
     TableScanDesc (*scan_begin_parallel)(Relation relation, ParallelHeapScanDesc parallel_scan);
+
+    /*-----------
+     * Optional functions to provide scanning for ranges of ItemPointers.
+     * Implementations must either provide both of these functions, or neither
+     * of them.
+     *
+     * Implementations of scan_set_tidrange must themselves handle
+     * ItemPointers of any value. i.e, they must handle each of the following:
+     *
+     * 1) mintid or maxtid is beyond the end of the table; and
+     * 2) mintid is above maxtid; and
+     * 3) item offset for mintid or maxtid is beyond the maximum offset
+     * allowed by the AM.
+     *
+     * Implementations can assume that scan_set_tidrange is always called
+     * before can_getnextslot_tidrange or after scan_rescan and before any
+     * further calls to scan_getnextslot_tidrange.
+     */
+    void		(*scan_set_tidrange) (TableScanDesc scan,
+                                      ItemPointer mintid,
+                                      ItemPointer maxtid);
+
+    /*
+     * Return next tuple from `scan` that's in the range of TIDs defined by
+     * scan_set_tidrange.
+     */
+    bool		(*scan_getnextslot_tidrange) (TableScanDesc scan,
+                                              ScanDirection direction,
+                                              TupleTableSlot *slot);
 
     /*
      * Re scan
@@ -901,6 +930,67 @@ static inline void tableam_tuple_abort_speculative(Relation relation, Tuple tupl
 static inline bool tableam_tuple_check_compress(Relation relation, Tuple tuple)
 {
     return relation->rd_tam_ops->tuple_check_compress(tuple);
+}
+
+/* ----------------------------------------------------------------------------
+ * TID Range scanning related functions.
+ * ----------------------------------------------------------------------------
+ */
+
+/*
+ * tableam_beginscan_tidrange is the entry point for setting up a TableScanDesc
+ * for a TID range scan.
+ */
+static inline TableScanDesc tableam_beginscan_tidrange(
+    Relation rel,
+    Snapshot snapshot,
+    ItemPointer mintid,
+    ItemPointer maxtid)
+{
+    TableScanDesc sscan;
+    uint32		flags = SO_TYPE_TIDRANGESCAN | SO_ALLOW_PAGEMODE;
+
+    sscan = rel->rd_tam_ops->scan_begin(rel, snapshot, 0, NULL, { false, 0, 0 });
+    /* Set the range of TIDs to scan */
+    sscan->rs_flags = flags;
+    sscan->rs_rd->rd_tam_ops->scan_set_tidrange(sscan, mintid, maxtid);
+    
+    return sscan;
+}
+
+/*
+ * tableam_rescan_tidrange resets the scan position and sets the minimum and
+ * maximum TID range to scan for a TableScanDesc created by
+ * tableam_beginscan_tidrange.
+ */
+static inline void tableam_rescan_tidrange(
+    TableScanDesc sscan,
+    ItemPointer mintid,
+    ItemPointer maxtid)
+{
+    /* Ensure tableam_beginscan_tidrange() was used. */
+    Assert((sscan->rs_flags & SO_TYPE_TIDRANGESCAN) != 0);
+
+    sscan->rs_rd->rd_tam_ops->scan_rescan(sscan, NULL);
+    sscan->rs_rd->rd_tam_ops->scan_set_tidrange(sscan, mintid, maxtid);
+}
+
+/*
+ * Fetch the next tuple from `sscan` for a TID range scan created by
+ * tableam_beginscan_tidrange().  Stores the tuple in `slot` and returns true,
+ * or returns false if no more tuples exist in the range.
+ */
+static inline bool tableam_scan_getnextslot_tidrange(
+    TableScanDesc sscan,
+    ScanDirection direction,
+    TupleTableSlot *slot)
+{
+    /* Ensure tableam_beginscan_tidrange() was used. */
+    Assert((sscan->rs_flags & SO_TYPE_TIDRANGESCAN) != 0);
+
+    return sscan->rs_rd->rd_tam_ops->scan_getnextslot_tidrange(sscan,
+                                                               direction,
+                                                               slot);
 }
 
 /* -----------------------------------------------------------------------

@@ -174,7 +174,8 @@ extern bool ItemPointerEquals(ItemPointer pointer1, ItemPointer pointer2);
 /* for upgrade from existed session, syscache has builtin tuple, AssertMacro(ItemPointerIsValid(pointer)) will fail */
 extern bool ItemPointerEqualsNoCheck(ItemPointer pointer1, ItemPointer pointer2);
 extern int32 ItemPointerCompare(ItemPointer arg1, ItemPointer arg2);
-
+extern void ItemPointerInc(ItemPointer pointer);
+extern void ItemPointerDec(ItemPointer pointer);
 /* --------------------------------------------------------
  *      support macros for dfs ItemPointer
  *

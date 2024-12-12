@@ -336,6 +336,15 @@ TableScanDesc HeapamBeginscanParallel(Relation relation, ParallelHeapScanDesc pa
     return heap_beginscan_internal(relation, SnapshotAny, 0, NULL, flags, parallel_scan);
 }
 
+void HeapSetTidrange(TableScanDesc sscan, ItemPointer mintid, ItemPointer maxtid)
+{
+    return heap_set_tidrange(sscan, mintid, maxtid);
+}
+
+bool HeapGetnextslotTidrange(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot)
+{
+    return heap_getnextslot_tidrange(sscan, direction, slot);
+}
 // The heap am implementation of abstract method scan_getnexttuple
 Tuple HeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL)
 {
@@ -501,6 +510,8 @@ static const TableAmRoutine g_heapam_methods = {
     scan_begin_bm : HeapamScanBeginBm,
     scan_begin_sampling : HeapamScanBeginSampling,
     scan_begin_parallel: HeapamBeginscanParallel,
+    scan_set_tidrange: HeapSetTidrange,
+    scan_getnextslot_tidrange: HeapGetnextslotTidrange,
     scan_rescan : HeapamScanRescan,
     scan_restrpos : HeapamScanRestrpos,
     scan_markpos : HeapamScanMarkpos,
@@ -1236,7 +1247,6 @@ static const TableAmRoutine g_ustoream_methods = {
     tuple_check_visible : UHeapamTupleCheckVisible,
     tuple_abort_speculative : UHeapamAbortSpeculative,
     tuple_check_compress: UHeapamTupleCheckCompress,
-
 
     /* ------------------------------------------------------------------------
      * DDL AM APIs

@@ -1580,6 +1580,15 @@ static void _outTidScan(StringInfo str, TidScan* node)
     WRITE_NODE_FIELD(tidquals);
 }
 
+static void _outTidRangeScan(StringInfo str, TidRangeScan *node)
+{
+    WRITE_NODE_TYPE("TIDRANGESCAN");
+
+    _outScanInfo(str, (Scan *) node);
+
+    WRITE_NODE_FIELD(tidrangequals);
+}
+
 static void _outPartIteratorParam(StringInfo str, PartIteratorParam* node)
 {
     WRITE_NODE_TYPE("PARTITERATORPARAM");
@@ -3469,6 +3478,15 @@ static void _outTidPath(StringInfo str, TidPath* node)
     _outPathInfo(str, (Path*)node);
 
     WRITE_NODE_FIELD(tidquals);
+}
+
+static void _outTidRangePath(StringInfo str, TidRangePath *node)
+{
+    WRITE_NODE_TYPE("TIDRANGEPATH");
+
+    _outPathInfo(str, (Path *) node);
+
+    WRITE_NODE_FIELD(tidrangequals);
 }
 
 static void _outPartIteratorPath(StringInfo str, PartIteratorPath* node)
@@ -6746,6 +6764,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_TidScan:
                 _outTidScan(str, (TidScan*)obj);
                 break;
+            case T_TidRangeScan:
+                _outTidRangeScan(str, (TidRangeScan*)obj);
+                break;
             case T_PartIteratorParam:
                 _outPartIteratorParam(str, (PartIteratorParam*)obj);
                 break;
@@ -7015,6 +7036,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_TidPath:
                 _outTidPath(str, (TidPath*)obj);
+                break;
+            case T_TidRangePath:
+                _outTidRangePath(str, (TidRangePath*)obj);
                 break;
             case T_PartIteratorPath:
                 _outPartIteratorPath(str, (PartIteratorPath*)obj);

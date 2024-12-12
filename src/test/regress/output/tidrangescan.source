@@ -1,0 +1,245 @@
+-- tests for tidrangescans
+-- empty table
+set enable_seqscan to off;
+create table trs_empty(id int);
+analyze trs_empty;
+explain (costs off)
+select * from trs_empty where ctid < '(1,0)';
+            QUERY PLAN             
+-----------------------------------
+ Tid Range Scan on trs_empty
+   TID Cond: (ctid < '(1,0)'::tid)
+(2 rows)
+
+select * from trs_empty where ctid < '(1,0)';
+ id 
+----
+(0 rows)
+
+explain (costs off)
+select * from trs_empty where ctid > '(9,0)';
+            QUERY PLAN             
+-----------------------------------
+ Tid Range Scan on trs_empty
+   TID Cond: (ctid > '(9,0)'::tid)
+(2 rows)
+
+select * from trs_empty where ctid > '(9,0)';
+ id 
+----
+(0 rows)
+
+set enable_seqscan to on;
+-- table with 10 full pages
+create table trs_10p as select generate_series(1, 2260) id;
+analyze trs_10p;
+explain 
+select * from trs_10p where ctid < '(1,0)';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Tid Range Scan on trs_10p  (cost=0.00..7.37 rows=237 width=4)
+   TID Cond: (ctid < '(1,0)'::tid)
+(2 rows)
+
+select count(*) from trs_10p where ctid < '(1,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain 
+select * from trs_10p where ctid > '(9,0)';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Tid Range Scan on trs_10p  (cost=0.00..5.19 rows=119 width=4)
+   TID Cond: (ctid > '(9,0)'::tid)
+(2 rows)
+
+select count(*) from trs_10p where ctid > '(9,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain 
+select * from trs_10p where ctid >= '(5,0)' and ctid <= '(6,0)';
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Tid Range Scan on trs_10p  (cost=0.01..7.37 rows=237 width=4)
+   TID Cond: ((ctid >= '(5,0)'::tid) AND (ctid <= '(6,0)'::tid))
+(2 rows)
+
+select count(*) from trs_10p where ctid >= '(5,0)' and ctid <= '(6,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain
+select * from trs_10p where ctid between '(5,0)' and '(6,0)';
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Tid Range Scan on trs_10p  (cost=0.01..7.37 rows=237 width=4)
+   TID Cond: ((ctid >= '(5,0)'::tid) AND (ctid <= '(6,0)'::tid))
+(2 rows)
+
+select count(*) from trs_10p where ctid between '(5,0)' and '(6,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain
+select * from trs_10p where ctid < '(1,0)' limit 10;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit  (cost=0.00..0.31 rows=10 width=4)
+   ->  Tid Range Scan on trs_10p  (cost=0.00..7.37 rows=237 width=4)
+         TID Cond: (ctid < '(1,0)'::tid)
+(3 rows)
+
+select count(*) from trs_10p where ctid < '(1,0)' limit 10;
+ count 
+-------
+   226
+(1 row)
+
+update trs_10p set id = 1000000 where id = 1;
+select count(*) from trs_10p where ctid < '(1,0)';
+ count 
+-------
+   225
+(1 row)
+
+-- table with more than 65536 pages
+create table trs_gt_65536p as select generate_series(1, 15000000) id;
+analyze trs_gt_65536p;
+explain (costs off)
+select * from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0)';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Tid Range Scan on trs_gt_65536p
+   TID Cond: ((ctid > '(65530,0)'::tid) AND (ctid < '(65540,0)'::tid))
+(2 rows)
+
+select count(*) from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0)';
+ count 
+-------
+  2260
+(1 row)
+
+-- table larger than 3 files (one file is approximately 131072 pages)
+create table trs_gt_3f as select generate_series(1, 100000000) id;
+analyze trs_gt_3f;
+explain 
+select * from trs_gt_3f where ctid > '(131000,0)' and ctid < '(262150,0)';
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Tid Range Scan on trs_gt_3f  (cost=0.01..427553.33 rows=29639932 width=4)
+   TID Cond: ((ctid > '(131000,0)'::tid) AND (ctid < '(262150,0)'::tid))
+(2 rows)
+
+select count(*) from trs_gt_3f where ctid > '(131000,0)' and ctid < '(262150,0)';
+  count   
+----------
+ 29639900
+(1 row)
+
+-- ustore
+create table trs_ustore with (storage_type=ustore) as select generate_series(1, 2260) id;
+analyze trs_ustore;
+explain 
+select * from trs_ustore where ctid > '(9,0)';
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on trs_ustore  (cost=0.00..34.25 rows=1 width=4)
+   Filter: (ctid > '(9,0)'::tid)
+(2 rows)
+
+select count(*) from trs_ustore where ctid > '(9,0)';
+ count 
+-------
+     0
+(1 row)
+
+-- segment store
+create table trs_seg with (segment=on) as select generate_series(1, 2260) id;
+analyze trs_seg;
+explain 
+select * from trs_seg where ctid < '(1,0)';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Tid Range Scan on trs_seg  (cost=0.00..7.37 rows=237 width=4)
+   TID Cond: (ctid < '(1,0)'::tid)
+(2 rows)
+
+select count(*) from trs_seg where ctid < '(1,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain 
+select * from trs_seg where ctid > '(9,0)';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Tid Range Scan on trs_seg  (cost=0.00..5.19 rows=119 width=4)
+   TID Cond: (ctid > '(9,0)'::tid)
+(2 rows)
+
+select count(*) from trs_seg where ctid > '(9,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain 
+select * from trs_seg where ctid >= '(5,0)' and ctid <= '(6,0)';
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Tid Range Scan on trs_seg  (cost=0.01..7.37 rows=237 width=4)
+   TID Cond: ((ctid >= '(5,0)'::tid) AND (ctid <= '(6,0)'::tid))
+(2 rows)
+
+select count(*) from trs_seg where ctid >= '(5,0)' and ctid <= '(6,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain
+select * from trs_seg where ctid between '(5,0)' and '(6,0)';
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Tid Range Scan on trs_seg  (cost=0.01..7.37 rows=237 width=4)
+   TID Cond: ((ctid >= '(5,0)'::tid) AND (ctid <= '(6,0)'::tid))
+(2 rows)
+
+select count(*) from trs_seg where ctid between '(5,0)' and '(6,0)';
+ count 
+-------
+   226
+(1 row)
+
+explain
+select * from trs_seg where ctid < '(1,0)' limit 10;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit  (cost=0.00..0.31 rows=10 width=4)
+   ->  Tid Range Scan on trs_seg  (cost=0.00..7.37 rows=237 width=4)
+         TID Cond: (ctid < '(1,0)'::tid)
+(3 rows)
+
+select count(*) from trs_seg where ctid < '(1,0)' limit 10;
+ count 
+-------
+   226
+(1 row)
+
+update trs_seg set id = 1000000 where id = 1;
+select count(*) from trs_seg where ctid < '(1,0)';
+ count 
+-------
+   225
+(1 row)
+

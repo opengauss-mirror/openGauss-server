@@ -990,6 +990,7 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
         case T_VecSubqueryScan:
         case T_FunctionScan:
         case T_TidScan:
+        case T_TidRangeScan:
         case T_Group:
         case T_VecGroup:
         case T_VecAgg:

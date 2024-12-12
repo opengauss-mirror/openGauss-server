@@ -108,6 +108,9 @@ typedef FormData_pg_operator *Form_pg_operator;
 #define TEXTEQOID 98
 #define TIDEqualOperator   387
 #define TIDLessOperator    2799
+#define TIDGreaterOperator 2800
+#define TIDLessEqOperator 2801
+#define TIDGreaterEqOperator 2802
 #define INT8EQOID    410
 #define INT8NEOID    411
 #define INT8LTOID    412

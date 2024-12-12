@@ -76,6 +76,7 @@ extern BitmapHeapPath* create_bitmap_heap_path(PlannerInfo* root, RelOptInfo* re
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);
+extern TidRangePath* create_tidrangescan_path(PlannerInfo* root, RelOptInfo* rel, List* tidrangequals);
 extern AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer);
 extern MergeAppendPath* create_merge_append_path(
     PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* pathkeys, Relids required_outer);

@@ -112,6 +112,10 @@ static BitmapHeapScan* create_bitmap_scan_plan(
 static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual,
     List** indexECs, Bitmapset** out_prefixkeys);
 static TidScan* create_tidscan_plan(PlannerInfo* root, TidPath* best_path, List* tlist, List* scan_clauses);
+static TidRangeScan *create_tidrangescan_plan(PlannerInfo *root,
+                                              TidRangePath *best_path,
+                                              List *tlist,
+                                              List *scan_clauses);
 static SubqueryScan* create_subqueryscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static FunctionScan* create_functionscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static ValuesScan* create_valuesscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -172,6 +176,8 @@ static CStoreIndexOr* make_cstoreindex_or(List* ctidplans);
 static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
     List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial);
 static TidScan* make_tidscan(List* qptlist, List* qpqual, Index scanrelid, List* tidquals);
+static TidRangeScan *make_tidrangescan(List *qptlist, List *qpqual,
+                                       Index scanrelid, List *tidrangequals);
 static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanrelid, Node* funcexpr, List* funccolnames,
     List* funccoltypes, List* funccoltypmods, List* funccolcollations);
 static ValuesScan* make_valuesscan(List* qptlist, List* qpqual, Index scanrelid, List* values_lists);
@@ -381,6 +387,7 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
         case T_SeqScan:
         case T_BitmapHeapScan:
         case T_TidScan:
+        case T_TidRangeScan:
         case T_SubqueryScan:
         case T_FunctionScan:
         case T_ValuesScan:
@@ -732,6 +739,10 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
 
         case T_TidScan:
             plan = (Plan*)create_tidscan_plan(root, (TidPath*)best_path, tlist, scan_clauses);
+            break;
+
+        case T_TidRangeScan:
+            plan = (Plan*)create_tidrangescan_plan(root, (TidRangePath*)best_path, tlist, scan_clauses);
             break;
 
         case T_SubqueryScan:
@@ -3232,6 +3243,67 @@ static TidScan* create_tidscan_plan(PlannerInfo* root, TidPath* best_path, List*
 #endif
 
     copy_path_costsize(&scan_plan->scan.plan, &best_path->path);
+
+    return scan_plan;
+}
+
+/*
+ * create_tidrangescan_plan
+ *	 Returns a tidrangescan plan for the base relation scanned by 'best_path'
+ *	 with restriction clauses 'scan_clauses' and targetlist 'tlist'.
+ */
+static TidRangeScan* create_tidrangescan_plan(PlannerInfo* root, TidRangePath* best_path, List* tlist, List* scan_clauses)
+{
+    TidRangeScan *scan_plan;
+    Index		scan_relid = best_path->path.parent->relid;
+    List	   *tidrangequals = best_path->tidrangequals;
+
+    /* it should be a base rel... */
+    Assert(scan_relid > 0);
+    Assert(best_path->path.parent->rtekind == RTE_RELATION);
+
+    {
+        List	   *qpqual = NIL;
+        ListCell   *l;
+
+        foreach(l, scan_clauses)
+        {
+            RestrictInfo *rinfo = lfirst_node(RestrictInfo, l);
+
+            if (rinfo->pseudoconstant)
+                continue;		/* we may drop pseudoconstants here */
+            if (list_member_ptr(tidrangequals, rinfo))
+                continue;		/* simple duplicate */
+            qpqual = lappend(qpqual, rinfo);
+        }
+        scan_clauses = qpqual;
+    }
+    /* Sort clauses into best execution order */
+    scan_clauses = order_qual_clauses(root, scan_clauses);
+
+    /* Reduce RestrictInfo lists to bare expressions; ignore pseudoconstants */
+    tidrangequals = extract_actual_clauses(tidrangequals, false);
+    scan_clauses = extract_actual_clauses(scan_clauses, false);
+    
+    /* Replace any outer-relation variables with nestloop params */
+    if (best_path->path.param_info)
+    {
+        tidrangequals = (List *)
+            replace_nestloop_params(root, (Node *) tidrangequals);
+        scan_clauses = (List *)
+            replace_nestloop_params(root, (Node *) scan_clauses);
+    }
+
+    scan_plan = make_tidrangescan(tlist,
+                                  scan_clauses,
+                                  scan_relid,
+                                  tidrangequals);
+
+    copy_generic_path_info(&scan_plan->scan.plan, &best_path->path);
+
+    #ifdef STREAMPLAN
+        add_distribute_info(root, &(scan_plan->scan.plan), scan_relid, &(best_path->path), scan_clauses);
+    #endif
 
     return scan_plan;
 }
@@ -6284,14 +6356,30 @@ static TidScan* make_tidscan(List* qptlist, List* qpqual, Index scanrelid, List*
     return node;
 }
 
+static TidRangeScan* make_tidrangescan(List* qptlist, List* qpqual, Index scanrelid, List* tidrangequals)
+{
+    TidRangeScan* node = makeNode(TidRangeScan);
+    Plan* plan = &node->scan.plan;
+
+    /* cost should be inserted by caller */
+    plan->targetlist = qptlist;
+    plan->qual = qpqual;
+    plan->lefttree = NULL;
+    plan->righttree = NULL;
+    node->scan.scanrelid = scanrelid;
+    node->tidrangequals = tidrangequals;
+
+    return node;
+}
+
 SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Plan* subplan)
 {
     SubqueryScan* node = makeNode(SubqueryScan);
     Plan* plan = &node->scan.plan;
 
-#ifdef STREAMPLAN
-    inherit_plan_locator_info(plan, subplan);
-#endif
+    #ifdef STREAMPLAN
+        inherit_plan_locator_info(plan, subplan);
+    #endif
 
     /*
      * Cost is figured here for the convenience of prepunion.c.  Note this is

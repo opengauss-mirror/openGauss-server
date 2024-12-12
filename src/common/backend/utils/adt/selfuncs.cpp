@@ -639,7 +639,7 @@ Datum neqsel(PG_FUNCTION_ARGS)
  * it will return a default estimate.
  */
 static double scalarineqsel(
-    PlannerInfo* root, Oid opera, bool isgt, VariableStatData* vardata, Datum constval, Oid consttype)
+    PlannerInfo* root, Oid opera, bool isgt, bool iseq, VariableStatData* vardata, Datum constval, Oid consttype)
 {
     Form_pg_statistic stats;
     FmgrInfo opproc;
@@ -650,6 +650,79 @@ static double scalarineqsel(
     bool inmcv = false;
 
     if (!HeapTupleIsValid(vardata->statsTuple)) {
+        /*
+         * No stats are available.  Typically this means we have to fall back
+         * on the default estimate; but if the variable is CTID then we can
+         * make an estimate based on comparing the constant to the table size.
+         */
+        if (vardata->var && IsA(vardata->var, Var) &&
+            ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber) {
+            ItemPointer itemptr;
+            double		block;
+            double		density;
+
+            /*
+             * If the relation's empty, we're going to include all of it.
+             * (This is mostly to avoid divide-by-zero below.)
+             */
+            if (vardata->rel->pages == 0)
+                return 1.0;
+
+            itemptr = (ItemPointer) DatumGetPointer(constval);
+            block = ItemPointerGetBlockNumberNoCheck(itemptr);
+
+            /*
+             * Determine the average number of tuples per page (density).
+             *
+             * Since the last page will, on average, be only half full, we can
+             * estimate it to have half as many tuples as earlier pages.  So
+             * give it half the weight of a regular page.
+             */
+            density = vardata->rel->tuples / (vardata->rel->pages - 0.5);
+
+            /* If target is the last page, use half the density. */
+            if (block >= vardata->rel->pages - 1)
+                density *= 0.5;
+
+            /*
+             * Using the average tuples per page, calculate how far into the
+             * page the itemptr is likely to be and adjust block accordingly,
+             * by adding that fraction of a whole block (but never more than a
+             * whole block, no matter how high the itemptr's offset is).  Here
+             * we are ignoring the possibility of dead-tuple line pointers,
+             * which is fairly bogus, but we lack the info to do better.
+             */
+            if (density > 0.0) {
+                OffsetNumber offset = ItemPointerGetOffsetNumberNoCheck(itemptr);
+
+                block += Min(offset / density, 1.0);
+            }
+
+            /*
+             * Convert relative block number to selectivity.  Again, the last
+             * page has only half weight.
+             */
+            selec = block / (vardata->rel->pages - 0.5);
+
+            /*
+             * The calculation so far gave us a selectivity for the "<=" case.
+             * We'll have one fewer tuple for "<" and one additional tuple for
+             * ">=", the latter of which we'll reverse the selectivity for
+             * below, so we can simply subtract one tuple for both cases.  The
+             * cases that need this adjustment can be identified by iseq being
+             * equal to isgt.
+             */
+            if (iseq == isgt && vardata->rel->tuples >= 1.0)
+                selec -= (1.0 / vardata->rel->tuples);
+
+            /* Finally, reverse the selectivity for the ">", ">=" cases. */
+            if (isgt)
+                selec = 1.0 - selec;
+
+            CLAMP_PROBABILITY(selec);
+            return selec;
+        }
+
         /* no stats available, so default result */
         return DEFAULT_INEQ_SEL;
     }
@@ -1142,7 +1215,7 @@ float8 scalarltsel_internal(PlannerInfo* root, Oid opera, List* args, int varRel
         isgt = true;
     }
 
-    selec = scalarineqsel(root, opera, isgt, &vardata, constval, consttype);
+    selec = scalarineqsel(root, opera, isgt, false, &vardata, constval, consttype);
 
     ReleaseVariableStats(vardata);
 
@@ -1213,7 +1286,7 @@ Datum scalargtsel(PG_FUNCTION_ARGS)
         isgt = false;
     }
 
-    selec = scalarineqsel(root, opera, isgt, &vardata, constval, consttype);
+    selec = scalarineqsel(root, opera, isgt, false, &vardata, constval, consttype);
 
     ReleaseVariableStats(vardata);
 
@@ -1752,6 +1825,13 @@ Selectivity nulltestsel(
 
                 return (Selectivity)0; /* keep compiler quiet */
         }
+    } else if (vardata.var && IsA(vardata.var, Var) &&
+       ((Var *) vardata.var)->varattno < 0) {
+        /*
+        * There are no stats for system columns, but we know they are never
+        * NULL.
+        */
+        selec = (nulltesttype == IS_NULL) ? 0.0 : 1.0;
     } else {
         /*
          * No ANALYZE stats available, so make a guess
@@ -3398,12 +3478,12 @@ void mergejoinscansel(PlannerInfo* root, Node* clause, Oid opfamily, int strateg
      * fraction that's <= the right-side maximum value.  But only believe
      * non-default estimates, else stick with our 1.0.
      */
-    selec = scalarineqsel(root, leop, isgt, &leftvar, rightmax, op_righttype);
+    selec = scalarineqsel(root, leop, isgt, true, &leftvar, rightmax, op_righttype);
     if (selec - DEFAULT_INEQ_SEL != 0)
         *leftend = selec;
 
     /* And similarly for the right variable. */
-    selec = scalarineqsel(root, revleop, isgt, &rightvar, leftmax, op_lefttype);
+    selec = scalarineqsel(root, revleop, isgt, true, &rightvar, leftmax, op_lefttype);
     if (selec - DEFAULT_INEQ_SEL != 0)
         *rightend = selec;
 
@@ -3426,12 +3506,12 @@ void mergejoinscansel(PlannerInfo* root, Node* clause, Oid opfamily, int strateg
      * minimum value.  But only believe non-default estimates, else stick with
      * our own default.
      */
-    selec = scalarineqsel(root, ltop, isgt, &leftvar, rightmin, op_righttype);
+    selec = scalarineqsel(root, ltop, isgt, false, &leftvar, rightmin, op_righttype);
     if (selec - DEFAULT_INEQ_SEL != 0)
         *leftstart = selec;
 
     /* And similarly for the right variable. */
-    selec = scalarineqsel(root, revltop, isgt, &rightvar, leftmin, op_lefttype);
+    selec = scalarineqsel(root, revltop, isgt, false, &rightvar, leftmin, op_lefttype);
     if (selec - DEFAULT_INEQ_SEL != 0)
         *rightstart = selec;
 
