@@ -30,5 +30,14 @@ select gms_i18n.string_to_raw('测试', 'euc_cn');
 select gms_i18n.string_to_raw('測試', 'big5');
 select gms_i18n.string_to_raw();
 
+create database db_i18n;
+\c db_i18n
+create schema s1_02;
+create extension gms_i18n;
+alter extension gms_i18n set schema s1_02;
+\c contrib_regression
+drop database if exists db_i18n;
+
 reset search_path;
 drop schema gms_i18n_test cascade;
+drop extension gms_i18n;

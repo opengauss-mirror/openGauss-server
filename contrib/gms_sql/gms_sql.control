@@ -2,4 +2,4 @@
 comment = 'collection of sql data for PL/SQL applications'
 default_version = '1.0'
 module_pathname = '$libdir/gms_sql'
-relocatable = true
+relocatable = false

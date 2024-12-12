@@ -2,4 +2,4 @@
 comment = 'provides the interface to initiate and control the debugging of PL/SQL applications'
 default_version = '1.0'
 module_pathname = '$libdir/gms_debug'
-relocatable = true
+relocatable = false

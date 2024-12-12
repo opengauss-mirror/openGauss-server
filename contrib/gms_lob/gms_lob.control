@@ -2,4 +2,4 @@
 comment = 'collection of stats data for PL/SQL applications'
 default_version = '1.0'
 module_pathname = '$libdir/gms_lob'
-relocatable = true
+relocatable = false
