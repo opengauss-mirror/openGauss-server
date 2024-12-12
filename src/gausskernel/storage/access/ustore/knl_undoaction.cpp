@@ -636,12 +636,8 @@ void ExecuteUndoForInsert(Relation rel, Buffer buffer, OffsetNumber off, Transac
     /* Rollback insert - increment the potential space for the Page */
     UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(rp->len));
 
-    if (RelationGetForm(rel)->relhasindex) {
-        RowPtrSetDead(rp);
-    } else {
-        RowPtrSetUnused(rp);
-        PageSetHasFreeLinePointers(page);
-    }
+    RowPtrSetUnused(rp);
+    UPageSetHasFreeLinePointers(page);
 
     UPageSetPrunable(page, xid);
 }
@@ -671,12 +667,8 @@ void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId
     /* Rollback insert - increment the potential space for the Page */
     UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(rp->len));
 
-    if (relhasindex) {
-        RowPtrSetDead(rp);
-    } else {
-        RowPtrSetUnused(rp);
-        PageSetHasFreeLinePointers(page);
-    }
+    RowPtrSetUnused(rp);
+    UPageSetHasFreeLinePointers(page);
 
     UPageSetPrunable(page, xid);
 }

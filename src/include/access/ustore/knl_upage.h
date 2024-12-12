@@ -65,6 +65,8 @@
 
 #define PageGetTDPointer(_page) ((char *)((char *)(_page) + SizeOfUHeapPageHeaderData))
 
+#define PageGetTDPointerBySlot(_page, _slot) (PageGetTDPointer(_page) + (_slot) * sizeof(TD))
+
 #define GetTDCount(_uphdr) ((_uphdr)->td_count)
 
 #define UPageGetTDSlotCount(_page) ((UHeapPageHeaderData *)(_page))->td_count
