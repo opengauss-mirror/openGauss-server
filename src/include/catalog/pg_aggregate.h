@@ -477,8 +477,8 @@ DATA(insert ( 4452 ordered_set_transition      -    percentile_cont_float8_final
 DATA(insert ( 4454 ordered_set_transition      -    percentile_cont_interval_final          0   2281    _null_   _null_ 	 o 1));
 DATA(insert (4461 ordered_set_transition - mode_final 0 2281 _null_ _null_ o 0));
 
-DATA(insert ( 3149 ordered_set_transition_multi      -    cume_dist_final            0   2281    _null_   _null_ 	 h 1));
-DATA(insert ( 3248 ordered_set_transition_multi      -    rank_final            0   2281    _null_   _null_ 	 h 1));
+DATA(insert ( 4776 ordered_set_transition_multi      -    cume_dist_final            0   2281    _null_   _null_ 	 h 1));
+DATA(insert ( 4774 ordered_set_transition_multi      -    rank_final            0   2281    _null_   _null_ 	 h 1));
 DATA(insert ( 4082 ordered_set_transition_multi      -    dense_rank_final            0   2281    _null_   _null_ 	 h 1));
 DATA(insert ( 4083 ordered_set_transition_multi      -    percent_rank_final            0   2281    _null_   _null_ 	 h 1));
 
