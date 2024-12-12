@@ -8,11 +8,11 @@ CREATE OR REPLACE FUNCTION pg_catalog.appendchildxml (xml, text, xml, text[]) RE
 
 DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, xml) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8802;
-CREATE OR REPLACE FUNCTION pg_catalog.appendchildxml (xml, text, xml) RETURNS xml LANGUAGE INTERNAL IMMUTABLE  as 'select pg_catalog.appendchildxml($1, $2, $3, ''{}''::pg_catalog.text[])'; 
+CREATE OR REPLACE FUNCTION pg_catalog.appendchildxml (xml, text, xml) RETURNS xml LANGUAGE SQL IMMUTABLE  as 'select pg_catalog.appendchildxml($1, $2, $3, ''{}''::pg_catalog.text[])'; 
 
 DROP FUNCTION IF EXISTS pg_catalog.appendchildxml(xml, text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8803;
-CREATE OR REPLACE FUNCTION pg_catalog.appendchildxml (xml, text, text) RETURNS xml LANGUAGE INTERNAL IMMUTABLE  as 'select pg_catalog.appendchildxml($1, $2, $3, ''{}''::pg_catalog.text[])';
+CREATE OR REPLACE FUNCTION pg_catalog.appendchildxml (xml, text, text) RETURNS xml LANGUAGE SQL IMMUTABLE  as 'select pg_catalog.appendchildxml($1, $2, $3, ''{}''::pg_catalog.text[])';
 
 DROP FUNCTION IF EXISTS pg_catalog.existsnode (xml, character varying) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8052;
@@ -21,12 +21,12 @@ CREATE OR REPLACE FUNCTION pg_catalog.existsnode (xml, character varying) RETURN
 DROP FUNCTION IF EXISTS pg_catalog.extract_internal (xml, character varying, text[]) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8580;
 CREATE OR REPLACE FUNCTION pg_catalog.extract_internal (xml, character varying, text[]) RETURNS xml LANGUAGE INTERNAL IMMUTABLE  as 'xmltype_extract';
-comment on function pg_catalog.extract_internal (xml, character varying, text[]) is 'evaluate XPath expression, with namespace support';
+comment on function pg_catalog.extract_internal (xml, character varying, text[]) is 'evaluate XPath expression, with namespace';
 
 DROP FUNCTION IF EXISTS pg_catalog.extract_internal (xml, character varying) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8581;
-CREATE OR REPLACE FUNCTION pg_catalog.extract_internal (xml, character varying) RETURNS xml LANGUAGE INTERNAL IMMUTABLE  as 'select pg_catalog.extract_internal($1, $2, ''{}''::pg_catalog.text[])';
-comment on function pg_catalog.extract_internal (xml, character varying) is 'evaluate XPath expression, without namespace support';
+CREATE OR REPLACE FUNCTION pg_catalog.extract_internal (xml, character varying) RETURNS xml LANGUAGE SQL IMMUTABLE  as 'select pg_catalog.extract_internal($1, $2, ''{}''::pg_catalog.text[])';
+comment on function pg_catalog.extract_internal (xml, character varying) is 'evaluate XPath expression, without namespace';
 
 DROP FUNCTION IF EXISTS pg_catalog.extractvalue (xml, character varying, text[]) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8051;
@@ -34,7 +34,7 @@ CREATE OR REPLACE FUNCTION pg_catalog.extractvalue (xml, character varying, text
 
 DROP FUNCTION IF EXISTS pg_catalog.extractvalue (xml, character varying) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8053;
-CREATE OR REPLACE FUNCTION pg_catalog.extractvalue (xml, character varying) RETURNS character varying LANGUAGE INTERNAL IMMUTABLE STRICT as 'select pg_catalog.extractvalue($1, $2, ''{}''::pg_catalog.text[])';
+CREATE OR REPLACE FUNCTION pg_catalog.extractvalue (xml, character varying) RETURNS character varying LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.extractvalue($1, $2, ''{}''::pg_catalog.text[])';
 
 DROP FUNCTION IF EXISTS pg_catalog.getstringval (xml) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8583;
