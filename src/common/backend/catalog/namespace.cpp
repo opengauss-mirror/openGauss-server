@@ -1152,9 +1152,10 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     bool isNull = false;
 
 #ifndef ENABLE_MULTIPLE_NODES
-    Oid schema_oid = get_func_namespace(HeapTupleGetOid(procTup));
+    Oid funcid = HeapTupleGetOid(procTup);
+    Oid schema_oid = get_func_namespace(funcid);
     (void)SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
-    if (IsAformatStyleFunctionOid(schema_oid) && isNull) {
+    if (IsAformatStyleFunctionOid(schema_oid, funcid) && isNull) {
         includeOut = false;
     }
     if (enable_outparam_override && includeOut) {

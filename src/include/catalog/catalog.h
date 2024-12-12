@@ -85,7 +85,6 @@ extern Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersi
 extern bool IsPackageSchemaOid(Oid relnamespace);
 extern bool IsPackageSchemaName(const char* schemaName);
 extern bool IsPldeveloper(Oid nspnamespace);
-extern bool IsAformatStyleFunctionOid(Oid relnamespace);
-extern bool IsAformatStyleFunctionName(const char* schemaName);
+extern bool IsAformatStyleFunctionOid(Oid relnamespace, Oid funcid);
 
 #endif   /* CATALOG_H */

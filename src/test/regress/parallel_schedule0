@@ -1136,7 +1136,7 @@ test: iud_heap_multi_insert
 test: enable_expr_fusion_flatten
 
 # test object type
-test: pg_object_type dump_object_type
+test: pg_object_type dump_object_type pg_anydata_type
 
 # test for on update timestamp and generated column
 test: on_update_session1 on_update_session2

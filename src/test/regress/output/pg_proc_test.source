@@ -42,7 +42,8 @@ select prokind,length(prokind),count(*) from pg_proc where oid < 16384 group by 
  prokind | length | count 
 ---------+--------+-------
 --? f       |      1 |  .*
-(1 row)
+--? p       |      1 |  .*
+(2 rows)
 
 -- The structure of function standby_statement_history must be consistent with table statement_history.
 select

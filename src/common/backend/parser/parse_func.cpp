@@ -2576,7 +2576,7 @@ static bool CheckDefaultArgs(int2vector* defaultargpos, int pronargdefaults, int
     // the pg_catalog's func can omit out param, so we don't check the defaultpos
     bool isnull = false;
     Datum namespaceDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_pronamespace, &isnull);
-    if (!isnull && IsAformatStyleFunctionOid(DatumGetObjectId(namespaceDatum))) {
+    if (!isnull && IsAformatStyleFunctionOid(DatumGetObjectId(namespaceDatum), HeapTupleGetOid(proctup))) {
         return true;
     }
     // if the func has the default args without position, we consider the position is at the end, no error
