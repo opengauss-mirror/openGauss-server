@@ -81,3 +81,9 @@ SELECT 1234567890::int4::money;
 SELECT 12345678901234567::int8::money;
 SELECT (-1234567890)::int4::money;
 SELECT (-12345678901234567)::int8::money;
+
+create table test_float_to_money(c1 money);
+insert into test_float_to_money values (1.23::float4);
+insert into test_float_to_money values (1.23::float8);
+select * from test_float_to_money;
+drop table test_float_to_money;
