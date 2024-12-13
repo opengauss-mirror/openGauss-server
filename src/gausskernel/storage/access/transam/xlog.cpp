@@ -11107,8 +11107,10 @@ void StartupXLOG(void)
     }
 
     if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING || !SSOndemandRecoveryExitNormal) {
-        if (SS_STANDBY_FAILOVER) {
-            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = ALLOW_CKPT;
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+            g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = ALLOW_CKPT;
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS %s] allow checkpoint execute.",
+                    SS_STANDBY_FAILOVER ? "failover" : "switchover")));
             pg_memory_barrier();
         }
         if (!SS_IN_ONDEMAND_RECOVERY) {
@@ -11577,7 +11579,7 @@ bool RecoveryInProgress(void)
      */
     if (!t_thrd.xlog_cxt.LocalRecoveryInProgress) {
         if (!ENABLE_DMS || (ENABLE_DMS && !SS_STANDBY_PROMOTING &&
-            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ACTIVE)) {
+            g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status == NOT_ACTIVE)) {
             return false;
         }
     }
@@ -12231,13 +12233,21 @@ void CreateCheckPoint(int flags)
             END_CRIT_SECTION();
         }
         return;
-    } else if (g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ALLOW_CKPT) {
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
+    } else if (g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status == NOT_ALLOW_CKPT) {
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS %s] do not do CreateCheckpoint during %s.",
+                SS_STANDBY_FAILOVER ? "failover" : "switchover",
+                SS_STANDBY_FAILOVER ? "failover" : "switchover")));
         return;
     } else if (SS_IN_ONDEMAND_RECOVERY && !SS_ONDEMAND_REDO_DONE) {
         /* do not allow ckpt in ondemand recovery if xlog do not redo done, for valid ckpt loc in control file */
         return;
+    } else if (SS_PRIMARY_DEMOTED &&
+        !(dms_reform_failed() || dms_reform_last_failed() || g_instance.dms_cxt.SSReformInfo.in_reform == false)) {
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform][SS switchover] do not do CreateCheckpoint during primary demoted.")));
+        return;
     }
+
 
     /* CHECKPOINT_IS_SHUTDOWN CHECKPOINT_END_OF_RECOVERY CHECKPOINT_FORCE shuld do full checkpoint */
     if (shutdown || ((unsigned int)flags & (CHECKPOINT_FORCE))) {
