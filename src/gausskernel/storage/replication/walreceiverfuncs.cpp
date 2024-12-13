@@ -349,10 +349,7 @@ bool WalRcvInProgress(void)
         }
     }
 
-    if (state != WALRCV_STOPPED)
-        return true;
-    else
-        return false;
+    return (state != WALRCV_STOPPED);
 }
 
 /*
@@ -554,26 +551,26 @@ void ShutdownWalRcv(void)
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     ThreadId walrcvpid = 0;
-    int i = 1;
 
     /*
-     * Request walreceiver to stop. Walreceiver will switch to WALRCV_STOPPED
-     * mode once it's finished, and will also request postmaster to not
-     * restart itself.
+     * in stopping or running state, we need to wait send signal to walreceiver for it to stop
+     * in starting state, we need to set walreceiver state to stopped, walreceiver will die in starting
+     * in stopped state, we can return
      */
     SpinLockAcquire(&walrcv->mutex);
     switch (walrcv->walRcvState) {
         case WALRCV_STOPPED:
-            break;
+            SpinLockRelease(&walrcv->mutex);
+            return;
         case WALRCV_STARTING:
             walrcv->walRcvState = WALRCV_STOPPED;
-            break;
+            SpinLockRelease(&walrcv->mutex);
+            return;
 
         case WALRCV_RUNNING:
             walrcv->walRcvState = WALRCV_STOPPING;
-            // fall through
+            break;
         case WALRCV_STOPPING:
-            walrcvpid = walrcv->pid;
             break;
     }
     SpinLockRelease(&walrcv->mutex);
@@ -585,32 +582,24 @@ void ShutdownWalRcv(void)
 
     ereport(LOG, (errmsg("startup shut down walreceiver.")));
     /*
-     * Signal walreceiver process if it was still running.
-     */
-    if (walrcvpid != 0)
-        (void)gs_signal_send(walrcvpid, SIGTERM);
-
-    /*
      * Wait for walreceiver to acknowledge its death by setting state to
      * WALRCV_STOPPED.
      */
-    while (WalRcvInProgress()) {
-        /*
-         * This possibly-long loop needs to handle interrupts of startup
-         * process.
-         */
-        RedoInterruptCallBack();
-        pg_usleep(100000); /* 100ms */
-
+    for (int i = 1;; i++) {
         SpinLockAcquire(&walrcv->mutex);
         walrcvpid = walrcv->pid;
         SpinLockRelease(&walrcv->mutex);
-
         if ((walrcvpid != 0) && (i % 2000 == 0)) {
             (void)gs_signal_send(walrcvpid, SIGTERM);
+            /* reset i after send signal */
             i = 1;
         }
-        i++;
+        if (!WalRcvInProgress()) {
+            break;
+        }
+        /* This possibly-long loop needs to handle interrupts of startup process. */
+        RedoInterruptCallBack();
+        pg_usleep(100000);
     }
 }
 
