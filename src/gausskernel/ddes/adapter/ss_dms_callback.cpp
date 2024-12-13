@@ -435,7 +435,7 @@ static int CBSwitchoverDemote(void *db_handle)
         if (pmState == PM_RUN && g_instance.dms_cxt.SSClusterState == NODESTATE_PROMOTE_APPROVE) {
             SSResetDemoteReqType();
             ereport(LOG,
-                (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Success in %s primary demote, running as"
+                (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Success in %s primary demote, running as "
                     "standby, waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
             return DMS_SUCCESS;
         } else {
@@ -1824,6 +1824,7 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] begin to set currrent DSS as primary")));
+        g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ALLOW_CKPT;
         SSGrantDSSWritePermission();
         g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     }
@@ -1996,7 +1997,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
         if (rs_cxt->role == DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.dw_init = false;
-            /* variable set order: SharedRecoveryInProgress -> failover_ckpt_status -> dms_role */
+            /* variable set order: SharedRecoveryInProgress -> reform_ckpt_status -> dms_role */
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             SpinLockAcquire(&xlogctl->info_lck);
             xlogctl->IsRecoveryDone = false;
@@ -2004,7 +2005,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
             SpinLockRelease(&xlogctl->info_lck);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
             pg_memory_barrier();
-            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ALLOW_CKPT;
+            g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ALLOW_CKPT;
             g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
 
             /* 
@@ -2108,7 +2109,7 @@ static int CBReformDoneNotify(void *db_handle)
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
-    g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
+    g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ACTIVE;
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     g_instance.dms_cxt.SSReformInfo.new_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] new cluster node bitmap: %lu",
