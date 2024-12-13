@@ -130,6 +130,54 @@ static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup
     return check_search_path_interface(func->fn_searchpath->schemas, proc_tup);
 }
 
+bool reload_proc_tuple_if_necessary(HeapTuple* proc_tup, Oid func_oid)
+{
+    AcceptInvalidationMessages();
+    if (likely(!ResourceOwnerTupleDead(t_thrd.utils_cxt.CurrentResourceOwner, *proc_tup))) {
+        return false;
+    }
+    ReleaseSysCache(*proc_tup);
+    *proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    if (!HeapTupleIsValid(*proc_tup)) {
+        ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for function %u, while compile function", func_oid),
+                errcause("Cache does not exist or compilation environment has changed."),
+                erraction("Please clean up the compilation cache and try again.")));
+    }
+    return true;
+}
+
+static void check_proc_args_type_match(FunctionCallInfo fcinfo, HeapTuple proc_tup, Form_pg_proc proc_struct)
+{
+    short nargs = Min(fcinfo->nargs, proc_struct->pronargs);
+    if (nargs <= 0) {
+        return;
+    }
+    oidvector* proargs = ProcedureGetArgTypes(proc_tup);
+
+    for (short i = 0; i < nargs; i++) {
+        if (IsPolymorphicType(proargs->values[i]) || !OidIsValid(fcinfo->argTypes[i])) {
+            continue;
+        }
+
+        if (TypeCategory(proargs->values[i]) == TYPCATEGORY_STRING &&
+            TypeCategory(fcinfo->argTypes[i]) == TYPCATEGORY_STRING) {
+            continue;
+        }
+
+        if (OidIsValid(get_element_type(fcinfo->argTypes[i])) &&
+            get_element_type(fcinfo->argTypes[i]) == get_element_type(proargs->values[i])) {
+            continue;
+        }
+
+        if (fcinfo->argTypes[i] != proargs->values[i]) {
+            ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                    errmsg("type of function %u args have been changed, while the function maybe rebuilt",
+                           fcinfo->flinfo->fn_oid)));
+        }
+    }
+}
+
 PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, bool isRecompile)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
@@ -185,7 +233,19 @@ PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, b
     /* Locking is performed before compilation. */
     gsplsql_lock_func_pkg_dependency_all(func_oid, PLSQL_FUNCTION_OBJ);
 #endif
- 
+
+    if (reload_proc_tuple_if_necessary(&proc_tup, func_oid)) {
+        proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
+        func = NULL;
+    }
+
+    /*
+     * perhaps function would be rebuilt, and args type maybe changed.
+     * Coredump may occur if the input parameters are treated as other types,
+     * so throw error directly.
+     */
+    check_proc_args_type_match(fcinfo, proc_tup, proc_struct);
+
 recheck:
     if (func == NULL) {
         /* Compute hashkey using function signature and actual arg types */
@@ -679,8 +739,6 @@ static bool CheckPipelinedResIsTuple(Form_pg_type type_struct) {
 
 static void plpgsql_add_param_initdatums(int *newvarnos, int newnum, int** oldvarnos, int oldnum)
 {
-    int i;
-    int n = 0;
     int *varnos = NULL;
     errno_t rc = 0;
     varnos = (int*)palloc(sizeof(int) * (newnum + oldnum));
@@ -4261,7 +4319,6 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
 List* search_external_nest_type(char* name, Oid typeOid, int layer, List* nest_typnames, PLpgSQL_nest_type* cur_ntype)
 {
     HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
-    PLpgSQL_nest_type* nntype = NULL;
     int typmod = -1;
     int natts = 1;
     layer++;
