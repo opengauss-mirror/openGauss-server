@@ -38,12 +38,27 @@
     do                                     \
 
 
+#ifdef FRONTEND
+// for bin
 #define RETRY_ON_CONNECT_ERR                                                       \
     if (errno == ERR_DSS_CONNECT_FAILED && _retry_on_connect_err_count < 1000) {   \
         pg_usleep(5000L);                                                          \
         _retry_on_connect_err_count++;                                             \
         continue;                                                                  \
     }
+#else
+// for gaussdb
+#include "utils/elog.h"
+#define RETRY_ON_CONNECT_ERR                                                               \
+    if (errno == ERR_DSS_CONNECT_FAILED && _retry_on_connect_err_count < 1000) {           \
+        if (_retry_on_connect_err_count == 0) {                                            \
+            ereport(WARNING, (errmsg("dss connect failed, start wait and retry.")));       \
+        }                                                                                  \
+        pg_usleep(5000L);                                                                  \
+        _retry_on_connect_err_count++;                                                     \
+        continue;                                                                          \
+    }
+#endif
 
 
 #define RETRY_ON_CONNECT_ERR_END   \
