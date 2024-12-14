@@ -29,7 +29,7 @@
 #include "utils/atomic.h"
 #include "utils/snapshot.h"
 #include "access/multi_redo_settings.h"
-
+#include "c.h"
 
 /*
  * Each backend advertises up to PGPROC_MAX_CACHED_SUBXIDS TransactionIds
@@ -475,9 +475,30 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 #define NUM_DMS_SMON_CALLBACK_PROC (2) // smon + smon_recycle
 #define NUM_DMS_PARALLEL_CALLBACK_PROC (g_instance.attr.attr_storage.dms_attr.parallel_thread_num <= 1 ? 0 : \
                                         g_instance.attr.attr_storage.dms_attr.parallel_thread_num)
-#define NUM_DMS_PRIO_CNT 4
-#define NUM_DMS_RECV_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.channel_count * \
-    (g_instance.attr.attr_storage.dms_attr.inst_count - 1) * NUM_DMS_PRIO_CNT)
+
+#define NUM_DMS_CKPT_NOTIFY_TASK_RATIO (1.0f / 32)
+#define NUM_DMS_CLEAN_EDP_TASK_RATIO (1.0f / 32)
+#define NUM_DMS_DERIVED_TASK_RATIO (1.0f / 8)
+#define NUM_DMS_RECV_WORK_THREAD_RATIO (1.0f / 4)
+
+#define NUM_DMS_WORK_THREAD_PRIO_0_2    (4)
+#define NUM_DMS_WORK_THREAD_PRIO_3      Max(1, (uint32)(NUM_DMS_WORK_THREAD_PROCS * NUM_DMS_CKPT_NOTIFY_TASK_RATIO))
+#define NUM_DMS_WORK_THREAD_PRIO_4      Max(1, (uint32)(NUM_DMS_WORK_THREAD_PROCS * NUM_DMS_CLEAN_EDP_TASK_RATIO))
+#define NUM_DMS_WORK_THREAD_PRIO_5      Max(1, (uint32)(NUM_DMS_WORK_THREAD_PROCS * NUM_DMS_DERIVED_TASK_RATIO))
+
+#define NUM_DMS_RECV_THREAD_PRIO_0_2    (3)
+#define NUM_DMS_RECV_THREAD_PRIO_3 Max(1, (uint32)(NUM_DMS_WORK_THREAD_PRIO_3 * NUM_DMS_RECV_WORK_THREAD_RATIO))
+#define NUM_DMS_RECV_THREAD_PRIO_4 Max(1, (uint32)(NUM_DMS_WORK_THREAD_PRIO_4 * NUM_DMS_RECV_WORK_THREAD_RATIO))
+#define NUM_DMS_RECV_THREAD_PRIO_5 Max(1, (uint32)(NUM_DMS_WORK_THREAD_PRIO_5 * NUM_DMS_RECV_WORK_THREAD_RATIO))
+#define NUM_DMS_RECV_THREAD_PRIO_6 \
+        Max(1, (uint32)((NUM_DMS_WORK_THREAD_PROCS - NUM_DMS_WORK_THREAD_PRIO_0_2 - \
+        NUM_DMS_WORK_THREAD_PRIO_3 - NUM_DMS_WORK_THREAD_PRIO_4 - NUM_DMS_WORK_THREAD_PRIO_5) * \
+        NUM_DMS_RECV_WORK_THREAD_RATIO))
+#define NUM_DMS_SENDER_MONITOR_THREAD     (1)
+#define NUM_DMS_RECV_THREAD_CNT \
+        (NUM_DMS_RECV_THREAD_PRIO_0_2 + NUM_DMS_RECV_THREAD_PRIO_3 + NUM_DMS_RECV_THREAD_PRIO_4 + \
+        NUM_DMS_RECV_THREAD_PRIO_5 + NUM_DMS_RECV_THREAD_PRIO_6 + NUM_DMS_SENDER_MONITOR_THREAD)
+
 #define NUM_DMS_MAX_WORK_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt)
 #define NUM_DMS_WORK_SCHEDULER_PROC (1)
 #define NUM_DMS_RDMA_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt != 0 ? \
