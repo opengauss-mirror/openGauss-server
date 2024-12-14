@@ -1875,7 +1875,7 @@ Datum gms_format_error_stack(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     errData = u_sess->plsql_cxt.cur_exception_cxt->cur_edata;
-    if (errData == NULL) {
+    if (errData == NULL || errData->context == NULL) {
         PG_RETURN_NULL();
     }
     errMsg = errData->message;
@@ -1926,10 +1926,10 @@ Datum gms_format_error_backtrace(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     errData = u_sess->plsql_cxt.cur_exception_cxt->cur_edata;
-    if (errData == NULL) {
+    if (errData == NULL || errData->context == NULL) {
         PG_RETURN_NULL();
     }
-    errContext = pg_strdup(errData->context);
+    errContext = pstrdup(errData->context);
     errCode = (char *) palloc0(codeLen);
     pg_ltoa(errData->sqlerrcode, errCode);
 
@@ -1950,7 +1950,7 @@ Datum gms_format_error_backtrace(PG_FUNCTION_ARGS)
 
     result = cstring_to_text_with_len(tmp->data, tmp->len);
 
-    free(errContext);
+    pfree_ext(errContext);
     pfree_ext(errCode);
     DestroyStringInfo(tmp);
 

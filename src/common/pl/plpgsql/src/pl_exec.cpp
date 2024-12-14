@@ -3832,6 +3832,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
          */
         estate->err_text = NULL;
 
+        ExceptionContext* saved_cxt = u_sess->plsql_cxt.cur_exception_cxt;
+        u_sess->plsql_cxt.cur_exception_cxt = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
             rc = exec_stmts_savecursor(estate, block->body);
@@ -3841,6 +3843,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
 #ifndef ENABLE_MULTIPLE_NODES
         }
 #endif
+        u_sess->plsql_cxt.cur_exception_cxt = saved_cxt;
+        saved_cxt = NULL;
 
 #ifdef ENABLE_MOT
         // throws ereport
