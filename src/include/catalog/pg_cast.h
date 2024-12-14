@@ -180,6 +180,8 @@ DATA(insert (  790 1700 3823 a f _null_));
 DATA(insert ( 1700	790 3824 a f _null_));
 DATA(insert ( 23	790 3811 a f _null_));
 DATA(insert ( 20	790 3812 a f _null_));
+DATA(insert ( 700	790 3910 a f _null_));
+DATA(insert ( 701	790 3911 a f _null_));
 
 /* Allow explicit coercions between int4 and bool */
 

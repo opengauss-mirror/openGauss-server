@@ -290,3 +290,14 @@ SELECT (-12345678901234567)::int8::money;
  -$12,345,678,901,234,567.00
 (1 row)
 
+create table test_float_to_money(c1 money);
+insert into test_float_to_money values (1.23::float4);
+insert into test_float_to_money values (1.23::float8);
+select * from test_float_to_money;
+  c1   
+-------
+ $1.23
+ $1.23
+(2 rows)
+
+drop table test_float_to_money;
