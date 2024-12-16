@@ -10724,6 +10724,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #ifdef ENABLE_HTAP
             case 'x': /* imcs query */
             {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+                    t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) {
+                    ereport(WARNING, (errmsg("HTAP populate is not allowed on a cascade standby.")));
+                    pq_putemptymessage('O');
+                    pq_flush();
+                    break;
+                }
                 int type = 0;
                 errno_t rc = EOK;
                 rc = memcpy_s(&type, sizeof(int),

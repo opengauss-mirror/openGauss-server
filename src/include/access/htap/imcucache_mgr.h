@@ -80,6 +80,7 @@ class IMCUDataCacheMgr : public DataCacheMgr {
 public: // static
     static IMCUDataCacheMgr* GetInstance(void);
     static void NewSingletonInstance(void);
+    static void ResetInstance();
     static void CacheCU(CU* srcCU, CU* slotCU);
 
 public:
@@ -94,6 +95,9 @@ public:
     IMCSDesc* GetImcsDesc(Oid relOid);
     void UpdateImcsStatus(Oid relOid, int imcsStatus);
     void DeleteImcsDesc(Oid relOid, RelFileNode* relNode);
+    void ClearImcsMem(Oid relOid, RelFileNode* relNode);
+    void UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus);
+    bool HasInitialImcsTable();
 
     HTAB* m_imcs_hash;
     LWLock *m_imcs_lock;

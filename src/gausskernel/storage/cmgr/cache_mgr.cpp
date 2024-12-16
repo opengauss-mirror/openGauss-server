@@ -228,6 +228,38 @@ void CacheMgr::Destroy(void)
     pfree_ext(m_CacheDesc);
 }
 
+#ifdef ENABLE_HTAP
+void CacheMgr::FreeImcstoreCache(void)
+{
+    if (GetCurrentMemSize() == 0) {
+        return;
+    }
+
+    HeapMemResetHash(m_hash, "Imcstore Cache Buffer Lookup Table");
+
+    for (int i = 0; i < m_CacheSlotsNum; ++i) {
+        m_CacheDesc[i].m_usage_count = 0;
+        m_CacheDesc[i].m_refcount = 0;
+        m_CacheDesc[i].m_ring_count = 0;
+        m_CacheDesc[i].m_slot_id = i;
+        m_CacheDesc[i].m_freeNext = i + 1;
+        m_CacheDesc[i].m_flag = CACHE_BLOCK_FREE;
+        m_CacheDesc[i].m_refreshing = false;
+        m_CacheDesc[i].m_datablock_size = 0;
+        FreeCacheBlockMem(i);
+    }
+
+    m_CacheDesc[m_CacheSlotsNum - 1].m_freeNext = CACHE_BLOCK_INVALID_IDX;
+    m_freeListHead = 0;
+    m_freeListTail = m_CacheSlotsNum - 1;
+    m_csweep = 0;
+    m_csweep_lock = CStoreCUCacheSweepLock;
+    m_partition_lock = FirstCacheSlotMappingLock;
+    m_CaccheSlotMax = 1;
+    m_cstoreCurrentSize = 0;
+}
+#endif
+
 /*
  * @Description: init cache block tag(key value)
  * @OUT cacheTag: block unique identification

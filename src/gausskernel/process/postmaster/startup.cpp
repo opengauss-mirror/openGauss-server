@@ -40,6 +40,11 @@
 #include "access/parallel_recovery/dispatcher.h"
 #include "replication/dcf_replication.h"
 
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#include "access/htap/imcucache_mgr.h"
+#endif
+
 /* Signal handlers */
 static void startupproc_quickdie(SIGNAL_ARGS);
 static void StartupProcSigUsr1Handler(SIGNAL_ARGS);
@@ -151,12 +156,22 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         WaitApplyAllDCFLog();
 #endif
         WakeupRecovery();
+#ifdef ENABLE_HTAP
+        if (!IMCU_CACHE->HasInitialImcsTable()) {
+            IMCUDataCacheMgr::ResetInstance();
+        }
+#endif
     } else if (CheckNotifySignal(NOTIFY_SWITCHOVER)) {
         t_thrd.startup_cxt.switchover_triggered = true;
 #ifndef ENABLE_MULTIPLE_NODES
         WaitApplyAllDCFLog();
 #endif
         WakeupRecovery();
+#ifdef ENABLE_HTAP
+        if (!IMCU_CACHE->HasInitialImcsTable()) {
+            IMCUDataCacheMgr::ResetInstance();
+        }
+#endif
     }
 
     errno = save_errno;

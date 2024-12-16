@@ -40,6 +40,9 @@
 #define TYPE_UNIMCSTORED 2
 #define TYPE_PARTITION_IMCSTORED 3
 #define TYPE_PARTITION_UNIMCSTORED 4
+#define CHECK_WALRCV_FREQ 1024
+#define WALRCV_STATUS_UP 0
+#define WALRCV_STATUS_DOWN 1
 
 #define MAX_IMCS_ROWS_ONE_CU(rel) \
     (((RelationIsAstoreFormat(rel)) ? MaxHeapTuplesPerPage : MaxUHeapTuplesPerPage(rel)) * MAX_IMCS_PAGES_ONE_CU)
@@ -82,6 +85,8 @@ extern bool RelHasImcs(Oid relOid);
 extern void CheckImcsSupportForRelType(Relation relation);
 
 extern bool CheckIsInTrans();
+
+extern void CheckWalRcvIsRunning(uint32 nScan);
 
 extern void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts);
 

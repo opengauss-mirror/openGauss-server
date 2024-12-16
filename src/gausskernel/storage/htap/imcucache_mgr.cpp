@@ -30,6 +30,7 @@
 #include "pgxc/pgxc.h"
 #include "utils/builtins.h"
 #include "storage/cu.h"
+#include "replication/syncrep.h"
 #include "access/htap/imcs_ctlg.h"
 #include "access/htap/imcucache_mgr.h"
 
@@ -403,4 +404,89 @@ void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         LWLockRelease(m_imcs_lock);
     }
     PG_END_TRY();
+}
+
+void IMCUDataCacheMgr::ClearImcsMem(Oid relOid, RelFileNode* relNode)
+{
+    bool found = false;
+    LWLockAcquire(m_imcs_lock, LW_SHARED);
+    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
+    if (!found) {
+        LWLockRelease(m_imcs_lock);
+        return;
+    }
+
+    PG_TRY();
+    {
+        if (imcsDesc->imcsStatus == IMCS_POPULATE_ERROR && imcsDesc->imcuDescContext != NULL) {
+            LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
+            imcsDesc->DropRowGroups(relNode);
+            LWLockRelease(imcsDesc->imcsDescLock);
+            MemoryContextDelete(imcsDesc->imcuDescContext);
+            imcsDesc->imcuDescContext = NULL;
+        }
+        LWLockRelease(m_imcs_lock);
+    }
+    PG_CATCH();
+    {
+        LWLockRelease(m_imcs_lock);
+    }
+    PG_END_TRY();
+}
+
+void IMCUDataCacheMgr::UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus)
+{
+    HASH_SEQ_STATUS hashSeq;
+    IMCSDesc *imcsDesc = NULL;
+    SyncRepStandbyData *syncStandbys;
+    int numStandbys = SyncRepGetSyncStandbys(&syncStandbys);
+
+    LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
+    hash_seq_init(&hashSeq, m_imcs_hash);
+    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
+        if (numStandbys == 0 || (imcsDesc->relOid == relOid ||
+            (imcsDesc->isPartition && imcsDesc->parentOid == relOid))) {
+            imcsDesc->imcsStatus = imcsStatus;
+        }
+    }
+    /* update sub partition imcs status */
+    if (numStandbys > 0) {
+        hash_seq_init(&hashSeq, m_imcs_hash);
+        while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
+            if (imcsDesc->isPartition && imcsDesc->imcsStatus != imcsStatus) {
+                IMCSDesc* parentImcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &(imcsDesc->parentOid), HASH_FIND, NULL);
+                imcsDesc->imcsStatus = (parentImcsDesc->imcsStatus == imcsStatus) ? imcsStatus : imcsDesc->imcsStatus;
+            }
+        }
+    }
+    LWLockRelease(m_imcs_lock);
+}
+
+bool IMCUDataCacheMgr::HasInitialImcsTable()
+{
+    Relation rel = NULL;
+    HASH_SEQ_STATUS hashSeq;
+    IMCSDesc *imcsDesc = NULL;
+
+    LWLockAcquire(m_imcs_lock, LW_SHARED);
+    hash_seq_init(&hashSeq, m_imcs_hash);
+    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
+        if (imcsDesc->imcsStatus == IMCS_POPULATE_INITIAL) {
+            LWLockRelease(m_imcs_lock);
+            return true;
+        }
+    }
+    LWLockRelease(m_imcs_lock);
+    return false;
+}
+
+void IMCUDataCacheMgr::ResetInstance()
+{
+    if (m_data_cache != NULL) {
+        HeapMemResetHash(m_data_cache->m_imcs_hash, "IMCSDesc Lookup Table");
+        m_data_cache->m_cache_mgr->FreeImcstoreCache();
+    }
+
+    CreateIMCUDirAndClearCUFiles();
+    ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
 }
