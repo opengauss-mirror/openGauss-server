@@ -4621,7 +4621,7 @@ Datum timestamptz_extract_zone(PG_FUNCTION_ARGS)
             result = cstring_to_text("Unknown");
         }
     } else if (strcmp(low_full_or_abbr, "timezone_abbr") == 0) {
-        if (tzn != NULL) {
+        if (tzn != nullptr && strlen(tzn) != 0) {
             result = cstring_to_text(tzn);
         } else {
             result = cstring_to_text("Unknown");
