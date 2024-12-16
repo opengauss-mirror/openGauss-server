@@ -1,11 +1,11 @@
-DROP OPERATOR FAMILY IF EXISTS vector_ops USING btree CASCADE; 
-DROP OPERATOR CLASS IF EXISTS vector_ops USING btree CASCADE;
-DROP OPERATOR FAMILY IF EXISTS vector_ubt_ops USING ubtree CASCADE;
-DROP OPERATOR CLASS IF EXISTS vector_ubt_ops USING ubtree CASCADE;
-DROP OPERATOR FAMILY IF EXISTS sparsevec_ops USING btree CASCADE; 
-DROP OPERATOR CLASS IF EXISTS sparsevec_ops USING btree CASCADE; 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_ubt_ops USING ubtree CASCADE; 
-DROP OPERATOR CLASS IF EXISTS sparsevec_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING btree CASCADE; 
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING btree CASCADE;
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE; 
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
 
 DO $$
 DECLARE
@@ -13,14 +13,14 @@ DECLARE
 BEGIN
     select count(*) into cnt from pg_am where amname = 'ivfflat';
     if cnt = 1 then
-        DROP OPERATOR FAMILY IF EXISTS vector_l2_ops USING ivfflat CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS vector_l2_ops USING ivfflat CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS vector_ip_ops USING ivfflat CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS vector_ip_ops USING ivfflat CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS vector_cosine_ops USING ivfflat CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS vector_cosine_ops USING ivfflat CASCADE;  
-        DROP OPERATOR FAMILY IF EXISTS bit_hamming_ops USING ivfflat CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS bit_hamming_ops USING ivfflat CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING ivfflat CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING ivfflat CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING ivfflat CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING ivfflat CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING ivfflat CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_cosine_ops USING ivfflat CASCADE;  
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE; 
     end if;
 END$$;
 
@@ -30,26 +30,26 @@ DECLARE
 BEGIN
     select count(*) into cnt from pg_am where amname = 'hnsw';
     if cnt = 1 then
-        DROP OPERATOR FAMILY IF EXISTS vector_l2_ops USING hnsw CASCADE;
-        DROP OPERATOR CLASS IF EXISTS vector_l2_ops USING hnsw CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS vector_ip_ops USING hnsw CASCADE;
-        DROP OPERATOR CLASS IF EXISTS vector_ip_ops USING hnsw CASCADE;
-        DROP OPERATOR FAMILY IF EXISTS vector_cosine_ops USING hnsw CASCADE;
-        DROP OPERATOR CLASS IF EXISTS vector_cosine_ops USING hnsw CASCADE;
-        DROP OPERATOR FAMILY IF EXISTS vector_l1_ops USING hnsw CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS vector_l1_ops USING hnsw CASCADE;
-        DROP OPERATOR FAMILY IF EXISTS bit_hamming_ops USING hnsw CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS bit_hamming_ops USING hnsw CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS bit_jaccard_ops USING hnsw CASCADE;
-        DROP OPERATOR CLASS IF EXISTS bit_jaccard_ops USING hnsw CASCADE;
-        DROP OPERATOR FAMILY IF EXISTS sparsevec_l2_ops USING hnsw CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS sparsevec_l2_ops USING hnsw CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS sparsevec_ip_ops USING hnsw CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS sparsevec_ip_ops USING hnsw CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS sparsevec_cosine_ops USING hnsw CASCADE; 
-        DROP OPERATOR CLASS IF EXISTS sparsevec_cosine_ops USING hnsw CASCADE; 
-        DROP OPERATOR FAMILY IF EXISTS sparsevec_l1_ops USING hnsw CASCADE;
-        DROP OPERATOR CLASS IF EXISTS sparsevec_l1_ops USING hnsw CASCADE;
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING hnsw CASCADE;
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING hnsw CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING hnsw CASCADE;
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING hnsw CASCADE;
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING hnsw CASCADE;
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_cosine_ops USING hnsw CASCADE;
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l1_ops USING hnsw CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l1_ops USING hnsw CASCADE;
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_hamming_ops USING hnsw CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_hamming_ops USING hnsw CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_jaccard_ops USING hnsw CASCADE;
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_jaccard_ops USING hnsw CASCADE;
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_l2_ops USING hnsw CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_l2_ops USING hnsw CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ip_ops USING hnsw CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ip_ops USING hnsw CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_cosine_ops USING hnsw CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_cosine_ops USING hnsw CASCADE; 
+        DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE;
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE;
     end if;
 END$$;
 
@@ -89,17 +89,17 @@ BEGIN
     end if;
 END$$;
 
-DROP FUNCTION IF EXISTS sparsevec_in(cstring, oid, int4) CASCADE;
-DROP FUNCTION IF EXISTS sparsevec_typmod_in(_cstring) CASCADE;
-DROP FUNCTION IF EXISTS sparsevec_recv(internal, oid, int4) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.sparsevec_in(cstring, oid, int4) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.sparsevec_typmod_in(_cstring) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.sparsevec_recv(internal, oid, int4) CASCADE;
 DO $$
 DECLARE
 ans boolean;
 BEGIN
     select case when count(*)=1 then true else false end as ans from (select * from pg_type where typname = 'sparsevec' limit 1) into ans;
     if ans = true then
-        DROP FUNCTION IF EXISTS sparsevec_out(pg_catalog.sparsevec) CASCADE;
-        DROP FUNCTION IF EXISTS sparsevec_send(pg_catalog.sparsevec) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.sparsevec_out(pg_catalog.sparsevec) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.sparsevec_send(pg_catalog.sparsevec) CASCADE;
     end if;
 END$$;
 DROP TYPE IF EXISTS pg_catalog.sparsevec CASCADE;
@@ -139,7 +139,7 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_float4(vector, int4, boolean) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_int4(vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_float8(vector) CASCADE;
-        DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector, int4) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_sparsevec(vector, int4, boolean) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<->(vector, vector) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<#>(vector, vector) CASCADE;
@@ -160,17 +160,17 @@ BEGIN
     end if;
 END$$;
 
-DROP FUNCTION IF EXISTS vector_in(cstring, oid, int4) CASCADE;
-DROP FUNCTION IF EXISTS vector_typmod_in(_cstring) CASCADE;
-DROP FUNCTION IF EXISTS vector_recv(internal, oid, int4) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.vector_in(cstring, oid, int4) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.vector_typmod_in(_cstring) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.vector_recv(internal, oid, int4) CASCADE;
 DO $$
 DECLARE
 ans boolean;
 BEGIN
     select case when count(*)=1 then true else false end as ans from (select * from pg_type where typname = 'vector' limit 1) into ans;
     if ans = true then
-        DROP FUNCTION IF EXISTS vector_out(pg_catalog.vector) CASCADE;
-        DROP FUNCTION IF EXISTS vector_send(pg_catalog.vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_out(pg_catalog.vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_send(pg_catalog.vector) CASCADE;
     end if;
 END$$;
 DROP TYPE IF EXISTS pg_catalog.vector CASCADE;
