@@ -1271,7 +1271,7 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
     ListCell* subpaths = NULL;
 
     if (tlist == NIL) {
-        Const* c = make_const(NULL, makeString("Dummy"), 0);
+        Const* c = makeConst(INT4OID, -1, InvalidOid, -2, (Datum)0, true, false);
         tlist = lappend(tlist, makeTargetEntry((Expr*)c, 1, NULL, true));
     }
 
