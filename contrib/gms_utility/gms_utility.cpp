@@ -1431,7 +1431,8 @@ static Oid SearchRelOidByName(Oid namespaceId, char* relName, NameResolveVar* va
         return InvalidOid;
     }
     Form_pg_class classForm = (Form_pg_class) GETSTRUCT(relTuple);
-    if (classForm->relkind != RELKIND_RELATION) {
+    char relkind = classForm->relkind;
+    if (relkind != RELKIND_RELATION && relkind != RELKIND_VIEW) {
         ReleaseSysCache(relTuple);
         return InvalidOid;
     }
@@ -1443,6 +1444,7 @@ static Oid SearchRelOidByName(Oid namespaceId, char* relName, NameResolveVar* va
     if (aclResult != ACLCHECK_OK) {
         ReportNameResolveAclErr(var);
     }
+    var->part1Type = relkind == RELKIND_RELATION ? NAME_RESOLVE_TYPE_TABLE : NAME_RESOLVE_TYPE_VIEW;
     return relOid;
 }
 
@@ -1453,7 +1455,8 @@ static Oid SearchSeqOidByName(Oid namespaceId, char* seqName, NameResolveVar* va
         return InvalidOid;
     }
     Form_pg_class classForm = (Form_pg_class) GETSTRUCT(seqTuple);
-    if (!(classForm->relkind == RELKIND_RELATION || classForm->relkind == RELKIND_SEQUENCE)) {
+    char relkind = classForm->relkind;
+    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_VIEW)) {
         ReleaseSysCache(seqTuple);
         return InvalidOid;
     }
@@ -1465,6 +1468,9 @@ static Oid SearchSeqOidByName(Oid namespaceId, char* seqName, NameResolveVar* va
     if (aclResult != ACLCHECK_OK) {
         ReportNameResolveAclErr(var);
     }
+    var->part1Type = relkind == RELKIND_RELATION ? NAME_RESOLVE_TYPE_TABLE
+                     : relkind == RELKIND_VIEW ? NAME_RESOLVE_TYPE_VIEW
+                     : NAME_RESOLVE_TYPE_SEQUENCE;
     return relOid;
 }
 
@@ -1590,11 +1596,9 @@ static void ResolveObjectNameByContext(NameResolveContext context, Oid namespace
             break;
         case NR_CONTEXT_TABLE:
             ResolveContextName(context, namespaceId, resolveName, var, SearchRelOidByName);
-            var->part1Type = NAME_RESOLVE_TYPE_TABLE;
             break;
         case NR_CONTEXT_SEQUENCES:
             ResolveContextName(context, namespaceId, resolveName, var, SearchSeqOidByName);
-            var->part1Type = NAME_RESOLVE_TYPE_SEQUENCE;
             break;
         case NR_CONTEXT_INDEX:
             ResolveContextName(context, namespaceId, resolveName, var, SearchIndexOidByName);

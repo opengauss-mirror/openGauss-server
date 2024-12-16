@@ -2498,6 +2498,7 @@ reset search_path;
 CREATE TABLE public.t_resolve (c1 NUMBER, c2 VARCHAR2(100));
 CREATE UNIQUE INDEX IF NOT EXISTS public.t_resolve_c1_udx ON public.t_resolve(c1);
 CREATE TABLE public.t_log (c1 NUMBER, c2 TIMESTAMP);
+CREATE VIEW public.v_resolve AS SELECT * FROM public.t_resolve;
 CREATE SEQUENCE IF NOT EXISTS public.t_seq
     INCREMENT BY 1
     NOMINVALUE
@@ -2559,6 +2560,7 @@ END t_pkg;
 /
 CREATE TYPE public.t_typ AS (t1 INT, t2 TEXT);
 CREATE OR REPLACE SYNONYM public.syn_tbl FOR t_resolve;
+CREATE OR REPLACE SYNONYM public.syn_view FOR v_resolve;
 CREATE OR REPLACE SYNONYM public.syn_idx FOR t_resolve_c1_udx;
 CREATE OR REPLACE SYNONYM public.syn_seq FOR t_seq;
 CREATE OR REPLACE SYNONYM public.syn_fun FOR add_numbers;
@@ -2637,7 +2639,7 @@ call test_name_resolve('syn_tbl', NULL);
 (1 row)
 
 call test_name_resolve('public.t_resolve', 2);
---?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 6, object_number:.*
+--?INFO:  schema: [PUBLIC], part1: [T_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
  test_name_resolve 
 -------------------
  
@@ -2651,6 +2653,82 @@ call test_name_resolve('public.t_resolve', 7);
 (1 row)
 
 call test_name_resolve('public.t_resolve', 9); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+-- test view
+call test_name_resolve('public.v_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.v_resolve', NULL);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('v_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('v_resolve', NULL);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_view', 0);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_view', NULL);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_view', 0);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_view', NULL);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.v_resolve', 2);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 4, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.v_resolve', 7);
+--?INFO:  schema: [PUBLIC], part1: [V_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 13, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.v_resolve', 9); -- error
 ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
 SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
@@ -2947,6 +3025,11 @@ ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
 SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
 PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.t_resolve_c1_udx', 7); -- error
+ERROR:  The Object is not exists
+CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
+SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
+PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
 -- test java
 call test_name_resolve('public.java.class', 4);
 ERROR:  Unsupported context type: 4
@@ -3101,6 +3184,7 @@ DROP FUNCTION public.tg_log;
 DROP FUNCTION public.add_numbers;
 DROP PROCEDURE public.insert_val;
 DROP INDEX public.t_resolve_c1_udx;
+DROP VIEW public.v_resolve;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;

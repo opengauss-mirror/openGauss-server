@@ -1364,6 +1364,7 @@ reset search_path;
 CREATE TABLE public.t_resolve (c1 NUMBER, c2 VARCHAR2(100));
 CREATE UNIQUE INDEX IF NOT EXISTS public.t_resolve_c1_udx ON public.t_resolve(c1);
 CREATE TABLE public.t_log (c1 NUMBER, c2 TIMESTAMP);
+CREATE VIEW public.v_resolve AS SELECT * FROM public.t_resolve;
 
 CREATE SEQUENCE IF NOT EXISTS public.t_seq
     INCREMENT BY 1
@@ -1429,6 +1430,7 @@ END t_pkg;
 CREATE TYPE public.t_typ AS (t1 INT, t2 TEXT);
 
 CREATE OR REPLACE SYNONYM public.syn_tbl FOR t_resolve;
+CREATE OR REPLACE SYNONYM public.syn_view FOR v_resolve;
 CREATE OR REPLACE SYNONYM public.syn_idx FOR t_resolve_c1_udx;
 CREATE OR REPLACE SYNONYM public.syn_seq FOR t_seq;
 CREATE OR REPLACE SYNONYM public.syn_fun FOR add_numbers;
@@ -1463,6 +1465,19 @@ call test_name_resolve('syn_tbl', NULL);
 call test_name_resolve('public.t_resolve', 2);
 call test_name_resolve('public.t_resolve', 7);
 call test_name_resolve('public.t_resolve', 9); -- error
+
+-- test view
+call test_name_resolve('public.v_resolve', 0);
+call test_name_resolve('public.v_resolve', NULL);
+call test_name_resolve('v_resolve', 0);
+call test_name_resolve('v_resolve', NULL);
+call test_name_resolve('public.syn_view', 0);
+call test_name_resolve('public.syn_view', NULL);
+call test_name_resolve('syn_view', 0);
+call test_name_resolve('syn_view', NULL);
+call test_name_resolve('public.v_resolve', 2);
+call test_name_resolve('public.v_resolve', 7);
+call test_name_resolve('public.v_resolve', 9); -- error
 
 -- test PL/SQL
 call test_name_resolve('public.add_numbers', 1);
@@ -1519,6 +1534,7 @@ call test_name_resolve('t_resolve_c1_udx', 9);
 call test_name_resolve('syn_idx', 9); -- error
 call test_name_resolve('public.t_resolve_c1_udx', 0); -- error
 call test_name_resolve('public.t_resolve_c1_udx', 2); -- error
+call test_name_resolve('public.t_resolve_c1_udx', 7); -- error
 
 -- test java
 call test_name_resolve('public.java.class', 4);
@@ -1564,6 +1580,7 @@ DROP FUNCTION public.tg_log;
 DROP FUNCTION public.add_numbers;
 DROP PROCEDURE public.insert_val;
 DROP INDEX public.t_resolve_c1_udx;
+DROP VIEW public.v_resolve;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
