@@ -199,11 +199,25 @@ SELECT CORR_K(sal, comm, 'COEFFICIENT') coefficient,
 CORR_K(sal, comm, 'TWO_SIDED_SIG') two_sided_p_value
 FROM EMP;
 
+CREATE TABLE test_data (
+id NUMBER PRIMARY KEY,
+value1 DOUBLE PRECISION,
+value2 DOUBLE PRECISION
+);
+INSERT INTO test_data (id, value1, value2) VALUES (1, 10, 20);
+INSERT INTO test_data (id, value1, value2) VALUES (2, 20, 40);
+INSERT INTO test_data (id, value1, value2) VALUES (3, 30, 60);
+INSERT INTO test_data (id, value1, value2) VALUES (4, 40, 80);
+
+SELECT CORR_K(value1, value2) FROM test_data;
+SELECT CORR_S(value1, value2) FROM test_data;
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
 drop table null_table3;
 drop table customers1;
 drop table EMP;
+drop table test_data;
 drop table t1;
 drop schema aggregate CASCADE;

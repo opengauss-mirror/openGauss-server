@@ -386,12 +386,35 @@ FROM EMP;
  -.547722557505166 |  .264288345226028
 (1 row)
 
+CREATE TABLE test_data (
+id NUMBER PRIMARY KEY,
+value1 DOUBLE PRECISION,
+value2 DOUBLE PRECISION
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_data_pkey" for table "test_data"
+INSERT INTO test_data (id, value1, value2) VALUES (1, 10, 20);
+INSERT INTO test_data (id, value1, value2) VALUES (2, 20, 40);
+INSERT INTO test_data (id, value1, value2) VALUES (3, 30, 60);
+INSERT INTO test_data (id, value1, value2) VALUES (4, 40, 80);
+SELECT CORR_K(value1, value2) FROM test_data;
+ corr_k 
+--------
+      1
+(1 row)
+
+SELECT CORR_S(value1, value2) FROM test_data;
+ corr_s 
+--------
+      1
+(1 row)
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
 drop table null_table3;
 drop table customers1;
 drop table EMP;
+drop table test_data;
 drop table t1;
 drop schema aggregate CASCADE;
 NOTICE:  drop cascades to 3 other objects
