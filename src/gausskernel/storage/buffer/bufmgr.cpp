@@ -2590,10 +2590,6 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
      */
     } else if (RecoveryInProgress()) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
-        /* when in failover, should return to worker thread exit */
-        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-            return InvalidBuffer;
-        }
 
         /* Update cached blocks */
         if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
@@ -2614,6 +2610,10 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
             pgstatCountLocalBlocksRead4SessionLevel();
         }
     } else {
+        /* when in failover worker thread should exit */
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+            ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+        }
         /*
          * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
          * not currently in memory.
@@ -2755,11 +2755,6 @@ found_branch:
                         TerminateBufferIO(bufHdr, false, 0);
                     }
                     pg_usleep(5000L);
-                    /* when in failover, should return to worker thread exit */
-                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-                        SSUnPinBuffer(bufHdr);
-                        return InvalidBuffer;
-                    }
                     continue;
                 }
 
@@ -2767,11 +2762,6 @@ found_branch:
                 if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
-                    }
-                    /* when in failover, should return to worker thread exit */
-                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-                        SSUnPinBuffer(bufHdr);
-                        return InvalidBuffer;
                     }
                     continue;
                 }
@@ -2799,10 +2789,11 @@ found_branch:
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
-                        /* when in failover, should return to worker thread exit */
+                        /* when in failover worker thread should exit */
                         if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
                             SSUnPinBuffer(bufHdr);
-                            return InvalidBuffer;
+                            ereport(ERROR,
+                                (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
                         }
                         pg_usleep(5000L);
                         continue;
@@ -3058,7 +3049,6 @@ retry:
             UnpinBuffer(buf, true);
             goto retry;
         }
-
         /*
          * Checkpoint if buffer need to redo and try hashMap partition lock,
          * if need to redo but doesn't get lock, unpinbuffer and retry.
@@ -3233,7 +3223,11 @@ retry:
                 continue;
             }
         }
-
+        /* when in failover worker thread should exit */
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+            ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+            gs_thread_exit(0);
+        }
         /*
          * To change the association of a valid buffer, we'll need to have
          * exclusive lock on both the old and new mapping partitions.
@@ -3355,12 +3349,6 @@ retry_new_buffer:
             }
 
             return buf;
-        }
-
-        /* when in failover, should return to worker thread exit */
-        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-            ClearReadHint(buf->buf_id, true);
-            break;
         }
         /*
          * Somebody could have pinned or re-dirtied the buffer while we were
@@ -6378,10 +6366,6 @@ retry:
             buf_ctrl->state &= ~BUF_READ_MODE_ZERO_LOCK;
         }
         bool with_io_in_progress = true;
-        /* when in failover, should return to worker thread exit */
-        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-            return;
-        }
         /* the old job schedule thread should exit */
         if (t_thrd.role == JOB_SCHEDULER && g_instance.dms_cxt.SSRecoveryInfo.failover_to_job) {
             g_instance.dms_cxt.SSRecoveryInfo.failover_to_job = false;
@@ -6405,7 +6389,10 @@ retry:
             }
 
             LWLockRelease(buf->content_lock);
-
+            /* when in failover worker thread should exit */
+            if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+            }
             if (AmDmsReformProcProcess() && dms_reform_failed()) {
                 t_thrd.dms_cxt.flush_copy_get_page_failed = true;
                 return;

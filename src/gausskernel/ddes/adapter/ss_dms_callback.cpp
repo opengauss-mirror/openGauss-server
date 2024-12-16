@@ -1914,8 +1914,8 @@ static void FailoverCleanBackends()
             return;
         }
 
-        pg_usleep(REFORM_WAIT_TIME);
-        wait_time += REFORM_WAIT_TIME;
+        pg_usleep(FAILOVER_PERIOD * REFORM_WAIT_TIME);
+        wait_time += FAILOVER_PERIOD * REFORM_WAIT_TIME;
     }
 }
 

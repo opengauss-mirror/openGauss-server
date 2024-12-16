@@ -620,11 +620,6 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
-                        /* when in failover, should return to worker thread exit */
-                        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-                            SSUnPinBuffer(bufHdr);
-                            return InvalidBuffer;
-                        }
                         pg_usleep(5000L);
                         continue;
                     }
