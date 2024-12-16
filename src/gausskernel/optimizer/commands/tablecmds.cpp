@@ -534,7 +534,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
     bool is_modified, bool *hasPartition);
 static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
-static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star = false);
+static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star);
 
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
     bool *has_depend);
@@ -12681,7 +12681,7 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
 
             pre_objid = dep_form->objid;
 
-            ViewInfoForAdd *info = GetViewInfoFirstAfter(NameStr(rel->rd_rel->relname), dep_form->objid);
+            ViewInfoForAdd *info = GetViewInfoFirstAfter(NameStr(rel->rd_rel->relname), dep_form->objid, false);
 
             foreach (viewinfo, query_str) {
                 ViewInfoForAdd *oldInfo = (ViewInfoForAdd *)lfirst(viewinfo);
@@ -12776,7 +12776,7 @@ static void CheckPgAttribute(Oid obj_oid, char* attName, Form_pg_attribute new_a
     heap_close(rel, RowExclusiveLock);
 }
 
-static void UpdatePgAttributeForView(TargetEntry* old_tle, TargetEntry* new_tle, Oid view_oid, Form_pg_attribute att_form)
+static void UpdatePgAttributeForView(TargetEntry* old_tle, TargetEntry* new_tle, Oid view_oid)
 {
     Node* old_node = (Node*)old_tle->expr;
     Node* new_node = (Node*)new_tle->expr;
@@ -12787,8 +12787,9 @@ static void UpdatePgAttributeForView(TargetEntry* old_tle, TargetEntry* new_tle,
     int32 old_typmod = exprTypmod(old_node);
     int32 new_typmod = exprTypmod(new_node);
     if (old_type != new_type || old_typmod != new_typmod) {
-        // get from pg_type
-        HeapTuple tp;
+        /* get from pg_type */
+        HeapTuple tp = NULL;
+        Form_pg_attribute att_form = (Form_pg_attribute)palloc0(sizeof(FormData_pg_attribute));
         tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(new_type));
         if (HeapTupleIsValid(tp)) {
             Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
@@ -12803,10 +12804,11 @@ static void UpdatePgAttributeForView(TargetEntry* old_tle, TargetEntry* new_tle,
             elog(ERROR, "Cannot find the type with oid %u.", new_type);
         }
         CheckPgAttribute(view_oid, col_name, att_form);
+        pfree_ext(att_form);
     }
 }
 
-static List* GetOriginalViewQuery(Oid rw_oid)
+List* GetOriginalViewQuery(Oid rw_oid)
 {
     List *evAction = NIL;
     ScanKeyData entry;
@@ -12843,7 +12845,7 @@ List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid)
         elog(ERROR, "Cannot find the view with oid %u.", view_oid);
     }
     Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
-    char* view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, rw_oid, view_oid);
+    char* view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, rw_oid, view_oid, false);
     List* raw_parsetree_list = raw_parser(view_def);
     Node* stmtNode = (Node*)linitial(raw_parsetree_list);
     Assert((IsA(stmtNode, ViewStmt) || IsA(stmtNode, CreateTableAsStmt)));
@@ -12878,7 +12880,7 @@ void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
     SysScanDesc rewrite_scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
     HeapTuple rewrite_tup = systable_getnext(rewrite_scan);
     Form_pg_rewrite rewrite_form = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
-    // update pg_rewrite
+    /* update pg_rewrite */
     char* actiontree = nodeToString((Node*)evAction);
     Datum values[Natts_pg_rewrite] = { 0 };
     bool nulls[Natts_pg_rewrite] = { 0 };
@@ -12892,7 +12894,12 @@ void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
     CommandCounterIncrement();
     heap_freetuple_ext(new_dep_tuple);
     pfree_ext(actiontree);
-    // get new_query_str from pg_rewrite
+    /* get new_query_str from pg_rewrite */
+    if (query_str == NULL) {
+        systable_endscan(rewrite_scan);
+        heap_close(rewrite_rel, RowExclusiveLock);
+        return;
+    }
     Query* query = (Query*)linitial(evAction);
     StringInfoData buf;
     initStringInfo(&buf);
@@ -12921,17 +12928,21 @@ void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
     heap_close(rewrite_rel, RowExclusiveLock);
 }
 
-bool UpdateChangedColumnForView(Oid viewid, Oid relid, int2 attnum, Oid rw_objid,
-                                       List **p_originEvAction, List **p_newEvAction, Form_pg_attribute attForm)
+void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query, List **query_str)
 {
-    if (*p_originEvAction == NIL) {
-        *p_originEvAction = GetOriginalViewQuery(rw_objid);
-    }
+    List* evAction = NIL;
+    evAction = lappend(evAction, query);
+    /*
+     * update pg_rewrite with correct varattno and relation oid firstly,
+     * so that GetRefreshedViewQuery which would scan pg_rewrite to get ev_action
+     * can obtain right view_def.
+     */
+    UpdatePgrewriteForView(rw_objid, evAction, NULL);
+
+    List* newEvAction = NIL;
     PG_TRY();
     {
-        if (*p_newEvAction == NIL) {
-            *p_newEvAction = GetRefreshedViewQuery(viewid, rw_objid);
-        }
+        newEvAction = GetRefreshedViewQuery(viewid, rw_objid);
     }
     PG_CATCH();
     {
@@ -12942,30 +12953,26 @@ bool UpdateChangedColumnForView(Oid viewid, Oid relid, int2 attnum, Oid rw_objid
                     errhint("Please re-add missing table fields.")));
     }
     PG_END_TRY();
-    List* originEvAction = *p_originEvAction;
-    List* newEvAction = *p_newEvAction;
-    bool is_changed = false;
-    Query* query = (Query*)linitial(originEvAction);
+
+    Query* origin_query = (Query*)linitial(originEvAction);
     Query* freshed_query = (Query*)linitial(newEvAction);
-    ViewQueryCheck_context context;
-    context.relid = relid;
-    context.attnum = attnum;
-    context.query = query;
-    context.attForm = attForm;
-    // check whether the querytree's targetEntry has changed,
-    // and update the pg_attribute entry of the changed column if so
+    /*
+     * check whether the querytree's targetEntry has changed,
+     * and update the pg_attribute entry of the changed column if so
+     */
     ListCell* lc1 = NULL;
     ListCell* lc2 = NULL;
-    forboth (lc1, query->targetList, lc2, freshed_query->targetList) {
+    forboth (lc1, origin_query->targetList, lc2, freshed_query->targetList) {
         TargetEntry* tle = (TargetEntry*)lfirst(lc1);
-        bool var_changed = check_changed_tle_walker((Node*)(tle->expr), &context);
-        if (var_changed) {
-            TargetEntry* tle2 = (TargetEntry*)lfirst(lc2);
-            UpdatePgAttributeForView(tle, tle2, viewid, attForm);
-        }
-        is_changed |= var_changed;
+        TargetEntry* tle2 = (TargetEntry*)lfirst(lc2);
+
+        UpdatePgAttributeForView(tle, tle2, viewid);
     }
-    return is_changed;
+
+    /* update pg_rewrite with final ev_action */
+    UpdatePgrewriteForView(rw_objid, newEvAction, query_str);
+
+    list_free_deep(newEvAction);
 }
 
 /*
@@ -33957,7 +33964,8 @@ static void ATPrepAlterModifyColumn(List** wqueue, AlteredTableInfo* tab, Relati
     def->raw_default = tmp_expr;
 }
 
-char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid)
+char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid,
+    bool keep_star)
 {
     StringInfoData buf;
     ViewInfoForAdd* view_info = NULL;
@@ -33998,7 +34006,7 @@ char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class re
     }
     pfree_ext(view_options);
     /* concat CREATE VIEW command with query */
-    view_info = GetViewInfoFirstAfter(rel_name, pg_rewrite_oid, true);
+    view_info = GetViewInfoFirstAfter(rel_name, pg_rewrite_oid, keep_star);
     if (view_info == NULL) {
         pfree_ext(buf.data);
         return NULL; /* should not happen */

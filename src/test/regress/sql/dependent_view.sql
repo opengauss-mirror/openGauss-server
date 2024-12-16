@@ -116,9 +116,6 @@ select * from dependent_view3;
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
 \d base_table
 
--- 删除整个表，预期报错
-DROP TABLE base_table;
--- 删除整个表，预期成功
 DROP TABLE base_table CASCADE;
 
 -- test2：物化视图

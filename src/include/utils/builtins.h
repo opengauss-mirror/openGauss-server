@@ -917,7 +917,7 @@ extern void get_query_def(Query* query, StringInfo buf, List* parentnamespace, T
 #ifdef PGXC
     bool finalise_aggregates, bool sortgroup_colno, void* parserArg = NULL,
 #endif /* PGXC */
-    bool qrw_phase = false, bool viewdef = false, bool is_fqs = false);
+    bool qrw_phase = false, bool viewdef = false, bool is_fqs = false, bool skip_lock = false);
 extern char* deparse_create_sequence(Node* stmt, bool owned_by_none = false);
 extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
 #ifdef PGXC

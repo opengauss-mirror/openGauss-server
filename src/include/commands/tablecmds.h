@@ -255,11 +255,13 @@ extern void RebuildDependViewForProc(Oid proc_oid);
 extern void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute attForm, int2 old_attnum,
     char** attName, List **old_query_str);
 extern void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str);
+extern List* GetOriginalViewQuery(Oid rw_oid);
 extern List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid);
-extern bool UpdateChangedColumnForView(Oid viewid, Oid relid, int2 attnum, Oid rw_objid,
-                                       List **originEvAction1, List **newEvAction1, Form_pg_attribute attForm);
+extern void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query,
+    List **query_str);
 extern void ReplaceViewQueryFirstAfter(List *query_str);
-extern char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid, Oid view_oid);
+extern char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid,
+    Oid view_oid, bool keep_star = true);
 #ifdef USE_SPQ
 extern void spq_btbuild_update_pg_class(Relation heap, Relation index);
 #endif

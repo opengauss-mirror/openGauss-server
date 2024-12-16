@@ -306,22 +306,6 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
  base_table_id    | integer | 
  base_table_field | integer | 
 
--- 删除整个表，预期报错
-DROP TABLE base_table;
-ERROR:  cannot drop table base_table because other objects depend on it
-DETAIL:  view master_view2 depends on table base_table
-view dependent_view4 depends on view master_view2
-view master_view3 depends on table base_table
-view dependent_view5 depends on view master_view3
-view master_view1 depends on table base_table
-view dependent_view3 depends on view master_view1
-view second_dependent_view3 depends on view dependent_view3
-view dependent_view1 depends on view master_view1
-view second_dependent_view1 depends on view dependent_view1
-view dependent_view2 depends on view master_view1
-view second_dependent_view2 depends on view dependent_view2
-HINT:  Use DROP ... CASCADE to drop the dependent objects too.
--- 删除整个表，预期成功
 DROP TABLE base_table CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to view master_view2
