@@ -1,0 +1,200 @@
+create schema extra_float_digits;
+set search_path = extra_float_digits;
+set extra_float_digits to 1;
+-- Special values
+select 0::float4;
+ float4 
+--------
+      0
+(1 row)
+
+select 'NaN'::float4;
+ float4 
+--------
+    NaN
+(1 row)
+
+select 'Infinity'::float4;
+  float4  
+----------
+ Infinity
+(1 row)
+
+select '-Infinity'::float4;
+  float4   
+-----------
+ -Infinity
+(1 row)
+
+select 0::float8;
+ float8 
+--------
+      0
+(1 row)
+
+select 'NaN'::float8;
+ float8 
+--------
+    NaN
+(1 row)
+
+select 'Infinity'::float8;
+  float8  
+----------
+ Infinity
+(1 row)
+
+select '-Infinity'::float8;
+  float8   
+-----------
+ -Infinity
+(1 row)
+
+-- Non-scientific notation for float4
+select 123456::float4;
+ float4 
+--------
+ 123456
+(1 row)
+
+select -123456::float4;
+ ?column? 
+----------
+  -123456
+(1 row)
+
+select 123456.789::float4;
+  float4   
+-----------
+--? 123456\.\d+
+(1 row)
+
+select -123456.789::float4;
+  ?column?  
+------------
+--? -123456\.\d+
+(1 row)
+
+select 0.000123456789::float4;
+    float4    
+--------------
+--? .00012345[67]\d+
+(1 row)
+
+select -0.000123456789::float4;
+   ?column?    
+---------------
+--? -.00012345[67]\d+
+(1 row)
+
+-- Scientific notation for float4
+select 1234567::float4;
+    float4    
+--------------
+--? 1.2345[67]\d*e\+06
+(1 row)
+
+select -1234567::float4;
+   ?column?    
+---------------
+--? -1.2345[67]\d*e\+06
+(1 row)
+
+select 1234567.89::float4;
+    float4     
+---------------
+--? 1.2345[67]\d+e\+06
+(1 row)
+
+select -1234567.89::float4;
+    ?column?    
+----------------
+--? -1.2345[67]\d+e\+06
+(1 row)
+
+select 0.0000123456789::float4;
+    float4     
+---------------
+--? 1.2345[67]\d+e-05
+(1 row)
+
+select -0.0000123456789::float4;
+    ?column?    
+----------------
+--? -1.2345[67]\d+e-05
+(1 row)
+
+-- Non-scientific notation for float8
+select 123456789012345::float8;
+     float8      
+-----------------
+ 123456789012345
+(1 row)
+
+select -123456789012345::float8;
+     ?column?     
+------------------
+ -123456789012345
+(1 row)
+
+select 123456789012345.6789::float8;
+       float8       
+--------------------
+--? 123456789012345\.\d+
+(1 row)
+
+select -123456789012345.6789::float8;
+      ?column?       
+---------------------
+--? -123456789012345\.\d+
+(1 row)
+
+select 0.0001234567890123456789::float8;
+        float8         
+-----------------------
+--? .00012345678901234[56]\d+
+(1 row)
+
+select -0.0001234567890123456789::float8;
+        ?column?        
+------------------------
+--? -.00012345678901234[56]\d+
+(1 row)
+
+-- Scientific notation for float8
+select 1234567890123456::float8;
+        float8         
+-----------------------
+--? 1.2345678901234[56]\d*e\+15
+(1 row)
+
+select -1234567890123456::float8;
+        ?column?        
+------------------------
+--? -1.2345678901234[56]\d*e\+15
+(1 row)
+
+select 1234567890123456.789::float8;
+         float8         
+------------------------
+--? 1.2345678901234[56]\d+e\+15
+(1 row)
+
+select -1234567890123456.789::float8;
+        ?column?         
+-------------------------
+--? -1.2345678901234[56]\d+e\+15
+(1 row)
+
+select 0.00001234567890123456789::float8;
+         float8         
+------------------------
+--? 1.2345678901234[56]\d+e-05
+(1 row)
+
+select -0.00001234567890123456789::float8;
+        ?column?         
+-------------------------
+--? -1.2345678901234[56]\d+e-05
+(1 row)
+

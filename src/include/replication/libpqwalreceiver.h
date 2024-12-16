@@ -67,8 +67,6 @@ typedef struct WalRcvExecResult {
     TupleDesc tupledesc;
 } WalRcvExecResult;
 
-extern int32 pg_atoi(char* s, int size, int c, bool can_ignore = false);
-extern int32 pg_strtoint32(const char* s, bool can_ignore = false);
 /* Prototypes for interface functions */
 extern bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo);
 extern bool libpqrcv_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, int channel_identifier);

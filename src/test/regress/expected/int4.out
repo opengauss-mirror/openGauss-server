@@ -12,8 +12,18 @@ LINE 1: INSERT INTO INT4_TBL(f1) VALUES ('34.5');
 CONTEXT:  referenced column: f1
 -- largest and smallest values
 INSERT INTO INT4_TBL(f1) VALUES ('2147483647');
-INSERT INTO INT4_TBL(f1) VALUES ('-2147483647');
+INSERT INTO INT4_TBL(f1) VALUES ('-2147483648');
 -- bad input values -- should give errors
+INSERT INTO INT4_TBL(f1) VALUES ('2147483648');
+ERROR:  value "2147483648" is out of range for type integer
+LINE 1: INSERT INTO INT4_TBL(f1) VALUES ('2147483648');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT4_TBL(f1) VALUES ('-2147483649');
+ERROR:  value "-2147483649" is out of range for type integer
+LINE 1: INSERT INTO INT4_TBL(f1) VALUES ('-2147483649');
+                                         ^
+CONTEXT:  referenced column: f1
 INSERT INTO INT4_TBL(f1) VALUES ('1000000000000');
 ERROR:  value "1000000000000" is out of range for type integer
 LINE 1: INSERT INTO INT4_TBL(f1) VALUES ('1000000000000');
@@ -48,7 +58,7 @@ INSERT INTO INT4_TBL(f1) VALUES ('');
 SELECT '' AS five, * FROM INT4_TBL ORDER BY f1;
  five |     f1      
 ------+-------------
-      | -2147483647
+      | -2147483648
       |     -123456
       |           0
       |      123456
@@ -59,7 +69,7 @@ SELECT '' AS five, * FROM INT4_TBL ORDER BY f1;
 SELECT '' AS four, i.* FROM INT4_TBL i WHERE i.f1 <> int2 '0' ORDER BY f1;
  four |     f1      
 ------+-------------
-      | -2147483647
+      | -2147483648
       |     -123456
       |      123456
       |  2147483647
@@ -68,7 +78,7 @@ SELECT '' AS four, i.* FROM INT4_TBL i WHERE i.f1 <> int2 '0' ORDER BY f1;
 SELECT '' AS four, i.* FROM INT4_TBL i WHERE i.f1 <> int4 '0' ORDER BY f1;
  four |     f1      
 ------+-------------
-      | -2147483647
+      | -2147483648
       |     -123456
       |      123456
       |  2147483647
@@ -89,21 +99,21 @@ SELECT '' AS one, i.* FROM INT4_TBL i WHERE i.f1 = int4 '0';
 SELECT '' AS two, i.* FROM INT4_TBL i WHERE i.f1 < int2 '0' ORDER BY f1;
  two |     f1      
 -----+-------------
-     | -2147483647
+     | -2147483648
      |     -123456
 (2 rows)
 
 SELECT '' AS two, i.* FROM INT4_TBL i WHERE i.f1 < int4 '0' ORDER BY f1;
  two |     f1      
 -----+-------------
-     | -2147483647
+     | -2147483648
      |     -123456
 (2 rows)
 
 SELECT '' AS three, i.* FROM INT4_TBL i WHERE i.f1 <= int2 '0' ORDER BY f1;
  three |     f1      
 -------+-------------
-       | -2147483647
+       | -2147483648
        |     -123456
        |           0
 (3 rows)
@@ -111,7 +121,7 @@ SELECT '' AS three, i.* FROM INT4_TBL i WHERE i.f1 <= int2 '0' ORDER BY f1;
 SELECT '' AS three, i.* FROM INT4_TBL i WHERE i.f1 <= int4 '0' ORDER BY f1;
  three |     f1      
 -------+-------------
-       | -2147483647
+       | -2147483648
        |     -123456
        |           0
 (3 rows)
@@ -155,37 +165,26 @@ SELECT '' AS one, i.* FROM INT4_TBL i WHERE (i.f1 % int2 '2') = int2 '1' ORDER B
 
 -- any evens
 SELECT '' AS three, i.* FROM INT4_TBL i WHERE (i.f1 % int4 '2') = int2 '0' ORDER BY f1;
- three |   f1    
--------+---------
-       | -123456
-       |       0
-       |  123456
-(3 rows)
+ three |     f1      
+-------+-------------
+       | -2147483648
+       |     -123456
+       |           0
+       |      123456
+(4 rows)
 
 SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT4_TBL i ORDER BY f1;
 ERROR:  integer out of range
 CONTEXT:  referenced column: x
 SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT4_TBL i
 WHERE abs(f1) < 1073741824 ORDER BY f1;
- five |   f1    |    x    
-------+---------+---------
-      | -123456 | -246912
-      |       0 |       0
-      |  123456 |  246912
-(3 rows)
-
+ERROR:  integer out of range
 SELECT '' AS five, i.f1, i.f1 * int4 '2' AS x FROM INT4_TBL i ORDER BY f1;
 ERROR:  integer out of range
 CONTEXT:  referenced column: x
 SELECT '' AS five, i.f1, i.f1 * int4 '2' AS x FROM INT4_TBL i
 WHERE abs(f1) < 1073741824 ORDER BY f1;
- five |   f1    |    x    
-------+---------+---------
-      | -123456 | -246912
-      |       0 |       0
-      |  123456 |  246912
-(3 rows)
-
+ERROR:  integer out of range
 SELECT '' AS five, i.f1, i.f1 + int2 '2' AS x FROM INT4_TBL i ORDER BY f1;
 ERROR:  integer out of range
 CONTEXT:  referenced column: x
@@ -193,7 +192,7 @@ SELECT '' AS five, i.f1, i.f1 + int2 '2' AS x FROM INT4_TBL i
 WHERE f1 < 2147483646 ORDER BY f1;
  five |     f1      |      x      
 ------+-------------+-------------
-      | -2147483647 | -2147483645
+      | -2147483648 | -2147483646
       |     -123456 |     -123454
       |           0 |           2
       |      123456 |      123458
@@ -206,7 +205,7 @@ SELECT '' AS five, i.f1, i.f1 + int4 '2' AS x FROM INT4_TBL i
 WHERE f1 < 2147483646 ORDER BY f1;
  five |     f1      |      x      
 ------+-------------+-------------
-      | -2147483647 | -2147483645
+      | -2147483648 | -2147483646
       |     -123456 |     -123454
       |           0 |           2
       |      123456 |      123458
@@ -239,25 +238,25 @@ WHERE f1 > -2147483647 ORDER BY f1;
 (4 rows)
 
 SELECT '' AS five, i.f1, i.f1 / int2 '2' AS x FROM INT4_TBL i ORDER BY f1;
- five |     f1      |       x       
-------+-------------+---------------
-      | -2147483647 | -1073741823.5
-      |     -123456 |        -61728
-      |           0 |             0
-      |      123456 |         61728
-      |  2147483647 |  1073741823.5
-      |             |              
+ five |     f1      |      x       
+------+-------------+--------------
+      | -2147483648 |  -1073741824
+      |     -123456 |       -61728
+      |           0 |            0
+      |      123456 |        61728
+      |  2147483647 | 1073741823.5
+      |             |             
 (6 rows)
 
 SELECT '' AS five, i.f1, i.f1 / int4 '2' AS x FROM INT4_TBL i ORDER BY f1;
- five |     f1      |       x       
-------+-------------+---------------
-      | -2147483647 | -1073741823.5
-      |     -123456 |        -61728
-      |           0 |             0
-      |      123456 |         61728
-      |  2147483647 |  1073741823.5
-      |             |              
+ five |     f1      |      x       
+------+-------------+--------------
+      | -2147483648 |  -1073741824
+      |     -123456 |       -61728
+      |           0 |            0
+      |      123456 |        61728
+      |  2147483647 | 1073741823.5
+      |             |             
 (6 rows)
 
 --

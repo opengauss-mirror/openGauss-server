@@ -507,3 +507,4 @@ test: gs_dump_char_semantic
 test: gs_dump_2hash
 # test backup tool audit log
 test: backup_tool_audit
+test: extra_float_digits

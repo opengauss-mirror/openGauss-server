@@ -458,16 +458,18 @@ extern Datum pseudo_current_user(PG_FUNCTION_ARGS);
 extern uint64 pg_strtouint64(const char* str, char** endptr, int base);
 
 /* numutils.c */
-extern int32 pg_atoi(char* s, int size, int c, bool can_ignore);
+extern int32 pg_atoi(char* s, int size, int c, bool can_ignore = false);
 extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
-extern int32 pg_strtoint32(const char* s, bool can_ignore);
+extern int32 pg_strtoint32(const char* s, bool can_ignore = false);
+extern void pg_ctoa(uint8 c, char* a);
 extern void pg_itoa(int16 i, char* a);
 extern void pg_ltoa(int32 l, char* a);
-extern char* pg_ltoa_printtup(int32 l, int* len);
-extern void pg_ctoa(uint8 i, char* a);
+extern void pg_ltoa(int32 l, char* a, int* len);
 extern void pg_lltoa(int64 ll, char* a);
-extern char* pg_lltoa_printtup(int64 ll, int* len);
+extern void pg_lltoa(int64 ll, char* a, int* len);
 extern void pg_i128toa(int128 value, char* a, int length);
+extern char* pg_ultostr(char* str, uint32 value);
+extern char* pg_ultostr_zeropad(char* str, uint32 value, int min_width);
 
 /*
  *		Per-opclass comparison functions for new btrees.  These are
@@ -509,13 +511,6 @@ extern Datum btfloat4sortsupport(PG_FUNCTION_ARGS);
 extern Datum btfloat8sortsupport(PG_FUNCTION_ARGS);
 extern Datum btoidsortsupport(PG_FUNCTION_ARGS);
 extern Datum btnamesortsupport(PG_FUNCTION_ARGS);
-
-extern double get_float8_infinity(void);
-extern float get_float4_infinity(void);
-extern double get_float8_nan(void);
-extern float get_float4_nan(void);
-extern int is_infinite(double val);
-extern double float8in_internal(char* str, char** s, bool* hasError);
 
 extern Datum float4in(PG_FUNCTION_ARGS);
 extern Datum float4out(PG_FUNCTION_ARGS);
@@ -1784,10 +1779,10 @@ extern Datum hypothetical_percent_rank_final(PG_FUNCTION_ARGS);
 extern Datum db4ai_predict_by(PG_FUNCTION_ARGS);
 extern Datum db4ai_explain_model(PG_FUNCTION_ARGS);
 extern Datum gs_index_advise(PG_FUNCTION_ARGS);
-extern Datum hypopg_create_index(PG_FUNCTION_ARGS);                             
-extern Datum hypopg_display_index(PG_FUNCTION_ARGS);                            
-extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);                               
-extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);                            
+extern Datum hypopg_create_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_display_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);
 extern Datum hypopg_reset_index(PG_FUNCTION_ARGS);
 
 /* MOT */
@@ -1902,11 +1897,10 @@ extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
 
 #else
 #endif
-extern char *pg_ultostr(char *str, uint32 value);
-extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
 extern char *printTypmod(const char *typname, int32 typmod, Oid typmodout);
+
 /* float.cpp */
 extern int float8_cmp_internal(float8 a, float8 b);
-extern bool is_req_from_jdbc();
+extern double float8in_internal(char* str, char** s, bool* hasError);
 
 #endif /* BUILTINS_H */

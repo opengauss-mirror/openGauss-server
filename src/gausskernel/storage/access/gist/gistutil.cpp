@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include <math.h>
+#include <limits>
 
 #include "access/gist_private.h"
 #include "access/reloptions.h"
@@ -497,7 +498,7 @@ float gistpenalty(GISTSTATE *giststate, int attno, GISTENTRY *orig, bool isNullO
         penalty = 0.0;
     } else {
         /* try to prevent mixing null and non-null values */
-        penalty = get_float4_infinity();
+        penalty = std::numeric_limits<float>::infinity();
     }
 
     return penalty;

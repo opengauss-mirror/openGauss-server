@@ -30,6 +30,7 @@
 #include "utils/date.h"
 #include "utils/datetime.h"
 #include "utils/memutils.h"
+#include "utils/numutils.h"
 #include "utils/tzparser.h"
 #include "parser/scansup.h"
 
@@ -451,14 +452,14 @@ static char* AppendSeconds(char* cp, int sec, fsec_t fsec, int precision, bool f
     /* fsec_t is just an int32 */
 
     if (fillzeros)
-        cp = pg_ultostr_zeropad(cp, Abs(sec), 2);
+        cp = pg_ultostr_zeropad_width_2(cp, Abs(sec));
     else
         cp = pg_ultostr(cp, Abs(sec));
 
     if (fsec != 0)
     {
         int32 value = Abs(fsec);
-        char *end = &cp[precision + 1];
+        char* end = &cp[precision + 1];
         bool gotnonzero = false;
 
         *cp++ = '.';
@@ -504,7 +505,7 @@ static char* AppendSeconds(char* cp, int sec, fsec_t fsec, int precision, bool f
     if (fsec == 0)
     {
         if (fillzeros)
-            return pg_ultostr_zeropad(cp, Abs(sec), 2);
+            return pg_ultostr_zeropad_width_2(cp, Abs(sec));
         else
             return pg_ultostr(cp, Abs(sec));
     }
@@ -3404,20 +3405,20 @@ static char* EncodeTimezone(char* str, int tz, int style)
 
     if (sec != 0)
     {
-        str = pg_ultostr_zeropad(str, hour, 2);
+        str = pg_ultostr_zeropad_width_2(str, hour);
         *str++ = ':';
-        str = pg_ultostr_zeropad(str, min, 2);
+        str = pg_ultostr_zeropad_width_2(str, min);
         *str++ = ':';
-        str = pg_ultostr_zeropad(str, sec, 2);
+        str = pg_ultostr_zeropad_width_2(str, sec);
     }
     else if (min != 0 || style == USE_XSD_DATES)
     {
-        str = pg_ultostr_zeropad(str, hour, 2);
+        str = pg_ultostr_zeropad_width_2(str, hour);
         *str++ = ':';
-        str = pg_ultostr_zeropad(str, min, 2);
+        str = pg_ultostr_zeropad_width_2(str, min);
     }
     else
-        str = pg_ultostr_zeropad(str, hour, 2);
+        str = pg_ultostr_zeropad_width_2(str, hour);
     return str;
 }
 
@@ -3432,57 +3433,53 @@ void EncodeDateOnly(struct pg_tm* tm, int style, char* str)
         case USE_ISO_DATES:
         case USE_XSD_DATES:
             /* compatible with ISO date formats */
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             *str++ = '-';
-            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             *str++ = '-';
-            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             break;
 
         case USE_SQL_DATES:
             /* compatible with A db/Ingres date formats */
             if (u_sess->time_cxt.DateOrder == DATEORDER_DMY) {
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
                 *str++ = '/';
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             }
             else {
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
                 *str++ = '/';
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             }
             *str++ = '/';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             break;
 
         case USE_GERMAN_DATES:
             /* German-style date format */
-            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             *str++ = '.';
-            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             *str++ = '.';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             break;
 
         case USE_POSTGRES_DATES:
         default:
             /* traditional date-only style for openGauss */
             if (u_sess->time_cxt.DateOrder == DATEORDER_DMY) {
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
                 *str++ = '-';
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             }
             else {
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
                 *str++ = '-';
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             }
             *str++ = '-';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             break;
     }
     if (tm->tm_year <= 0)
@@ -3504,9 +3501,9 @@ void EncodeDateOnly(struct pg_tm* tm, int style, char* str)
  */
 void EncodeTimeOnly(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, int style, char* str)
 {
-    str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+    str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
     *str++ = ':';
-    str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+    str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
     *str++ = ':';
     str = AppendSeconds(str, tm->tm_sec, fsec, MAX_TIME_PRECISION, true);
     if (print_tz)
@@ -3546,16 +3543,15 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
         case USE_ISO_DATES:
         case USE_XSD_DATES:
             /* Compatible with ISO-8601 date formats */
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             *str++ = '-';
-            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             *str++ = '-';
-            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             *str++ = (style == USE_ISO_DATES) ? ' ' : 'T';
-            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
             *str++ = ':';
-            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
             *str++ = ':';
             str = AppendTimestampSeconds(str, tm, fsec);
             if (print_tz)
@@ -3565,21 +3561,20 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
         case USE_SQL_DATES:
             /* Compatible with A db/Ingres date formats */
             if (u_sess->time_cxt.DateOrder == DATEORDER_DMY) {
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
                 *str++ = '/';
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             } else {
-                str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
                 *str++ = '/';
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             }
             *str++ = '/';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             *str++ = ' ';
-            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
             *str++ = ':';
-            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
             *str++ = ':';
             str = AppendTimestampSeconds(str, tm, fsec);
 
@@ -3600,16 +3595,15 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
 
         case USE_GERMAN_DATES:
             /* German variant on European style */
-            str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             *str++ = '.';
-            str = pg_ultostr_zeropad(str, tm->tm_mon, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             *str++ = '.';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             *str++ = ' ';
-            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
             *str++ = ':';
-            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
             *str++ = ':';
             str = AppendTimestampSeconds(str, tm, fsec);
 
@@ -3633,7 +3627,7 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
             str += 3;
             *str++ = ' ';
             if (u_sess->time_cxt.DateOrder == DATEORDER_DMY) {
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
                 *str++ = ' ';
                 rc = memcpy_s(str, 3, months[tm->tm_mon - 1], 3);
                 securec_check(rc, "", "");
@@ -3643,17 +3637,16 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
                 securec_check(rc, "", "");
                 str += 3;
                 *str++ = ' ';
-                str = pg_ultostr_zeropad(str, tm->tm_mday, 2);
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             }
             *str++ = ' ';
-            str = pg_ultostr_zeropad(str, tm->tm_hour, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
             *str++ = ':';
-            str = pg_ultostr_zeropad(str, tm->tm_min, 2);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
             *str++ = ':';
             str = AppendTimestampSeconds(str, tm, fsec);
             *str++ = ' ';
-            str = pg_ultostr_zeropad(str,
-                    (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1), 4);
+            str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
 
             if (print_tz) {
                 if (NULL != tzn) {

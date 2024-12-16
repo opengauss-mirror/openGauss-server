@@ -15,6 +15,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <limits>
+
 #include "access/gist.h"
 #include "access/skey.h"
 #include "utils/builtins.h"
@@ -348,7 +350,7 @@ Datum range_gist_penalty(PG_FUNCTION_ARGS)
              * If lower bound of original range is not -inf, then extension of
              * it is infinity.
              */
-            *penalty = get_float4_infinity();
+            *penalty = std::numeric_limits<float>::infinity();
         }
     } else if (new_upper.infinite) {
         /* Handle insertion of (x, +inf) range */
@@ -382,7 +384,7 @@ Datum range_gist_penalty(PG_FUNCTION_ARGS)
              * If upper bound of original range is not +inf, then extension of
              * it is infinity.
              */
-            *penalty = get_float4_infinity();
+            *penalty = std::numeric_limits<float>::infinity();
         }
     } else {
         /* Handle insertion of normal (non-empty, non-infinite) range */
@@ -390,7 +392,7 @@ Datum range_gist_penalty(PG_FUNCTION_ARGS)
             /*
              * Avoid mixing normal ranges with infinite and empty ranges.
              */
-            *penalty = get_float4_infinity();
+            *penalty = std::numeric_limits<float>::infinity();
         } else {
             /*
              * Calculate extension of original range by calling subtype_diff.

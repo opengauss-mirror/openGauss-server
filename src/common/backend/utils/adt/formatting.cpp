@@ -68,7 +68,6 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include <math.h>
 #include <float.h>
 #include <limits.h>
 #include <cmath>
@@ -7542,7 +7541,7 @@ Datum float4_to_char(PG_FUNCTION_ARGS)
         numstr = orgnum = int_to_roman((int)rint(value));
     else if (IS_EEEE(&Num)) {
         numstr = orgnum = (char*)palloc(MAXDOUBLEWIDTH + 1);
-        if (isnan(value) || is_infinite(value)) {
+        if (std::isnan(value) || std::isinf(value)) {
             /*
              * Allow 6 characters for the leading sign, the decimal point,
              * "e", the exponent's sign and two exponent digits.
@@ -7654,7 +7653,7 @@ Datum float8_to_char(PG_FUNCTION_ARGS)
         numstr = orgnum = int_to_roman((int)rint(value));
     else if (IS_EEEE(&Num)) {
         numstr = orgnum = (char*)palloc(MAXDOUBLEWIDTH + 1);
-        if (isnan(value) || is_infinite(value)) {
+        if (std::isnan(value) || std::isinf(value)) {
             /*
              * Allow 6 characters for the leading sign, the decimal point,
              * "e", the exponent's sign and two exponent digits.

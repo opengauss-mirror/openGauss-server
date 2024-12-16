@@ -2923,7 +2923,6 @@ static void compress_encrypt_directory()
 {
     error_t rc;
     int ret = 0;
-    bool res = false;
     uint key_len = 0;
     uint hmac_len = MAX_HMAC_LEN;
     uint enc_buffer_len = 0;

@@ -22,9 +22,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include <float.h>
-#include <limits.h>
-#include <math.h>
+#include <limits>
+#include <cmath>
 
 #include "access/hash.h"
 #include "catalog/pg_type.h"
@@ -3303,7 +3302,7 @@ Datum numeric_float8(PG_FUNCTION_ARGS)
             num = makeNumericNormal(num);
         } else {
             /* Handle NaN */
-            PG_RETURN_FLOAT8(get_float8_nan());
+            PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
         }
     }
 
@@ -3329,7 +3328,7 @@ Datum numeric_float8_no_overflow(PG_FUNCTION_ARGS)
             num = makeNumericNormal(num);
         } else {
             /* Handle NaN */
-            PG_RETURN_FLOAT8(get_float8_nan());
+            PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
         }
     }
 
@@ -3380,7 +3379,7 @@ Datum numeric_float4(PG_FUNCTION_ARGS)
             num = makeNumericNormal(num);
         } else {
             /* Handle NaN */
-            PG_RETURN_FLOAT4(get_float4_nan());
+            PG_RETURN_FLOAT4(std::numeric_limits<float>::quiet_NaN());
         }
     }
 
