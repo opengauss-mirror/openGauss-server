@@ -1318,7 +1318,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("Dropping Rel: %d which enabled imcstore, canceling imcstore.", object->objectId)));
                     Relation rel = relation_open(object->objectId, AccessExclusiveLock);
-                    UnPopulateImcs(rel);
+                    AlterTableDisableImcstore(rel);
                     /* Then close the relation opened previously */
                     relation_close(rel, AccessExclusiveLock);
                 }

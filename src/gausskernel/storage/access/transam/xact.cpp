@@ -7466,10 +7466,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
             update_delay_ddl_files(newColFileNodes, nrels, lsn);
         } else {
 #ifdef ENABLE_HTAP
-            for (int i = 0; i < nrels; i++) {
-                RelFileNode rnode = (newColFileNodes + i)->filenode;
-                if (RelHasImcs(rnode.relNode)) {
-                    IMCU_CACHE->DeleteImcsDesc(rnode.relNode, &rnode);
+            if (HAVE_HTAP_TABLES) {
+                for (int i = 0; i < nrels; i++) {
+                    RelFileNode rnode = (newColFileNodes + i)->filenode;
+                    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(rnode.relNode);
+                    if (imcsDesc != NULL) {
+                        IMCU_CACHE->DeleteImcsDesc(imcsDesc->parentOid, NULL);
+                        IMCU_CACHE->DeleteImcsDesc(rnode.relNode, &rnode);
+                    }
                 }
             }
 #endif

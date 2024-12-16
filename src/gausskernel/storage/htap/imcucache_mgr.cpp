@@ -374,6 +374,9 @@ void IMCUDataCacheMgr::UpdateImcsStatus(Oid relOid, int imcsStatus)
 void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
 {
     bool found = false;
+    if (!OidIsValid(relOid)) {
+        return;
+    }
     LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
     IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
     if (!found) {
@@ -386,6 +389,7 @@ void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         if (imcsDesc->imcuDescContext != NULL) {
             /* drop rowgroup\cu\cudesc, no need to drop RowGroups for primary node */
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
+            Assert(relNode);
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
             MemoryContextDelete(imcsDesc->imcuDescContext);
