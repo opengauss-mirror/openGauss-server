@@ -96,5 +96,5 @@ void UHeapUndoActionsCloseRelation(UndoRelationData *relationData);
 bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloid, Oid *partitionoid);
 bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
     BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo = NULL);
-
+int GetUndoApplySize();
 #endif

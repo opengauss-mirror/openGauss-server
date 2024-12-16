@@ -519,6 +519,7 @@ extern void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page 
 extern void UBTreeInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void UBTreeFinishSplit(Relation rel, Buffer lbuf, BTStack stack);
 extern Buffer UBTreeGetStackBuf(Relation rel, BTStack stack);
+extern void ReportFailedToDelete(Relation rel, Buffer buf, IndexTuple itup, char* extraInfo);
 
 /*
  * prototypes for functions in ubtsort.cpp
@@ -557,6 +558,7 @@ extern void BtCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace,
 extern bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_xmin, TransactionId *xmin,
     TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted, bool isToast);
 extern TransactionIdStatus UBTreeCheckXid(TransactionId xid);
+extern bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
 
 /*
  * prototypes for functions in ubtpage.cpp

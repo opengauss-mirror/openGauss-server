@@ -53,6 +53,7 @@
 #include "access/itup.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/slru.h"
 #include "access/twophase_rmgr.h"
 #include "access/double_write.h"
@@ -160,6 +161,8 @@ typedef enum SegmentType {
     SEG_FSM,
     SEG_UHEAP,
     SEG_INDEX_BTREE,
+    SEG_INDEX_UBTREE,
+    SEG_INDEX_UBTREE_PCR,
     SEG_UNDO,
     SEG_UNKNOWN
 } SegmentType;
@@ -819,6 +822,8 @@ typedef enum HackingType {
     HACKING_FSM,   /* fsm page */
     HACKING_UHEAP, /* uheap page */
     HACKING_INDEX, /* index page */
+    HACKING_UINDEX, /* ubtree index page */
+    HACKING_UINDEX_PCR, /* ubtree pcr index page */
     HACKING_UNDO,  /* undo page */
     HACKING_PCA,   /* pca page */
     HACKING_FILENODE,
@@ -849,6 +854,8 @@ static const char* HACKINGTYPE[] = {"heap",
     "fsm",
     "uheap",
     "btree_index",
+    "ubtree_index",
+    "ubtree_pcr_index",
     "undo",
     "pca",
     "filenode_map",
@@ -2636,6 +2643,95 @@ static void parse_btree_index_item(const Item item, unsigned len, int blkno, int
     }
 }
 
+static void parse_ubtree_index_item(const Item item, unsigned len)
+{
+    IndexTuple itup = (IndexTuple)item;
+    bool hasnull = (itup->t_info & INDEX_NULL_MASK);
+    unsigned int tuplen = (itup->t_info & INDEX_SIZE_MASK);
+    unsigned int offset = 0;
+    unsigned char* null_map = NULL;
+
+    indentLevel = 3;
+
+    if (tuplen != len) {
+        /* there are xmin/xmax */
+        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+        fprintf(stdout,
+            "%s xmin:%d xmax:%d Tid: block %u/%u, offset %u\n",
+            indents[indentLevel],
+            uxid->xmin,
+            uxid->xmax,
+            itup->t_tid.ip_blkid.bi_hi,
+            itup->t_tid.ip_blkid.bi_lo,
+            itup->t_tid.ip_posid);
+    } else {
+        fprintf(stdout,
+            "%s UHeap Tid: block %u/%u, offset %u\n",
+            indents[indentLevel],
+            itup->t_tid.ip_blkid.bi_hi,
+            itup->t_tid.ip_blkid.bi_lo,
+            itup->t_tid.ip_posid);
+    }
+
+    fprintf(stdout, "%s Length: %u", indents[indentLevel], tuplen);
+    if (itup->t_info & INDEX_VAR_MASK)
+        fprintf(stdout, ", has var-width attrs");
+    if (hasnull) {
+        fprintf(stdout, ", has nulls \n");
+        formatBitmap((unsigned char*)item + sizeof(IndexTupleData), sizeof(IndexAttributeBitMapData), 'V', 'N');
+        null_map = (unsigned char*)item + sizeof(IndexTupleData);
+    } else
+        fprintf(stdout, "\n");
+
+    offset = IndexInfoFindDataOffset(itup->t_info);
+    if (PgIndexRelTupleParserCursor >= 0) {
+        (PgIndexRelTupleParser[PgIndexRelTupleParserCursor])(
+            (unsigned char*)item + offset, tuplen - offset, null_map, 32 /* skip */);
+    } else {
+        formatBytes((unsigned char*)item + offset, tuplen - offset);
+    }
+}
+
+static void parse_ubtree_pcr_index_item(const Item item)
+{
+    IndexTuple itup = (IndexTuple)item;
+    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
+    uint8 slotNo = trx->tdSlot;
+    bool hasnull = (itup->t_info & INDEX_NULL_MASK);
+    unsigned int tuplen = (itup->t_info & INDEX_SIZE_MASK);
+    unsigned int offset = 0;
+    unsigned char* null_map = NULL;
+
+    indentLevel = 3;
+
+    /* there are trx information */
+    fprintf(stdout,
+        "%s td_id:%d Tid: block %u/%u, offset %u\n",
+        indents[indentLevel],
+        trx->tdSlot,
+        itup->t_tid.ip_blkid.bi_hi,
+        itup->t_tid.ip_blkid.bi_lo,
+        itup->t_tid.ip_posid);
+
+    fprintf(stdout, "%s Length: %u", indents[indentLevel], tuplen);
+    if (itup->t_info & INDEX_VAR_MASK)
+        fprintf(stdout, ", has var-width attrs");
+    if (hasnull) {
+        fprintf(stdout, ", has nulls \n");
+        formatBitmap((unsigned char*)item + sizeof(IndexTupleData), sizeof(IndexAttributeBitMapData), 'V', 'N');
+        null_map = (unsigned char*)item + sizeof(IndexTupleData);
+    } else
+        fprintf(stdout, "\n");
+
+    offset = IndexInfoFindDataOffset(itup->t_info);
+    if (PgIndexRelTupleParserCursor >= 0) {
+        (PgIndexRelTupleParser[PgIndexRelTupleParserCursor])(
+            (unsigned char*)item + offset, tuplen - offset, null_map, 32 /* skip */);
+    } else {
+        formatBytes((unsigned char*)item + offset, tuplen - offset);
+    }
+}
+
 static void parse_one_item(const Item item, unsigned len, int blkno, int lineno, SegmentType type)
 {
     switch (type) {
@@ -2651,6 +2747,12 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
             parse_btree_index_item(item, len, blkno, lineno);
             break;
 
+        case SEG_INDEX_UBTREE:
+            parse_ubtree_index_item(item, len);
+            break;
+
+        case SEG_INDEX_UBTREE_PCR:
+            parse_ubtree_pcr_index_item(item);
         default:
             break;
     }
@@ -2831,6 +2933,85 @@ static void parse_special_data(const char* buffer, SegmentType type)
         }
     } else if (SEG_UHEAP == type) {
         ParseTDSlot(buffer);
+    } else if (SEG_INDEX_UBTREE == type) {
+        UBTPageOpaqueInternal uopaque;
+
+        uopaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+        fprintf(stdout, "\nubtree index special information:\n");
+        fprintf(stdout, "\tubtree left sibling: %u\n", uopaque->btpo_prev);
+        fprintf(stdout, "\tubtree right sibling: %u\n", uopaque->btpo_next);
+        if (!P_ISDELETED(uopaque)) {
+            fprintf(stdout, "\tubtree tree level: %u\n", uopaque->btpo.level);
+        } else {
+            fprintf(stdout, "\tnext txid (deleted): %lu\n", ((UBTPageOpaque)uopaque)->xact);
+        }
+        fprintf(stdout, "\tubtree flag: ");
+        if (P_ISLEAF(uopaque)) {
+            fprintf(stdout, "BTP_LEAF ");
+        } else {
+            fprintf(stdout, "BTP_INTERNAL ");
+        }
+        if (P_ISROOT(uopaque)) {
+            fprintf(stdout, "BTP_ROOT ");
+        }
+        if (P_ISMETA(uopaque)) { 
+            fprintf(stdout, "BTP_META ");
+        }
+        if (P_ISDELETED(uopaque)) {
+            fprintf(stdout, "BTP_DELETED ");
+        }
+        if (P_ISHALFDEAD(uopaque)) {
+            fprintf(stdout, "BTP_HALF_DEAD ");
+        }
+        if (P_HAS_GARBAGE(uopaque)) {
+            fprintf(stdout, "BTP_HAS_GARBAGE ");
+        }
+        fprintf(stdout, "\n");
+
+        fprintf(stdout, "\tubtree cycle ID: %u\n", uopaque->btpo_cycleid);
+        fprintf(stdout, "\tubtree active tuples: %u\n", uopaque->activeTupleCount);
+    } else if (SEG_INDEX_UBTREE_PCR == type) {
+        UBTPCRPageOpaque uPCRopaque;
+        
+        uPCRopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+
+        fprintf(stdout, "\nubtree PCR index special information:\n");
+        fprintf(stdout, "\tubtree PCR left sibling: %u\n", uPCRopaque->btpo_prev);
+        fprintf(stdout, "\tubtree PCR right sibling: %u\n", uPCRopaque->btpo_next);
+        if (!P_ISDELETED(uPCRopaque)) {
+            fprintf(stdout, "\tubtree tree level: %u\n", uPCRopaque->btpo.level);
+        } else {
+            fprintf(stdout, "\tnext txid (deleted): %lu\n", ((UBTPCRPageOpaque)uPCRopaque)->btpo.xact_old);
+        }
+        fprintf(stdout, "\tubtree PCR flag: ");
+        if (P_ISLEAF(uPCRopaque)) {
+            fprintf(stdout, "BTP_LEAF ");
+        } else {
+            fprintf(stdout, "BTP_INTERNAL ");
+        }
+        if (P_ISROOT(uPCRopaque)) {
+            fprintf(stdout, "BTP_ROOT ");
+        }
+        if (P_ISMETA(uPCRopaque)) { 
+            fprintf(stdout, "BTP_META ");
+        }
+        if (P_ISDELETED(uPCRopaque)) {
+            fprintf(stdout, "BTP_DELETED ");
+        }
+        if (P_ISHALFDEAD(uPCRopaque)) {
+            fprintf(stdout, "BTP_HALF_DEAD ");
+        }
+        if (P_HAS_GARBAGE(uPCRopaque)) {
+            fprintf(stdout, "BTP_HAS_GARBAGE ");
+        }
+        fprintf(stdout, "\n");
+
+        fprintf(stdout, "\tubtree PCR cycle ID: %u\n", uPCRopaque->btpo_cycleid);
+        fprintf(stdout, "\tubtree PCR last delete xid: %u\n", uPCRopaque->last_delete_xid);
+        fprintf(stdout, "\tubtree PCR last commit xid: %u\n", uPCRopaque->last_commit_xid);
+        fprintf(stdout, "\tubtree PCR td_count: %u\n", uPCRopaque->td_count);
+        fprintf(stdout, "\tubtree PCR active tuples: %u\n", uPCRopaque->activeTupleCount);
     }
 }
 
@@ -2908,6 +3089,19 @@ static void ParseTDSlot(const char *page)
     }
 }
 
+static void parse_ubtree_pcr_tdslot(const char *page)
+{
+    unsigned short tdCount;
+    PageHeaderData *ubtreePCRPage = (PageHeaderData *)page;
+    tdCount = UBTreePageGetTDSlotCount(ubtreePCRPage);
+    fprintf(stdout, "\n\n\tUBtree PCR Page TD information, nTDSlots = %hu\n", tdCount);
+    for (int i = 0; i < tdCount; i++) {
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, i + 1);
+        fprintf(stdout, "\n\t\t TD Slot #%d, xid:%ld, urp:%ld, tdStatus:%u\n",
+                i + 1, thisTrans->xactid, thisTrans->undoRecPtr, thisTrans->tdStatus);
+    }
+}
+
 static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType type)
 {
     const PageHeader page = (const PageHeader)buffer;
@@ -2960,18 +3154,74 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
         fprintf(stdout, "\tSummary (%d total): %d unused, %d normal, %d dead\n", nline, nunused, nnormal, ndead);
 
         parse_special_data(buffer, type);
-    } else if (type == SEG_HEAP || type == SEG_INDEX_BTREE) {
-        nline = PageGetMaxOffsetNumber((Page)page);
+    } else if (type == SEG_HEAP || type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE || type == SEG_INDEX_UBTREE_PCR) {
+        if (blkno == 0) {
+            if (type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE || type == SEG_INDEX_UBTREE_PCR) {
+                fprintf(stdout, "\n\tMeta information on this page\n");
+                BTMetaPageData* metad = BTPageGetMeta(page);
+                if (type == SEG_INDEX_BTREE) {
+                    fprintf(stdout, 
+                                    "\n\t\tmagic number of btree pages : %u \n",
+                                    metad->btm_magic);
+                    fprintf(stdout, 
+                                    "\n\t\tBtree version : %u \n",
+                                    metad->btm_version);
+                } else if (type == SEG_INDEX_UBTREE){
+                    fprintf(stdout, 
+                                    "\n\t\tmagic number of ubtree pages : %u \n",
+                                    metad->btm_magic);
+                    fprintf(stdout, 
+                                    "\n\t\tUBtree version : %u \n",
+                                    metad->btm_version);
+                } else if (type == SEG_INDEX_UBTREE_PCR){
+                    fprintf(stdout, 
+                                    "\n\t\tmagic number of ubtree PCR pages : %u \n",
+                                    metad->btm_magic);
+                    fprintf(stdout, 
+                                    "\n\t\tUBtree PCR version : %u \n",
+                                    metad->btm_version);
+                }
+                fprintf(stdout, 
+                                "\n\t\tBlock Number of root page : %u \n",
+                                metad->btm_root);
+                fprintf(stdout, 
+                                "\n\t\tLevel of root page : %u \n",
+                                metad->btm_level);
+                fprintf(stdout, 
+                                "\n\t\tBlock Number of fast root page : %u \n",
+                                metad->btm_fastroot);
+                fprintf(stdout, 
+                                "\n\t\tLevel of fast root page : %u \n",
+                                metad->btm_fastlevel);
+                fprintf(stdout, "\n");
+                return;
+            }
+        } else {
+            if (type == SEG_INDEX_UBTREE) {
+                fprintf(stdout, "\n\tUBtree tuple information on this page\n");    
+            } else if (type == SEG_INDEX_UBTREE_PCR) {
+                fprintf(stdout, "\n\tUBtree PCR tuple information on this page\n");    
+            } else if (type == SEG_INDEX_BTREE) {
+                fprintf(stdout, "\n\tHeap tuple information on this page\n");
+            }
+        }
+        if (type == SEG_INDEX_UBTREE_PCR) {
+            nline = UBTPCRPageGetMaxOffsetNumber((Page)page); 
+        } else if (type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE) {
+            nline = PageGetMaxOffsetNumber((Page)page);
+        }
         g_rpCount += (uint64)nline;
         g_rpMax = (uint64)nline > g_rpMax ? (uint64)nline : g_rpMax;
-        fprintf(stdout, "\n\tHeap tuple information on this page\n");
         for (i = FirstOffsetNumber; i <= nline; i++) {
             lp = PageGetItemId(page, i);
+            if (type == SEG_INDEX_UBTREE_PCR) {
+                lp = UBTreePCRGetRowPtr(page, i);
+            }
             if (ItemIdIsUsed(lp)) {
                 if (ItemIdHasStorage(lp))
                     nstorage++;
 
-                if (ItemIdIsNormal(lp) || (type == SEG_INDEX_BTREE && blkno != 0 && IndexItemIdIsFrozen(lp))) {
+                if (ItemIdIsNormal(lp) || ((type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE || type == SEG_INDEX_UBTREE_PCR) && blkno != 0 && IndexItemIdIsFrozen(lp))) {
                     if (ItemIdIsNormal(lp)) {
                         fprintf(stdout,
                                 "\n\t\tTuple #%d is normal: length %u, offset %u\n",
@@ -2987,6 +3237,7 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
                     item = PageGetItem(page, lp);
                     HeapTupleCopyBaseFromPage(&dummyTuple, page);
                     parse_one_item(item, ItemIdGetLength(lp), blkno, i, type);
+                    
                 } else if (ItemIdIsDead(lp)) {
                     fprintf(stdout,
                         "\n\t\tTuple #%d is dead: length %u, offset %u",
@@ -3084,7 +3335,7 @@ static bool parse_data_page(const char *buffer, int blkno, SegmentType type)
     if (only_vm || only_bcm) {
         return true;
     }
-    if (type == SEG_HEAP || type == SEG_UHEAP || type == SEG_INDEX_BTREE) {
+    if (type == SEG_HEAP || type == SEG_UHEAP || type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE || type == SEG_INDEX_UBTREE_PCR) {
         parse_heap_or_index_page(buffer, blkno, type);
     } else if (type == SEG_FSM) {
         parse_fsm_page(buffer, blkno);
@@ -3096,7 +3347,6 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
 {
     const PageHeader page = (const PageHeader)buffer;
     uint16 headersize;
-
     if (PageIsNew(page)) {
         fprintf(stdout, "Page information of block %d/%d : new page\n\n", blkno, blknum);
         ParsePageHeader(page, blkno, blknum, type);
@@ -3118,6 +3368,10 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
         parse_bcm_page(buffer, blkno, blknum);
     } else if (!only_vm) {
         ParsePageHeader(page, blkno, blknum, type);
+    }
+
+    if (type == SEG_INDEX_UBTREE_PCR) {
+        parse_ubtree_pcr_tdslot(buffer);
     }
 
     parse_data_page(buffer, blkno, type);
@@ -6224,6 +6478,20 @@ int main(int argc, char** argv)
 
         case HACKING_INDEX:
             if (!parse_page_file(filename, SEG_INDEX_BTREE, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing index file %s\n", filename);
+                exit(1);
+            }
+            break;
+ 
+        case HACKING_UINDEX:
+            if (!parse_page_file(filename, SEG_INDEX_UBTREE, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing index file %s\n", filename);
+                exit(1);
+            }
+            break;
+
+        case HACKING_UINDEX_PCR:
+            if (!parse_page_file(filename, SEG_INDEX_UBTREE_PCR, start_point, num_block)) {
                 fprintf(stderr, "Error during parsing index file %s\n", filename);
                 exit(1);
             }

@@ -216,9 +216,13 @@ bool UBTreeDelete(Relation rel, Datum* values, const bool* isnull, ItemPointer h
 
     WHITEBOX_TEST_STUB("UBTreeDelete", WhiteboxDefaultErrorEmit);
 
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
     itup->t_tid = *heapTCtid;
-    ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
+    if (UBTreeIndexIsPCRType(rel)) {
+        ret = UBTreePCRDoDelete(rel, itup, isRollbackIndex);
+    } else {
+        ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
+    }
     pfree(itup);
 
     return ret;
@@ -255,7 +259,7 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
     }
 
     /* generate an index tuple */
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
     itup->t_tid = *htCtid;
 
     /* reserve space for xmin/xmax */
@@ -281,7 +285,12 @@ Datum ubtgettuple(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function btgettuple")));
     }
 
-    bool res = UBTreeGetTupleInternal(scan, dir);
+    bool res;
+    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+        res = UBTreePCRGetTupleInternal(scan, dir);
+    } else {
+        res = UBTreeGetTupleInternal(scan, dir);
+    }
 
     PG_RETURN_BOOL(res);
 }
@@ -315,8 +324,10 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
 
     /* This loop handles advancing to the next array elements, if any */
     do {
+        bool found = UBTreeIndexIsPCRType(scan->indexRelation) ?
+            UBTreePCRFirst(scan, ForwardScanDirection) : UBTreeFirst(scan, ForwardScanDirection);
         /* Fetch the first page & tuple */
-        if (UBTreeFirst(scan, ForwardScanDirection)) {
+        if (found) {
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
             currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
@@ -330,8 +341,14 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
                  */
                 if (++so->currPos.itemIndex > so->currPos.lastItem) {
                     /* let _bt_next do the heavy lifting */
-                    if (!UBTreeNext(scan, ForwardScanDirection)) {
-                        break;
+                    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+                        if (!UBTreePCRNext(scan, ForwardScanDirection)) {
+                            break;
+                        }
+                    } else {
+                        if (!UBTreeNext(scan, ForwardScanDirection)) {
+                            break;
+                        }
                     }
                 }
 
@@ -1098,7 +1115,12 @@ Datum ubtoptions(PG_FUNCTION_ARGS)
 
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset)
 {
-    bool found = UBTreeGetTupleInternal(scan, dir);
+    bool found;
+    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+        found = UBTreePCRGetTupleInternal(scan, dir);
+    } else {
+        found = UBTreeGetTupleInternal(scan, dir);
+    }
     /* Reset kill flag immediately for safety */
     scan->kill_prior_tuple = false;
 

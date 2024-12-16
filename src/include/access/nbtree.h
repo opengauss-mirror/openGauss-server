@@ -107,6 +107,28 @@ typedef struct UBTPageOpaqueData {
 } UBTPageOpaqueData;
 
 typedef UBTPageOpaqueData* UBTPageOpaque;
+
+/*
+ * UBTPCRPageOpaqueData 
+ */
+typedef struct {
+    BlockNumber btpo_prev; /* left sibling, or P_NONE if leftmost */
+    BlockNumber btpo_next; /* right sibling, or P_NONE if rightmost */
+    union {
+        uint32 level;                /* tree level --- zero for leaf pages */
+        ShortTransactionId xact_old; /* next transaction ID, if deleted */
+    } btpo;
+    uint16 btpo_flags;      /* flag bits, see below */
+    BTCycleId btpo_cycleid; /* vacuum cycle ID of latest split */
+
+    TransactionId last_delete_xid;
+    TransactionId last_commit_xid;
+    uint8 td_count;
+    uint16 activeTupleCount;
+    uint32 flags; 
+} UBTPCRPageOpaqueData;
+typedef UBTPCRPageOpaqueData* UBTPCRPageOpaque;
+
 #define BTPageGetOpaqueInternal(page) ((BTPageOpaqueInternal) PageGetSpecialPointer(page))
 
 typedef struct BTDedupIntervalData {
@@ -377,6 +399,11 @@ enum {
 
 enum {
     BTREE_REUSE_PAGE_BLOCK_NUM = 0,
+};
+
+enum ScanMode {
+    PCR_SCAN_MODE,
+    PBRCR_SCAN_MODE
 };
 
 typedef struct xl_btree_metadata_old {
@@ -959,6 +986,7 @@ typedef struct BTScanOpaqueData {
     bool xs_want_xid; /* indicate that the index scan want xid. Put it here for alignment */
     int numberOfKeys; /* number of preprocessed scan keys */
     ScanKey keyData;  /* array of preprocessed scan keys */
+    ScanMode scanMode;  /* pcr or pbrcr */
 
     /* workspace for SK_SEARCHARRAY support */
     ScanKey arrayKeyData;       /* modified copy of scan->keyData */

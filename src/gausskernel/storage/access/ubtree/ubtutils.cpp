@@ -40,7 +40,6 @@ static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, boo
 static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot, Buffer buffer);
 static int UBTreeKeepNatts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itupKey);
 static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *needRecheck);
-static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
 
 #define MAX(A, B) (((B) > (A)) ? (B) : (A))
 #define MIN(A, B) (((B) < (A)) ? (B) : (A))
@@ -704,7 +703,7 @@ IndexTuple UBTreeTruncate(Relation rel, IndexTuple lastleft, IndexTuple firstrig
     return tidpivot;
 }
 
-static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2)
+bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2)
 {
     if (itup1 == NULL || itup2 == NULL) {
         return false;

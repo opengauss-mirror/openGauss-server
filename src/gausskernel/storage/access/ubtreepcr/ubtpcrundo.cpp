@@ -26,12 +26,14 @@
 
 #include "access/ubtreepcr.h"
 
-/*
-* ExecuteUndoActionsForUBTreePage
-*     Eexute rollback for ubtree page.
-*/
-void ExecuteUndoActionsForUBTreePage(Relation relation, Buffer buf, uint8 slotID)
+IndexTuple FetchTupleFromUndoRecord(UndoRecord *urec)
 {
-    ereport(ERROR, (errmsg("TODO: ExecuteUndoActionsForUBTreePage")));
-    return;
+    Assert(urec->Rawdata()->data != NULL);
+    return (IndexTuple)((char*)(urec->Rawdata()->data) + SizeOfUBTreeUndoInfoData);
+}
+
+UBTreeUndoInfo FetchUndoInfoFromUndoRecord(UndoRecord *urec)
+{
+    Assert(urec->Rawdata()->data != NULL);
+    return (UBTreeUndoInfo)((char*)(urec->Rawdata()->data));
 }

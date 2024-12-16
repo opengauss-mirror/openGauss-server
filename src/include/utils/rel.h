@@ -615,6 +615,13 @@ typedef struct StdRdOptions {
 #define IndexRelationGetNumberOfKeyAttributes(relation) \
     (AssertMacro((relation)->rd_indnkeyatts != 0), ((relation)->rd_indnkeyatts))
 
+/*
+ * Use to judge if a ubtree relation is a including index
+ *         Returns the tag of the include index
+ */
+#define UBTreeHasIncluding(rel) (RelationIsGlobalIndex(rel) ?   \
+    (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel) + 1) :    \
+    (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel)))
 
 /*
  * RelationGetDescr

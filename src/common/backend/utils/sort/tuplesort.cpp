@@ -1570,7 +1570,7 @@ void tuplesort_putindextuplevalues(
     MemoryContext oldcontext = MemoryContextSwitchTo(state->tuplecontext);
     SortTuple stup;
     stup.tupindex = 0;
-    stup.tuple = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCR(rel));
+    stup.tuple = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
 
     ((IndexTuple)stup.tuple)->t_tid = *self;
     USEMEM(state, GetMemoryChunkSpace(stup.tuple));

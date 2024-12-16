@@ -26,6 +26,7 @@
 
 #include "access/ubtreepcr.h"
 #include "storage/procarray.h"
+#include "storage/lmgr.h"
 
 
 static bool UBTreeFreezeOrInvalidIndexTuplesSetTd(const ItemId itemId, const IndexTupleTrx trx, uint8 *tdSlot)
@@ -114,8 +115,6 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
     uint8 reuseSlot = UBTreeInvalidTDSlotId;
     Page page = BufferGetPage(buf);
     uint8 numSlots = UBTreePageGetTDSlotCount(page);
-    UBTreeTD tdPtr[0];
-    *tdPtr = (UBTreeTD)UBTreePageGetTDPointer(page);
     TransactionId oldestXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
 
     /*
@@ -133,7 +132,8 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
         frozenSlots[nFrozenSlots++] = 0;
     } else {
         for (uint8 slotNo = 0; slotNo < numSlots; slotNo++) {
-            TransactionId slotXactid = tdPtr[slotNo]->xactid;
+            UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
+            TransactionId slotXactid = thisTrans->xactid;
             /*
              * Transaction slot can be considered frozen if it belongs to
              * transaction id is old enough that it is all visible.
@@ -158,7 +158,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
             UBTreeTD thisTrans;
 
             slotNo = frozenSlots[i];
-            thisTrans = tdPtr[slotNo];
+            thisTrans = UBTreePCRGetTD(page, slotNo + 1);
 
             /* Remember the latest xid. */
             if (TransactionIdFollows(thisTrans->xactid, latestfxid)){
@@ -203,7 +203,8 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
      * it can fetch the record from undo and check the visibility.
      */
     for (int slotNo = 0; slotNo < numSlots; slotNo++) {
-        TransactionId slotXid = tdPtr[slotNo]->xactid;
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
+        TransactionId slotXid = thisTrans->xactid;
         if (!TransactionIdIsInProgress(slotXid, NULL, false, true)) {
             if (UHeapTransactionIdDidCommit(slotXid)) {
                 completedXactSlots[nCompletedXactSlots++] = slotNo;
@@ -237,7 +238,8 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          */
         for (i = 0; i < nCompletedXactSlots; i++) {
             slotNo = completedXactSlots[i];
-            tdPtr[slotNo]->xactid = InvalidTransactionId;
+            UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
+            thisTrans->xactid = InvalidTransactionId;
         }
         MarkBufferDirty(buf);
 
@@ -286,8 +288,6 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
     uint16 freeSpace = PageGetFreeSpace(page);
     size_t linePtrSize;
     errno_t ret = EOK;
-    UBTreeTD tdPtr[0];
-    *tdPtr = (UBTreeTD)UBTreePageGetTDPointer(page);
     uint8 numExtended = UBTREE_TD_SLOT_INCREMENT_SIZE;
 
     if (currTDSlots < UBTREE_TD_THRESHOLD_FOR_PAGE_SWITCH) {
@@ -338,15 +338,16 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
      * Initialize the new TD slots
      */
     for (int i = currTDSlots; i < currTDSlots + numExtended; i++) {
-        tdPtr[i]->xactid = InvalidTransactionId;
-        tdPtr[i]->undoRecPtr = INVALID_UNDO_REC_PTR;
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, i + 1);
+        thisTrans->xactid = InvalidTransactionId;
+        thisTrans->undoRecPtr = INVALID_UNDO_REC_PTR;
     }
 
     /*
      * Reinitialize number of TD slots and begining
      * of free space in the header
      */
-    opaque->tdCount = currTDSlots + numExtended;
+    opaque->td_count = currTDSlots + numExtended;
     phdr->pd_lower += numExtended * sizeof(UBTreeTDData);
 
     MarkBufferDirty(buf);
@@ -387,8 +388,6 @@ int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionI
     int nExtended;
     int tdCount = UBTreePageGetTDSlotCount(page);
 
-    UBTreeTD tdPtr[0];
-    *tdPtr = (UBTreeTD)UBTreePageGetTDPointer(page);
     TransactionId currMinXid = MaxTransactionId;
 
     // TODO: uheap有pgstat report，后面考虑下我们要不要加
@@ -409,7 +408,7 @@ int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionI
         /* We can't access temp tables of other backends. */
         Assert(!RELATION_IS_OTHER_TEMP(relation));
         slotNo = 0;
-        UBTreeTD thisTrans = tdPtr[slotNo];
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
 
         if (TransactionIdEquals(thisTrans->xactid, fxid)) {
             *oldTd = *thisTrans;
@@ -419,7 +418,7 @@ int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionI
         }
     } else {
         for (slotNo = 0; slotNo < tdCount; slotNo++) {
-            UBTreeTD thisTrans = tdPtr[slotNo];
+            UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
 
             if (TransactionIdIsValid(thisTrans->xactid)) {
                 if (TransactionIdEquals(thisTrans->xactid, fxid)) {
@@ -469,4 +468,35 @@ int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionI
         RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
     /* no transaction slot available */
     return UBTreeInvalidTDSlotId;
+}
+
+void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry)
+{
+    if (UBTreePCRTDIdIsNormal(*slotNo) && !IsUBTreePCRIndexTupleTrxInvalid(trx)) {
+        Page page = BufferGetPage(buf);
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, *slotNo);
+        TransactionId xid = thisTrans->xactid;
+
+        if (TransactionIdIsValid(xid) && !TDIsFrozen(thisTrans) && !TDIsCommited(thisTrans)) {    
+            if (TransactionIdIsCurrentTransactionId(xid)) {     
+                return;
+            }
+
+            if (TransactionIdIsInProgress(xid, NULL, false, true, true)) {
+                _bt_relbuf(rel, buf);
+                XactLockTableWait(xid);
+                *needRetry = true;
+                return;
+            }
+
+            if (!TransactionIdDidCommit(xid)) {
+                /* previous xid is abort, slove it first */
+                // UBTrePCRTransactionRollbackOnPage(rel, buf, *slotNo);        //TODO      
+                ereport(DEBUG5, (errmsg("PCR handle previous td to rollbalk, relfilenode is : %u",
+        rel->rd_node.relNode)));
+            }
+            /* recheck the previous TD, we may rolled back some txn */      
+            *slotNo = trx->tdSlot;
+        }
+    }
 }

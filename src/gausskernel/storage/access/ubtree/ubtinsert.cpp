@@ -1881,7 +1881,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     return rbuf;
 }
 
-static void ReportFailedToDelete(Relation rel, Buffer buf, IndexTuple itup, char* extraInfo)
+void ReportFailedToDelete(Relation rel, Buffer buf, IndexTuple itup, char* extraInfo)
 {
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
