@@ -1813,7 +1813,7 @@ void dw_enable_init()
     dw_cxt_init_batch();
     dw_cxt_init_single();
 
-    if (SS_REFORM_PARTNER || g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile) {
+    if (SS_REFORM_PARTNER) {
         return;
     }
 

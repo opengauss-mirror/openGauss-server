@@ -69,8 +69,6 @@
     (g_enable_dss ? g_datadir.controlBakPath : "global/pg_control.backup")
 #define T_OLD_DW_FILE_NAME \
     (g_enable_dss ? g_datadir.dwDir.dwOldPath : "global/pg_dw")
-#define T_DW_FILE_NAME_PREFIX \
-    (g_enable_dss ? g_datadir.dwDir.dwPathPrefix : "global/pg_dw_")
 #define T_SINGLE_DW_FILE_NAME \
     (g_enable_dss ? g_datadir.dwDir.dwSinglePath : "global/pg_dw_single")
 #define T_DW_BUILD_FILE_NAME \
@@ -86,7 +84,6 @@
 
 typedef struct st_dw_subdatadir_t {
     char dwOldPath[MAXPGPATH];
-    char dwPathPrefix[MAXPGPATH];
     char dwSinglePath[MAXPGPATH];
     char dwBuildPath[MAXPGPATH];
     char dwUpgradePath[MAXPGPATH];

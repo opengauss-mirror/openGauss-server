@@ -27,6 +27,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "replication/ss_disaster_cluster.h"
 
+#define SS_CTRL_PAGE  0
 #define REFORM_CTRL_PAGE  DMS_MAX_INSTANCE
 
 #define RECOVERY_WAIT_TIME 10000
@@ -71,7 +72,7 @@ typedef struct st_reformer_ctrl {
     uint32 version;
     uint64 list_stable; // stable instances list
     int primaryInstId;
-    int recoveryInstId;
+    int recoveryInstId; // abandoned in xlog merge
     SSGlobalClusterState clusterStatus;
     ClusterRunMode clusterRunMode;
     pg_crc32c crc;
@@ -157,10 +158,7 @@ typedef enum st_realtime_build_log_ctrl_status {
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
     volatile failover_ckpt_status_t failover_ckpt_status;
-    char recovery_xlog_dir[MAXPGPATH];
-    int recovery_inst_id;
     volatile SSGlobalClusterState cluster_ondemand_status;
-    char xlog_list[DMS_MAX_INSTANCE][MAXPGPATH];
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true
@@ -192,13 +190,10 @@ typedef struct ondemand_htab_ctrl {
 } ondemand_htab_ctrl_t;
 
 extern bool SSRecoveryNodes();
-extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
 extern void SSInitReformerControlPages(void);
 extern bool SSRecoveryApplyDelay();
 extern void SShandle_promote_signal();
-extern void ss_failover_dw_init();
-extern void ss_switchover_promoting_dw_init();
 extern XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn();
 void StartupOndemandRecovery();
 void OndemandRealtimeBuildHandleFailover();

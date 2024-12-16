@@ -3611,7 +3611,6 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     bool av_enabled = false;
     bool force_vacuum = false;
     bool delta_vacuum = false;
-    bool ustorePartTbl = false;
     bytea* partoptions = NULL;
     /* pg_partition.reltuples */
     float4 reltuples;

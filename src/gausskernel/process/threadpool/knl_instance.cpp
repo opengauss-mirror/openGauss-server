@@ -196,7 +196,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSReformInfo.reform_ver_startup_wait = 0;
     dms_cxt->SSReformInfo.switchover_demote_failure_signal_handled = false;
     dms_cxt->SSClusterState = NODESTATE_NORMAL;
-    dms_cxt->SSRecoveryInfo.recovery_inst_id = INVALID_INSTANCEID;
     dms_cxt->SSRecoveryInfo.cluster_ondemand_status = CLUSTER_NORMAL;
     dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
     dms_cxt->SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
@@ -230,7 +229,6 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->dmsInited = false;
     dms_cxt->ckptRedo = InvalidXLogRecPtr;
     dms_cxt->resetSyscache = false;
-    dms_cxt->finishedRecoverOldPrimaryDWFile = false;
     dms_cxt->dw_init = false;
     {
         ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;

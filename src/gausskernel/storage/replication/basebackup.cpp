@@ -195,9 +195,7 @@ static void send_xlog_location()
     int rc = 0;
     
     if (ENABLE_DSS) {
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
-        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog%d", dssdir,
-             g_instance.attr.attr_storage.dms_attr.instance_id);
+        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, SS_XLOGDIR);
     } else {
         rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog", t_thrd.proc_cxt.DataDir);
     }
@@ -2255,9 +2253,6 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     if (ENABLE_DSS && strcmp(tarfilename, XLOG_CONTROL_FILE) == 0) {
         int read_size = BUFFERALIGN(sizeof(ControlFileData));
         statbuf->st_size = read_size;
-        int primary_id = SSGetPrimaryInstId();
-        off_t seekpos = (off_t)BLCKSZ * primary_id;
-        fseek(fp, seekpos, SEEK_SET);
     }
     
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {

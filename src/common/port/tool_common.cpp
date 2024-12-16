@@ -109,9 +109,6 @@ static void initFileDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->dwDir.dwOldPath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_dw", dataDir->pg_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->dwDir.dwPathPrefix, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_dw_", dataDir->pg_data);
-    securec_check_ss_c(rc, "", "");
-
     rc = snprintf_s(dataDir->dwDir.dwSinglePath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_dw_single", dataDir->pg_data);
     securec_check_ss_c(rc, "", "");
 
@@ -156,7 +153,8 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->controlInfoPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replication/pg_ss_ctl_info", dataDir->dss_data);
+    rc = snprintf_s(dataDir->controlInfoPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replication/pg_ss_ctl_info",
+        dataDir->dss_log);
     securec_check_ss_c(rc, "", "");
 
     // DSS file directory (instance owner)
@@ -184,41 +182,35 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
         dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dataDir->dss_data,
-        dataDir->instance_id);
+    rc = snprintf_s(dataDir->xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", dataDir->dss_log);
     securec_check_ss_c(rc, "", "");
 
     // Unix file directory (instance owner)
-    rc = snprintf_s(dataDir->dwDir.dwOldPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw",
-        dataDir->dss_data, dataDir->instance_id);
+    rc = snprintf_s(dataDir->dwDir.dwOldPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/pg_dw", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->dwDir.dwPathPrefix, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_",
-        dataDir->dss_data, dataDir->instance_id);
+    rc = snprintf_s(dataDir->dwDir.dwSinglePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/pg_dw_single",
+        dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->dwDir.dwSinglePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_single",
-        dataDir->dss_data, dataDir->instance_id);
+    rc = snprintf_s(dataDir->dwDir.dwBuildPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/pg_dw.build",
+        dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->dwDir.dwBuildPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw.build",
-        dataDir->dss_data, dataDir->instance_id);
+    rc = snprintf_s(dataDir->dwDir.dwUpgradePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/dw_upgrade",
+        dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
-    rc = snprintf_s(dataDir->dwDir.dwUpgradePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/dw_upgrade",
-        dataDir->dss_data, dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->dwDir.dwMetaPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite%d/pg_dw_meta",
-        dataDir->dss_data, dataDir->instance_id);
+    rc = snprintf_s(dataDir->dwDir.dwMetaPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/pg_dw_meta",
+        dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwBatchUpgradeMetaPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_meta", dataDir->dss_data, dataDir->instance_id);
+        "%s/pg_doublewrite/dw_batch_upgrade_meta", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->dwDir.dwBatchUpgradeFilePath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_files", dataDir->dss_data, dataDir->instance_id);
+        "%s/pg_doublewrite/dw_batch_upgrade_files", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 }
 

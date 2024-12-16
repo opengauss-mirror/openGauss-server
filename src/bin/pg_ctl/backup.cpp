@@ -2577,8 +2577,7 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
 
     if (ss_instance_config.dss.enable_dss) {
         char *dssdir = ss_instance_config.dss.vgname;
-        nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
-            ss_instance_config.dss.instance_id);
+        nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", dssdir);
     } else {
         nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", basedir);
     }
