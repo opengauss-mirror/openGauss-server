@@ -3800,6 +3800,16 @@ static void do_help(void)
     printf(_("(The default is to wait for shutdown, start and restart.)\n\n"));
     printf(_("If the -D option is omitted, the environment variable PGDATA is used.\n"));
 
+    printf(_("\nOptions for init:\n"));
+    printf(_("  %s init is used in a similar fashion to gs_initdb.\n"), progname);
+    printf(_("  Some parameters in gs_ctl init have detailed explanations\n"
+              "  in the gs_initdb parameter documentation.\n"));
+    printf(_("  To view these detailed explanations, you can run the command:\n"));
+    printf(_("  \n"));
+    printf(_("  gs_initdb --help\n"));
+    printf(_("  \n"));
+    printf(_("  This will display a list of all available parameters and their descriptions.\n"));
+
     printf(_("\nOptions for start or restart:\n"));
 #if defined(HAVE_GETRLIMIT) && defined(RLIMIT_CORE)
     printf(_("  -c, --core-files       allow openGauss to produce core files\n"));
