@@ -308,6 +308,8 @@ void OndemandRealtimeBuildHandleFailover()
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
         pg_usleep(REFORM_WAIT_TIME);
     }
+    g_instance.dms_cxt.SSReformInfo.redo_start_time = GetCurrentTimestamp();
+    g_instance.dms_cxt.SSReformInfo.construct_hashmap = GetCurrentTimestamp();
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_REDO;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS][On-demand] Node:%d receive failover signal, "
         "close realtime build and start ondemand build, set status to BUILD_TO_REDO.", SS_MY_INST_ID)));

@@ -15211,7 +15211,7 @@ TupleDesc create_query_node_reform_info_tupdesc()
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
     BlessTupleDesc(tupdesc);
