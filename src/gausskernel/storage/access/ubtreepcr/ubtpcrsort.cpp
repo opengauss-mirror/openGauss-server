@@ -334,9 +334,8 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
                     errmsg("Index tuple cant fit in the page when creating index.")));
     } else {
         Size storageSize = IndexTupleSize(itup);
-        // TODO: PCR page 调试的时候确认下这里的计算, 因应该不用减
-        Size newsize = storageSize;// - TXNINFOSIZE;
-        // IndexTupleSetSize(itup, newsize);
+        Size newsize = storageSize - MAXALIGN(sizeof(IndexTupleTrxData));
+        IndexTupleSetSize(itup, newsize);
 
         if (hasTrx) {
             /*
@@ -359,16 +358,6 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
             */
 
             IndexTupleTrx tupleTrx = (IndexTupleTrx)(((char*)itup) + newsize);
-            // TransactionId xmin = transInfo->xmin;
-            // TransactionId xmax = transInfo->xmax;
-
-    //         /* setup pd_xid_base */
-            // IndexPagePrepareForXid(NULL, page, xmin, false, InvalidBuffer);
-            // IndexPagePrepareForXid(NULL, page, xmax, false, InvalidBuffer);
-
-    //         UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
-    //         uxid->xmin = NormalTransactionIdToShort(opaque->xid_base, xmin);
-    //         uxid->xmax = NormalTransactionIdToShort(opaque->xid_base, xmax);
 
             if (UBTPCRPageAddItem(page, (Item)itup, storageSize, itup_off, false) == InvalidOffsetNumber) {
                 ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
@@ -378,14 +367,16 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
             /* reserve space for IndexTupleTrxData and set into Frozen and Invalid */
             ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
             IndexTupleTrx trx = (IndexTupleTrx)(((char*)page) + ((PageHeader)page)->pd_upper);
-            trx->tdSlot = UBTreeFrozenTDSlotId;
+            UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
+            UBTreePCRSetIndexTupleTrxValid(trx);
+            UBTreePCRClearIndexTupleDeleted(trx);
             if (UBTPCRPageAddItem(page, (Item)itup, newsize, itup_off, false) == InvalidOffsetNumber) {
                 ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("Index tuple cant fit in the page when creating index.")));
             }
 
             ItemId iid = UBTreePCRGetRowPtr(page, itup_off);
-            UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
+            iid->lp_len = storageSize;
         }
         
         opaque->activeTupleCount ++;
@@ -414,9 +405,9 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
 
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(npage);
 
-    if (!isPivot & hasTrx) {
+    if (!isPivot & !hasTrx) {
         /* Normal index tuple, need reserve space for IndexTupleTrx */
-        itupsz += sizeof(IndexTupleTrxData);
+        itupsz += MAXALIGN(sizeof(IndexTupleTrxData));
         IndexTupleSetSize(itup, itupsz);
     }
 
@@ -472,7 +463,7 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
         Assert(last_off > P_FIRSTKEY);
         ii = UBTreePCRGetRowPtr(opage, last_off);
         oitup = (IndexTuple)UBTreePCRGetIndexTuple(opage, last_off);
-        UBTreePCRSortAddTuple(npage, ItemIdGetLength(ii), oitup, P_FIRSTKEY, true, false);
+        UBTreePCRSortAddTuple(npage, ItemIdGetLength(ii), oitup, P_FIRSTKEY, false, false);
 
         /*
          * Move 'last' into the high key position on opage
@@ -645,11 +636,8 @@ static Page UBTreePCRBlNewPage(Relation rel, uint32 level)
     opaque->btpo_flags = (level > 0) ? 0 : BTP_LEAF;
     opaque->btpo_cycleid = 0;
     if (level == 0) {
-        /* reserve td slots in leaf page */
-        opaque->td_count = UBTREE_DEFAULT_TD_COUNT;
-        ((PageHeader)page)->pd_lower += opaque->td_count * sizeof(UBTreeTDData);
-        // TODO : FROZEN TD
-     } 
+        UBTreePCRInitTD(page);
+    } 
     /* Make the P_HIKEY line pointer appear allocated */
     ((PageHeader)page)->pd_lower += sizeof(ItemIdData);
 

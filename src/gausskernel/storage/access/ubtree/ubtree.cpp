@@ -275,7 +275,7 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
         result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
     } else {
         /* reserve space for xmin/xmax */
-        Size newsize = IndexTupleSize(itup) + sizeof(IndexTupleTrxData);
+        Size newsize = IndexTupleSize(itup) + MAXALIGN(sizeof(IndexTupleTrxData));
         IndexTupleSetSize(itup, newsize);
         result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel);
     }

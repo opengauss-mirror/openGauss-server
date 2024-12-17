@@ -78,6 +78,7 @@
 #include "utils/atomic.h"
 #include "pgstat.h"
 #include "access/xlogreader.h"
+#include "access/ubtreepcr.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -118,7 +119,9 @@ static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
 
 static const int UNDO_START_BLK = 1;
-static const int UHEAP_UPDATE_UNDO_START_BLK = 2; 
+static const int UHEAP_UPDATE_UNDO_START_BLK = 2;
+static const int UBTREE3_SPLIT_UNDO_START_BLK = 3;
+static const int UBTREE3_RIGHT_MOST_SPLIT_UNDO_START_BLK = 2;
 static const uint32 XLOG_FPI_FOR_HINT_VERSION_NUM = 92658;
 static const XLogRecPtr DISPATCH_FIX_SIZE = (XLogRecPtr)1024 * 1024 * 1024 * 2;
 
@@ -186,7 +189,9 @@ static bool DispatchLogicalDDLMsgRecord(XLogReaderState *record, List *expectedT
 static uint32 GetUndoSpaceWorkerId(int zid);
 static void HandleStartupProcInterruptsForParallelRedo(void);
 static bool timeoutForDispatch(void);
-
+/* Ubtree pcr */
+static bool DispatchUBTree3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchUBTree4Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 RedoWaitInfo redo_get_io_event(int32 event_id);
 
 /* dispatchTable must consistent with RmgrTable */
@@ -227,6 +232,10 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchUBTreeRecord, RmgrRecordInfoValid, RM_UBTREE_ID, XLOG_UBTREE_INSERT_LEAF, XLOG_UBTREE_PRUNE_PAGE},
     { DispatchUBTree2Record, RmgrRecordInfoValid, RM_UBTREE2_ID, XLOG_UBTREE2_SHIFT_BASE,
         XLOG_UBTREE2_FREEZE },
+    { DispatchUBTree3Record, RmgrRecordInfoValid, RM_UBTREE3_ID, XLOG_UBTREE3_INSERT_PCR_INTERNAL,
+        XLOG_UBTREE3_INSERT_PCR_META },
+    { DispatchUBTree4Record, RmgrRecordInfoValid, RM_UBTREE4_ID, XLOG_UBTREE4_UNLINK_PAGE,
+        XLOG_UBTREE4_MARK_PAGE_HALFDEAD },
     { DispatchSegpageSmgrRecord, RmgrRecordInfoValid, RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION, 
         XLOG_SEG_NEW_PAGE },
     { DispatchRepOriginRecord, RmgrRecordInfoValid, RM_REPLORIGIN_ID, XLOG_REPLORIGIN_SET, XLOG_REPLORIGIN_DROP },
@@ -609,6 +618,10 @@ static bool RmgrRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 ma
     if ((XLogRecGetRmid(record) == RM_UHEAP_ID) || (XLogRecGetRmid(record) == RM_UNDOLOG_ID) ||
         (XLogRecGetRmid(record) == RM_UHEAPUNDO_ID) || (XLogRecGetRmid(record) == RM_UNDOACTION_ID)) {
         info = (info & XLOG_UHEAP_OPMASK);
+    }
+
+    if ((XLogRecGetRmid(record) == RM_UBTREE3_ID) || (XLogRecGetRmid(record) == RM_UBTREE4_ID)) {
+        info = (info & XLOG_UBTREE_PCR_OP_MASK);
     }
 
     info = (info >> XLOG_INFO_SHIFT_SIZE);
@@ -2798,6 +2811,165 @@ static bool DispatchUHeapUndoRecord(XLogReaderState *record, List *expectedTLIs,
     return false;
 }
 
+static void Ubtree3GetWorkersIdWithOutUndoBuffer(XLogReaderState *record) {
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    uint8 op = info &= XLOG_UBTREE_PCR_OP_MASK;
+    int undoStartingBlk = UNDO_START_BLK;
+
+    if (op >= XLOG_UBTREE3_SPLIT_L && op <=  XLOG_UBTREE3_SPLIT_R_ROOT) {
+        if (XLogRecGetBlockTag(record, BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM, NULL, NULL, NULL)) {
+            undoStartingBlk = UBTREE3_SPLIT_UNDO_START_BLK;
+        } else {
+            undoStartingBlk = UBTREE3_RIGHT_MOST_SPLIT_UNDO_START_BLK;
+        }
+    }
+
+    for (int i = 0; i < undoStartingBlk; i++) {
+        DecodedBkpBlock *block = &record->blocks[i];
+        uint32 pageWorkerId = 0;
+
+        if (!(block->in_use)) {
+            continue;
+        }
+        /* Ubtree has multi-page redo logs, hence there is no performance gain when
+         * we dispatch them by block number.
+         */
+        pageWorkerId = GetWorkerId(block->rnode, 0, 0);
+        AddWorkerToSet(pageWorkerId);
+    }
+}
+
+static void AddUndoSpaceAndTransGrpWorkersForUbtree3Record(XLogReaderState *record, XlUndoHeader *xlundohdr,
+                                                           const char *commandString) {
+    uint32 undoWorkerId = INVALID_WORKER_ID;
+    TransactionId fxid = XLogRecGetXid(record);
+    undoWorkerId = GetUndoSpaceWorkerId(UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr));
+    AddWorkerToSet(undoWorkerId);
+    elog(DEBUG1, "Dispatch %s xid(%lu) lsn(%016lx) undo worker zid %lu, undoWorkerId %d", commandString,
+        fxid, record->EndRecPtr, UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), undoWorkerId);
+
+    /* Get redo workers with pages without undo */
+    Ubtree3GetWorkersIdWithOutUndoBuffer(record);
+}
+
+static void CreateAndAddRedoItemForUbtree3Record(XLogReaderState *record, List *expectedTLIs, bool hasUndoAction)
+{
+    uint32 workerNum = g_dispatcher->chosedWorkerCount;
+    bool enableUndologRedoworker = SUPPORT_USTORE_UNDO_WORKER;
+    RedoItem *item = NULL;
+    uint32 undoWorkerNum = get_recovery_undozidworkers_num();
+
+    if (enableUndologRedoworker && hasUndoAction) {
+        item = CreateRedoItem(record, workerNum - undoWorkerNum, ANY_WORKER, expectedTLIs, 0, true);
+        item->replay_undo = true;
+    } else {
+        if (enableUndologRedoworker)
+            item = CreateRedoItem(record, workerNum, ANY_WORKER, expectedTLIs, 0, true);
+        else
+            item = CreateRedoItem(record, workerNum, USTORE_WORKER, expectedTLIs, 0, true);
+    }
+
+    for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+        if (g_dispatcher->chosedWorkerIds[i] > 0) {
+            AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
+            elog(DEBUG1, "Dispatch page worker %d", i);
+        }
+    }
+}
+
+static bool DispatchUBTree3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    uint8 op = info &= XLOG_UBTREE_PCR_OP_MASK;
+    bool needsCreateItem = true; /* Need to set to false if need to skip undo */
+    bool hasUndoAction = true;
+    TransactionId rollBackXid = XLogRecGetXid(record);
+    char* commandStr = nullptr;
+
+    switch (op) {
+        case XLOG_UBTREE3_INSERT_PCR_INTERNAL:
+        case XLOG_UBTREE3_PRUNE_PAGE_PCR:
+        case XLOG_UBTREE3_FREEZE_TD_SLOT:
+        case XLOG_UBTREE3_REUSE_TD_SLOT:
+        case XLOG_UBTREE3_EXTEND_TD_SLOTS:
+        case XLOG_UBTREE3_NEW_ROOT:
+        case XLOG_UBTREE3_INSERT_PCR_META: {
+            Ubtree3GetWorkersIdWithOutUndoBuffer(record);
+            hasUndoAction = false;
+            break;
+        }
+        case XLOG_UBTREE3_DUP_INSERT: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_DUP_INSERT";
+            }
+        }
+        case XLOG_UBTREE3_INSERT_PCR: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_INSERT_PCR";
+            }
+        }
+        case XLOG_UBTREE3_DELETE_PCR: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_DELETE_PCR";
+            }
+            char* recordPtr = XLogRecGetData(record);
+            recordPtr += SizeOfUbtree3InsertOrDelete + IndexTupleSize((IndexTuple)recordPtr);
+            XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)recordPtr);
+            AddUndoSpaceAndTransGrpWorkersForUbtree3Record(record, xlundohdr, commandStr);
+            break;
+        }
+        case XLOG_UBTREE3_ROLLBACK_TXN: {
+            xl_ubtree3_rollback_txn *xlrec = (xl_ubtree3_rollback_txn *)XLogRecGetData(record);
+            elog(DEBUG1, "Dispatch ubtree3 rollback transaction xid(%lu) lsn(%016lx) rec xid: %lu",
+                 rollBackXid, record->EndRecPtr, xlrec->xid);
+            Ubtree3GetWorkersIdWithOutUndoBuffer(record);
+            CreateAndAddRedoItemForUndoActionRecords(record, expectedTLIs, "XLOG_UBTREE3_ROLLBACK_TXN");
+            needsCreateItem = false;
+            break;
+        }
+        case XLOG_UBTREE3_SPLIT_L: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_SPLIT_L";
+            }
+        }
+        case XLOG_UBTREE3_SPLIT_R: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_SPLIT_R";
+            }
+        }
+        case XLOG_UBTREE3_SPLIT_L_ROOT: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_SPLIT_L_ROOT";
+            }
+        }
+        case XLOG_UBTREE3_SPLIT_R_ROOT: {
+            if (!commandStr) {
+                commandStr = "XLOG_UBTREE3_SPLIT_R_ROOT";
+            }
+            char* recordPtr = XLogRecGetData(record);
+            xl_ubtree3_split *xlrec = (xl_ubtree3_split *)recordPtr;
+            recordPtr += SizeOfUbtree3Split;
+            if (xlrec->slotNo == UBTreeInvalidTDSlotId) {
+                Ubtree3GetWorkersIdWithOutUndoBuffer(record);
+                hasUndoAction = false;
+            } else {
+                recordPtr += SizeOfUbtree3InsertOrDelete + IndexTupleSize((IndexTuple)recordPtr);
+                XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)recordPtr);
+                AddUndoSpaceAndTransGrpWorkersForUbtree3Record(record, xlundohdr, commandStr);
+            }
+            break;
+        }
+        default: {
+            elog(ERROR, "Invalid op in DispatchUbtree3Record: %u", (uint8)op);
+        }
+    }
+
+    if (needsCreateItem) {
+        CreateAndAddRedoItemForUbtree3Record(record, expectedTLIs, hasUndoAction);
+    }
+    return false;
+}
+
 static bool DispatchRollbackFinishRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -2990,4 +3162,10 @@ void get_dispatch_stat_detail(DispatchStat **dispatch_stat, uint32 *realNum)
     *dispatch_stat = stat;
 }
 
+static bool DispatchUBTree4Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchRecordWithPages(record, expectedTLIs, true);
+    return false;
 }
+
+} /* namesapce parallel_recovery */

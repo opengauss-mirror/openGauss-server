@@ -165,6 +165,27 @@ typedef UBTRecycleQueueHeaderData* UBTRecycleQueueHeader;
 
 #define XLOG_UBTREE2_FREEZE 0x40
 
+#define XLOG_UBTREE3_INSERT_PCR_INTERNAL 0x00
+#define XLOG_UBTREE3_PRUNE_PAGE_PCR 0x10
+#define XLOG_UBTREE3_DELETE_PCR 0x20
+#define XLOG_UBTREE3_INSERT_PCR 0x30
+#define XLOG_UBTREE3_DUP_INSERT 0x40
+#define XLOG_UBTREE3_ROLLBACK_TXN 0x50
+#define XLOG_UBTREE3_FREEZE_TD_SLOT 0x60
+#define XLOG_UBTREE3_REUSE_TD_SLOT 0x70
+#define XLOG_UBTREE3_EXTEND_TD_SLOTS 0x80
+#define XLOG_UBTREE3_SPLIT_L 0x90
+#define XLOG_UBTREE3_SPLIT_R 0xA0
+#define XLOG_UBTREE3_SPLIT_L_ROOT 0xB0
+#define XLOG_UBTREE3_SPLIT_R_ROOT 0xC0
+#define XLOG_UBTREE3_NEW_ROOT 0xD0
+#define XLOG_UBTREE3_INSERT_PCR_META 0xE0
+#define XLOG_UBTREE_PCR_OP_MASK 0xF0
+
+#define XLOG_UBTREE4_UNLINK_PAGE 0x00
+#define XLOG_UBTREE4_UNLINK_PAGE_META 0x10
+#define XLOG_UBTREE4_MARK_PAGE_HALFDEAD 0x20
+
 #define UBTREE_VERIFY_OUTPUT_PARAM_CNT 3
 #define UBTREE_RECYCLE_OUTPUT_PARAM_CNT 6
 #define UBTREE_RECYCLE_OUTPUT_XID_STR_LEN 32
@@ -199,6 +220,48 @@ enum {
 
 enum {
     UBTREE2_FREEZE_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_INSERT_PCR_INTERNAL_BLOCK_NUM = 0,
+    UBTREE3_INSERT_PCR_LEAF_BLOCK_NUM,
+    UBTREE3_INSERT_PCR_META_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_PRUNE_PAGE_PCR_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_DELETE_PCR_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_INSERT_PCR_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_UNDO_ORIG_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_DUP_INSERT_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_ROLLBACK_TXN_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_FREEZE_TD_SLOT_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_REUSE_TD_SLOT_BLOCK_NUM,
+};
+
+enum{
+    UBTREE3_EXTEND_TD_SLOTS_BLOCK_NUM,
 };
 
 typedef struct xl_ubtree_mark_delete {
@@ -270,6 +333,52 @@ typedef struct xl_ubtree_split {
 #define SizeOfUBtreeSplit (sizeof(xl_ubtree_split))
 
 #define UBTREE_OPAQUE_VERSION_RCR 1
+
+typedef struct xl_ubtree3_prune_page {
+    TransactionId latestRemovedXid;
+    TransactionId latestFrozenXid;
+    int32 activeTupleCount;
+    int32 pruneTupleCount;
+    uint8 canCompactTdCount;
+} xl_ubtree3_prune_page;
+
+#define SizeOfUBtree3Prunepage (sizeof(xl_ubtree3_prune_page))
+
+typedef struct xl_ubtree3_rollback_txn {
+    TransactionId xid;
+    uint32 n_rollback;
+    uint8 td_id;
+    /* followed below is UBTreeTDData and UBTreeItemId array */
+} xl_ubtree3_rollback_txn;
+
+#define sizeOfUbtree3RollbackTxn (sizeof(xl_ubtree3_rollback_txn))
+
+typedef struct xl_ubtree3_insert_or_delete {
+    TransactionId curXid;
+    TransactionId prevXidOfTuple;
+    OffsetNumber offNum;
+    uint8 tdId;
+    char padding[5];
+} xl_ubtree3_insert_or_delete;
+
+#define SizeOfUbtree3InsertOrDelete (sizeof(xl_ubtree3_insert_or_delete))
+
+typedef struct xl_ubtree3_split {
+    uint32 level;            /* tree level of page being split */
+    OffsetNumber firstRight; /* first item moved to right page */
+    OffsetNumber newItemOff; /* new item's offset (if placed on left page) */
+    LocationIndex rightLower;
+    uint8 slotNo;
+    TransactionId fxid;
+    UndoRecPtr urp;
+    UBTPCRPageOpaqueData letfPcrOpq;
+} xl_ubtree3_split;
+
+#define SizeOfUbtree3Split (sizeof(xl_ubtree3_split))
+
+#define UBTREE_XLOG_HAS_BLK_PREV (1)
+#define UBTREE_XLOG_HAS_XACT_PREV (1 << 1)
+#define UBTREE_XLOG_HAS_PARTITION_OID (1 << 2)
 
 /*
  * Notes on B-Tree tuple format, and key and non-key attributes:
@@ -578,15 +687,26 @@ extern OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetN
     bool *newitemonleft, IndexTuple newitem);
 
 extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr);
+extern bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack);
+extern bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos = NULL);
+extern bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
+    OffsetNumber *topoff, BlockNumber *target, BlockNumber *rightsib);
+extern void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid);
 /*
  * prototypes for functions in ubtxlog.cpp
  */
 extern void UBTreeRedo(XLogReaderState* record);
 extern void UBTree2Redo(XLogReaderState* record);
+extern void UBTree3Redo(XLogReaderState* record);
+extern void UBTree4Redo(XLogReaderState* record);
 extern void UBTreeDesc(StringInfo buf, XLogReaderState* record);
 extern const char* ubtree_type_name(uint8 subtype);
 extern void UBTree2Desc(StringInfo buf, XLogReaderState* record);
+extern void UBTree3Desc(StringInfo buf, XLogReaderState* record);
+extern void UBTree4Desc(StringInfo buf, XLogReaderState* record);
 extern const char* ubtree2_type_name(uint8 subtype);
+extern const char* ubtree3_type_name(uint8 subtype);
+extern const char* ubtree4_type_name(uint8 subtype);
 extern void UBTreeXlogStartup(void);
 extern void UBTreeXlogCleanup(void);
 extern bool UBTreeSafeRestartPoint(void);
@@ -655,6 +775,31 @@ typedef enum NewPageCostType {
 /*
  * prototypes for functions in ubtrecycle.cpp
  */
+const BlockNumber FirstBlockNumber = 0;
+const BlockNumber FirstNormalBlockNumber = 2;      /* 0 and 1 are pages which include meta data */
+const uint16 FirstNormalOffset = 0;
+const uint16 OtherBlockOffset = ((uint16)0) - 2;   /* indicate that previous or next item is in other block */
+
+#define IsMetaPage(blkno) (blkno < FirstNormalBlockNumber)
+#define IsNormalOffset(offset) (offset < OtherBlockOffset)
+extern uint32 BlockGetMaxItems(BlockNumber blkno);
+extern void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno);
+extern void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr);
+extern void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
+    BlockNumber blkno, TransactionId xid);
+extern Buffer StepNextPage(Relation rel, Buffer buf);
+extern Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
+    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UBTreeGetNewPageStats* stats = NULL);
+extern Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access);
+extern uint16 PageAllocateItem(Buffer buf);
+extern void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf);
+extern bool QueuePageIsEmpty(Buffer buf);
+extern Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber);
+extern void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid);
+extern void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset);
+extern UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 offset);
+Buffer StepNextPage(Relation rel, Buffer buf);
+
 const BlockNumber minRecycleQueueBlockNumber = 6;
 extern UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno);
 extern Buffer ReadRecycleQueueBuffer(Relation rel, BlockNumber blkno);
@@ -678,8 +823,8 @@ extern void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNu
 extern void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
     void *state);
 
-void UBTreeVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum = InvalidOffsetNumber,
+extern void UBTreeVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum = InvalidOffsetNumber,
     bool fromInsert = false);
 
-void UBTreeRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start);
+extern void UBTreeRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start);
 #endif /* UBTREE_H */

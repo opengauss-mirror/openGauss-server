@@ -19,6 +19,7 @@
 #include "access/multixact.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/rmgr.h"
 #include "access/spgist.h"
 #include "access/ubtree.h"

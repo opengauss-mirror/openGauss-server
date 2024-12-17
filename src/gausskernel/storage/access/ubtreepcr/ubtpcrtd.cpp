@@ -63,7 +63,8 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
         map[slots[i]] = 1;
     }
 
-    for (OffsetNumber offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
+    OffsetNumber offnum = P_FIRSTDATAKEY((UBTPCRPageOpaque)PageGetSpecialPointer(page));
+    for (; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         ItemId itemId = (ItemId)UBTreePCRGetRowPtr(page, offnum);
         IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offnum);
         IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
@@ -84,11 +85,12 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
              * is all visible and mark the deleted itemids as dead.
              */
             if (isFrozen) {
-                if (IsUBTreePCRItemDeleted(itemId)) {
+                if (IsUBTreePCRItemDeleted(trx)) {
                     ItemIdSetDead(itemId);
                 } else {
                     IndexItemIdSetFrozen(itemId);
                     UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
+                    UBTreePCRClearIndexTupleTrxInvalid(trx);
                 }
             } else {
                 /*
@@ -164,9 +166,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
             if (TransactionIdFollows(thisTrans->xactid, latestfxid)){
                 latestfxid = thisTrans->xactid;
             }
-
-            thisTrans->xactid = InvalidTransactionId;
-            thisTrans->undoRecPtr = INVALID_UNDO_REC_PTR;
+            thisTrans->setFrozen();
         }
 
         MarkBufferDirty(buf);
@@ -181,7 +181,6 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          */
         if (RelationNeedsWAL(relation)) {
             // TODO: Realize xlog for freeze TD 
-            ereport(WARNING, (errmsg("TODO: UBTreeFreezeOrInvalidIndexTuples")));
         }
 
         END_CRIT_SECTION();
@@ -205,7 +204,9 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
     for (int slotNo = 0; slotNo < numSlots; slotNo++) {
         UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
         TransactionId slotXid = thisTrans->xactid;
-        if (!TransactionIdIsInProgress(slotXid, NULL, false, true)) {
+        if (UBTreePCRTDIsCommited(thisTrans) || UHeapTransactionIdDidCommit(slotXid)) {
+            completedXactSlots[nCompletedXactSlots++] = slotNo;
+        } else if (!TransactionIdIsInProgress(slotXid, NULL, false, true)) {
             if (UHeapTransactionIdDidCommit(slotXid)) {
                 completedXactSlots[nCompletedXactSlots++] = slotNo;
             } else {
@@ -214,16 +215,14 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
         }
     }
 
-    // 先处理abort事务，在处理complate事务，这里可以调一下反过来会怎么样
     if (nAbortedXactSlots > 0) {
-        for (uint8 i = 0;i < nAbortedXactSlots; i ++) {
-            // TODO: 待实现回滚
+        for (uint8 i = 0; i < nAbortedXactSlots; i ++) {
             ExecuteUndoActionsForUBTreePage(relation, buf, abortedXactSlots[nAbortedXactSlots]);
         }
-        return abortedXactSlots[nAbortedXactSlots - 1];  // 这里直接return会跳过下面freeze动作，可能会影响整体性能。
-    } else if (nCompletedXactSlots > 0) {
-        uint8 slotNo;
+        reuseSlot = abortedXactSlots[nAbortedXactSlots - 1];
+    }
 
+    if (nCompletedXactSlots > 0) {
         START_CRIT_SECTION();
 
         /* clear the transaction slot info on tuples */
@@ -235,10 +234,17 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          * accessible by traversing slot's undo chain even though the slots
          * are reused.
          */
+        UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+        TransactionId lastCommitXid;
         for (uint8 i = 0; i < nCompletedXactSlots; i++) {
-            slotNo = completedXactSlots[i];
-            UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
-            thisTrans->xactid = InvalidTransactionId;
+            UBTreeTD thisTrans = UBTreePCRGetTD(page, completedXactSlots[i] + 1);
+            Assert(TransactionIdIsValid(thisTrans->xactid));
+            UBTreePCRTDClearStatus(thisTrans, TD_ACTIVE);
+            UBTreePCRTDSetStatus(thisTrans, TD_COMMITED);
+            lastCommitXid = opaque->last_commit_xid;
+            if (!TransactionIdIsValid(lastCommitXid) || TransactionIdFollows(thisTrans->xactid, lastCommitXid)) {
+                opaque->last_commit_xid = thisTrans->xactid;
+            }
         }
         MarkBufferDirty(buf);
 
@@ -246,13 +252,12 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          * Xlog Stuff
          */
         if (RelationNeedsWAL(relation)) {
-            // TODO: Realize xlog for freeze TD 
-            ereport(WARNING, (errmsg("TODO: UBTreeFreezeOrInvalidIndexTuples")));
+            // TODO: Realize xlog for freeze TD
         }
 
         END_CRIT_SECTION();
 
-        return completedXactSlots[nCompletedXactSlots - 1];
+        reuseSlot = completedXactSlots[nCompletedXactSlots - 1];
     }
 
     return reuseSlot;
@@ -367,7 +372,7 @@ void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTup
         Page page = BufferGetPage(buf);
         UBTreeTD td = UBTreePCRGetTD(page, *slotNo);
         TransactionId xid = td->xactid;
-        if (TransactionIdIsValid(xid) && !UBTreePCRTDIsFrozen(td) && UBTreePCRTDIsCommited(td)) {
+        if (TransactionIdIsValid(xid) && !UBTreePCRTDIsFrozen(td) && !UBTreePCRTDIsCommited(td)) {
             if (TransactionIdIsCurrentTransactionId(xid)) {
                 return;
             }
@@ -381,7 +386,6 @@ void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTup
             if (!TransactionIdDidCommit(xid)) {
                 ExecuteUndoActionsForUBTreePage(rel, buf, *slotNo);
             }
-            // TODO: 连调时候看一下回滚完成trx里的slot是否可能变化
             *slotNo = trx->tdSlot;
         }
     }
@@ -448,6 +452,7 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
             if (TransactionIdIsValid(thisTrans->xactid)) {
                 if (TransactionIdEquals(thisTrans->xactid, fxid)) {
                     /* Already reserved by ourself */
+                    *oldTd = *thisTrans;
                     return (slotNo + 1);
                 } else {
                     currMinXid = Min(currMinXid, thisTrans->xactid);
@@ -459,7 +464,9 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
         }
     }
 
-    if (latestFreeTDSlot >= 0) {
+    if (UBTreeTDSlotIsNormal(latestFreeTDSlot + 1)) {
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, latestFreeTDSlot + 1);
+        *oldTd = *thisTrans;
         return (latestFreeTDSlot + 1);
     }
 
@@ -475,7 +482,7 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
 
     /* no transaction slot available, try to reuse some existing slot */
     uint8 reuseSlot = UBTreePageFreezeTransationSlots(relation, buf, minXid);
-    if (IsValidUBTreeTransationSlotId(reuseSlot)) {
+    if (reuseSlot != UBTreeInvalidTDSlotId) {
         return reuseSlot + 1;
     }
 

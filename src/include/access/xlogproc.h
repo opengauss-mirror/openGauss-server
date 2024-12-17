@@ -37,6 +37,7 @@
 #include "access/ustore/knl_utuple.h"
 #include "access/ustore/undo/knl_uundotxn.h"
 #include "access/ustore/undo/knl_uundoxlog.h"
+#include "access/ubtreepcr.h"
 
 #ifndef byte
 #define byte unsigned char
@@ -497,7 +498,7 @@ typedef struct {
 #define XLogRecRedoHeadEncodeSize (offsetof(XLogBlockRedoHead, refrecord))
 typedef struct {
     XLogRecPtr start_ptr;
-    XLogRecPtr end_ptr; /* copy from XLogReaderState's EndRecPtr */    
+    XLogRecPtr end_ptr; /* copy from XLogReaderState's EndRecPtr */
     BlockNumber blkno;
     Oid relNode;        /* relation */
     uint16 block_valid; /* block data validinfo see XLogBlockInfoEnum */
@@ -717,7 +718,7 @@ typedef enum {
 
 typedef struct {
     void* nextrecord;
-    XLogBlockParse blockparse; /* block data  */	
+    XLogBlockParse blockparse; /* block data  */
     RedoParseManager* manager;
     void* refrecord; /* origin dataptr, for mem release */
     bool isFullSync;
@@ -832,7 +833,7 @@ extern void* XLogMemCtlInit(RedoMemManager* memctl, Size itemsize, int itemnum);
 extern RedoMemSlot* XLogMemAlloc(RedoMemManager* memctl);
 extern void XLogMemRelease(RedoMemManager* memctl, Buffer bufferid);
 
-extern void XLogRedoBufferInit(RedoBufferManager* buffermanager, int buffernum, RefOperate *refOperate, 
+extern void XLogRedoBufferInit(RedoBufferManager* buffermanager, int buffernum, RefOperate *refOperate,
     InterruptFunc interruptOperte);
 extern void XLogRedoBufferDestory(RedoBufferManager* buffermanager);
 extern RedoMemSlot* XLogRedoBufferAlloc(
@@ -875,7 +876,7 @@ extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot
     XLogRedoBufferSetState(g_bufferManager, bufferslot, state); \
 } while (0)
 
-extern void XLogParseBufferInit(RedoParseManager* parsemanager, int buffernum, RefOperate *refOperate, 
+extern void XLogParseBufferInit(RedoParseManager* parsemanager, int buffernum, RefOperate *refOperate,
     InterruptFunc interruptOperte);
 extern void XLogParseBufferDestory(RedoParseManager* parsemanager);
 extern void XLogParseBufferRelease(XLogRecParseState* recordstate);
@@ -1069,6 +1070,19 @@ extern void UBTreeXlogUnlinkPageOperatorChildpage(RedoBufferInfo* cbuf, void* re
 
 extern void UBTreeXlogClearIncompleteSplit(RedoBufferInfo* buffer);
 
+/* UBT PCR */
+extern void UBTree3XlogPrunePageOperatorPage(RedoBufferInfo* buffer, void* recorddata, const Oid rdid);
+extern void UBTree3XlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, UndoRecPtr urecptr);
+extern void UBTree3XlogReuseTdOperatorPage(RedoBufferInfo* buffer, void* recorddata);
+extern void UBTree3RestoreMetaOperatorPage(RedoBufferInfo *metabuf, void *recorddata, Size datalen);
+extern void UBTree3XlogRollbackTxnOperatorPage(RedoBufferInfo* buffer, void* recorddata);
+extern void UBTree4XlogUnlinkPageOperatorRightpage(RedoBufferInfo *rbuf, void *recorddata);
+extern void UBTree4XlogUnlinkPageOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata);
+extern void UBTree4XlogUnlinkPageOperatorCurpage(RedoBufferInfo *buf, void *recorddata);
+extern void UBTree4XlogUnlinkPageOperatorChildpage(RedoBufferInfo *cbuf, void *recorddata);
+extern void UBTree4XlogHalfdeadPageOperatorParentpage(RedoBufferInfo *pbuf, void *recorddata);
+extern void UBTree4XlogHalfdeadPageOperatorLeafpage(RedoBufferInfo *lbuf, void *recorddata, bool willInit);
+
 void HashRedoInitMetaPageOperatorPage(RedoBufferInfo *metabuf, void *recorddata);
 
 void HashRedoInitBitmapPageOperatorBitmapPage(RedoBufferInfo *bitmapbuf, void *recorddata);
@@ -1155,7 +1169,6 @@ void Btree2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdata
 extern void UBTreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void UBTree2RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
     RedoBufferInfo *bufferinfo);
-
 extern void HashRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 XLogRecParseState* XactXlogCsnlogParseToBlock(XLogReaderState* record, uint32* blocknum, TransactionId xid,
     int nsubxids, TransactionId* subxids, CommitSeqNo csn, XLogRecParseState* recordstatehead);
@@ -1269,7 +1282,7 @@ extern void Heap3RedoDataBlock(
 
 extern XLogRecParseState* xact_redo_parse_to_block(XLogReaderState* record, uint32* blocknum);
 
-extern bool XLogBlockRedoForExtremeRTO(XLogRecParseState* redoblocktate, RedoBufferInfo *bufferinfo, 
+extern bool XLogBlockRedoForExtremeRTO(XLogRecParseState* redoblocktate, RedoBufferInfo *bufferinfo,
                                                       bool notfound, RedoTimeCost &readBufCost, RedoTimeCost &redoCost);
 extern void XlogBlockRedoForOndemandExtremeRTOQuery(XLogRecParseState *redoBlockState, RedoBufferInfo *bufferInfo);
 void XLogBlockParseStateRelease_debug(XLogRecParseState* recordstate, const char *func, uint32 line);

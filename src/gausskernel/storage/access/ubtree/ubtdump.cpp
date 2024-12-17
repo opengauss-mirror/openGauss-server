@@ -27,9 +27,117 @@
 #include "access/ubtree.h"
 #include "utils/builtins.h"
 #include "storage/procarray.h"
+#include "access/ubtreepcr.h"
+
+static int UBTreePCRVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTuple prevHikey)
+{
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    /* get compare info */
+    TupleDesc tupdes = RelationGetDescr(rel);
+    int keysz = IndexRelationGetNumberOfKeyAttributes(rel);
+    OffsetNumber firstPos = P_FIRSTDATAKEY(opaque);
+    OffsetNumber lastPos = UBTPCRPageGetMaxOffsetNumber(page);
+    if (lastPos < firstPos) {
+        return VERIFY_NORMAL; /* empty */
+    }
+    /* compare last key and HIKEY first */
+    if (!P_RIGHTMOST(opaque)) {
+        IndexTuple lastKey = UBTreePCRGetIndexTuple(page, lastPos);
+        IndexTuple hikey = UBTreePCRGetIndexTuple(page, P_HIKEY);
+        /* we must hold: hikey > lastKey, it's equals to !(hikey <= lastKey) */
+        if (_bt_index_tuple_compare(tupdes, cmpKeys->scankeys, keysz, hikey, lastKey)) {
+            return VERIFY_HIKEY_ERROR;
+        }
+    }
+    /* if prevHikey passed in, we also need to check it */
+    if (prevHikey) {
+        IndexTuple firstKey = UBTreePCRGetIndexTuple(page, firstPos);
+        /* we must hold: previous hikey <= firstKey */
+        if (!_bt_index_tuple_compare(tupdes, cmpKeys->scankeys, keysz, prevHikey, firstKey)) {
+            return VERIFY_PREV_HIKEY_ERROR;
+        }
+    }
+    /* now check key orders */
+    IndexTuple curKey = UBTreePCRGetIndexTuple(page, firstPos);
+    for (OffsetNumber nxtPos = OffsetNumberNext(firstPos); nxtPos <= lastPos; nxtPos = OffsetNumberNext(nxtPos)) {
+        IndexTuple nextKey = UBTreePCRGetIndexTuple(page, nxtPos);
+        /* current key must <= next key */
+        if (!_bt_index_tuple_compare(tupdes, cmpKeys->scankeys, keysz, curKey, nextKey)) {
+            return VERIFY_ORDER_ERROR;
+        }
+        curKey = nextKey;
+    }
+    
+    return VERIFY_NORMAL;
+}
+
+void UBTreePCRVerifyIndex(Relation rel, TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols)
+{
+    uint32 errVerified = 0;
+    UBTPCRPageOpaque opaque = NULL;
+    BTScanInsert cmpKeys = UBTreeMakeScanKey(rel, NULL);
+    Buffer buf = UBTreePCRGetRoot(rel, BT_READ);
+    if (!BufferIsValid(buf)) {
+        pfree(cmpKeys);
+        return; /* empty index */
+    }
+    /* find the left most leaf page */
+    while (true) {
+        Page page = BufferGetPage(buf);
+        opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+        if (P_ISLEAF(opaque)) {
+            break; /* it's a leaf page, we are done */
+        }
+        OffsetNumber offnum = P_FIRSTDATAKEY(opaque);
+        IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
+        BlockNumber blkno = UBTreeTupleGetDownLink(itup);
+        /* drop the read lock on the parent page, acquire one on the child */
+        buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+    }
+    /* we got a leaf page, but now sure it's the left most page */
+    while (!P_LEFTMOST(opaque)) {
+        BlockNumber blkno = opaque->btpo_prev;
+        buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+        Page page = BufferGetPage(buf);
+        opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    }
+    /* now we can scan over the whole tree to verify each page */
+    IndexTuple prevHikey = NULL;
+    while (true) {
+        Page page = BufferGetPage(buf);
+        opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+        BlockNumber blkno = opaque->btpo_next;
+        if (P_IGNORE(opaque)) {
+            buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+            continue;
+        }
+        int erroCode = UBTreePCRVerifyOnePage(rel, page, cmpKeys, prevHikey);
+        if (erroCode != VERIFY_NORMAL) {
+            UBTreeVerifyRecordOutput(VERIFY_MAIN_PAGE, BufferGetBlockNumber(buf), erroCode, tupDesc, tupstore, cols);
+            errVerified++;
+        }
+        if (P_RIGHTMOST(opaque) || P_LEFTMOST(opaque)) {
+            break;
+        }
+        prevHikey = UBTreePCRGetIndexTuple(page, P_HIKEY);
+        buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+    }
+    _bt_relbuf(rel, buf);
+    pfree(cmpKeys);
+    /* last, we need to verify the recycle queue */
+    errVerified += UBTreeVerifyRecycleQueue(rel, tupDesc, tupstore, cols);
+    /* every page is ok , output normal state */
+    if (errVerified == 0) {
+        UBTreeVerifyRecordOutput(VERIFY_MAIN_PAGE, 0, VERIFY_NORMAL, tupDesc, tupstore, cols);
+    }
+}
 
 void UBTreeVerifyIndex(Relation rel, TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols)
 {
+    if (UBTreeIndexIsPCRType(rel)) {
+        UBTreePCRVerifyIndex(rel, tupDesc, tupstore, cols);
+        return;
+    }
     uint32 errVerified = 0;
     UBTPageOpaqueInternal opaque = NULL;
     BTScanInsert cmpKeys = UBTreeMakeScanKey(rel, NULL);
@@ -112,6 +220,7 @@ static Buffer StepNextRecyclePage(Relation rel, Buffer buf)
     LockBuffer(nextBuf, BT_READ);
     return nextBuf;
 }
+
 uint32 UBTreeVerifyRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNum, TupleDesc *tupDesc,
     Tuplestorestate *tupstore, uint32 cols)
 {
@@ -216,8 +325,12 @@ uint32 UBTreeVerifyRecycleQueue(Relation rel, TupleDesc *tupDesc, Tuplestorestat
     RelationCloseSmgr(rel);
     return errVerified;
 }
+
 int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTuple prevHikey)
 {
+    if (UBTreeIndexIsPCRType(rel)) {
+        return UBTreePCRVerifyOnePage(rel, page, cmpKeys, prevHikey);
+    }
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     /* get compare info */
     TupleDesc tupdes = RelationGetDescr(rel);

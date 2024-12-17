@@ -19,6 +19,7 @@
 
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/transam.h"
 #include "access/xlog.h"
 #include "access/xlogutils.h"
@@ -1509,6 +1510,290 @@ static void UBTree2XlogFreezeBlock(
         }
         MakeRedoBufferDirty(bufferinfo);
     }
+}
+
+void UBTree3RestoreMetaOperatorPage(RedoBufferInfo *metabuf, void *recorddata, Size datalen)
+{
+    char *ptr = (char *)recorddata;
+    Page metapg = metabuf->pageinfo.page;
+    BTMetaPageData *md = NULL;
+    UBTPCRPageOpaque pageop;
+    xl_btree_metadata *xlrec = NULL;
+
+    Assert(datalen == sizeof(xl_btree_metadata));
+    Assert(metabuf->blockinfo.blkno == BTREE_METAPAGE);
+    xlrec = (xl_btree_metadata *)ptr;
+
+    metapg = metabuf->pageinfo.page;
+
+    UBTreePCRPageInit(metapg, metabuf->pageinfo.pagesize);
+
+    md = BTPageGetMeta(metapg);
+    md->btm_magic = BTREE_MAGIC;
+    md->btm_version = xlrec->version;
+    md->btm_root = xlrec->root;
+    md->btm_level = xlrec->level;
+    md->btm_fastroot = xlrec->fastroot;
+    md->btm_fastlevel = xlrec->fastlevel;
+
+    pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(metapg);
+    pageop->btpo_flags = BTP_META;
+
+    /*
+     * Set pd_lower just past the end of the metadata.	This is not essential
+     * but it makes the page look compressible to xlog.c.
+     */
+    ((PageHeader)metapg)->pd_lower = ((char *)md + sizeof(BTMetaPageData)) - (char *)metapg;
+
+    PageSetLSN(metapg, metabuf->lsn);
+}
+
+void UBTree3XlogPrunePageOperatorPage(RedoBufferInfo* buffer, void* recorddata, const Oid rdid)
+{
+    xl_ubtree3_prune_page *xlrec = (xl_ubtree3_prune_page *)recorddata;
+    Page page = buffer->pageinfo.page;
+    int tdCount = UBTreePageGetTDSlotCount(page);
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+
+     /* Set up flags and try to repair page  fragmentation */
+    int deadTupleOff = SizeOfUBtree3Prunepage;
+    int frozenTdMapOff = deadTupleOff + sizeof(OffsetNumber) * xlrec->pruneTupleCount;
+    UBTreePCRPrunePageExecute(page, (OffsetNumber *)(((char *)xlrec) + deadTupleOff), xlrec->pruneTupleCount);
+    bool* frozenTdMap = (bool*)(((char*)xlrec) + frozenTdMapOff);
+
+    if (xlrec->canCompactTdCount > 0) {
+        CompactTd(page, tdCount, xlrec->canCompactTdCount, frozenTdMap);
+    } else {
+        FreezeTd(page, frozenTdMap, tdCount);
+    }
+
+    if (xlrec->pruneTupleCount > 0) {
+        UBTreePCRPageRepairFragmentation(NULL, buffer->blockinfo.blkno, page);
+    }
+
+    opaque->activeTupleCount = xlrec->activeTupleCount;
+    PageSetLSN(page, buffer->lsn);
+}
+
+void UBTree3XlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, UndoRecPtr urecptr)
+{
+    xl_ubtree3_insert_or_delete *xlrec = (xl_ubtree3_insert_or_delete *)((char*)recorddata);
+    IndexTuple indextup = (IndexTuple)((char *)recorddata + SizeOfUbtree3InsertOrDelete);
+    char *recordPtr = (char *)xlrec + SizeOfUbtree3InsertOrDelete + IndexTupleSize(indextup) + SizeOfXLUndoHeader;
+    Page page = buffer->pageinfo.page;
+    UBTreeUndoInfo uinfo = (UBTreeUndoInfo)recordPtr;
+
+    bool isInvalid = xlrec->offNum > UBTPCRPageGetMaxOffsetNumber(page);
+
+    if (isInvalid) {
+        ereport(PANIC, (errmsg("Invalid UBTreePCR itemid"),
+                        errcause("UBTreePCR page is corrupted"),
+                        erraction("Please try to reindex to fix it")));
+    }
+
+    ItemId iid = (ItemId)UBTreePCRGetRowPtr(page, xlrec->offNum);
+    IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, xlrec->offNum);
+    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
+    UBTreePCRSetIndexTupleDeleted(trx);
+    UBTreePCRSetIndexTupleTrxValid(trx);
+    trx->tdSlot = xlrec->tdId;
+    if (uinfo->prev_td_id == UBTreeFrozenTDSlotId) {
+        IndexItemIdSetFrozen(iid);
+    }
+
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    /* update active hint */
+    opaque->activeTupleCount--;
+    if (TransactionIdPrecedes(opaque->last_delete_xid, xlrec->curXid)) {
+        opaque->last_delete_xid = xlrec->curXid;
+    }
+
+    UBTreeTD thisTrans = UBTreePCRGetTD(page, xlrec->curXid);
+    thisTrans->xactid = xlrec->curXid;
+    thisTrans->undoRecPtr = urecptr;
+    thisTrans->combine.csn = InvalidCommitSeqNo;
+    thisTrans->tdStatus &= ~(TD_COMMITED | TD_FROZEN | TD_CSN);
+    thisTrans->tdStatus |= TD_ACTIVE;
+    thisTrans->tdStatus |= TD_DELETE;
+
+    PageSetLSN(page, buffer->lsn);
+}
+
+void UBTree3XlogReuseTdOperatorPage(RedoBufferInfo* buffer, void* recorddata)
+{
+    uint8 *ncompletedXactSlots = (uint8 *)recorddata;
+    uint8 *completedXactSlots = (uint8 *)(((char*)recorddata) + sizeof(uint8));
+    Buffer buf = buffer->buf;
+    Page page = BufferGetPage(buf);
+    UBTreeFreezeOrInvalidIndexTuples(buf, *ncompletedXactSlots, completedXactSlots, false);
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    for (uint8 i = 0; i < *ncompletedXactSlots; i++) {
+        UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, completedXactSlots[i] + 1);
+        if (!TransactionIdIsValid(pageop->last_commit_xid) ||
+            TransactionIdFollows(curTd->xactid, pageop->last_commit_xid)) {
+                pageop->last_commit_xid = curTd->xactid;
+        }
+        UBTreePCRTDClearStatus(curTd, TD_ACTIVE);
+        UBTreePCRTDSetStatus(curTd, TD_COMMITED);
+        Assert(TransactionIdIsValid(curTd->xactid));
+    }
+}
+
+void UBTree3XlogRollbackTxnOperatorPage(RedoBufferInfo* buffer, void* recorddata)
+{
+    xl_ubtree3_rollback_txn *xlrec = (xl_ubtree3_rollback_txn *)recorddata;
+    UBTreeTD xltd = (UBTreeTD)((char*)xlrec + sizeOfUbtree3RollbackTxn);
+    Page page = buffer->pageinfo.page;
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    UBTreeRedoRollbackItem items =
+        (UBTreeRedoRollbackItem)((char*)xlrec + sizeOfUbtree3RollbackTxn + sizeof(UBTreeTDData));
+    for (uint32 i = 0; i < xlrec->n_rollback; i++) {
+        ItemId iid = UBTreePCRGetRowPtr(page, items[i].offnum);
+        iid->lp_flags = items[i].iid.lp_flags;
+        iid->lp_len = items[i].iid.lp_len;
+        IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, items[i].offnum));
+        trx->tdSlot = items[i].trx.tdSlot;
+        trx->slotIsInvalid = items[i].trx.slotIsInvalid;
+        trx->isDeleted = items[i].trx.isDeleted;
+        if (ItemIdIsDead(iid) || IsUBTreePCRItemDeleted(trx)) {
+            opaque->activeTupleCount--;
+        }
+        if (!IsUBTreePCRItemDeleted(trx)) {
+            opaque->activeTupleCount++;
+        }
+    }
+    UBTreeTD td = UBTreePCRGetTD(page, xlrec->td_id);
+    td->xactid = xltd->xactid;
+    td->undoRecPtr = xltd->undoRecPtr;
+    td->tdStatus = xltd->tdStatus;
+    PageSetLSN(page, buffer->lsn);
+}
+
+
+void UBTree4XlogUnlinkPageOperatorRightpage(RedoBufferInfo *rbuf, void *recorddata)
+{
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)recorddata;
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(rbuf->pageinfo.page);
+    pageop->btpo_prev = xlrec->leftsib;
+
+    PageSetLSN(rbuf->pageinfo.page, rbuf->lsn);
+}
+
+void UBTree4XlogUnlinkPageOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata)
+{
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)recorddata;
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(lbuf->pageinfo.page);
+    pageop->btpo_next = xlrec->rightsib;
+
+    PageSetLSN(lbuf->pageinfo.page, lbuf->lsn);
+}
+
+void UBTree4XlogUnlinkPageOperatorCurpage(RedoBufferInfo *buf, void *recorddata)
+{
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)recorddata;
+
+    UBTreePCRPageInit(buf->pageinfo.page, buf->pageinfo.pagesize);
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(buf->pageinfo.page);
+
+    pageop->btpo_prev = xlrec->leftsib;
+    pageop->btpo_next = xlrec->rightsib;
+    pageop->btpo.xact_old = xlrec->btpo_xact;
+    pageop->btpo_flags = BTP_DELETED;
+    pageop->btpo_cycleid = 0;
+
+    PageSetLSN(buf->pageinfo.page, buf->lsn);
+}
+
+void UBTree4XlogUnlinkPageOperatorChildpage(RedoBufferInfo *cbuf, void *recorddata)
+{
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)recorddata;
+
+    UBTreePCRPageInit(cbuf->pageinfo.page, cbuf->pageinfo.pagesize);
+
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(cbuf->pageinfo.page);
+
+    pageop->btpo_flags = BTP_HALF_DEAD | BTP_LEAF;
+    pageop->btpo_prev = xlrec->leafleftsib;
+    pageop->btpo_next = xlrec->leafrightsib;
+    pageop->btpo.level = 0;
+    pageop->btpo_cycleid = 0;
+
+    /* Add a dummy hikey item */
+    IndexTupleData trunctuple;
+    errno_t rc = memset_s(&trunctuple, sizeof(IndexTupleData), 0, sizeof(IndexTupleData));
+    securec_check(rc, "\0", "\0");
+    trunctuple.t_info = sizeof(IndexTupleData);
+    ItemPointerSet(&(trunctuple.t_tid), xlrec->topparent, 0);
+
+    if (UBTPCRPageAddItem(cbuf->pageinfo.page, (Item)&trunctuple, sizeof(IndexTupleData), P_HIKEY, false) ==
+        InvalidOffsetNumber) {
+        ereport(ERROR, (errmsg("could not add dummy high key to half-dead page")));
+    }
+
+    PageSetLSN(cbuf->pageinfo.page, cbuf->lsn);
+}
+
+void UBTree4XlogHalfdeadPageOperatorParentpage(RedoBufferInfo *pbuf, void *recorddata)
+{
+    xl_btree_mark_page_halfdead *xlrec = (xl_btree_mark_page_halfdead *)recorddata;
+    OffsetNumber poffset;
+    ItemId itemid;
+    IndexTuple itup;
+    OffsetNumber nextoffset;
+    BlockNumber rightsib;
+
+    poffset = xlrec->poffset;
+
+    nextoffset = OffsetNumberNext(poffset);
+    itemid = UBTreePCRGetRowPtr(pbuf->pageinfo.page, nextoffset);
+    itup = (IndexTuple)UBTreePCRGetIndexTupleByItemId(pbuf->pageinfo.page, itemid);
+    rightsib = ItemPointerGetBlockNumber(&(itup->t_tid));
+
+    itemid = UBTreePCRGetRowPtr(pbuf->pageinfo.page, poffset);
+    itup = (IndexTuple)UBTreePCRGetIndexTupleByItemId(pbuf->pageinfo.page, itemid);
+    ItemPointerSetBlockNumber(&(itup->t_tid), rightsib);
+    nextoffset = OffsetNumberNext(poffset);
+    UBTreePCRPageIndexTupleDelete(pbuf->pageinfo.page, nextoffset);
+
+    PageSetLSN(pbuf->pageinfo.page, pbuf->lsn);
+}
+
+void UBTree4XlogHalfdeadPageOperatorLeafpage(RedoBufferInfo *lbuf, void *recorddata, bool willInit)
+{
+    xl_btree_mark_page_halfdead *xlrec = (xl_btree_mark_page_halfdead *)recorddata;
+    if (willInit) {
+        UBTreePCRPageInit(lbuf->pageinfo.page, lbuf->pageinfo.pagesize);
+        UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(lbuf->pageinfo.page);
+        pageop->btpo_prev = xlrec->leftblk;
+        pageop->btpo_next = xlrec->rightblk;
+
+        pageop->btpo.level = 0;
+        pageop->btpo_flags = BTP_HALF_DEAD | BTP_LEAF;
+        pageop->btpo_cycleid = 0;
+    } else {
+        UBTreePCRPageIndexTupleDelete(lbuf->pageinfo.page, P_HIKEY);
+        UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(lbuf->pageinfo.page);
+        pageop->btpo_prev = xlrec->leftblk;
+        pageop->btpo_next = xlrec->rightblk;
+        pageop->btpo_flags |= BTP_HALF_DEAD;
+    }
+
+    /*
+     * Construct a dummy hikey item that points to the next parent to be
+     * deleted (if any).
+     */
+    IndexTupleData trunctuple;
+    errno_t rc = memset_s(&trunctuple, sizeof(IndexTupleData), 0, sizeof(IndexTupleData));
+    securec_check(rc, "\0", "\0");
+    trunctuple.t_info = sizeof(IndexTupleData);
+    ItemPointerSet(&(trunctuple.t_tid), xlrec->topparent, 0);
+
+    if (UBTPCRPageAddItem(lbuf->pageinfo.page, (Item)&trunctuple, sizeof(IndexTupleData), P_HIKEY, false) ==
+        InvalidOffsetNumber) {
+        ereport(ERROR, (errmsg("could not add dummy high key to half-dead page")));
+    }
+
+    PageSetLSN(lbuf->pageinfo.page, lbuf->lsn);
 }
 
 void UBTree2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo)

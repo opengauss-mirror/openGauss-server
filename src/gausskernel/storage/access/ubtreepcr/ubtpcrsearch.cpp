@@ -42,13 +42,14 @@
 
 #include "access/ubtreepcr.h"
 #include "lib/binaryheap.h"
+#include "storage/buf/crbuf.h"
 
 static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
 static void UBTreePCRSaveItem(IndexScanDesc scan, int itemIndex, Page page, OffsetNumber offnum,
     const IndexTuple itup, Oid partOid);
 static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir);
 static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir);
-static void ConstructCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer);
+static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer);
 
 const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
 
@@ -1205,15 +1206,17 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
     
     if (ItemIdIsDead(iid)) {
         tupleAlive = false;
-    } else if (so->scanMode == PCR_SCAN_MODE && IsUBTreePCRItemDeleted(trx)) {
-        tupleVisible = showAnyTupleMode;
     } else if (IsUBTreePCRItemDeleted(trx)) {
-        if (trx->slotIsInvalid) {
+        if (so->scanMode == PCR_SCAN_MODE) {
             tupleVisible = showAnyTupleMode;
         } else {
-            UBTreeTD td = UBTreePCRGetTD(page, trx->tdSlot);
-            if (UBTreePCRTDIsCommited(td) || UBTreePCRTDIsFrozen(td)) {
+            if (IsUBTreePCRTDReused(trx)) {
                 tupleVisible = showAnyTupleMode;
+            } else {
+                UBTreeTD td = UBTreePCRGetTD(page, trx->tdSlot);
+                if (UBTreePCRTDIsCommited(td) || UBTreePCRTDIsFrozen(td)) {
+                    tupleVisible = showAnyTupleMode;
+                }
             }
         }
     }
@@ -1331,41 +1334,38 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
     return tuple;
 }
 
-void ReportSnapshotTooOld(IndexScanDesc scan, Page page, OffsetNumber offnum,
-    UndoRecPtr urecptr, const char* when)
-{
-    BlockNumber blkno = InvalidBlockNumber;
-    Buffer buf = BlockGetBuffer(page);
-    if (BufferIsValid(buf)) {
-        blkno = BufferGetBlockNumber(buf);
-    }
-
-    Relation rel = scan->indexRelation;
-    ereport(ERROR, (errmsg("Snapshot too old! the undo record has been forced discarded."
-        "Reason: need to fetch old ubtree tuple from undo when: %s, rnode[%u,%u,%u], blkno: %u,"
-        "offnum:%u, globalRecycleXid:%lu, globalFrozenXid:%lu, urp:%lu, snapshot: type:%d, xmin:%lu. ",
-        when, rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno,
-        offnum, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
-        pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid), urecptr,
-        scan->xs_snapshot->satisfies, scan->xs_snapshot->xmin)));
-
-}
-
-static bool CheckXminEqualToXmax(IndexScanDesc scan, Page page, OffsetNumber offnum,
+static bool IsXminXmaxEqual(IndexScanDesc scan, Page page, OffsetNumber offnum,
     UndoRecPtr urecptr, TransactionId xmax)
 {
+    Snapshot snapshot = scan->xs_snapshot;
     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
     IndexTuple undoItup;
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->SetMemoryContext(CurrentMemoryContext);
     urec->SetUrp(urecptr);
-    bool sameXact = false;
+    bool xminXmaxEqual = false;
 
     while (true) {
         UndoTraversalState state = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId, false, NULL);
         if (state == UNDO_TRAVERSAL_ABORT) {
-            ReportSnapshotTooOld(scan, page, offnum, urecptr, "CheckXminEqualToXmax");
+            int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urec->Urp());
+            undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
+            ereport(ERROR, (errmodule(MOD_UNDO), errmsg(
+                "snapshot too old! the undo record has been force discard. "
+                "Reason: PCR index IsXminXmaxEqual. "
+                "LogInfo: undo state %d. "
+                "globalRecycleXid %lu, globalFrozenXid %lu. "
+                "ZoneInfo: urp: %lu, zid %d, insertURecPtr %lu, forceDiscardURecPtr %lu, "
+                "discardURecPtr %lu, recycleXid %lu. "
+                "Snapshot: type %d, xmin %lu.",
+                state,
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
+                urec->Urp(), zoneId, PtrGetVal(uzone, GetInsertURecPtr()),
+                PtrGetVal(uzone, GetForceDiscardURecPtr()),
+                PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()),
+                PtrGetVal(snapshot, satisfies), PtrGetVal(snapshot, xmin))));
         } else if (state != UNDO_TRAVERSAL_COMPLETE) {
             break;
         }
@@ -1375,20 +1375,21 @@ static bool CheckXminEqualToXmax(IndexScanDesc scan, Page page, OffsetNumber off
         undoItup = FetchTupleFromUndoRecord(urec);
         if (UBTreeItupEquals(itup, undoItup)) {
             if (urec->Utype() == UNDO_UBT_INSERT) {
-                sameXact = true;
+                xminXmaxEqual = true;
             } else if (urec->Utype() == UNDO_UBT_DELETE) {
-                sameXact = false;
+                xminXmaxEqual = false;
             }
         }
         urec->Reset2Blkprev();
     }
 
     DELETE_EX(urec);
-    return sameXact;
+    return xminXmaxEqual;
 }
 
-static bool checkVisibilityWithUndo(IndexScanDesc scan, Page page, OffsetNumber offnum, Snapshot snapshot)
+static bool IndexTupleSatisfiesMvcc(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
+    Snapshot snapshot = scan->xs_snapshot;
     ItemId iid = UBTreePCRGetRowPtr(page, offnum);
     Assert(!ItemIdIsDead(iid));
     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
@@ -1398,8 +1399,8 @@ static bool checkVisibilityWithUndo(IndexScanDesc scan, Page page, OffsetNumber 
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     IndexTuple undoItup;
 
-recheck_td:
-    /* items td id is frozen */
+check_frozen:
+    /* tdid is frozen */
     if (tdid == UBTreeFrozenTDSlotId) {
         return !tupleDeleted;
     }
@@ -1411,6 +1412,7 @@ recheck_td:
         return !tupleDeleted;
     }
 
+    /* current xid, check cid */
     if (TransactionIdIsCurrentTransactionId(xid) && !IsUBTreePCRTDReused(trx)) {
         bool cidVisible = false;
         UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
@@ -1423,7 +1425,7 @@ recheck_td:
             Assert(state != UNDO_TRAVERSAL_ABORT);
             if (state != UNDO_TRAVERSAL_COMPLETE || td->xactid != urec->Xid()) {
                 cidVisible = true;
-                break; 
+                break;
             }
             if (urec->Cid() < snapshot->curcid) {
                 cidVisible = true;
@@ -1432,17 +1434,18 @@ recheck_td:
             undoItup = FetchTupleFromUndoRecord(urec);
             if (UBTreeItupEquals(itup, undoItup)) {
                 if (!tupleDeleted) {
-                    /* here we find xmin for the inserted tuple */
+                    /* undorec cid > snapshotcid xmin invisible */
+                    Assert(!cidVisible);
                     break;
                 } else {
-                    /* fit this deleted tuple, xmax is invisible, we should continue to check if xmin visible */
+                    /* undorec cid > snapshotcid xmax invisible, continue to check if xmin visible */
                     tupleDeleted = false;
                 }
             }
             urec->Reset2Blkprev();
         }
         DELETE_EX(urec);
-        return (cidVisible && !tupleDeleted) || ((!cidVisible && tupleDeleted));
+        return cidVisible != tupleDeleted;
     }
 
     TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
@@ -1458,7 +1461,8 @@ recheck_td:
     bool looped = false;
 
 loop:
-    csn = UBTreePCRTDHasCsn(td) ? td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, scan->xs_snapshot);
+    csn = UBTreePCRTDHasCsn(td) ?
+        td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
     if (COMMITSEQNO_IS_COMMITTED(csn)) {
         xidVisible = csn < snapshot->snapshotcsn;
     } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
@@ -1481,23 +1485,40 @@ loop:
         return !tupleDeleted;
     }
 
+    /* tdxid invisible, check tuple visibility through undo chain */
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->SetMemoryContext(CurrentMemoryContext);
     urec->SetUrp(td->undoRecPtr);
-    bool switchXid = false;
+    bool changeXid = false;
     while (true) {
         UndoTraversalState state = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId, false, NULL);
         if (state == UNDO_TRAVERSAL_ABORT) {
-            ReportSnapshotTooOld(scan, page, offnum, td->undoRecPtr, "checkVisibilityWithUndo");
+            int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urec->Urp());
+            undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
+            ereport(ERROR, (errmodule(MOD_UNDO), errmsg(
+                "snapshot too old! the undo record has been force discard. "
+                "Reason: PCR index IndexTupleSatisfiesMvcc. "
+                "LogInfo: undo state %d. "
+                "globalRecycleXid %lu, globalFrozenXid %lu. "
+                "ZoneInfo: urp: %lu, zid %d, insertURecPtr %lu, forceDiscardURecPtr %lu, "
+                "discardURecPtr %lu, recycleXid %lu. "
+                "Snapshot: type %d, xmin %lu.",
+                state,
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
+                urec->Urp(), zoneId, PtrGetVal(uzone, GetInsertURecPtr()),
+                PtrGetVal(uzone, GetForceDiscardURecPtr()),
+                PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()),
+                PtrGetVal(snapshot, satisfies), PtrGetVal(snapshot, xmin))));
         } else if (state != UNDO_TRAVERSAL_COMPLETE) {
             xidVisible = true;
             break; 
         }
         if (urec->Xid() != td->xactid) {
-            switchXid = true;
+            changeXid = true;
         }
-        if (switchXid) {
+        if (changeXid) {
             if (urec->Xid() < snapshot->xmin) {
                 xidVisible = true;
                 break;
@@ -1512,28 +1533,25 @@ loop:
         undoItup = FetchTupleFromUndoRecord(urec);
         if (UBTreeItupEquals(itup, undoItup)) {
             if (!tupleDeleted) {
-                /* here we find xmin for the inserted tuple */
+                Assert(!xidVisible);
                 break;
             } else {
-                /* fit this deleted tuple, xmax is invisible, we should continue to check if xmin visible */
                 tupleDeleted = false;
                 UBTreeUndoInfo undoInfo = FetchUndoInfoFromUndoRecord(urec);
                 if (undoInfo->prev_td_id != tdid) {
                     tdid = undoInfo->prev_td_id;
                     DELETE_EX(urec);
-                    goto recheck_td;
+                    goto check_frozen;
                 }
             }
         }
         urec->Reset2Blkprev();
     }
     DELETE_EX(urec);
-    return (xidVisible && !tupleDeleted) || ((!xidVisible && tupleDeleted));;
-
+    return xidVisible != tupleDeleted;
 }
 
-/* SNAPSHOT_DIRTY: tuple is visible if its xmax is not committed or its xmax is not the current transaction */
-static bool checkVisibilityInSnapshotDirty(IndexScanDesc scan, Page page, OffsetNumber offnum)
+static bool IndexTupleSatisfiesDirty(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
     ItemId iid = UBTreePCRGetRowPtr(page, offnum);
     Assert(!ItemIdIsDead(iid));
@@ -1546,14 +1564,14 @@ static bool checkVisibilityInSnapshotDirty(IndexScanDesc scan, Page page, Offset
     if (tdid == UBTreeFrozenTDSlotId || IsUBTreePCRTDReused(trx)) {
         return !tupleDeleted;
     }
-    UBTreeTD td = UBTreePCRGetTD(page, tdid);
-    TransactionId xid = td->xactid;
 
+    UBTreeTD td = UBTreePCRGetTD(page, tdid);
     /* td is frozen */
     if (UBTreePCRTDIsFrozen(td)) {
         return !tupleDeleted;
     }
 
+    TransactionId xid = td->xactid;
     if (TransactionIdIsCurrentTransactionId(xid)) {
         return !tupleDeleted;
     }
@@ -1567,12 +1585,12 @@ static bool checkVisibilityInSnapshotDirty(IndexScanDesc scan, Page page, Offset
 
     TransactionIdStatus ts = UBTreeCheckXid(xid);
     if (ts == XID_ABORTED) {
-        /* xmin is aborted, it is not visible */
+        /* xmin aborted, not visible */
         if (!tupleDeleted) {
             return false;
         }
-        /* xmax is aborted, it is visible if xmax is not equal to xmin */
-        return !CheckXminEqualToXmax(scan, page, offnum, td->undoRecPtr, xid);
+        /* xmax aborted, visible if xmax != xmin */
+        return !IsXminXmaxEqual(scan, page, offnum, td->undoRecPtr, xid);
     } else if (ts == XID_INPROGRESS) {
         return true;
     }
@@ -1580,15 +1598,15 @@ static bool checkVisibilityInSnapshotDirty(IndexScanDesc scan, Page page, Offset
     return !tupleDeleted;
 }
 
-static bool checkVisibilityInSnapshotAnyOrToast(IndexScanDesc scan, Page page, OffsetNumber offnum)
+static bool IndexTupleSatisfiesAnyAndToast(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
     IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
     uint8 tdid = trx->tdSlot;
     bool tupleDeleted = IsUBTreePCRItemDeleted(trx);
 
-    /* items td id is frozen or reused */
-    if (tdid == UBTreeFrozenTDSlotId || IsUBTreePCRTDReused(trx)) {
+    /* items td id is frozen */
+    if (tdid == UBTreeFrozenTDSlotId) {
         return !tupleDeleted;
     }
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
@@ -1600,6 +1618,34 @@ static bool checkVisibilityInSnapshotAnyOrToast(IndexScanDesc scan, Page page, O
 
     /* for inprogress and committed xid, tuple is always visible */
     return true;
+}
+
+static bool IndexTupleSatisfiesVisibility(IndexScanDesc scan, Page page, OffsetNumber offnum)
+{
+    Snapshot snapshot = scan->xs_snapshot;
+    switch (snapshot->satisfies) {
+        case SNAPSHOT_MVCC:
+        case SNAPSHOT_VERSION_MVCC:
+            return IndexTupleSatisfiesMvcc(scan, page, offnum);
+        case SNAPSHOT_TOAST:
+        case SNAPSHOT_ANY:
+            return IndexTupleSatisfiesAnyAndToast(scan, page, offnum);
+        case SNAPSHOT_DIRTY:
+            return IndexTupleSatisfiesDirty(scan, page, offnum);
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("unsupported snapshot type %u for UBTreePCR index.", snapshot->satisfies),
+                errhint("This kind of operation may not supported.")));
+    }
+}
+
+/*
+ * PCR_SCAN_MODE only supported in SNAPSHOT_MVCC & SNAPSHOT_VERSION_MVCC & SNAPSHOT_NOW
+ */
+static bool IsPCRScanModeSupported(Snapshot snapshot)
+{
+    return snapshot->satisfies == SNAPSHOT_MVCC || snapshot->satisfies == SNAPSHOT_VERSION_MVCC ||
+        snapshot->satisfies == SNAPSHOT_NOW;
 }
 
 /*
@@ -1656,12 +1702,27 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
 
     so->isPageInfoLogged = false;
 
+    Snapshot snapshot = scan->xs_snapshot;
     Page crPage = NULL;
-    bool specialSnapshot = (scan->xs_snapshot->satisfies == SNAPSHOT_DIRTY ||
-        scan->xs_snapshot->satisfies == SNAPSHOT_ANY || scan->xs_snapshot->satisfies == SNAPSHOT_TOAST);
-    bool canUsePbrcr = (TransactionIdPrecedes(opaque->last_delete_xid, scan->xs_snapshot->xmin)
-        || specialSnapshot) && (scan->xs_snapshot->satisfies != SNAPSHOT_NOW);
-    if (canUsePbrcr) {
+    CRBufferDesc* desc = NULL;
+
+    bool pcrScanModeSupported = IsPCRScanModeSupported(snapshot);
+    /*
+     * In an MVCC snapshot, if a delete operation occurs after the current snapshot is taken,
+     * the page being searched may have already been pruned. In this scenario, we cannot
+     * retrieve the index tuple through the undo chain because the index tuple might have
+     * been pruned as well, we must switch to PCR scan mode.
+     */
+    bool usePbrcrScanMode = !pcrScanModeSupported || 
+        ((snapshot->satisfies == SNAPSHOT_MVCC || snapshot->satisfies == SNAPSHOT_VERSION_MVCC)
+            && TransactionIdPrecedes(opaque->last_delete_xid, snapshot->xmin));
+
+    uint32 checkNum = 0;
+    OffsetNumber checkVisibleOffs[MaxIndexTuplesPerPage] = {0};
+    OffsetNumber originOffnum = offnum;
+
+switch_scan_mode:
+    if (usePbrcrScanMode) {
         so->scanMode = PBRCR_SCAN_MODE;
     } else {
         so->scanMode = PCR_SCAN_MODE;
@@ -1671,19 +1732,17 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
             desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
                 snapshot->snapshotcsn, snapshot->curcid);
             crPage = CRBufferGetPage(desc->buf_id);
-            ConstructCRPage(scan, crPage, so->currPos.buf);
+            BuildCRPage(scan, crPage, so->currPos.buf);
         } else {
             crPage = CRBufferGetPage(desc->buf_id);
             LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
         }
         page = crPage;
+        maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
     }
     ereport(DEBUG5, (errmsg("pcr readpage relfilenode:%u, blkno:%u, snapshot:%u, scanMode:%d (0:PCR 1:PBRCR) ",
             scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
-            scan->xs_snapshot->satisfies, so->scanMode)));
-    
-    uint32 needCheckVisNum = 0;
-    OffsetNumber needCheckVisOffs[MaxIndexTuplesPerPage] = {0};
+            snapshot->satisfies, so->scanMode)));
     
     if (ScanDirectionIsForward(dir)) {
         /* load items[] in ascending order */
@@ -1705,7 +1764,15 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
                     UBTreePCRSaveItem(scan, itemIndex, page, offnum, itup, partOid);
                     itemIndex++;
                 } else {
-                    needCheckVisOffs[needCheckVisNum++] = offnum;
+                    checkVisibleOffs[checkNum++] = offnum;
+                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && pcrScanModeSupported) {
+                        usePbrcrScanMode = false;
+                        offnum = originOffnum;
+                        ereport(DEBUG5, (errmsg("pcr readpage switch scan mode, relfilenode:%u, blkno:%u, snapshot:%u",
+                            scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
+                            snapshot->satisfies)));
+                        goto switch_scan_mode;
+                    }
                 }
             }
             if (!continuescan) {
@@ -1738,7 +1805,15 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
                     itemIndex--;
                     UBTreePCRSaveItem(scan, itemIndex, page, offnum, itup, partOid);
                 } else {
-                    needCheckVisOffs[needCheckVisNum++] = offnum;
+                    checkVisibleOffs[checkNum++] = offnum;
+                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && pcrScanModeSupported) {
+                        usePbrcrScanMode = false;
+                        offnum = originOffnum;
+                        ereport(DEBUG5, (errmsg("pcr readpage switch scan mode, relfilenode:%u, blkno:%u, snapshot:%u",
+                            scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
+                            snapshot->satisfies)));
+                        goto switch_scan_mode;
+                    }
                 }
             }
             
@@ -1757,47 +1832,12 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
         so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
     }
     
-    /**
-     * For pbrcr mode, we will recheck if switch to pcr mode.
-     */
     if (so->scanMode == PBRCR_SCAN_MODE) {
-        if (needCheckVisNum >= SCAN_MODE_SWITCH_THRESHOLD && !specialSnapshot) {
-            so->scanMode = PCR_SCAN_MODE;
-            desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
-                snapshot->snapshotcsn, snapshot->curcid);
-            if (desc == NULL) {
-                desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM,
-                    BufferGetBlockNumber(so->currPos.buf), snapshot->snapshotcsn, snapshot->curcid);
-                crPage = CRBufferGetPage(desc->buf_id);
-                ConstructCRPage(scan, crPage, so->currPos.buf);
-            } else {
-                crPage = CRBufferGetPage(desc->buf_id);
-                LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-            }
-            page = crPage;
-        }
-        bool tupleVisible = false;
-        ItemId iid = NULL;
-        IndexTupleTrx trx = NULL;
         if (ScanDirectionIsForward(dir)) {
             int itemIndex = 0;
-            for (uint32 i = 0; i < needCheckVisNum; i++) {
-                offnum = needCheckVisOffs[i];
-                if (so->scanMode == PCR_SCAN_MODE) {
-                    iid = UBTreePCRGetRowPtr(page, offnum);
-                    trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
-                    tupleVisible = !ItemIdIsDead(iid) && !IsUBTreePCRItemDeleted(trx);
-                } else if (!specialSnapshot) {
-                    tupleVisible = checkVisibilityWithUndo(scan, page, offnum, scan->xs_snapshot);
-                } else {
-                    if (scan->xs_snapshot->satisfies == SNAPSHOT_DIRTY) {
-                        tupleVisible = checkVisibilityInSnapshotDirty(scan, page, offnum);
-                    } else {
-                        /* SNAPSHOT_ANY & SNAPSHOT_TOAST */
-                        tupleVisible = checkVisibilityInSnapshotAnyOrToast(scan, page, offnum);
-                    }
-                }
-                if (tupleVisible) {
+            for (uint32 i = 0; i < checkNum; i++) {
+                offnum = checkVisibleOffs[i];
+                if (IndexTupleSatisfiesVisibility(scan, page, offnum)) {
                     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
                     isnull = false;
                     partOid = scan->xs_want_ext_oid
@@ -1812,23 +1852,9 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
             so->currPos.lastItem = itemIndex - 1;
         } else {
             int itemIndex = MaxIndexTuplesPerPage;
-            for (uint32 i = 0; i < needCheckVisNum; i++) {
-                offnum = needCheckVisOffs[i];
-                if (so->scanMode == PCR_SCAN_MODE) {
-                    iid = UBTreePCRGetRowPtr(page, offnum);
-                    trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
-                    tupleVisible = !ItemIdIsDead(iid) && !IsUBTreePCRItemDeleted(trx);
-                } else if (!specialSnapshot) {
-                    tupleVisible = checkVisibilityWithUndo(scan, page, offnum, scan->xs_snapshot);
-                } else {
-                    if (scan->xs_snapshot->satisfies == SNAPSHOT_DIRTY) {
-                        tupleVisible = checkVisibilityInSnapshotDirty(scan, page, offnum);
-                    } else {
-                        /* SNAPSHOT_ANY & SNAPSHOT_TOAST */
-                        tupleVisible = checkVisibilityInSnapshotAnyOrToast(scan, page, offnum);
-                    }
-                }
-                if (tupleVisible) {
+            for (uint32 i = 0; i < checkNum; i++) {
+                offnum = checkVisibleOffs[i];
+                if (IndexTupleSatisfiesVisibility(scan, page, offnum)) {
                     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
                     isnull = false;
                     partOid = scan->xs_want_ext_oid
@@ -1843,13 +1869,13 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
             so->currPos.firstItem = itemIndex;
         }
     }
-    if (crPage != NULL) {
-        pfree_ext(crPage);
+    if (desc != NULL) {
+        ReleaseCRBuffer(desc->buf_id);
     }
     return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
-static UndoRecPtr RollbackToTuple(IndexTuple itup, UndoRecPtr urecptr, TransactionId *tdXid, uint8 *tdid,
+static UndoRecPtr GetItupXidFromUndo(IndexTuple itup, UndoRecPtr urecptr, TransactionId *tdXid, uint8 *tdid,
     bool *deleted)
 {
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
@@ -1864,13 +1890,14 @@ static UndoRecPtr RollbackToTuple(IndexTuple itup, UndoRecPtr urecptr, Transacti
             break;
         }
         *tdXid = urec->Xid();
-        *deleted = urec->Utype() == UNDO_UBT_INSERT;
+        *deleted = urec->Utype() == UNDO_UBT_DELETE;
         IndexTuple undoItup = FetchTupleFromUndoRecord(urec);
         if (UBTreeItupEquals(itup, undoItup)) {
             UBTreeUndoInfo undoInfo = FetchUndoInfoFromUndoRecord(urec);
             *tdid = undoInfo->prev_td_id;
             break;
         }
+        /* td reused */
         urec->Reset2Blkprev();
     }
 
@@ -1879,40 +1906,37 @@ static UndoRecPtr RollbackToTuple(IndexTuple itup, UndoRecPtr urecptr, Transacti
     return prev;
 }
 
-static void GetItupXminXmax(IndexScanDesc scan, Page page, IndexTuple itup, OffsetNumber offnum,
+static void GetItupTransInfo(IndexScanDesc scan, Page page, IndexTuple itup, OffsetNumber offnum,
     IndexTransInfo *transInfo)
 {
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     ItemId iid = UBTreePCRGetRowPtr(page, offnum);
     IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
     Assert(!ItemIdIsDead(iid));
 
     uint8 tdid = trx->tdSlot;
-    Assert(tdid != UBTreeInvalidTDSlotId); // todo 确定哪个值代表invalid
-
-    TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-
+    Assert(tdid != UBTreeInvalidTDSlotId);
     bool deleted = IsUBTreePCRItemDeleted(trx);
 
     if (tdid == UBTreeFrozenTDSlotId) {
         transInfo->xmin = FrozenTransactionId;
-        transInfo->xmax = deleted ? FrozenTransactionId : InvalidTransactionId;
+        transInfo->xmax = (deleted ? FrozenTransactionId : InvalidTransactionId);
         return;
     }
     
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
-    if (UBTreePCRTDIsFrozen(td) || (UBTreePCRTDIsCommited(td) && TransactionIdPrecedes(opaque->last_commit_xid, globalRecycleXid))) { // todo 确认后半部分判断复用的逻辑对不对
+    if (UBTreePCRTDIsFrozen(td) || (IsUBTreePCRTDReused(trx) &&
+        TransactionIdPrecedes(opaque->last_commit_xid, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid)))) {
         transInfo->xmin = FrozenTransactionId;
-        transInfo->xmax = deleted ? FrozenTransactionId : InvalidTransactionId;
+        transInfo->xmax = (deleted ? FrozenTransactionId : InvalidTransactionId);
         return;
     }
 
     TransactionId tdXid;
     uint8 prevTdid;
-    UndoRecPtr blkprev = RollbackToTuple(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
-
-    if (tdXid == InvalidTransactionId) {
-        tdXid = UBTreePCRTDIsCommited(td) ? tdXid : td->xactid;
+    UndoRecPtr blkprev = GetItupXidFromUndo(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
+    if (!TransactionIdIsValid(tdXid)) {
+        tdXid = IsUBTreePCRTDReused(trx) ? tdXid : td->xactid;
         if (deleted) {
             transInfo->xmin = FrozenTransactionId;
             transInfo->xmax = tdXid;
@@ -1929,16 +1953,11 @@ static void GetItupXminXmax(IndexScanDesc scan, Page page, IndexTuple itup, Offs
     transInfo->xmax = tdXid;
     if (prevTdid != tdid) {
         td = UBTreePCRGetTD(page, prevTdid);
-        RollbackToTuple(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
-    } else {
-        RollbackToTuple(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
+        blkprev = td->undoRecPtr;
     }
-    if (tdXid == InvalidTransactionId) {
-        transInfo->xmin = FrozenTransactionId;
-    } else {
-        Assert(!deleted);
-        transInfo->xmin = tdXid;
-    }
+    (void)GetItupXidFromUndo(itup, blkprev, &tdXid, &prevTdid, &deleted);
+
+    transInfo->xmin = TransactionIdIsValid(tdXid) ? tdXid : FrozenTransactionId;
 }
 
 /* UBTreePCRSaveItem() -- Save an index item into so->currPos.items[itemIndex] */
@@ -1966,7 +1985,7 @@ static void UBTreePCRSaveItem(IndexScanDesc scan, int itemIndex, Page page, Offs
             output_itup = CopyIndexTupleAndReserveSpace(output_itup, sizeof(TransactionId) * 2);
             /* transInfo points to the xmin/xmax field */
             IndexTransInfo *transInfo = (IndexTransInfo *)(((char *)output_itup) + itupsz);
-            GetItupXminXmax(scan, page, itup, offnum, transInfo);
+            GetItupTransInfo(scan, page, itup, offnum, transInfo);
             itupsz = IndexTupleSize(output_itup);
         }
 
@@ -2389,27 +2408,28 @@ int TDCompare(Datum a, Datum b, void *arg)
     }
 }
 
-static void ConstructCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
+static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
 {
     /* copy base page to cr page and unlock base page */
     Page basePage = BufferGetPage(baseBuffer);
     errno_t rc = memcpy_sp(crPage, BLCKSZ, basePage, BLCKSZ);
     securec_check(rc, "\0", "\0");
 
+    BlockNumber blkno = BufferGetBlockNumber(baseBuffer);
+    /* unlock base page but still pin */
     LockBuffer(baseBuffer, BUFFER_LOCK_UNLOCK);
 
     Relation rel = scan->indexRelation;
     Snapshot snapshot = scan->xs_snapshot;
 
-    ereport(DEBUG5, (errmsg("contruct cr page rnode[%u,%u,%u], blkno:%u, snapshot:%u",
-        rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, BufferGetBlockNumber(baseBuffer),
-        snapshot->satisfies)));
-    
-    if (snapshot->satisfies != SNAPSHOT_VERSION_MVCC && snapshot->satisfies != SNAPSHOT_MVCC &&
-        snapshot->satisfies != SNAPSHOT_NOW) {
+    if (!IsPCRScanModeSupported(snapshot)) {
         ereport(ERROR, (errmsg("Unsupported snapshot type %u when contruct cr page rnode[%u,%u,%u], blkno:%u",
-            rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, BufferGetBlockNumber(baseBuffer))));
+            rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno)));
     }
+
+    ereport(DEBUG5, (errmsg("build cr page rnode[%u,%u,%u], blkno:%u, snapshot:%u",
+        rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno,
+        snapshot->satisfies)));
 
     bool needMaxHeap = false;
     bool fillCsnOnBasePage = false;
@@ -2427,7 +2447,7 @@ static void ConstructCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
 loop:
         TransactionId xid = td->xactid;
         if (!TransactionIdIsValid(xid)) {
-            /* td is unused or frozen */
+            /* td unused or frozen */
             Assert(!IS_VALID_UNDO_REC_PTR(td->undoRecPtr));
             continue;
         }
@@ -2435,7 +2455,8 @@ loop:
             (TransactionIdPrecedes(xid, globalFrozenXid) && TransactionIdPrecedes(xid, snapshot->xmin))) {
             continue;
         }
-        csn = UBTreePCRTDHasCsn(td) ? td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+        csn = UBTreePCRTDHasCsn(td) ?
+            td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
         if (COMMITSEQNO_IS_COMMITTED(csn)) {
             if (!UBTreePCRTDHasCsn(td) && csn != COMMITSEQNO_FROZEN) {
                 fillCsnOnBasePage = true;
@@ -2456,7 +2477,7 @@ loop:
             /* prevCommitting is true indicate xid is aborted */
             if (prevCommitting || (latestCsn >= snapshot->snapshotcsn && snapshot->satisfies != SNAPSHOT_NOW)) {
                 /* xid is invisible, rollback it */
-                RollbackCRPage(scan, crPage, tdid); // todo
+                RollbackCRPage(scan, crPage, tdid);
                 if (!TransactionIdIsValid(xid)) {
                     continue;
                 }
@@ -2466,10 +2487,11 @@ loop:
             }
             goto loop;
         } else {
+            /* xid in progress or aborted */
             Assert(!prevInprogress);
             bool isCurrentXid = TransactionIdIsCurrentTransactionId(td->xactid);
             CommandId cid = isCurrentXid ? snapshot->curcid : InvalidCommandId;
-            RollbackCRPage(scan, crPage, tdid, cid); // todo
+            RollbackCRPage(scan, crPage, tdid, cid);
             if (xid == td->xactid) {
                 Assert(cid > 0);
                 continue;
@@ -2484,7 +2506,7 @@ loop:
     if (fillCsnOnBasePage) {
         LockBuffer(baseBuffer, BT_WRITE);
         basePage = BufferGetPage(baseBuffer);
-        for (uint8 tdid = 0; tdid < UBTreePageGetTDSlotCount(basePage); tdid++) {
+        for (uint8 tdid = 1; tdid <= tdCount; tdid++) {
             td = UBTreePCRGetTD(basePage, tdid);
             cr_td = UBTreePCRGetTD(crPage, tdid);
             if (UBTreePCRTDHasCsn(td) || !UBTreePCRTDHasCsn(cr_td) || td->xactid != cr_td->xactid) {
@@ -2535,12 +2557,15 @@ loop:
             continue;
         }
 
-        csn = TransactionIdGetCommitSeqNo(td->xactid, false, true, false, snapshot);
+        csn = TransactionIdGetCommitSeqNo(td->xactid, true, true, false, snapshot);
         if (!COMMITSEQNO_IS_COMMITTED(csn)) {
             if (TransactionIdDidCommit(td->xactid)) {
                 csn = GET_COMMITSEQNO(csn);
             } else {
-                // error
+                ereport(ERROR, (errmsg("build cr page error, td_id %d, xid %lu commit status error. "
+                    "rnode[%u,%u,%u], blkno:%u, snapshot:%u", tdid, td->xactid,
+                    rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno,
+                    snapshot->satisfies)));
             }
         }
         td->combine.csn = csn;

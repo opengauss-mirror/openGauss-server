@@ -22,6 +22,7 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "access/xlogproc.h"
+#include "access/ubtreepcr.h"
 
 #include "storage/procarray.h"
 #include "miscadmin.h"
@@ -937,6 +938,90 @@ static void UBTreeXlogNewRoot(XLogReaderState *record, bool issplitupgrade)
     UBTreeRestoreMeta(record, 1);
 }
 
+static UndoRecPtr PrepareAndInsertUndoRecordForPCRDeleteRedo(XLogReaderState *record,
+    xl_ubtree3_insert_or_delete *xlrec, IndexTuple itup, char *recordPtr, const bool tryPrepare, bool isInsert)
+{
+    XLogRecPtr lsn = record->EndRecPtr;
+    UndoRecPtr *blkprev;
+    UndoRecPtr *prevurp;
+    UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
+    Oid *partitionOid;
+    undo::XlogUndoMeta undometa;
+    Oid invalidPartitionOid = 0;
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)recordPtr;
+    recordPtr += SizeOfXLUndoHeader;
+    UBTreeUndoInfo uinfo = (UBTreeUndoInfo)recordPtr;
+    recordPtr += SizeOfUBTreeUndoInfoData;
+
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
+        blkprev = (UndoRecPtr *) ((char *)recordPtr);
+        recordPtr += sizeof(UndoRecPtr);
+    } else {
+        blkprev = &invalidUrp;
+    }
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
+        prevurp = (UndoRecPtr *) ((char *)recordPtr);
+        recordPtr += sizeof(UndoRecPtr);
+    } else {
+        prevurp = &invalidUrp;
+    }
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
+        partitionOid = (Oid *) ((char *)recordPtr);
+        recordPtr += sizeof(Oid);
+    } else {
+        partitionOid = &invalidPartitionOid;
+    }
+
+    undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)((char *)recordPtr);
+    UndoRecPtr urecptr = xlundohdr->urecptr;
+
+    /* copy xlundometa to local struct */
+    CopyUndoMeta(*xlundometa, undometa);
+    recordPtr += undometa.Size();
+
+    if (tryPrepare) {
+        bool skipInsert = undo::IsSkipInsertUndo(urecptr);
+        if (skipInsert) {
+            undometa.SetInfo(XLOG_UNDOMETA_INFO_SKIP);
+        }
+
+        /* recover undo record */
+        UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
+        undorec->SetUrp(urecptr);
+        undorec->SetBlkprev(*prevurp);
+        undorec->SetOldXactId(xlrec->prevXidOfTuple);
+
+        /* We need to pass in tablespace and relfilenode in PrepareUndo but we never explicitly
+         * wrote those information in the xlundohdr because we can grab them from the XLOG record itself.
+         */
+        RelFileNode targetNode = { 0 };
+        BlockNumber blkno = InvalidBlockNumber;
+        bool res PG_USED_FOR_ASSERTS_ONLY = XLogRecGetBlockTag(record, 0, &targetNode, NULL, &blkno);
+        Assert(res == true);
+
+        if (isInsert) {
+            // TODO
+        } else {
+            urecptr = UBTreePCRPrepareUndoDelete(xlundohdr->relOid, *partitionOid, targetNode.relNode,
+                        targetNode.spcNode, UNDO_PERMANENT, InvalidBuffer, xlrec->curXid, 0, *prevurp,
+                        itup, blkno, xlundohdr, &undometa, uinfo);
+        }
+
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
+        undorec->SetOffset(xlrec->offNum);
+        if (!skipInsert) {
+            /* Insert the Undo record into the undo store */
+            InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
+        }
+        undo::RedoUndoMeta(record, &undometa, xlundohdr->urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
+            t_thrd.ustore_cxt.urecvec->LastRecordSize());
+        UndoRecordVerify(undorec);
+        UHeapResetPreparedUndo();
+    }
+
+    return urecptr;
+}
+
 bool IsUBTreeVacuum(const XLogReaderState *record)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
@@ -1166,6 +1251,335 @@ void UBTreeRedo(XLogReaderState* record)
             break;
         default:
             ereport(PANIC, (errmsg("UBTreeRedo: unknown op code %hhu", info)));
+    }
+}
+
+static void UBTree3RestoreMeta(XLogReaderState *record, uint8 block_id)
+{
+    RedoBufferInfo metabuf;
+    char *ptr = NULL;
+    Size len;
+
+    XLogInitBufferForRedo(record, block_id, &metabuf);
+    ptr = XLogRecGetBlockData(record, block_id, &len);
+
+    UBTree3RestoreMetaOperatorPage(&metabuf, (void *)ptr, len);
+    MarkBufferDirty(metabuf.buf);
+    UnlockReleaseBuffer(metabuf.buf);
+}
+
+static void UBTree3XlogInsertPcrInternal(XLogReaderState* record, bool hasMeta)
+{
+    return;
+}
+
+static void UBTree3XlogInsert(XLogReaderState* record, bool isDup)
+{
+    return;
+}
+
+static void UBTree3XlogNewRoot(XLogReaderState* record)
+{
+    return;
+}
+
+static void UBTree3XlogPrunePage(XLogReaderState* record)
+{
+    RedoBufferInfo buffer;
+    buffer.buf = InvalidBuffer;
+    RelFileNode rnode;
+    xl_ubtree3_prune_page *xlrec = (xl_ubtree3_prune_page*)XLogRecGetData(record);
+
+    if (!XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL)) {
+        /* Caller specified a bogus block_id */
+        ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
+    }
+
+    TransactionId latestConflictXid = TransactionIdFollows(xlrec->latestFrozenXid,
+        xlrec->latestRemovedXid) ? xlrec->latestFrozenXid : xlrec->latestRemovedXid;
+
+    if (InHotStandby && TransactionIdIsValid(latestConflictXid) && g_supportHotStandby)
+        ResolveRecoveryConflictWithSnapshot(latestConflictXid, rnode);
+
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
+        UBTree3XlogPrunePageOperatorPage(&buffer, XLogRecGetData(record), rnode.relNode);
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+        }
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
+}
+
+static void UBTree3XlogDelete(XLogReaderState* record)
+{
+    RedoBufferInfo buffer = { 0 };
+    RelFileNode targetNode;
+    BlockNumber blkno = InvalidBlockNumber;
+    XLogRedoAction action;
+    xl_ubtree3_insert_or_delete *xlrec = (xl_ubtree3_insert_or_delete *)XLogRecGetData(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUbtree3InsertOrDelete);
+    IndexTuple itup = (IndexTuple)xlundohdr;
+    char *recordPtr = (char *)xlrec + SizeOfUbtree3InsertOrDelete + IndexTupleSize(itup);
+
+    bool allReplay = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
+    bool onlyReplayUndo = allReplay ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
+
+    XLogRecGetBlockTag(record, 0, &targetNode, NULL, &blkno);
+
+    UndoRecPtr urecptr = PrepareAndInsertUndoRecordForPCRDeleteRedo(record, xlrec, itup, recordPtr,
+        (allReplay || onlyReplayUndo), false);
+
+    if (allReplay || !onlyReplayUndo) {
+        action = XLogReadBufferForRedo(record, 0, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            UBTree3XlogDeleteOperatorPage(&buffer, XLogRecGetData(record), urecptr);
+            if (BufferIsInvalid(buffer.buf)) {
+                MarkBufferDirty(buffer.buf);
+            }
+        }
+
+        if (BufferIsValid(buffer.buf)) {
+            UnlockReleaseBuffer(buffer.buf);
+        }
+    }
+}
+
+static void UBTree3XlogFreezeTdSlot(XLogReaderState* record)
+{
+    return;
+}
+
+static void UBTree3XlogReuseTdSlot(XLogReaderState* record)
+{
+    RedoBufferInfo buffer;
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
+        UBTree3XlogReuseTdOperatorPage(&buffer, (void *)XLogRecGetData(record));
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+        }
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
+}
+
+static void UBTree3XlogExtendTdSlots(XLogReaderState* record)
+{
+    return;
+}
+
+static void UBTree3XlogRollBackTxn(XLogReaderState* record)
+{
+    RedoBufferInfo buffer;
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
+        UBTree3XlogRollbackTxnOperatorPage(&buffer, (void *)XLogRecGetData(record));
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+        }
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
+}
+
+static void UBTree3XlogSplit(XLogReaderState* record, bool onLeft, bool isRoot)
+{
+    return;
+}
+
+static void UBTree4XlogUnlinkPage(uint8 info, XLogReaderState *record)
+{
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)XLogRecGetData(record);
+    BlockNumber leftsib;
+    BlockNumber rightsib;
+
+    leftsib = xlrec->leftsib;
+    rightsib = xlrec->rightsib;
+
+    /*
+     * In normal operation, we would lock all the pages this WAL record
+     * touches before changing any of them.  In WAL replay, it should be okay
+     * to lock just one page at a time, since no concurrent index updates can
+     * be happening, and readers should not care whether they arrive at the
+     * target page or not (since it's surely empty).
+     */
+
+    /* Fix left-link of right sibling */
+    RedoBufferInfo rbuffer;
+    if (XLogReadBufferForRedo(record, BTREE_UNLINK_PAGE_RIGHT_NUM, &rbuffer) == BLK_NEEDS_REDO) {
+        UBTree4XlogUnlinkPageOperatorRightpage(&rbuffer, xlrec);
+        MarkBufferDirty(rbuffer.buf);
+    }
+    if (BufferIsValid(rbuffer.buf)) {
+        UnlockReleaseBuffer(rbuffer.buf);
+    }
+
+    /* Fix right-link of left sibling, if any */
+    if (leftsib != P_NONE) {
+        RedoBufferInfo lbuffer;
+        if (XLogReadBufferForRedo(record, BTREE_UNLINK_PAGE_LEFT_NUM, &lbuffer) == BLK_NEEDS_REDO) {
+            UBTree4XlogUnlinkPageOperatorLeftpage(&lbuffer, xlrec);
+            MarkBufferDirty(lbuffer.buf);
+        }
+        if (BufferIsValid(lbuffer.buf)) {
+            UnlockReleaseBuffer(lbuffer.buf);
+        }
+    }
+
+    /* Rewrite target page as empty deleted page */
+    RedoBufferInfo buffer;
+    XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, &buffer);
+    UBTree4XlogUnlinkPageOperatorCurpage(&buffer, xlrec);
+
+    MarkBufferDirty(buffer.buf);
+    UnlockReleaseBuffer(buffer.buf);
+
+    /*
+     * If we deleted a parent of the targeted leaf page, instead of the leaf
+     * itself, update the leaf to point to the next remaining child in the
+     * branch.
+     */
+    if (XLogRecHasBlockRef(record, BTREE_UNLINK_PAGE_CHILD_NUM)) {
+        /*
+         * There is no real data on the page, so we just re-create it from
+         * scratch using the information from the WAL record.
+         */
+        RedoBufferInfo cbuffer;
+        XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CHILD_NUM, &cbuffer);
+        UBTree4XlogUnlinkPageOperatorChildpage(&cbuffer, xlrec);
+
+        MarkBufferDirty(cbuffer.buf);
+        UnlockReleaseBuffer(cbuffer.buf);
+    }
+
+    /* Update metapage if needed */
+    if (info == XLOG_UBTREE4_UNLINK_PAGE_META) {
+        UBTree3RestoreMeta(record, BTREE_UNLINK_PAGE_META_NUM);
+    }
+}
+
+static void UBTree4XlogMarkPageHalfDead(XLogReaderState *record)
+{
+    xl_btree_mark_page_halfdead *xlrec = (xl_btree_mark_page_halfdead *)XLogRecGetData(record);
+    RedoBufferInfo pbuffer;
+
+    /*
+     * In normal operation, we would lock all the pages this WAL record
+     * touches before changing any of them.  In WAL replay, it should be okay
+     * to lock just one page at a time, since no concurrent index updates can
+     * be happening, and readers should not care whether they arrive at the
+     * target page or not (since it's surely empty).
+     */
+
+    /* parent page */
+    if (XLogReadBufferForRedo(record, BTREE_HALF_DEAD_PARENT_PAGE_NUM, &pbuffer) == BLK_NEEDS_REDO) {
+        UBTree4XlogHalfdeadPageOperatorParentpage(&pbuffer, xlrec);
+        MarkBufferDirty(pbuffer.buf);
+    }
+    if (BufferIsValid(pbuffer.buf)) {
+        UnlockReleaseBuffer(pbuffer.buf);
+    }
+
+    RedoBufferInfo lbuffer;
+    bool willInit = record->blocks[BTREE_HALF_DEAD_LEAF_PAGE_NUM].flags & BKPBLOCK_WILL_INIT;
+    if (willInit) {
+        XLogInitBufferForRedo(record, BTREE_HALF_DEAD_LEAF_PAGE_NUM, &lbuffer);
+        UBTree4XlogHalfdeadPageOperatorLeafpage(&lbuffer, xlrec, willInit);
+        if (BufferIsValid(lbuffer.buf)) {
+            MarkBufferDirty(lbuffer.buf);
+            UnlockReleaseBuffer(lbuffer.buf);
+        }
+        return;
+    }
+
+    if (XLogReadBufferForRedo(record, BTREE_HALF_DEAD_PARENT_PAGE_NUM, &lbuffer) == BLK_NEEDS_REDO) {
+        UBTree4XlogHalfdeadPageOperatorLeafpage(&lbuffer, xlrec, willInit);
+        if (BufferIsValid(lbuffer.buf)) {
+            MarkBufferDirty(lbuffer.buf);
+        }
+    }
+
+    UnlockReleaseBuffer(lbuffer.buf);
+}
+
+void UBTree3Redo(XLogReaderState* record)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    info &= XLOG_UBTREE_PCR_OP_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE3_INSERT_PCR_INTERNAL:
+            UBTree3XlogInsertPcrInternal(record, false);
+            break;
+        case XLOG_UBTREE3_INSERT_PCR_META:
+            UBTree3XlogInsertPcrInternal(record, false);
+            break;
+        case XLOG_UBTREE3_DUP_INSERT:
+            UBTree3XlogInsert(record, true);
+            break;
+        case XLOG_UBTREE3_INSERT_PCR:
+            UBTree3XlogInsert(record, false);
+            break;
+        case XLOG_UBTREE3_NEW_ROOT:
+            UBTree3XlogNewRoot(record);
+            break;
+        case XLOG_UBTREE3_DELETE_PCR:
+            UBTree3XlogDelete(record);
+            break;
+        case XLOG_UBTREE3_PRUNE_PAGE_PCR:
+            UBTree3XlogPrunePage(record);
+            break;
+        case XLOG_UBTREE3_FREEZE_TD_SLOT:
+            UBTree3XlogFreezeTdSlot(record);
+            break;
+        case XLOG_UBTREE3_REUSE_TD_SLOT:
+            UBTree3XlogReuseTdSlot(record);
+            break;
+        case XLOG_UBTREE3_EXTEND_TD_SLOTS:
+            UBTree3XlogExtendTdSlots(record);
+            break;
+        case XLOG_UBTREE3_ROLLBACK_TXN:
+            UBTree3XlogRollBackTxn(record);
+            break;
+        case XLOG_UBTREE3_SPLIT_L:
+            UBTree3XlogSplit(record, true, false);
+            break;
+        case XLOG_UBTREE3_SPLIT_R:
+            UBTree3XlogSplit(record, false, false);
+            break;
+        case XLOG_UBTREE3_SPLIT_L_ROOT:
+            UBTree3XlogSplit(record, true, true);
+            break;
+        case XLOG_UBTREE3_SPLIT_R_ROOT:
+            UBTree3XlogSplit(record, false, true);
+            break;
+        default:
+            ereport(PANIC, (errmsg("UBTree3Redo: unknown op code %hhu", info)));
+    }
+}
+
+void UBTree4Redo(XLogReaderState* record)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    info &= XLOG_UBTREE_PCR_OP_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE4_UNLINK_PAGE:
+            UBTree4XlogUnlinkPage(info, record);
+            break;
+        case XLOG_UBTREE4_UNLINK_PAGE_META:
+            UBTree4XlogUnlinkPage(info, record);
+            break;
+        case XLOG_UBTREE4_MARK_PAGE_HALFDEAD:
+            UBTree4XlogMarkPageHalfDead(record);
+            break;
+        default:
+            ereport(PANIC, (errmsg("UBTree4Redo: unknown op code %hhu", info)));
     }
 }
 

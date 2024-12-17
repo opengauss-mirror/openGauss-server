@@ -46,7 +46,7 @@ static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
 static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff, BTScanInsert itup_key,
     IndexTuple newtup, bool checkingunique, BTStack stack, Relation heapRel);
 bool UBTPCRIsNormalInsert(Relation rel, Buffer& pbuf, OffsetNumber& offnum, IndexTuple itup,
-    BTScanInsert itupKye, BTStack stack);
+    BTScanInsert itupKey, BTStack stack);
 static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, BTStack stack,
     IndexTuple itup, OffsetNumber newitemoff, bool split_only_page, int tdslot, UndoRecPtr urecptr, 
     undo::XlogUndoMeta *xlum);
@@ -317,9 +317,11 @@ top:
                         _bt_freestack(stack);
                         goto top;
                     }
-                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("UBTree pcr insert conflict, relfilenode[%u], block[%d], offset[%u], prevSlot[%d],"
-                        "reserved slot[%d]", rel->rd_node.relNode, BufferGetBlockNumber(buf), off, prevSlot, tdSlot)));
+                    if (!IsUBTreePCRItemDeleted(trx)) {
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("UBTree pcr same tuple exists, relfilenode[%u], block[%d], offset[%u], prevSlot[%d],"
+                                "reserved slot[%d]", rel->rd_node.relNode, BufferGetBlockNumber(buf), off, prevSlot, tdSlot)));
+                    }
                 }
             }
             break;
@@ -447,37 +449,12 @@ DELETE_RETRY:
         itup, InvalidBlockNumber, NULL, &xlum, &undoInfo);
 
     /* STEP3: mark xmax for the target tuple */
-    UBTreePCRPageDel(rel, buf, offset, isRollbackIndex, tdslot, urecPtr, &xlum);
+    UBTreePCRDeleteOnPage(rel, buf, offset, isRollbackIndex, tdslot, urecPtr, &xlum);
 
     UHeapResetPreparedUndo();
     /* be tidy */
     pfree(itupKey);
     return found;
-}
-
-bool UBTreePCRPagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_blknos)
-{
-    return false;
-}
-
-bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts)
-{
-    return false;
-}
-
-bool UBTreePCRPruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate, bool isToast)
-{
-    return false;
-}
-
-void UBTreePCRPagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate, TransactionId oldest_xmin)
-{
-    return;
-}
-
-void UBTreePCRPageRepairFragmentation(Relation rel, BlockNumber blkno, Page page)
-{
-    return;
 }
 
 /*
@@ -1260,7 +1237,7 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
      */
     if (PageGetFreeSpace(page) < itemsz) {
         if (P_ISLEAF(lpageop)) {
-            if (UBTreePCRPagePruneOpt(rel, buf, false, NULL)) {
+            if (UBTreePCRPrunePageOpt(rel, buf, false, NULL, true)) {
                 /* just like vacuum, we mark pruned as true to find the newitemoff again */
                 pruned = true;
             }
@@ -1290,7 +1267,7 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
         firstlegaloff = P_FIRSTDATAKEY(lpageop);
     }
 
-    OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+    OffsetNumber maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
     if (firstlegaloff != InvalidOffsetNumber && !pruned &&
         (firstlegaloff > maxoff || UBTreePCRCompare(rel, itup_key, page, firstlegaloff) <= 0)) {
         return firstlegaloff;
@@ -1325,7 +1302,7 @@ Buffer UBTPCRGetNextPage(Relation rel, Buffer buf, BTStack stack)
 }
 
 bool UBTPCRIsNormalInsert(Relation rel, Buffer& pbuf, OffsetNumber& offnum, IndexTuple itup,
-    BTScanInsert itupKye, BTStack stack)
+    BTScanInsert itupKey, BTStack stack)
 {
     Buffer buf = pbuf;
     bool isIncluding = UBTreeHasIncluding(rel);
@@ -1340,11 +1317,11 @@ loop:
     Page page = BufferGetPage(buf);
     OffsetNumber maxOff = UBTreePCRPageGetMaxOffsetNumber(page);
     OffsetNumber endOff = maxOff;
-    Size size = IndexTupleSize(itup) - sizeof(IndexTupleTrxData);
+    Size size = IndexTupleSize(itup) - MAXALIGN(sizeof(IndexTupleTrxData));
     if (isIncluding) {
-        itupKye->nextkey = true;
-        endOff = UBTreePCRBinarySearch(rel, itupKye, page) - 1;
-        itupKye->nextkey = false;
+        itupKey->nextkey = true;
+        endOff = UBTreePCRBinarySearch(rel, itupKey, page) - 1;
+        itupKey->nextkey = false;
         while (offnum <= endOff) {
             IndexTuple curItup = UBTreePCRGetIndexTuple(page, offnum);
             if (size == IndexTupleSize(curItup) && memcmp(curItup, itup, size)) {
@@ -1355,7 +1332,7 @@ loop:
     } else {
         while (offnum <= endOff) {
             IndexTuple curItup = UBTreePCRGetIndexTuple(page, offnum);
-            if (!ItemPointerEquals(&curItup->t_tid, &itup->t_tid) || !UBTreePCRIsKeyEqual(rel, curItup, itupKye)) {
+            if (!ItemPointerEquals(&curItup->t_tid, &itup->t_tid) || !UBTreePCRIsKeyEqual(rel, curItup, itupKey)) {
                 break;
             }
             if (RelationIsGlobalIndex(rel)) {
@@ -1372,7 +1349,7 @@ loop:
     if ((!isIncluding && RelationIsGlobalIndex(rel) && offnum > maxOff) || 
         (isIncluding && offnum > maxOff)) {
         UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-        if (P_RIGHTMOST(opaque) || UBTreePCRCompare(rel, itupKye, page, P_HIKEY) != 0) {
+        if (P_RIGHTMOST(opaque) || UBTreePCRCompare(rel, itupKey, page, P_HIKEY) != 0) {
             return true;
         }
         buf = UBTPCRGetNextPage(rel, buf, stack);
@@ -1461,7 +1438,7 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                  * in real comparison, but only for ordering/finding items on
                  * pages. - vadim 03/24/97
                  */
-                if (!UBTreeIsEqual<UBTPCRPageOpaque>(rel, page, offset, itup_key->keysz, itup_key->scankeys)) {
+                if (!UBTreePCRIsEqual(rel, page, offset, itup_key->keysz, itup_key->scankeys)) {
                     break; /* we're past all the equal tuples */
                 }
 
@@ -1532,25 +1509,22 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                                     }
                                     return xid;
                                 }
-                            }
-                            
-                            if (!IsUBTreePCRTDReused(trx) && TransactionIdIsValid(xid) && (!UBTreePCRTDIsCommited(td) 
-                                || !UHeapTransactionIdDidCommit(xid))) {
-                                if (nbuf != InvalidBuffer) {
-                                    // _bt_relbuf(rel, nbuf);
-                                    LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
-                                    LockBuffer(nbuf, BT_WRITE);
-                                    ExecuteUndoActionsForUBTreePage(rel, nbuf, trx->tdSlot);
-                                    LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
-                                    LockBuffer(nbuf, BT_READ);
-                                } else {
-                                    ExecuteUndoActionsForUBTreePage(rel, nbuf, trx->tdSlot);
+                                if (!IsUBTreePCRTDReused(trx) && TransactionIdIsValid(xid) && 
+                                    !(UBTreePCRTDIsCommited(td) || UHeapTransactionIdDidCommit(xid))) {
+                                    if (nbuf != InvalidBuffer) {
+                                        LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
+                                        LockBuffer(nbuf, BT_WRITE);
+                                        ExecuteUndoActionsForUBTreePage(rel, nbuf, trx->tdSlot);
+                                        LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
+                                        LockBuffer(nbuf, BT_READ);
+                                    } else {
+                                        ExecuteUndoActionsForUBTreePage(rel, buf, trx->tdSlot);
+                                    }
                                 }
                             }
                         }
 
-                        // TODO: 要理解一下这里的状态
-                        if (!IsUBTreePCRItemDeleted(iid)) {
+                        if (!IsUBTreePCRItemDeleted(trx)) {
                             Datum values[INDEX_MAX_KEYS];
                             bool isnull[INDEX_MAX_KEYS];
                             char *key_desc = NULL;
@@ -1633,7 +1607,7 @@ void UBTreePCRCopyTDSlot(Page origin, Page target)
 
     tOpaque->td_count = oOpaque->td_count;
     Size size = SizeOfUBTreeTDData(origin);
-    errno_t rc = memcpy_s((char*)target + SizeOfPageHeaderData, size, (char*)target + SizeOfPageHeaderData, size);
+    errno_t rc = memcpy_s((char*)target + SizeOfPageHeaderData, size, (char*)origin + SizeOfPageHeaderData, size);
     securec_check(rc, "", "");
     ((PageHeader)target)->pd_lower += size;
 }
@@ -2158,7 +2132,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     // UBTreeVerify(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
 
     /* discard this page from the Recycle Queue */
-    UBTreePCRRecordUsedPage(rel, addr);
+    UBTreeRecordUsedPage(rel, addr);
 
     /* release the old right sibling */
     if (!P_RIGHTMOST(ropaque)) {
@@ -2212,15 +2186,14 @@ static bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTup
     }
     
     if (isnew) {
-        itemsize -= sizeof(IndexTupleTrxData);
+        itemsize -= MAXALIGN(sizeof(IndexTupleTrxData));
         IndexTupleSetSize(itup, itemsize);
-    }  
+    }
     
     /*
     * New inserted tuple need mark xmin, except HIKEY.
     * We assume itemsize included the reserved space for xmin/xmax.
     */
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
     ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
     itup_off = UBTPCRPageAddItem(page, (Item)itup, itemsize, itup_off, false);
     if (itup_off == InvalidOffsetNumber) {
@@ -2234,7 +2207,8 @@ static bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTup
     IndexTupleTrx curtrx = UBTreePCRGetIndexTupleTrx(curtup);
     
     if (copyflags) {
-        curtrx->tdSlot = tdslot;
+        IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
+        curtrx->tdSlot = trx->tdSlot;
         curtrx->slotIsInvalid = trx->slotIsInvalid;
         curtrx->isDeleted = trx->isDeleted;
         curiid->lp_flags = iid->lp_flags;
@@ -2243,6 +2217,7 @@ static bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTup
         curtrx->slotIsInvalid = 0;
         curtrx->isDeleted = 0;
     }
+    curiid->lp_len += MAXALIGN(sizeof(IndexTupleTrxData));
 
     return true;
 }
@@ -2398,7 +2373,6 @@ uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndo
         TransactionId xid = thisTrans->xactid;
         TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
         if (TransactionIdIsValid(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
-            IndexItemIdSetFrozen(iid);
             UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
             slotNo = UBTreeFrozenTDSlotId;
         }
@@ -2447,7 +2421,6 @@ UndoRecPtr UBTreePCRPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilen
     urec->SetCid(cid);
     urec->SetReloid(relOid);
     urec->SetPartitionoid(partitionOid);
-    urec->SetBlkprev(prevurpInOneXact);
     urec->SetRelfilenode(relfilenode);
     urec->SetTablespace(tablespace);
 
@@ -2760,7 +2733,7 @@ static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     _bt_relbuf(rel, metabuf);
 
     /* discard this page from the Recycle Queue */
-    UBTreePCRRecordUsedPage(rel, addr);
+    UBTreeRecordUsedPage(rel, addr);
 
     pfree(left_item);
     pfree(right_item);

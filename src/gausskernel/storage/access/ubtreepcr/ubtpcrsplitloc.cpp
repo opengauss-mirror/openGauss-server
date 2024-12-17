@@ -274,7 +274,7 @@ static bool UBTreePCRAfternewitemoff(FindSplitData *state, OffsetNumber maxoff, 
      * consisting of two non-NULL int8/int64 attributes (or four non-NULL
      * int4/int32 attributes)
      */
-    if (state->newitemsz > MAXALIGN(sizeof(IndexTupleData) + sizeof(IndexTupleTrxData)) + sizeof(ItemIdData)) {
+    if (state->newitemsz > MAXALIGN(sizeof(IndexTupleData)) + MAXALIGN(sizeof(IndexTupleTrxData)) + sizeof(ItemIdData)) {
         return false;
     }
 
@@ -799,7 +799,7 @@ OffsetNumber UBTreePCRFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumbe
         Size itemsz;
 
         itemid = UBTreePCRGetRowPtr(page, offnum);
-        itemsz = MAXALIGN(ItemIdGetLength(itemid)) + MAXALIGN(sizeof(IndexTupleTrxData)) + sizeof(ItemIdData);
+        itemsz = MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData);
 
         /*
          * Will the new item go to left or right of split?

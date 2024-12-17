@@ -675,7 +675,7 @@ void UndoRecordVerify(_in_ UndoRecord *urec)
             errmsg(UNDOFORMAT("UndoRecordVerify invalid, uinfo %d, tablespace is invalid, urp %lu"),
             (int)urec->Uinfo(), urec->Urp())));
     }
-    if (urec->Utype() <= UNDO_UNKNOWN || urec->Utype() > UNDO_UPDATE) {
+    if (urec->Utype() <= UNDO_UNKNOWN || urec->Utype() > UNDO_UBT_DELETE) {
         ereport(defence_errlevel(), (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT("UndoRecordVerify invalid, utype %d is invalid, urp %lu"),
             urec->Utype(), urec->Urp())));

@@ -200,8 +200,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
                 currBlkno = uur->Blkno();
                 currRelfilenode = uur->Relfilenode();
                 currTablespace = uur->Tablespace();
-                // todo RM_UBTREE3_ID
-                preRetCode = RmgrTable[RM_UBTREE2_ID].rm_undo(ubtreeUrecvec, i, i, fullXid,
+                preRetCode = RmgrTable[RM_UBTREE3_ID].rm_undo(ubtreeUrecvec, i, i, fullXid,
                     currReloid, currPartitionoid, currBlkno, containsFullChain,
                     preRetCode, &preReloid, &prePartitionoid);
             }
@@ -210,9 +209,11 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
         preReloid = InvalidOid;
         prePartitionoid = InvalidOid;
 
+        uheapUrecvec->clear();
         DELETE_EX(uheapUrecvec);
+        ubtreeUrecvec->clear();
         DELETE_EX(ubtreeUrecvec);
-        // DELETE_EX(urecvec);
+        DELETE_EX(urecvec);
     } while (true);
     
     return true;

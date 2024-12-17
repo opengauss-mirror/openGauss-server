@@ -43,6 +43,7 @@
 #include "storage/freespace.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/undo/knl_uundotxn.h"
+#include "access/ubtreepcr.h"
 #include "access/multi_redo_api.h"
 
 using namespace undo;

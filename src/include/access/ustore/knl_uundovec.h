@@ -65,6 +65,7 @@ public:
     UndoRecPtr LastRecord();
     UndoRecordSize LastRecordSize();
     void SetMemoryContext(MemoryContext mem_cxt);
+    void clear();
     /* The first record must be valid. */
     UndoRecPtr FirstRecord()
     {

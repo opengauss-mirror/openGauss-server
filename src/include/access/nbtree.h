@@ -121,6 +121,7 @@ typedef struct {
     uint16 btpo_flags;      /* flag bits, see below */
     BTCycleId btpo_cycleid; /* vacuum cycle ID of latest split */
 
+    TransactionId xact; /* next transaction id, if deleted*/
     TransactionId last_delete_xid;
     TransactionId last_commit_xid;
     uint8 td_count;
@@ -207,7 +208,8 @@ typedef struct BTMetaPageData {
     uint32 btm_level;         /* tree level of the root page */
     BlockNumber btm_fastroot; /* current "fast" root location */
     uint32 btm_fastlevel;     /* tree level of the "fast" root page */
-    bool btm_allequalimage;
+    bool btm_allequalimage;   
+    uint32 btm_reltoastrelid; /* uheap toast oid used for pcr ubtree */
 } BTMetaPageData;
 
 #define BTPageGetMeta(p) ((BTMetaPageData*)PageGetContents(p))

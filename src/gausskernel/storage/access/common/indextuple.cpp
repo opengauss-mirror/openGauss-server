@@ -210,7 +210,7 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
      * IndexTupleTrxData.
      */
     Size check_size = size + 
-        (is_ubtree ? is_ubtree_pcr ? sizeof(IndexTupleTrxData) : sizeof(ShortTransactionId) * 2 : 0);
+        (is_ubtree ? (is_ubtree_pcr ? MAXALIGN(sizeof(IndexTupleTrxData)) : sizeof(ShortTransactionId) * 2) : 0);
     if ((check_size & INDEX_SIZE_MASK) != check_size)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),

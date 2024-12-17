@@ -43,12 +43,6 @@
 #include "utils/snapmgr.h"
 #include "datatype/timestamp.h"
 
-static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack);
-static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos = NULL);
-static bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
-    OffsetNumber *topoff, BlockNumber *target, BlockNumber *rightsib);
-static void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid);
-
 /*
  *	UBTreePageInit() -- Initialize a new page.
  *
@@ -453,7 +447,7 @@ static bool UBTreeIsPageHalfDead(Relation rel, BlockNumber blk)
  * child is split, but that cannot happen as long as we hold a lock on the
  * leaf.
  */
-static bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
+bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
     OffsetNumber *topoff, BlockNumber *target, BlockNumber *rightsib)
 {
     BlockNumber parent;
@@ -778,7 +772,7 @@ int UBTreePageDel(Relation rel, Buffer buf, BTStack del_blknos)
  * First stage of page deletion.  Remove the downlink to the top of the
  * branch being deleted, and mark the leaf page as half-dead.
  */
-static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
+bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
 {
     BlockNumber leafblkno;
     BlockNumber leafrightsib;
@@ -1050,7 +1044,7 @@ static bool ReserveForDeletion(Relation rel, Buffer buf)
  * we'll release both pin and lock before returning (we define it that way
  * to avoid having to reacquire a lock we already released).
  */
-static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos)
+bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos)
 {
     BlockNumber leafblkno = BufferGetBlockNumber(leafbuf);
     BlockNumber leafleftsib;
@@ -1585,7 +1579,7 @@ out:
 /*
  * Log the reuse of a page from the recycle queue.
  */
-static void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid)
+void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid)
 {
     xl_btree_reuse_page xlrec;
 

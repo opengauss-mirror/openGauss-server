@@ -18,6 +18,7 @@
 
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 
 const char* btree_type_name(uint8 subtype)
 {
@@ -171,7 +172,7 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
         case XLOG_BTREE_VACUUM: {
             if (!is_dedup_upgrade) {
                 xl_btree_vacuum *xlrec = (xl_btree_vacuum *)rec;
-                
+
                 appendStringInfo(buf, "vacuum: lastBlockVacuumed %u ", xlrec->lastBlockVacuumed);
             } else {
                 xl_btree_vacuum_posting *xlrec = (xl_btree_vacuum_posting *)rec;
@@ -552,3 +553,342 @@ const char* ubtree2_type_name(uint8 subtype)
     }
 }
 
+
+void UBTree3PrunePagePcrDesc(StringInfo buf, XLogReaderState* record)
+{
+    xl_ubtree3_prune_page *xlrec = (xl_ubtree3_prune_page *)XLogRecGetData(record);
+    appendStringInfo(buf, "XLOG_UBTREE3_PRUNE_PAGE_PCR : latestRemovedXid: %lu, latestFrozenXid: %lu, ",
+                     xlrec->latestRemovedXid, xlrec->latestFrozenXid);
+
+    const int32 pruneTupleCount = xlrec->pruneTupleCount;
+    int deadTupleOff = SizeOfUBtree3Prunepage;
+    OffsetNumber *deadOffs = (OffsetNumber *)(((char *)xlrec) + deadTupleOff);
+
+    appendStringInfo(buf, "pruneTupleCount: %d, tuple offsets: [", xlrec->activeTupleCount);
+    for (int i =0; i < pruneTupleCount; i++) {
+        appendStringInfo(buf, "%hu, ", deadOffs[i]);
+    }
+    appendStringInfo(buf, "], activeTupleCount: %d, canCompactTdCount: %hhu, ",
+                     xlrec->activeTupleCount, xlrec->canCompactTdCount);
+    bool* frozenTdMap = (bool*)(((char*)xlrec) + deadTupleOff + pruneTupleCount * sizeof(OffsetNumber));
+    appendStringInfo(buf, "the head 4 frozen map: [");
+    for (int i = 0; i < UBTREE_DEFAULT_TD_COUNT; i++) {
+        appendStringInfo(buf, "%s, ", frozenTdMap[i] ? "true" : "false");
+    }
+    appendStringInfo(buf, "].");
+}
+
+void UBTree3InsertDeleteSplitDesc(StringInfo buf, char* rec, TransactionId xid)
+{
+    Oid partitionOid = InvalidOid;
+    UndoRecPtr blkPrev = INVALID_UNDO_REC_PTR;
+    UndoRecPtr prevUrp = INVALID_UNDO_REC_PTR;
+    xl_ubtree3_insert_or_delete *xlrec = (xl_ubtree3_insert_or_delete *)rec;
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUbtree3InsertOrDelete);
+    IndexTuple itup = (IndexTuple)xlundohdr;
+    rec = (char *)xlrec + SizeOfUbtree3InsertOrDelete + IndexTupleSize(itup);
+    appendStringInfo(buf, "curXid: %lu, prevXidOfTuple: %lu, offNum: %hu, tdId: %hhu",
+                    xlrec->curXid, xlrec->prevXidOfTuple, xlrec->offNum, xlrec->tdId);
+    appendStringInfo(buf, "IndexTuple: t_tid = (blk: %u, off: %hu), t_indo: 0x%hX ",
+                    BlockIdGetBlockNumber((&itup->t_tid.ip_blkid)), itup->t_tid.ip_posid, itup->t_info);
+
+    xlundohdr = (XlUndoHeader *)rec;
+    rec += SizeOfXLUndoHeader;
+    UBTreeUndoInfo uinfo = (UBTreeUndoInfo)rec;
+    rec += SizeOfUBTreeUndoInfoData;
+    appendStringInfo(buf, "UBTreeUndoInfo: ");
+    appendStringInfo(buf, "prevTdId %u, ",uinfo->prev_td_id);
+
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
+        blkPrev = *((UndoRecPtr *) ((char *)rec));
+        rec += sizeof(UndoRecPtr);
+    }
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
+        prevUrp = *((UndoRecPtr *) ((char *)rec));
+        rec += sizeof(UndoRecPtr);
+    }
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
+        partitionOid = *((Oid *) ((char *)rec));
+        rec += sizeof(Oid);
+    }
+
+    appendStringInfo(buf, "UndoInfo: ");
+    appendStringInfo(buf, "urecptr %lu, blkPrev %lu, prevUrp %lu, relOid %u, partitionOid %u, flag %u",
+                    xlundohdr->urecptr, blkPrev, prevUrp, xlundohdr->relOid, partitionOid, xlundohdr->flag);
+
+    undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)((char *)rec);
+    appendStringInfo(buf, "UndoMetaInfo: ");
+    Oid dbId = (xlundometa->info & XLOG_UNDOMETA_INFO_SLOT) != 0 ? xlundometa->dbid : 0;
+    appendStringInfo(buf, "zone %d slot offset %lu: info %u, dbId %u, xid %lu, lastrecsize %u, "
+                    "allocateSlot %u, switchZone %u.", (int)UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), xlundometa->slotPtr,
+                    (uint32)xlundometa->info, dbId, xid, (uint32)xlundometa->lastRecordSize,
+                    (uint32)((xlundometa->info & XLOG_UNDOMETA_INFO_SLOT) != 0 ? 1 : 0),
+                    (uint32)((xlundometa->info & XLOG_UNDOMETA_INFO_SWITCH) != 0 ? 1 : 0));
+}
+
+void UBTree3InsertOrDeletePcrDesc(StringInfo buf, XLogReaderState* record, bool isDup, bool isDelete)
+{
+    char* rec = XLogRecGetData(record);
+    TransactionId xid = XLogRecGetXid(record);
+
+    if (isDup) {
+        appendStringInfo(buf, "XLOG_UBTREE3_DUP_INSERT: ");
+    } else if (isDelete) {
+        appendStringInfo(buf, "XLOG_UBTREE3_DELETE_PCR: ");
+    } else if(!isDup && !isDelete) {
+        appendStringInfo(buf, "XLOG_UBTREE3_INSERT_PCR: ");
+    } else{
+        appendStringInfo(buf, "UBTree3InsertOrDeletePcrDesc: unknown operation");
+    }
+
+    UBTree3InsertDeleteSplitDesc(buf, rec, xid);
+}
+
+void UBTree3RollbackTxnDesc(StringInfo buf, XLogReaderState* record)
+{
+    xl_ubtree3_rollback_txn *xlrec = (xl_ubtree3_rollback_txn *)XLogRecGetData(record);
+    UBTreeTD xltd = (UBTreeTD)(((char *)xlrec) + sizeOfUbtree3RollbackTxn);
+    appendStringInfo(buf, "XLOG_UBTREE3_ROLLBACK_PCR: xid %lu, td_id %u, td(xid: %lu, urecptr:%lu, status:%d), "
+        "n_rollback %u", xlrec->xid, xlrec->td_id, xltd->xactid, xltd->undoRecPtr, xltd->tdStatus, xlrec->n_rollback);
+    if (xlrec->n_rollback > 0) {
+        appendStringInfo(buf, ", rollback_items:(");
+        UBTreeRedoRollbackItem items = 
+            (UBTreeRedoRollbackItem)(((char *)xlrec) + sizeOfUbtree3RollbackTxn + sizeof(UBTreeTDData));
+        for (int i = 0; i < xlrec->n_rollback; i++) {
+            appendStringInfo(buf, "[off:%u, lp_off:%u, lp_flag:%u, lp_len:%u, "
+                "tdSlot:%u, slotIsInvalid:%u, isDeleted:%u]", 
+                items[i].offnum, items[i].iid.lp_off, items[i].iid.lp_flags, items[i].iid.lp_len,
+                items[i].trx.tdSlot, items[i].trx.slotIsInvalid, items[i].trx.isDeleted);
+            if (i != xlrec->n_rollback - 1) {
+                appendStringInfo(buf, ",");
+            }
+        }
+        appendStringInfo(buf, ")");
+    }
+}
+
+void UBTree3Desc(StringInfo buf, XLogReaderState* record)
+{
+   uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+   info &= XLOG_UBTREE_PCR_OP_MASK;
+
+   switch (info) {
+    /*case XLOG_UBTREE3_INSERT_PCR_INTERNAL: {
+        UBTree3InsertPcrInternalOrMetaDesc(buf, record, false);
+        break;
+    }*/
+    case XLOG_UBTREE3_PRUNE_PAGE_PCR: {
+        UBTree3PrunePagePcrDesc(buf, record);
+        break;
+    }
+    case XLOG_UBTREE3_DELETE_PCR: {
+        UBTree3InsertOrDeletePcrDesc(buf, record, false, true);
+        break;
+    }
+    case XLOG_UBTREE3_ROLLBACK_TXN: {
+        UBTree3RollbackTxnDesc(buf, record);
+        break;
+    }
+    /*case XLOG_UBTREE3_INSERT_PCR: {
+        UBTree3InsertOrDeletePcrDesc(buf, record, false, false);
+        break;
+    }
+    case XLOG_UBTREE3_DUP_INSERT: {
+        UBTree3InsertOrDeletePcrDesc(buf, record, true, false);
+        break;
+    }
+    case XLOG_UBTREE3_FREEZE_TD_SLOT: {
+        UBTree3FreezeTdSlotDesc(buf, record);
+        break;
+    }
+    case XLOG_UBTREE3_REUSE_TD_SLOT: {
+        UBTree3ReuseTdSlotDesc(buf, record);
+        break;
+    }
+    case XLOG_UBTREE3_EXTEND_TD_SLOTS: {
+        UBTree3ExtendTdSlotsDesc(buf, record);
+        break;
+    }
+    case XLOG_UBTREE3_SPLIT_L: {
+        UBTree3SplitDesc(buf, record, "XLOG_UBTREE3_SPLIT_L");
+        break;
+    }
+    case XLOG_UBTREE3_SPLIT_R: {
+        UBTree3SplitDesc(buf, record, "XLOG_UBTREE3_SPLIT_R");
+        break;
+    }
+    case XLOG_UBTREE3_SPLIT_L_ROOT: {
+        UBTree3SplitDesc(buf, record, "XLOG_UBTREE3_SPLIT_L_ROOT");
+        break;
+    }
+    case XLOG_UBTREE3_SPLIT_R_ROOT: {
+        UBTree3SplitDesc(buf, record, "XLOG_UBTREE3_SPLIT_R_ROOT");
+        break;
+    }
+    case XLOG_UBTREE3_NEW_ROOT: {
+        UBTree3NewRootDesc(buf, record);
+        break;
+    }
+    case XLOG_UBTREE3_INSERT_PCR_META: {
+        UBTree3InsertPcrInternalOrMetaDesc(buf, record, true);
+        break;
+    }*/
+    default:
+        appendStringInfo(buf, "UBTree3Redo: unknown op code %hhu", info);
+        break;
+   }
+   return;
+}
+
+
+
+const char* ubtree3_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_UBTREE_PCR_OP_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE3_INSERT_PCR_INTERNAL: {
+            return "ubt3_insert_pcr_internal";
+            break;
+        }
+        case XLOG_UBTREE3_PRUNE_PAGE_PCR: {
+            return "ubt3_prune_page_pcr";
+            break;
+        }
+        case XLOG_UBTREE3_DELETE_PCR: {
+            return "ubt3_delete_pcr";
+            break;
+        }
+        case XLOG_UBTREE3_INSERT_PCR: {
+            return "ubt3_insert_pcr";
+            break;
+        }
+        case XLOG_UBTREE3_DUP_INSERT: {
+            return "ubt3_duplicate_pcr";
+            break;
+        }
+        case XLOG_UBTREE3_ROLLBACK_TXN: {
+            return "ubt3_rollback_transaction";
+            break;
+        }
+        case XLOG_UBTREE3_FREEZE_TD_SLOT: {
+            return "ubt3_freeze_td_slot";
+            break;
+        }
+        case XLOG_UBTREE3_REUSE_TD_SLOT: {
+            return "ubt3_reuse_td_slot";
+            break;
+        }
+        case XLOG_UBTREE3_EXTEND_TD_SLOTS: {
+            return "ubt3_extend_td_slots";
+            break;
+        }
+        case XLOG_UBTREE3_SPLIT_L: {
+            return "ubt3_split_left";
+            break;
+        }
+        case XLOG_UBTREE3_SPLIT_R: {
+            return "ubt3_split_right";
+            break;
+        }
+        case XLOG_UBTREE3_SPLIT_L_ROOT: {
+            return "ubt3_split_root_left";
+            break;
+        }
+        case XLOG_UBTREE3_SPLIT_R_ROOT: {
+            return "ubt3_split_root_right";
+            break;
+        }
+        case XLOG_UBTREE3_NEW_ROOT: {
+            return "ubt3_new_root";
+            break;
+        }
+        case XLOG_UBTREE3_INSERT_PCR_META: {
+            return "ubt3_insert_pcr_meta";
+            break;
+        }
+        default:
+            return "unknown_type";
+            break;
+    }
+}
+
+static void UBTree4UnlinkPageDesc(StringInfo buf, XLogReaderState* record, bool isMeta)
+{
+    char *rec = XLogRecGetData(record);
+    xl_btree_unlink_page *xlrec = (xl_btree_unlink_page *)rec;
+    if (isMeta) {
+        appendStringInfo(buf, "XLOG_UBTREE4_UNLINK_PAGE_META: ");
+        Size metaDataLen;
+        char *metaData = XLogRecGetBlockData(record, BTREE_UNLINK_PAGE_META_NUM, &metaDataLen);
+        xl_btree_metadata *metaRec = (xl_btree_metadata *)metaData;
+        appendStringInfo(buf, "meta info: [root blk no: %u, level %u, fast root blk no: %u, fast level: %u, version: %u]",
+            metaRec->root, metaRec->level, metaRec->fastroot, metaRec->fastlevel, metaRec->version);
+    } else {
+        appendStringInfo(buf, "XLOG_UBTREE4_UNLINK_PAGE: ");
+    }
+
+    appendStringInfo(buf,
+                "leftsib %u; rightsib %u; leafleftsib %u; leafrightsib %u; topparent %u; btpo_xact " XID_FMT "",
+                xlrec->leftsib, xlrec->rightsib, xlrec->leafleftsib, xlrec->leafrightsib, xlrec->topparent,
+                xlrec->btpo_xact);
+}
+
+static void UBTree4MarkPageHalfDeadDesc(StringInfo buf, XLogReaderState* record)
+{
+    char *rec = XLogRecGetData(record);
+    xl_btree_mark_page_halfdead *xlrec = (xl_btree_mark_page_halfdead *)rec;
+    appendStringInfo(buf, "XLOG_UBTREE4_MARK_PAGE_HALFDEAD: ");
+    appendStringInfo(buf, "leaf %u; left %u; right %u; parent %u; parent off %u", xlrec->leafblk,
+                             xlrec->leftblk, xlrec->rightblk, xlrec->topparent, (uint32)xlrec->poffset);
+}
+
+void UBTree4Desc(StringInfo buf, XLogReaderState* record)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    info &= XLOG_UBTREE_PCR_OP_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE4_UNLINK_PAGE: {
+            UBTree4UnlinkPageDesc(buf, record, false);
+            break;
+        }
+        case XLOG_UBTREE4_UNLINK_PAGE_META: {
+            UBTree4UnlinkPageDesc(buf, record, true);
+            break;
+        }
+        case XLOG_UBTREE4_MARK_PAGE_HALFDEAD: {
+            UBTree4MarkPageHalfDeadDesc(buf, record);
+            break;
+        }
+        default:
+        appendStringInfo(buf, "UBTree4Redo: unknown op code %hhu", info);
+        break;
+   }
+   return;
+}
+
+const char* ubtree4_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_UBTREE_PCR_OP_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE4_UNLINK_PAGE: {
+            return "ubt4_unlink_page";
+            break;
+        }
+        case XLOG_UBTREE4_UNLINK_PAGE_META: {
+            return "ubt4_unlink_page_meta";
+            break;
+        }
+        case XLOG_UBTREE4_MARK_PAGE_HALFDEAD: {
+            return "ubt4_mark_page_halfdead";
+            break;
+        }
+        default:
+            return "unknown_type";
+            break;
+    }
+}

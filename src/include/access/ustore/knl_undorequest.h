@@ -97,4 +97,6 @@ bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloi
 bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber forkNum, BlockNumber srcBlkno,
     BlockNumber destBlkno, RollBackTypeForAlterTable opType, PartitionToastInfo *toastInfo = NULL);
 int GetUndoApplySize();
+int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
 #endif
