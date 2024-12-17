@@ -99,7 +99,6 @@ int hnswpq_load_symbols(char *lib_dl_path)
     HNSWPQ_RETURN_IFERR(HNSWPQ_LOAD_SYMBOL_FUNC(GetPQDistanceTableSdc));
     HNSWPQ_RETURN_IFERR(HNSWPQ_LOAD_SYMBOL_FUNC(GetPQDistanceTableAdc));
     HNSWPQ_RETURN_IFERR(HNSWPQ_LOAD_SYMBOL_FUNC(GetPQDistance));
-    HNSWPQ_RETURN_IFERR(HNSWPQ_LOAD_SYMBOL_FUNC(Rerank));
 
     return HNSWPQ_SUCCESS;
 }
@@ -185,9 +184,4 @@ int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams 
                   const float *pqDistanceTable, float *PQDistance)
 {
     return g_hnsw_func.GetPQDistance(basecode, querycode, params, pqDistanceTable, PQDistance);
-}
-
-int Rerank(float *query, const PQParams *params, const int candidateNum, Candidate **candidateSet, Candidate **sortSet)
-{
-    return g_hnsw_func.Rerank(query, params, candidateNum, candidateSet, sortSet);
 }

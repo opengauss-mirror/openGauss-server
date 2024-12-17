@@ -1234,6 +1234,10 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
         ereport(ERROR, (errmsg("this data type cannot support hnswpq.")));
     }
+    if (buildstate->enablePQ && !g_instance.hnswpq_inited) {
+        ereport(ERROR, (errmsg("this instance has not currently loaded the hnswpq dynamic library.")));
+    }
+
     buildstate->pqM = HnswGetPqM(index);
     buildstate->pqKsub = HnswGetPqKsub(index);
     if (buildstate->enablePQ) {

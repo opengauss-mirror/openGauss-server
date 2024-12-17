@@ -754,16 +754,13 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 
     etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
 
-    if (enablePQ) {
-        ePQCode = LoadPQcode(etup);
-        params = &pqinfo->params;
-    }
-
     Assert(HnswIsElementTuple(etup));
 
     /* Calculate distance */
     if (distance != NULL) {
         if (enablePQ && pqinfo->lc == 0) {
+            ePQCode = LoadPQcode(etup);
+            params = &pqinfo->params;
             if (params->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
                 *distance = 0;
             } else if (params->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
@@ -784,6 +781,13 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     /* Load element */
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
         HnswLoadElementFromTuple(element, etup, true, loadVec);
+        if (enablePQ) {
+            params = &pqinfo->params;
+            Vector *vd1 = &etup->data;
+            Vector *vd2 = (Vector *)DatumGetPointer(*q);
+            float exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
+            *distance = exactDis;
+        }
     }
 
     UnlockReleaseBuffer(buf);
@@ -988,43 +992,6 @@ HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvi
     }
 }
 
-void formCandidates(char* base, pairingheap *W, Candidate **candidateSet)
-{
-    int i = 0;
-    while (!pairingheap_is_empty(W)) {
-        HnswCandidate *hc = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(W));
-        HnswElement eElement = (HnswElement)HnswPtrAccess(base, hc->element);
-        Candidate *cur = (Candidate*)palloc(sizeof(Candidate));
-        Datum q = PointerGetDatum(HnswPtrAccess(base, eElement->value));
-
-        cur->vector = DatumGetVector(q)->x;
-        cur->distance = hc->distance;
-        cur->heaptids = eElement->heaptids;
-        cur->heaptidsLength = eElement->heaptidsLength;
-
-        candidateSet[i] = cur;
-        i++;
-    }
-}
-
-List *deformCandidates(char* base, Candidate **sortSet, List *w, int candidateNum)
-{
-    errno_t rc = 0;
-    int len = sizeof(ItemPointerData) * HNSW_HEAPTIDS;
-    for (int i = 0; i < candidateNum; i++) {
-        HnswCandidate *hc = (HnswCandidate *)palloc(sizeof(HnswCandidate));
-        HnswElement element = (HnswElement)palloc(sizeof(HnswElementData));
-        element->heaptidsLength = sortSet[i]->heaptidsLength;
-        rc = memcpy_s(element->heaptids, len, sortSet[i]->heaptids, len);
-        securec_check(rc, "\0", "\0");
-        HnswPtrStore(base, hc->element, element);
-        hc->distance = sortSet[i]->distance;
-
-        w = lappend(w, hc);
-    }
-    return w;
-}
-
 /*
  * Algorithm 2 from paper
  */
@@ -1045,7 +1012,9 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
     HnswElement *unvisited = (HnswElementData**)palloc(lm * sizeof(HnswElement));
     int unvisitedLength;
     errno_t rc = EOK;
-    int candidateNum = 0;
+    int vNum = 0;
+    int threshold = u_sess->datavec_ctx.hnsw_earlystop_threshold;
+    bool enableEarlyStop = threshold == INT32_MAX ? false : true;
 
     InitVisited(base, &v, index, ef, m);
 
@@ -1075,7 +1044,6 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
         if (CountElement(base, skipElement, (HnswElement)HnswPtrAccess(base, hc->element))) {
             wlen++;
         }
-        candidateNum++;
     }
 
     while (!pairingheap_is_empty(C)) {
@@ -1083,7 +1051,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
         HnswCandidate *f = HnswGetPairingHeapCandidate(w_node, pairingheap_first(W));
         HnswElement cElement;
 
-        if (c->distance > f->distance)
+        if (c->distance > f->distance || (enableEarlyStop && vNum == threshold))
             break;
 
         cElement = (HnswElement)HnswPtrAccess(base, c->element);
@@ -1117,6 +1085,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
             if (eDistance < f->distance || alwaysAdd) {
                 HnswCandidate *e;
                 HnswPairingHeapNode *node;
+                vNum = 0;
 
                 Assert(!eElement->deleted);
 
@@ -1132,7 +1101,6 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 node = CreatePairingHeapNode(e);
                 pairingheap_add(C, &node->c_node);
                 pairingheap_add(W, &node->w_node);
-                candidateNum++;
 
                 /*
                  * Do not count elements being deleted towards ef when
@@ -1145,28 +1113,23 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                    /* No need to decrement wlen */
                     if (wlen > ef) {
                         pairingheap_remove_first(W);
-                        candidateNum--;
                     }
                 }
+            } else {
+                vNum++;
+            }
+
+            if (enableEarlyStop && vNum == threshold) {
+                break;
             }
         }
     }
 
-    if (enablePQ && lc == 0) {
-        float *query = DatumGetVector(q)->x;
-        Candidate **candidateSet = (Candidate **)palloc(candidateNum * sizeof(Candidate*));
-        Candidate **sortSet = (Candidate **)palloc(candidateNum * sizeof(Candidate*));
+    /* Add each element of W to w */
+    while (!pairingheap_is_empty(W)) {
+        HnswCandidate *hc = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(W));
 
-        formCandidates(base, W, candidateSet);
-        Rerank(query, &pqinfo->params, candidateNum, candidateSet, sortSet);
-        w = deformCandidates(base, sortSet, w, candidateNum);
-    } else {
-        /* Add each element of W to w */
-        while (!pairingheap_is_empty(W)) {
-            HnswCandidate *hc = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(W));
-
-            w = lcons(hc, w);
-        }
+        w = lcons(hc, w);
     }
 
     return w;

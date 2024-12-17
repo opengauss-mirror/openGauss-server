@@ -56,12 +56,6 @@
 #define STATE_DIMS(x) (ARR_DIMS(x)[0] - 1)
 #define CreateStateDatums(dim) palloc(sizeof(Datum) * ((dim) + 1))
 
-#if defined(USE_TARGET_CLONES) && !defined(__FMA__)
-#define VECTOR_TARGET_CLONES __attribute__((target_clones("default", "fma")))
-#else
-#define VECTOR_TARGET_CLONES
-#endif
-
 #define MarkGUCPrefixReserved(x) EmitWarningsOnPlaceholders(x)
 
 /*
@@ -634,7 +628,7 @@ static float L2SquaredDistanceRef(int dim, float *ax, float *bx)
     return distance;
 }
 
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorL2SquaredDistance(int dim, float *ax, float *bx)
 {
     // 128 bit register = float 32*4
@@ -699,7 +693,7 @@ static inline __m128 masked_read(int d, const float *x)
     }
     return _mm_load_ps(buf);
 }
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorL2SquaredDistance(int dim, float *ax, float *bx)
 {
     float* x = (float*)ax;
@@ -746,7 +740,7 @@ VectorL2SquaredDistance(int dim, float *ax, float *bx)
 }
 #else
 
-VECTOR_TARGET_CLONES static float VectorL2SquaredDistance(int dim, float *ax, float *bx)
+VECTOR_TARGET_CLONES float VectorL2SquaredDistance(int dim, float *ax, float *bx)
 {
     float distance = 0.0;
 

@@ -39,6 +39,13 @@ typedef struct Vector {
     float x[FLEXIBLE_ARRAY_MEMBER];
 } Vector;
 
+#if defined(USE_TARGET_CLONES) && !defined(__FMA__)
+#define VECTOR_TARGET_CLONES __attribute__((target_clones("default", "fma")))
+#else
+#define VECTOR_TARGET_CLONES
+#endif
+
+VECTOR_TARGET_CLONES float VectorL2SquaredDistance(int dim, float *ax, float *bx);
 Vector *InitVector(int dim);
 void PrintVector(char *msg, Vector *vector);
 int vector_cmp_internal(Vector *a, Vector *b);
