@@ -4404,8 +4404,12 @@ static int ServerLoop(void)
 
         /* If we have lost the snapshot capturer, try to start a new one */
         if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
-                g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
-            g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
+            g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
+            if (u_sess->attr.attr_storage.undo_retention_time != 0 ||
+                u_sess->attr.attr_storage.enable_recyclebin) {
+                    g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
+            }
+        }
 
 #ifndef ENABLE_FINANCE_MODE
         /* If we have lost the cfs shrinker, try to start a new one */
@@ -7298,8 +7302,12 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.PgStatPID = pgstat_start();
 
             if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
-                    g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
-                g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
+                g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
+                if (u_sess->attr.attr_storage.undo_retention_time != 0 ||
+                    u_sess->attr.attr_storage.enable_recyclebin) {
+                    g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
+                }
+            }
 
 #ifndef ENABLE_FINANCE_MODE
             /* If we have lost the cfs shrinker, try to start a new one */
