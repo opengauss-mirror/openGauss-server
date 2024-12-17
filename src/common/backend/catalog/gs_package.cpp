@@ -38,6 +38,7 @@
 #include "catalog/gs_package_fn.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_synonym.h"
 #include "commands/defrem.h"
@@ -1761,7 +1762,7 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
 
 #ifndef ENABLE_MULTIPLE_NODES
 Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid procNamespace,
-    Oid propackageid, Datum* values, Datum parameterModes, Oid protypeoid)
+    Oid propackageid, Datum* values, Datum parameterModes, Oid protypeoid, Oid profuncoid)
 {
     bool enableOutparamOverride = enable_out_param_override();
     if (t_thrd.proc->workingVersionNum < 92470) {
@@ -1778,8 +1779,9 @@ Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid pro
     }
     CatCList* catlist = NULL;
     catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
-    Oid packageid;
-    Oid typeoid;
+    Oid packageid = InvalidOid;
+    Oid procoid = InvalidOid;
+    Oid typeoid = InvalidOid;
     for (int i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         if (HeapTupleIsValid(proctup)) {
@@ -1805,6 +1807,10 @@ Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid pro
                 typeoid = ObjectIdGetDatum(packageIdDatum);
             }
             if (protypeoid != typeoid) {
+                continue;
+            }
+            procoid = GetProprocoidByOid(oldTupleOid);
+            if (procoid != profuncoid) {
                 continue;
             }
             if (enableOutparamOverride) {

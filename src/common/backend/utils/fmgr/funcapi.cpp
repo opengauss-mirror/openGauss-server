@@ -178,7 +178,8 @@ static void shutdown_multi_func_call(Datum arg)
 bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!enable_out_param_override() || u_sess->attr.attr_sql.sql_compatibility != A_FORMAT || funcid == InvalidOid) {
+    if (!enable_out_param_override() || u_sess->attr.attr_sql.sql_compatibility != A_FORMAT ||
+            funcid == InvalidOid || funcid == OID_MAX) {
         return false;
     }
 #else

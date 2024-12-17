@@ -881,11 +881,15 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->is_insert_gs_source = false;
     plsql_cxt->CursorRecordTypeList = NIL;
+    plsql_cxt->block_level = 0;
+    plsql_cxt->isCreateFuncSubprogramBody = false;
+    plsql_cxt->cur_func_oid = 0;
     plsql_cxt->need_create_depend = true;
     plsql_cxt->createPlsqlType = CREATE_PLSQL_TYPE_END;
     plsql_cxt->functionStyleType = FUNCTION_STYLE_TYPE_NONE;
     plsql_cxt->is_pkg_compile = false;
     plsql_cxt->is_pipelined = false;
+    plsql_cxt->createFunctionOid = InvalidOid;
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
     plsql_cxt->currCompilingObjStatus = true;

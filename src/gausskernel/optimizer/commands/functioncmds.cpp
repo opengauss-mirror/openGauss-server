@@ -998,7 +998,7 @@ static bool isForbiddenSchema (Oid namespaceId)
     return IsPackageSchemaOid(namespaceId) || namespaceId == PG_DB4AI_NAMESPACE;
 }
 
-void CheckCreateFunctionPrivilege(Oid namespaceId, const char* funcname)
+void CheckCreateFunctionPrivilege(Oid namespaceId, Oid funcOid, const char* funcname)
 {
     if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && isForbiddenSchema(namespaceId)) {
         ereport(ERROR,
@@ -1009,7 +1009,7 @@ void CheckCreateFunctionPrivilege(Oid namespaceId, const char* funcname)
                 erraction("Please create an object in another schema.")));
     }
 
-    if (!isRelSuperuser() &&
+    if (!isRelSuperuser() && !OidIsValid(funcOid) &&
         (namespaceId == PG_CATALOG_NAMESPACE ||
         namespaceId == PG_PUBLIC_NAMESPACE ||
         namespaceId == PG_DB4AI_NAMESPACE)) {
@@ -1037,7 +1037,7 @@ extern HeapTuple SearchUserHostName(const char* userName, Oid* oid);
  * CreateFunction
  *	 Execute a CREATE FUNCTION utility statement.
  */
-ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_oid, Oid type_oid)
+ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_oid, Oid type_oid, Oid func_oid)
 {
     char* probin_str = NULL;
     char* prosrc_str = NULL;
@@ -1113,9 +1113,37 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
      */
     bool isalter = false;
     /* Convert list of names to a name and namespace */
-    if (!OidIsValid(pkg_oid) && !OidIsValid(type_oid)) {
+    if (!OidIsValid(pkg_oid) &&(!OidIsValid(func_oid)) && (!OidIsValid(type_oid))) {
         namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname, &funcname);
-    } else if (OidIsValid(pkg_oid)) {
+    } else if (OidIsValid(func_oid)) {
+        if (func_oid == OID_MAX) {
+            char *schemaname = NULL;
+            DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
+            namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname, &funcname);
+        } else {
+            char *schemaname = NULL;
+            DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
+            HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+            if (HeapTupleIsValid(tuple)) {
+                Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(tuple);
+                namespaceId = procform->pronamespace;
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("package not found")));
+            }
+            ReleaseSysCache(tuple);
+        }
+    } else if (OidIsValid(type_oid)) {
+        char *schemaname = NULL;
+        DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
+        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
+        if (HeapTupleIsValid(tuple)) {
+            Form_pg_type typform = (Form_pg_type)GETSTRUCT(tuple);
+            namespaceId = typform->typnamespace;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("object type not found")));
+        }
+        ReleaseSysCache(tuple);
+    } else {
         char *schemaname = NULL;
         DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
         HeapTuple tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkg_oid));
@@ -1133,20 +1161,9 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("package not found")));
         }
         ReleaseSysCache(tuple);
-    } else {
-        char *schemaname = NULL;
-        DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
-        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
-        if (HeapTupleIsValid(tuple)) {
-            Form_pg_type typform = (Form_pg_type)GETSTRUCT(tuple);
-            namespaceId = typform->typnamespace;
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("object type not found")));
-        }
-        ReleaseSysCache(tuple);
     }
-
-    CheckCreateFunctionPrivilege(namespaceId, funcname);
+    
+    CheckCreateFunctionPrivilege(namespaceId, func_oid, funcname);
     bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_FUNCTION);
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
@@ -1194,6 +1211,10 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
 
     pipelined_function_sanity_check(stmt, isPipelined);
     
+    if (OidIsValid(pkg_oid) || OidIsValid(func_oid)) {
+        package = true;
+    }
+
     /* Look up the language and validate permissions */
     languageTuple = SearchSysCache1(LANGNAME, PointerGetDatum(language));
     if (!HeapTupleIsValid(languageTuple))
@@ -1414,7 +1435,8 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         partInfo,
         type_oid,
         stmt->typfunckind,
-        stmt->isfinal);
+        stmt->isfinal,
+        func_oid);
 
     CreateFunctionComment(address.objectId, functionOptions);
     pfree_ext(param_type_depend_ext);

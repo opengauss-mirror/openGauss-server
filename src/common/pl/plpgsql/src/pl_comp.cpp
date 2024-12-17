@@ -30,6 +30,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_attrdef.h"
 #include "commands/sqladvisor.h"
+#include "commands/typecmds.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
@@ -66,6 +67,7 @@ extern THR_LOCAL List* baseSearchPath;
 #define FUNCS_PER_USER 128 /* initial table size */
 #define PKGS_PER_USER 256  /* initial table size */
 #define MAXSTRLEN ((1 << 11) - 1)
+const int MAX_SUB_PROGRAM_LEVEL = 2;
 /* ----------
  * Lookup table for EXCEPTION condition names
  * ----------
@@ -91,14 +93,15 @@ static Node* plpgsql_pre_column_ref(ParseState* pstate, ColumnRef* cref);
 static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* var);
 static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref);
 static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRef* cref, bool error_if_no_field);
-static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location);
+static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location, char* name = NULL,
+    PLpgSQL_nsitem* nse = NULL);
 extern PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues);
 static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars);
-static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
+void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
     PLpgSQL_func_hashkey* hashkey, bool for_validator);
 static void plpgsql_resolve_polymorphic_argtypes(
     int numargs, Oid* arg_types, const char* arg_modes, Node* call_expr, bool for_validator, const char* pro_name);
-static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
+PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
 static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key);
 static void plpgsql_append_dlcell(plpgsql_HashEnt* entity);
 static bool plpgsql_lookup_tripword_datum(int itemno, const char* word2, const char* word3,
@@ -109,7 +112,6 @@ static int find_package_rowfield(PLpgSQL_datum* datum, const char* pkgName, cons
 static bool isObjectTypeMethod(char* compWord, char* firstword, char* secondWord,
     char* thirdWord, PLwdatum* wdatum, int* nsflag);
 extern bool is_func_need_cache(Oid funcid, const char* func_name);
-
 /* ----------
  * plpgsql_compile		Make an execution tree for a PL/pgSQL function.
  *
@@ -474,6 +476,7 @@ static void initCompileContext(PLpgSQL_compile_context* compile_cxt, MemoryConte
     compile_cxt->datums_pkg_alloc = 0;
     compile_cxt->plpgsql_nDatums = 0;
     compile_cxt->plpgsql_pkg_nDatums = 0;
+    compile_cxt->plpgsql_subprogram_nDatums = 0;
     compile_cxt->datums_last = 0;
     compile_cxt->datums_pkg_last = 0;
     compile_cxt->plpgsql_error_funcname = NULL;
@@ -749,6 +752,12 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     Oid namespaceOid = InvalidOid;
     int *allvarnos = NULL;
     int n_varnos = 0;
+
+    // for subprogram.
+    Oid parent_oid = InvalidOid;
+    PLpgSQL_compile_context* parent_func_context = NULL;
+    PLpgSQL_function* parent_func = NULL;
+    
     Oid* saved_pseudo_current_userId = NULL;
     char* signature = NULL;
 
@@ -818,6 +827,14 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     u_sess->plsql_cxt.plpgsql_IndexErrorVariable = 0;
 
     signature = format_procedure(fcinfo->flinfo->fn_oid);
+
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+           u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        parent_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
+        parent_func_context = u_sess->plsql_cxt.curr_compile_context;
+        parent_func = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
+    }
+
     /*
      * All the permanent output of compilation (e.g. parse tree) is kept in a
      * per-function memory context, so it can be reclaimed easily.
@@ -890,6 +907,19 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     }
     func->fn_owner = proc_struct->proowner;
     func->fn_oid = fcinfo->flinfo->fn_oid;
+
+    func->parent_oid = parent_oid;
+    func->parent_func = parent_func;
+    if (parent_func) {
+        func->block_level = parent_func->block_level + 1;
+        if (func->block_level > MAX_SUB_PROGRAM_LEVEL) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("The definition of the function is error."),
+                    errhint("Subprogram nesting levels should be less than 2.")));
+        }
+        func->in_anonymous = parent_func->in_anonymous;
+    }
+
     func->fn_xmin = HeapTupleGetRawXmin(proc_tup);
     func->fn_tid = proc_tup->t_self;
     func->fn_input_collation = fcinfo->fncollation;
@@ -998,6 +1028,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         curr_compile->compile_tmp_cxt, sizeof(bool) * curr_compile->datums_alloc);
     curr_compile->datums_last = 0;
     add_pkg_compile();
+    add_parent_func_compile(parent_func_context);
     Oid base_oid = InvalidOid;
     bool isHaveTableOfIndexArgs = false;
     bool isHaveOutRefCursorArgs = false;
@@ -1377,6 +1408,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     /*
      * Now parse the function's text
      */
+     /* 重置plpgsql块层次计数器 */
+    u_sess->plsql_cxt.block_level = 0;
     bool saved_flag = u_sess->plsql_cxt.have_error;
     ResourceOwnerData* oldowner = NULL;
     int64 stackId = 0;
@@ -1559,6 +1592,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         func->fn_argvarnos[i] = in_arg_varnos[i];
     }
     func->ndatums = curr_compile->plpgsql_nDatums;
+    func->subprogram_ndatums = curr_compile->plpgsql_subprogram_nDatums;
     func->datums = (PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * curr_compile->plpgsql_nDatums);
     func->datum_need_free = (bool*)palloc(sizeof(bool) * curr_compile->plpgsql_nDatums);
     for (i = 0; i < curr_compile->plpgsql_nDatums; i++) {
@@ -1624,6 +1658,21 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         errmsg("%s finish compile, level: %d", __func__, list_length(u_sess->plsql_cxt.compile_context_list))));
     u_sess->plsql_cxt.curr_compile_context = popCompileContext();
     clearCompileContext(curr_compile);
+    if (func->sub_type_oid_list != NULL) {
+        ListCell* cell = NULL;
+        foreach(cell, func->sub_type_oid_list) {
+            Oid* oid = (Oid*)lfirst(cell);
+            if (func->fn_oid == OID_MAX && OidIsValid(*oid)) {
+                HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*oid));
+                if (HeapTupleIsValid(tup)) {
+                    ReleaseSysCache(tup);
+                    RemoveTypeById(*oid);
+                }
+            }
+        }
+        list_free_deep(func->sub_type_oid_list);
+        func->sub_type_oid_list = NULL;
+    }
     if (temp != NULL) {
         MemoryContextSwitchTo(temp);
     }
@@ -1686,7 +1735,8 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
 
     curr_compile->plpgsql_curr_compile = func;
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
-
+    func->fn_oid = OID_MAX;
+    func->in_anonymous = true;
     func->fn_signature = pstrdup(func_name);
     func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
     func->fn_input_collation = InvalidOid;
@@ -1771,6 +1821,8 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     /*
      * Now parse the function's text
      */
+     /* 重置plpgsql块层次计数器 */
+    u_sess->plsql_cxt.block_level = 0;
     parse_rc = plpgsql_yyparse();
     if (parse_rc != 0) {
         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -1833,7 +1885,7 @@ static void add_parameter_name(int item_type, int item_no, const char* name)
      * disambiguate.
      */
     PLpgSQL_nsitem* item = plpgsql_ns_lookup(plpgsql_ns_top(), true, name, NULL, NULL, NULL);
-    if (item != NULL) {
+    if (item != NULL && !item->inherit) {
         if (item->pkgname == NULL) {
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("parameter name \"%s\" used more than once", name)));
@@ -1964,7 +2016,30 @@ static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref)
     if (nse == NULL) {
         return NULL; /* name not known to plpgsql */
     }
-    return make_datum_param(expr, nse->itemno, pref->location);
+    return make_datum_param(expr, nse->itemno, pref->location, nse->name, nse);
+}
+
+static PLpgSQL_nsitem* GetSubprogramVarItemInRow(PLpgSQL_execstate* estate, int dno,
+    PLpgSQL_nsitem* nse, PLpgSQL_row* row)
+{
+    char* refname = NULL;
+    PLpgSQL_datum* originDatum = GetOriginSubprogramDatum(estate, dno, row->func_oid);
+    if (!originDatum)
+        return NULL;
+    switch (originDatum->dtype) {
+        case PLPGSQL_DTYPE_VAR:
+        case PLPGSQL_DTYPE_REC:
+        case PLPGSQL_DTYPE_ROW:
+            refname = ((PLpgSQL_var*)originDatum)->refname;
+            break;
+        default:
+            return NULL;
+    }
+    for (PLpgSQL_nsitem* nsitem = nse; nsitem != NULL; nsitem = nsitem->prev) {
+        if (strcmp(nsitem->name, refname) == 0)
+            return nsitem;
+    }
+    return NULL;
 }
 
 /*
@@ -2137,13 +2212,13 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
     switch (nse->itemtype) {
         case PLPGSQL_NSTYPE_VAR:
             if (nnames == nnames_scalar) {
-                return make_datum_param(expr, nse->itemno, cref->location);
+                return make_datum_param(expr, nse->itemno, cref->location, nse->name, nse);
             }
             break;
         case PLPGSQL_NSTYPE_CURSORROW:
         case PLPGSQL_NSTYPE_REC:
             if (nnames == nnames_wholerow) {
-                return make_datum_param(expr, nse->itemno, cref->location);
+                return make_datum_param(expr, nse->itemno, cref->location, nse->name, nse);
             }
             if (nnames == nnames_field) {
                 /* colname could be a field in this record */
@@ -2166,7 +2241,7 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
                     }
                     if (fld->dtype == PLPGSQL_DTYPE_RECFIELD && fld->recparentno == nse->itemno &&
                         strcmp(fld->fieldname, colname) == 0) {
-                        return make_datum_param(expr, i, cref->location);
+                        return make_datum_param(expr, i, cref->location, nse->name, nse);
                     }
                 }
 
@@ -2185,7 +2260,7 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
             break;
         case PLPGSQL_NSTYPE_ROW:
             if (nnames == nnames_wholerow) {
-                return make_datum_param(expr, nse->itemno, cref->location);
+                return make_datum_param(expr, nse->itemno, cref->location, nse->name, nse);
             }
             if (nnames == nnames_field) {
                 /* colname could be a field in this row */
@@ -2200,25 +2275,40 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
                 for (i = 0; i < row->nfields; i++) {
                     if (row->fieldnames[i] && strcmp(row->fieldnames[i], colname) == 0) {
                         switch (nnames_wholerow) {
-                            case 2: /* row.col */
-                                return make_datum_param(expr, row->varnos[i], cref->location);
-                            case 3: { /* pkg.row.col */
-                                PLpgSQL_nsitem* tempns = NULL;
-                                PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
-                                char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
-                                tempns = plpgsql_ns_lookup(expr->ns, false, name1, refname, NULL, NULL);
-                                if (tempns != NULL) {
-                                    return make_datum_param(expr, tempns->itemno, cref->location);
+                            case 2: {
+                                int dno = row->varnos[i];
+                                if (expr->func->fn_oid != row->func_oid && row->inherit) {
+                                    PLpgSQL_nsitem* subnse = GetSubprogramVarItemInRow(expr->func->cur_estate, dno, nse, row);
+                                    if (subnse)
+                                        dno = subnse->itemno;
+                                }
+                                return make_datum_param(expr, dno, cref->location, nse->name, nse);
+                            }
+                            case 3: {
+                                if (row->ispkg && InvalidOid != row->pkg->pkg_oid) {
+                                    PLpgSQL_nsitem* tempns = NULL;
+                                    PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
+                                    char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
+                                    tempns = plpgsql_ns_lookup(expr->ns, false, name1, refname, NULL, NULL);
+                                    if (tempns != NULL) {
+                                        return make_datum_param(expr, tempns->itemno, cref->location, nse->name, nse);
+                                    }
+                                } else {
+                                    return make_datum_param(expr, row->varnos[i], cref->location, nse->name, nse);
                                 }
                                 break;
                             }
-                            case 4: { /* schema.pkg.row.col */
-                                PLpgSQL_nsitem* tempns = NULL;
-                                PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
-                                char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
-                                tempns = plpgsql_ns_lookup(expr->ns, false, name1, name2, refname, NULL);
-                                if (tempns != NULL) {
-                                    return make_datum_param(expr, tempns->itemno, cref->location);
+                            case 4: {
+                                if (row->ispkg && InvalidOid != row->pkg->pkg_oid) {
+                                    PLpgSQL_nsitem* tempns = NULL;
+                                    PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
+                                    char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
+                                    tempns = plpgsql_ns_lookup(expr->ns, false, name1, name2, refname, NULL);
+                                    if (tempns != NULL) {
+                                        return make_datum_param(expr, tempns->itemno, cref->location, nse->name, nse);
+                                    } else {
+                                        return make_datum_param(expr, row->varnos[i], cref->location, nse->name, nse);
+                                    }
                                 }
                                 break;
                             }
@@ -2248,7 +2338,7 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
  * Helper for columnref parsing: build a Param referencing a plpgsql datum,
  * and make sure that that datum is listed in the expression's paramnos.
  */
-static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
+static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location, char* name,  PLpgSQL_nsitem* nse)
 {
     PLpgSQL_execstate* estate = NULL;
     PLpgSQL_datum* datum = NULL;
@@ -2277,7 +2367,17 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
     /*
     * Bitmapset must be allocated in function's permanent memory context
     */
-    oldcontext = MemoryContextSwitchTo(expr->func->fn_cxt);
+    if (nse && nse->pkgname) {
+        Oid nspoid = nse->schemaName ? get_namespace_oid(nse->schemaName, true) : 0;
+        Oid package_oid = PackageNameGetOid(nse->pkgname, nspoid);
+        PLpgSQL_package* pkg = NULL;
+        PLpgSQL_pkg_hashkey hashkey;
+        hashkey.pkgOid = package_oid;
+        pkg = plpgsql_pkg_HashTableLookup(&hashkey);
+        oldcontext = pkg ? MemoryContextSwitchTo(pkg->pkg_cxt) : MemoryContextSwitchTo(expr->func->fn_cxt);
+    } else {
+        oldcontext = MemoryContextSwitchTo(expr->func->fn_cxt);
+    }
     expr->paramnos = bms_add_member(expr->paramnos, dno);
     MemoryContextSwitchTo(oldcontext);
 
@@ -2816,6 +2916,33 @@ static bool isVarrayWord(const char *compWord, const char *firstWord, const char
     return false;
 }
 
+PLpgSQL_nsitem* getSubprogramNsInRow(PLpgSQL_row* row, char* fieldname)
+{
+    PLpgSQL_nsitem* ns = NULL;
+
+    if (row->datatype == NULL) {
+        return ns;
+    }
+    /* when create %rowtype variable,we use typename */
+    StringInfoData buf;
+    initStringInfo(&buf);
+    appendStringInfoString(&buf, row->datatype->typname);
+    appendStringInfoChar(&buf, '.');
+    appendStringInfoString(&buf, fieldname);
+
+    ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, buf.data, NULL, NULL, NULL);
+    /* if we don't find any ns,try again with row->refname */
+    if (ns == NULL) {
+        resetStringInfo(&buf);
+        appendStringInfoString(&buf, row->refname);
+        appendStringInfoChar(&buf, '.');
+        appendStringInfoString(&buf, fieldname);
+        ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, buf.data, NULL, NULL, NULL);
+    }
+    FreeStringInfo(&buf);
+    return ns;
+}
+
 /* ----------
  * plpgsql_parse_dblword		Same lookup for two words
  *					separated by a dot.
@@ -2936,10 +3063,18 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                         for (i = 0; i < row->nfields; i++) {
                             if (row->fieldnames[i] && strcmp(row->fieldnames[i], word2) == 0) {
                                 wdatum->datum = curr_compile->plpgsql_Datums[row->varnos[i]];
+                                wdatum->dno = row->varnos[i];
+                                if (row->inherit) {
+                                    /* pl中出现row.field时，由于子程序中subfield对象的dno此时不正确，因此在ns中取dno */
+                                    PLpgSQL_nsitem* sub_ns = getSubprogramNsInRow(row, word2);
+                                    if (sub_ns != NULL) {
+                                        wdatum->datum = curr_compile->plpgsql_Datums[sub_ns->itemno];
+                                        wdatum->dno = sub_ns->itemno;
+                                    }
+                                }
                                 wdatum->ident = pstrdup(NameListToString(idents));
                                 wdatum->quoted = false; /* not used */
                                 wdatum->idents = idents;
-                                wdatum->dno = row->varnos[i];
                                 get_datum_tok_type(wdatum->datum, nsflag);
                                 return true;
                             }
@@ -3792,7 +3927,7 @@ PLpgSQL_type* plpgsql_get_row_field_type(int dno, const char* fieldname, MemoryC
  * @in varno - variable number in datums
  * @return -void
  */
-static void build_cursor_variable(int varno)
+void build_cursor_variable(int varno)
 {
     PLpgSQL_var* tmpvar = NULL;
     StringInfoData str;
@@ -3955,6 +4090,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL &&
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
                 var->pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+                var->pkg_oid = var->pkg->pkg_oid;
             }
             if (dtype->typoid == REFCURSOROID) {
                 build_cursor_variable(varno);
@@ -3974,7 +4110,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                 row->customErrorCode = plpgsql_getCustomErrorCode();
             }
             row->hasExceptionInit = false;
-
+            row->datatype = dtype;
             row->dtype = PLPGSQL_DTYPE_ROW;
             row->refname = pstrdup(refname);
             row->lineno = lineno;
@@ -3987,11 +4123,6 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             varno = plpgsql_adddatum((PLpgSQL_datum*)row);
             if (add2namespace) {
                 plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, refname, pkgname);
-            }
-            if (u_sess->plsql_cxt.curr_compile_context != NULL &&
-                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
-                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
-                row->pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
             }
             result = (PLpgSQL_variable*)row;
             break;
@@ -4049,6 +4180,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
                 rec->pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+                rec->pkg_oid = rec->pkg->pkg_oid;
             }
             result = (PLpgSQL_variable*)rec;
             break;
@@ -4077,6 +4209,8 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             PLpgSQL_row* row = NULL;
 
             row = build_row_from_rec_type(refname, lineno, (PLpgSQL_rec_type*)dtype);
+
+            row->datatype = dtype;
             row->addNamespace = add2namespace;
             row->datatype = dtype;
             row->varname = varname == NULL ? NULL : pstrdup(varname);
@@ -4137,6 +4271,7 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL && 
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
         var->pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+        var->pkg_oid = var->pkg->pkg_oid;
     }
     return (PLpgSQL_variable*)var;
 }
@@ -4251,6 +4386,10 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
     result->nest_typnames = nest_typnames;
 
     varno = plpgsql_adddatum((PLpgSQL_datum*)result);
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        result->pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+    }
 
     if (add2namespace) {
        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, typname);
@@ -5142,7 +5281,7 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname)
  *
  * The hashkey is returned into the caller-provided storage at *hashkey.
  */
-static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
+void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
     PLpgSQL_func_hashkey* hashkey, bool for_validator)
 {
     /* Make sure any unused bytes of the struct are zero */
@@ -5288,7 +5427,7 @@ void plpgsql_HashTableInit(void)
         hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
-static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
+PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
 {
     plpgsql_HashEnt* hentry = NULL;
 
@@ -6075,6 +6214,26 @@ Node* get_default_node_from_plpgsql_expr(PLpgSQL_expr *expr)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
     }
     return (Node*)val;
+}
+
+void record_inline_subprogram_type(Oid typeoid)
+{
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->in_anonymous) {
+        bool in_subprogram = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile &&
+                                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func;
+        if (in_subprogram) {
+            Oid* oid = (Oid*)palloc(sizeof(Oid));
+            *oid = typeoid;
+            List *oid_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->sub_type_oid_list;
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_func->sub_type_oid_list = lappend(oid_list, oid);
+        } else {
+            Oid* oid = (Oid*)palloc(sizeof(Oid));
+            *oid = typeoid;
+            List *oid_list = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->sub_type_oid_list;
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->sub_type_oid_list = lappend(oid_list, oid);
+        }
+    }
 }
 
 PLpgSQL_expr** get_default_plpgsql_expr_from_typeoid(Oid typeOid, int* attrnum)

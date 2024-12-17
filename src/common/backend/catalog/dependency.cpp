@@ -120,6 +120,7 @@
 #include "datasource/datasource.h"
 #include "postmaster/rbcleaner.h"
 #include "catalog/pg_object.h"
+#include "catalog/namespace.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/gs_dependencies_obj.h"
 #ifdef ENABLE_HTAP
@@ -1042,6 +1043,10 @@ void reportDependentObjects(
              */
             ereport(DEBUG2, (errmsg("drop auto-cascades to %s", objDesc)));
         } else if (behavior == DROP_RESTRICT) {
+            if (obj->classId == ProcedureRelationId && origObject && origObject->classId == ProcedureRelationId &&
+                is_sub_program(obj->objectId, origObject->objectId)) {
+                continue;
+            }
             char* otherDesc = getObjectDescription(&extra->dependee);
 
             if (numReportedClient < MAX_REPORTED_DEPS) {

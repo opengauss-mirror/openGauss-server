@@ -418,6 +418,7 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                 if (!OidIsValid(typoid)) {
                     typoid = LookupTypeInFunc(typeName);
                 }
+
                 if (!OidIsValid(typoid)) {
                     /* Unqualified type name, so search the search path */
                     typoid = TypenameGetTypidExtended(typeName, temp_ok);
@@ -1548,6 +1549,37 @@ bool IsTypeTableInInstallationGroup(const Type type_tup)
     return true;
 }
 
+/*
+ * find the type if it is a function type.
+ * typeName: type name
+ * return : function type oid
+ */
+Oid LookupTypeInFunc(const char* typeName)
+{
+    Oid typOid = InvalidOid;
+    char* castTypeName = NULL;
+    Oid func_oid = InvalidOid;
+
+    if (u_sess->plsql_cxt.curr_compile_context != NULL && u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        if (OidIsValid(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_oid))
+            func_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->parent_oid;
+        else
+            func_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
+    }
+
+    castTypeName = CastPackageTypeName(typeName, func_oid, false, true);
+    Oid namespaceId = getCurrentNamespace();
+    if (OidIsValid(namespaceId)) {
+        typOid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(castTypeName), ObjectIdGetDatum(namespaceId));
+        if (!OidIsValid(typOid)) {
+            typOid = TryLookForSynonymType(castTypeName, namespaceId);
+        }
+    }
+
+    pfree_ext(castTypeName);
+    return typOid;
+}
+
 char* CastPackageTypeName(const char* typName, Oid objOid, bool isPackage, bool isPublic)
 {
     StringInfoData  castTypName;
@@ -1777,34 +1809,6 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
     return typOid;
 
 
-}
-
-/* find type in curr function */
-Oid LookupTypeInFunc(const char *typeName)
-{
-    Oid typOid = InvalidOid;
-    char* castTypeName = NULL;
-    Oid func_oid = InvalidOid;
-
-    if (u_sess->plsql_cxt.curr_compile_context != NULL
-        && u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
-        func_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
-    }
-
-    if (!OidIsValid(func_oid)) {
-        return typOid;
-    }
-
-    castTypeName = CastPackageTypeName(typeName, func_oid, false, true);
-    Oid namespaceId = getCurrentNamespace();
-    if (OidIsValid(namespaceId)) {
-        typOid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(castTypeName), ObjectIdGetDatum(namespaceId));
-        if (!OidIsValid(typOid)) {
-            typOid = TryLookForSynonymType(castTypeName, namespaceId);
-        }
-    }
-    pfree_ext(castTypeName);
-    return typOid;
 }
 
 bool IsBinaryType(Oid typid)

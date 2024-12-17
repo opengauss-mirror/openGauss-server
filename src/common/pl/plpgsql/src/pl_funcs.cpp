@@ -22,6 +22,7 @@
 #include "utils/memutils.h"
 #include "utils/pl_package.h"
 #include "catalog/gs_package.h"
+
 /* ----------
  * plpgsql_ns_init			Initialize namespace processing for a new function
  * ----------
@@ -49,6 +50,107 @@ void add_pkg_compile()
         plpgsql_add_pkg_ns(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package);
     }
 }
+
+char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref)
+{
+    Assert (datum);
+    switch (datum->dtype) {
+        case PLPGSQL_DTYPE_VAR:
+            return ref ? ((PLpgSQL_var*)datum)->refname : ((PLpgSQL_var*)datum)->varname;
+        case PLPGSQL_DTYPE_VARRAY:
+            return ref ? ((PLpgSQL_var*)datum)->refname : ((PLpgSQL_var*)datum)->varname;
+        case PLPGSQL_DTYPE_REC:
+            return ref ? ((PLpgSQL_rec*)datum)->refname : ((PLpgSQL_rec*)datum)->varname;
+        case PLPGSQL_DTYPE_ROW:
+            return ref ? ((PLpgSQL_row*)datum)->refname : ((PLpgSQL_row*)datum)->varname;
+        case PLPGSQL_DTYPE_RECORD:
+            return ref ? ((PLpgSQL_row*)datum)->refname : ((PLpgSQL_row*)datum)->varname;
+        case PLPGSQL_DTYPE_RECORD_TYPE:
+            return ((PLpgSQL_rec_type*)datum)->typname;
+        case PLPGSQL_DTYPE_COMPOSITE:
+            return ((PLpgSQL_type*)datum)->typname;
+        default:
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized ttype: %d, when build variable in PLSQL, this situation should not occur.",
+                    datum->dtype)));
+    }
+    return NULL;
+}
+
+void add_parent_func_compile(PLpgSQL_compile_context* context)
+{
+    if (context != NULL && context->plpgsql_curr_compile != NULL) {
+        PLpgSQL_datum *datum = NULL;
+        int varno = -1;
+        for (int i = 0; i < context->plpgsql_nDatums; i++) {
+            datum = context->plpgsql_Datums[i];
+            if (datum == NULL) {
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_NONEXISTANT_VARIABLE),
+                    errmsg("unrecognized package variable")));
+            }
+            char* objname = getPlpgsqlVarName(datum);
+            if (!objname)
+                continue;
+            if (strcmp(objname, "found") == 0 || strcmp(objname, "__gsdb_sql_cursor_attri_found__") == 0 ||
+                strcmp(objname, "__gsdb_sql_cursor_attri_notfound__") == 0 ||
+                strcmp(objname, "__gsdb_sql_cursor_attri_isopen__") == 0 ||
+                strcmp(objname, "__gsdb_sql_cursor_attri_rowcount__") == 0 || strcmp(objname, "sqlcode") == 0 ||
+                strcmp(objname, "sqlstate") == 0 || strcmp(objname, "sqlerrm") == 0 ||
+                strcmp(objname, "bulk_exceptions") == 0 || strncmp(objname, "__gsdb_cursor_attri_", 20) == 0)
+                continue;
+            if (datum != NULL) {
+                /* copy datum,mark it as is_sub */
+                PLpgSQL_datum* copy_datum = copy_plpgsql_datum(datum);
+                copy_datum->inherit = true;
+                char* varname = (objname[0] == '$') ? getPlpgsqlVarName(datum, false) : objname;
+                switch (copy_datum->dtype) {
+                    case PLPGSQL_DTYPE_VAR:
+                        varno = plpgsql_adddatum(copy_datum, true);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, varname, NULL, NULL, true);
+                        if (((PLpgSQL_var*)copy_datum)->datatype &&
+                            ((PLpgSQL_var*)copy_datum)->datatype->typoid == REFCURSOROID) {
+                            build_cursor_variable(varno);
+                        }
+                        break;
+                    case PLPGSQL_DTYPE_VARRAY:
+                        varno = plpgsql_adddatum(copy_datum, true);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_VARRAY, varno, varname, NULL, NULL, true);
+                        break;
+                    case PLPGSQL_DTYPE_REC:
+                        varno = plpgsql_adddatum(copy_datum, true);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_REC, varno, varname, NULL, NULL, true);
+                        break;
+                    case PLPGSQL_DTYPE_RECORD:
+                    case PLPGSQL_DTYPE_ROW:
+                        varno = plpgsql_adddatum(copy_datum, false);
+                        if (!OidIsValid(((PLpgSQL_row*)copy_datum)->func_oid)) {
+                            ((PLpgSQL_row*)copy_datum)->func_oid = context->plpgsql_curr_compile->fn_oid;
+                        }
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, varname, NULL, NULL, true);
+                        break;
+                    case PLPGSQL_DTYPE_RECORD_TYPE:
+                        varno = plpgsql_adddatum(copy_datum, false);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, varname, NULL, NULL, true);
+                        break;
+
+                    case PLPGSQL_DTYPE_UNKNOWN:
+                        varno = plpgsql_adddatum(copy_datum, false);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_UNKNOWN, varno, varname, NULL, NULL, true);
+                        break;
+                    case PLPGSQL_DTYPE_COMPOSITE:
+                        varno = plpgsql_adddatum(copy_datum, false);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_COMPOSITE, varno, varname, NULL, NULL, true);
+                        break;
+                    default:
+                        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("unrecognized ttype: %d, when build variable in PLSQL, this situation should not occur.",
+                                copy_datum->dtype)));
+                }
+            }
+        }
+    }
+}
+
 /*
  * add package variable to namespace when compile a function whcih in package
  * it will add all package variable,including private variable, so it can't use
@@ -159,7 +261,8 @@ PLpgSQL_nsitem* plpgsql_ns_top(void)
  * plpgsql_ns_additem		Add an item to the current namespace chain
  * ----------
  */
-void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* pkgname,  const char* schemaName)
+void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* pkgname,
+    const char* schemaName, bool inherit)
 {
     PLpgSQL_nsitem* nse = NULL;
     errno_t rc;
@@ -182,6 +285,7 @@ void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* 
     nse->itemtype = itemtype;
     nse->itemno = itemno;
     nse->prev = curr_compile->ns_top;
+    nse->inherit = inherit;
     rc = strncpy_s(nse->name, nseNameSize, name, nameLength);
     securec_check_c(rc, "\0", "\0");
 
@@ -931,7 +1035,7 @@ void free_expr(PLpgSQL_expr* expr)
     }
 }
 
-static void DropDependencyForAnonymousType(PLpgSQL_type *type, PLpgSQL_function* func)
+static void DropDependencyForAnonymousType(PLpgSQL_type* type, PLpgSQL_function* func)
 {
     char* funcname = "inline_code_block";
     if (func != NULL) {
@@ -947,6 +1051,37 @@ static void DropDependencyForAnonymousType(PLpgSQL_type *type, PLpgSQL_function*
             n->purge = false;
             RemoveObjects(n, true);
         }
+    }
+}
+
+/*
+ * delete type depend in subprogram
+ */
+static void DropAnonymousSubprogramType(Oid typid)
+{
+    if (OidIsValid(typid)) {
+        HeapTuple typetup;
+        Form_pg_type typform;
+        char* typname = NULL;
+
+        typetup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+        if (!HeapTupleIsValid(typetup))
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+        typform = (Form_pg_type)GETSTRUCT(typetup);
+
+        typname = NameStr(typform->typname);
+
+        ReleaseSysCache(typetup);
+
+        DropStmt *n = makeNode(DropStmt);
+        n->removeType = OBJECT_TYPE;
+        n->missing_ok = TRUE;
+        n->objects = list_make1(list_make1(makeString(typname)));;
+        n->arguments = NIL;
+        n->behavior = DROP_CASCADE;
+        n->concurrent = false;
+        n->purge = false;
+        RemoveObjects(n, true);
     }
 }
 
@@ -967,7 +1102,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
     for (i = 0; i < func->ndatums; i++) {
         PLpgSQL_datum* d = func->datums[i];
         if (d != NULL) {
-            if (!func->datum_need_free[i]) {
+            if (!func->datum_need_free[i] || (func->parent_oid && d->inherit)) {
                 continue;
             }
         } else {
@@ -1009,6 +1144,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
             case PLPGSQL_DTYPE_UNKNOWN:
                 break;
             case PLPGSQL_DTYPE_COMPOSITE:
+                DropDependencyForAnonymousType((PLpgSQL_type*)d, func);
                 break;
             case PLPGSQL_DTYPE_SUBTYPE:
                 DropDependencyForAnonymousType((PLpgSQL_type*)d, func);
@@ -1050,7 +1186,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
     }
 
     // Release searchpath
-    if (func->fn_searchpath != NULL && !OidIsValid(func->pkg_oid)) {
+    if (func->fn_searchpath != NULL && !OidIsValid(func->pkg_oid) && !OidIsValid(func->parent_oid)) {
         if (func->fn_searchpath->schemas && func->fn_searchpath->schemas->length > 0) {
             list_free_ext(func->fn_searchpath->schemas);
         }
@@ -1061,6 +1197,72 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
         func->invalItems = NULL;
     }
 
+    // release subprograms which belong to current function
+    if (func->proc_list != NULL) {
+        list_free_deep(func->proc_list);
+        func->proc_list = NULL;
+        if (func->sub_func_oid_list == NULL) {
+            HTAB* htbl = NULL;
+            PLpgSQL_function* cur_fun = NULL;
+            void* hentry;
+            HASH_SEQ_STATUS status;
+
+            htbl = u_sess->plsql_cxt.plpgsql_HashTable;
+            Assert(htbl != NULL);
+            hash_seq_init(&status, htbl);
+            List* delete_func_list = NIL;
+            ListCell* cell = NULL;
+            while ((hentry = hash_seq_search(&status)) != NULL) {
+                cur_fun = ((plpgsql_hashent*)hentry)->function;
+                if (cur_fun->parent_oid == func->fn_oid)
+                    delete_func_list = lappend(delete_func_list, cur_fun);
+            }
+            foreach(cell, delete_func_list) {
+                cur_fun = (PLpgSQL_function*) lfirst(cell);
+                delete_function(cur_fun);
+            }
+        }
+    }
+
+    // remove subprograms function in inline block.
+    if (func->sub_func_oid_list != NULL) {
+        _SPI_begin_call(false);
+        saveCallFromFuncOid(InvalidOid);
+        ListCell* cell = NULL;
+        foreach(cell, func->sub_func_oid_list) {
+            Oid* oid = (Oid*)lfirst(cell);
+            if (func->fn_oid == OID_MAX && OidIsValid(*oid)) {
+                HeapTuple tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(*oid));
+                if (!HeapTupleIsValid(tup)) {
+                    continue;
+                }
+                ReleaseSysCache(tup);
+                (void)deleteDependencyRecordsFor(ProcedureRelationId, *oid, true);
+                RemoveFunctionById(*oid);
+            }
+        }
+        list_free_deep(func->sub_func_oid_list);
+        func->sub_func_oid_list = NULL;
+        _SPI_end_call(false);
+    }
+
+    // remove subprograms type in inline block.
+    if (func->sub_type_oid_list != NULL) {
+        ListCell* cell = NULL;
+        foreach(cell, func->sub_type_oid_list) {
+            Oid* oid = (Oid*)lfirst(cell);
+            if (func->fn_oid == OID_MAX && OidIsValid(*oid)) {
+                HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*oid));
+                if (HeapTupleIsValid(tup)) {
+                    ReleaseSysCache(tup);
+                    DropAnonymousSubprogramType(*oid);
+                }
+            }
+        }
+        list_free_deep(func->sub_type_oid_list);
+        func->sub_type_oid_list = NULL;
+    }
+
     /*
      * And finally, release all memory except the PLpgSQL_function struct
      * itself (which has to be kept around because there may be multiple
@@ -1069,7 +1271,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
     if (u_sess->plsql_cxt.curr_compile_context != NULL &&
         func->fn_cxt == u_sess->plsql_cxt.curr_compile_context->compile_cxt)
         u_sess->plsql_cxt.curr_compile_context->compile_cxt = NULL;
-    if (!OidIsValid(func->pkg_oid)) {
+    if (!OidIsValid(func->pkg_oid) && !OidIsValid(func->parent_oid)) {
         if (func->fn_cxt) {
             MemoryContextDelete(func->fn_cxt);
         }

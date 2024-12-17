@@ -583,6 +583,8 @@ END;
 CONTEXT:  compilation of PL/pgSQL function "test_nested" near line 6
 DROP PACKAGE r_types;
 --?.*
+--?.*
+--?.*
 CREATE OR REPLACE PACKAGE plpgsql_assignlist.r_types IS
   TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
   TYPE t_rec1 IS RECORD (val4 t_rec0, val3 VARCHAR2(10));
@@ -687,6 +689,8 @@ END;
 --?.*
 CONTEXT:  compilation of PL/pgSQL function "test_nested" near line 6
 DROP PACKAGE r_types;
+--?.*
+--?.*
 --?.*
 CREATE OR REPLACE PROCEDURE test_nested AS
 DECLARE

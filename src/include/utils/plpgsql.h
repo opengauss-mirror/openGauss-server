@@ -21,6 +21,7 @@
 
 #include "access/xact.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_proc.h"
 #include "commands/trigger.h"
 #include "commands/event_trigger.h"
 #include "executor/spi.h"
@@ -336,6 +337,7 @@ typedef struct PLpgSQL_datum { /* Generic datum array item		*/
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
 } PLpgSQL_datum;
 
 /*
@@ -393,6 +395,8 @@ typedef struct { /* Scalar or composite variable */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
+    Oid pkg_oid;
     char* refname;
     int lineno;
     bool isImplicit;
@@ -404,6 +408,7 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     char* query;
     List* nest_typnames;
     SPIPlanPtr plan;
@@ -471,6 +476,7 @@ typedef struct { /* openGauss data type */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     char* typname; /* (simple) name of the type */
     Oid typoid;    /* OID of the data type */
     int ttype;     /* PLPGSQL_TTYPE_ code */
@@ -508,6 +514,8 @@ typedef struct PLpgSQL_var { /* Scalar variable */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
+    Oid pkg_oid;
     char* refname;
     int lineno;
     bool isImplicit;
@@ -522,6 +530,8 @@ typedef struct PLpgSQL_var { /* Scalar variable */
     int cursor_explicit_argrow; /* count of cursor's args including those with default exprs */
     int cursor_implicit_argrow; /* count of cursor's args requiring values (those without default exprs) */
     int cursor_options;
+
+    MemoryContext datum_cxt;
 
     Datum value;
     bool isnull;
@@ -543,14 +553,17 @@ typedef struct { /* Row variable */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     char* refname;
     int lineno;
     bool isImplicit;
     bool addNamespace;
     char* varname;
     PLpgSQL_type* datatype;
-    TupleDesc rowtupdesc;
+    Oid func_oid;
 
+    TupleDesc rowtupdesc;
+    MemoryContext datum_cxt;
     /*
      * Note: TupleDesc is only set up for named rowtypes, else it is NULL.
      *
@@ -589,6 +602,8 @@ typedef struct {
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
+    Oid pkg_oid;
     char* typname; /* (simple) name of the type */
     Oid typoid;    /* OID of the data type */
     int ttype;     /* PLPGSQL_TTYPE_ code */
@@ -612,6 +627,8 @@ typedef struct { /* Record variable (non-fixed structure) */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
+    Oid pkg_oid;
     char* refname;
     int lineno;
     bool isImplicit;
@@ -624,6 +641,7 @@ typedef struct { /* Record variable (non-fixed structure) */
     bool freetupdesc;
     List* pkg_name = NULL;
     List* field_need_check = NULL;
+    MemoryContext datum_cxt;
     PLpgSQL_package* pkg = NULL;
     PLpgSQL_expr* default_val = NULL;
     PLpgSQL_expr* expr = NULL;
@@ -634,6 +652,7 @@ typedef struct { /* Field in record */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     char* fieldname;
     int recparentno; /* dno of parent record */
 } PLpgSQL_recfield;
@@ -642,6 +661,7 @@ typedef struct { /* Element of array variable */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     PLpgSQL_expr* subscript;
     int arrayparentno; /* dno of parent array variable */
     /* Remaining fields are cached info about the array variable's type */
@@ -663,6 +683,7 @@ typedef struct { /* assign list */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     List* assignlist; /* assign list, contains subscripts or attributes */
     int targetno; /* the dno of assign target */
 } PLpgSQL_assignlist;
@@ -672,6 +693,7 @@ typedef struct { /* Scalar variable */
     int dno;
     bool ispkg;
     bool isnull;
+    bool inherit;
     Datum value;
     char* attrname;
     uint32 attnum;
@@ -686,6 +708,7 @@ typedef struct { /* Element of table variable */
     int dtype;
     int dno;
     bool ispkg;
+    bool inherit;
     PLpgSQL_expr* subscript;
     int tableparentno; /* dno of parent table variable */
     /* Remaining fields are cached info about the array variable's type */
@@ -718,6 +741,7 @@ typedef struct PLpgSQL_nsitem { /* Item in the compilers namespace tree */
     int itemtype;
     int itemno;
     struct PLpgSQL_nsitem* prev;
+    bool inherit;
     char* pkgname;
     char* schemaName;
     char name[FLEXIBLE_ARRAY_MEMBER]; /* actually, as long as needed */
@@ -1255,7 +1279,18 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     List* invalItems; /* other dependencies, like other pkg's type or variable */
     PLpgSQL_resolve_option resolve_option;
 
+    /* for function subprograms. */
+    Oid parent_oid = InvalidOid;
+    PLpgSQL_function *parent_func;
+    List* sub_func_oid_list;
+    List* sub_type_oid_list;
+    List* record_oid_list;
+    List* proc_list;
+    bool in_anonymous = false;
+    int block_level = 0;
+
     int ndatums;
+    int subprogram_ndatums;
     PLpgSQL_datum** datums;
     bool* datum_need_free; /* need free datum when free function memory? */
     PLpgSQL_stmt_block* action;
@@ -1861,6 +1896,11 @@ PLpgSQL_condition* plpgsql_parse_err_condition_b_signal(const char* condname);
 extern PLpgSQL_condition* plpgsql_parse_err_condition_b(const char* condname);
 extern int plpgsql_adddatum(PLpgSQL_datum* newm, bool isChange = true);
 extern int plpgsql_add_initdatums(int** varnos);
+extern void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
+    PLpgSQL_func_hashkey* hashkey, bool for_validator);
+extern PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
+extern void build_cursor_variable(int varno);
+extern PLpgSQL_datum* GetOriginSubprogramDatum(PLpgSQL_execstate *estate, int dno, Oid func_oid);
 extern void plpgsql_HashTableInit(void);
 extern PLpgSQL_row* build_row_from_tuple_desc(const char* rowname, int lineno, TupleDesc desc); 
 extern PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_rec_type* type);
@@ -1868,6 +1908,7 @@ extern bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgs
 extern void plpgsql_HashTableDeleteAll();
 extern void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId);
 extern void delete_package_and_check_invalid_item(Oid pkgOid);
+extern void saveCallFromFuncOid(Oid funcOid);
 extern void plpgsql_hashtable_clear_invalid_obj(bool need_clear = false);
 extern void plpgsql_HashTableDelete(PLpgSQL_function* func);
 extern bool plpgsql_get_current_value_stp_with_exception();
@@ -1981,8 +2022,8 @@ extern void plpgsql_add_pkg_ns(PLpgSQL_package* pkg);
 extern void plpgsql_add_pkg_public_ns(PLpgSQL_package* pkg);
 extern void plpgsql_ns_pop(void);
 extern PLpgSQL_nsitem* plpgsql_ns_top(void);
-extern void plpgsql_ns_additem(
-    int itemtype, int itemno, const char* name, const char* pkgname = NULL, const char* schemaName = NULL);
+extern void plpgsql_ns_additem(int itemtype, int itemno, const char* name,
+    const char* pkgname = NULL, const char* schemaName = NULL, bool inherit = false);
 extern PLpgSQL_nsitem* plpgsql_ns_lookup(
     PLpgSQL_nsitem* ns_cur, bool localmode, const char* name1, const char* name2, const char* name3, int* names_used);
 extern PLpgSQL_nsitem* plpgsql_ns_lookup_label(PLpgSQL_nsitem* ns_cur, const char* name);
@@ -2216,4 +2257,9 @@ extern void init_lock_hash_table();
 extern void gsplsql_lock_func_pkg_dependency_all(Oid obj_oid, GSPLSQLObjectType type);
 extern void gsplsql_unlock_func_pkg_dependency_all();
 extern void gsplsql_lock_depend_pkg_on_session(PLpgSQL_function* func);
+void ProcessSubprograms(List* func_proc_list, Oid parentFuncOid);
+extern void FunctionInSubprogramCompile(Oid parentFuncOid);
+extern void add_parent_func_compile(PLpgSQL_compile_context* context);
+extern void record_inline_subprogram_type(Oid typeoid);
+extern char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref = true);
 #endif /* PLPGSQL_H */

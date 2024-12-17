@@ -282,7 +282,8 @@ select typname from pg_type where typtype = 'c' and typarray != 0 and typnamespa
  info
  customer
 --?.*
-(3 rows)
+--?.*
+(4 rows)
 
 drop function get_age();
 select typname from pg_type where typtype = 'c' and typarray != 0 and typnamespace = (select oid from pg_namespace where nspname = current_schema) order by typname desc;
@@ -444,7 +445,7 @@ end;
 $$ language plpgsql;
 ERROR:  type name too long
 --?.*
-CONTEXT:  compilation of PL/pgSQL function "get_age" near line 4
+CONTEXT:  compilation of PL/pgSQL function "get_age" near line 3
 --ERROR: record type nested is not supported in anonymous block.
 declare
     type r1 is record  (name varchar2(50), age int, address varchar2(20)); 

@@ -42,6 +42,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
 #include "catalog/gs_package_fn.h"
 #include "catalog/pg_synonym.h"
@@ -189,6 +190,28 @@ Datum pg_ts_template_is_visible(PG_FUNCTION_ARGS);
 Datum pg_ts_config_is_visible(PG_FUNCTION_ARGS);
 Datum pg_my_temp_schema(PG_FUNCTION_ARGS);
 Datum pg_is_other_temp_schema(PG_FUNCTION_ARGS);
+
+bool is_sub_program(Oid func_oid, Oid caller_oid)
+{
+    if (!OidIsValid(caller_oid)) {
+        return false;
+    }
+    while (true) {
+        if (caller_oid == func_oid) {
+            return true;
+        }
+        HeapTuple proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+        if (!HeapTupleIsValid(proctup)) {
+            return false;
+        }
+        func_oid = GetProprocoidByOid(HeapTupleGetOid(proctup));
+        ReleaseSysCache(proctup);
+        if (!OidIsValid(func_oid)) {
+            return false;
+        }
+    }
+    return false;
+}
 
 /*
  * RangeVarGetRelid
@@ -1217,11 +1240,12 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     }
 
     Datum proAllArgTypes;
-    Datum packageOidDatum;	
+    Datum packageOidDatum;
     ArrayType* arr = NULL;
     int numProcAllArgs = proNargs;
     bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isNull);
     packageOidDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isNull);
+    Oid functionOid = GetProprocoidByOid(HeapTupleGetOid(procTup));
 #ifndef ENABLE_MULTIPLE_NODES
     if (!enable_outparam_override && includeOut) {
 #else
@@ -1342,6 +1366,7 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     newResult->nargs = effectiveNargs;
     newResult->argnumbers = argNumbers;
     newResult->packageOid = ispackage ? DatumGetObjectId(packageOidDatum) : InvalidOid;
+    newResult->funcOid = functionOid;
     /* record the referenced synonym oid for building view dependency. */
     newResult->refSynOid = refSynOid;
     newResult->allArgNum = allArgNum;
@@ -1586,6 +1611,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     bool isNull;
     Oid funcoid;
     Oid caller_pkg_oid = InvalidOid;
+    Oid caller_func_oid = InvalidOid;
     Oid initNamespaceId = InvalidOid;
     bool enable_outparam_override = false;
     Oid objecttyp_oid = InvalidOid;
@@ -1599,9 +1625,14 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
 	
     if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
         caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
+    } else if (OidIsValid(u_sess->plsql_cxt.running_func_oid)) {
+        caller_func_oid = u_sess->plsql_cxt.running_func_oid;
     } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
         caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+    } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        caller_func_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
     }
     /* check for caller error */
     Assert(nargs >= 0 || !(expand_variadic || expand_defaults));
@@ -1679,7 +1710,6 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             }
         }
 #endif
-
         /* judge the function in package is called by a function in same package or another package.
            if it's called by another package,it will continue*/
         funcoid = HeapTupleGetOid(proctup);
@@ -1695,6 +1725,8 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             objtype_oid = DatumGetObjectId(package_oid_datum);
         }
 
+        Oid func_oid = GetProprocoidByOid(HeapTupleGetOid(proctup));
+        Oid self_func_oid = HeapTupleGetOid(proctup);
         /* Find method type from pg_object */
         char typeMethodKind = OBJECTTYPE_NULL_PROC;
         HeapTuple objTuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(funcoid), CharGetDatum(OBJECT_TYPE_PROC));
@@ -1703,7 +1735,14 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             ReleaseSysCache(objTuple);
         }
         /* Only member function can use object call */
-        if (OidIsValid(objtype_oid)) {
+        if (OidIsValid(func_oid)) {
+            if (caller_func_oid == func_oid ||
+                (!OidIsValid(u_sess->plsql_cxt.running_func_oid) && caller_func_oid == self_func_oid)) {
+                namespaceId = QualifiedNameGetCreationNamespace(names, &funcname);
+            } else {
+                continue;
+            }
+        } else if (OidIsValid(objtype_oid)) {
             /* Only static object function can be called like object_type.method */
             if (objtype_oid !=objecttyp_oid && typeMethodKind == OBJECTTYPE_STATIC_PROC)
                 continue;
@@ -1730,7 +1769,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
                     continue;
                 }
                 namespaceId = GetPackageNamespace(pkg_oid);
-            } else if (caller_pkg_oid == package_oid) {
+        } else if (caller_pkg_oid == package_oid) {
                 if (pkgname != NULL) {
                     pkg_oid = PackageNameGetOid(pkgname, namespaceId);
                     if (pkg_oid != caller_pkg_oid) {
@@ -1777,11 +1816,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             enable_outparam_override);
     }
     ReleaseSysCacheList(catlist);
-
-    /* avoid POC error temporary */
-    if (resultList != NULL) {
-        return resultList;
-    }
+    catlist = NULL;
 
     /* Step2. try to add candidates with referenced name if funcname is regarded as synonym object. */
     if (IsNormalProcessingMode() && !IsInitdb
@@ -1844,6 +1879,30 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             }
         }
     }
+
+    /*
+     * In the context of a nested subroutine, when a sub-function shares the same name and parameters as
+     * a normally defined function, invoking the sub-function will filter out the normally defined function,
+     * applying exclusively to scenarios within the nested subroutine
+     */
+    if (OidIsValid(caller_pkg_oid) && resultList != NULL && resultList->next !=NULL && resultList->next->next == NULL) {
+        HeapTuple functup = SearchSysCache1(PROCOID, ObjectIdGetDatum(caller_pkg_oid));
+        if (HeapTupleIsValid(functup)) {
+            ReleaseSysCache(functup);
+            FuncCandidateList first = resultList;
+            FuncCandidateList second = resultList->next;
+            if (caller_pkg_oid == first->packageOid && caller_pkg_oid != second->packageOid) {
+                resultList = first;
+                pfree_ext(resultList->next);
+                resultList->next = NULL;
+            } else if (caller_pkg_oid == second->packageOid && caller_pkg_oid != first->packageOid) {
+                resultList = second;
+                pfree_ext(first);
+                first = NULL;
+            }
+        }
+    }
+
     return resultList;
 }
 

@@ -154,6 +154,9 @@ test: aioptimizer_small
 test: pgfincore
 test: rename_table
 
+#subprogram
+test: nested_subprogram
+
 # debug instrument
 test: test_debug5
 

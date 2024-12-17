@@ -21,6 +21,7 @@
 #include "auditfuncs.h"
 #include "catalog/pg_cast.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_object_type.h"
 #include "catalog/gs_package.h"
@@ -74,6 +75,38 @@ static void generate_procoverage_rows(StringInfoData* result, List* coverage_arr
 static void deconstruct_coverage_array(List** coverage_array, char* array_string);
 static void deconstruct_querys_array(List** pro_querys, const char* querys_string);
 static char* replace_html_entity(const char* input);
+void ProcessSubprograms(List* func_proc_list, Oid parentFuncOid);
+
+static void processSubFuncError(CreateFunctionStmt* stmt, enum FunctionErrorType ErrorType)
+{
+    int lines = stmt->startLineNumber + u_sess->plsql_cxt.package_first_line - 1;
+    InsertErrorMessage("function defined in subprogram must be the valid", 0, false, lines);
+    if (ErrorType == FuncitonDefineError) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                errmsg("function defined error, function: %s",
+                NameListToString(stmt->funcname))));
+    } else if (ErrorType == FunctionDuplicate) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                errmsg("function declared duplicate: %s",
+                NameListToString(stmt->funcname))));
+    } else if (ErrorType == FunctionUndefined) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                errmsg("function undefined: %s",
+                NameListToString(stmt->funcname))));
+    } else if (ErrorType == FunctionReturnTypeError) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                errmsg("function return type must be consistent: %s",
+                NameListToString(stmt->funcname))));
+    }
+}
 
 static void auditExecPLpgSQLFunction(PLpgSQL_function* func, AuditResult result)
 {
@@ -115,6 +148,17 @@ extern Oid saveCallFromPkgOid(Oid pkgOid)
 extern void restoreCallFromPkgOid(Oid pkgOid) 
 {
     u_sess->plsql_cxt.running_pkg_oid = pkgOid;
+}
+
+extern void saveCallFromFuncOid(Oid funcOid)
+{
+    u_sess->plsql_cxt.running_func_oid = funcOid;
+    return ;
+}
+
+extern Oid getCurrCallerFuncOid()
+{
+    return u_sess->plsql_cxt.running_func_oid;
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -799,6 +843,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     int pkgDatumsNumber = 0;
     bool savedisAllowCommitRollback = true;
     bool enableProcCoverage = u_sess->attr.attr_common.enable_proc_coverage;
+    Oid saveCallerOid = InvalidOid;
+    Oid savaCallerParentOid = InvalidOid;
+    bool is_pkg_func = false;
     
     /* Check if type body exists if using type method */
     HeapTuple proc_tup = NULL;
@@ -880,6 +927,26 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             pkg = PackageInstantiation(package_oid);
         }
     }
+
+    proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    if (!HeapTupleIsValid(proc_tup)) {
+        ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for function %u, while compile function", func_oid)));
+    }
+
+    Oid caller_oid = GetProprocoidByOid(HeapTupleGetOid(proc_tup));
+    if (OidIsValid(caller_oid) && caller_oid == getCurrCallerFuncOid()) {
+        PLpgSQL_func_hashkey hashkey;
+        Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
+        fcinfo->fncollation = InvalidOid;
+        /* Compute hashkey using function signature and actual arg types */
+        compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, false);
+            /* And do the lookup */
+        func = plpgsql_HashTableLookup(&hashkey);
+    }
+
+    ReleaseSysCache(proc_tup);
+
     if (pkg != NULL) {
         ListCell* l;
         foreach(l, pkg->proc_compiled_list) {
@@ -908,6 +975,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 #endif
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
+    Oid firstLevelfuncOid = InvalidOid;
     bool save_curr_status = GetCurrCompilePgObjStatus();
     bool save_is_exec_autonomous = u_sess->plsql_cxt.is_exec_autonomous;
     bool save_is_pipelined = u_sess->plsql_cxt.is_pipelined;
@@ -918,6 +986,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
          * save running package value
          */
         firstLevelPkgOid = saveCallFromPkgOid(package_oid);
+        firstLevelfuncOid = getCurrCallerFuncOid();
         bool saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
         int *coverage = NULL;
         if (enableProcCoverage) {
@@ -932,6 +1001,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         if (func == NULL) {
             u_sess->plsql_cxt.compile_has_warning_info = false;
             SetCurrCompilePgObjStatus(true);
+            u_sess->plsql_cxt.isCreateFuncSubprogramBody = false;
             func = plpgsql_compile(fcinfo, false);
             if (enable_plpgsql_gsdependency_guc() && func != NULL) {
                 SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, GetCurrCompilePgObjStatus());
@@ -941,7 +1011,20 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
                                get_func_name(func_oid))));
                 }
             }
+            u_sess->plsql_cxt.isCreateFuncSubprogramBody = true;
+            u_sess->plsql_cxt.cur_func_oid = func->fn_oid;
         }
+
+        if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid != func->fn_oid) {
+            if (func->proc_list != NULL) {
+                saveCallFromFuncOid(func->fn_oid);
+                savaCallerParentOid = func->parent_oid;
+            } else if (func->parent_func) {
+                saveCallFromFuncOid(func->parent_oid);
+            }
+        }
+        saveCallerOid = func->fn_oid;
+        
         if (func->fn_readonly) {
             stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_IMMUTABLE);
         }
@@ -1078,12 +1161,14 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             // resume the search_path when there is an error
             PopOverrideSearchPath();
 
+            saveCallFromFuncOid(InvalidOid);
             restoreCallFromPkgOid(secondLevelPkgOid);
             ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
                 errmsg("%s clear curr_compile_context because of error.", __func__)));
             /* reset nest plpgsql compile */
             u_sess->plsql_cxt.curr_compile_context = save_compile_context;
             u_sess->plsql_cxt.compile_status = save_compile_status;
+            u_sess->plsql_cxt.cur_func_oid = InvalidOid;
             clearCompileContextList(save_compile_list_length);
 
             u_sess->misc_cxt.Pseudo_CurrentUserId = saved_Pseudo_CurrentUserId;
@@ -1158,6 +1243,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         SetCurrCompilePgObjStatus(save_curr_status);
         u_sess->plsql_cxt.is_exec_autonomous = save_is_exec_autonomous;
         u_sess->plsql_cxt.is_pipelined = save_is_pipelined;
+        saveCallFromFuncOid(firstLevelfuncOid);
+        u_sess->plsql_cxt.cur_func_oid = InvalidOid;
         /* clean stp save pointer if the outermost function is end. */
         if (u_sess->SPI_cxt._connected == 0) {
             t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
@@ -1217,6 +1304,14 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     if (has_switch) {
         SetUserIdAndSecContext(old_user, save_sec_context);
         u_sess->exec_cxt.cast_owner = InvalidOid;
+    }
+    
+    u_sess->plsql_cxt.cur_func_oid = InvalidOid;
+    if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid == saveCallerOid) {
+        if (!OidIsValid(savaCallerParentOid) && OidIsValid(firstLevelfuncOid))
+            saveCallFromFuncOid(firstLevelfuncOid);
+        else
+            saveCallFromFuncOid(savaCallerParentOid);
     }
     return retval;
 }
@@ -1549,6 +1644,9 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     char* argmodes = NULL;
     bool is_dml_trigger = false;
     bool is_event_trigger = false;
+    Oid saveCallerOid = InvalidOid;
+    Oid savaCallerParentOid = InvalidOid;
+    bool is_pkg_func = false;
     
     int i;
     /*
@@ -1648,6 +1746,17 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             u_sess->parser_cxt.isCreateFuncOrProc = true;
             func = plpgsql_compile(&fake_fcinfo, true);
             u_sess->parser_cxt.isCreateFuncOrProc = false;
+            if (func != NULL) {
+                if (OidIsValid(func->pkg_oid)) {
+                    is_pkg_func = true;
+                }
+                // ignore in case of function has subprogram to update the running_func_oid.
+                if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid != func->fn_oid) {
+                    saveCallFromFuncOid(func->parent_oid);
+                }
+                saveCallerOid = func->fn_oid;
+                savaCallerParentOid = func->parent_oid;
+            }
         }
         PG_CATCH();
         {
@@ -1668,6 +1777,9 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
                     }
                     u_sess->plsql_cxt.isCreateFunction = false;
                     u_sess->plsql_cxt.isCreateTypeBody = false;
+                    u_sess->plsql_cxt.createFunctionOid = InvalidOid;
+                    saveCallFromFuncOid(InvalidOid);
+                    u_sess->plsql_cxt.isCreateFuncSubprogramBody = false;
                 }
             }
 #endif
@@ -1679,6 +1791,8 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             u_sess->plsql_cxt.isCreateFunction = false;
             u_sess->plsql_cxt.isCreateTypeBody = false;
             u_sess->plsql_cxt.typfunckind = OBJECTTYPE_NULL_PROC;
+            u_sess->plsql_cxt.createFunctionOid = InvalidOid;
+            u_sess->plsql_cxt.isCreateFuncSubprogramBody = false;
             ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
                 errmsg("%s clear curr_compile_context because of error.", __func__)));
             /* reset nest plpgsql compile */
@@ -1697,13 +1811,13 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         PG_END_TRY();
         bool isNotComipilePkg = u_sess->plsql_cxt.curr_compile_context == NULL ||
             u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL;
-
+        bool isNotCompileSubprogram = (func && !OidIsValid(func->parent_oid));
         if (!IsInitdb && (
 #ifdef ENABLE_MULTIPLE_NODES
             !IS_MAIN_COORDINATOR ||
 #endif
             u_sess->attr.attr_common.enable_full_encryption) &&
-            isNotComipilePkg) {
+            isNotComipilePkg && isNotCompileSubprogram) {
                 /*
                  * set ClientAuthInProgress to prevent warnings from the parser
                  * to be sent to client
@@ -1716,10 +1830,13 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         UpdateCurrCompilePgObjStatus(save_curr_status);
     }
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
+    if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction && !u_sess->plsql_cxt.running_func_oid) {
         ProcInsertGsSource(funcoid, true);
     }
 #endif
+    if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid == saveCallerOid) {
+        saveCallFromFuncOid(savaCallerParentOid);
+    }
 
     PG_RETURN_VOID();
 }
@@ -2532,4 +2649,268 @@ static char* replace_html_entity(const char* input)
     }
     result[j] = '\0';
     return result;
+}
+
+/*
+ * process different situation in function,for example,duplicate declartion,duplicate definition,
+ * and only declartion no definition.
+ * the recordArr record the proc list which has been declared and which has been defined,
+ * for example
+ * recordArr[0] = 1; it means the location 0 is pairing location 1, so the location 1 value must be 0;
+ * so recordArr[record[1]] = 1;
+ */
+void ProcessFuncProcList(List* func_proc_list, int** deleteArr)
+{
+    ListCell* cell = NULL;
+    CreateFunctionStmt** stmtArray = (CreateFunctionStmt**)palloc0(list_length(func_proc_list) *
+                                        sizeof(CreateFunctionStmt*));
+    int* recordArr = (int*)palloc0(list_length(func_proc_list) * sizeof(int));
+    *deleteArr = (int*)palloc0(list_length(func_proc_list) * sizeof(int));
+    int i = 0;
+    int funcStmtLength = 0;
+    foreach(cell, func_proc_list) {
+        if (IsA(lfirst(cell), CreateFunctionStmt)) {
+            CreateFunctionStmt* funcStmt = (CreateFunctionStmt*)lfirst(cell);
+            stmtArray[i] = funcStmt;
+            i = i + 1;
+        }
+    }
+    funcStmtLength = i;
+    if (funcStmtLength == 0) {
+        return;
+    }
+    /*
+     * process the situation that only 1 declartion or only 1 definition.
+     */
+    if (funcStmtLength <= 1) {
+        if (stmtArray[0]->isFunctionDeclare) {
+            processError(stmtArray[0], FunctionUndefined);
+        }
+    }
+    for (int j = 0; j < funcStmtLength - 1; j++) {
+        for (int k = j + 1; k < funcStmtLength; k++) {
+            char* funcname1 = NULL;
+            char* funcname2 = NULL;
+            char* returnType1 = NULL;
+            char* returnType2 = NULL;
+            CreateFunctionStmt* funcStmt1 = stmtArray[j];
+            CreateFunctionStmt* funcStmt2 = stmtArray[k];
+            List* funcnameList1 = funcStmt1->funcname;
+            List* funcnameList2 = funcStmt2->funcname;
+            bool returnTypeSame = false;
+            funcname1 = getFuncName(funcnameList1);
+            funcname2 = getFuncName(funcnameList2);
+            if (strcmp(funcname1, funcname2) != 0) {
+                /* ignore function name when two procedure is not same */
+                continue;
+            }
+            if (funcStmt1->returnType != NULL) {
+                returnType1 = TypeNameToString((TypeName*)funcStmt1->returnType);
+            } else {
+                returnType1 = "void";
+            }
+            if (funcStmt2->returnType != NULL) {
+                returnType2 = TypeNameToString((TypeName*)funcStmt2->returnType);
+            } else {
+                returnType2 = "void";
+            }
+            if (!isSameArgList(funcStmt1, funcStmt2)) {
+                continue;
+            }
+            if (!isSameParameterList(funcStmt1->options, funcStmt2->options)) {
+                processSubFuncError(funcStmt1, FuncitonDefineError);
+            }
+            if (strcmp(returnType1, returnType2) != 0) {
+                returnTypeSame = false;
+            } else {
+                returnTypeSame = true;
+            }
+            if (!returnTypeSame && (funcStmt1->isFunctionDeclare^funcStmt2->isFunctionDeclare)) {
+                processSubFuncError(funcStmt1, FunctionReturnTypeError);
+            }
+            if (funcStmt1->isProcedure != funcStmt2->isProcedure) {
+                processSubFuncError(funcStmt1, FuncitonDefineError);
+            }
+            if (funcStmt1->isFunctionDeclare && funcStmt2->isFunctionDeclare) {
+                processSubFuncError(funcStmt1, FunctionDuplicate);
+            }
+            if (!(funcStmt1->isFunctionDeclare || funcStmt2->isFunctionDeclare)) {
+                processSubFuncError(funcStmt1, FuncitonDefineError);
+            }
+            if (recordArr[j] == 0) {
+                if (recordArr[k] != 0) {
+                    processSubFuncError(stmtArray[j], FuncitonDefineError);
+                }
+                recordArr[j] = k;
+                recordArr[k] = j;
+            } else if (recordArr[recordArr[j]] != j) {
+                processSubFuncError(stmtArray[j], FuncitonDefineError);
+            }
+        }
+    }
+    i = 0;
+    for (i = 0; i < funcStmtLength; i++) {
+        if (stmtArray[i]->isFunctionDeclare) {
+            if (recordArr[i] == 0) {
+                errno_t rc;
+                char message[MAXSTRLEN];
+                rc = sprintf_s(message, MAXSTRLEN,
+                    "Function definition not found: %s",
+                        NameListToString(stmtArray[i]->funcname));
+                securec_check_ss_c(rc, "\0", "\0");
+                InsertErrorMessage(message, stmtArray[i]->startLineNumber);
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmodule(MOD_PLSQL),
+                        errmsg("Function definition not found: %s", NameListToString(stmtArray[i]->funcname))));
+            }
+        }
+    }
+    pfree(recordArr);
+    pfree(stmtArray);
+}
+
+void FunctionInSubprogramCompile(Oid parentFuncOid)
+{
+    HeapTuple oldtup;
+    ScanKeyData entry;
+    int oldCompileStatus = getCompileStatus();
+
+    CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK_FUNC);
+    ScanKeyInit(&entry, Anum_pg_proc_ext_procoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentFuncOid));
+    Relation pg_proc_ext_rel = heap_open(ProcedureExtensionRelationId, RowExclusiveLock);
+    SysScanDesc scan = systable_beginscan(pg_proc_ext_rel, InvalidOid, false, NULL, 1, &entry);
+    PG_TRY();
+    {
+        while ((oldtup = systable_getnext(scan)) != NULL) {
+            HeapTuple proctup = heap_copytuple(oldtup);
+            if (HeapTupleIsValid(proctup)) {
+                Oid funcOid = InvalidOid;
+                HeapTuple languageTuple;
+                Form_pg_language languageStruct;
+                funcOid = ((Form_pg_proc_ext)GETSTRUCT(proctup))->proc_oid;
+                char* language = "plpgsql";
+                languageTuple = SearchSysCache1(LANGNAME, PointerGetDatum(language));
+                if (!HeapTupleIsValid(languageTuple)) {
+                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("language \"%s\" does not exist", language)));
+                }
+
+                languageStruct = (Form_pg_language)GETSTRUCT(languageTuple);
+                Oid languageValidator = languageStruct->lanvalidator;
+                OidFunctionCall1Coll(languageValidator, InvalidOid, ObjectIdGetDatum(funcOid));
+                ReleaseSysCache(languageTuple);
+
+                if (!OidIsValid(funcOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                            errmodule(MOD_PLSQL),
+                            errmsg("cache lookup failed for relid %u", funcOid)));
+                }
+            } else {
+                ereport(ERROR,
+                        (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmodule(MOD_PLSQL),
+                        errmsg("cache lookup failed")));
+            }
+            heap_freetuple(proctup);
+        }
+    }
+    PG_CATCH();
+    {
+        systable_endscan(scan);
+        heap_close(pg_proc_ext_rel, RowExclusiveLock);
+        (void)CompileStatusSwtichTo(oldCompileStatus);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    /*
+     * do we need job status not run, we can change the owner,
+     * now only check if have the permission to change the owner, if after change, the running job may
+     * failed in check permission
+     */
+
+    systable_endscan(scan);
+    heap_close(pg_proc_ext_rel, RowExclusiveLock);
+    (void)CompileStatusSwtichTo(oldCompileStatus);
+}
+
+void ProcessSubprograms(List* func_proc_list, Oid parentFuncOid)
+{
+    /*
+     * The current created subprogram's parent function is inconsistent with the parent function being compiled,
+     * and it is not an anonymous block, which indicates that it is a compilation of a subprogram, not the
+     * creation of a subprogram.
+     */
+    if (u_sess->plsql_cxt.createFunctionOid != parentFuncOid && parentFuncOid != OID_MAX) {
+        FunctionInSubprogramCompile(parentFuncOid);
+        return;
+    }
+
+    if (func_proc_list == NULL) {
+        return;
+    }
+
+    ListCell* cell = NULL;
+
+    int oldCompileStatus = getCompileStatus();
+
+    {
+        int exception_num = 0;
+        int* deleteArr = NULL;
+        ProcessFuncProcList(func_proc_list, &deleteArr);
+        int i = 0;
+        foreach(cell, func_proc_list)
+        {
+            CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK_FUNC);
+            if (IsA(lfirst(cell), CreateFunctionStmt)) {
+                if (deleteArr[i] == 1) {
+                    i++;
+                    continue;
+                }
+                CreateFunctionStmt* funcStmt = (CreateFunctionStmt*)lfirst(cell);
+                if (!funcStmt->isExecuted) {
+                    char* funcStr = funcStmt->queryStr;
+                    bool check_states = u_sess->attr.attr_sql.check_function_bodies;
+                    MemoryContext oldContext = CurrentMemoryContext;
+                    PG_TRY();
+                    {
+                        Oid packageOid = (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) ?
+                                InvalidOid : u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+                        u_sess->attr.attr_sql.check_function_bodies = true;
+                        CreateFunction(funcStmt, funcStr, packageOid, InvalidOid,
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid);
+                        u_sess->attr.attr_sql.check_function_bodies = check_states;
+                    }
+                    PG_CATCH();
+                    {
+                        u_sess->attr.attr_sql.check_function_bodies = check_states;
+                        if (u_sess->plsql_cxt.create_func_error) {
+                            u_sess->plsql_cxt.create_func_error = false;
+                            exception_num += 1;
+                            (void)MemoryContextSwitchTo(oldContext);
+                            FlushErrorState();
+                        } else {
+                            PG_RE_THROW();
+                        }
+                    }
+                    PG_END_TRY();
+                    funcStmt->isExecuted = true;
+                    (void)CompileStatusSwtichTo(oldCompileStatus);
+                }
+            }
+            i++;
+        }
+        pfree(deleteArr);
+        if (exception_num > 0) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Debug mod,create procedure has error."),
+                    errdetail("N/A"),
+                    errcause("compile procedure error."),
+                    erraction("check procedure error and redefine procedure")));
+        }
+    }
 }

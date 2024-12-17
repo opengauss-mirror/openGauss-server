@@ -1035,6 +1035,55 @@ bool IsPackageDependType(Oid typOid, Oid pkgOid, bool isRefCur)
     return isFind;
 }
 
+/*
+ * when rebuild function, delete subprograms which dependent on it.
+ */
+long DeleteSubprogramDenpendOnProcedure(Oid classId, Oid objectId, bool is_delete)
+{
+    long count = 0;
+    Relation depRel;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    ObjectAddresses* objects = new_object_addresses();
+    ObjectAddress address;
+    const int keyNumber = 2;
+    bool isPkgDepTyp = false;
+    Form_pg_depend depTuple = NULL;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        depTuple = (Form_pg_depend)GETSTRUCT(tup);
+        isPkgDepTyp = (depTuple->deptype == DEPENDENCY_NORMAL) && depTuple->classid == ProcedureRelationId;
+        if (!isPkgDepTyp) {
+            continue;
+        }
+
+        address.classId = depTuple->classid;
+        address.objectId = depTuple->objid;
+        address.objectSubId = 0;
+        add_exact_object_address(&address, objects);
+        count++;
+    }
+
+    systable_endscan(scan);
+
+    heap_close(depRel, RowExclusiveLock);
+
+    if (is_delete) {
+        CommandCounterIncrement();
+        performMultipleDeletions(objects, DROP_CASCADE, PERFORM_DELETION_INTERNAL, true);
+    }
+
+    return count;
+}
+
 void DeletePgDependObject(const ObjectAddress* object, const ObjectAddress* ref_object)
 {
     int keyNum = 0;

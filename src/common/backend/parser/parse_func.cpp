@@ -1499,18 +1499,28 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
 
 #ifndef ENABLE_MULTIPLE_NODES
     Oid caller_pkg_oid = InvalidOid;
+    Oid caller_func_oid = InvalidOid;
     if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
         caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
+    } else if (OidIsValid(u_sess->plsql_cxt.running_func_oid)) {
+        caller_func_oid = u_sess->plsql_cxt.running_func_oid;
     } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
         caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+    } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        caller_func_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
     }
     nbestMatch = 0;
     ncandidates = 0;
     last_candidate = NULL;
     for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
         nmatch = 0;
-        if (current_candidate->packageOid == caller_pkg_oid) {
+        if (caller_func_oid) {
+            if (current_candidate->funcOid == caller_func_oid) {
+                nmatch++;
+            }
+        } else if (current_candidate->packageOid == caller_pkg_oid) {
             nmatch++;
         }
         keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);

@@ -36,7 +36,7 @@ static inline ArrayType* getPartKeysArr(List* partitionCols);
 /*
  * @Description: Insert a new record to pg_proc_ext.
  */
-void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo)
+void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo, Oid proprocoid)
 {
     Datum values[Natts_pg_proc_ext];
     bool nulls[Natts_pg_proc_ext];
@@ -49,7 +49,7 @@ void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo)
     rel = heap_open(ProcedureExtensionRelationId, RowExclusiveLock);
 
     oldtuple = SearchSysCache1(PROCEDUREEXTENSIONOID, ObjectIdGetDatum(oid));
-    if (partInfo == NULL) {
+    if (partInfo == NULL && !OidIsValid(proprocoid)) {
         if (HeapTupleIsValid(oldtuple)) {
             simple_heap_delete(rel, &oldtuple->t_self);
             ReleaseSysCache(oldtuple);
@@ -60,15 +60,23 @@ void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo)
 
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    rc = memset_s(nulls, sizeof(nulls), true, sizeof(nulls));
     securec_check_c(rc, "\0", "\0");
     rc = memset_s(replaces, sizeof(replaces), true, sizeof(replaces));
     securec_check_c(rc, "\0", "\0");
 
     values[Anum_pg_proc_ext_proc_oid - 1] = ObjectIdGetDatum(oid);
-    values[Anum_pg_proc_ext_parallel_cursor_seq - 1] = UInt64GetDatum(partInfo->partitionCursorIndex);
-    values[Anum_pg_proc_ext_parallel_cursor_strategy - 1] = Int16GetDatum(partInfo->strategy);
-    values[Anum_pg_proc_ext_parallel_cursor_partkey - 1] = PointerGetDatum(getPartKeysArr(partInfo->partitionCols));
+    nulls[Anum_pg_proc_ext_proc_oid - 1] = false;
+    if (partInfo != NULL) {
+        values[Anum_pg_proc_ext_parallel_cursor_seq - 1] = UInt64GetDatum(partInfo->partitionCursorIndex);
+        values[Anum_pg_proc_ext_parallel_cursor_strategy - 1] = Int16GetDatum(partInfo->strategy);
+        values[Anum_pg_proc_ext_parallel_cursor_partkey - 1] = PointerGetDatum(getPartKeysArr(partInfo->partitionCols));
+        nulls[Anum_pg_proc_ext_parallel_cursor_seq - 1] = false;
+        nulls[Anum_pg_proc_ext_parallel_cursor_strategy - 1] = false;
+        nulls[Anum_pg_proc_ext_parallel_cursor_partkey - 1] = false;
+    }
+    values[Anum_pg_proc_ext_procoid - 1] = ObjectIdGetDatum(proprocoid);
+    nulls[Anum_pg_proc_ext_procoid - 1] = OidIsValid(proprocoid) ? false : true;
 
     if (HeapTupleIsValid(oldtuple)) {
         replaces[Anum_pg_proc_ext_proc_oid - 1] = false;
@@ -161,4 +169,22 @@ FunctionPartitionStrategy GetParallelStrategyAndKey(Oid oid, List** partkey)
 
     ReleaseSysCache(tuple);
     return strategy;
+}
+
+Oid GetProprocoidByOid(Oid oid)
+{
+    bool isNull;
+    HeapTuple tuple = SearchSysCache1(PROCEDUREEXTENSIONOID, ObjectIdGetDatum(oid));
+    if (!HeapTupleIsValid(tuple)) {
+        return InvalidOid;
+    }
+
+    Datum proprocoid_datum = SysCacheGetAttr(PROCEDUREEXTENSIONOID, tuple, Anum_pg_proc_ext_procoid, &isNull);
+    if (isNull) {
+        ReleaseSysCache(tuple);
+        return InvalidOid;
+    }
+    Oid proprocoid = ObjectIdGetDatum(proprocoid_datum);
+    ReleaseSysCache(tuple);
+    return proprocoid;
 }

@@ -146,7 +146,6 @@ typedef FormData_pg_proc *Form_pg_proc;
  * func view shouldn't be included in Natts_pg_proc
  */
 #define Anum_pg_proc_oid 40
-
 /* ----------------
  *        initial contents of pg_proc
  * ----------------

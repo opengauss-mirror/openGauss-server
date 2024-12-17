@@ -37,10 +37,11 @@ static volatile uint32 gt_tempID_seed = 0;
 typedef struct _FuncCandidateList
 {
 	struct _FuncCandidateList *next;
-	int			pathpos;		/* for internal use of namespace lookup */
+	int	        pathpos;		/* for internal use of namespace lookup */
 	Oid			oid;			/* the function or operator's OID */
 	int			nargs;			/* number of arg types returned */
 	Oid         packageOid;     /* package oid */
+	Oid			funcOid;
 	int			nvargs;			/* number of args to become variadic array */
 	int			ndargs;			/* number of defaulted args */
 	int		   *argnumbers;		/* args' positional indexes, if named call */
@@ -233,7 +234,7 @@ extern void validateTempRelation(Relation rel);
 extern bool checkGroup(Oid relid, bool missing_ok);
 
 extern bool validateTempNamespace(Oid tmepNspId);
-
+extern bool is_sub_program(Oid func_oid, Oid parent_oid);
 extern bool IsPackageFunction(List* funcname);
 
 extern void recomputeNamespacePath(StringInfo error_info = NULL);
