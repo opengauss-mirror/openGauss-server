@@ -184,6 +184,7 @@ extern void ResourceOwnerForgetLocalCatCList(ResourceOwner owner, LocalCatCList*
 extern void ResourceOwnerEnlargeLocalCatCTup(ResourceOwner owner);
 extern void ResourceOwnerRememberLocalCatCTup(ResourceOwner owner, LocalCatCTup* tuple);
 extern LocalCatCTup* ResourceOwnerForgetLocalCatCTup(ResourceOwner owner, HeapTuple tuple);
+extern bool ResourceOwnerTupleDead(ResourceOwner owner, HeapTuple tuple);
 /* support for global catcache tuple/list ref management */
 extern void ResourceOwnerEnlargePthreadRWlock(ResourceOwner owner);
 extern void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock);
