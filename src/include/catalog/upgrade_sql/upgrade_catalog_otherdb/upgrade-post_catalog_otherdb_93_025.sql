@@ -10,7 +10,7 @@ CREATE FUNCTION pg_catalog.realtime_build_log_ctrl_status(
     out build_rate            int8,
     out prev_build_ptr        text,
     out realtime_build_ptr    text,
-    out current_insert_lsn    text,
-    out sleepTime             int4
+    out current_insert_ptr    text,
+    out sleep_time            int4
 )
-RETURNS SETOF record LANGUAGE INTERNAL as 'realtime_build_log_ctrl_status' stable;
+RETURNS SETOF record LANGUAGE INTERNAL as 'get_realtime_build_log_ctrl_status' stable rows 64;
