@@ -48,6 +48,7 @@
 #include "storage/sinval.h"
 #include "utils/anls_opt.h"
 #include "utils/elog.h"
+#include "utils/float.h"
 #include "utils/formatting.h"
 #include "utils/inval.h"
 #include "utils/memutils.h"
@@ -476,7 +477,8 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
 
     utils_cxt->int4output_buffer = (char*)palloc0(32);
     utils_cxt->int8output_buffer = (char*)palloc0(128);
-    utils_cxt->int16output_buffer = (char*)palloc0(128);
+    utils_cxt->float4output_buffer = (char*)palloc0(MAXFLOATWIDTH);
+    utils_cxt->float8output_buffer = (char*)palloc0(MAXDOUBLEWIDTH);
     utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
     utils_cxt->numericoutput_buffer = (char*)palloc0(64);
     utils_cxt->dateoutput_buffer = (char*)palloc0(MAXDATELEN + 1);

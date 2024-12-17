@@ -13200,8 +13200,6 @@ static void dumpObjectTypeSpec(Archive* fout, TypeInfo* tyinfo)
     char* qtypname = NULL;
     Oid supertype = InvalidOid;
     char* isfinal = NULL;
-    char* status = NULL;
-    char* config = NULL;
 
     PQExpBuffer q = createPQExpBuffer();
     PQExpBuffer labelq = createPQExpBuffer();

@@ -18,12 +18,15 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <cstring>
+
 #include "access/printtup.h"
 #include "access/transam.h"
 #include "access/tableam.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "tcop/pquery.h"
+#include "utils/float.h"
 #include "utils/lsyscache.h"
 #include "utils/numeric.h"
 #include "mb/pg_wchar.h"
@@ -588,8 +591,9 @@ static void printtup_startup(DestReceiver *self, int operation, TupleDesc typein
          */
         const char *portalName = portal->name;
 
-        if (portalName == NULL || portalName[0] == '\0')
+        if (portalName == nullptr || portalName[0] == '\0') {
             portalName = "blank";
+        }
 
         pq_puttextmessage('P', portalName);
     }
@@ -1011,7 +1015,7 @@ void assembleStreamMessage(TupleTableSlot *slot, DestReceiver *self, StringInfo 
 
             if (thisState->format == 0) {
                 /* Text output */
-                char *outputstr = NULL;
+                char* outputstr = nullptr;
 
                 outputstr = OutputFunctionCall(&thisState->finfo, attr);
                 pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
@@ -1105,7 +1109,7 @@ void printtupStream(TupleTableSlot *slot, DestReceiver *self)
 
         if (thisState->format == 0) {
             /* Text output */
-            char *outputstr = NULL;
+            char* outputstr = nullptr;
 #ifndef ENABLE_MULTIPLE_NODES
             t_thrd.xact_cxt.callPrint = true;
 #endif
@@ -1117,7 +1121,7 @@ void printtupStream(TupleTableSlot *slot, DestReceiver *self)
 #endif
         } else {
             /* Binary output */
-            bytea *outputbytes = NULL;
+            bytea* outputbytes = NULL;
 
             outputbytes = SendFunctionCall(&thisState->finfo, attr);
             pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
@@ -1159,14 +1163,8 @@ static inline bool check_need_free_numeric_output(const char* str)
 {
     return ((char*)str == u_sess->utils_cxt.numericoutput_buffer);
 }
-static inline bool check_need_free_date_output(const char* str)
-{
-    return ((char*)str == u_sess->utils_cxt.dateoutput_buffer);
-}
-/* ----------------
- *		printtup --- print a tuple in protocol 3.0
- * ----------------
- */
+
+// print a tuple in protocol 3.0
 void printtup(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
@@ -1251,29 +1249,45 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
         } else {
             if (thisState->format == 0) {
                 /* Text output */
-                char *outputstr = NULL;
+                char* outputstr = nullptr;
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = true;
 #endif
                 need_free = false;
                 switch (thisState->typoutput) {
                     case F_INT4OUT: {
-                        int length32 = 0;
-                        outputstr = pg_ltoa_printtup(DatumGetInt32(attr), &length32);
+                        outputstr = u_sess->utils_cxt.int4output_buffer;
+                        int length = 0;
+                        pg_ltoa(DatumGetInt32(attr), outputstr, &length);
 #ifndef ENABLE_MULTIPLE_NODES
                         t_thrd.xact_cxt.callPrint = false;
 #endif
-                        pq_sendcountedtext_printtup(buf, outputstr, length32, thisState->encoding,
+                        pq_sendcountedtext_printtup(buf, outputstr, length, thisState->encoding,
                                                     (void *)&thisState->convert_finfo);
                         continue;
                     }
                     case F_INT8OUT: {
-                        int length64 = 0;
-                        outputstr = pg_lltoa_printtup(DatumGetInt64(attr), &length64);
+                        outputstr = u_sess->utils_cxt.int8output_buffer;
+                        int length = 0;
+                        pg_lltoa(DatumGetInt64(attr), outputstr, &length);
 #ifndef ENABLE_MULTIPLE_NODES
                         t_thrd.xact_cxt.callPrint = false;
 #endif
-                        pq_sendcountedtext_printtup(buf, outputstr, length64, thisState->encoding,
+                        pq_sendcountedtext_printtup(buf, outputstr, length, thisState->encoding,
+                                                    (void*)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_FLOAT4OUT: {
+                        outputstr = u_sess->utils_cxt.float4output_buffer;
+                        pg_ftoa<MAXFLOATWIDTH>(DatumGetFloat4(attr), outputstr);
+                        pq_sendcountedtext_printtup(buf, outputstr, std::strlen(outputstr), thisState->encoding,
+                                                    (void*)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_FLOAT8OUT: {
+                        outputstr = u_sess->utils_cxt.float8output_buffer;
+                        pg_dtoa<MAXDOUBLEWIDTH>(DatumGetFloat8(attr), outputstr);
+                        pq_sendcountedtext_printtup(buf, outputstr, std::strlen(outputstr), thisState->encoding,
                                                     (void *)&thisState->convert_finfo);
                         continue;
                     }
@@ -1299,7 +1313,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                             need_free = true;
                         } else {
                             outputstr = output_date_out(DatumGetDateADT(attr));
-                            need_free = !check_need_free_date_output(outputstr);
                         }
                         break;
                     default:
@@ -1419,7 +1432,7 @@ static void printtup_20(TupleTableSlot *slot, DestReceiver *self)
         PrinttupAttrInfo *thisState = myState->myinfo + i;
         Datum origattr = slot->tts_values[i];
         Datum attr = static_cast<uintptr_t>(0);
-        char *outputstr = NULL;
+        char* outputstr = nullptr;
 
         if (slot->tts_isnull[i])
             continue;
@@ -1512,7 +1525,7 @@ void debugtup(TupleTableSlot *slot, DestReceiver *self)
     int natts = typeinfo->natts;
     int i;
     Datum attr = 0;
-    char *value = NULL;
+    char* value = nullptr;
     bool isnull = false;
     Oid typoutput;
     bool typisvarlena = false;
@@ -1527,7 +1540,7 @@ void debugtup(TupleTableSlot *slot, DestReceiver *self)
         value = OidOutputFunctionCall(typoutput, attr);
 
         printatt((unsigned)i + 1, &typeinfo->attrs[i], value);
-        if (value != NULL) {
+        if (value != nullptr) {
             pfree(value);
         }
     }

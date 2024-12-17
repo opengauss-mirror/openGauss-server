@@ -26,7 +26,7 @@
 #include <math.h>
 
 #include "access/datavec/halfvec.h"
-#include "access/datavec/shortest_dec.h"
+#include "utils/shortest_dec.h"
 
 #ifdef F16C_SUPPORT
 #include <immintrin.h>
@@ -239,7 +239,7 @@ static inline half Float4ToHalf(float num)
     if (unlikely(HalfIsInf(result)) && !isinf(num)) {
         char *buf = (char *)palloc(FLOAT_SHORTEST_DECIMAL_LEN);
 
-        FloatToShortestDecimalBuf(num, buf);
+        float_to_shortest_decimal_buf(num, buf);
 
         ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("\"%s\" is out of range for type halfvec", buf)));

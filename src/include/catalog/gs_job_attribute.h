@@ -33,6 +33,7 @@
 #include "fmgr.h"
 #include "utils/date.h"
 #include "utils/builtins.h"
+#include "utils/numutils.h"
 
 /* -------------------------------------------------------------------------
  *		gs_job_attribute definition.  cpp turns this into

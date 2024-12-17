@@ -32,7 +32,7 @@
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
 #include "port.h" /* for strtof() */
-#include "access/datavec/shortest_dec.h"
+#include "utils/shortest_dec.h"
 #include "access/datavec/sparsevec.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -276,7 +276,7 @@ Datum halfvec_in(PG_FUNCTION_ARGS)
 }
 
 #define AppendChar(ptr, c) (*(ptr)++ = (c))
-#define AppendFloat(ptr, f) ((ptr) += FloatToShortestDecimalBufn((f), (ptr)))
+#define AppendFloat(ptr, f) ((ptr) += float_to_shortest_decimal_bufn((f), (ptr)))
 
 /*
  * Convert internal representation to textual representation
@@ -293,7 +293,7 @@ Datum halfvec_out(PG_FUNCTION_ARGS)
      * Need:
      *
      * dim * (FLOAT_SHORTEST_DECIMAL_LEN - 1) bytes for
-     * FloatToShortestDecimalBufn
+     * float_to_shortest_decimal_bufn
      *
      * dim - 1 bytes for separator
      *

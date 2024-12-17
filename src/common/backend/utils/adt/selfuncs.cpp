@@ -101,6 +101,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <limits>
 
 #include "access/gin.h"
 #include "access/relscan.h"
@@ -1799,7 +1800,8 @@ Selectivity nantestsel(
         double freq_nan;
 
         stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
-        freq_nan = var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(get_float8_nan()), false, true);
+        freq_nan =
+            var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(std::numeric_limits<double>::quiet_NaN()), false, true);
 
         switch (nantesttype) {
             case IS_NAN:
@@ -1867,7 +1869,8 @@ Selectivity infinitetestsel(
         double freq_inf;
 
         stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
-        freq_inf = var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(get_float8_infinity()), false, true);
+        freq_inf =
+            var_eq_const(&vardata, FLOAT8EQOID, Float8GetDatum(std::numeric_limits<double>::infinity()), false, true);
 
         switch (infinitetesttype) {
             case IS_INFINITE:
