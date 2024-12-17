@@ -4619,7 +4619,7 @@ static int initPollfd(struct pollfd* ufds)
     /* set default value for all pollfds */
     for (i = 0; i < MAXLISTEN * 2 + 1; i++) {
         ufds[i].fd = PGINVALID_SOCKET;
-        ufds[cnt].events = 0;
+        ufds[i].events = 0;
     }
 
     for (i = 0; i < MAXLISTEN; i++) {
