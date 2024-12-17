@@ -670,7 +670,7 @@ begin
   raise info 'output_sql_text1: %', output_sql_text1;
 END;
 /
-ERROR:  permission denied for relation view3
+ERROR:  permission denied for relation test_1
 DETAIL:  N/A
 CONTEXT:  PL/pgSQL function gms_utility.expand_sql_text(clob) line 2 at assignment
 SQL statement "CALL gms_utility.expand_sql_text(input_sql_text1,output_sql_text1)"
@@ -1111,23 +1111,15 @@ drop user test_utility_analyze cascade;
 ---------------------------
 create schema test_utility_canonicalize;
 set search_path to test_utility_canonicalize;
--- canonicalize
+create or replace procedure test_canonicalize(name in varchar2, len in int)
+as
 declare
     canon_name varchar2(100);
 begin
-    gms_utility.canonicalize('uwclass.test', canon_name, 16);
-    raise info 'canon_name: %', canon_name;
+    gms_utility.canonicalize(name, canon_name, len);
+    raise info 'canon_name: [%]', canon_name;
 end;
 /
-INFO:  canon_name: "UWCLASS"."TEST"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."ROOY"."NUUOP"."A"
 declare
 	canon_name varchar2(100);
 begin
@@ -1138,363 +1130,357 @@ end;	-- error
 ERROR:  function "canonicalize" with 2 parameters doesn't exist 
 CONTEXT:  SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
+call test_canonicalize('koll.rooy.nuuop.a', 200);
+INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
 -- empty、space
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize(NULL, canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- NULL
-/
-INFO:  canon_name: <NULL>
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: <NULL>
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('""', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+call test_canonicalize(NULL, 200); -- NULL
+INFO:  canon_name: [<NULL>]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('', 200); -- NULL
+INFO:  canon_name: [<NULL>]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('""', 200); -- error
 ERROR:  Invalid parameter value """" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('""',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('     ', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: 
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('''''', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('     ', 200);
+INFO:  canon_name: [     ]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('''', 200); -- error
+ERROR:  Invalid parameter value "'" with special character
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('''''', 200); -- error
 ERROR:  Invalid parameter value "''" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('''''',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"''''"', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: ''
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('"''"', 200);
+INFO:  canon_name: [']
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('"''''"', 200);
+INFO:  canon_name: ['']
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.ro oy.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll.ro oy.nuuop.a"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.ro oy.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."ro oy".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."ro oy"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('    .abcd', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-ERROR:  Invalid parameter value "    .abcd" with special words
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll."ro oy".nuuop.a', 200);
+INFO:  canon_name: ["KOLL"."ro oy"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('exa mple.tab_na me', 200); -- error
+ERROR:  Invalid parameter value "exa mple.tab_na me"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('    .abcd',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll..nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-ERROR:  Invalid parameter value "koll..nuuop.a" with special words
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('exa   mple', 200); -- error
+ERROR:  Invalid parameter value "exa   mple"
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll..nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('    .abcd', 200); -- error
+ERROR:  Invalid parameter value "    .abcd" with zero length
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll..nuuop.a', 200); -- error
+ERROR:  Invalid parameter value "koll..nuuop.a" with zero length
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll."".nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll."".nuuop.a" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll."".nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: KOLL
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"koll"', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: koll
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('   "  koll.rooy"  .nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "  koll.rooy"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."ROOY"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "~!#@@#$%)(#@(!@))<>?/*-+"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy#_$nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."ROOY#_$NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.ro,oy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll', 200);
+INFO:  canon_name: [KOLL]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('"koll"', 200);
+INFO:  canon_name: [koll]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('   "  koll.rooy"  .nuuop.a', 200);
+INFO:  canon_name: ["  koll.rooy"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.rooy.nuuop.a', 200);
+INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+-- special char
+call test_canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', 200);
+INFO:  canon_name: ["~!#@@#$%)(#@(!@))<>?/*-+"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.rooy#_$nuuop.a', 200);
+INFO:  canon_name: ["KOLL"."ROOY#_$NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.ro,oy.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll.ro,oy.nuuop.a" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.ro,oy.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."rooy"  abc.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;  	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll."rooy"  abc.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll."rooy"  abc.nuuop.a" after quotation
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll."rooy"  abc.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll.rooy.nuuop.', 200); -- error
 ERROR:  Invalid parameter value "koll.rooy.nuuop."
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nu"uo"p', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll.rooy.nu"uo"p', 200); -- error
 ERROR:  Invalid parameter value "koll.rooy.nu"uo"p" before quotation
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.rooy.nu"uo"p',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy."nu"u"o"p', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll.rooy."nu"u"o"p', 200); -- error
 ERROR:  Invalid parameter value "koll.rooy."nu"u"o"p" after quotation
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.rooy."nu"u"o"p',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."rooy"."nuuop.', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll."rooy"."nuuop.', 200); -- error
 ERROR:  Invalid parameter value "koll."rooy"."nuuop." with quotation not closed
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll."rooy"."nuuop.',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
--- identy
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.123rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-ERROR:  Invalid parameter value "koll.123rooy.nuuop.a" with special words
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('abc.test,c.f', 200); -- error
+ERROR:  Invalid parameter value "abc.test,c.f" with special character
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.123rooy.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll._rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- ok for og, error for A
-/
-INFO:  canon_name: "KOLL"."_ROOY"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.#rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+-- identy
+call test_canonicalize('koll.123rooy.nuuop.a', 200); -- error
+ERROR:  Invalid parameter value "koll.123rooy.nuuop.a"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('123', 200);
+INFO:  canon_name: [123]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('  123  ', 200);
+INFO:  canon_name: [123]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('123abc', 200); -- error
+ERROR:  Invalid parameter value "123abc"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('  123.123  ', 200);
+INFO:  canon_name: [123.123]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('"123".123', 200); -- error
+ERROR:  Invalid parameter value ""123".123"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('"123"."123"', 200); -- error
+INFO:  canon_name: ["123"."123".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('123."123"', 200);
+ERROR:  Invalid parameter value "123."123""
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('  123.123456789123456789', 200);
+INFO:  canon_name: [123.123456789123456789]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('123.123.123', 200); -- error
+ERROR:  Invalid parameter value "123.123.123"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('123.gaussdb', 200); -- error
+ERROR:  Invalid parameter value "123.gaussdb"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('"123".gaussdb', 200);
+INFO:  canon_name: ["123"."GAUSSDB".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('gaussdb.123', 200); -- error
+ERROR:  Invalid parameter value "gaussdb.123"
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('gaussdb."123"', 200);
+INFO:  canon_name: ["GAUSSDB"."123".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('gaussdb."123nuuop"', 200);
+INFO:  canon_name: ["GAUSSDB"."123nuuop".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll._rooy.nuuop.a', 200); -- ok for og, error for A
+INFO:  canon_name: ["KOLL"."_ROOY"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.#rooy.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll.#rooy.nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.#rooy.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.$rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll.$rooy.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll.$rooy.nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.$rooy.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."_rooy".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."_rooy"."NUUOP"."A"
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('table', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: TABLE
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.table.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll."_rooy".nuuop.a', 200);
+INFO:  canon_name: ["KOLL"."_rooy"."NUUOP"."A".]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('table', 200);
+INFO:  canon_name: [TABLE]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.rooy.table.a', 200); -- error
 ERROR:  Invalid parameter value "koll.rooy.table.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.rooy.table.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('column', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: COLUMN
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.column.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('column', 200);
+INFO:  canon_name: [COLUMN]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.column.nuuop.a', 200); -- error
 ERROR:  Invalid parameter value "koll.column.nuuop.a" with special words
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.column.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 -- test indentifier overlength; og >= 64, A >= 128
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
+call test_canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a', 200); -- error
 ERROR:  identifier too long, max length is 63
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a',canon_name,100)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj', 200); -- error
+ERROR:  identifier too long, max length is 63
+CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 -- param canon_len
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, -10);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+call test_canonicalize('koll.rooy.nuuop.a', -10); -- error
 ERROR:  Input parameter "canon_len" value "-10" should be greater than or equal to 0 
 CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name,-10)"
-PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 0);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: 
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 10);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "KOLL"."RO
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('开车.rooy.nuuop.a', canon_name, 10);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-INFO:  canon_name: "开车"."
+SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
+PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
+call test_canonicalize('koll.rooy.nuuop.a', 0);
+INFO:  canon_name: []
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('koll.rooy.nuuop.a', 10);
+INFO:  canon_name: ["KOLL"."RO]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
+call test_canonicalize('开车.rooy.nuuop.a', 10);
+INFO:  canon_name: ["开车"."]
+ test_canonicalize 
+-------------------
+ 
+(1 row)
+
 declare
 	canon_name varchar2(10);
 begin
@@ -1504,106 +1490,7 @@ end;	-- error
 /
 ERROR:  value too long for type character varying(10)
 CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
-declare
-   v_input_name   varchar2(255) := 'agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 200;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'original name length: %', length(v_input_name);
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end; -- error
-/
-ERROR:  identifier too long, max length is 63
-CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
-   )"
-PL/pgSQL function inline_code_block line 5 at SQL statement
-declare
-   v_input_name   varchar2(255) := 'abc.test,c.f';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 100;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end; -- error
-/
-ERROR:  Invalid parameter value "abc.test,c.f" with special character
-CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
-   )"
-PL/pgSQL function inline_code_block line 5 at SQL statement
-declare
-   v_input_name   varchar2(255) := '123';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-  gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-
-  raise info 'original name: %', v_input_name;
-  raise info 'canonicalized name: %', v_canon_name;
-  raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-INFO:  original name: 123
-INFO:  canonicalized name: 123
-INFO:  canonicalized name length: 3
-declare
-   v_input_name   varchar2(255) := 'exam  ple';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-  gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-  raise info 'original name: %', v_input_name;
-  raise info 'canonicalized name: %', v_canon_name;
-  raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-ERROR:  Invalid parameter value "exam  ple"
-CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
-   )"
-PL/pgSQL function inline_code_block line 5 at SQL statement
-declare
-   v_input_name   varchar2(255) := 'exa mple.tab_na me';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-ERROR:  Invalid parameter value "exa mple.tab_na me"
-CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) line 5 at assignment
-SQL statement "CALL gms_utility.canonicalize(name        => v_input_name,canon_name=>v_canon_name,canon_len   => v_canon_len
-   )"
-PL/pgSQL function inline_code_block line 5 at SQL statement
+drop procedure test_canonicalize;
 drop schema test_utility_canonicalize;
 ---------------------------
 -- compile schema
@@ -2222,7 +2109,7 @@ INFO:  a: [PEER], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 4
 (1 row)
 
 call test_name_tokenize('peer.-lokppe.vuumee@ookeyy'); -- error
-ERROR:  Invalid input value "eer.-lokppe.vuumee@ookeyy"
+ERROR:  Invalid input value "peer.-lokppe.vuumee@ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
@@ -2248,7 +2135,12 @@ INFO:  a: [PEER], b: [LOKP], c: [<NULL>], dblink: [<NULL>], nextpos: 9
 (1 row)
 
 call test_name_tokenize('peer.=lokppe.vuumee@ookeyy'); -- error
-ERROR:  Invalid input value "eer.=lokppe.vuumee@ookeyy"
+ERROR:  Invalid input value "peer.=lokppe.vuumee@ookeyy" with special words
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('peer.]lokppe.vuumee@ookeyy'); -- error
+ERROR:  Invalid input value "peer.]lokppe.vuumee@ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
@@ -2267,18 +2159,6 @@ ERROR:  Invalid input value "peer.lokp%pe.vuumee@ookeyy" with special character
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
-call test_name_tokenize('123_abc'); -- error
-ERROR:  Invalid Input value "123_abc"
-CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
-SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
-PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
-call test_name_tokenize('"123_abc"');
-INFO:  a: [123_abc], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 9
- test_name_tokenize 
---------------------
- 
-(1 row)
-
 call test_name_tokenize('123'); -- error
 ERROR:  Invalid Input value "123"
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
@@ -2286,6 +2166,83 @@ SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
 call test_name_tokenize('"123"');
 INFO:  a: [123], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 5
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('  123  '); -- error
+ERROR:  Invalid Input value "  123  "
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('123abc'); -- error
+ERROR:  Invalid Input value "123abc"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('  123.123  '); -- error
+ERROR:  Invalid Input value "  123.123  "
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"123".123');
+INFO:  a: [123], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 5
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('"123"."123"');
+INFO:  a: [123], b: [123], c: [<NULL>], dblink: [<NULL>], nextpos: 11
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('  123.123456789123456789'); -- error
+ERROR:  Invalid Input value "  123.123456789123456789"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('123."123"'); -- error
+ERROR:  Invalid Input value "123."123""
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('123.123.123'); -- error
+ERROR:  Invalid Input value "123.123.123"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('123.gaussdb'); -- error
+ERROR:  Invalid Input value "123.gaussdb"
+CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
+PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
+call test_name_tokenize('"123".gaussdb');
+INFO:  a: [123], b: [GAUSSDB], c: [<NULL>], dblink: [<NULL>], nextpos: 13
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('gaussdb.123');
+INFO:  a: [GAUSSDB], b: [<NULL>], c: [<NULL>], dblink: [<NULL>], nextpos: 7
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('gauss123.vuumee.123');
+INFO:  a: [GAUSS123], b: [VUUMEE], c: [<NULL>], dblink: [<NULL>], nextpos: 15
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
+call test_name_tokenize('gaussdb."123"');
+INFO:  a: [GAUSSDB], b: [123], c: [<NULL>], dblink: [<NULL>], nextpos: 13
  test_name_tokenize 
 --------------------
  
@@ -2398,6 +2355,13 @@ INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOKEYY.ZK], nextpos: 28
  
 (1 row)
 
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy@zk');
+INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOKEYY@ZK], nextpos: 28
+ test_name_tokenize 
+--------------------
+ 
+(1 row)
+
 call test_name_tokenize('@vuumee'); -- error
 ERROR:  Invalid input value "@vuumee" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
@@ -2411,7 +2375,7 @@ INFO:  a: [PEER], b: [LOKPPE], c: [VUUMEE], dblink: [OOK], nextpos: 22
 (1 row)
 
 call test_name_tokenize('peer.lokppe.vuumee@=ookeyy'); -- error
-ERROR:  Invalid input value "eer.lokppe.vuumee@=ookeyy" with special words
+ERROR:  Invalid input value "peer.lokppe.vuumee@=ookeyy" with special words
 CONTEXT:  PL/pgSQL function gms_utility.name_tokenize(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.name_tokenize(name,a,b,c,dblink,nextpos)"
 PL/pgSQL function test_name_tokenize(character varying) line 7 at SQL statement
@@ -2870,6 +2834,34 @@ call test_name_resolve('syn_pkg.delete_var', 1);
 
 call test_name_resolve('syn_pkg.qwer', 1);
 --?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [QWER], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.t_pkg', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [<NULL>], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('t_pkg', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [<NULL>], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('public.syn_pkg', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [<NULL>], dblink: [<NULL>], part1_type: 9, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('syn_pkg', 1);
+--?INFO:  schema: [PUBLIC], part1: [T_PKG], part2: [<NULL>], dblink: [<NULL>], part1_type: 9, object_number:.*
  test_name_resolve 
 -------------------
  
@@ -3596,7 +3588,7 @@ CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
 call test_comma_to_table('gaussdb..dept,gaussdb.emp'); -- error
-ERROR:  Invalid parameter value "gaussdb..dept" with special words
+ERROR:  Invalid parameter value "gaussdb..dept" with zero length
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
@@ -3679,7 +3671,7 @@ tablename: gaussdb.emp
 (1 row)
 
 call test_comma_to_table('gaussdb.123deptdblink,gaussdb.emp'); -- error
-ERROR:  Invalid parameter value "gaussdb.123deptdblink" with special words
+ERROR:  Invalid parameter value "gaussdb.123deptdblink"
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
@@ -3693,12 +3685,12 @@ tablename: gaussdb.emp
 (1 row)
 
 call test_comma_to_table('123,gaussdb.emp'); -- error
-ERROR:  Invalid parameter value "123" with special words
+ERROR:  Invalid parameter value "123"
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
 call test_comma_to_table('123.abc,gaussdb.emp'); -- error
-ERROR:  Invalid parameter value "123.abc" with special words
+ERROR:  Invalid parameter value "123.abc"
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
@@ -3947,13 +3939,33 @@ declare
 begin
     tab(1) := '';
     gms_utility.table_to_comma(tab, tablen, list);
-    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
-end; -- error
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
 /
-ERROR:  function 395 returned NULL
-CONTEXT:  PL/pgSQL function gms_utility.table_to_comma(character varying[]) line 5 at assignment
-SQL statement "CALL gms_utility.table_to_comma(tab,tablen,list)"
-PL/pgSQL function inline_code_block line 6 at SQL statement
+tablen: 0, result: []
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '';
+    tab(2) := '';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
+/
+tablen: 0, result: []
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '  ';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
+/
+tablen: 1, result: [  ]
 declare
     tablen  integer;
     list    varchar2;

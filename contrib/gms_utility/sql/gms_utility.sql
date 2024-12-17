@@ -584,20 +584,13 @@ drop user test_utility_analyze cascade;
 create schema test_utility_canonicalize;
 set search_path to test_utility_canonicalize;
 
--- canonicalize
+create or replace procedure test_canonicalize(name in varchar2, len in int)
+as
 declare
     canon_name varchar2(100);
 begin
-    gms_utility.canonicalize('uwclass.test', canon_name, 16);
-    raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
+    gms_utility.canonicalize(name, canon_name, len);
+    raise info 'canon_name: [%]', canon_name;
 end;
 /
 
@@ -609,302 +602,74 @@ begin
 end;	-- error
 /
 
+call test_canonicalize('koll.rooy.nuuop.a', 200);
+
 -- empty、space
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize(NULL, canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- NULL
-/
+call test_canonicalize(NULL, 200); -- NULL
+call test_canonicalize('', 200); -- NULL
+call test_canonicalize('""', 200); -- error
+call test_canonicalize('     ', 200);
+call test_canonicalize('''', 200); -- error
+call test_canonicalize('''''', 200); -- error
+call test_canonicalize('"''"', 200);
+call test_canonicalize('"''''"', 200);
+call test_canonicalize('koll.ro oy.nuuop.a', 200); -- error
+call test_canonicalize('koll."ro oy".nuuop.a', 200);
+call test_canonicalize('exa mple.tab_na me', 200); -- error
+call test_canonicalize('exa   mple', 200); -- error
+call test_canonicalize('    .abcd', 200); -- error
+call test_canonicalize('koll..nuuop.a', 200); -- error
+call test_canonicalize('koll."".nuuop.a', 200); -- error
+call test_canonicalize('koll', 200);
+call test_canonicalize('"koll"', 200);
+call test_canonicalize('   "  koll.rooy"  .nuuop.a', 200);
+call test_canonicalize('koll.rooy.nuuop.a', 200);
 
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('""', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('     ', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('''''', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"''''"', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.ro oy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."ro oy".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('    .abcd', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll..nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"koll"', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('   "  koll.rooy"  .nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy#_$nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.ro,oy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."rooy"  abc.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;  	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nu"uo"p', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy."nu"u"o"p', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."rooy"."nuuop.', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+-- special char
+call test_canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', 200);
+call test_canonicalize('koll.rooy#_$nuuop.a', 200);
+call test_canonicalize('koll.ro,oy.nuuop.a', 200); -- error
+call test_canonicalize('koll."rooy"  abc.nuuop.a', 200); -- error
+call test_canonicalize('koll.rooy.nuuop.', 200); -- error
+call test_canonicalize('koll.rooy.nu"uo"p', 200); -- error
+call test_canonicalize('koll.rooy."nu"u"o"p', 200); -- error
+call test_canonicalize('koll."rooy"."nuuop.', 200); -- error
+call test_canonicalize('abc.test,c.f', 200); -- error
 
 -- identy
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.123rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
+call test_canonicalize('koll.123rooy.nuuop.a', 200); -- error
+call test_canonicalize('123', 200);
+call test_canonicalize('  123  ', 200);
+call test_canonicalize('123abc', 200); -- error
+call test_canonicalize('  123.123  ', 200);
+call test_canonicalize('"123".123', 200); -- error
+call test_canonicalize('"123"."123"', 200); -- error
+call test_canonicalize('123."123"', 200);
+call test_canonicalize('  123.123456789123456789', 200);
+call test_canonicalize('123.123.123', 200); -- error
+call test_canonicalize('123.gaussdb', 200); -- error
+call test_canonicalize('"123".gaussdb', 200);
+call test_canonicalize('gaussdb.123', 200); -- error
+call test_canonicalize('gaussdb."123"', 200);
+call test_canonicalize('gaussdb."123nuuop"', 200);
+call test_canonicalize('koll._rooy.nuuop.a', 200); -- ok for og, error for A
+call test_canonicalize('koll.#rooy.nuuop.a', 200); -- error
+call test_canonicalize('koll.$rooy.nuuop.a', 200); -- error
+call test_canonicalize('koll."_rooy".nuuop.a', 200);
+call test_canonicalize('table', 200);
+call test_canonicalize('koll.rooy.table.a', 200); -- error
+call test_canonicalize('column', 200);
+call test_canonicalize('koll.column.nuuop.a', 200); -- error
 
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll._rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- ok for og, error for A
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.#rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.$rooy.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll."_rooy".nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('table', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.table.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('column', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.column.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end; -- error
-/
 -- test indentifier overlength; og >= 64, A >= 128
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a', canon_name, 100);
-	raise info 'canon_name: %', canon_name;
-end;
-/
+call test_canonicalize('koll.DoYouThinkCausalUnderstandingIsADefiningCharacteristicOfHumanCognition.nuuop.a', 200); -- error
+call test_canonicalize('agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj', 200); -- error
 
 -- param canon_len
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, -10);
-	raise info 'canon_name: %', canon_name;
-end;	-- error
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 0);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('koll.rooy.nuuop.a', canon_name, 10);
-	raise info 'canon_name: %', canon_name;
-end;
-/
-
-declare
-	canon_name varchar2(100);
-begin
-	gms_utility.canonicalize('开车.rooy.nuuop.a', canon_name, 10);
-	raise info 'canon_name: %', canon_name;
-end;
-/
+call test_canonicalize('koll.rooy.nuuop.a', -10); -- error
+call test_canonicalize('koll.rooy.nuuop.a', 0);
+call test_canonicalize('koll.rooy.nuuop.a', 10);
+call test_canonicalize('开车.rooy.nuuop.a', 10);
 
 declare
 	canon_name varchar2(10);
@@ -914,86 +679,7 @@ begin
 end;	-- error
 /
 
-declare
-   v_input_name   varchar2(255) := 'agdbchwnnw_test_adhsd_123_dbscbswcbswcbswjbc$2384243758475_fhdkj';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 200;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'original name length: %', length(v_input_name);
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end; -- error
-/
-
-declare
-   v_input_name   varchar2(255) := 'abc.test,c.f';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 100;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end; -- error
-/
-
-declare
-   v_input_name   varchar2(255) := '123';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-  gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-
-  raise info 'original name: %', v_input_name;
-  raise info 'canonicalized name: %', v_canon_name;
-  raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-declare
-   v_input_name   varchar2(255) := 'exam  ple';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-  gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-  raise info 'original name: %', v_input_name;
-  raise info 'canonicalized name: %', v_canon_name;
-  raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-declare
-   v_input_name   varchar2(255) := 'exa mple.tab_na me';
-   v_canon_name   varchar2(255);
-   v_canon_len    binary_integer := 255;
-begin
-   gms_utility.canonicalize(
-      name        => v_input_name,
-      canon_name  => v_canon_name,
-      canon_len   => v_canon_len
-   );
-   raise info 'original name: %', v_input_name;
-   raise info 'canonicalized name: %', v_canon_name;
-   raise info 'canonicalized name length: %', length(v_canon_name);
-end;
-/
-
+drop procedure test_canonicalize;
 drop schema test_utility_canonicalize;
 
 ---------------------------
@@ -1305,13 +991,27 @@ call test_name_tokenize('peer."-lokppe".vuumee@ookeyy');
 call test_name_tokenize('peer.lokp-pe.vuumee@ookeyy'); -- 9
 call test_name_tokenize('peer.lokp=pe.vuumee@ookeyy'); -- 9
 call test_name_tokenize('peer.=lokppe.vuumee@ookeyy'); -- error
+call test_name_tokenize('peer.]lokppe.vuumee@ookeyy'); -- error
 call test_name_tokenize('peer.lokp`pe.vuumee@ookeyy'); -- error
 call test_name_tokenize('peer.lokp~pe.vuumee@ookeyy'); -- error
 call test_name_tokenize('peer.lokp%pe.vuumee@ookeyy'); -- error
-call test_name_tokenize('123_abc'); -- error
-call test_name_tokenize('"123_abc"');
+
 call test_name_tokenize('123'); -- error
 call test_name_tokenize('"123"');
+call test_name_tokenize('  123  '); -- error
+call test_name_tokenize('123abc'); -- error
+call test_name_tokenize('  123.123  '); -- error
+call test_name_tokenize('"123".123');
+call test_name_tokenize('"123"."123"');
+call test_name_tokenize('  123.123456789123456789'); -- error
+call test_name_tokenize('123."123"'); -- error
+call test_name_tokenize('123.123.123'); -- error
+call test_name_tokenize('123.gaussdb'); -- error
+call test_name_tokenize('"123".gaussdb');
+call test_name_tokenize('gaussdb.123');
+call test_name_tokenize('gauss123.vuumee.123');
+call test_name_tokenize('gaussdb."123"');
+
 call test_name_tokenize(''''''); -- error
 call test_name_tokenize('"''''"');
 call test_name_tokenize(''''); -- error
@@ -1333,6 +1033,7 @@ call test_name_tokenize('peer.lokppe.vuumee@$ookeyy');
 call test_name_tokenize('peer.lokppe.vuumee@"$ookeyy"');
 call test_name_tokenize('peer.lokppe.vuumee@123ookeyy'); -- error
 call test_name_tokenize('peer.lokppe.vuumee@ookeyy.zk');
+call test_name_tokenize('peer.lokppe.vuumee@ookeyy@zk');
 call test_name_tokenize('@vuumee'); -- error
 call test_name_tokenize('peer.lokppe.vuumee@ook=eyy');
 call test_name_tokenize('peer.lokppe.vuumee@=ookeyy'); -- error
@@ -1502,6 +1203,10 @@ call test_name_resolve('public.syn_pkg.qwer', 1);
 call test_name_resolve('syn_pkg.multi_number', 1);
 call test_name_resolve('syn_pkg.delete_var', 1);
 call test_name_resolve('syn_pkg.qwer', 1);
+call test_name_resolve('public.t_pkg', 1);
+call test_name_resolve('t_pkg', 1);
+call test_name_resolve('public.syn_pkg', 1);
+call test_name_resolve('syn_pkg', 1);
 
 --  test trigger
 call test_name_resolve('public.log_resolve_after_insert', 3);
@@ -1917,8 +1622,29 @@ declare
 begin
     tab(1) := '';
     gms_utility.table_to_comma(tab, tablen, list);
-    gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
-end; -- error
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '';
+    tab(2) := '';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
+/
+declare
+    tab varchar2[];
+    tablen  integer;
+    list    varchar2;
+begin
+    tab(1) := '  ';
+    gms_utility.table_to_comma(tab, tablen, list);
+    gms_output.put_line('tablen: '|| tablen ||', result: ['|| list || ']');
+end;
 /
 declare
     tablen  integer;

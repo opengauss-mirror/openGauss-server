@@ -47,6 +47,7 @@
 #include "parser/keywords.h"
 #include "executor/lightProxy.h"
 #include "nodes/parsenodes_common.h"
+#include "workload/cpwlm.h"
 #include "gms_utility.h"
 
 PG_MODULE_MAGIC;
@@ -65,9 +66,9 @@ typedef Oid (*SearchOidByName)(Oid namespaceId, char* name, NameResolveVar* var)
 static List* GetRelationsInSchema(char *namespc);
 static void DoAnalyzeSchemaStatistic(char* schema, AnalyzeVar* var, AnalyzeMethodOpt methodOpt);
 static void DoDeleteSchemaStatistic(char* schema);
-static char* CanonNameParseInternal(char* name, int len, bool allowAllDigital);
+static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, bool trimSpace);
 static bool DetectKeyword(char* words);
-static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword);
+static bool CheckLegalIdenty(char* w, bool checkKeyword);
 static TokenizeVar* MakeTokenizeVar();
 static void DestoryTokenizeVar(TokenizeVar* var);
 static TokenizeVar* NameParseInternal(char* name, int len, bool truncated);
@@ -543,15 +544,11 @@ static bool DetectKeyword(char* w)
     return kwnum >= 0 && ScanKeywordCategories[kwnum] != UNRESERVED_KEYWORD;
 }
 
-static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
+static bool CheckLegalIdenty(char* w, bool checkKeyword)
 {
     if (strlen(w) >= NAMEDATALEN) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("identifier too long, max length is %d", (NAMEDATALEN - 1))));
-    }
-    /* For gms_canonicalize, legual identy must not start with digit */
-    if (checkDigital && isdigit(*w)) {
-        return false;
     }
     /* '_' '$' '#' are legal chars, but only '_' can be the first char of a string */
     if (*w == '$' || *w == '#') {
@@ -563,139 +560,167 @@ static bool CheckLegalIdenty(char* w, bool checkDigital, bool checkKeyword)
     return true;
 }
 
-static bool ExistsInnerSpace(char* w)
+static bool CheckAllDigits(char* w, char* name)
 {
     if (w == NULL) {
         return false;
     }
-
+    
     int i = 0;
-    char lastChar = '\0';
-
+    if (!isdigit(w[i++])) {
+        return false;
+    }
     for (; w[i] != '\0'; i++) {
-        if (lastChar == ' ' && w[i] != ' ') {
-            return true;
+        if (!isdigit(w[i])) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
         }
-        lastChar = w[i];
     }
-
-    return false;
-}
-
-static bool CheckAllDigital(char* w)
-{
-    if (w == NULL) {
-        return false;
-    }
-
-    char* p = w;
-    for (; *p != '\0' && !isdigit(*p); p++) {
-        return false;
-    }
-
     return true;
 }
 
-static char* CanonNameParseInternal(char* name, int len, bool allowAllDigital)
+/*
+ * String like 123 | 123.123 is ok.
+ * String like 123."123" | 123abc | 123.123.123 | abc.123 is error.
+ */
+static bool CheckLegalDigit(char* name, char* w, bool* firstDigit, bool allowAllDigit, int dotted, bool quotted)
+{
+    if (w == NULL) {
+        return false;
+    }
+    /* 123."123" */
+    if (quotted && dotted == 1 && *firstDigit) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
+    }
+    if (!quotted && CheckAllDigits(w, name)) {
+        /* abc.abc.123 or don't allow all digits */
+        if (!allowAllDigit || dotted >= 2) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
+        }
+        if (dotted == 0) {
+            *firstDigit = true;
+        } else if (dotted == 1 && !*firstDigit) {
+            /* abc.123 */
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
+        }
+        return true;
+    }
+    /* 123.abc */
+    if (dotted == 1 && *firstDigit) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
+    }
+    return false;
+}
+
+static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, bool trimSpace)
 {
     char* format = NULL;
     StringInfo result;
     StringInfo tmp;
     bits8 quoteState = QUOTE_NONE;
     char curChar = '\0';
+    char lastChar = '\0';
     int traveLen = 0;
-    bool dotted = false;
+    int dotted = 0;
+    bool firstDigit = false;
 
     result = makeStringInfo();
     tmp = makeStringInfo();
 
-    while (*name != '\0' && traveLen < len) {
-        curChar = *name;
+    while (name[traveLen] != '\0' && traveLen < len) {
+        curChar = name[traveLen];
         traveLen++;
-        name++;
 
-        if (!IS_QUOTE_STARTED(quoteState) && curChar == ' ' && tmp->len == 0) {
-            continue;
-        } else if (curChar == '"') {
+        if (curChar == '"') {
             if (BEFORE_QUOTE_STARTED(quoteState)) {
                 if (tmp->len != 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid parameter value \"%s\" before quotation", (name - traveLen))));
+                                    errmsg("Invalid parameter value \"%s\" before quotation", name)));
                 }
                 quoteState = QUOTE_STARTED;
             } else if (IS_QUOTE_STARTED(quoteState)) {
                 if (tmp->len == 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid parameter value \"%s\" with zero length", (name - traveLen))));
+                                    errmsg("Invalid parameter value \"%s\" with zero length", name)));
                 }
                 quoteState = QUOTE_ENDED;
             } else {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Invalid parameter value \"%s\" after quotation", (name - traveLen))));
+                                errmsg("Invalid parameter value \"%s\" after quotation", name)));
             }
+
+        } else if (IS_QUOTE_STARTED(quoteState)) {
+            appendStringInfoChar(tmp, curChar);
+
+        } else if (curChar == ' ') {
+            if (tmp->len > 0 && lastChar != '\0') {
+                lastChar = curChar;
+            }
+            if (!trimSpace) {
+                appendStringInfoChar(tmp, curChar);
+            }
+
         } else if (curChar == '.') {
-            if (IS_QUOTE_STARTED(quoteState)) {
-                appendStringInfoChar(tmp, curChar);
-            } else {
-                dotted = true;
-                if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true, dotted)) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("Invalid paramter value \"%s\" with special words", (name - traveLen))));
-                }
-                if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid paramter value \"%s\"", (name - traveLen))));
-                }
-                if (tmp->len == 0) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid parameter value \"%s\" with zero length", (name - traveLen))));
-                }
-                if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
-                }
-                appendStringInfo(result, dotted ? "\"%s\"." : "%s.", tmp->data);
-                resetStringInfo(tmp);
-                quoteState = QUOTE_NONE;
-            }
-        } else {
-            if (IS_QUOTE_STARTED(quoteState)) {
-                appendStringInfoChar(tmp, curChar);
-            } else if (IS_QUOTE_END(quoteState)) {
-                if (curChar == ' ') continue;
+            if (tmp->len == 0) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Invalid parameter value \"%s\" after quotation", (name - traveLen))));
-            } else {
-                if (InvalidCanonChars(curChar)) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Invalid parameter value \"%s\" with special character", (name - traveLen))));
-                }
-                appendStringInfoChar(tmp, pg_toupper(curChar));
+                                errmsg("Invalid parameter value \"%s\" with zero length", name)));
             }
+            if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, dotted)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid parameter value \"%s\" with special words", name)));
+            }
+
+            bool digit = CheckLegalDigit(name, tmp->data, &firstDigit, allowAllDigit,
+                                        dotted, IS_QUOTE_END(quoteState));
+            dotted++;
+            if (digit) {
+                appendStringInfo(result, "%s.", tmp->data);
+            } else {
+                appendStringInfo(result, dotted ? "\"%s\"." : "%s.", tmp->data);
+            }
+
+            resetStringInfo(tmp);
+            quoteState = QUOTE_NONE;
+            lastChar = '\0';
+
+        } else {
+            if (IS_QUOTE_END(quoteState)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid parameter value \"%s\" after quotation", name)));
+            }
+            if (InvalidCanonChars(curChar)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("Invalid parameter value \"%s\" with special character", name)));
+            }
+            if (lastChar == ' ') {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
+            }
+            appendStringInfoChar(tmp, pg_toupper(curChar));
+            lastChar = curChar;
+
         }
     }
 
     if (IS_QUOTE_STARTED(quoteState)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid parameter value \"%s\" with quotation not closed", (name - traveLen))));
+                        errmsg("Invalid parameter value \"%s\" with quotation not closed", name)));
     }
-    if (dotted && tmp->len == 0) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
-    }
-    if (BEFORE_QUOTE_STARTED(quoteState) && ExistsInnerSpace(tmp->data)) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid parameter value \"%s\"", (name - traveLen))));
-    }
-    if (tmp->len > 0) {
-        if (!(allowAllDigital && !dotted && CheckAllDigital(tmp->data))
-             && BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true, dotted)) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("Invalid parameter value \"%s\" with special words", (name - traveLen))));
+    if (tmp->len == 0) {
+        if (dotted) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid parameter value \"%s\"", name)));
         }
-        appendStringInfo(result, dotted ? "\"%s\"" : "%s", tmp->data);
+        appendStringInfo(result, "%s", name);
+    } else {
+        if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, dotted)) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("Invalid parameter value \"%s\" with special words", name)));
+        }
+        bool digit = CheckLegalDigit(name, tmp->data, &firstDigit, allowAllDigit,
+                                    dotted, IS_QUOTE_END(quoteState));
+        if (digit) {
+            appendStringInfo(result, "%s", tmp->data);
+        } else {
+            appendStringInfo(result, dotted ? "\"%s\"." : "%s", tmp->data);
+        }
     }
 
     format = pstrdup(result->data);
@@ -732,14 +757,13 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
                 errmsg("Input parameter \"canon_len\" value \"%d\" should be greater than or equal to 0 ", canonLen)));
     }
 
-    result = CanonNameParseInternal(name, len, true);
+    result = CanonicalizeParseInternal(name, len, true, true);
 
     traveLen = strlen(result);
     canonLen = canonLen < traveLen ? canonLen : traveLen;
     output = cstring_to_text_with_len(result, canonLen);
 
     pfree_ext(result);
-
     PG_RETURN_TEXT_P(output);
 }
 
@@ -1060,23 +1084,18 @@ static TokenizeVar* NameParseInternal(char* name, int len, bool truncated)
     bits8 quoteState = QUOTE_NONE;
     char curChar = '\0';
     char lastChar = '\0';
+    bool startDigit = false;
     bool startLink = false;
     TokenizeVar* var;
     StringInfo tmp = makeStringInfo();
 
     var = MakeTokenizeVar();
 
-    while (*name != '\0' && traveLen < len) {
-        curChar = *name;
+    while (name[traveLen] != '\0' && traveLen < len) {
+        curChar = name[traveLen];
         traveLen++;
-        name++;
 
-        if (!IS_QUOTE_STARTED(quoteState) && curChar == ' ') {
-            if (tmp->len > 0) {
-                lastChar = curChar;
-            }
-            continue;
-        } else if (curChar == '"') {
+        if (curChar == '"') {
             if (BEFORE_QUOTE_STARTED(quoteState)) {
                 if (tmp->len != 0) {
                     /* If there exists valid char before double quote, end read. */
@@ -1087,106 +1106,100 @@ static TokenizeVar* NameParseInternal(char* name, int len, bool truncated)
             } else if (IS_QUOTE_STARTED(quoteState)) {
                 if (tmp->len == 0) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid input value \"%s\" with zero length", (name - traveLen))));
+                                    errmsg("Invalid input value \"%s\" with zero length", name)));
                 }
                 quoteState = QUOTE_ENDED;
             } else {
                 /* If there are more than one pair of double quote, end read. */
                 break;
             }
-        } else if (curChar == '.' || curChar == '@') {
-            if (IS_QUOTE_STARTED(quoteState) || startLink) {
-                appendStringInfoChar(tmp, curChar);
-            } else {
-                if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, false, true)) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("Invalid input value \"%s\" with special words", (name - traveLen))));
-                }
-                if (tmp->len == 0) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid input value \"%s\" with zero length", (name - traveLen))));
-                }
-                if (list_length(list) >= 3) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid input value \"%s\"", (name - traveLen))));
-                }
-                if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
-                    /* If word start with digit, end read. */
-                    break;
-                }
-                list = lappend(list, pstrdup(tmp->data));
-                resetStringInfo(tmp);
-                quoteState = QUOTE_NONE;
-                if (curChar == '@') {
-                    startLink = true;
-                }
+
+        } else if (IS_QUOTE_STARTED(quoteState)) {
+            appendStringInfoChar(tmp, curChar);
+
+        } else if (curChar == ' ') {
+            if (tmp->len > 0) {
+                lastChar = curChar;
             }
-        } else {
-            if (IS_QUOTE_STARTED(quoteState)) {
+            continue;
+
+        } else if (curChar == '.' || curChar == '@') {
+            if (startLink) {
                 appendStringInfoChar(tmp, curChar);
-            } else if (lastChar == ' ' && curChar != ' ') {
+                continue;
+            }
+            if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid input value \"%s\" with special words", name)));
+            }
+            if (tmp->len == 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid input value \"%s\" with zero length", name)));
+            }
+            if (list_length(list) >= 3) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input value \"%s\"", name)));
+            }
+            list = lappend(list, pstrdup(tmp->data));
+            if (curChar == '@') {
+                startLink = true;
+            }
+
+            lastChar = '\0';
+            quoteState = QUOTE_NONE;
+            resetStringInfo(tmp);
+
+        } else {
+            if (IsDangerousChars(curChar)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid input value \"%s\" with special character", name)));
+            }
+            /* If meet special char or start with digit, end read. */
+            if (IS_QUOTE_END(quoteState) || lastChar == ' ' || IsTruncateChars(curChar)
+                || (tmp->len == 0 && isdigit(curChar))) {
                 if (!truncated) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
+                                errmsg("Invalid input value \"%s\" with special character", name)));
                 }
-                traveLen--;
-                break;
-            } else if (IS_QUOTE_END(quoteState)) {
-                traveLen--;
-                break;
-            } else {
-                if (IsDangerousChars(curChar)) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
-                }
-                if (IsTruncateChars(curChar)) {
-                    if (!truncated) {
-                        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg("Invalid input value \"%s\" with special character", (name - traveLen))));
-                    }
-                    /* If meet special char, end read. */
+                if (tmp->len == 0 && isdigit(curChar)) {
+                    startDigit = true;
                     traveLen--;
-                    break;
+                    appendStringInfoChar(tmp, pg_toupper(curChar));
                 }
-                appendStringInfoChar(tmp, pg_toupper(curChar));
+                traveLen--;
+                break;
             }
+            lastChar = curChar;
+            appendStringInfoChar(tmp, pg_toupper(curChar));
+
         }
-        lastChar = curChar;
     }
 
     if (IS_QUOTE_STARTED(quoteState)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid input value \"%s\" with quotation not closed", (name - traveLen))));
+                        errmsg("Invalid input value \"%s\" with quotation not closed", name)));
     }
-    if (tmp->len == 0 && !startLink) {
+    if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, true)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("Invalid input value \"%s\"", (name - traveLen))));
-    }
-    if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, false, true)) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                errmsg("Invalid input value \"%s\" with special words", (name - traveLen))));
+                errmsg("Invalid input value \"%s\" with special words", name)));
     }
     if (startLink) {
+        if (BEFORE_QUOTE_STARTED(quoteState) && startDigit) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid dblink value \"%s\"", name)));
+        }
         if (tmp->len == 0) {
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("dblink is empty \"%s\"", (name - traveLen))));
-        } else if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("Invalid dblink value \"%s\"", (name - traveLen))));
-        } else {
-            var->dblink = (char *) palloc0(tmp->len + 1);
-            errno_t rc = strcpy_s(var->dblink, tmp->len + 1, tmp->data);
-            securec_check(rc, "\0", "\0");
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("dblink is empty \"%s\"", name)));
         }
+        var->dblink = (char *) palloc0(tmp->len + 1);
+        errno_t rc = strcpy_s(var->dblink, tmp->len + 1, tmp->data);
+        securec_check(rc, "\0", "\0");
     } else {
-        if (list_length(list) >= 3) {
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("Invalid input value \"%s\"", (name - traveLen))));
+        if (tmp->len == 0) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input value \"%s\"", name)));
         }
-        if (BEFORE_QUOTE_STARTED(quoteState) && isdigit(*(tmp->data))) {
-            traveLen -= (tmp->len + 2);
-        } else {
+        if (!startDigit) {
+            if (list_length(list) >= 3) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid input value \"%s\"", name)));
+            }
             list = lappend(list, pstrdup(tmp->data));
         }
     }
@@ -1593,6 +1606,10 @@ static void ResolveObjectNameByContext(NameResolveContext context, Oid namespace
         case NR_CONTEXT_PLSQL:
             /* Search func、proc、package */
             ResolveContextName(context, namespaceId, resolveName, var, SearchProcOidByName);
+            if (!OidIsValid(var->objectId)) {
+                /* search schema.pkg or pkg */
+                ResolveContextName(context, namespaceId, resolveName, var, SearchPkgOidByName);
+            }
             break;
         case NR_CONTEXT_TABLE:
             ResolveContextName(context, namespaceId, resolveName, var, SearchRelOidByName);
@@ -2027,7 +2044,7 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
             }
             tokenLen = end - start;
             token = pnstrdup(&namelist[start], tokenLen);
-            tmp = CanonNameParseInternal(token, tokenLen, false);
+            tmp = CanonicalizeParseInternal(token, tokenLen, false, false);
             if (tmp == NULL || *tmp == '\0') {
                 pfree_ext(token);
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
@@ -2048,7 +2065,7 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
 
     tokenLen = end - start;
     token = pnstrdup(&namelist[start], tokenLen);
-    tmp = CanonNameParseInternal(token, tokenLen, false);
+    tmp = CanonicalizeParseInternal(token, tokenLen, false, false);
     if (tmp == NULL || *tmp == '\0') {
         pfree_ext(token);
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
@@ -2158,7 +2175,8 @@ Datum gms_table_to_comma(PG_FUNCTION_ARGS)
     Datum values[2];
     bool nulls[2];
     FmgrInfo flinfo;
-    char* result = NULL;
+    FunctionCallInfoData arrFcinfo;
+    Datum result;
 
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid Input value")));
@@ -2170,13 +2188,29 @@ Datum gms_table_to_comma(PG_FUNCTION_ARGS)
     BlessTupleDesc(tupdesc);
 
     fmgr_info(ARRAYTOSTRINGFUNCOID, &flinfo);
+    InitFunctionCallInfoData(arrFcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
 
-    values[0] = DirectFunctionCall2(array_length, PG_GETARG_DATUM(0), Int32GetDatum(1));
-    nulls[0] = false;
+    arrFcinfo.arg[0] = PG_GETARG_DATUM(0);
+    arrFcinfo.arg[1] = CStringGetTextDatum(",");
+    arrFcinfo.argnull[0] = false;
+    arrFcinfo.argnull[1] = false;
+    arrFcinfo.can_ignore = false;
+	
+    result = array_to_text(&arrFcinfo);
 
-    result = TextDatumGetCString(FunctionCall2Coll(&flinfo, InvalidOid, PG_GETARG_DATUM(0), CStringGetTextDatum(",")));
-    values[1] = CStringGetDatum(result);
-    nulls[1] = false;
+    if (arrFcinfo.isnull) {
+        values[0] = Int32GetDatum(0);
+        nulls[0] = false;
 
+        values[1] = (Datum) 0;
+        nulls[1] = true;
+    } else {
+        values[0] = DirectFunctionCall2(array_length, PG_GETARG_DATUM(0), Int32GetDatum(1));
+        nulls[0] = false;
+
+        values[1] = CStringGetDatum(TextDatumGetCString(result));
+        nulls[1] = false;
+    }
+    
     return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls));
 }
