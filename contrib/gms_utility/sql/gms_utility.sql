@@ -1326,6 +1326,57 @@ $$ language plpgsql;
 select t_outter(100, 2);
 select t_outter(100, 0);
 
+create table t_error_log (
+    pro_name varchar2(300),
+    error_desc varchar2(2000),
+    exec_date date
+);
+create table test_error_stack(id int unique);
+insert into test_error_stack values(1);
+
+create or replace procedure pr_error_code_test is
+    v_backtrace varchar2(1000);
+    v_error varchar2(2000);
+begin
+    begin
+        insert into test_error_stack (id) values (1);
+        commit;
+    exception
+        when others then
+            raise;
+    end;
+exception
+    when others then
+        v_backtrace := gms_utility.format_error_stack;
+        v_error := '异常错误为:' || v_backtrace;
+        insert into t_error_log (pro_name, error_desc, exec_date)
+        values ('pr_error_code_test', v_error, sysdate);
+end pr_error_code_test;
+/
+
+call pr_error_code_test();
+
+select pro_name, error_desc from t_error_log;
+
+declare
+    v_str varchar2(10) := '123';
+    v_num number;
+    v_error_backtrace varchar2(10);
+begin
+    v_num := to_number(v_str);
+    v_error_backtrace := gms_utility.format_error_stack;
+    gms_output.put_line('backtrace: ' || v_error_backtrace);
+exception
+    when others then
+        v_error_backtrace := gms_utility.format_error_stack;
+        gms_output.put_line('backtrace: ' || v_error_backtrace);
+end;
+/
+
+drop procedure pr_error_code_test;
+drop table t_error_log;
+drop table test_error_stack;
+
 -- test stack overflow
 create or replace procedure t_recursion(count in out int)
 as
@@ -1387,6 +1438,57 @@ $$ language plpgsql;
 
 select t_outter(100, 2);
 select t_outter(100, 0);
+
+create table t_error_log (
+    pro_name varchar2(300),
+    error_desc varchar2(2000),
+    exec_date date
+);
+create table test_error_stack(id int unique);
+insert into test_error_stack values(1);
+
+create or replace procedure pr_error_code_test is
+    v_backtrace varchar2(1000);
+    v_error varchar2(2000);
+begin
+    begin
+        insert into test_error_stack (id) values (1);
+        commit;
+    exception
+        when others then
+            raise;
+    end;
+exception
+    when others then
+        v_backtrace := gms_utility.format_error_backtrace;
+        v_error := '异常错误为:' || v_backtrace;
+        insert into t_error_log (pro_name, error_desc, exec_date)
+        values ('pr_error_code_test', v_error, sysdate);
+end pr_error_code_test;
+/
+
+call pr_error_code_test();
+
+select pro_name, error_desc from t_error_log;
+
+declare
+    v_str varchar2(10) := '123';
+    v_num number;
+    v_error_backtrace varchar2(10);
+begin
+    v_num := to_number(v_str);
+    v_error_backtrace := gms_utility.format_error_backtrace;
+    gms_output.put_line('backtrace: ' || v_error_backtrace);
+exception
+    when others then
+        v_error_backtrace := gms_utility.format_error_backtrace;
+        gms_output.put_line('backtrace: ' || v_error_backtrace);
+end;
+/
+
+drop procedure pr_error_code_test;
+drop table t_error_log;
+drop table test_error_stack;
 
 -- test stack overflow
 create or replace procedure t_recursion(count in out int, max in int)
