@@ -277,7 +277,11 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
      * that we produce a zero-element array if no tuples are produced (this is
      * a change from pre-8.3 behavior of returning NULL).
      */
+#ifdef USE_SPQ
+    result = BoolGetDatum(sub_link_type == ALL_SUBLINK || sub_link_type == NOT_EXISTS_SUBLINK);
+#else
     result = BoolGetDatum(sub_link_type == ALL_SUBLINK);
+#endif
     *isNull = false;
 
     for (slot = ExecProcNode(planstate); !TupIsNull(slot); slot = ExecProcNode(planstate)) {
