@@ -446,9 +446,9 @@ GROUP BY ROLLUP(Column_026);
                        ->  CStore Scan on vector_result_engine.job_classification table_030
                              Output: 'Dummy'
                        ->  Vector Adapter
-                             Output: ('Dummy')
+                             Output: (NULL::integer)
                              ->  Result
-                                   Output: 'Dummy'
+                                   Output: NULL::integer
                                    One-Time Filter: false
                  ->  Vector Materialize
                        Output: table_037.location_type_desc
@@ -487,9 +487,9 @@ GROUP BY ROLLUP(Column_026);
                            ->  CStore Scan on vector_result_engine.job_classification table_030
                                  Output: 'Dummy'
                            ->  Vector Adapter
-                                 Output: ('Dummy')
+                                 Output: (NULL::integer)
                                  ->  Result
-                                       Output: 'Dummy'
+                                       Output: NULL::integer
                                        One-Time Filter: false
                      ->  Vector Materialize
                            Output: table_037.location_type_desc
