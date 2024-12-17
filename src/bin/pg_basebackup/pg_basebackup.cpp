@@ -1691,7 +1691,7 @@ static void GsTarDirCheck(char* tarfilename)
     struct dirent* ent;
     while (1) {
         ent = readdir(dir);
-        if (ent <= 0) {
+        if (!ent) {
             break;
         }
         if ((strcmp(".", ent->d_name) == 0) || (strcmp("..", ent->d_name) == 0)) {

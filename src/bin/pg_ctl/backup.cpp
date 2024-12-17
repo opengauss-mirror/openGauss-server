@@ -2003,7 +2003,7 @@ bool CopySecureFilesMain(char* dirname, uint32 term)
         }
         while (1) {
             de = readdir(dir);
-            if (de <= 0) {
+            if (!de) {
                 break;
             }
             if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
