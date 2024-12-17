@@ -71,16 +71,16 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 
         pqinfo.lc = entryPoint->level;
         ep = list_make1(HnswEntryCandidate(
-                        base, entryPoint, q, index, procinfo, collation, true, NULL, enablePQ, &pqinfo));
+                        base, entryPoint, q, index, procinfo, collation, false, NULL, enablePQ, &pqinfo));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, true, NULL, NULL, enablePQ, &pqinfo);
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, enablePQ, &pqinfo);
             ep = w;
         }
         int hnsw_ef_search = u_sess->datavec_ctx.hnsw_ef_search;
         pqinfo.lc = 0;
         w = HnswSearchLayer(base, q, ep, hnsw_ef_search, 0, index, procinfo, collation, m,
-                            true, NULL, NULL, enablePQ, &pqinfo);
+                            false, NULL, NULL, enablePQ, &pqinfo);
     } else {
         ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
