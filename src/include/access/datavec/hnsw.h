@@ -71,6 +71,9 @@
 #define HNSW_DEFAULT_EF_SEARCH 40
 #define HNSW_MIN_EF_SEARCH 1
 #define HNSW_MAX_EF_SEARCH 1000
+#define HNSW_DEFAULT_THRESHOLD INT32_MAX
+#define HNSW_MIN_THRESHOLD 160
+#define HNSW_MAX_THRESHOLD INT32_MAX
 #define HNSW_DEFAULT_ENABLE_PQ false
 #define HNSW_DEFAULT_PQ_M 8
 #define HNSW_MIN_PQ_M 1
@@ -622,8 +625,6 @@ typedef struct st_hnswpq_func {
     int (*GetPQDistanceTableAdc)(float *vector, const PQParams *params, float *pqDistanceTable);
     int (*GetPQDistance)(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
                          const float *pqDistanceTable, float *PQDistance);
-    int (*Rerank)(float *query, const PQParams *params, const int candidateNum,
-                                 Candidate **candidateSet, Candidate **sortSet);
 } hnswpq_func_t;
 
 
@@ -686,7 +687,6 @@ int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable);
 int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
 int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
                   const float *pqDistanceTable, float *PQDistance);
-int Rerank(float* query, const PQParams *params, const int candidateNum, Candidate **candidateSet, Candidate **sortSet);
 int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ);
 
