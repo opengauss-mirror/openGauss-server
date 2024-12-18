@@ -2207,7 +2207,7 @@ static void getProcedureTypeDescription(StringInfo buffer, Oid procid)
 
     if (prokind == PROKIND_AGGREGATE)
         appendStringInfoString(buffer, "aggregate");
-    else if (prokind == PROKIND_PROCEDURE)
+    else if (PROC_IS_PRO(prokind))
         appendStringInfoString(buffer, "procedure");
     else 
         appendStringInfoString(buffer, "function");

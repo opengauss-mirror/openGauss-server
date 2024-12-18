@@ -371,7 +371,7 @@ static void ProcInsertGsSource(Oid funcOid, bool status)
 
     char* name = NameStr(procStruct->proname);
     Oid nspid = procStruct->pronamespace;
-    const char* type = (prokind == PROKIND_PROCEDURE) ? ("procedure") : ("function");
+    const char* type = PROC_IS_PRO(prokind) ? ("procedure") : ("function");
     if (strcasecmp(get_language_name((Oid)procStruct->prolang), "plpgsql") != 0) {
         ReleaseSysCache(procTup);
         return;

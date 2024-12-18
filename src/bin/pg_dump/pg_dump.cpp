@@ -14006,7 +14006,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (hasProKindAttr) {
         proKind = PQgetvalue(res, 0, PQfnumber(res, "prokind"));
         if (proKind != NULL) {
-            isProcedure = proKind[0] == PROKIND_PROCEDURE;
+            isProcedure = PROC_IS_PRO(proKind[0]);
         }
     }
 

@@ -1451,7 +1451,14 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     values[Anum_pg_proc_fenced - 1] = BoolGetDatum(fenced);
     values[Anum_pg_proc_shippable - 1] = BoolGetDatum(shippable);
     values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
-    char functionKind = proIsProcedure ? PROKIND_PROCEDURE : (isPipelined ? PROKIND_PIPELIEND : PROKIND_FUNCTION);
+    char functionKind;
+    if (proIsProcedure) {
+        functionKind = OidIsValid(profuncid) ? PROKIND_SUBPROCEDURE : PROKIND_PROCEDURE;
+    } else if (isPipelined) {
+        functionKind = PROKIND_PIPELINED;
+    } else {
+        functionKind = OidIsValid(profuncid) ? PROKIND_SUBFUNCTION : PROKIND_FUNCTION;
+    }
     values[Anum_pg_proc_prokind - 1] = CharGetDatum(functionKind);
 
     if (proargsrc != NULL) {

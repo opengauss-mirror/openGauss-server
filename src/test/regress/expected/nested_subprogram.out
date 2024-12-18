@@ -63,6 +63,12 @@ select func();
     7
 (1 row)
 
+select prokind from pg_proc where proname = 'sum1';
+ prokind 
+---------
+ v
+(1 row)
+
 CREATE or replace FUNCTION func(a int, b int) returns int AS $$
 DECLARE 
 ans int:=0;
@@ -1846,6 +1852,12 @@ PL/pgSQL function proc2_1041292() line 10 at PERFORM
 (1 row)
 
 drop table tmp1041292;
+select prokind from pg_proc where proname = 'sub_proc2_1041292';
+ prokind 
+---------
+ b
+(1 row)
+
 create table t_1202881(id int,name varchar(20));
 insert into t_1202881 values(2,'clouds break');
 create or replace procedure proc2_1202881 is

@@ -61,6 +61,8 @@ END;
 $$ LANGUAGE plpgsql;
 select func();
 
+select prokind from pg_proc where proname = 'sum1';
+
 CREATE or replace FUNCTION func(a int, b int) returns int AS $$
 DECLARE 
 ans int:=0;
@@ -1519,6 +1521,8 @@ end;
 /
 call proc2_1041292();
 drop table tmp1041292;
+
+select prokind from pg_proc where proname = 'sub_proc2_1041292';
 
 create table t_1202881(id int,name varchar(20));
 insert into t_1202881 values(2,'clouds break');
