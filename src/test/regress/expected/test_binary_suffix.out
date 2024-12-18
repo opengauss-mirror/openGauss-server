@@ -914,6 +914,9 @@ create type binary_double_infinity AS (
     name VARCHAR(50),
     age INT
 );
+ERROR:  syntax error at or near "binary_double_infinity"
+LINE 1: create type binary_double_infinity AS (
+                    ^
 drop type binary_double_infinity;
 ERROR:  syntax error at or near "binary_double_infinity"
 LINE 1: drop type binary_double_infinity;
@@ -982,4 +985,3 @@ SELECT * FROM employees;
 
 DROP TABLE employees;
 drop schema if exists test_binary cascade;
-NOTICE:  drop cascades to type "binary_double_infinity"
