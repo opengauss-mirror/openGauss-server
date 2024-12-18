@@ -70,10 +70,10 @@
 #define HNSW_MAX_EF_CONSTRUCTION 1000
 #define HNSW_DEFAULT_EF_SEARCH 40
 #define HNSW_MIN_EF_SEARCH 1
-#define HNSW_MAX_EF_SEARCH 1000
 #define HNSW_DEFAULT_THRESHOLD INT32_MAX
 #define HNSW_MIN_THRESHOLD 160
 #define HNSW_MAX_THRESHOLD INT32_MAX
+#define HNSW_MAX_EF_SEARCH 1000000
 #define HNSW_DEFAULT_ENABLE_PQ false
 #define HNSW_DEFAULT_PQ_M 8
 #define HNSW_MIN_PQ_M 1
@@ -572,6 +572,9 @@ typedef struct HnswScanOpaqueData {
 
     /* used in ustore only */
     VectorScanData vs;
+    int length;
+    int currentLoc;
+    Datum value;
 } HnswScanOpaqueData;
 
 typedef HnswScanOpaqueData *HnswScanOpaque;
