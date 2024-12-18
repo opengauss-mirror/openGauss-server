@@ -3094,7 +3094,7 @@ static Node* transformTypeCast(ParseState* pstate, TypeCast* tc)
     if (tc->default_expr) {
         default_expr = transformExprRecurse(pstate, tc->default_expr);
     }
-    
+
     Oid inputType = exprType(expr);
     Oid targetType;
     int32 targetTypmod;

@@ -1743,6 +1743,11 @@ extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
 /* nlssort.cpp */
 extern Datum nlssort(PG_FUNCTION_ARGS);
 extern Datum nls_initcap(PG_FUNCTION_ARGS);
+extern Datum nls_lower_plain(PG_FUNCTION_ARGS);
+extern Datum nls_lower_fmt(PG_FUNCTION_ARGS);
+extern Datum nls_lower_byte(PG_FUNCTION_ARGS);
+extern Datum nls_lower_fmt_byte(PG_FUNCTION_ARGS);
+
 extern char *remove_trailing_spaces(const char *src_str);
 
 // template function implementation

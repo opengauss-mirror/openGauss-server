@@ -751,12 +751,11 @@ SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', '') ;
 (1 row)
 
 SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE=xxx') ;
-ERROR:  NLS parameter NLS_DATE_LANGUAGE=xxx is not supported!
+ERROR:  NLS parameter xxx is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'yyy=ENGLISH') ;
-ERROR:  NLS parameter yyy=ENGLISH is not supported!
-DETAIL:  Not support the given nls parameter.
+ERROR:  invalid format: yyy
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(DATE '2024-08-05', 'ERROR', 'NLS_DATE_LANGUAGE = ENGLISH') ;
  to_char 
@@ -792,6 +791,10 @@ LINE 1: SELECT TO_CHAR(DATE '0-12-31', 'DY, DD-MON-YYYY', 'NLS_DATE_...
                             ^
 HINT:  Perhaps you need a different "datestyle" setting.
 CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'NLS_DATE_LANGUAGE = ') ;
+ERROR:  NLS parameter  is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
 SELECT TO_CHAR('2023-10-24 14:30:00'::timestamp, 'Day, DDth Month YYYY HH:MI:SS AM', 'NLS_DATE_LANGUAGE = ENGLISH') ;
                   to_char                   
 --------------------------------------------
@@ -813,6 +816,10 @@ SELECT to_char('2024-01-01 25:61:61'::timestamp, 'YYYY-MM-DD HH24:MI:SS', 'NLS_D
 ERROR:  date/time field value out of range: "2024-01-01 25:61:61"
 LINE 1: SELECT to_char('2024-01-01 25:61:61'::timestamp, 'YYYY-MM-DD...
                        ^
+CONTEXT:  referenced column: to_char
+SELECT to_char('2024-01-01 20:01:01'::timestamp, 'YYYY-MM-DD HH24:MI:SS', 'NLS_DATE_LANGUAGE = ');
+ERROR:  NLS parameter  is not supported!
+DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYY-MON', 'NLS_DATE_LANGUAGE = ENGLISH');
  to_char 
@@ -879,11 +886,14 @@ ERROR:  Interval simultaneously includes 'year to month' and 'day to second' is 
 DETAIL:  Not support the given interval data.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'NLS_DATE_LANGUAGE=xxx') ;
-ERROR:  NLS parameter NLS_DATE_LANGUAGE=xxx is not supported!
+ERROR:  NLS parameter xxx is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'yyy=ENGLISH') ;
-ERROR:  NLS parameter yyy=ENGLISH is not supported!
+ERROR:  invalid format: yyy
+CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'NLS_DATE_LANGUAGE = ') ;
+ERROR:  NLS parameter  is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 CREATE TABLE blob_table (c1 BLOB);

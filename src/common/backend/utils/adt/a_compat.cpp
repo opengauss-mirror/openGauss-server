@@ -14,11 +14,16 @@
 #include "knl/knl_variable.h"
 
 #include "catalog/pg_proc.h"
+#include "catalog/pg_collation.h"
 #include "common/int.h"
+#include "nodes/pg_list.h"
 #include "utils/builtins.h"
 #include "utils/formatting.h"
+#include "utils/rangetypes.h"
+#include "utils/tzparser.h"
 #include "mb/pg_wchar.h"
 #include "parser/parser.h"
+#include "parser/parse_type.h"
 #include "miscadmin.h"
 
 static text* dotrim(const char* string, int stringlen, const char* set, int setlen, bool doltrim, bool dortrim);
@@ -150,6 +155,80 @@ Datum nls_initcap(PG_FUNCTION_ARGS)
 
     PG_RETURN_TEXT_P(result);
 }
+
+/********************************************************************
+ *
+ * nls_lower
+ *
+ * Syntax:
+ *
+ *	 text nls_lower(text)
+ *	 text nls_lower(text, text)
+ *   bytea nls_lower(bytea)
+ *   bytea nls_lower(bytea, text)
+ *
+ * Purpose:
+ *
+ *	 Returns string, with lower letter of each word. A word is defined as a sequence of
+ *	 alphanumeric characters, delimited by non-alphanumeric characters.
+ *
+ ********************************************************************/
+
+Datum nls_lower_plain(PG_FUNCTION_ARGS)
+{
+    return lower(fcinfo);
+}
+
+Datum nls_lower_fmt(PG_FUNCTION_ARGS)
+{
+    auto arg1_val = text_to_cstring(PG_GETARG_TEXT_P(1));
+    char* nlsFmtStr = pg_findformat("NLS_SORT", arg1_val);
+    if (nlsFmtStr) {
+        List* colnameList = list_make1(makeString(nlsFmtStr));
+        fcinfo->fncollation = LookupCollation(nullptr, colnameList, 0);
+    } else {
+        fcinfo->fncollation = DEFAULT_COLLATION_OID;
+    }
+    pfree(arg1_val);    
+    return lower(fcinfo);    
+}
+
+Datum nls_lower_byte(PG_FUNCTION_ARGS)
+{
+    bytea* byte_data = PG_GETARG_BYTEA_PP(0);
+    auto len = VARSIZE_ANY_EXHDR(byte_data);
+
+    bytea* result = static_cast<bytea*>(palloc(len + VARHDRSZ));
+    SET_VARSIZE(result, VARHDRSZ + len);
+    char* lowercase = str_tolower(VARDATA_ANY(byte_data), len, DEFAULT_COLLATION_OID);
+    auto rc= memcpy_s(VARDATA(result), len, lowercase, len);
+    securec_check(rc, "\0", "\0");
+    pfree_ext(lowercase);
+
+    PG_RETURN_BYTEA_P(result);
+}
+
+Datum nls_lower_fmt_byte(PG_FUNCTION_ARGS)
+{
+    Oid coloid;
+    bytea* byte_data = PG_GETARG_BYTEA_PP(0);
+    auto len = VARSIZE_ANY_EXHDR(byte_data);
+
+    bytea* result = static_cast<bytea*>(palloc(len + VARHDRSZ));
+    SET_VARSIZE(result, VARHDRSZ + len);
+    char* nlsFmtStr = pg_findformat("NLS_SORT", text_to_cstring(PG_GETARG_TEXT_P(1)));
+    if (nlsFmtStr) {
+        List* colnameList = list_make1(makeString(nlsFmtStr));
+        coloid = LookupCollation(nullptr, colnameList, 0);
+    }
+    char* lowercase = str_tolower(VARDATA_ANY(byte_data), len, coloid);
+    auto rc = memcpy_s(VARDATA(result), len, lowercase, len);
+    securec_check(rc, "\0", "\0");
+    pfree_ext(nlsFmtStr);
+
+    PG_RETURN_BYTEA_P(result);
+}
+
 /********************************************************************
  *
  * lpad

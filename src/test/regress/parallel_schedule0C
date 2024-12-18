@@ -210,6 +210,6 @@ test: to_timestamp_default cast
 test: alter_index_disable
 test: dump_alter_index_disable
 
-test: dump_alter_index_invisible
+test: dump_alter_index_invisible nls_lower
 
 test: record_slow_sql_in_proc_commit
