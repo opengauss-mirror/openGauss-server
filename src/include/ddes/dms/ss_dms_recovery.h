@@ -100,11 +100,11 @@ typedef struct st_reform_info {
     bool switchover_demote_failure_signal_handled;
 } ss_reform_info_t;
 
-typedef enum st_failover_ckpt_status {
+typedef enum st_reform_ckpt_status {
     NOT_ACTIVE = 0,
     NOT_ALLOW_CKPT,
     ALLOW_CKPT
-} failover_ckpt_status_t;
+} reform_ckpt_status_t;
 
 typedef enum st_ondemand_realtime_build_status {
     DISABLED = 0,
@@ -157,7 +157,7 @@ typedef enum st_realtime_build_log_ctrl_status {
 
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
-    volatile failover_ckpt_status_t failover_ckpt_status;
+    volatile reform_ckpt_status_t reform_ckpt_status;
     volatile SSGlobalClusterState cluster_ondemand_status;
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
