@@ -18,8 +18,6 @@
 constexpr int INIT_CORR_ARRAY_LENGTH = 64;
 constexpr int MAX_CORR_ARRAY_LENGTH = 524288;
 
-constexpr float HALF = 0.5;
-
 enum class ModeType {
     COEFFICIENT,
     ONE_SIDED_SIG,
@@ -265,7 +263,7 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
 
     CorrBuildState *state = (CorrBuildState *) PG_GETARG_POINTER(0);
 
-    if (state->count == 0) {
+    if (state->count == 0 || state->count == 1) {
         PG_RETURN_NULL();
     }
 
@@ -312,12 +310,8 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
 
             float8 one_sided_p_value_pos = 1 - boost::math::cdf(t_dist, t_stat);
             float8 one_sided_p_value_neg = 1 - one_sided_p_value_pos;
-            float8 one_sided_p_value;
-            if (one_sided_p_value_pos < HALF) {
-                one_sided_p_value = one_sided_p_value_pos;
-            } else {
-                one_sided_p_value = one_sided_p_value_neg;
-            }
+            float8 one_sided_p_value = (one_sided_p_value_pos < one_sided_p_value_neg) ?
+                    one_sided_p_value_pos : one_sided_p_value_neg;
             float8 two_sided_p_value = 2 * one_sided_p_value;
 
             if (mode == ModeType::ONE_SIDED_SIG_NEG) {
@@ -346,8 +340,14 @@ Datum corr_k_final_fn(PG_FUNCTION_ARGS)
     
     CorrBuildState *state = (CorrBuildState *) PG_GETARG_POINTER(0);
 
-    if (state->count == 0) {
+    if (state->count == 0 || state->count == 1) {
         PG_RETURN_NULL();
+    }
+
+    ModeType mode = state->mode;
+
+    if (mode == ModeType::ILLEGAL) {
+        ereport(ERROR, (errmsg("illegal argument for function")));
     }
 
     uint32 n = state->count;
@@ -381,36 +381,31 @@ Datum corr_k_final_fn(PG_FUNCTION_ARGS)
     uint32 n0 = n * (n - 1) / 2;
     float8 tau_b = (float8)(concordant - discordant) / sqrt((n0 - tiedX) * (n0 - tiedY));
 
-    // z-statistic
-    float8 z_stat = calculate_z_statistic(tau_b, n);
-
-    // Normal distribution
-    boost::math::normal_distribution<> normal_dist(0.0, 1.0);
-    float8 one_sided_p_value_pos = 1.0 - boost::math::cdf(normal_dist, z_stat);
-    float8 one_sided_p_value_neg = boost::math::cdf(normal_dist, z_stat);
-    float8 one_sided_p_value;
-    if (one_sided_p_value_pos < HALF) {
-        one_sided_p_value = one_sided_p_value_pos;
+    if (mode == ModeType::COEFFICIENT) {
+        result = tau_b;
     } else {
-        one_sided_p_value = one_sided_p_value_neg;
+        // z-statistic
+        float8 z_stat = calculate_z_statistic(tau_b, n);
+
+        // Normal distribution
+        boost::math::normal_distribution<> normal_dist(0.0, 1.0);
+        float8 one_sided_p_value_pos = 1.0 - boost::math::cdf(normal_dist, z_stat);
+        float8 one_sided_p_value_neg = boost::math::cdf(normal_dist, z_stat);
+        float8 one_sided_p_value = (one_sided_p_value_pos < one_sided_p_value_neg) ?
+                one_sided_p_value_pos : one_sided_p_value_neg;
+        float8 two_sided_p_value = 2 * one_sided_p_value;
+        
+        if (mode == ModeType::ONE_SIDED_SIG_NEG) {
+            result = one_sided_p_value_neg;
+        } else if (mode == ModeType::TWO_SIDED_SIG) {
+            result = two_sided_p_value;
+        } else { // mode == ModeType::ONE_SIDED_SIG || mode == ModeType::ONE_SIDED_SIG_POS
+            result = one_sided_p_value_pos;
+        }
     }
-    float8 two_sided_p_value = 2 * one_sided_p_value;
 
     pfree(x_ranks);
     pfree(y_ranks);
-
-    ModeType mode = state->mode;
-    if (mode == ModeType::COEFFICIENT) {
-        result = tau_b;
-    } else if (mode == ModeType::ONE_SIDED_SIG || mode == ModeType::ONE_SIDED_SIG_POS) {
-        result = one_sided_p_value_pos;
-    } else if (mode == ModeType::ONE_SIDED_SIG_NEG) {
-        result = one_sided_p_value_neg;
-    } else if (mode == ModeType::TWO_SIDED_SIG) {
-        result = two_sided_p_value;
-    } else { // mode == ModeType::ILLEGAL
-        ereport(ERROR, (errmsg("illegal argument for function")));
-    }
 
     PG_RETURN_DATUM(Float8GetDatum(result));
 }
