@@ -212,6 +212,41 @@ INSERT INTO test_data (id, value1, value2) VALUES (4, 40, 80);
 SELECT CORR_K(value1, value2) FROM test_data;
 SELECT CORR_S(value1, value2) FROM test_data;
 
+CREATE TABLE test_data1 (
+value1 DOUBLE PRECISION,
+value2 DOUBLE PRECISION,
+value3 DOUBLE PRECISION,
+value4 DOUBLE PRECISION,
+value5 DOUBLE PRECISION,
+value6 DOUBLE PRECISION
+);
+
+INSERT INTO test_data1 (value1, value2, value3, value4, value5, value6) VALUES (1.0, 2.0,'', 4.0, NULL, NULL);
+INSERT INTO test_data1 (value1, value2, value3, value4, value5, value6) VALUES (5.0, 8.0, 5.0, NULL, NULL, NULL);
+INSERT INTO test_data1 (value1, value2, value3, value4, value5, value6) VALUES (NULL, 6.0, 4.0, '', NULL, NULL);
+INSERT INTO test_data1 (value1, value2, value3, value4, value5, value6) VALUES (2.0, NULL, 1.0, 3.0, NULL, NULL);
+INSERT INTO test_data1 (value1, value2, value3, value4, value5, value6) VALUES (13.0, 4.0, 4.0, '', NULL, NULL);
+
+SELECT corr_s(value1, value2) AS corr_s_value1_value2,
+corr_s(value1, value3) AS corr_s_value1_value3,
+corr_s(value1, value4) AS corr_s_value1_value4,
+corr_s(value2, value3) AS corr_s_value2_value3,
+corr_s(value2, value4) AS corr_s_value2_value4,
+corr_s(value3, value4) AS corr_s_value3_value4,
+corr_s(value4, value6) AS corr_s_value4_value6,
+corr_s(value5, value6) AS corr_s_value5_value6
+FROM test_data1;
+
+SELECT corr_k(value1, value2) AS corr_k_value1_value2,
+corr_k(value1, value3) AS corr_k_value1_value3,
+corr_k(value1, value4) AS corr_k_value1_value4,
+corr_k(value2, value3) AS corr_k_value2_value3,
+corr_k(value2, value4) AS corr_k_value2_value4,
+corr_k(value2, value4) AS corr_k_value2_value4,
+corr_k(value4, value6) AS corr_k_value4_value6,
+corr_k(value5, value6) AS corr_k_value5_value6
+FROM test_data1;
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
@@ -219,5 +254,6 @@ drop table null_table3;
 drop table customers1;
 drop table EMP;
 drop table test_data;
+drop table test_data1;
 drop table t1;
 drop schema aggregate CASCADE;
