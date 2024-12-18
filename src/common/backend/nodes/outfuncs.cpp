@@ -856,6 +856,20 @@ static void _outBitmapHeapScanInfo(StringInfo str, BitmapHeapScan* node)
     WRITE_NODE_FIELD(bitmapqualorig);
 }
 
+static void _outAnnIndexScanInfo(StringInfo str, AnnIndexScan* node)
+{
+    _outCommonIndexScanPart<AnnIndexScan>(str, node);
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_ustore);
+    }
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
+        WRITE_BOOL_FIELD(is_partial);
+    }
+}
+
 /*
  * print the basic stuff of all nodes that inherit from Join
  */
@@ -1191,6 +1205,12 @@ static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
     WRITE_NODE_FIELD(indextlist);
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
     WRITE_BOOL_FIELD(indexonly);
+}
+
+static void _outAnnIndexScan(StringInfo str, AnnIndexScan* node)
+{
+    WRITE_NODE_TYPE("ANNINDEXSCAN");
+    _outAnnIndexScanInfo(str, node);
 }
 
 static void _outStream(StringInfo str, Stream* node)
@@ -3382,6 +3402,12 @@ static void _outIndexPath(StringInfo str, IndexPath* node)
     WRITE_ENUM_FIELD(indexscandir, ScanDirection);
     WRITE_FLOAT_FIELD(indextotalcost, "%.2f");
     WRITE_FLOAT_FIELD(indexselectivity, "%.4f");
+    WRITE_BOOL_FIELD(isAnnIndex);
+    WRITE_NODE_FIELD(annQuals);
+    WRITE_NODE_FIELD(annQualCols);
+    WRITE_FLOAT_FIELD(annQualTotalCost, "%.2f");
+    WRITE_FLOAT_FIELD(annQualSelectivity, "%.4f");
+    WRITE_FLOAT_FIELD(allcost, "%.2f");
     if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
@@ -6677,6 +6703,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_BitmapHeapScan:
                 _outBitmapHeapScan(str, (BitmapHeapScan*)obj);
+                break;
+            case T_AnnIndexScan:
+                _outAnnIndexScan(str, (AnnIndexScan*)obj);
                 break;
             case T_CStoreIndexCtidScan:
                 _outCStoreIndexCtidScan(str, (CStoreIndexCtidScan*)obj);

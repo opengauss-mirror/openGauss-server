@@ -316,6 +316,15 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             /* Other fields are lists of basic items, nothing to walk. */
             break;
 
+        case T_AnnIndexScan:
+            if (walk_scan_node_fields((Scan*)node, walker, context))
+                return true;
+            if (p2walker((Node*)((AnnIndexScan*)node)->indexqual, context)) {
+                return true;
+            }
+            /* Other fields are lists of basic items, nothing to walk. */
+            break;
+
         case T_CStoreIndexScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;

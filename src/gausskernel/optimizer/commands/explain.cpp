@@ -264,7 +264,7 @@ static bool show_scan_distributekey(const Plan* plan)
 {
     return (
         IsA(plan, CStoreScan) || IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexHeapScan) || IsA(plan, SeqScan) ||
-        IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, CteScan) ||
+        IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, CteScan) || IsA(plan, AnnIndexScan) ||
         IsA(plan, ForeignScan) || IsA(plan, VecForeignScan) || IsA(plan, BitmapHeapScan) || IsA(plan, TsStoreScan)
     );
 }
@@ -1929,6 +1929,12 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
                 flag = 1;
             }
             break;
+        case T_AnnIndexScan:
+            if (((AnnIndexScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
             if (((IMCStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
@@ -1964,7 +1970,8 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
             RowToVec* rowToVecPlan = (RowToVec*)curPlan->lefttree;
             Plan* scanPlan = (Plan*)rowToVecPlan->plan.lefttree;
             if (!(IsA(scanPlan, Scan) || IsA(scanPlan, SeqScan) || IsA(scanPlan, IndexOnlyScan) ||
-                IsA(scanPlan, IndexScan) || IsA(scanPlan, BitmapHeapScan) || IsA(scanPlan, TidScan))) {
+                IsA(scanPlan, IndexScan) || IsA(scanPlan, BitmapHeapScan) || IsA(scanPlan, TidScan) ||
+                IsA(scanPlan, AnnIndexScan))) {
                 break;
             }
             curPlan = &rowToVecPlan->plan;
@@ -1979,6 +1986,7 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
 #endif
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreScan:
@@ -2252,6 +2260,15 @@ static void ExplainNode(
 
             pt_index_name = explain_get_index_name(indexonlyscan->indexid);
             pt_index_owner = get_namespace_name(get_rel_namespace(indexonlyscan->indexid));
+        } break;
+        case T_AnnIndexScan: {
+            AnnIndexScan* annindexscan = (AnnIndexScan*)plan;
+
+            ExplainIndexScanDetails(annindexscan->indexid, annindexscan->indexorderdir, es);
+            ExplainScanTarget((Scan*)annindexscan, es);
+
+            pt_index_name = explain_get_index_name(annindexscan->indexid);
+            pt_index_owner = get_namespace_name(get_rel_namespace(annindexscan->indexid));
         } break;
         case T_BitmapIndexScan: {
             BitmapIndexScan* bitmapindexscan = (BitmapIndexScan*)plan;
@@ -2680,6 +2697,15 @@ static void ExplainNode(
             if (es->analyze)
                 ExplainPropertyLong("Heap Fetches", ((IndexOnlyScanState*)planstate)->ioss_HeapFetches, es);
             break;
+        case T_AnnIndexScan:
+            show_scan_qual(((AnnIndexScan*)plan)->indexqualorig, "Index Cond", planstate, ancestors, es);
+            if (((AnnIndexScan*)plan)->indexqualorig)
+                show_instrumentation_count("Rows Removed by Index Recheck", 2, planstate, es);
+            show_scan_qual(((AnnIndexScan*)plan)->indexorderbyorig, "Order By", planstate, ancestors, es);
+            show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+            if (plan->qual)
+                show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
+            break;
         case T_BitmapIndexScan:
             show_scan_qual(((BitmapIndexScan*)plan)->indexqualorig, "Index Cond", planstate, ancestors, es);
             break;
@@ -2695,7 +2721,7 @@ static void ExplainNode(
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
             show_llvm_info(planstate, es);
-            break;
+            break;       
 #ifdef PGXC
         case T_ModifyTable:
         case T_VecModifyTable: {
@@ -3203,6 +3229,7 @@ static void ExplainNode(
 #endif
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_BitmapIndexScan:
         case T_CStoreIndexScan:
@@ -8350,7 +8377,7 @@ static const char* explain_get_index_name(Oid indexId)
 }
 
 /*
- * Add some additional details about an IndexScan or IndexOnlyScan
+ * Add some additional details about an IndexScan, IndexOnlyScan or AnnIndexScan
  */
 static void ExplainIndexScanDetails(Oid indexid, ScanDirection indexorderdir, ExplainState* es)
 {
@@ -8472,6 +8499,7 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es, bool multi
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:

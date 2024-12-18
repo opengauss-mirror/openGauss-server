@@ -972,6 +972,7 @@ List* PlanAnalyzerOperator(QueryDesc* querydesc, PlanState* planstate)
             }
             case T_IndexScan:
             case T_IndexOnlyScan:
+            case T_AnnIndexScan:
             case T_BitmapIndexScan: {
                 /* Check unsuitable index scan */
                 issueResultsItem = CheckUnsuitableScanMethod(ps, dn_num, total_tuples, totalFiltereds, true, false);

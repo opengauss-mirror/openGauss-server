@@ -2089,6 +2089,40 @@ typedef struct BitmapHeapScanState {
 } BitmapHeapScanState;
 
 /* ----------------
+ *	 AnnIndexScanState information
+ *
+ *		indexqualorig	   execution state for indexqualorig expressions
+ *		ScanKeys		   Skey structures for index quals
+ *		NumScanKeys		   number of ScanKeys
+ *		OrderByKeys		   Skey structures for index ordering operators
+ *		NumOrderByKeys	   number of OrderByKeys
+ *		RuntimeKeys		   info about Skeys that must be evaluated at runtime
+ *		NumRuntimeKeys	   number of RuntimeKeys
+ *		RuntimeKeysReady   true if runtime Skeys have been computed
+ *		RuntimeContext	   expr context for evaling runtime Skeys
+ *		RelationDesc	   index relation descriptor
+ *		ScanDesc		   index scan descriptor
+ * ----------------
+ */
+typedef struct AnnIndexScanState {
+    ScanState ss; /* its first field is NodeTag */
+    List* indexqualorig;
+    ScanKey iss_ScanKeys;
+    int iss_NumScanKeys;
+    ScanKey iss_OrderByKeys;
+    int iss_NumOrderByKeys;
+    IndexRuntimeKeyInfo* iss_RuntimeKeys;
+    int iss_NumRuntimeKeys;
+    bool iss_RuntimeKeysReady;
+    ExprContext* iss_RuntimeContext;
+    Relation iss_RelationDesc;
+    IndexScanDesc iss_ScanDesc;
+    List* iss_IndexPartitionList;
+    LOCKMODE lockMode;
+    Relation iss_CurrentIndexPartition;
+} AnnIndexScanState;
+
+/* ----------------
  *	 TidScanState information
  *
  *		isCurrentOf    scan has a CurrentOfExpr qual

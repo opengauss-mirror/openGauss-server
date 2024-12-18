@@ -168,6 +168,8 @@ static CStoreIndexHeapScan* make_cstoreindex_heapscan(PlannerInfo* root, Path* b
     Plan* lefttree, List* bitmapqualorig, Index scanrelid);
 static CStoreIndexAnd* make_cstoreindex_and(List* ctidplans);
 static CStoreIndexOr* make_cstoreindex_or(List* ctidplans);
+static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial);
 static TidScan* make_tidscan(List* qptlist, List* qpqual, Index scanrelid, List* tidquals);
 static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanrelid, Node* funcexpr, List* funccolnames,
     List* funccoltypes, List* funccoltypmods, List* funccolcollations);
@@ -372,6 +374,7 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_SeqScan:
         case T_BitmapHeapScan:
         case T_TidScan:
@@ -699,6 +702,7 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
             break;
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
+        case T_AnnIndexScan:
             if (SUBQUERY_IS_PARAM(root) && PATH_REQ_UPPER(best_path) != NULL) {
                 scan_clauses = list_concat(scan_clauses, rel->subplanrestrictinfo);
             }
@@ -798,7 +802,7 @@ static bool IsScanPath(NodeTag type)
 {
     return (
         type == T_CStoreScan || type == T_CStoreIndexScan || type == T_CStoreIndexHeapScan || type == T_SeqScan ||
-        type == T_IndexScan || type == T_IndexOnlyScan || type == T_BitmapHeapScan
+        type == T_IndexScan || type == T_IndexOnlyScan || type == T_BitmapHeapScan || type == T_AnnIndexScan
     );
 }
 
@@ -1055,6 +1059,7 @@ void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path)
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
         case T_TidScan:
@@ -1085,6 +1090,7 @@ void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path)
                 case T_SeqScan:
                 case T_IndexScan:
                 case T_IndexOnlyScan:
+                case T_AnnIndexScan:
                 case T_BitmapHeapScan:
                 case T_CStoreIndexHeapScan:
                 case T_TidScan: {
@@ -2731,18 +2737,33 @@ static Scan* create_indexscan_plan(
                 indexselectivity,
                 (best_path->indexinfo->indpred != NIL));
         } else {
-            scan_plan = (Scan*)make_indexscan(tlist,
-                qpqual,
-                baserelid,
-                indexoid,
-                fixed_indexquals,
-                stripped_indexquals,
-                fixed_indexorderbys,
-                indexorderbys,
-                best_path->indexscandir,
-                indexselectivity,
-                (best_path->indexinfo->indpred != NIL));
-            ((IndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
+            if (best_path->isAnnIndex) {
+                scan_plan = (Scan*)make_annindexscan(tlist,
+                    qpqual,
+                    baserelid,
+                    indexoid,
+                    fixed_indexquals,
+                    stripped_indexquals,
+                    fixed_indexorderbys,
+                    indexorderbys,
+                    best_path->indexscandir,
+                    indexselectivity,
+                    (best_path->indexinfo->indpred != NIL));
+                ((AnnIndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
+            } else {
+                scan_plan = (Scan*)make_indexscan(tlist,
+                    qpqual,
+                    baserelid,
+                    indexoid,
+                    fixed_indexquals,
+                    stripped_indexquals,
+                    fixed_indexorderbys,
+                    indexorderbys,
+                    best_path->indexscandir,
+                    indexselectivity,
+                    (best_path->indexinfo->indpred != NIL));
+                ((IndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
+            }
         }
     }
 
@@ -3442,6 +3463,7 @@ static void ModifyWorktableWtParam(Node* planNode, int oldWtParam, int newWtPara
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_SeqScan:
         case T_ForeignScan:
         case T_ExtensiblePlan:
@@ -6091,6 +6113,30 @@ static CStoreIndexHeapScan* make_cstoreindex_heapscan(PlannerInfo* root, Path* b
 
     return node;
 }
+
+static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial)
+{
+    AnnIndexScan* node = makeNode(AnnIndexScan);
+    Plan* plan = &node->scan.plan;
+
+    /* cost should be inserted by caller */
+    plan->targetlist = qptlist;
+    plan->qual = qpqual;
+    plan->lefttree = NULL;
+    plan->righttree = NULL;
+    node->scan.scanrelid = scanrelid;
+    node->indexid = indexid;
+    node->indexqual = indexqual;
+    node->indexqualorig = indexqualorig;
+    node->indexorderby = indexorderby;
+    node->indexorderbyorig = indexorderbyorig;
+    node->indexorderdir = indexscandir;
+    node->selectivity = indexselectivity;
+    node->is_partial = is_partial;
+    return node;
+}
+
 
 static TidScan* make_tidscan(List* qptlist, List* qpqual, Index scanrelid, List* tidquals)
 {
@@ -9691,6 +9737,7 @@ bool is_projection_capable_plan(Plan* plan)
 #endif   /* ENABLE_MULTIPLE_NODES */
                 case T_IndexScan:
                 case T_IndexOnlyScan:
+                case T_AnnIndexScan:
                 case T_BitmapHeapScan:
                 case T_TidScan:
                 case T_CStoreIndexScan:
@@ -9721,7 +9768,7 @@ bool IsPlanForPartitionScan(Plan* plan)
         return false;
     }
     if (IsA(plan, SeqScan) || IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, BitmapHeapScan) ||
-        IsA(plan, BitmapIndexScan) || IsA(plan, TidScan) || IsA(plan, VecToRow)) {
+        IsA(plan, BitmapIndexScan) || IsA(plan, TidScan) || IsA(plan, VecToRow) || IsA(plan, AnnIndexScan)) {
         return true;
     }
     if (IsA(plan, CStoreScan) || IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexCtidScan) ||
@@ -9777,6 +9824,7 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
 #endif   /* ENABLE_MULTIPLE_NODES */
             case T_IndexScan:
             case T_IndexOnlyScan:
+            case T_AnnIndexScan:
             case T_BitmapHeapScan:
             case T_BitmapIndexScan:
             case T_TidScan:
@@ -9821,6 +9869,7 @@ static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
 #endif
             case T_IndexScan:
             case T_IndexOnlyScan:
+            case T_AnnIndexOnlyScan:
             case T_BitmapHeapScan:
             case T_BitmapIndexScan:
             case T_TidScan:

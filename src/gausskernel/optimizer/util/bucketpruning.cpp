@@ -734,6 +734,7 @@ void setPlanBucketId(Plan* plan, ParamListInfo params, MemoryContext cxt)
 #endif
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_BitmapIndexScan:
         case T_TidScan:

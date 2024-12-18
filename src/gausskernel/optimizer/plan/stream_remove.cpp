@@ -178,6 +178,9 @@ static List *fetch_qual_from_scan(const Scan *scan)
         case T_IndexOnlyScan: {
             return ((IndexOnlyScan *)scan)->indexqual;
         }
+        case T_AnnIndexScan: {
+            return ((AnnIndexScan *)scan)->indexqual;
+        }
         default: {
             return NULL;
         }
@@ -260,7 +263,8 @@ static bool is_stream_limit_plan(const Stream *stream)
         case T_SeqScan:
         case T_IndexScan:
         case T_BitmapIndexScan:
-        case T_IndexOnlyScan: {
+        case T_IndexOnlyScan:
+        case T_AnnIndexScan: {
             return is_select_const_with_distribute_qual_plan((Scan *)lefttree);
         }
         default:
@@ -285,7 +289,8 @@ static bool is_stream_plan(const Stream *stream)
         case T_SeqScan:
         case T_IndexScan:
         case T_BitmapIndexScan:
-        case T_IndexOnlyScan: {
+        case T_IndexOnlyScan:
+        case T_AnnIndexScan: {
             return is_select_const_with_distribute_qual_plan((Scan *)lefttree);
         }
         default:

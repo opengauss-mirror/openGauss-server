@@ -3085,6 +3085,18 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
 
+        case T_AnnIndexScan:
+            (void)finalize_primnode((Node*)((AnnIndexScan*)plan)->indexqual, &context);
+            (void)finalize_primnode((Node*)((AnnIndexScan*)plan)->indexorderby, &context);
+
+            /*
+             * we need not look at indexqualorig, since it will have the same
+             * param references as indexqual.  Likewise, we can ignore
+             * indexorderbyorig.
+             */
+            context.paramids = bms_add_members(context.paramids, scan_params);
+            break;
+
         case T_BitmapIndexScan:
             (void)finalize_primnode((Node*)((BitmapIndexScan*)plan)->indexqual, &context);
 
@@ -3115,7 +3127,6 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             (void)finalize_primnode((Node*)((CStoreIndexHeapScan*)plan)->bitmapqualorig, &context);
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
-
         case T_TidScan:
             (void)finalize_primnode((Node*)((TidScan*)plan)->tidquals, &context);
             context.paramids = bms_add_members(context.paramids, scan_params);
