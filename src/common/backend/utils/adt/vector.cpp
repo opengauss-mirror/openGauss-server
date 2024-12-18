@@ -549,26 +549,8 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_numeric);
 Datum vector_to_numeric(PG_FUNCTION_ARGS)
 {
     Vector *vec = PG_GETARG_VECTOR_P(0);
-    int32 typmod = PG_GETARG_INT32(1);
     Datum *datums;
     ArrayType *result;
-    int32 tmp_typmod;
-    int precision;
-    int scale;
-
-    tmp_typmod = typmod - VARHDRSZ;
-    precision = (tmp_typmod >> 16) & NUMERIC_TYPEMOD_MASK;
-    scale = (int16)(tmp_typmod & NUMERIC_TYPEMOD_MASK);
-    if (precision < 1 || precision > NUMERIC_MAX_PRECISION) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("NUMERIC precision %d must be between 1 and %d", precision, NUMERIC_MAX_PRECISION)));
-    }
-    if (scale < NUMERIC_MIN_SCALE || scale > NUMERIC_MAX_SCALE) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("NUMERIC scale must be between %d and %d", NUMERIC_MIN_SCALE, NUMERIC_MAX_SCALE)));
-    }
 
     datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
 
@@ -576,8 +558,7 @@ Datum vector_to_numeric(PG_FUNCTION_ARGS)
         Datum numericVal;
         Numeric typmod_numericVal;
         numericVal = DirectFunctionCall1(float4_numeric, Float4GetDatum(vec->x[i]));
-        typmod_numericVal = DatumGetNumeric(DirectFunctionCall2(numeric, numericVal, typmod));
-        datums[i] = NumericGetDatum(typmod_numericVal);
+        datums[i] = NumericGetDatum(numericVal);
     }
 
     /* Use TYPALIGN_INT for numeric */
