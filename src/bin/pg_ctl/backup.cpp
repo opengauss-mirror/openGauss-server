@@ -758,40 +758,6 @@ static bool GetCurrentPath(char *currentPath, PGresult *res, int rownum)
     return true;
 }
 
-static bool SSUpdateControlFile(FILE* file, const char* filename, const void* copybuf)
-{
-    off_t seekpos = 0;
-    if (ss_instance_config.dss.enable_dorado) {
-        for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
-            seekpos = (off_t)BLCKSZ * node;
-            if (fseek(file, seekpos, SEEK_SET) < 0) {
-                pg_log(PG_WARNING, _("could not seek in file \"%s\" for node %d: %s\n"),
-                    filename, node, strerror(errno));
-                return false;
-            }
-            if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
-                pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"),
-                    filename, strerror(errno));
-                return false;
-            }
-        }
-    } else {
-        seekpos = (off_t)BLCKSZ * ss_instance_config.dss.instance_id;
-        if (fseek(file, seekpos, SEEK_SET) < 0) {
-            pg_log(PG_WARNING, _("could not seek in file \"%s\": %s\n"),
-                filename, strerror(errno));
-            return false;
-        }
-
-        if (fwrite(copybuf, sizeof(ControlFileData), 1, file) != 1) {
-            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"),
-                filename, strerror(errno));
-            return false;
-        }
-    }
-
-    return true;
-}
 /*
  * Receive a tar format stream from the connection to the server, and unpack
  * the contents of it into a directory. Only files, directories and
@@ -1062,21 +1028,11 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            /* pg_control will be written into pages of each interconnect nodes in dorado stanby cluster corresponding to */
-            if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
-                pg_log(PG_WARNING, _("file size %d. \n"), r);
-                if (!SSUpdateControlFile(file, filename, copybuf)) {
-                    DisconnectConnection();
-                    FREE_AND_RESET(copybuf);
-                    return false;
-                }
-            } else {
-                if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
-                    pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
-                    DisconnectConnection();
-                    FREE_AND_RESET(copybuf);
-                    return false;
-                }
+            if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
+                pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                DisconnectConnection();
+                FREE_AND_RESET(copybuf);
+                return false;
             }
 
             totaldone += r;
