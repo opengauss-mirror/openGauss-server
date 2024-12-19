@@ -198,11 +198,7 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
         pt++;
     }
 
-    if (maxNnz > SPARSEVEC_MAX_NNZ)
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                        errmsg("sparsevec cannot have more than %d non-zero elements", SPARSEVEC_MAX_NNZ)));
-
-    elements = (SparseInputElement *)palloc(maxNnz * sizeof(SparseInputElement));
+    elements = (SparseInputElement *)palloc(Min(maxNnz, SPARSEVEC_MAX_NNZ) * sizeof(SparseInputElement));
 
     pt = lit;
 
@@ -228,10 +224,15 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
             long index;
             float value;
 
-            if (nnz == maxNnz)
+            if (nnz == SPARSEVEC_MAX_NNZ) {
+                ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                                errmsg("sparsevec cannot have more than %d non-zero elements", SPARSEVEC_MAX_NNZ)));
+            }
+            if (nnz == maxNnz) {
                 ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("ran out of buffer: \"%s\"", lit)));
-
+                        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("the current nnz value of %d ran out of buffer: \"%s\"", nnz, lit)));
+            }
             while (SparsevecIsspace(*pt)) {
                 pt++;
             }
