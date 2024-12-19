@@ -1,6 +1,6 @@
 DROP TYPE IF EXISTS pg_catalog.vector CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8305, 8308, b;
-CREATE TYPE vector;
+CREATE TYPE pg_catalog.vector;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_in(cstring, oid, int4) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8423;
@@ -42,7 +42,7 @@ AS 'vector_send'
 LANGUAGE INTERNAL
 STABLE STRICT;
 
-CREATE TYPE vector (
+CREATE TYPE pg_catalog.vector (
 	INPUT     = vector_in,
 	OUTPUT    = vector_out,
 	TYPMOD_IN = vector_typmod_in,
@@ -265,7 +265,7 @@ CREATE FUNCTION pg_catalog.vector(vector, int4, boolean)
 RETURNS vector
 AS 'vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.array_to_vector(_int4, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8215;
@@ -273,7 +273,7 @@ CREATE FUNCTION pg_catalog.array_to_vector(_int4, int4, boolean)
 RETURNS vector
 AS 'array_to_vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.array_to_vector(_float4, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8216;
@@ -281,7 +281,7 @@ CREATE FUNCTION pg_catalog.array_to_vector(_float4, int4, boolean)
 RETURNS vector
 AS 'array_to_vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.array_to_vector(_float8, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8217;
@@ -289,7 +289,7 @@ CREATE FUNCTION pg_catalog.array_to_vector(_float8, int4, boolean)
 RETURNS vector
 AS 'array_to_vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.array_to_vector(_numeric, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8218;
@@ -297,7 +297,7 @@ CREATE FUNCTION pg_catalog.array_to_vector(_numeric, int4, boolean)
 RETURNS vector
 AS 'array_to_vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_to_float4(vector, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8219;
@@ -305,7 +305,7 @@ CREATE FUNCTION pg_catalog.vector_to_float4(vector, int4, boolean)
 RETURNS _float4
 AS 'vector_to_float4'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_to_int4(vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8212;
@@ -313,7 +313,7 @@ CREATE FUNCTION pg_catalog.vector_to_int4(vector)
 RETURNS _int4
 AS 'vector_to_int4'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_to_float8(vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8213;
@@ -321,15 +321,15 @@ CREATE FUNCTION pg_catalog.vector_to_float8(vector)
 RETURNS _float8
 AS 'vector_to_float8'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
-DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector, int4) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8221;
-CREATE FUNCTION pg_catalog.vector_to_numeric(vector, int4)
+CREATE FUNCTION pg_catalog.vector_to_numeric(vector)
 RETURNS _numeric
 AS 'vector_to_numeric'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatbuild(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8417;
@@ -589,7 +589,7 @@ IMMUTABLE STRICT;
 
 DROP TYPE IF EXISTS pg_catalog.sparsevec CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8307, 8310, b;
-CREATE TYPE sparsevec;
+CREATE TYPE pg_catalog.sparsevec;
 
 DROP FUNCTION IF EXISTS pg_catalog.sparsevec_in(cstring, oid, int4) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8458;
@@ -631,7 +631,7 @@ AS 'sparsevec_send'
 LANGUAGE INTERNAL
 STABLE STRICT;
 
-CREATE TYPE sparsevec (
+CREATE TYPE pg_catalog.sparsevec (
 	INPUT     = sparsevec_in,
 	OUTPUT    = sparsevec_out,
 	TYPMOD_IN = sparsevec_typmod_in,
@@ -766,7 +766,7 @@ CREATE FUNCTION pg_catalog.sparsevec(sparsevec, int4, boolean)
 RETURNS sparsevec
 AS 'sparsevec'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_to_sparsevec(vector, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8229;
@@ -774,7 +774,7 @@ CREATE FUNCTION pg_catalog.vector_to_sparsevec(vector, int4, boolean)
 RETURNS sparsevec
 AS 'vector_to_sparsevec'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 DROP FUNCTION IF EXISTS pg_catalog.sparsevec_to_vector(sparsevec, int4, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8230;
@@ -782,7 +782,7 @@ CREATE FUNCTION pg_catalog.sparsevec_to_vector(sparsevec, int4, boolean)
 RETURNS vector
 AS 'sparsevec_to_vector'
 LANGUAGE INTERNAL
-STABLE STRICT;
+IMMUTABLE STRICT;
 
 COMMENT ON FUNCTION pg_catalog.vector_in(cstring, oid, int4) IS 'I/O';
 COMMENT ON FUNCTION pg_catalog.vector_out(vector) IS 'I/O';
@@ -823,7 +823,7 @@ COMMENT ON FUNCTION pg_catalog.array_to_vector(_numeric, int4, boolean) IS 'NULL
 COMMENT ON FUNCTION pg_catalog.vector_to_float4(vector, int4, boolean) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.vector_to_int4(vector) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.vector_to_float8(vector) IS 'NULL';
-COMMENT ON FUNCTION pg_catalog.vector_to_numeric(vector, int4) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.vector_to_numeric(vector) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatbuild(internal, internal, internal) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatbuildempty(internal) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatinsert(internal, internal, internal, internal, internal, internal) IS 'NULL';
@@ -898,7 +898,7 @@ CREATE CAST (vector AS vector)
 DROP CAST IF EXISTS (vector AS _numeric) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8291;
 CREATE CAST (vector AS _numeric)
-	WITH FUNCTION vector_to_numeric(vector, int4) AS IMPLICIT;
+	WITH FUNCTION vector_to_numeric(vector) AS IMPLICIT;
 	
 DROP CAST IF EXISTS (vector AS _float8) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8292;
@@ -958,79 +958,81 @@ DROP ACCESS METHOD IF EXISTS hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8300;
 CREATE ACCESS METHOD hnsw TYPE INDEX HANDLER hnswhandler;
 
+SET search_path = 'pg_catalog';
+
 DROP OPERATOR IF EXISTS pg_catalog.<->(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8311;
 CREATE OPERATOR pg_catalog.<->(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = l2_distance,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.l2_distance,
 	COMMUTATOR = '<->'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<#>(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8312;
 CREATE OPERATOR pg_catalog.<#>(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_negative_inner_product,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_negative_inner_product,
 	COMMUTATOR = '<#>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<=>(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8313;
 CREATE OPERATOR pg_catalog.<=>(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = cosine_distance,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.cosine_distance,
 	COMMUTATOR = '<=>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<+>(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8314;
 CREATE OPERATOR pg_catalog.<+>(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = l1_distance,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.l1_distance,
 	COMMUTATOR = '<+>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.+(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8325;
 CREATE OPERATOR pg_catalog.+(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_add,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_add,
 	COMMUTATOR = '+'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.-(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8326;
 CREATE OPERATOR pg_catalog.-(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_sub,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_sub,
 	COMMUTATOR = '-'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.*(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8349;
 CREATE OPERATOR pg_catalog.*(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_mul,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_mul,
 	COMMUTATOR = '*'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.||(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8339;
 CREATE OPERATOR pg_catalog.||(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_concat
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_concat
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8327;
 CREATE OPERATOR pg_catalog.<(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_lt,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_lt,
 	RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<=(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8328;
 CREATE OPERATOR pg_catalog.<=(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_le,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_le,
 	RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.=(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8331;
 CREATE OPERATOR pg_catalog.=(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_eq,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_eq,
 	COMMUTATOR = '=' ,
 	RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
@@ -1038,7 +1040,7 @@ CREATE OPERATOR pg_catalog.=(
 DROP OPERATOR IF EXISTS pg_catalog.<>(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8332;
 CREATE OPERATOR pg_catalog.<>(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_ne,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_ne,
 	COMMUTATOR = '<>' , NEGATOR = '=' ,
 	RESTRICT = neqsel, JOIN = neqjoinsel
 );
@@ -1046,7 +1048,7 @@ CREATE OPERATOR pg_catalog.<>(
 DROP OPERATOR IF EXISTS pg_catalog.>=(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8330;
 CREATE OPERATOR pg_catalog.>=(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_ge,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_ge,
 	COMMUTATOR = '<=' , NEGATOR = '<' ,
 	RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
@@ -1054,7 +1056,7 @@ CREATE OPERATOR pg_catalog.>=(
 DROP OPERATOR IF EXISTS pg_catalog.>(vector, vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8329;
 CREATE OPERATOR pg_catalog.>(
-	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = vector_gt,
+	LEFTARG = vector, RIGHTARG = vector, PROCEDURE = pg_catalog.vector_gt,
 	COMMUTATOR = '<' , NEGATOR = '<=' ,
 	RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
@@ -1062,63 +1064,63 @@ CREATE OPERATOR pg_catalog.>(
 DROP OPERATOR IF EXISTS pg_catalog.<~>(bit, bit) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8323;
 CREATE OPERATOR pg_catalog.<~>(
-	LEFTARG = bit, RIGHTARG = bit, PROCEDURE = hamming_distance,
+	LEFTARG = bit, RIGHTARG = bit, PROCEDURE = pg_catalog.hamming_distance,
 	COMMUTATOR = '<~>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<%>(bit, bit) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8324;
 CREATE OPERATOR pg_catalog.<%>(
-	LEFTARG = bit, RIGHTARG = bit, PROCEDURE = jaccard_distance,
+	LEFTARG = bit, RIGHTARG = bit, PROCEDURE = pg_catalog.jaccard_distance,
 	COMMUTATOR = '<%>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<->(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8319;
 CREATE OPERATOR pg_catalog.<->(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = l2_distance,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.l2_distance,
 	COMMUTATOR = '<->'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<#>(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8320;
 CREATE OPERATOR pg_catalog.<#>(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_negative_inner_product,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_negative_inner_product,
 	COMMUTATOR = '<#>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<=>(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8321;
 CREATE OPERATOR pg_catalog.<=>(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = cosine_distance,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.cosine_distance,
 	COMMUTATOR = '<=>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<+>(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8322;
 CREATE OPERATOR pg_catalog.<+>(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = l1_distance,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.l1_distance,
 	COMMUTATOR = '<+>'
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8333;
 CREATE OPERATOR pg_catalog.<(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_lt,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_lt,
 	RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<=(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8334;
 CREATE OPERATOR pg_catalog.<=(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_le,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_le,
 	RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.=(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8337;
 CREATE OPERATOR pg_catalog.=(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_eq,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_eq,
 	COMMUTATOR = '=' ,
 	RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
@@ -1126,7 +1128,7 @@ CREATE OPERATOR pg_catalog.=(
 DROP OPERATOR IF EXISTS pg_catalog.<>(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8338;
 CREATE OPERATOR pg_catalog.<>(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_ne,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_ne,
 	COMMUTATOR = '<>' , NEGATOR = '=' ,
 	RESTRICT = neqsel, JOIN = neqjoinsel
 );
@@ -1134,7 +1136,7 @@ CREATE OPERATOR pg_catalog.<>(
 DROP OPERATOR IF EXISTS pg_catalog.>=(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8336;
 CREATE OPERATOR pg_catalog.>=(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_ge,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_ge,
 	COMMUTATOR = '<=' , NEGATOR = '<' ,
 	RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
@@ -1142,7 +1144,7 @@ CREATE OPERATOR pg_catalog.>=(
 DROP OPERATOR IF EXISTS pg_catalog.>(sparsevec, sparsevec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8335;
 CREATE OPERATOR pg_catalog.>(
-	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_gt,
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = pg_catalog.sparsevec_gt,
 	COMMUTATOR = '<' , NEGATOR = '<=' ,
 	RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
@@ -1174,13 +1176,13 @@ COMMENT ON OPERATOR pg_catalog.>=(sparsevec,sparsevec) IS 'sparsevec greater tha
 COMMENT ON OPERATOR pg_catalog.=(sparsevec,sparsevec) IS 'sparsevec equal';
 COMMENT ON OPERATOR pg_catalog.<>(sparsevec,sparsevec) IS 'sparsevec unequal';
 
-DROP OPERATOR FAMILY IF EXISTS vector_ops USING btree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING btree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8392;
-CREATE OPERATOR FAMILY vector_ops USING btree;
+CREATE OPERATOR FAMILY pg_catalog.vector_ops USING btree;
 
-DROP OPERATOR CLASS IF EXISTS vector_ops USING btree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING btree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8977;
-CREATE OPERATOR CLASS vector_ops DEFAULT
+CREATE OPERATOR CLASS pg_catalog.vector_ops DEFAULT
     FOR TYPE vector USING btree as
     OPERATOR 1 pg_catalog.<(vector, vector),
     OPERATOR 2 pg_catalog.<=(vector, vector),
@@ -1189,13 +1191,13 @@ CREATE OPERATOR CLASS vector_ops DEFAULT
     OPERATOR 5 pg_catalog.>(vector, vector),
     FUNCTION 1 pg_catalog.vector_cmp(vector,vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8375;
-CREATE OPERATOR FAMILY vector_ubt_ops USING ubtree;
+CREATE OPERATOR FAMILY pg_catalog.vector_ubt_ops USING ubtree;
 
-DROP OPERATOR CLASS IF EXISTS vector_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8951;
-CREATE OPERATOR CLASS vector_ubt_ops DEFAULT
+CREATE OPERATOR CLASS pg_catalog.vector_ubt_ops DEFAULT
 	FOR TYPE vector USING ubtree AS
 	OPERATOR 1 pg_catalog.<(vector, vector),
 	OPERATOR 2 pg_catalog.<=(vector, vector),
@@ -1204,38 +1206,38 @@ CREATE OPERATOR CLASS vector_ubt_ops DEFAULT
 	OPERATOR 5 pg_catalog.>(vector, vector),
 	FUNCTION 1 pg_catalog.vector_cmp(vector, vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_l2_ops USING ivfflat CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8385;
-CREATE OPERATOR FAMILY vector_l2_ops USING ivfflat;
+CREATE OPERATOR FAMILY pg_catalog.vector_l2_ops USING ivfflat;
 
-DROP OPERATOR CLASS IF EXISTS vector_l2_ops USING ivfflat CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING ivfflat CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8914;
-CREATE OPERATOR CLASS vector_l2_ops
+CREATE OPERATOR CLASS pg_catalog.vector_l2_ops
 	DEFAULT FOR TYPE vector USING ivfflat AS
 	OPERATOR 1 pg_catalog.<->(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_l2_squared_distance(vector, vector),
 	FUNCTION 3 pg_catalog.l2_distance(vector, vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_ip_ops USING ivfflat CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8386;
-CREATE OPERATOR FAMILY vector_ip_ops USING ivfflat;
+CREATE OPERATOR FAMILY pg_catalog.vector_ip_ops USING ivfflat;
 
-DROP OPERATOR CLASS IF EXISTS vector_ip_ops USING ivfflat CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING ivfflat CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8915;
-CREATE OPERATOR CLASS vector_ip_ops
+CREATE OPERATOR CLASS pg_catalog.vector_ip_ops
 	FOR TYPE vector USING ivfflat AS
 	OPERATOR 1 pg_catalog.<#>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
 	FUNCTION 3 pg_catalog.vector_spherical_distance(vector, vector),
 	FUNCTION 4 pg_catalog.vector_norm(vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_cosine_ops USING ivfflat CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8387;
-CREATE OPERATOR FAMILY vector_cosine_ops USING ivfflat;
+CREATE OPERATOR FAMILY pg_catalog.vector_cosine_ops USING ivfflat;
 
-DROP OPERATOR CLASS IF EXISTS vector_cosine_ops USING ivfflat CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_cosine_ops USING ivfflat CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8916;
-CREATE OPERATOR CLASS vector_cosine_ops
+CREATE OPERATOR CLASS pg_catalog.vector_cosine_ops
 	FOR TYPE vector USING ivfflat AS
 	OPERATOR 1 pg_catalog.<=>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
@@ -1243,97 +1245,97 @@ CREATE OPERATOR CLASS vector_cosine_ops
 	FUNCTION 3 pg_catalog.vector_spherical_distance(vector, vector),
 	FUNCTION 4 pg_catalog.vector_norm(vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_l2_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8371;
-CREATE OPERATOR FAMILY vector_l2_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.vector_l2_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS vector_l2_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8900;
-CREATE OPERATOR CLASS vector_l2_ops
+CREATE OPERATOR CLASS pg_catalog.vector_l2_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<->(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_l2_squared_distance(vector, vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_ip_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8372;
-CREATE OPERATOR FAMILY vector_ip_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.vector_ip_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS vector_ip_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8999;
-CREATE OPERATOR CLASS vector_ip_ops
+CREATE OPERATOR CLASS pg_catalog.vector_ip_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<#>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
 	FUNCTION 4 pg_catalog.vector_norm(vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_cosine_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8373;
-CREATE OPERATOR FAMILY vector_cosine_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.vector_cosine_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS vector_cosine_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_cosine_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8902;
-CREATE OPERATOR CLASS vector_cosine_ops
+CREATE OPERATOR CLASS pg_catalog.vector_cosine_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<=>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
 	FUNCTION 2 pg_catalog.vector_norm(vector),
 	FUNCTION 4 pg_catalog.vector_norm(vector);
 
-DROP OPERATOR FAMILY IF EXISTS vector_l1_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l1_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8374;
-CREATE OPERATOR FAMILY vector_l1_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.vector_l1_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS vector_l1_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l1_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8903;
-CREATE OPERATOR CLASS vector_l1_ops
+CREATE OPERATOR CLASS pg_catalog.vector_l1_ops
 	FOR TYPE vector USING hnsw AS
 	OPERATOR 1 pg_catalog.<+>(vector, vector) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.l1_distance(vector, vector);
 
-DROP OPERATOR FAMILY IF EXISTS bit_hamming_ops USING ivfflat CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8394;
-CREATE OPERATOR FAMILY bit_hamming_ops USING ivfflat;
+CREATE OPERATOR FAMILY pg_catalog.bit_hamming_ops USING ivfflat;
 
-DROP OPERATOR CLASS IF EXISTS bit_hamming_ops USING ivfflat CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8923;
-CREATE OPERATOR CLASS bit_hamming_ops
+CREATE OPERATOR CLASS pg_catalog.bit_hamming_ops
 	FOR TYPE bit USING ivfflat AS
 	OPERATOR 1 pg_catalog.<~>(bit, bit) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.hamming_distance(bit, bit),
 	FUNCTION 3 pg_catalog.hamming_distance(bit, bit),
 	FUNCTION 5 pg_catalog.ivfflat_bit_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS bit_hamming_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_hamming_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8380;
-CREATE OPERATOR FAMILY bit_hamming_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.bit_hamming_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS bit_hamming_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_hamming_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8909;
-CREATE OPERATOR CLASS bit_hamming_ops
+CREATE OPERATOR CLASS pg_catalog.bit_hamming_ops
 	FOR TYPE bit USING hnsw AS
 	OPERATOR 1 pg_catalog.<~>(bit, bit) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.hamming_distance(bit, bit),
 	FUNCTION 3 pg_catalog.hnsw_bit_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS bit_jaccard_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_jaccard_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8379;
-CREATE OPERATOR FAMILY bit_jaccard_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.bit_jaccard_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS bit_jaccard_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_jaccard_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8908;
-CREATE OPERATOR CLASS bit_jaccard_ops
+CREATE OPERATOR CLASS pg_catalog.bit_jaccard_ops
 	FOR TYPE bit USING hnsw AS
 	OPERATOR 1 pg_catalog.<%>(bit, bit) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.jaccard_distance(bit, bit),
 	FUNCTION 3 pg_catalog.hnsw_bit_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_ops USING btree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8397;
-CREATE OPERATOR FAMILY sparsevec_ops USING btree;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_ops USING btree;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_ops USING btree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8979;
-CREATE OPERATOR CLASS sparsevec_ops
+CREATE OPERATOR CLASS pg_catalog.sparsevec_ops
 	DEFAULT FOR TYPE sparsevec USING btree AS
 	OPERATOR 1 pg_catalog.<(sparsevec, sparsevec),
 	OPERATOR 2 pg_catalog.<=(sparsevec, sparsevec),
@@ -1342,13 +1344,13 @@ CREATE OPERATOR CLASS sparsevec_ops
 	OPERATOR 5 pg_catalog.>(sparsevec, sparsevec),
 	FUNCTION 1 pg_catalog.sparsevec_cmp(sparsevec, sparsevec);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8376;
-CREATE OPERATOR FAMILY sparsevec_ubt_ops USING ubtree;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_ubt_ops USING ubtree;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8952;
-CREATE OPERATOR CLASS sparsevec_ubt_ops DEFAULT
+CREATE OPERATOR CLASS pg_catalog.sparsevec_ubt_ops DEFAULT
 	FOR TYPE sparsevec USING ubtree AS
 	OPERATOR 1 pg_catalog.<(sparsevec, sparsevec),
 	OPERATOR 2 pg_catalog.<=(sparsevec, sparsevec),
@@ -1357,50 +1359,50 @@ CREATE OPERATOR CLASS sparsevec_ubt_ops DEFAULT
 	OPERATOR 5 pg_catalog.>(sparsevec, sparsevec),
 	FUNCTION 1 sparsevec_cmp(sparsevec, sparsevec);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_l2_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_l2_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8381;
-CREATE OPERATOR FAMILY sparsevec_l2_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_l2_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_l2_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_l2_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8910;
-CREATE OPERATOR CLASS sparsevec_l2_ops
+CREATE OPERATOR CLASS pg_catalog.sparsevec_l2_ops
 	FOR TYPE sparsevec USING hnsw AS
 	OPERATOR 1 pg_catalog.<->(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.sparsevec_l2_squared_distance(sparsevec, sparsevec),
 	FUNCTION 3 pg_catalog.hnsw_sparsevec_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_ip_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ip_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8382;
-CREATE OPERATOR FAMILY sparsevec_ip_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_ip_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_ip_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ip_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8911;
-CREATE OPERATOR CLASS sparsevec_ip_ops
+CREATE OPERATOR CLASS pg_catalog.sparsevec_ip_ops
 	FOR TYPE sparsevec USING hnsw AS
 	OPERATOR 1 pg_catalog.<#>(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.sparsevec_negative_inner_product(sparsevec, sparsevec),
 	FUNCTION 3 pg_catalog.hnsw_sparsevec_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_cosine_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_cosine_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8383;
-CREATE OPERATOR FAMILY sparsevec_cosine_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_cosine_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_cosine_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_cosine_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8912;
-CREATE OPERATOR CLASS sparsevec_cosine_ops
+CREATE OPERATOR CLASS pg_catalog.sparsevec_cosine_ops
 	FOR TYPE sparsevec USING hnsw AS
 	OPERATOR 1 pg_catalog.<=>(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.sparsevec_negative_inner_product(sparsevec, sparsevec),
 	FUNCTION 2 pg_catalog.l2_norm(sparsevec),
 	FUNCTION 3 pg_catalog.hnsw_sparsevec_support(internal);
 
-DROP OPERATOR FAMILY IF EXISTS sparsevec_l1_ops USING hnsw CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8384;
-CREATE OPERATOR FAMILY sparsevec_l1_ops USING hnsw;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_l1_ops USING hnsw;
 
-DROP OPERATOR CLASS IF EXISTS sparsevec_l1_ops USING hnsw CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8913;
-CREATE OPERATOR CLASS sparsevec_l1_ops
+CREATE OPERATOR CLASS pg_catalog.sparsevec_l1_ops
 	FOR TYPE sparsevec USING hnsw AS
 	OPERATOR 1 pg_catalog.<+>(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.l1_distance(sparsevec, sparsevec),
