@@ -1131,14 +1131,14 @@ int IsBeginWith(const char *str1, char *str2)
     return 1;
 }
 
-bool SsIsSkipPath(const char* dirname, bool needskipall)
+bool SsIsSkipPath(const char* dirname)
 {   
     if (!ss_instance_config.dss.enable_dss) {
-        return false;    
+        return false;
     }
 
     if (strcmp(dirname, ".recycle") == 0) {
-        return true;    
+        return true;
     }
 
     /* skip doublewrite of all instances*/
@@ -1157,26 +1157,6 @@ bool SsIsSkipPath(const char* dirname, bool needskipall)
         return true;
     }
 
-    /* skip directory which not belong to primary in dss */
-    if (needskipall) {
-        /* skip pg_xlog and doublewrite of all instances*/
-        if (IsBeginWith(dirname, "pg_xlog") > 0) {
-            return true;
-        }
-    } else {
-        /* skip other node pg_xlog except primary */
-        if (IsBeginWith(dirname, "pg_xlog") > 0) { 
-            size_t dirNameLen = strlen("pg_xlog");
-            char instanceId[MAX_INSTANCEID_LEN] = {0};
-            errno_t rc = EOK;
-            rc = snprintf_s(instanceId, sizeof(instanceId), sizeof(instanceId) - 1, "%d",
-                                ss_instance_config.dss.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
-            /* not skip pg_xlog directory in file systerm */
-            if (strlen(dirname) > dirNameLen && strcmp(dirname + dirNameLen, instanceId) != 0)
-                return true;
-        }
-    }
     return false;
 }
 
@@ -1227,7 +1207,7 @@ static void DeleteSubDataDir(const char* dirname)
                 continue;
             if (g_is_obsmode && (strcmp(de->d_name, "pg_replslot") == 0))
                 continue;
-            if (is_dss_file(dirname) && SsIsSkipPath(de->d_name, true))
+            if (is_dss_file(dirname) && SsIsSkipPath(de->d_name))
                 continue;
             
             rc = memset_s(fullpath, MAXPGPATH, 0, MAXPGPATH);
