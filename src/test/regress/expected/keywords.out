@@ -1,0 +1,32 @@
+-- Test keywords used in statements, refers to `kwlist.h`
+CREATE SCHEMA keywords;
+SET CURRENT_SCHEMA TO keywords;
+-- Unreserved keywords
+CREATE TABLE following (final int);
+DROP TABLE following;
+CREATE TYPE following;
+DROP TYPE following;
+-- Col name keywords
+CREATE TABLE float (forward int);
+DROP TABLE float;
+CREATE TYPE grouping; -- Will fail
+ERROR:  syntax error at or near "grouping"
+LINE 1: CREATE TYPE grouping;
+                    ^
+DROP TYPE grouping; -- Will fail
+ERROR:  syntax error at or near "grouping"
+LINE 1: DROP TYPE grouping;
+                  ^
+-- Type name keywords
+CREATE TABLE full (freeze int); -- Will fail
+ERROR:  syntax error at or near "full"
+LINE 1: CREATE TABLE full (freeze int);
+                     ^
+DROP TABLE full; -- Will fail
+ERROR:  syntax error at or near "full"
+LINE 1: DROP TABLE full;
+                   ^
+CREATE TYPE full;
+DROP TYPE full;
+SET CURRENT_SCHEMA TO DEFAULT;
+DROP SCHEMA keywords;

@@ -554,7 +554,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 				sort_clause opt_sort_clause sortby_list index_params constraint_params
 				name_list UserIdList from_clause from_list opt_array_bounds
 				from_list_for_no_table_function
-				qualified_name_list any_name any_name_list type_name_list collate_name
+				qualified_name_list any_name type_name any_name_list type_name_list collate_name
 				any_operator expr_list attrs callfunc_args
 				target_list insert_column_list set_target_list rename_clause_list rename_clause
 				set_clause_list set_clause multiple_set_clause
@@ -12868,7 +12868,7 @@ DefineStmt:
 					n->definition = $4;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name definition
+			| CREATE TYPE_P type_name definition
 				{
 					DefineStmt *n = makeNode(DefineStmt);
 					n->kind = OBJECT_TYPE;
@@ -12878,7 +12878,7 @@ DefineStmt:
 					n->definition = $4;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name
+			| CREATE TYPE_P type_name
 				{
 					/* Shell type (identified by lack of definition) */
 					DefineStmt *n = makeNode(DefineStmt);
@@ -12889,7 +12889,7 @@ DefineStmt:
 					n->definition = NIL;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is '(' OptTableFuncElementList ')'
+			| CREATE TYPE_P type_name as_is '(' OptTableFuncElementList ')'
 				{
 					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
 
@@ -12919,7 +12919,7 @@ DefineStmt:
 					n->methodlist = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
+			| CREATE TYPE_P type_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 						ereport(errstate, 
@@ -12981,7 +12981,7 @@ DefineStmt:
 					n->typebody = NULL;
 					$$ = (Node *)n;					
 				}
-			| CREATE TYPE_P any_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
+			| CREATE TYPE_P type_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 						ereport(errstate, 
@@ -13033,7 +13033,7 @@ DefineStmt:
 					n->typebody = NULL;
 					$$ = (Node *)n;						
 				}
-			| CREATE TYPE_P any_name UNDER any_name '(' TableFuncElementList ')' final_clause
+			| CREATE TYPE_P type_name UNDER any_name '(' TableFuncElementList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13087,7 +13087,7 @@ DefineStmt:
 						n->typebody = NULL;
 						$$ = (Node *)n;	
 				}
-			| CREATE TYPE_P any_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
+			| CREATE TYPE_P type_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13141,7 +13141,7 @@ DefineStmt:
 						n->typebody = NULL;
 						$$ = (Node *)n;
 				}
-			| CREATE TYPE_P BODY_P any_name as_is type_body_subprogram
+			| CREATE TYPE_P BODY_P type_name as_is type_body_subprogram
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 						ereport(errstate, 
@@ -13185,7 +13185,7 @@ DefineStmt:
 					n->typebody = typebody.data;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is VARRAY '(' ICONST ')' OF func_type
+			| CREATE TYPE_P type_name as_is VARRAY '(' ICONST ')' OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
 					n->typname = $3;
@@ -13205,7 +13205,7 @@ DefineStmt:
 					n->typecategory = TYPCATEGORY_VARRAY;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is TABLE OF func_type
+			| CREATE TYPE_P type_name as_is TABLE OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
 					n->replace = false;
@@ -13225,14 +13225,14 @@ DefineStmt:
 					n->typecategory = TYPCATEGORY_TABLEOF;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is ENUM_P '(' opt_enum_val_list ')'
+			| CREATE TYPE_P type_name as_is ENUM_P '(' opt_enum_val_list ')'
 				{
 					CreateEnumStmt *n = makeNode(CreateEnumStmt);
 					n->typname = $3;
 					n->vals = $7;
 					$$ = (Node *)n;
 				}
-			| CREATE TYPE_P any_name as_is RANGE definition
+			| CREATE TYPE_P type_name as_is RANGE definition
 				{
 					CreateRangeStmt *n = makeNode(CreateRangeStmt);
 					n->typname = $3;
@@ -14414,6 +14414,11 @@ any_name_list:
 
 any_name:	ColId						{ $$ = list_make1(makeString($1)); }
 			| ColId attrs				{ $$ = lcons(makeString($1), $2); }
+		;
+
+type_name:
+			type_function_name			{ $$ = list_make1(makeString($1)); }
+			| type_function_name attrs	{ $$ = lcons(makeString($1), $2); }
 		;
 
 attrs:		'.' attr_name
