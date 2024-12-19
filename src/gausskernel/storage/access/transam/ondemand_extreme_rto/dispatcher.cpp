@@ -1976,13 +1976,15 @@ void WaitRedoFinish()
     g_instance.fatal_error = false;
     g_instance.demotion = NoDemote;
     pmState = PM_RUN;
-    write_stderr_with_prefix("[On-demand] LOG: database system is ready to accept connections");
+    write_stderr_with_prefix("[SS][On-demand] LOG: database system is ready to accept connections");
 
     g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_REDO;
     /* for other nodes in cluster */
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_REDO;
     SSUpdateReformerCtrl();
+    ereport(LOG, (errmsg("[SS][On-demand] WaitRedoFinish recovery instance id is %d",
+                         g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id)));
     LWLockRelease(ControlFileLock);
     SSRequestAllStandbyReloadReformCtrlPage();
 

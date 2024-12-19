@@ -318,6 +318,8 @@ void StartupOndemandRecovery()
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
     g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
     SSUpdateReformerCtrl();
+    ereport(LOG, (errmsg("[SS][On-demand] StartupOndemandRecovery recovery instance id is %d",
+                         g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id)));
     LWLockRelease(ControlFileLock);
     SSRequestAllStandbyReloadReformCtrlPage();
     SetOndemandExtremeRtoMode();
