@@ -19,6 +19,7 @@
 #include "access/relscan.h"
 #include "bulkload/dist_fdw.h"
 #include "executor/instrument.h"
+#include "lib/pairingheap.h"
 #include "nodes/params.h"
 #include "nodes/plannodes.h"
 #include "storage/pagecompress.h"
@@ -1974,6 +1975,7 @@ typedef struct {
  *	 IndexScanState information
  *
  *		indexqualorig	   execution state for indexqualorig expressions
+ *		indexorderbyorig   execution state for indexorderbyorig expressions
  *		ScanKeys		   Skey structures for index quals
  *		NumScanKeys		   number of ScanKeys
  *		OrderByKeys		   Skey structures for index ordering operators
@@ -1984,11 +1986,20 @@ typedef struct {
  *		RuntimeContext	   expr context for evaling runtime Skeys
  *		RelationDesc	   index relation descriptor
  *		ScanDesc		   index scan descriptor
+ *
+ *		ReorderQueue	   tuples that need reordering due to re-check
+ *		ReachedEnd		   have we fetched all tuples from index already?
+ *		OrderByValues	   values of ORDER BY exprs of last fetched tuple
+ *		OrderByNulls	   null flags for OrderByValues
+ *		SortSupport		   for reordering ORDER BY exprs
+ *		OrderByTypByVals   is the datatype of order by expression pass-by-value?
+ *		OrderByTypLens	   typlens of the datatypes of order by expressions
  * ----------------
  */
 typedef struct IndexScanState {
     ScanState ss; /* its first field is NodeTag */
     List* indexqualorig;
+    List* indexorderbyorig;
     ScanKey iss_ScanKeys;
     int iss_NumScanKeys;
     ScanKey iss_OrderByKeys;
@@ -2002,6 +2013,14 @@ typedef struct IndexScanState {
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
+    /* These are needed for re-checking ORDER BY expr ordering */
+    pairingheap* iss_ReorderQueue;
+    bool iss_ReachedEnd;
+    Datum* iss_OrderByValues;
+    bool* iss_OrderByNulls;
+    SortSupport iss_SortSupport;
+    bool* iss_OrderByTypByVals;
+    int16* iss_OrderByTypLens;
 } IndexScanState;
 
 /* ----------------

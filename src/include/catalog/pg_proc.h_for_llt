@@ -4533,7 +4533,7 @@ DATA(insert OID = 1030 (  gist_point_compress	PGNSP PGUID 12 1 0 0 0 f f f f t f
 DESCR("GiST support");
 DATA(insert OID = 2179 (  gist_point_consistent PGNSP PGUID 12 1 0 0 0 f f f f t f i 5 0 16 "2281 600 23 26 2281" _null_ _null_ _null_ _null_	gist_point_consistent _null_ _null_ _null_ "" f));
 DESCR("GiST support");
-DATA(insert OID = 3064 (  gist_point_distance	PGNSP PGUID 12 1 0 0 0 f f f f t f i 4 0 701 "2281 600 23 26" _null_ _null_ _null_ _null_	gist_point_distance _null_ _null_ _null_ "" f));
+DATA(insert OID = 3064 (  gist_point_distance	PGNSP PGUID 12 1 0 0 0 f f f f t f i 5 0 701 "2281 600 23 26 2281" _null_ _null_ _null_ _null_	gist_point_distance _null_ _null_ _null_ "" f));
 DESCR("GiST support");
 
 /* GIN */

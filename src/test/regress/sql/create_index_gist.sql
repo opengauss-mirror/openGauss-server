@@ -236,6 +236,15 @@ create table t(id int, c_point point);
 insert into t select id, point'(1, 2)' from (select * from generate_series(1, 200000) as id) as x;
 create index i on t using gist(c_point) with (buffering=on);
 
+-- test 'Order by' using GiST indexscan with reorder on circle
+CREATE TABLE circle_tbl2(f1 circle);
+INSERT INTO circle_tbl2(f1) VALUES('<(7.1,5),1>'::circle),('<(2.5,8.5),2.5>'::circle),('<(1,2),1>'::circle),('<(2,2),1>'::circle);
+CREATE INDEX circle_ind2 on circle_tbl2 USING gist(f1);
+EXPLAIN (COSTS false) SELECT /*+ indexscan(circle_tbl2 circle_ind2) */ * FROM circle_tbl2 ORDER BY f1 <-> '(5,5)'::point ASC;
+-- '<(7.1,5),1>' shoule be output before'<(2.5,8.5),2.5>', and it is reverse if there is no 'reorder'
+SELECT /*+ indexscan(circle_tbl2 circle_ind2) */ f1, trunc(f1 <-> '(5,5)'::point, 2) AS d FROM circle_tbl2 ORDER BY f1 <-> '(5,5)'::point ASC;
+SELECT /*+ tablescan(circle_tbl2) */ f1, trunc(f1 <-> '(5,5)'::point, 2) AS d FROM circle_tbl2 ORDER BY f1 <-> '(5,5)'::point ASC;
+
 RESET enable_seqscan;
 RESET enable_indexscan;
 RESET enable_bitmapscan;
@@ -245,4 +254,5 @@ DROP TABLE polygon_tbl;
 DROP TABLE circle_tbl;
 DROP TABLE point_tbl;
 DROP TABLE t;
+DROP TABLE circle_tbl2;
 DROP SCHEMA create_index_gist CASCADE;

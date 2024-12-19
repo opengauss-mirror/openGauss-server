@@ -157,6 +157,16 @@ typedef struct IndexScanDescData {
     Buffer xs_cbuf;        /* current heap buffer in scan, if any */
     /* NB: if xs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
     bool xs_recheck; /* T means scan keys must be rechecked */
+    /*
+     * When fetching with an ordering operator, the values of the ORDER BY
+     * expressions of the last returned tuple, according to the index.  If
+     * xs_recheckorderby is true, these need to be rechecked just like the
+     * scan keys, and the values returned here are a lower-bound on the actual
+     * values.
+     */
+    Datum* xs_orderbyvals;
+    bool* xs_orderbynulls;
+    bool xs_recheckorderby;
 
     /* used in ubtree only, indicate that we need to recheck the returned IndexTuple */
     bool xs_recheck_itup;

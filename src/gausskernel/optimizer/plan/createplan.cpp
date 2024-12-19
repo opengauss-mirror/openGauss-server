@@ -31,6 +31,7 @@
 #include "catalog/pg_opfamily.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/pg_proc_ext.h"
+#include "catalog/pg_operator.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
@@ -157,7 +158,8 @@ static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
 
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
-    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial);
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, Oid* indexorderbyops,
+    ScanDirection indexscandir, double indexselectivity, bool is_partial);
 static IndexOnlyScan* make_indexonlyscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
     List* indexqualorig, List* indexorderby, List* indextlist, ScanDirection indexscandir, double indexselectivity, bool is_partial);
 static CStoreIndexScan* make_cstoreindexscan(PlannerInfo* root, Path* best_path, List* qptlist, List* qpqual,
@@ -199,7 +201,7 @@ static MergeJoin* make_mergejoin(List* tlist, List* joinclauses, List* otherclau
 static Plan* prepare_sort_from_pathkeys(PlannerInfo* root, Plan* lefttree, List* pathkeys, Relids relids,
     const AttrNumber* reqColIdx, bool adjust_tlist_in_place, int* p_numsortkeys, AttrNumber** p_sortColIdx,
     Oid** p_sortOperators, Oid** p_collations, bool** p_nullsFirst);
-static EquivalenceMember* find_ec_member_for_tle(EquivalenceClass* ec, TargetEntry* tle, Relids relids);
+static EquivalenceMember* find_ec_member_for_expr(EquivalenceClass* ec, Expr* tlexpr, Relids relids);
 static List* fix_cstore_scan_qual(PlannerInfo* root, List* qpqual);
 static List* make_null_eq_clause(List* joinqual, List** otherqual, List* nullinfo);
 static Node* get_null_eq_restrictinfo(Node* restrictinfo, List* nullinfo);
@@ -2620,6 +2622,7 @@ static Scan* create_indexscan_plan(
 	double indexselectivity = best_path->indexselectivity;
     ListCell* l = NULL;
     Bitmapset *prefixkeys = NULL;
+    Oid* indexorderbyops = NULL;
 
     /* it should be a base rel... */
     Assert(baserelid > 0);
@@ -2730,6 +2733,44 @@ static Scan* create_indexscan_plan(
         indexorderbys = (List*)replace_nestloop_params(root, (Node*)indexorderbys);
     }
 
+    /*
+     * If there are ORDER BY expressions, look up the sort operators for
+     * their datatypes.
+     */
+    if (best_path->path.pathkeys && indexorderbys) {
+        int       numOrderBys = list_length(indexorderbys);
+        int       i;
+        ListCell* pathkeyCell;
+        ListCell* exprCell;
+        PathKey*  pathkey;
+        Expr*     expr;
+        EquivalenceMember* em;
+
+        indexorderbyops = (Oid *) palloc(numOrderBys * sizeof(Oid));
+
+        /*
+         * PathKey contains pointer to the equivalence class, but that's not
+         * enough because we need the expression's datatype to look up the
+         * sort operator in the operator family.  We have to dig the
+         * equivalence member for the datatype.
+         */
+        i = 0;
+        forboth (pathkeyCell, best_path->path.pathkeys, exprCell, indexorderbys) {
+            pathkey = (PathKey *) lfirst(pathkeyCell);
+            expr = (Expr *) lfirst(exprCell);
+
+            /* Find equivalence member for the order by expression */
+            em = find_ec_member_for_expr(pathkey->pk_eclass, expr, NULL);
+
+            /* Get sort operator from opfamily */
+            indexorderbyops[i] = get_opfamily_member(pathkey->pk_opfamily,
+                                                     em->em_datatype,
+                                                     em->em_datatype,
+                                                     pathkey->pk_strategy);
+            i++;
+        }
+    }
+
     /* Finally ready to build the plan node */
     if (best_path->path.parent->orientation == REL_COL_ORIENTED) {
         scan_plan = (Scan*)make_cstoreindexscan(root,
@@ -2788,6 +2829,7 @@ static Scan* create_indexscan_plan(
                     stripped_indexquals,
                     fixed_indexorderbys,
                     indexorderbys,
+                    indexorderbyops,
                     best_path->indexscandir,
                     indexselectivity,
                     (best_path->indexinfo->indpred != NIL));
@@ -6121,7 +6163,8 @@ static TsStoreScan* make_tsstorescan(List* qptlist, List* qpqual, Index scanreli
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
-    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial)
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, Oid* indexorderbyops,
+    ScanDirection indexscandir, double indexselectivity, bool is_partial)
 {
     IndexScan* node = makeNode(IndexScan);
     Plan* plan = &node->scan.plan;
@@ -6137,6 +6180,7 @@ static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, O
     node->indexqualorig = indexqualorig;
     node->indexorderby = indexorderby;
     node->indexorderbyorig = indexorderbyorig;
+    node->indexorderbyops = indexorderbyops;
     node->indexorderdir = indexscandir;
     node->selectivity = indexselectivity;
     node->is_partial = is_partial;
@@ -7715,7 +7759,7 @@ static Plan* prepare_sort_from_pathkeys(PlannerInfo* root, Plan* lefttree, List*
              */
             tle = get_tle_by_resno(tlist, reqColIdx[numsortkeys]);
             if (tle != NULL) {
-                em = find_ec_member_for_tle(ec, tle, relids);
+                em = find_ec_member_for_expr(ec, tle->expr, relids);
                 if (em != NULL) {
                     /* found expr at right place in tlist */
                     pk_datatype = em->em_datatype;
@@ -7741,7 +7785,7 @@ static Plan* prepare_sort_from_pathkeys(PlannerInfo* root, Plan* lefttree, List*
              */
             foreach (j, tlist) {
                 tle = (TargetEntry*)lfirst(j);
-                em = find_ec_member_for_tle(ec, tle, relids);
+                em = find_ec_member_for_expr(ec, tle->expr, relids);
                 if (em != NULL) {
                     /* found expr already in tlist */
                     pk_datatype = em->em_datatype;
@@ -7872,20 +7916,18 @@ static Plan* prepare_sort_from_pathkeys(PlannerInfo* root, Plan* lefttree, List*
 }
 
 /*
- * find_ec_member_for_tle
- *		Locate an EquivalenceClass member matching the given TLE, if any
+ * find_ec_member_for_expr
+ *		Locate an EquivalenceClass member matching the given expression, if any
  *
  * Child EC members are ignored unless they match 'relids'.
  */
-static EquivalenceMember* find_ec_member_for_tle(EquivalenceClass* ec, TargetEntry* tle, Relids relids)
+static EquivalenceMember* find_ec_member_for_expr(EquivalenceClass* ec, Expr* expr, Relids relids)
 {
-    Expr* tlexpr = NULL;
     ListCell* lc = NULL;
 
     /* We ignore binary-compatible relabeling on both ends */
-    tlexpr = tle->expr;
-    while (tlexpr && IsA(tlexpr, RelabelType))
-        tlexpr = ((RelabelType*)tlexpr)->arg;
+    while (expr && IsA(expr, RelabelType))
+        expr = ((RelabelType *) expr)->arg;
 
     foreach (lc, ec->ec_members) {
         EquivalenceMember* em = (EquivalenceMember*)lfirst(lc);
@@ -7910,7 +7952,7 @@ static EquivalenceMember* find_ec_member_for_tle(EquivalenceClass* ec, TargetEnt
         while (emexpr && IsA(emexpr, RelabelType))
             emexpr = ((RelabelType*)emexpr)->arg;
 
-        if (equal(emexpr, tlexpr))
+        if (equal(emexpr, expr))
             return em;
     }
 

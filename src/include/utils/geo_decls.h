@@ -384,6 +384,7 @@ extern Datum circle_diameter(PG_FUNCTION_ARGS);
 extern Datum circle_radius(PG_FUNCTION_ARGS);
 extern Datum circle_distance(PG_FUNCTION_ARGS);
 extern Datum dist_pc(PG_FUNCTION_ARGS);
+extern Datum dist_cpoint(PG_FUNCTION_ARGS);
 extern Datum dist_cpoly(PG_FUNCTION_ARGS);
 extern Datum circle_center(PG_FUNCTION_ARGS);
 extern Datum cr_circle(PG_FUNCTION_ARGS);
@@ -407,6 +408,7 @@ extern Datum gist_circle_compress(PG_FUNCTION_ARGS);
 extern Datum gist_circle_consistent(PG_FUNCTION_ARGS);
 extern Datum gist_point_compress(PG_FUNCTION_ARGS);
 extern Datum gist_point_consistent(PG_FUNCTION_ARGS);
+extern Datum gist_circle_distance(PG_FUNCTION_ARGS);
 extern Datum gist_point_distance(PG_FUNCTION_ARGS);
 
 /* geo_selfuncs.c */

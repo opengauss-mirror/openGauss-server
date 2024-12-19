@@ -4587,6 +4587,20 @@ Datum dist_pc(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(result);
 }
 
+/*
+ * Distance from a circle to a point
+ */
+Datum dist_cpoint(PG_FUNCTION_ARGS)
+{
+    CIRCLE* circle = PG_GETARG_CIRCLE_P(0);
+    Point* point = PG_GETARG_POINT_P(1);
+    float8 result;
+
+    result = point_dt(point, &circle->center) - circle->radius;
+    result = result < 0 ? 0 : result;
+    PG_RETURN_FLOAT8(result);
+}
+
 /*		circle_center	-		returns the center point of the circle.
  */
 Datum circle_center(PG_FUNCTION_ARGS)

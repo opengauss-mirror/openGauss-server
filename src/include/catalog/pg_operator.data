@@ -972,6 +972,8 @@ DATA(insert OID = 1522 ("<->"   PGNSP PGUID b f f  600    718  701      0    0 d
 DESCR("distance between");
 DATA(insert OID = 1523 ("<->"   PGNSP PGUID b f f  718    604  701      0    0 dist_cpoly - -));
 DESCR("distance between");
+DATA(insert OID = 3291 ("<->"   PGNSP PGUID b f f  718    600  701   1522    0 dist_cpoint - -));
+DESCR("distance between");
 
 /* additional geometric operators - thomas 1997-07-09 */
 DATA(insert OID = 1524 ("<->"   PGNSP PGUID b f f  628    603  701      0  0 dist_lb - -));
