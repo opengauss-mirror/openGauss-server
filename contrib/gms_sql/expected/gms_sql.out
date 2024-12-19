@@ -461,7 +461,7 @@ l_cnt int;
 l_desctab gms_sql.desc_tab;
 l_sqltext varchar(2000);
 begin
-  l_sqltext='select * from pg_object;';
+  l_sqltext='select * from pg_object order by 1;';
   l_curid := gms_sql.open_cursor();
   gms_sql.parse(l_curid, l_sqltext, 0);
   gms_sql.describe_columns(l_curid, l_cnt, l_desctab);
@@ -479,6 +479,7 @@ NOTICE:  mtime,181
 NOTICE:  createcsn,2 
 NOTICE:  changecsn,2 
 NOTICE:  valid,109 
+NOTICE:  object_options,2 
 create table t1(id int, name varchar(20));
 insert into t1 select generate_series(1,3), 'abcddd';
 create table t2(a int, b date);
@@ -751,3 +752,22 @@ CONTEXT:  referenced column: close_cursor
 select gms_sql.close_cursor(-1);
 ERROR:  cursor -1 value of cursor id is out of range
 CONTEXT:  referenced column: close_cursor
+drop extension gms_sql;
+create extension gms_xmlgen;
+create extension gms_sql;
+DECLARE
+  c                NUMBER;
+BEGIN
+  c := GMS_SQL.OPEN_CURSOR;
+   GMS_SQL.CLOSE_CURSOR(c);
+END;
+/
+DECLARE
+  c                NUMBER;
+BEGIN
+  c := GMS_SQL.OPEN_CURSOR;
+   GMS_SQL.CLOSE_CURSOR(c);
+END;
+/
+drop extension gms_xmlgen;
+drop extension gms_sql;

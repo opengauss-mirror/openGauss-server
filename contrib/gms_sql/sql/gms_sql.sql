@@ -174,7 +174,7 @@ l_cnt int;
 l_desctab gms_sql.desc_tab;
 l_sqltext varchar(2000);
 begin
-  l_sqltext='select * from pg_object;';
+  l_sqltext='select * from pg_object order by 1;';
   l_curid := gms_sql.open_cursor();
   gms_sql.parse(l_curid, l_sqltext, 0);
   gms_sql.describe_columns(l_curid, l_cnt, l_desctab);
@@ -313,3 +313,23 @@ select gms_sql.close_cursor(3);
 select gms_sql.is_open(3);
 select gms_sql.close_cursor(10000);
 select gms_sql.close_cursor(-1);
+
+drop extension gms_sql;
+create extension gms_xmlgen;
+create extension gms_sql;
+DECLARE
+  c                NUMBER;
+BEGIN
+  c := GMS_SQL.OPEN_CURSOR;
+   GMS_SQL.CLOSE_CURSOR(c);
+END;
+/
+DECLARE
+  c                NUMBER;
+BEGIN
+  c := GMS_SQL.OPEN_CURSOR;
+   GMS_SQL.CLOSE_CURSOR(c);
+END;
+/
+drop extension gms_xmlgen;
+drop extension gms_sql;

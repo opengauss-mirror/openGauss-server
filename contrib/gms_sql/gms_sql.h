@@ -159,5 +159,7 @@ extern "C"  Datum gms_sql_describe_columns_f(PG_FUNCTION_ARGS);
 extern "C"  Datum gms_sql_debug_cursor(PG_FUNCTION_ARGS);
 extern "C"  Datum gms_sql_return_result(PG_FUNCTION_ARGS);
 extern "C"  Datum gms_sql_return_result_i(PG_FUNCTION_ARGS);
+extern "C" void set_extension_index(uint32 index);
+extern "C" void init_session_vars(void);
 
 #endif
