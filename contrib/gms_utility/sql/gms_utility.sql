@@ -1648,9 +1648,25 @@ call test_comma_to_table('gaussdb."table",gaussdb.emp');
 call test_comma_to_table('gaussdb.column,gaussdb.emp'); -- error
 call test_comma_to_table('gaussdb."column",gaussdb.emp');
 
-call test_comma_to_table('"gaussdb.dept,gaussdb.emp"'); -- error
+call test_comma_to_table('"gaussdb.dept,gaussdb.emp"');
 call test_comma_to_table('"gauss"db.d"ept,gaussdb.emp'); -- error
 call test_comma_to_table('gauss"db".dept,gaussdb.emp'); -- error
+
+call test_comma_to_table('nullabc.abcd');
+call test_comma_to_table('null');  -- error
+call test_comma_to_table('"null"');
+call test_comma_to_table('null.null');  -- error
+call test_comma_to_table('null,null');  -- error
+call test_comma_to_table('table');  -- error
+call test_comma_to_table('table,column'); -- error
+call test_comma_to_table('"table"');
+call test_comma_to_table('table.table');  -- error
+call test_comma_to_table('table,table');  -- error
+
+call test_comma_to_table('gaussdb."dept,gaussdb".emp,gaussdb.jobhist');
+call test_comma_to_table('",d"');
+call test_comma_to_table('a.b,c.d,",d"');
+call test_comma_to_table('"a,b,c,d"');
 
 drop procedure test_comma_to_table;
 

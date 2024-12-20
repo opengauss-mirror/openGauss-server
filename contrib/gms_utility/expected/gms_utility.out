@@ -3844,13 +3844,16 @@ tablename: gaussdb.emp
  
 (1 row)
 
-call test_comma_to_table('"gaussdb.dept,gaussdb.emp"'); -- error
-ERROR:  Invalid parameter value ""gaussdb.dept" with quotation not closed
-CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
-SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
-PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"gaussdb.dept,gaussdb.emp"');
+table len: 1
+tablename: "gaussdb.dept,gaussdb.emp"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
 call test_comma_to_table('"gauss"db.d"ept,gaussdb.emp'); -- error
-ERROR:  Invalid parameter value ""gauss"db.d"ept" after quotation
+ERROR:  Invalid parameter value ""gauss"db.d"ept,gaussdb.emp" after quotation
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
@@ -3859,6 +3862,100 @@ ERROR:  Invalid parameter value "gauss"db".dept" before quotation
 CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
 SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
 PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('nullabc.abcd');
+table len: 1
+tablename: nullabc.abcd
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('null');  -- error
+ERROR:  Invalid parameter value "null" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"null"');
+table len: 1
+tablename: "null"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('null.null');  -- error
+ERROR:  Invalid parameter value "null.null" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('null,null');  -- error
+ERROR:  Invalid parameter value "null" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('table');  -- error
+ERROR:  Invalid parameter value "table" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('table,column'); -- error
+ERROR:  Invalid parameter value "table" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('"table"');
+table len: 1
+tablename: "table"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('table.table');  -- error
+ERROR:  Invalid parameter value "table.table" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('table,table');  -- error
+ERROR:  Invalid parameter value "table" with special words
+CONTEXT:  PL/pgSQL function gms_utility.comma_to_table(character varying) line 4 at assignment
+SQL statement "CALL gms_utility.comma_to_table(list,tablen,tab)"
+PL/pgSQL function test_comma_to_table(character varying) line 5 at SQL statement
+call test_comma_to_table('gaussdb."dept,gaussdb".emp,gaussdb.jobhist');
+table len: 2
+tablename: gaussdb."dept,gaussdb".emp
+tablename: gaussdb.jobhist
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('",d"');
+table len: 1
+tablename: ",d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('a.b,c.d,",d"');
+table len: 3
+tablename: a.b
+tablename: c.d
+tablename: ",d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('"a,b,c,d"');
+table len: 1
+tablename: "a,b,c,d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
 drop procedure test_comma_to_table;
 ---------------------------
 -- exec_ddl_statement

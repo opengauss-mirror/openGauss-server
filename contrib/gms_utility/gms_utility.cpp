@@ -66,7 +66,8 @@ typedef Oid (*SearchOidByName)(Oid namespaceId, char* name, NameResolveVar* var)
 static List* GetRelationsInSchema(char *namespc);
 static void DoAnalyzeSchemaStatistic(char* schema, AnalyzeVar* var, AnalyzeMethodOpt methodOpt);
 static void DoDeleteSchemaStatistic(char* schema);
-static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, bool trimSpace);
+static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit,
+                                       bool trimSpace, bool checkSingleKeyword);
 static bool DetectKeyword(char* words);
 static bool CheckLegalIdenty(char* w, bool checkKeyword);
 static TokenizeVar* MakeTokenizeVar();
@@ -611,7 +612,8 @@ static bool CheckLegalDigit(char* name, char* w, bool* firstDigit, bool allowAll
     return false;
 }
 
-static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, bool trimSpace)
+static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit,
+                                       bool trimSpace, bool checkSingleKeyword)
 {
     char* format = NULL;
     StringInfo result;
@@ -664,7 +666,7 @@ static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, 
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                 errmsg("Invalid parameter value \"%s\" with zero length", name)));
             }
-            if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, dotted)) {
+            if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, checkSingleKeyword || dotted)) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                 errmsg("Invalid parameter value \"%s\" with special words", name)));
             }
@@ -710,7 +712,7 @@ static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit, 
         }
         appendStringInfo(result, "%s", name);
     } else {
-        if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, dotted)) {
+        if (BEFORE_QUOTE_STARTED(quoteState) && !CheckLegalIdenty(tmp->data, checkSingleKeyword || dotted)) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Invalid parameter value \"%s\" with special words", name)));
         }
@@ -757,7 +759,7 @@ Datum gms_canonicalize(PG_FUNCTION_ARGS)
                 errmsg("Input parameter \"canon_len\" value \"%d\" should be greater than or equal to 0 ", canonLen)));
     }
 
-    result = CanonicalizeParseInternal(name, len, true, true);
+    result = CanonicalizeParseInternal(name, len, true, true, false);
 
     traveLen = strlen(result);
     canonLen = canonLen < traveLen ? canonLen : traveLen;
@@ -2014,6 +2016,7 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
 {
     char* namelist = NULL;
     const char separator = ',';
+    bits8 quoteState = QUOTE_NONE;
     int start = 0;
     int end = 0;
     int tokenLen = 0;
@@ -2038,13 +2041,20 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
     end = start;
 
     while (namelist[end] != '\0') {
-        if (namelist[end] == separator) {
+        if (namelist[end] == '"') {
+            if (IS_QUOTE_END(quoteState)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("Invalid parameter value \"%s\" after quotation", namelist)));
+            }
+            quoteState <<= 1;
+            end++;
+        } else if (!IS_QUOTE_STARTED(quoteState) && namelist[end] == separator) {
             if (start == end) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
             }
             tokenLen = end - start;
             token = pnstrdup(&namelist[start], tokenLen);
-            tmp = CanonicalizeParseInternal(token, tokenLen, false, false);
+            tmp = CanonicalizeParseInternal(token, tokenLen, false, false, true);
             if (tmp == NULL || *tmp == '\0') {
                 pfree_ext(token);
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
@@ -2053,6 +2063,7 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
             pfree(tmp);
             pfree(token);
 
+            quoteState = QUOTE_NONE;
             start = ++end;
             len++;
         } else {
@@ -2065,7 +2076,7 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
 
     tokenLen = end - start;
     token = pnstrdup(&namelist[start], tokenLen);
-    tmp = CanonicalizeParseInternal(token, tokenLen, false, false);
+    tmp = CanonicalizeParseInternal(token, tokenLen, false, false, true);
     if (tmp == NULL || *tmp == '\0') {
         pfree_ext(token);
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid comma-separated list")));
