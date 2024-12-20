@@ -1020,5 +1020,51 @@ WHERE T2.c_phone in ('N','L','8','X','u','e','S','2','t','p','C')
 DROP TABLE IF EXISTS hbom_t;
 DROP TABLE IF EXISTS bmsql_prefixkey;
 
+-- test prefix index with in-expr
+drop table if exists t1;
+create table t1(
+    id integer,
+    name text,
+    addr varchar(20)
+);
+create index it1 on t1 using btree(name(5));
+
+insert into t1 values (1, '1234567890', '1234567890');
+insert into t1 values (2, '1234567890123', '1234567890123');
+insert into t1 values (3, 'a1234567890', '1234567890');
+insert into t1 values (4, '12345', '12345');
+table t1;
+
+set enable_seqscan=on;
+set enable_indexscan=off;
+explain (costs off) select * from t1 where name in ('1234567890', '1234567890123');
+select * from t1 where name in ('1234567890', '1234567890123'); -- two
+select * from t1 where name in ('12345', '123456'); -- one
+select * from t1 where name in ('12345'); -- one
+select * from t1 where name in ('123456'); -- none
+set enable_seqscan=off;
+set enable_indexscan=on;
+explain (costs off) select * from t1 where name in ('1234567890', '1234567890123');
+select * from t1 where name in ('1234567890', '1234567890123'); -- two
+select * from t1 where name in ('12345', '123456'); -- one
+select * from t1 where name in ('12345'); -- one
+select * from t1 where name in ('123456'); -- none
+
+-- test prefix index with any-expr
+set enable_seqscan=on;
+set enable_indexscan=off;
+explain (costs off) select * from t1 where name = any('{1234567890, a1234567890}'::text[]);
+select * from t1 where name = any('{1234567890, a1234567890}'::text[]); -- two
+select * from t1 where name = any('{12345, 123456}'::text[]); -- one
+select * from t1 where name = any('{12345}'::text[]); -- one
+select * from t1 where name = any('{123456}'::text[]); -- none
+set enable_seqscan=off;
+set enable_indexscan=on;
+explain (costs off) select * from t1 where name = any('{1234567890, a1234567890}'::text[]);
+select * from t1 where name = any('{1234567890, a1234567890}'::text[]); -- two
+select * from t1 where name = any('{12345, 123456}'::text[]); -- one
+select * from t1 where name = any('{12345}'::text[]); -- one
+select * from t1 where name = any('{123456}'::text[]); -- none
+
 \c regression
 drop database prefix_index_db;
