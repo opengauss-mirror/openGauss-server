@@ -89,6 +89,7 @@
 #include "auditfuncs.h"
 #include "datasource/datasource.h"
 #include "storage/proc.h"
+#include "libpq/ip.h"
 
 /*
  * The information about one Grant/Revoke statement, in internal format: object
@@ -272,6 +273,14 @@ static void dumpacl(Acl* acl)
         pfree_ext((acl));                                               \
     }                                                                   \
 } while (0)
+
+/* Check if remote DDL operations are allowed for non-owners */
+#define IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId) \
+    (!u_sess->attr.attr_common.enable_nonowner_remote_ddl && \
+     (ACLMODE_FOR_DDL(mask) || ((mask) & ACL_CREATE) || ((mask) & ACL_TRUNCATE)) && \
+     !has_privs_of_role(roleid, ownerId) && \
+     !IS_AF_UNIX(u_sess->proc_cxt.MyProcPort->laddr.addr.ss_family) && \
+     !IsLoopBackAddr(u_sess->proc_cxt.MyProcPort))
 
 /*
  * If is_grant is true, adds the given privileges for the list of
@@ -4991,6 +5000,12 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
     classForm = (Form_pg_class)GETSTRUCT(classTuple);
 
     ownerId = classForm->relowner;
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(attTuple);
+        ReleaseSysCache(classTuple);
+        return ACL_NO_RIGHTS;
+    }
+
     Oid namespaceId = classForm->relnamespace;
 
     ReleaseSysCache(classTuple);
@@ -5105,6 +5120,7 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
     bool isNull = false;
     Acl* acl = NULL;
     Oid ownerId;
+    AclMode originMask = mask;
 
     bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
     /* remove ddl privileges flag from Aclitem */
@@ -5223,6 +5239,10 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
      * Normal case: get the relation's ACL from pg_class
      */
     ownerId = classForm->relowner;
+    if (IS_REMOTE_DDL_BLOCKED(originMask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_relacl, &isNull);
     if (isNull) {
@@ -5303,6 +5323,11 @@ AclMode pg_database_aclmask(Oid db_oid, Oid roleid, AclMode mask, AclMaskHow how
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_database)GETSTRUCT(tuple))->datdba;
+    
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(DATABASEOID, tuple, Anum_pg_database_datacl, &isNull);
     if (isNull) {
@@ -5355,6 +5380,11 @@ AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow h
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_directory)GETSTRUCT(tuple))->owner;
+    
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(DIRECTORYOID, tuple, Anum_pg_directory_directory_acl, &isNull);
     if (isNull) {
@@ -5405,6 +5435,12 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     bool ispackage = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_package, &isNull);
     packageOidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
     /* packageid can be oid of object type */
@@ -5492,6 +5528,11 @@ AclMode pg_package_aclmask(Oid packageOid, Oid roleid, AclMode mask, AclMaskHow 
     }
     ownerId = ((Form_gs_package)GETSTRUCT(tuple))->pkgowner;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(packageOid));
     if (!HeapTupleIsValid(pkgTuple)) {
         ReleaseSysCache(pkgTuple);
@@ -5554,6 +5595,11 @@ AclMode gs_sec_cmk_aclmask(Oid global_setting_oid, Oid roleid, AclMode mask, Acl
 
     ownerId = ((Form_gs_client_global_keys)GETSTRUCT(tuple))->key_owner;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(GLOBALSETTINGOID, tuple, Anum_gs_client_global_keys_key_acl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -5606,6 +5652,11 @@ AclMode pg_language_aclmask(Oid lang_oid, Oid roleid, AclMode mask, AclMaskHow h
 
     ownerId = ((Form_pg_language)GETSTRUCT(tuple))->lanowner;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(LANGOID, tuple, Anum_pg_language_lanacl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -5654,6 +5705,11 @@ AclMode gs_sec_cek_aclmask(Oid column_setting_oid, Oid roleid, AclMode mask, Acl
     }
 
     ownerId = ((Form_gs_column_keys) GETSTRUCT(tuple))->key_owner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(COLUMNSETTINGOID, tuple, Anum_gs_column_keys_key_acl, &isNull);
     if (isNull) {
@@ -5723,6 +5779,11 @@ AclMode pg_largeobject_aclmask_snapshot(Oid lobj_oid, Oid roleid, AclMode mask, 
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_largeobject_metadata)GETSTRUCT(tuple))->lomowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = heap_getattr(tuple, Anum_pg_largeobject_metadata_lomacl, RelationGetDescr(pg_lo_meta), &isNull);
 
@@ -5862,6 +5923,11 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
 
     ownerId = ((Form_pg_namespace)GETSTRUCT(tuple))->nspowner;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(NAMESPACEOID, tuple, Anum_pg_namespace_nspacl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -5939,6 +6005,11 @@ AclMode pg_nodegroup_aclmask(Oid group_oid, Oid roleid, AclMode mask, AclMaskHow
 
     ownerId = BOOTSTRAP_SUPERUSERID;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     isNull = true;
 
     aclDatum = SysCacheGetAttr(PGXCGROUPOID, tuple, Anum_pgxc_group_group_acl, &isNull);
@@ -5993,6 +6064,11 @@ AclMode pg_tablespace_aclmask(Oid spc_oid, Oid roleid, AclMode mask, AclMaskHow 
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_tablespace)GETSTRUCT(tuple))->spcowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(TABLESPACEOID, tuple, Anum_pg_tablespace_spcacl, &isNull);
 
@@ -6050,6 +6126,11 @@ AclMode pg_foreign_data_wrapper_aclmask(Oid fdw_oid, Oid roleid, AclMode mask, A
      */
     ownerId = fdwForm->fdwowner;
 
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(FOREIGNDATAWRAPPEROID, tuple, Anum_pg_foreign_data_wrapper_fdwacl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -6104,6 +6185,11 @@ AclMode pg_foreign_server_aclmask(Oid srv_oid, Oid roleid, AclMode mask, AclMask
      * Normal case: get the foreign server's ACL from pg_foreign_server
      */
     ownerId = srvForm->srvowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
 
     aclDatum = SysCacheGetAttr(FOREIGNSERVEROID, tuple, Anum_pg_foreign_server_srvacl, &isNull);
     if (isNull) {
@@ -6161,6 +6247,12 @@ AclMode pg_extension_data_source_aclmask(Oid src_oid, Oid roleid, AclMode mask, 
 
     /* Normal case: get the data source's ACL from pg_extension_data_source */
     ownerId = srcForm->srcowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(DATASOURCEOID, tuple, Anum_pg_extension_data_source_srcacl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -6233,6 +6325,12 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
      * Now get the type's owner and ACL from the tuple
      */
     ownerId = typeForm->typowner;
+
+    if (IS_REMOTE_DDL_BLOCKED(mask, roleid, ownerId)) {
+        ReleaseSysCache(tuple);
+        return ACL_NO_RIGHTS;
+    }
+
     aclDatum = SysCacheGetAttr(TYPEOID, tuple, Anum_pg_type_typacl, &isNull);
     if (isNull) {
         /* No ACL, so build default ACL */
@@ -6252,6 +6350,7 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
         ReleaseSysCache(tuple);
         return result;
     }
+
     bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
     if (is_ddl_privileges) {
         if ((REMOVE_DDL_FLAG(mask) & ACL_ALTER) && !(result & ACL_ALTER)) {
