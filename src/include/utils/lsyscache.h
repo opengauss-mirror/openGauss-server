@@ -31,6 +31,7 @@ typedef struct OpBtreeInterpretation {
 /* I/O function selector for get_type_io_data */
 typedef enum IOFuncSelector { IOFunc_input, IOFunc_output, IOFunc_receive, IOFunc_send } IOFuncSelector;
 
+extern void get_operator_types(Oid opno, Oid* leftType, Oid* rightType);
 extern bool op_in_opfamily(Oid opno, Oid opfamily);
 extern int get_op_opfamily_strategy(Oid opno, Oid opfamily);
 extern Oid get_op_opfamily_sortfamily(Oid opno, Oid opfamily);
