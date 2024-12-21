@@ -96,8 +96,6 @@ typedef struct st_datadir_t {
     char pg_data[MAXPGPATH];    // pg_data path in unix
     char dss_data[MAXPGPATH];   // dss vgdata (only in dss mode)
     char dss_log[MAXPGPATH];    // dss vglog (only in dss mode)
-    int instance_id;            // instance id of cluster (only in dss mode)
-    char xlogDir[MAXPGPATH];
     char baseDir[MAXPGPATH];
     char globalDir[MAXPGPATH];
     char clogDir[MAXPGPATH];
@@ -109,6 +107,7 @@ typedef struct st_datadir_t {
     char tblspcDir[MAXPGPATH];
     char twophaseDir[MAXPGPATH];
     char multixactDir[MAXPGPATH];
+    char xlogDir[MAXPGPATH];
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
     char controlInfoPath[MAXPGPATH];

@@ -272,13 +272,9 @@ extern void dir_list_file(parray *files, const char *root, bool exclude,
                           bool skip_hidden, int external_dir_num, fio_location location,
                           bool backup_replslots = false);
 
-extern void create_data_directories(parray *dest_files,
-                                        const char *data_dir,
-                                        const char *backup_dir,
-                                        bool extract_tablespaces,
-                                        bool incremental,
-                                        fio_location location,
-                                        bool is_restore);
+extern void create_data_directories(parray *dest_files, const char *data_dir, const char *xlog_dir,
+                                    const char *backup_dir, bool extract_tablespaces, bool incremental,
+                                    fio_location location, bool is_restore);
 
 extern void read_tablespace_map(parray *files, const char *backup_dir);
 extern void opt_tablespace_map(ConfigOption *opt, const char *arg);
@@ -412,12 +408,8 @@ extern pg_crc32c get_pgcontrol_checksum(const char *fullpath);
 extern uint32 get_xlog_seg_size(char *pgdata_path);
 extern void get_redo(const char *pgdata_path, RedoParams *redo);
 extern void parse_vgname_args(const char* args);
-extern bool is_ss_xlog(const char *ss_dir);
-extern void ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog);
-extern bool ss_create_if_pg_replication(pgFile *dir, const char *vgdata, const char *vglog);
-extern bool ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id);
-extern bool ss_create_if_pg_replication(pgFile* dir, const char* vgdata, const char* vglog);
-extern char* xstrdup(const char* s);
+extern bool is_dss_xlog_dir(const char *ss_dir);
+extern char *xstrdup(const char* s);
 extern void set_min_recovery_point(pgFile *file, const char *fullpath,
                                    XLogRecPtr stop_backup_lsn);
 extern void copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
