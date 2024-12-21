@@ -31,15 +31,6 @@
 
 #include "builtins.h"
 
-enum NumUtilsConvertResult {
-    RES_OK,
-    RES_OUT_OF_RANGE,
-    RES_NOT_A_NUMBER,
-    RES_UNEXPECTED_TRAILING_CHARS,
-};
-
-extern NumUtilsConvertResult pg_strtoint64_internal(const char* s, int64* result);
-
 inline char* pg_ultostr_zeropad_width_2(char* str, uint32 value);
 inline char* pg_ultostr_zeropad_min_width_4(char* str, uint32 value);
 

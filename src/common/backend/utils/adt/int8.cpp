@@ -24,7 +24,6 @@
 #include "libpq/pqformat.h"
 #include "utils/int8.h"
 #include "utils/builtins.h"
-#include "utils/numutils.h"
 
 #define MAXINT8LEN 25
 
@@ -43,6 +42,89 @@ typedef struct {
 /* ----------------------------------------------------------
  * Formatting and conversion routines.
  * --------------------------------------------------------- */
+
+enum NumUtilsConvertResult {
+    RES_OK,
+    RES_OUT_OF_RANGE,
+    RES_NOT_A_NUMBER,
+    RES_UNEXPECTED_TRAILING_CHARS,
+};
+
+/*
+ * Convert input string to a signed 64 bit integer.
+ * Allows any number of leading or trailing whitespace characters. Will return
+ * `NumUtilsConvertResult` upon bad input format or overflow.
+ */
+static inline NumUtilsConvertResult pg_strtoint64_internal(const char* s, int64* result)
+{
+    Assert(result);
+    *result = 0;
+
+    const char* ptr = s;
+    uint64 tmp = 0;
+    bool neg = false;
+
+    /* skip leading spaces */
+    while (isspace(static_cast<unsigned char>(*ptr))) {
+        ptr++;
+    }
+
+    /* handle sign */
+    if (*ptr == '-') {
+        ptr++;
+        neg = true;
+    } else if (*ptr == '+') {
+        ptr++;
+    }
+
+    /* require at least one digit */
+    if (unlikely(!isdigit(static_cast<unsigned char>(*ptr)))) {
+        return RES_NOT_A_NUMBER;
+    }
+
+    /* process digits */
+    for (;;) {
+        uint8 digit = *ptr - '0';
+
+        if (digit >= 10) {
+            break;
+        }
+
+        ptr++;
+
+        if (unlikely(tmp > -(PG_INT64_MIN / 10))) {
+            *result = neg ? PG_INT64_MIN : PG_INT64_MAX;
+            return RES_OUT_OF_RANGE;
+        }
+
+        tmp = tmp * 10 + digit;
+    }
+
+    /* allow trailing whitespace, but not other trailing chars */
+    while (isspace(static_cast<unsigned char>(*ptr))) {
+        ptr++;
+    }
+
+    if (unlikely(*ptr != '\0')) {
+        return RES_UNEXPECTED_TRAILING_CHARS;
+    }
+
+    if (neg) {
+        if (unlikely(pg_neg_u64_overflow(tmp, result))) {
+            *result = PG_INT64_MIN;
+            return RES_OUT_OF_RANGE;
+        }
+        return RES_OK;
+    }
+
+    if (unlikely(tmp > PG_INT64_MAX)) {
+        *result = PG_INT64_MAX;
+        return RES_OUT_OF_RANGE;
+    }
+
+    *result = static_cast<int64>(tmp);
+    return RES_OK;
+}
 
 /*
  * Try to parse `str` into an `int8`.
@@ -73,8 +155,12 @@ bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
         ereport(WARNING, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                           errmsg("value \"%s\" is out of range for type %s. truncated automatically", str, "bigint")));
     } else if (res == RES_NOT_A_NUMBER) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                        errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
+        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                            errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
+        } else if (DB_IS_CMPT(B_FORMAT)) {
+            return true;
+        }
     } else if (res == RES_UNEXPECTED_TRAILING_CHARS) {
         if (!can_ignore) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
