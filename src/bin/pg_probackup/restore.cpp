@@ -87,7 +87,6 @@ static void get_pgdata_and_dssdata_files(const char *pgdata_path,
                              parray *pgdata_and_dssdata_files,
                              parray *external_dirs);
 static bool skip_some_tblspc_files(pgFile *file);
-static char check_in_dss_instance(pgFile *file, int include_id);
 static void remove_redundant_files(const char *pgdata_path,
                                    const char *dssdata_path,
                                    parray *pgdata_and_dssdata_files,
@@ -840,16 +839,15 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
      * Restore dest_backup internal directories.
      */
 
-    create_data_directories(dest_files, instance_config.pgdata,
+    create_data_directories(dest_files, instance_config.pgdata, NULL,
                             dest_backup->root_dir, true,
                             params->incremental_mode != INCR_NONE,
                             FIO_DB_HOST, true);
 
     /* some file is in dssserver */
     if (IsDssMode())
-        create_data_directories(dest_files, instance_config.dss.vgdata,
-                                dest_backup->root_dir, true,
-                                params->incremental_mode != INCR_NONE,
+        create_data_directories(dest_files, instance_config.dss.vgdata, instance_config.dss.vglog,
+                                dest_backup->root_dir, true, params->incremental_mode != INCR_NONE,
                                 FIO_DSS_HOST, true);
 
     /*
@@ -1039,36 +1037,6 @@ static bool skip_some_tblspc_files(pgFile *file)
 #define CHECK_TRUE                      1
 #define CHECK_EXCLUDE_FALSE             2
 
-static char check_in_dss_instance(pgFile *file, int include_id)
-{
-    if (!is_dss_type(file->type)) {
-        return CHECK_TRUE;
-    }
-
-    char instance_id[MAX_INSTANCEID_LEN];
-    char top_path[MAXPGPATH];
-    errno_t rc = EOK;
-    int move = 0;
-
-    /* step1 : skip other instance owner file or dir */
-    strlcpy(top_path, file->rel_path, sizeof(top_path));
-    get_top_path(top_path);
-
-    rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d", include_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    move = (int)strlen(top_path) - (int)strlen(instance_id);
-    if (move > 0 && move < MAXPGPATH && strcmp(top_path + move, instance_id) != 0) {
-        char tail = top_path[strlen(top_path) - 1];
-        /* Is this file or dir belongs to other instance? */
-        if (tail >= '0' && tail <= '9') {
-            return CHECK_FALSE;
-        }
-    }
-
-    return CHECK_TRUE;
-}
-
 /*
  * Print a progress report based on the global variables.
  * Execute this function in another thread and print the progress periodically.
@@ -1172,13 +1140,7 @@ static void remove_redundant_files(const char *pgdata_path,
                                                          file->external_dir_num - 1);
                 join_path_components(fullpath, external_path, file->rel_path);                
             } else if (is_dss_type(file->type)) {
-                /* skip other instance files in dss mode */
-                char check_res = check_in_dss_instance(file, instance_config.dss.instance_id);
-                if (check_res != CHECK_TRUE) {
-                    continue;
-                } else {
-                    join_path_components(fullpath, dssdata_path, file->rel_path);
-                }
+                join_path_components(fullpath, dssdata_path, file->rel_path);
             } else {
                 join_path_components(fullpath, pgdata_path, file->rel_path);
             }            

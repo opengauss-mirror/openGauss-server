@@ -148,31 +148,12 @@ digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
     errno_t rc;
     char* oldSrc = src;
     char* tmpDssSrc;
-    size_t clearSize = 0;
     bool dssMode = IsDssMode();
-    int instanceId = instance_config.dss.instance_id;
-    int64 instanceId64 = (int64) instanceId;
-    size_t instanceIdSize = (size_t) instanceId;
     size_t compareSize = PG_CONTROL_SIZE;
     /* control file contents need special handle in dss mode */
     if (dssMode) {
         // dms support (MAX_INSTANCEID + 1) instance, and last page for all control.
-        compareSize = 1 + MAX_INSTANCEID - MIN_INSTANCEID;
-        compareSize = (compareSize + 1) * PG_CONTROL_SIZE;
-        src += instanceId64 * PG_CONTROL_SIZE;
-        // in here, we clear all control page except instance page and last page.
-        if (instanceId != MIN_INSTANCEID) {
-            clearSize = instanceIdSize * PG_CONTROL_SIZE;
-            rc = memset_s(oldSrc, clearSize, 0, clearSize);
-            securec_check_c(rc, "\0", "\0");
-        }
-        if (instanceId != MAX_INSTANCEID) {
-            clearSize = (size_t) (MAX_INSTANCEID - instanceIdSize) * PG_CONTROL_SIZE;
-            tmpDssSrc = oldSrc;
-            tmpDssSrc += (instanceId64 + 1) * PG_CONTROL_SIZE;
-            rc = memset_s(tmpDssSrc, clearSize, 0, clearSize);
-            securec_check_c(rc, "\0", "\0");
-        }
+        compareSize = (REFORMER_CTL_INSTANCEID + 1) * PG_CONTROL_SIZE;
     }
     
     if (size != compareSize)
@@ -558,99 +539,12 @@ void parse_vgname_args(const char* args)
         elog(ERROR, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
 }
 
-bool is_ss_xlog(const char *ss_dir)
+bool is_dss_xlog_dir(const char *ss_dir)
 {
-    char ss_xlog[MAXPGPATH] = {0};
-    char ss_notify[MAXPGPATH] = {0};
-    char ss_snapshots[MAXPGPATH] = {0};
-    int rc = EOK;
-    int instance_id = instance_config.dss.instance_id;
-
-    rc = sprintf_s(ss_xlog, sizeof(ss_xlog), "%s%d", "pg_xlog", instance_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    rc = sprintf_s(ss_notify, sizeof(ss_notify), "%s%d", "pg_notify", instance_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    rc = sprintf_s(ss_snapshots, sizeof(ss_snapshots), "%s%d", "pg_snapshots", instance_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    if (IsDssMode() && strlen(instance_config.dss.vglog) &&
-        (pg_strcasecmp(ss_dir, ss_xlog) == 0 ||
-        pg_strcasecmp(ss_dir, ss_notify) == 0 ||
-        pg_strcasecmp(ss_dir, ss_notify) == 0)) {
+    if (IsDssMode() && (pg_strcasecmp(ss_dir, "pg_xlog") == 0 || pg_strcasecmp(ss_dir, "pg_replication") == 0)) {
         return true;
     }
     return false;
-}
-
-void
-ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog)
-{
-    char path[MAXPGPATH] = {0};
-    char link_path[MAXPGPATH] = {0};
-    int rc = EOK;
-
-    rc = sprintf_s(link_path, sizeof(link_path), "%s/%s", vgdata, ss_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-    rc = sprintf_s(path, sizeof(path), "%s/%s", vglog, ss_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    dir_create_dir(path, DIR_PERMISSION);
-
-    /* if xlog link is already exist, destroy it and recreate */
-    if (unlink(link_path) != 0) {
-        elog(ERROR, "can not remove xlog dir \"%s\" : %s", link_path, strerror(errno));
-    }
-    
-    if (symlink(path, link_path) < 0) {
-        elog(ERROR, "can not link dss xlog dir \"%s\" to dss xlog dir \"%s\": %s", link_path, path,
-            strerror(errno));
-    }
-}
-
-bool
-ss_create_if_pg_replication(pgFile* dir, const char* vgdata, const char* vglog)
-{
-    if (pg_strcasecmp(dir->rel_path, "pg_replication") == 0) {
-        char path[MAXPGPATH];
-        errno_t rc = sprintf_s(path, sizeof(path), "%s/%s", vglog, dir->rel_path);
-        securec_check_ss_c(rc, "\0", "\0");
-        char link_path[MAXPGPATH];
-        rc = sprintf_s(link_path, sizeof(link_path), "%s/%s", vgdata, dir->rel_path);
-        securec_check_ss_c(rc, "\0", "\0");
-        dir_create_dir(path, DIR_PERMISSION);
-
-        /* if link is already exist, destroy it and recreate */
-        if (unlink(link_path) != 0) {
-            elog(ERROR, "can not remove pg_replication dir \"%s\" : %s", link_path,
-                strerror(errno));
-        }
-
-        if (symlink(path, link_path) < 0) {
-            elog(ERROR, "can not link dss  dir \"%s\" to dss  dir \"%s\": %s", link_path, path,
-                strerror(errno));
-        }
-        return true;
-    } else {
-        return false;
-    }
-}
-
-bool
-ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id)
-{
-    char ss_doublewrite[MAXPGPATH];
-    errno_t rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s%d", "pg_doublewrite", instance_id);
-    securec_check_ss_c(rc, "\0", "\0");
-    if (pg_strcasecmp(dir->rel_path, ss_doublewrite) == 0) {
-        rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s/%s", vgdata, dir->rel_path);
-        securec_check_ss_c(rc, "\0", "\0");
-        dir_create_dir(ss_doublewrite, DIR_PERMISSION);
-        return true;
-    } else {
-        return false;
-    }
 }
 
 /*

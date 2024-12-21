@@ -68,8 +68,6 @@ static const char* progname;
 
 static void DssParaInit(void);
 static void SetGlobalDssParam(void);
-static int  ReadNonDssControlFile(int *fd, char * buffer);
-static int  ReadDssControlFile(int *fd, char *buffer);
 static bool TryReadControlFile(void);
 static void GuessControlValues(void);
 static bool GetGucValue(const char *key, char *value);
@@ -81,6 +79,8 @@ static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
 static void usage(void);
+static void CheckPrimaryInDssMode(void);
+static int GetPrimaryIdInDssMode(void);
 
 #define XLOG_NAME_LENGTH 24
 #define MAX_STRING_LENGTH 1024
@@ -372,39 +372,17 @@ int main(int argc, char* argv[])
     }
 
     /*
+     * We require cluster shutdown when executing this tool, so a better
+     * solution is to execute the tool on the primary node.
+     */
+    CheckPrimaryInDssMode();
+
+    /*
      * Attempt to read the existing pg_control file
      */
     if (!TryReadControlFile()) {
         GuessControlValues();
     }
-
-    if (dss.enable_dss) {
-        char guc_value[MAX_STRING_LENGTH] = {0};
-        int curr_inst_id;
-
-        if (!GetGucValue("ss_instance_id", guc_value)) {
-            fprintf(stderr,
-                _("%s: get the guc value of \"ss_instance_id\" failed, "
-                "please check the file \"postgresql.conf\".\n"), progname);
-            exit(1);
-        }
-        curr_inst_id = atoi(guc_value);
-
-        if (curr_inst_id < MIN_INSTANCEID || curr_inst_id > MAX_INSTANCEID) {
-            fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
-                progname, MIN_INSTANCEID, MAX_INSTANCEID);
-            exit(1);
-        }
-
-        if (curr_inst_id != dss.primaryInstId) {
-            fprintf(stderr,
-                _("%s: you must execute this command in primary node: %d, "
-                "current node id is %d.\n"),
-                progname, dss.primaryInstId, curr_inst_id);
-            exit(1);
-        }
-    }
-
 
     /*
      * Also look at existing segment files to set up newXlogSegNo
@@ -510,92 +488,8 @@ static void SetGlobalDssParam(void)
             dss.vgname, dss.socketpath);
         exit(1);
     }
-}
-
-/*
- * Try to read the existing pg_control file.
- */
-static int ReadNonDssControlFile(int *fd, char *buffer)
-{
-    int len = 0;
-    len = read(*fd, buffer, PG_CONTROL_SIZE);
-    if (len < 0) {
-        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), 
-                progname, T_XLOG_CONTROL_FILE, strerror(errno));
-        free(buffer);
-        buffer = NULL;
-        close(*fd);
-        *fd = -1;
-        exit(1);
-    }
-    return len;
-}
-
-/*
- * Try to read the existing pg_control file in DSS mode.
- */
-static int ReadDssControlFile(int *fd, char *buffer)
-{
-    char        *tmpDssSrc;
-    struct stat statbuf;
-    int         len;
-    errno_t     rc;
-
-    if (stat(T_XLOG_CONTROL_FILE, &statbuf) < 0) {
-        fprintf(stderr, _("%s: could not stat file \"%s\": %s\n"), 
-                progname, T_XLOG_CONTROL_FILE, strerror(errno));
-        free(buffer);
-        buffer = NULL;
-        close(*fd);
-        *fd = -1;
-        exit(1);
-    }
-
-    len = statbuf.st_size;
-
-    char *tmpBuffer = (char*)malloc(len + 1);
-
-    if (read(*fd, tmpBuffer, len) != len) {
-        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), 
-                progname, T_XLOG_CONTROL_FILE, strerror(errno));
-        free(buffer);
-        buffer = NULL;
-        free(tmpBuffer);
-        tmpBuffer = NULL;
-        close(*fd);
-        *fd = -1;
-        exit(1);
-    }
-
-    /* 
-     * In dss mode, we need to get the primary instance id
-     * from the pg_control file's last page.
-     */
-    ss_reformer_ctrl_t *reformerCtrl;
-    reformerCtrl = (ss_reformer_ctrl_t *)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
-    dss.primaryInstId = reformerCtrl->primaryInstId;
-    if (dss.primaryInstId < MIN_INSTANCEID || dss.primaryInstId > MAX_INSTANCEID) {
-        fprintf(stderr, _("%s: unexpected primary node id: %d, valid range is %d - %d.\n"),
-            progname, dss.primaryInstId, MIN_INSTANCEID, MAX_INSTANCEID);
-        free(tmpBuffer);
-        tmpBuffer = NULL;
-        close(*fd);
-        *fd = -1;
-        exit(1);
-    }
-    g_datadir.instance_id = dss.primaryInstId;
-    /* update the dss data path */
-    initDataPathStruct(dss.enable_dss);
-
-    tmpBuffer[len] = '\0';
-    tmpDssSrc = tmpBuffer;
-    tmpDssSrc += dss.primaryInstId * PG_CONTROL_SIZE;
-    rc = memcpy_s(buffer, PG_CONTROL_SIZE, tmpDssSrc, PG_CONTROL_SIZE);
+    rc = strcpy_s(g_datadir.dss_log, strlen(dss.vgname) + 1, dss.vgname);
     securec_check_c(rc, "\0", "\0");
-
-    free(tmpBuffer);
-    tmpBuffer = NULL;
-    return PG_CONTROL_SIZE;
 }
 
 /*
@@ -640,10 +534,16 @@ static bool TryReadControlFile(void)
         fd = -1;
         exit(1);
     }
-    if (dss.enable_dss) {
-        len = ReadDssControlFile(&fd, buffer);
-    } else {
-        len = ReadNonDssControlFile(&fd, buffer);
+
+    len = read(fd, buffer, PG_CONTROL_SIZE);
+    if (len < 0) {
+        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"),
+                progname, T_XLOG_CONTROL_FILE, strerror(errno));
+        free(buffer);
+        buffer = NULL;
+        close(fd);
+        fd = -1;
+        exit(1);
     }
     close(fd);
     fd = -1;
@@ -954,18 +854,6 @@ static void RewriteControlFile(void)
     }
 
     errno = 0;
-    if (dss.enable_dss) {
-        off_t seekpos = (off_t)BLCKSZ * dss.primaryInstId;
-        if (lseek(fd, seekpos, SEEK_SET) < 0) {
-            fprintf(stderr, _("%s: Can not seek the primary id %d of \"%s\": %s\n"),
-                    progname, dss.primaryInstId, T_XLOG_CONTROL_FILE, strerror(errno));
-            close(fd);
-            fd = -1;
-            exit(1);
-        }
-    }
-
-    errno = 0;
     if (write(fd, buffer, PG_CONTROL_SIZE) != PG_CONTROL_SIZE) {
         /* if write didn't set errno, assume problem is no disk space */
         if (errno == 0)
@@ -1146,7 +1034,7 @@ static void KillExistingArchiveStatus(void)
     char archStatDir[MAXPGPATH] = {0};
     int nRet = 0;
 
-    nRet = snprintf_s(archStatDir, MAXPGPATH, MAXPGPATH - 1, "%s/%s", T_SS_XLOGDIR, "/archive_status");
+    nRet = snprintf_s(archStatDir, MAXPGPATH, MAXPGPATH - 1, "%s/archive_status", T_SS_XLOGDIR);
     securec_check_ss_c(nRet, "\0", "\0");
 
     xldir = opendir(archStatDir);
@@ -1306,6 +1194,93 @@ static void WriteEmptyXLOG(void)
 
     close(fd);
     fd = -1;
+}
+
+static void CheckPrimaryInDssMode(void)
+{
+    if (!dss.enable_dss) {
+        return;
+    }
+
+    char guc_value[MAX_STRING_LENGTH] = {0};
+    int curr_inst_id;
+
+    if (!GetGucValue("ss_instance_id", guc_value)) {
+        fprintf(stderr,
+            _("%s: get the guc value of \"ss_instance_id\" failed, "
+            "please check the file \"postgresql.conf\".\n"), progname);
+        exit(1);
+    }
+
+    curr_inst_id = atoi(guc_value);
+    if (curr_inst_id < MIN_INSTANCEID || curr_inst_id > MAX_INSTANCEID) {
+        fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
+            progname, MIN_INSTANCEID, MAX_INSTANCEID);
+        exit(1);
+    }
+
+    dss.primaryInstId = GetPrimaryIdInDssMode();
+    if (curr_inst_id != dss.primaryInstId) {
+        fprintf(stderr, _("%s: you must execute this command in primary node: %d, current node id is %d.\n"),
+            progname, dss.primaryInstId, curr_inst_id);
+        exit(1);
+    }
+}
+
+static int GetPrimaryIdInDssMode(void)
+{
+    char* buffer = NULL;
+    int fd = -1;
+    int len = 0;
+    int primaryId = -1;
+
+    if ((fd = open(T_XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0) {
+        /*
+         * If pg_control is not there at all, or we can't read it, the odds
+         * are we've been handed a bad DataDir path, so give up. User can do
+         * "touch pg_control" to force us to proceed.
+         */
+        fprintf(stderr,
+            _("%s: could not open file \"%s\" for reading: %s\n"),
+            progname,
+            T_XLOG_CONTROL_FILE,
+            strerror(errno));
+        exit(1);
+    }
+
+    /* Use malloc to ensure we have a maxaligned buffer */
+    buffer = (char*)malloc(PG_CONTROL_SIZE);
+    if (buffer == NULL) {
+        fprintf(stderr, _("%s: out of memory\n"), progname);
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    len = pread(fd, buffer, PG_CONTROL_SIZE, REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
+    if (len < 0) {
+        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"),
+                progname, T_XLOG_CONTROL_FILE, strerror(errno));
+        free(buffer);
+        buffer = NULL;
+        close(fd);
+        fd = -1;
+        exit(1);
+    }
+
+    ss_reformer_ctrl_t *reformerCtrl = (ss_reformer_ctrl_t *)buffer;
+    primaryId = reformerCtrl->primaryInstId;
+    if (primaryId < MIN_INSTANCEID || primaryId > MAX_INSTANCEID) {
+        fprintf(stderr, _("%s: unexpected primary id %d in reform control, valid range is %d - %d\n"),
+            progname, primaryId, MIN_INSTANCEID, MAX_INSTANCEID);
+        exit(1);
+    }
+
+    free(buffer);
+    buffer = NULL;
+    close(fd);
+    fd = -1;
+    return primaryId;
 }
 
 static void usage(void)

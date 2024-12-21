@@ -2394,8 +2394,7 @@ static bool ss_backup_dw_file(const char* target_dir)
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_path, PATH_MAX, PATH_MAX - 1, "%s/pg_doublewrite%d", target_dir,
-                    ss_instance_config.dss.instance_id);
+    rc = snprintf_s(dw_path, PATH_MAX, PATH_MAX - 1, "%s/pg_doublewrite", target_dir);
     securec_check_ss_c(rc, "\0", "\0");
 
     /* check whether directory is exits or not, if not exit then mkdir it */

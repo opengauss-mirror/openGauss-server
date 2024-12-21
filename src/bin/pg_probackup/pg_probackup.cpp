@@ -180,7 +180,6 @@ static void opt_media_type(ConfigOption *opt, const char *arg);
 
 static void compress_init(void);
 static void dss_init(void);
-static int ss_get_primary_id(void);
 static void check_unlimit_stack_size(void);
 
 /*
@@ -1050,52 +1049,6 @@ compress_init(void)
     }
 }
 
-static int ss_get_primary_id(void)
-{
-    int fd = -1;
-    int len = 0;
-    int primary_id = -1;
-    errno_t rc = 0;
-    struct stat statbuf;
-    char control_file_path[MAXPGPATH];
-
-    rc = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check_c(rc, "\0", "\0");
-    rc = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgdata);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
-    if (fd < 0) {
-        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
-        close(fd);
-        exit(1);
-    }
-
-    if (stat(control_file_path, &statbuf) < 0) {
-        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
-        close(fd);
-        exit(1);
-    }
-
-    len = statbuf.st_size;
-    char *tmpBuffer = (char*)malloc(len + 1);
-
-    if ((read(fd, tmpBuffer, len)) != len) {
-        close(fd);
-        free(tmpBuffer);
-        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
-        exit(1);
-    }
-
-    ss_reformer_ctrl_t* reformerCtrl;
-
-    /* Calculate the offset to obtain the primary_id of the last page */
-    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
-    primary_id = reformerCtrl->primaryInstId;
-    free(tmpBuffer);
-    return primary_id;
-}
-
 static void dss_init(void)
 {
     if (IsDssMode()) {
@@ -1133,38 +1086,16 @@ static void dss_init(void)
                  instance_config.dss.vglog, instance_config.dss.socketpath);
         }
 
-        /* Check backup instance id in shared storage mode */
-        int id = instance_config.dss.instance_id;
-        if (id < MIN_INSTANCEID || id > MAX_INSTANCEID) {
-            elog(ERROR, "Instance id must be specified in dss mode, valid range is %d - %d.",
-                MIN_INSTANCEID, MAX_INSTANCEID);
-        }
-
-        if (backup_subcmd == BACKUP_CMD || backup_subcmd == ADD_INSTANCE_CMD) {
-            int primary_instance_id = ss_get_primary_id();
-            if (id != primary_instance_id) {
-                elog(ERROR, "backup only support on primary in dss mode, primary instance id: %d, backup instance id: %d",
-                    primary_instance_id, id);
-            }
-        }
-
         if (backup_subcmd != RESTORE_CMD) {
             off_t size = 0;
             char xlog_control_path[MAXPGPATH];
 
             join_path_components(xlog_control_path, instance_config.dss.vgdata, PG_XLOG_CONTROL_FILE);
-            if ((size = dss_get_file_size(xlog_control_path)) == INVALID_DEVICE_SIZE) {
-                elog(ERROR, "Could not get \"%s\" size: %s", xlog_control_path, strerror(errno));
-            }
-
-            if (size < (off_t)BLCKSZ * id) {
-                elog(ERROR, "Cound not read beyond end of file \"%s\", file_size: %ld, instance_id: %d\n",
-                    xlog_control_path, size, id);
+            size = dss_get_file_size(xlog_control_path);
+            if (size != (off_t)(PG_CONTROL_SIZE * (REFORMER_CTL_INSTANCEID + 1))) {
+                elog(ERROR, "Invalid size of file \"%s\", file_size: %ld\n", xlog_control_path, size);
             }
         }
-
-        /* Prepare some g_datadir parameters */
-        g_datadir.instance_id = id;
 
         errno_t rc = strcpy_s(g_datadir.dss_data, strlen(instance_config.dss.vgdata) + 1, instance_config.dss.vgdata);
         securec_check_c(rc, "\0", "\0");

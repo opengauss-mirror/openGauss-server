@@ -745,11 +745,11 @@ static void get_backup_files(pgBackup *dest_backup,
     join_path_components(full_external_prefix, full_backup->root_dir, EXTERNAL_DIR);
 
     /* Create directories in database_dir*/
-    create_data_directories(dest_backup->files, full_database_dir,
-                    dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
+    create_data_directories(dest_backup->files, full_database_dir, NULL,
+        dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
     /* Create directories in dssdata_dir */
-    create_data_directories(dest_backup->files, full_dss_dir,
-                    dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
+    create_data_directories(dest_backup->files, full_dss_dir, NULL,
+        dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
 
     /* External directories stuff */
     if (dest_backup->external_dir_str)

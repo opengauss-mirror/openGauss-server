@@ -1236,29 +1236,15 @@ bool IsSkipDir(const char * dirName)
         return true;
     if (strcmp(dirName, DISABLE_CONN_FILE) == 0)
         return true;
-    
-    /* skip .recycle in dss */
-    if (ENABLE_DSS && strcmp(dirName, ".recycle") == 0)
-        return true;
-    
-    /* skip directory which not belong to primary in dss */
+
+    /* skip directory in dss */
     if (ENABLE_DSS) {
-        /* skip primary doublewrite and other node doublewrite */
-        if (IsBeginWith(dirName, "pg_doublewrite") > 0) {
+        if (strcmp(dirName, "pg_doublewrite") > 0) {
             return true;
         }
-    
-        /* skip other node pg_xlog except primary */
-        if (IsBeginWith(dirName, "pg_xlog") > 0) { 
-            size_t dirNameLen = strlen("pg_xlog");
-            char instance_id[MAX_INSTANCEID_LEN];
-            errno_t rc = EOK;
-            rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d",
-                            g_instance.attr.attr_storage.dms_attr.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
-            /* not skip pg_xlog directory in file systerm */
-            if (strlen(dirName) > dirNameLen && strcmp(dirName + dirNameLen, instance_id) != 0) 
-                return true;
+
+        if (strcmp(dirName, ".recycle") == 0) {
+            return true;
         }
     }
 
