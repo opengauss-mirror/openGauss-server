@@ -242,15 +242,9 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
         if (recvOff == (uint32)0 && segbytes >= (int)sizeof(XLogPageHeaderData)) {
             if (((XLogPageHeader)buf)->xlp_magic == XLOG_PAGE_MAGIC &&
                 (recvSegNo * XLogSegSize) != ((XLogPageHeader)buf)->xlp_pageaddr) {
-                if (SS_STREAM_CLUSTER) {
-                    ereport(LOG, (errcode_for_file_access(),
-                                errmsg("unexpected page addr %lu of log file %s", ((XLogPageHeader)buf)->xlp_pageaddr,
-                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
-                } else {
-                    ereport(PANIC, (errcode_for_file_access(),
-                                errmsg("unexpected page addr %lu of log file %s", ((XLogPageHeader)buf)->xlp_pageaddr,
-                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
-                }
+                ereport(PANIC, (errcode_for_file_access(),
+                        errmsg("unexpected page addr %lu of log file %s", ((XLogPageHeader)buf)->xlp_pageaddr,
+                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
             }
         }
         /* Update state for write */
