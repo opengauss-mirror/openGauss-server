@@ -817,7 +817,7 @@ typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn);
-typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
+typedef int(*dms_flush_copy)(void *db_handle, char *pageid, unsigned char thread_index);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
 typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
@@ -932,6 +932,8 @@ typedef void (*dms_thread_deinit_t)(void);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
 typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
 typedef int (*dms_opengauss_do_ckpt_immediate)(unsigned long long *ckpt_loc);
+typedef void (*dms_reform_check_opengauss)(void *db_handle, unsigned int current_step, unsigned int current_role,
+    long long dyn_log_time);
 
 // for ssl
 typedef int(*dms_decrypt_pwd_t)(const char *cipher, unsigned int len, char *plain, unsigned int size);
@@ -1111,6 +1113,7 @@ typedef struct st_dms_callback {
     dms_get_opengauss_txn_status get_opengauss_txn_status;
     dms_opengauss_lock_buffer opengauss_lock_buffer;
     dms_opengauss_do_ckpt_immediate opengauss_do_ckpt_immediate;
+    dms_reform_check_opengauss reform_check_opengauss;
     dms_get_txn_snapshot get_txn_snapshot;
     dms_get_opengauss_txn_snapshot get_opengauss_txn_snapshot;
     dms_get_opengauss_txn_of_master get_opengauss_txn_of_master;

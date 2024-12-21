@@ -57,6 +57,9 @@
 #include "storage/ipc.h"
 #include "utils/elog.h"
 
+XLogRecPtr lastLsn = InvalidXLogRecPtr;
+long long lastDynLogTime = 0;
+
 static void ReleaseResource();
 
 static inline void IniRedoInfo()
@@ -1422,6 +1425,8 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
     ctrl_info.is_edp = false;
     ctrl_info.lock_mode = buf_ctrl->lock_mode;
     ctrl_info.in_rcy = buf_ctrl->in_rcy;
+    int threadIndex = (int)thread_index;
+    g_instance.dms_cxt.reform_check_status[threadIndex] = buf_desc->buf_id;
     int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][%u/%u/%u/%d %d-%u] rebuild page: failed.",
@@ -1692,7 +1697,7 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
     return GS_SUCCESS;
 }
 
-static int CBFlushCopy(void *db_handle, char *pageid)
+static int CBFlushCopy(void *db_handle, char *pageid, unsigned char thread_index)
 {
     /* 
      * only two occasions
@@ -1739,6 +1744,8 @@ static int CBFlushCopy(void *db_handle, char *pageid)
             Assert(0);
         }
     }
+    int threadIndex = (int)thread_index;
+    g_instance.dms_cxt.reform_check_status[threadIndex] = buffer;
     
     /*
      *  when remote DB instance reboot, this round reform fail
@@ -2025,6 +2032,16 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
     }
 }
 
+void InitReformCheckStatus()
+{
+    int max_threads = g_instance.attr.attr_storage.dms_attr.parallel_thread_num;
+
+    g_instance.dms_cxt.reform_check_status = (int*)palloc(max_threads * sizeof(int));
+    for (int i = 0; i < max_threads; i++) {
+        g_instance.dms_cxt.reform_check_status[i] = InvalidBuffer;
+    }
+}
+
 static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
 {
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform start enter: pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
@@ -2052,6 +2069,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
     g_instance.dms_cxt.resetSyscache = true;
     g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
+    lastDynLogTime = 0;
+    lastLsn = InvalidXLogRecPtr;
+    InitReformCheckStatus();
     FailoverStartNotify(rs_cxt);
 
     reform_info->reform_start_time = GetCurrentTimestamp();
@@ -2368,6 +2388,81 @@ unsigned char CBDmsGetInterceptType(unsigned int sid)
     return 0;
 }
 
+void checkReformStatus(unsigned int current_step) {
+    for (uint32 i = 0; i < (uint32)g_instance.attr.attr_storage.dms_attr.parallel_thread_num; i++) {
+        if (t_thrd.dms_cxt.reform_check_status[i] == g_instance.dms_cxt.reform_check_status[i]) {
+            ereport(ERROR, (errmodule(MOD_DMS),
+                errmsg("[SS reform] Reform %s has been hanging for more than 2 minutes, db exit now.",
+                       (current_step == DMS_REFORM_STEP_REBUILD) ? "Rebuild" : "Repair")));
+            print_all_stack();
+            _exit(0);
+        }
+        t_thrd.dms_cxt.reform_check_status[i] = g_instance.dms_cxt.reform_check_status[i];
+    }
+}
+
+
+static void CBReformHealthCheck(void *db_handle, unsigned int current_step, unsigned int current_role,
+    long long dyn_log_time)
+{
+    if (lastDynLogTime == 0) {
+        lastDynLogTime = dyn_log_time;
+    }
+
+    XLogRecPtr currentLsn;
+
+    switch (current_step) {
+        case DMS_REFORM_STEP_DONE:
+            if (g_instance.dms_cxt.SSXminInfo.snapshot_available) {
+                return;
+            }
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            ereport(ERROR, (errmodule(MOD_DMS),
+                errmsg("[SS reform] Reform Done has been hanging for more than 2 minutes, db exit now.")));
+            print_all_stack();
+            _exit(0);
+            break;
+
+        case DMS_REFORM_STEP_RECOVERY:
+            currentLsn = GetXLogReplayRecPtr(NULL, NULL);
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_CHECK_INTERVFAL) {
+                return;
+            }
+            if (lastLsn == currentLsn) {
+                ereport(ERROR, (errmodule(MOD_DMS),
+                    errmsg("[SS reform] Reform Recovery has been hanging for more than 5 minutes, db exit now.")));
+                print_all_stack();
+                _exit(0);
+            }
+            lastLsn = currentLsn;
+            break;
+
+        case DMS_REFORM_STEP_REBUILD:
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            checkReformStatus(DMS_REFORM_STEP_REBUILD);
+            break;
+
+        case DMS_REFORM_STEP_REPAIR:
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            checkReformStatus(DMS_REFORM_STEP_REPAIR);
+            break;
+
+        default:
+            break;
+    }
+
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2441,4 +2536,5 @@ void DmsInitCallback(dms_callback_t *callback)
 
     callback->get_session_type = CBDmsGetSessionType;
     callback->get_intercept_type = CBDmsGetInterceptType;
+    callback->reform_check_opengauss = CBReformHealthCheck;
 }

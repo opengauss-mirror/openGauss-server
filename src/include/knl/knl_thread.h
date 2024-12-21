@@ -3453,6 +3453,7 @@ typedef struct knl_t_dms_context {
     PinnedBufferItem* pincount_array;
     bool need_check_pincount;
     bool in_ondemand_redo;
+    int* reform_check_status;
 } knl_t_dms_context;
 
 typedef struct knl_t_dms_auxiliary_context {
