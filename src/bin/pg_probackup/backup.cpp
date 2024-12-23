@@ -315,10 +315,7 @@ static void start_stream_wal(const char *database_path, const char *dssdata_path
     stream_stop_timeout = stream_stop_timeout + stream_stop_timeout * 0.1;
 
     if (IsDssMode()) {
-        error_t rc;
-        rc = snprintf_s(dst_backup_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata_path,
-            PG_XLOG_DIR, instance_config.dss.instance_id);
-        securec_check_ss_c(rc, "\0", "\0");
+        join_path_components(dst_backup_path, dssdata_path, PG_XLOG_DIR);
     } else {
         join_path_components(dst_backup_path, database_path, PG_XLOG_DIR);
     }
@@ -476,8 +473,7 @@ static void calc_data_bytes()
     }
 }
 
-static void add_xlog_files_into_backup_list(const char *database_path, const char *dssdata_path,
-                                            int instance_id, bool enable_dss)
+static void add_xlog_files_into_backup_list(const char *database_path, const char *dssdata_path, bool enable_dss)
 {
     int i;
     parray     *xlog_files_list;
@@ -489,16 +485,12 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
     xlog_files_list = parray_new();
 
     if (IsDssMode()) {
-        errno_t rc;
-
-        rc = snprintf_s(pg_xlog_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata_path, PG_XLOG_DIR, instance_id);
-        securec_check_ss_c(rc, "\0", "\0");
+        join_path_components(pg_xlog_path, dssdata_path, PG_XLOG_DIR);
         parent_path = dssdata_path;
     } else {
         join_path_components(pg_xlog_path, database_path, PG_XLOG_DIR);
         parent_path = database_path;
     }
-
 
     dir_list_file(xlog_files_list, pg_xlog_path, false, true, false, false, true, 0,
                             FIO_BACKUP_HOST);
@@ -599,7 +591,7 @@ static void sync_files(parray *database_map, const char *database_path, parray *
     /* Add archived xlog files into the list of files of this backup */
     if (stream_wal)
     {
-        add_xlog_files_into_backup_list(database_path, dssdata_path, instance_config.dss.instance_id, IsDssMode());
+        add_xlog_files_into_backup_list(database_path, dssdata_path, IsDssMode());
     }
 
     /* write database map to file and add it to control file */
@@ -1530,19 +1522,11 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
     {
         if (IsDssMode())
         {
-            errno_t rc;
-            char dss_xlog[MAXPGPATH];
-
-            rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d",
-                    PG_XLOG_DIR, instance_config.dss.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
-            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir),
-                DSSDATA_DIR, dss_xlog);
+            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir), DSSDATA_DIR, PG_XLOG_DIR);
         }
         else
         {
-            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir),
-                DATABASE_DIR, PG_XLOG_DIR);
+            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir), DATABASE_DIR, PG_XLOG_DIR);
         }
         join_path_components(wal_segment_path, pg_wal_dir, wal_segment);
         wal_segment_dir = pg_wal_dir;
@@ -1668,13 +1652,8 @@ static void get_valid_stop_lsn(pgBackup *backup, bool *stop_lsn_exists, XLogRecP
     {
         if (IsDssMode())
         {
-            errno_t rc;
-            char dss_xlog[MAXPGPATH];
-            rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d", PG_XLOG_DIR,
-                instance_config.dss.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
             pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
-                DSSDATA_DIR, dss_xlog);
+                DSSDATA_DIR, PG_XLOG_DIR);
         }
         else
         {
@@ -2113,19 +2092,11 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
 
             if (IsDssMode())
             {
-                errno_t rc;
-                char dss_xlog[MAXPGPATH];
-
-                rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d",
-                    PG_XLOG_DIR, instance_config.dss.instance_id);
-                securec_check_ss_c(rc, "\0", "\0");
-                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
-                    DSSDATA_DIR, dss_xlog);
+                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path), DSSDATA_DIR, PG_XLOG_DIR);
             }
             else
             {
-                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
-                    DATABASE_DIR, PG_XLOG_DIR);
+                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path), DATABASE_DIR, PG_XLOG_DIR);
             }
             xlog_path = stream_xlog_path;
         }

@@ -89,8 +89,7 @@ void help_pg_probackup(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--help]\n"));
 
@@ -121,8 +120,7 @@ void help_pg_probackup(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--help]\n"));
 
@@ -176,8 +174,7 @@ void help_pg_probackup(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--ttl=interval] [--expire-time=time]\n"));
     printf(_("                 [--backup-pg-replslot]\n"));
@@ -198,8 +195,7 @@ void help_pg_probackup(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
@@ -277,8 +273,7 @@ static void help_add_instance(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
 #endif
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
@@ -296,7 +291,7 @@ static void help_add_instance(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
-    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
+    printf(_("      --remote-libpath=libpath     library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
@@ -311,8 +306,7 @@ static void help_add_instance(void)
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
-    printf(_("      --vgname=\"vgdata,vglog\"        name of dss volume group\n"));
-    printf(_("      --instance-id=instance_id    instance id of backup node\n"));
+    printf(_("      --vgname=\"vgdata,vglog\"    name of dss volume group\n"));
     printf(_("      --socketpath=socketpath      dss connect socket file path\n\n"));
 #endif
 }
@@ -361,8 +355,7 @@ static void help_set_config(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n\n"));
 #endif
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
@@ -422,7 +415,7 @@ static void help_set_config(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
-    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
+    printf(_("      --remote-libpath=libpath     library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
@@ -437,8 +430,7 @@ static void help_set_config(void)
 #ifndef ENABLE_LITE_MODE
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
-    printf(_("      --vgname=\"vgdata,vglog\"        name of dss volume group\n"));
-    printf(_("      --instance-id=instance_id    instance id of backup node\n"));
+    printf(_("      --vgname=\"vgdata,vglog\"    name of dss volume group\n"));
     printf(_("      --socketpath=socketpath      dss connect socket file path\n\n"));
 #endif
 }
@@ -547,8 +539,7 @@ static void help_backup(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--ttl=interval] [--expire-time=time]\n"));
     printf(_("                 [--backup-pg-replslot]\n\n"));
@@ -633,7 +624,7 @@ static void help_backup(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
-    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
+    printf(_("      --remote-libpath=libpath     library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
@@ -649,7 +640,6 @@ static void help_backup(void)
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
     printf(_("      --vgname=\"vgdata,vglog\"    name of dss volume group\n"));
-    printf(_("      --instance-id=instance_id    instance id of backup node\n"));
     printf(_("      --socketpath=socketpath      dss connect socket file path\n"));
 #endif
 
@@ -678,8 +668,7 @@ static void help_restore(void)
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
     printf(_("                 [--access-bucket=bucket] [--endpoint=endpoint] [--region=region]\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("                 [--enable-dss] [--instance-id=instance_id]\n"));
-    printf(_("                 [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
+    printf(_("                 [--enable-dss] [--vgname=\"vgdata,vglog\"] [--socketpath=socketpath]\n"));
 #endif
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
@@ -725,7 +714,7 @@ static void help_restore(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
-    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
+    printf(_("      --remote-libpath=libpath     library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
@@ -741,7 +730,6 @@ static void help_restore(void)
     printf(_("\n  DSS options:\n"));
     printf(_("      --enable-dss                 enable shared storage mode\n"));
     printf(_("      --vgname=\"vgdata,vglog\"    name of dss volume group\n"));
-    printf(_("      --instance-id=instance_id    instance id of backup node\n"));
     printf(_("      --socketpath=socketpath      dss connect socket file path\n"));
 #endif
 

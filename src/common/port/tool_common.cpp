@@ -147,6 +147,27 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->tblspcDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
+    rc = snprintf_s(dataDir->clogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_clog", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->csnlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_csnlog", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->serialDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_serial", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->twophaseDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_twophase", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", dataDir->dss_log);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->snapshotsDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_snapshots", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
     rc = snprintf_s(dataDir->controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
@@ -157,35 +178,7 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
         dataDir->dss_log);
     securec_check_ss_c(rc, "", "");
 
-    // DSS file directory (instance owner)
-    rc = snprintf_s(dataDir->clogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_clog%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->csnlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_csnlog%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->serialDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_serial%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->snapshotsDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_snapshots%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->twophaseDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_twophase%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact%d", dataDir->dss_data,
-        dataDir->instance_id);
-    securec_check_ss_c(rc, "", "");
-
-    rc = snprintf_s(dataDir->xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", dataDir->dss_log);
-    securec_check_ss_c(rc, "", "");
-
-    // Unix file directory (instance owner)
+    // doublewrite file
     rc = snprintf_s(dataDir->dwDir.dwOldPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_doublewrite/pg_dw", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
