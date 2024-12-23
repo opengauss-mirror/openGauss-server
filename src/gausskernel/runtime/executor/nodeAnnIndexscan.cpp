@@ -49,7 +49,7 @@ static void ExecInitNextPartitionForAnnIndexScan(AnnIndexScanState* node);
 /* ----------------------------------------------------------------
  *		AnnIndexNext
  *
- *		Retrieve a tuple from the IndexScan node's current_relation
+ *		Retrieve a tuple from the AnnIndexScan node's current_relation
  *		using the index specified in the IndexScanState information.
  * ----------------------------------------------------------------
  */
@@ -758,7 +758,7 @@ static void ExecInitNextPartitionForAnnIndexScan(AnnIndexScanState* node)
  */
 void ExecInitPartitionForAnnIndexScan(AnnIndexScanState* index_state, EState* estate)
 {
-    IndexScan* plan = NULL;
+    AnnIndexScan* plan = NULL;
     Relation current_relation = NULL;
     Partition table_partition = NULL;
     Partition index_partition = NULL;
@@ -768,7 +768,7 @@ void ExecInitPartitionForAnnIndexScan(AnnIndexScanState* index_state, EState* es
     index_state->iss_IndexPartitionList = NIL;
     index_state->iss_CurrentIndexPartition = NULL;
 
-    plan = (IndexScan*)index_state->ss.ps.plan;
+    plan = (AnnIndexScan*)index_state->ss.ps.plan;
     current_relation = index_state->ss.ss_currentRelation;
 
     if (plan->scan.itrs > 0) {
