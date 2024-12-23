@@ -37,5 +37,13 @@ analyze dimens3_scan_l2_100;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 20;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+
+CREATE TABLE items (id int, embedding vector(3));
+INSERT INTO items VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]'), (4, '[10,11,12]'), (5, '[13,14,15]');
+CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+set enable_seqscan=off;
+SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+set ivfflat_probes = 3;
+SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 \c regression
 drop database test;

@@ -76,7 +76,7 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
             /* Use procinfo from the index instead of scan key for performance */
             distance = DatumGetFloat8(so->distfunc(so->procinfo, so->collation, PointerGetDatum(&list->center), value));
 
-            if (listCount < so->probes) {
+            if (listCount < so->listCount) {
                 IvfflatScanList *scanlist;
 
                 scanlist = &so->lists[listCount];
@@ -88,7 +88,7 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
                 pairingheap_add(so->listQueue, &scanlist->ph_node);
 
                 /* Calculate max distance */
-                if (listCount == so->probes)
+                if (listCount == so->listCount)
                     maxDistance = ((IvfflatScanList *)pairingheap_first(so->listQueue))->distance;
             } else if (distance < maxDistance) {
                 IvfflatScanList *scanlist;
@@ -130,10 +130,12 @@ static void GetScanItems(IndexScanDesc scan, Datum value)
     BufferAccessStrategy bas = GetAccessStrategy(BAS_BULKREAD);
 
     /* Search closest probes lists */
+    int listCount = 0;
     while (!pairingheap_is_empty(so->listQueue)) {
         BlockNumber searchPage = ((IvfflatScanList *)pairingheap_remove_first(so->listQueue))->startPage;
-
         /* Search all entry pages for list */
+        bool isEmptyList = false;
+        bool isFirstPage = true;
         while (BlockNumberIsValid(searchPage)) {
             Buffer buf;
             Page page;
@@ -143,6 +145,13 @@ static void GetScanItems(IndexScanDesc scan, Datum value)
             LockBuffer(buf, BUFFER_LOCK_SHARE);
             page = BufferGetPage(buf);
             maxoffno = PageGetMaxOffsetNumber(page);
+
+            isEmptyList = (isFirstPage && maxoffno <= 0 && !BlockNumberIsValid(IvfflatPageGetOpaque(page)->nextblkno));
+            isFirstPage = false;
+            if (isEmptyList) {
+                UnlockReleaseBuffer(buf);
+                break;
+            }
 
             for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
                 IndexTuple itup;
@@ -170,10 +179,17 @@ static void GetScanItems(IndexScanDesc scan, Datum value)
 
                 tuples++;
             }
-
+            
             searchPage = IvfflatPageGetOpaque(page)->nextblkno;
 
             UnlockReleaseBuffer(buf);
+        }
+
+        if (!isEmptyList) {
+            ++listCount;
+            if (listCount >= so->probes) {
+                break;
+            }
         }
     }
 
@@ -235,7 +251,7 @@ IndexScanDesc ivfflatbeginscan_internal(Relation index, int nkeys, int norderbys
     Oid sortOperators[] = {FLOAT8LTOID};
     Oid sortCollations[] = {InvalidOid};
     bool nullsFirstFlags[] = {false};
-    int probes = INT_MAX;
+    int probes = u_sess->datavec_ctx.ivfflat_probes;
     int natts = 2;
     int attDistance = 1;
     int attHeaptid = 2;
@@ -249,9 +265,10 @@ IndexScanDesc ivfflatbeginscan_internal(Relation index, int nkeys, int norderbys
         probes = lists;
     }
 
-    so = (IvfflatScanOpaque)palloc(offsetof(IvfflatScanOpaqueData, lists) + probes * sizeof(IvfflatScanList));
+    so = (IvfflatScanOpaque)palloc(offsetof(IvfflatScanOpaqueData, lists) + lists * sizeof(IvfflatScanList));
     so->typeInfo = IvfflatGetTypeInfo(index);
     so->first = true;
+    so->listCount = lists;
     so->probes = probes;
     so->dimensions = dimensions;
 
@@ -324,7 +341,6 @@ bool ivfflatgettuple_internal(IndexScanDesc scan, ScanDirection dir)
             elog(ERROR, "cannot scan ivfflat index without order");
 
         /* Requires MVCC-compliant snapshot as not able to pin during sorting */
-        /* https://www.postgresql.org/docs/current/index-locking.html */
         if (!IsMVCCSnapshot(scan->xs_snapshot))
             elog(ERROR, "non-MVCC snapshots are not supported with ivfflat");
 
@@ -338,7 +354,29 @@ bool ivfflatgettuple_internal(IndexScanDesc scan, ScanDirection dir)
             pfree(DatumGetPointer(value));
     }
 
-    if (tuplesort_gettupleslot(so->sortstate, true, so->slot, NULL)) {
+    bool isDone = tuplesort_gettupleslot(so->sortstate, true, so->slot, NULL);
+    if (!isDone && !pairingheap_is_empty(so->listQueue)) {
+        /* End prev  tuplesort of ivfflat lists group */
+        tuplesort_end(so->sortstate);
+
+        /* Reinitialize a new tuplesort of ivfflat lists group */
+        AttrNumber attNums[] = {1};
+        Oid sortOperators[] = {FLOAT8LTOID};
+        Oid sortCollations[] = {InvalidOid};
+        bool nullsFirstFlags[] = {false};
+        so->sortstate = tuplesort_begin_heap(so->tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags,
+                                                    u_sess->attr.attr_memory.work_mem, NULL, false);
+        Datum value = GetScanValue(scan);
+        IvfflatBench("GetScanItems", GetScanItems(scan, value));
+        isDone = tuplesort_gettupleslot(so->sortstate, true, so->slot, NULL);
+        
+        /* Clean up if we allocated a new value */
+        if (value != scan->orderByData->sk_argument) {
+            pfree(DatumGetPointer(value));
+        }
+    }
+
+    if (isDone) {
         ItemPointer heaptid = (ItemPointer)DatumGetPointer(heap_slot_getattr(so->slot, 2, &so->isnull));
 
         scan->xs_ctup.t_self = *heaptid;

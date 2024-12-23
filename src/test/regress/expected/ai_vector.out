@@ -102,5 +102,33 @@ SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
   1 | item1  | [0.211557,0.076130316,0.048887435]
 (26 rows)
 
+CREATE TABLE items (id int, embedding vector(3));
+INSERT INTO items VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]'), (4, '[10,11,12]'), (5, '[13,14,15]');
+CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+NOTICE:  ivfflat index created with little data
+DETAIL:  This will cause low recall.
+HINT:  Drop the index until the table has more data.
+set enable_seqscan=off;
+SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+ embedding  
+------------
+ [13,14,15]
+ [10,11,12]
+ [7,8,9]
+ [4,5,6]
+ [1,2,3]
+(5 rows)
+
+set ivfflat_probes = 3;
+SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+ embedding  
+------------
+ [13,14,15]
+ [10,11,12]
+ [7,8,9]
+ [4,5,6]
+ [1,2,3]
+(5 rows)
+
 \c regression
 drop database test;
