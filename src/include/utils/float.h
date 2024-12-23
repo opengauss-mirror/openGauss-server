@@ -89,7 +89,7 @@ void pg_ftoa(float num, char* ascii)
     securec_check(rc, "\0", "\0");
 
     if (std::isnan(num)) {
-        if (u_sess->attr.attr_sql.enable_binary_special_a_format) {
+        if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
             rc = strcpy_sp(ascii, ascii_size, "Nan");
         } else {
             rc = strcpy_sp(ascii, ascii_size, "NaN");
@@ -99,13 +99,13 @@ void pg_ftoa(float num, char* ascii)
         return;
     } else if (std::isinf(num)) {
         if (num > 0) {
-            if (u_sess->attr.attr_sql.enable_binary_special_a_format) {
+            if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
                 rc = strcpy_sp(ascii, ascii_size, "Inf");
             } else {
                 rc = strcpy_sp(ascii, ascii_size, "Infinity");
             }
         } else {
-            if (u_sess->attr.attr_sql.enable_binary_special_a_format) {
+            if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
                 rc = strcpy_sp(ascii, ascii_size, "-Inf");
             } else {
                 rc = strcpy_sp(ascii, ascii_size, "-Infinity");
@@ -151,7 +151,7 @@ void pg_dtoa(double num, char* ascii)
     securec_check(rc, "\0", "\0");
 
     if (std::isnan(num)) {
-        if (u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
+        if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
             rc = strcpy_sp(ascii, ascii_size, "Nan");
         } else {
             rc = strcpy_sp(ascii, ascii_size, "NaN");
@@ -160,13 +160,13 @@ void pg_dtoa(double num, char* ascii)
         return;
     } else if (std::isinf(num)) {
         if (num > 0) {
-            if (u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
+            if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
                 rc = strcpy_sp(ascii, ascii_size, "Inf");
             } else {
                 rc = strcpy_sp(ascii, ascii_size, "Infinity");
             }
         } else {
-            if (u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
+            if (DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.enable_binary_special_a_format && !is_req_from_jdbc()) {
                 rc = strcpy_sp(ascii, ascii_size, "-Inf");
             } else {
                 rc = strcpy_sp(ascii, ascii_size, "-Infinity");
