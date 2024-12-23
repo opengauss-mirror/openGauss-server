@@ -15,6 +15,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/builtins.h"
 #include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "optimizer/pgxcship.h"
@@ -22,6 +23,18 @@
 #include "utils/memutils.h"
 #include "utils/pl_package.h"
 #include "catalog/gs_package.h"
+
+
+static const int ORA_ERR_CODE_MIN = -20999;
+static const int ORA_ERR_CODE_MAX = -20000;
+
+extern Datum raise_application_error(PG_FUNCTION_ARGS);
+
+extern "C" {
+Datum raise_application_error(PG_FUNCTION_ARGS);
+}
+
+PG_FUNCTION_INFO_V1(raise_application_error);
 
 /* ----------
  * plpgsql_ns_init			Initialize namespace processing for a new function
@@ -3020,4 +3033,92 @@ bool plpgsql_is_trigger_shippable(PLpgSQL_function* func)
     rec_old->tupdesc = func->tg_relation->rd_att;
     rec_old->freetupdesc = false;
     return traverse_block(func, func->action);
+}
+
+
+static void print_exception_stack(plpgsql_exception_stack *exception_stack, bool print)
+{
+    ErrorData* edata = NULL;
+
+    if (exception_stack) {
+        edata = (ErrorData*)exception_stack->elem;
+        if (print) {
+            if (edata->sqlerrcode >= 0) {
+                errcontext("GAUSS-%s: %s", plpgsql_get_sqlstate(edata->sqlerrcode), edata->message);
+            }
+            errcontext("%s", edata->context);
+        }
+        if (exception_stack->prev) {
+            print_exception_stack(exception_stack->prev, edata->sqlerrcode > 0);
+        }
+    }
+}
+
+void raise_application_error_context_callback(void* arg)
+{
+    if (!t_thrd.log_cxt.print_exception_stack) {
+        return;
+    }
+    int elevel;
+    int sqlState;
+    plpgsql_exception_stack *exception_stack = NULL;
+
+    getElevelAndSqlstate(&elevel, &sqlState);
+
+    Assert(elevel == ERROR);
+    
+    exception_stack = t_thrd.log_cxt.exception_stack;
+    print_exception_stack(exception_stack, true);
+    t_thrd.log_cxt.print_exception_stack = false;
+}
+
+Datum raise_application_error(PG_FUNCTION_ARGS)
+{
+    int errCode = 0;
+    char* errMessge = NULL;
+    bool keepErrors = false;
+    
+    if (A_FORMAT != u_sess->attr.attr_sql.sql_compatibility) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmodule(MOD_PLSQL),
+                        errmsg("raise_application_error is only supported in database which dbcompatibility = 'A'")));
+    }
+
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmodule(MOD_PLSQL),
+                        errmsg("Parameter 'code' can not be null.")));
+    }
+
+    errCode = PG_GETARG_INT32(0);
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmodule(MOD_PLSQL),
+                        errmsg("Parameter 'message' can not be null.")));
+    }
+
+    errMessge = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    if (PG_ARGISNULL(2)) {
+        keepErrors = false;
+    } else {
+        keepErrors = PG_GETARG_BOOL(2);
+    }
+
+    if (errCode < ORA_ERR_CODE_MIN || errCode > ORA_ERR_CODE_MAX) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmodule(MOD_PLSQL),
+                        errmsg("Parameter 'code' to raise_application_error of %d is out of range", errCode)));
+    }
+
+    if (keepErrors) {
+        t_thrd.log_cxt.print_exception_stack = true;
+    } else {
+        free_exception_stack();
+        t_thrd.log_cxt.print_exception_stack = false;
+    }
+    
+    ereport(ERROR, (errcode(errCode), errmodule(MOD_PLSQL),
+                    errmsg("%s", errMessge),
+                    errcontext("ORA%d: %s", errCode, errMessge)));
+    return Int32GetDatum(0);
 }

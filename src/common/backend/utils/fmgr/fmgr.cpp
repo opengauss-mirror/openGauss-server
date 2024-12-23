@@ -154,9 +154,10 @@ static RegExternFunc plpgsql_function_table[] = {
     {"plpgsql_call_handler", plpgsql_call_handler},
     {"plpgsql_inline_handler", plpgsql_inline_handler},
     {"plpgsql_validator", plpgsql_validator},
+    {"raise_application_error", raise_application_error},
     {"rawtohex", rawtohex},
     {"regexp_substr", regexp_substr},
-    {"report_application_error", report_application_error},
+    {"report_application_error", report_application_error}
 };
 
 /*

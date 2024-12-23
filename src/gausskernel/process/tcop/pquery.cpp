@@ -1031,6 +1031,7 @@ bool PortalRun(
     MemoryContext savePortalContext;
     MemoryContext saveMemoryContext;
     errno_t errorno = EOK;
+    ErrorContextCallback app_errcontext_callback;
     List **savePortalDataList;
 
     AssertArg(PortalIsValid(portal));
@@ -1068,6 +1069,11 @@ bool PortalRun(
         }
         PGSTAT_START_TIME_RECORD();
     }
+
+    app_errcontext_callback.callback = raise_application_error_context_callback;
+    app_errcontext_callback.arg = NULL;
+    app_errcontext_callback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &app_errcontext_callback;
 
     /*
      * Check for improper portal use, and mark portal active.
@@ -1336,6 +1342,13 @@ bool PortalRun(
             }
         }
     }
+
+    /*
+     * Pop the error context stack
+     */
+    t_thrd.log_cxt.error_context_stack = app_errcontext_callback.previous;
+    t_thrd.log_cxt.print_exception_stack = false;
+        
     decrease_instr_portal_nesting_level();
     gstrace_exit(GS_TRC_ID_PortalRun);
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;

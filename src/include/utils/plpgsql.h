@@ -1953,6 +1953,7 @@ Datum regexp_substr(PG_FUNCTION_ARGS);
 Datum intervaltonum(PG_FUNCTION_ARGS);
 Datum rawtohex(PG_FUNCTION_ARGS);
 Datum report_application_error(PG_FUNCTION_ARGS);
+Datum raise_application_error(PG_FUNCTION_ARGS);
 }
 
 extern THR_LOCAL PLpgSQL_execstate* plpgsql_estate;
@@ -1961,6 +1962,11 @@ extern THR_LOCAL PLpgSQL_execstate* plpgsql_estate;
  * Functions in pl_exec.c
  * ----------
  */
+/* save ErrorData for plpgsql exception handler */
+typedef struct plpgsql_exception_stack {
+    struct plpgsql_exception_stack* prev;
+    void* elem;
+} plpgsql_exception_stack;
 #define BULK_COLLECT_MAX ((Size)0x3FFFFFF)    /* maximum number of rows can be bulk collected (by 3FFFFFFF/16) */
 
 extern Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo,
@@ -2010,6 +2016,9 @@ extern Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTy
 extern void estate_cursor_set(FormatCallStack* plcallstack);
 #endif
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+
+extern void free_exception_stack();
+
 
 /* ----------
  * Functions for namespace handling in pl_funcs.c
@@ -2262,4 +2271,7 @@ extern void FunctionInSubprogramCompile(Oid parentFuncOid);
 extern void add_parent_func_compile(PLpgSQL_compile_context* context);
 extern void record_inline_subprogram_type(Oid typeoid);
 extern char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref = true);
+
+extern void raise_application_error_context_callback(void* arg);
+
 #endif /* PLPGSQL_H */

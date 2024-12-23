@@ -801,7 +801,7 @@ test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
 test: goto
 test: equivalence_class
 test: tsdb_delta2_compress
-test: tsdb_xor_compress
+test: tsdb_xor_compress plpgsql_custom_exception
 #test: tsdb_aggregate
 
 test: readline

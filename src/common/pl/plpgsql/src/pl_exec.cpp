@@ -3413,6 +3413,42 @@ static void exec_exception_end(PLpgSQL_execstate* estate, ExceptionContext *cont
     MemoryContextSwitchTo(context->oldMemCxt);
 }
 
+static void push_error_data_to_exception_stack() 
+{
+    MemoryContext oldcontext;
+    ErrorData* edata;
+    plpgsql_exception_stack *exceptionstack;
+
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    exceptionstack = (plpgsql_exception_stack*)palloc0(sizeof(plpgsql_exception_stack));
+    edata = CopyErrorData();
+    
+    exceptionstack->elem = edata;
+    exceptionstack->prev = t_thrd.log_cxt.exception_stack;
+    t_thrd.log_cxt.exception_stack = exceptionstack;
+
+    MemoryContextSwitchTo(oldcontext);
+}
+
+void free_exception_stack()
+{
+    plpgsql_exception_stack *exceptionstack;
+    plpgsql_exception_stack *tmp_exceptionstack;
+    ErrorData* edata;
+
+    exceptionstack = t_thrd.log_cxt.exception_stack;
+
+    while (exceptionstack) {
+        tmp_exceptionstack = exceptionstack->prev;
+        edata = (ErrorData*)exceptionstack->elem;
+        FreeErrorData(edata);
+        pfree(exceptionstack);
+        exceptionstack = tmp_exceptionstack;
+    }
+
+    t_thrd.log_cxt.exception_stack = NULL;
+}
+
 /*
  * Action at exception block's abnormal exit
  *
@@ -3873,6 +3909,9 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
 
                 estate->err_text = gettext_noop("during exception cleanup");
 
+                /* push ErrorData to exception stack*/
+                push_error_data_to_exception_stack();
+                
                 exec_exception_cleanup(estate, &excptContext);
     #ifndef ENABLE_MULTIPLE_NODES
                 AutoDopControl dopControl;
@@ -3883,6 +3922,9 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
                 u_sess->SPI_cxt.is_stp = savedIsSTP;
                 u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
+                free_exception_stack();
+                t_thrd.log_cxt.print_exception_stack = false;
             }
             PG_END_TRY();
 

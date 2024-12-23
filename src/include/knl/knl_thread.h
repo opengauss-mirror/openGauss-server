@@ -1190,6 +1190,10 @@ typedef struct knl_t_log_context {
 
     struct FormatCallStack* call_stack;
 
+    bool print_exception_stack;
+
+    struct plpgsql_exception_stack* exception_stack;
+
     sigjmp_buf* PG_exception_stack;
 
     char** thd_bt_symbol;

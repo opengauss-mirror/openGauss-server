@@ -76,12 +76,13 @@ bool will_shutdown = false;
  *       NEXT   |  93000   |     ?      |     ?
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 93030;
+const uint32 GRAND_VERSION_NUM = 93031;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 RAISE_APPLICATION_ERROR = 93031;
 const uint32 HASH_SAOP_VERSION_NUMBER = 93027;
 const uint32 CAST_FUNC_VERSION_NUMBER = 93026;
 const uint32 IGNORE_NULLS_VERSION_NUMBER = 93025;
