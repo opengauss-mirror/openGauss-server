@@ -9365,6 +9365,13 @@ void StartupXLOG(void)
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 src_id = SSGetPrimaryInstId();
+                if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_STANDBY_FAILOVER) {
+                    if (g_instance.dms_cxt.SSReformerControl.recoveryInstId != INVALID_INSTANCEID &&
+                        g_instance.dms_cxt.SSReformerControl.recoveryInstId != src_id) {
+                        src_id = g_instance.dms_cxt.SSReformerControl.recoveryInstId;
+                    }
+                }
+
                 ereport(LOG, (errmsg("[SS reform]: Standby:%d promoting, reading control file of original primary:%d",
                     g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
             } else {
@@ -11178,6 +11185,10 @@ void StartupXLOG(void)
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
         SSRequestAllStandbyReloadReformCtrlPage();
+        if (ENABLE_ONDEMAND_REALTIME_BUILD) {
+            ereport(LOG, (errmsg("[SS][On-demand] StartupXLOG recovery instance id is %d in control file",
+                    g_instance.dms_cxt.SSReformerControl.recoveryInstId)));
+        }
     }
 
     ereport(LOG, (errmsg("redo done, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT ", recentLocalXmin: " XID_FMT
