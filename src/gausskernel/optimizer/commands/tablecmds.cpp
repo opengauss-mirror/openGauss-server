@@ -22415,7 +22415,7 @@ static void ATExecIMCSTORED(Relation rel, List* colList)
 
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
     /* standbynode populate */
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+    if (IMCS_IS_PRIMARY_MODE) {
         CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
         SendImcstoredRequest(relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
     } else {

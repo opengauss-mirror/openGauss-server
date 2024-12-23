@@ -309,6 +309,8 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
 
     pg_atomic_init_u32(&(context->imcs_tbl_cnt), 0);
     pg_atomic_init_u32(&(context->is_walrcv_down), WALRCV_STATUS_UP);
+    pg_atomic_init_u32(&(context->dbname_reference_count), 0);
+    context->should_clean = false;
 }
 #endif
 

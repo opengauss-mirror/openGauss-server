@@ -93,7 +93,7 @@ struct IMCStoreVacuumTarget {
 struct knl_g_imcstore_context;
 
 extern void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context);
-extern void IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
+extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
 extern void IMCStoreVacuumWorkerMain(void);
 
 extern void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);

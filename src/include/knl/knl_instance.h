@@ -1387,6 +1387,8 @@ template<typename T> class MpmcBoundedQueue;
 typedef struct knl_g_imcstore_context {
     pthread_rwlock_t context_mutex;
     char* dbname;
+    pg_atomic_uint32 dbname_reference_count;
+    bool should_clean;
     Latch vacuum_latch;
     MpmcBoundedQueue<IMCStoreVacuumTarget> *vacuum_queue;
 
