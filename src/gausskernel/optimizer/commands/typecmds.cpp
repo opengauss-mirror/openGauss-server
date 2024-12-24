@@ -569,7 +569,7 @@ ObjectAddress DefineType(List* names, List* parameters)
      */
     char TypeCreateType = u_sess->cmd_cxt.TypeCreateType;
     if (!u_sess->attr.attr_common.IsInplaceUpgrade || !TypeCreateType ||
-        (TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET))
+        (TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET && TypeCreateType != TYPTYPE_UNDEFINE))
         array_oid = AssignTypeArrayOid();
 
     /* check the input and output functions's real type whether match the custum attributes */
@@ -623,7 +623,7 @@ ObjectAddress DefineType(List* names, List* parameters)
      * which doesn't have array type.
      */
     if (!u_sess->attr.attr_common.IsInplaceUpgrade || !TypeCreateType ||
-        (TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET)) {
+        (TypeCreateType != TYPTYPE_PSEUDO && TypeCreateType != TYPTYPE_SET && TypeCreateType != TYPTYPE_UNDEFINE)) {
         /*
          * Create the array type that goes with it.
          */
