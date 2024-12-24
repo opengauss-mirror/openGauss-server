@@ -863,7 +863,7 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
 #ifdef USE_ASSERT_CHECKING
         uint64 waitCount = 0;
         while (!CheckBufHasSpaceToDispatch(record->EndRecPtr)) {
-            if(SS_DISASTER_MAIN_STANDBY_NODE) {
+            if (ENABLE_DMS) {
                 uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
                 uint64 curPosition;
                 XLogRecPtr curLsn;
