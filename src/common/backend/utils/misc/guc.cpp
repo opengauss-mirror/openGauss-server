@@ -2000,7 +2000,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            false
+            true
         },
 #else
         {{"enable_ustore",
