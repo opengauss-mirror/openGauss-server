@@ -34,6 +34,29 @@
 #include "storage/smgr/relfilenode.h"
 #include "utils/hsearch.h"
 
+typedef struct CBM_RECORD {
+    XLogRecPtr startPtr;
+    XLogRecPtr endPtr;
+
+    HTAB* hashPtr;
+    pg_atomic_uint32 parseState;
+    pg_atomic_uint32 threadIndex;
+    TimeLineID timeLine;
+    Dllist cbmParseFreeList;
+    volatile int totalPageNum;
+
+    bool isRecEnd;
+    bool isLastOne;
+    bool isNewSegFile;
+}CBM_RECORD;
+
+/* CBM Queue Node struct. */
+typedef struct CBM_QUEUE_NODE {
+    struct CBM_QUEUE_NODE* prev;
+    struct CBM_QUEUE_NODE* next;
+    struct CBM_RECORD CBMRecord;
+} CBM_QUEUE_NODE;
+
 /* Struct for single bitmap file information */
 typedef struct BitmapFileStruct {
     char name[MAXPGPATH]; /* Name with full path */
@@ -44,13 +67,6 @@ typedef struct BitmapFileStruct {
 
 #define CBMDIR "pg_cbm/"
 #define MAX_CBM_FILENAME_LENGTH 66
-
-/* CBM xlog read structure */
-typedef struct CBMXlogReadStruct {
-    int fd;
-    XLogSegNo logSegNo;
-    char filePath[MAXPGPATH];
-} CBMXlogRead;
 
 /* Xlog parsing and bitmap output data structure */
 typedef struct XlogBitmapStruct {
@@ -63,15 +79,20 @@ typedef struct XlogBitmapStruct {
     XLogRecPtr endLSN;           /* the end of the LSN interval to be
                                  parsed, equal to the next checkpoint
                                  LSN at the time of parse */
-    HTAB* cbmPageHash;           /* the current modified page set,
-                                organized as htab with the keys of
-                                (rNode, forkNum) pairs */
-    Dllist pageFreeList;         /* doublely-linked list of freed CBM pages */
-    uint64 totalPageNum;         /* total cbm page number during one parse cycle */
-    CBMXlogRead xlogRead;        /* file information of xlog files to be parsed */
-    bool xlogParseFailed;        /* true if failed during last xlog parse */
-    bool needReset;              /* true if failed during last CBMFollowXlog */
+    pg_atomic_uint64 lastXlogParseResult;        /* true if failed during last xlog parse */
+    bool needReset;              /* true if failed during last CBMWriteAndFollowXlog */
     bool firstCPCreated;         /* if first checkpoint has been created after recovery */
+
+    int parseXlogFiles;
+    volatile CBM_QUEUE_NODE* headQueueNode;
+  
+    volatile int actualWorkerNum;
+    volatile int xlogFilesEpoch;
+    volatile CBM_QUEUE_NODE* currentQueueNode;
+
+    HTAB* cbmPageHash;
+    int totalPageNum;
+    Dllist pageFreeList;
 } XlogBitmap;
 
 typedef struct cbmpageheader {
@@ -277,7 +298,7 @@ typedef struct cbmbitmapiterator {
 extern void InitXlogCbmSys(void);
 extern void CBMTrackInit(bool startupXlog, XLogRecPtr startupCPRedo);
 extern void ResetXlogCbmSys(void);
-extern void CBMFollowXlog(void);
+extern void CBMWriteAndFollowXlog(void);
 extern void CBMGetMergedFile(XLogRecPtr startLSN, XLogRecPtr endLSN, char* mergedFileName);
 extern CBMArray* CBMGetMergedArray(XLogRecPtr startLSN, XLogRecPtr endLSN);
 extern void FreeCBMArray(CBMArray* cbmArray);
@@ -286,5 +307,13 @@ extern void CBMRecycleFile(XLogRecPtr targetLSN, XLogRecPtr* endLSN);
 extern XLogRecPtr ForceTrackCBMOnce(XLogRecPtr targetLSN, int timeOut, bool wait, bool lockHeld, bool isRecEnd = true);
 extern void advanceXlogPtrToNextPageIfNeeded(XLogRecPtr* recPtr);
 extern void cbm_rotate_file(XLogRecPtr rotateLsn);
-
+extern void CBMReadAndParseXLog(void);
+extern bool CheckCBMReaderWorkersStatus();
+extern bool CreateCBMReaderWorkers();
+extern void ResetCBMReaderStatus(int threadIndex, bool isReboot);
+extern void RebootCBMReader(int threadIndex);
+extern void WaitAndCheckCBMReaderWorkReboot(uint32 expectState, bool isSpecial, bool needRestart);
+extern void ModifyCBMReaderByConfig();
+extern void WakeUpCBMWorkers();
+extern void SignalCBMReaderWorker(int singal);
 #endif

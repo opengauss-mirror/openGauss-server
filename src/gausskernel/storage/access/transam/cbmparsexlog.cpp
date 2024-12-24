@@ -51,6 +51,7 @@
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
 #include "storage/file/fio_device.h"
+#define CBM_WRITE_WORKERS_NUM 1
 
 /* we can put the following globals into XlogCbmSys */
 static XLogRecPtr tmpTargetLSN = InvalidXLogRecPtr;
@@ -86,9 +87,10 @@ static void StartNextCBMFile(XLogRecPtr startLSN);
 static void StartExistCBMFile(uint64 lastfileSize);
 static HTAB *CBMPageHashInitialize(MemoryContext memoryContext);
 static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd);
+static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastCBMRecord);
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                            char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
-
+static void DestoryCbmHashEntryByCBMWriter(CbmHashEntry *cbmPageEntry, Dllist *pageFreeList);
 static void TrackChangeBlock(XLogReaderState *record);
 static void TrackRelPageModification(XLogReaderState *record);
 static void TrackCuBlockModification(XLogReaderState *record);
@@ -107,7 +109,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record);
 static void TrackUndoPageModification(XLogReaderState *record);
 static void TrackUndoStorageModification(XLogReaderState *record);
 static void TrackTransSlotModification(XLogReaderState *record);
-
+static void FlushOneCBMPageByCBMWriter(const char *page, XlogBitmap* xlogCbmSys, CBM_RECORD* cbmRecord, uint32 threadIndex);
 static void RegisterBlockChange(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo);
 static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo, uint8 pageType,
                                         BlockNumber truncBlkNo);
@@ -117,9 +119,9 @@ static void CBMPageSetBitmap(char *page, BlockNumber blkNo, uint8 pageType, Bloc
 static void CreateNewCBMPageAndInsert(CbmHashEntry *cbmPageEntry, BlockNumber blkNo, uint8 pageType,
                                       BlockNumber truncBlkNo);
 static void CreateDummyCBMEtyPageAndInsert(void);
+static void FlushOneCBMPage(const char *page, XlogBitmap *xlogCbmSys);
 static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter);
 static int CBMPageSeqCmp(const void *a, const void *b);
-static void FlushOneCBMPage(const char *page, XlogBitmap *xlogCbmSys);
 static void RotateCBMFile(void);
 static void RemoveAllCBMFiles(int elevel);
 static void PrintCBMHashTab(HTAB *cbmPageHash);
@@ -174,17 +176,155 @@ static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitm
                                 StringInfo log);
 static Dlelem *FindPageElemFromEntry(CbmHashEntry *cbmPageEntry, BlockNumber pageFirstBlock);
 static bool checkUserRequstAndRotateCbm();
+static void CBMQueuePopFront();
+static bool CBMQueueInsertAfter(XLogRecPtr startPtr, XLogRecPtr endPtr, TimeLineID timeLine, bool isRecEnd);
+static bool CreateCBMReaderWorker(CBMReaderWorker* cbmReaderWorker);
+static ThreadId CreateWorker(CBMReaderWorker* cbmReaderWorker);
+static void FlushCBMPagesToDiskByCBMWriter(XlogBitmap *xlogCbmSys, CBM_RECORD* CbmRecord, uint32 pageListIndex);
+
+static bool ParseXlogIntoTaskFluent(bool isRecEnd);
 
 extern void InitXlogCbmSys(void)
 {
     CBMFileHomeInitialize();
 
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = -1;
-    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+    for(int i = 0; i < MAX_CBM_READERS_NUMBER; i++) {
+        g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].xlogRead.fd = -1;
+    }
     ResetXlogCbmSys();
 
-    t_thrd.cbm_cxt.XlogCbmSys->xlogParseFailed = false;
+    pg_atomic_write_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult, CBM_PARSE_SUCCESS);
     t_thrd.cbm_cxt.XlogCbmSys->firstCPCreated = false;
+    t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum = 0;
+    t_thrd.cbm_cxt.XlogCbmSys->xlogFilesEpoch = 0;
+}
+
+static ThreadId CreateWorker(CBMReaderWorker* cbmReaderWorker) {
+    cbmReaderWorker->thid = initialize_util_thread(CBMREADER, cbmReaderWorker);
+    return cbmReaderWorker->thid;
+}
+
+static bool CreateCBMReaderWorker(CBMReaderWorker* cbmReaderWorker) {
+    /* We should wait for last CBM Reader quit success. */
+    while (cbmReaderWorker->thid != 0) {
+        ereport(LOG, (errmsg("Last %d CBM Reader didn't quit yet, thread pid is %lu, should wait.", cbmReaderWorker->threadIndex, cbmReaderWorker->thid)));
+        WakeUpCBMWorkers();
+	    pg_usleep(1000000L);
+    }
+    ThreadId threadId = CreateWorker(cbmReaderWorker);
+    if (threadId == 0) {
+        ereport(WARNING, (errmsg("Cannot create CBM Reader worker thread: %u, %m.")));
+        return false;
+    }
+    ereport(LOG, (errmsg("CreateCBMReaderWorker successfully, threadId:%lu.", threadId)));
+    pg_atomic_write_u32(&cbmReaderWorker->workState, CBM_THREAD_INIT);
+    return true;
+}
+
+extern bool CreateCBMReaderWorkers() {
+    for (int i = 0; i <  t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+        g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].threadIndex = i;
+        if (CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i])) {
+            ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", i)));
+        } else {
+            ereport(LOG, (errmsg("The %d CBM Reader worker thread create failed.", i)));
+        }
+    }
+
+    return true;
+}
+
+extern bool CheckCBMReaderWorkersStatus() {
+    for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+        if (pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].workState) != CBM_THREAD_NORMAL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Recourse reset function, reset memory context and data construct. */
+extern void ResetCBMReaderStatus(int threadIndex, bool isReboot) {
+    int rc;
+
+    MemoryContextReset(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].cbmReaderFreeContext);
+    if (g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.fd >= 0) {
+        if (close(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not close file \"%s\" during reset",
+                                                                g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.filePath)));
+    }
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.fd = -1;
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.logSegNo = 0;
+    rc = memset_s(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].xlogRead.filePath, MAXPGPATH, 0, MAXPGPATH);
+    securec_check(rc, "\0", "\0");
+    
+    /* Re-init the page list. */
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList = DLNewList();
+    DLInitList(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].readerPageFreeList);
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].readerTotalPageNum = 0;
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].pageFreeList = NULL;
+    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].totalPageNum = 0;
+    ereport(LOG, (errmsg("The %d CBM Reader worker reset status success.", threadIndex)));
+}
+
+
+extern void RebootCBMReader(int threadIndex) {
+    signal_child(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].thid, SIGTERM, -1);
+    ResetCBMReaderStatus(threadIndex, true);
+    if (CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex])) {
+        ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", threadIndex)));
+    } else {
+        ereport(WARNING, (errmsg("The %d CBM Reader worker thread create failed.", threadIndex)));
+    }
+}
+
+extern void ModifyCBMReaderByConfig() {
+    volatile int newCBMThreadsNum = u_sess->attr.attr_storage.cbm_threads_num;
+    if (newCBMThreadsNum < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum) {
+        for (int i = newCBMThreadsNum; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+            signal_child(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].thid, SIGTERM, -1);
+            ereport(LOG, (errmsg("The %d CBM Reader worker thread recived SIGTERM.", i)));
+            ResetCBMReaderStatus(i, false);
+        }
+    } else {
+        for (int i = t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i < newCBMThreadsNum; i++) {
+            ResetCBMReaderStatus(i, false);
+            if (CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i])) {
+                ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", i)));
+            } else {
+                ereport(WARNING, (errmsg("The %d CBM Reader worker thread create failed.", i)));
+            }
+        }
+    }
+    t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum = newCBMThreadsNum;
+    ereport(LOG, (errmsg("The CBM Writer thread handle config modify success.")));
+}
+
+/* We check all CBM Reader status, and restart abnormal thread again. */
+extern void WaitAndCheckCBMReaderWorkReboot(uint32 expectState, bool isSpecial, bool noNeedCheck) {
+    bool enableWork = false;
+    bool needWakeup = false;
+    uint32 state;
+    while (!enableWork && noNeedCheck) {
+        for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+            uint32 state = pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].workState);
+            if ((isSpecial && expectState == state) || (!isSpecial && expectState != state)) {
+                enableWork = true;
+            } else {
+                ereport(LOG, (errmsg("The %d CBM Reader worker thread status ablnormal, state is %d.", i, 
+                                pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].workState))));
+                RebootCBMReader(i);
+                needWakeup = true;
+            }
+        }
+        // 12-8 唤醒所有线程；
+        if (needWakeup) {
+            WakeUpCBMWorkers();
+            needWakeup = false;
+        }
+        pg_usleep(10000);
+    }
 }
 
 static void CBMFileHomeInitialize(void)
@@ -234,20 +374,18 @@ extern void ResetXlogCbmSys(void)
     t_thrd.cbm_cxt.XlogCbmSys->outSeqNum = 0;
     t_thrd.cbm_cxt.XlogCbmSys->startLSN = 0;
     t_thrd.cbm_cxt.XlogCbmSys->endLSN = 0;
-
     t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash = NULL;
     DLInitList(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList);
     t_thrd.cbm_cxt.XlogCbmSys->totalPageNum = 0;
 
-    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0) {
-        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not close file \"%s\" during reset",
-                                                                t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
+    for(int i = 0; i < MAX_CBM_READERS_NUMBER; i++) {
+        ResetCBMReaderStatus(i, false);
     }
-    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
-    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo = 0;
-    rc = memset_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, 0, MAXPGPATH);
-    securec_check(rc, "\0", "\0");
+    if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode == NULL) {
+        t_thrd.cbm_cxt.XlogCbmSys->headQueueNode = (CBM_QUEUE_NODE*)palloc0(sizeof(CBM_QUEUE_NODE));
+        t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
+        t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
+    }
 }
 
 extern void CBMTrackInit(bool startupXlog, XLogRecPtr startupCPRedo)
@@ -412,7 +550,10 @@ static void ValidateCBMFile(const char *filename, XLogRecPtr *trackedLSN, uint64
             checksum_ok = false;
             break;
         }
-
+        ereport(LOG, (errmsg("cbm page start at %08X/%08X , end at %08X/%08X.",
+                    (uint32)((((cbmpageheader *)page)->pageStartLsn) >> 32), (uint32)(((cbmpageheader *)page)->pageStartLsn),
+                    (uint32)((((cbmpageheader *)page)->pageEndLsn)) >> 32,
+                    (uint32)(((cbmpageheader *)page)->pageEndLsn))));
         if (checksum_ok)
             is_last_page = ((cbmpageheader *)page)->isLastBlock;
         else
@@ -489,7 +630,7 @@ static XLogRecPtr InitCBMTrackStartLSN(bool startupXlog, bool fromScratch, XLogR
     XLogRecPtr trackStartLSN = InvalidXLogRecPtr;
 
     if (startupXlog) {
-        Assert(!t_thrd.cbm_cxt.XlogCbmSys->xlogParseFailed);
+        Assert(pg_atomic_read_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult) == CBM_PARSE_SUCCESS);
         if (fromScratch && u_sess->attr.attr_storage.enable_cbm_tracking) {
             Assert(XLogRecPtrIsInvalid(lastTrackedLSN));
             Assert(!XLogRecPtrIsInvalid(startupCPRedo));
@@ -506,7 +647,7 @@ static XLogRecPtr InitCBMTrackStartLSN(bool startupXlog, bool fromScratch, XLogR
             Assert(XLogRecPtrIsInvalid(startupCPRedo));
             trackStartLSN = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
         } else {
-            trackStartLSN = (t_thrd.cbm_cxt.XlogCbmSys->xlogParseFailed &&
+            trackStartLSN = ((pg_atomic_read_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult) == CBM_PARSE_FAILED) &&
                              XLByteLT(lastTrackedLSN, t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo))
                                 ? t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo
                                 : lastTrackedLSN;
@@ -649,17 +790,71 @@ static HTAB *CBMPageHashInitialize(MemoryContext memoryContext)
     return hTab;
 }
 
-extern void CBMFollowXlog(void)
+extern void CBMReadAndParseXLog(void)
+{
+    volatile CBM_QUEUE_NODE* queueNodePtr = NULL;
+    bool needParse = true;
+
+    while (!t_thrd.cbm_cxt.shutdown_requested && pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest) == CBM_ACCEPT_TASK) {
+	    needParse = true;
+        SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+        queueNodePtr = t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode;
+        if (queueNodePtr == NULL || queueNodePtr == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+            /* Have nothing to parse. */
+            needParse = false;
+        } else {
+            t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = queueNodePtr->next;
+        }
+        SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+        
+        if (!needParse) {
+            ereport(LOG, (errmsg("Thread %d have find nothing to parse.", t_thrd.cbm_cxt.CBMReaderIndex)));
+            if (LWLockAcquireOrWait(g_instance.wal_cxt.cbmWaitTaskLock->l.lock, LW_EXCLUSIVE)) {
+                PGSemaphoreLock(&g_instance.wal_cxt.cbmWaitTaskLock->l.sem, true);
+                LWLockRelease(g_instance.wal_cxt.cbmWaitTaskLock->l.lock);
+            }
+            ereport(LOG, (errmsg("Thread %d have waken up for parse.", t_thrd.cbm_cxt.CBMReaderIndex)));
+            continue;
+        }
+        pg_atomic_write_u32(&queueNodePtr->CBMRecord.threadIndex, t_thrd.cbm_cxt.CBMReaderIndex);
+        pg_atomic_write_u32(&t_thrd.cbm_cxt.CBMReaderStatus->workState, CBM_THREAD_WORKING);
+
+        (void)LWLockAcquire(CBMFreeListLock, LW_EXCLUSIVE);
+        /* Get page free list, to handle cbm page write. */
+        if (t_thrd.cbm_cxt.CBMReaderStatus->pageFreeList != NULL) {
+            DLListConcat(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, t_thrd.cbm_cxt.CBMReaderStatus->pageFreeList);
+            DLFreeList(t_thrd.cbm_cxt.CBMReaderStatus->pageFreeList);
+            t_thrd.cbm_cxt.CBMReaderStatus->pageFreeList = NULL;
+        }
+        (void)LWLockRelease(CBMFreeListLock);
+
+        if (t_thrd.cbm_cxt.cbmPageHash == NULL)
+            t_thrd.cbm_cxt.cbmPageHash = CBMPageHashInitialize(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
+        
+        if (ParseXlogIntoCBMPagesByCBMReader((CBM_RECORD*)&queueNodePtr->CBMRecord, queueNodePtr->CBMRecord.isLastOne)) {
+            /* If something wrong in xlog parse. */
+            ereport(LOG, (errmsg("Thread CBM Reader %d parse failed.", t_thrd.cbm_cxt.CBMReaderIndex)));
+            pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
+            /* We should reset the cbmReaderNormalContext duo to useless hash left. */
+            MemoryContextReset(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
+            t_thrd.cbm_cxt.cbmPageHash = NULL;
+	    } else {
+            /* If get success in xlog parse. */
+            ereport(LOG, (errmsg("Thread CBM Reader %d parse success.", t_thrd.cbm_cxt.CBMReaderIndex)));
+        }
+        pg_atomic_write_u32(&t_thrd.cbm_cxt.CBMReaderStatus->workState, CBM_THREAD_NORMAL);
+    }
+    return;
+}
+
+extern void CBMWriteAndFollowXlog(void)
 {
     (void)LWLockAcquire(CBMParseXlogLock, LW_EXCLUSIVE);
     if (t_thrd.cbm_cxt.XlogCbmSys->needReset) {
         /* Flush any leaked data in the top-level context */
-        MemoryContextResetAndDeleteChildren(t_thrd.cbm_cxt.cbmwriter_context);
-        MemoryContextResetAndDeleteChildren(t_thrd.cbm_cxt.cbmwriter_page_context);
-
         ResetXlogCbmSys();
         CBMTrackInit(false, InvalidXLogRecPtr);
-        t_thrd.cbm_cxt.XlogCbmSys->xlogParseFailed = false;
+        pg_atomic_write_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult, CBM_PARSE_SUCCESS);
     } else {
         t_thrd.cbm_cxt.XlogCbmSys->needReset = true;
 
@@ -669,21 +864,17 @@ extern void CBMFollowXlog(void)
                             errmsg("failed to stat current cbm file %s :%s", t_thrd.cbm_cxt.XlogCbmSys->out.name, TRANSLATE_ERRNO)));
     }
 
-    if (t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash == NULL)
-        t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash = CBMPageHashInitialize(t_thrd.cbm_cxt.cbmwriter_page_context);
-
-    TimeLineID timeLine;
     XLogRecPtr checkPointRedo;
     XLogRecPtr tmpEndLSN;
     XLogRecPtr tmpForceEnd;
     bool isRecEnd = false;
     (void)LWLockAcquire(ControlFileLock, LW_SHARED);
     checkPointRedo = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
-    timeLine = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID;
-    LWLockRelease(ControlFileLock);
 
+    LWLockRelease(ControlFileLock);
     tmpEndLSN = checkPointRedo;
     tmpForceEnd = GetTmpTargetLSN(&isRecEnd);
+
     if (!XLogRecPtrIsInvalid(tmpForceEnd)) {
         if (XLByteLT(t_thrd.cbm_cxt.XlogCbmSys->startLSN, tmpForceEnd))
             tmpEndLSN = tmpForceEnd;
@@ -692,8 +883,9 @@ extern void CBMFollowXlog(void)
             isRecEnd = true;
             SetTmpTargetLSN(InvalidXLogRecPtr, true);
         }
-    } else
+    } else {
         isRecEnd = true;
+    }
 
     if (RecoveryInProgress()) {
         XLogRecPtr standbyReplayLsn = GetXLogReplayRecPtr(NULL, NULL);
@@ -763,35 +955,32 @@ extern void CBMFollowXlog(void)
         t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
         LWLockRelease(CBMParseXlogLock);
         return;
-    } else
+    } else {
         ereport(LOG, (errmsg("The xlog LSN to be parsed %08X/%08X is larger than "
                              "already tracked xlog LSN %08X/%08X. Do CBM track one time",
                              (uint32)(tmpEndLSN >> 32), (uint32)tmpEndLSN,
                              (uint32)(t_thrd.cbm_cxt.XlogCbmSys->startLSN >> 32),
                              (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN)));
-
+    }
     t_thrd.cbm_cxt.XlogCbmSys->endLSN = tmpEndLSN;
 
-    if (ParseXlogIntoCBMPages(timeLine, isRecEnd)) {
+    if (!ParseXlogIntoTaskFluent(isRecEnd)) {
         ereport(LOG, (errmsg("Found no any valid xlog record From the already tracked xlog "
                              "LSN %08X/%08X. Skip CBM track this time",
                              (uint32)(t_thrd.cbm_cxt.XlogCbmSys->startLSN >> 32),
                              (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN)));
 
         t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
+        pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_ACCEPT_TASK);
         LWLockRelease(CBMParseXlogLock);
         return;
     }
 
-    if (t_thrd.cbm_cxt.XlogCbmSys->totalPageNum == 0)
-        CreateDummyCBMEtyPageAndInsert();
-
-    PrintCBMHashTab(t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash);
-
-    FlushCBMPagesToDisk(t_thrd.cbm_cxt.XlogCbmSys, true);
-
-    t_thrd.cbm_cxt.XlogCbmSys->startLSN = t_thrd.cbm_cxt.XlogCbmSys->endLSN;
-    SetCBMTrackedLSN(t_thrd.cbm_cxt.XlogCbmSys->startLSN);
+    ereport(LOG, (errmsg("We had tarck LSN  %08X/%08X to %08X/%08X this time.",
+                             (uint32)(t_thrd.cbm_cxt.XlogCbmSys->startLSN >> 32),
+                             (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN,
+                             (uint32)(t_thrd.cbm_cxt.XlogCbmSys->endLSN >> 32),
+                             (uint32)t_thrd.cbm_cxt.XlogCbmSys->endLSN)));
 
     if (!XLogRecPtrIsInvalid(tmpForceEnd)) {
         Assert(XLByteLT(GetLatestCompTargetLSN(), tmpForceEnd));
@@ -807,11 +996,15 @@ extern void CBMFollowXlog(void)
         SetTmpTargetLSN(InvalidXLogRecPtr, true);
     }
 
-    if (DLListLength(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList) > MAXCBMFREEPAGENUM) {
-        MemoryContextResetAndDeleteChildren(t_thrd.cbm_cxt.cbmwriter_page_context);
-        DLInitList(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList);
-        t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash = NULL;
+    for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+        if (DLListLength(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].readerPageFreeList) > MAXCBMFREEPAGENUM) {
+            MemoryContextReset(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].cbmReaderFreeContext);
+            g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].pageFreeList = NULL;
+            DLInitList(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].parsePageFreeList);
+            DLInitList(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].readerPageFreeList);
+        }
     }
+
     t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
     LWLockRelease(CBMParseXlogLock);
 }
@@ -832,28 +1025,273 @@ static bool checkUserRequstAndRotateCbm()
     }
     return false;
 }
-static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
+
+
+extern void WakeUpCBMWorkers() {
+    WakeupWalSemaphore(&g_instance.wal_cxt.cbmWaitTaskLock->l.sem);
+}
+
+static bool CheckCBMWorkersStatus(int threadIndex) {
+    if (pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].workState) == CBM_THREAD_INVALID) {
+        if (!CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex])) {
+            ereport(WARNING, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("Something wrong with recreate thread!, please check again.")));
+        }
+        return false;
+    } else {
+        return true;
+    }
+}
+
+static void ResetNodeInformation(CBM_RECORD* cbmRecord)
 {
+    cbmRecord->hashPtr = NULL;
+    pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_UNDO);
+    cbmRecord->threadIndex = 0;
+}
+
+extern void SignalCBMReaderWorker(int singal) 
+{
+    for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
+        signal_child(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].thid, singal, -1);
+    }
+}
+
+static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter)
+{
+    HASH_SEQ_STATUS status;
+    CbmHashEntry *cbmPageEntry = NULL;
+
+    hash_seq_init(&status, xlogCbmSys->cbmPageHash);
+
+    while ((cbmPageEntry = (CbmHashEntry *)hash_seq_search(&status)) != NULL) {
+        Dlelem *eltCbmSegPageList = NULL;
+        Dlelem *eltPagelist = NULL;
+
+        int pageNum = cbmPageEntry->pageNum;
+        Assert(pageNum);
+        CbmPageHeader **cbmPageHeaderArray = (CbmPageHeader **)palloc_extended(pageNum * sizeof(CbmPageHeader *),
+                                                                               MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+
+        if (cbmPageHeaderArray == NULL)
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                            errmsg("memory is temporarily unavailable while allocate CBM page header array")));
+
+        while (ForeachEntryForPage(cbmPageEntry, &eltCbmSegPageList, &eltPagelist)) {
+            cbmPageHeaderArray[--pageNum] = (CbmPageHeader *)DLE_VAL(eltPagelist);
+            Assert(cbmPageHeaderArray[pageNum]);
+        }
+        Assert(!pageNum);
+
+        qsort(cbmPageHeaderArray, cbmPageEntry->pageNum, sizeof(CbmPageHeader *), CBMPageSeqCmp);
+
+        for (pageNum = 0; pageNum < cbmPageEntry->pageNum; pageNum++) {
+            FlushOneCBMPage((char *)(cbmPageHeaderArray[pageNum]), xlogCbmSys);
+
+            ereport(DEBUG1,
+                    (errmsg("flush CBM page: rel %u/%u/%u forknum %d first blkno %u "
+                            "page type %d truncate blkno %u",
+                            cbmPageHeaderArray[pageNum]->rNode.spcNode, cbmPageHeaderArray[pageNum]->rNode.dbNode,
+                            cbmPageHeaderArray[pageNum]->rNode.relNode, cbmPageHeaderArray[pageNum]->forkNum,
+                            cbmPageHeaderArray[pageNum]->firstBlkNo, cbmPageHeaderArray[pageNum]->pageType,
+                            cbmPageHeaderArray[pageNum]->truncBlkNo)));
+        }
+        pfree(cbmPageHeaderArray);
+        DestoryCbmHashEntry(cbmPageEntry, isCBMWriter, xlogCbmSys, false, NULL);
+        if (hash_search(xlogCbmSys->cbmPageHash, (void *)&cbmPageEntry->cbmTag, HASH_REMOVE, NULL) == NULL)
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("CBM hash table corrupted")));
+    }
+
+    Assert(xlogCbmSys->totalPageNum == 0);
+
+    if (pg_fsync(xlogCbmSys->out.fd) != 0)
+        ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("fsync CBM file \"%s\" failed during flushing", xlogCbmSys->out.name)));
+
+    if (isCBMWriter && (xlogCbmSys->out.offset >= MAXCBMFILESIZE || checkUserRequstAndRotateCbm())) {
+        RotateCBMFile();
+    }
+}
+
+static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
+    TimeLineID timeLine = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID;
+    XLogRecPtr startPoint = t_thrd.cbm_cxt.XlogCbmSys->startLSN;
+    XLogRecPtr endPoint = t_thrd.cbm_cxt.XlogCbmSys->endLSN;
+    XLogRecPtr tempEnd = 0;
+    volatile int xlogFileGap = t_thrd.cbm_cxt.XlogCbmSys->xlogFilesEpoch;
+    XLogSegNo startSegNo = 0;
+    XLogSegNo endSegNo = 0;
+    bool isErrorInReadProcess = false;
+
+    while (startPoint != endPoint) {
+        XLByteToSeg(startPoint, startSegNo);
+        XLByteToSeg(endPoint, endSegNo);
+        if ((endSegNo - startSegNo) >= (uint64)xlogFileGap) {
+            XLogSegNoOffsetToRecPtr(startSegNo + xlogFileGap, 0, tempEnd);
+        } else {
+            tempEnd = endPoint;
+        }
+        ereport(DEBUG1, (errmsg("CBM Queue Node construct, startPoint: %08X/%08X, endPoint: %08X/%08X",
+                                                (uint32)(startPoint >> 32), (uint32)(startPoint),
+                                                (uint32)(tempEnd >> 32), (uint32)(tempEnd))));
+        CBMQueueInsertAfter(startPoint, tempEnd, timeLine, isRecEnd);
+        startPoint = tempEnd;
+    }
+
+    if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+        t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev->CBMRecord.isLastOne = true;
+        t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next->CBMRecord.isNewSegFile = false;
+    }
+
+    SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+    t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
+    SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+
+    /* Wake all CBM Workers. */
+    WakeUpCBMWorkers();
+
+    volatile CBM_QUEUE_NODE* head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
+    volatile CBM_QUEUE_NODE* temp = NULL;
+    while (head != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+        uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
+        if (isErrorInReadProcess || t_thrd.cbm_cxt.shutdown_requested) {
+            ereport(LOG, (errmsg("Thread %d something wrong with parsing xlog file, skip forward.", head->CBMRecord.threadIndex)));
+            while (true) {
+                uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
+                uint32 threadId = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
+                /* If this CBMRecord under  CBM_READ_UNDO or CBM_READ_PROCESSING, we must wait for it handled off. */
+                if ((state == CBM_READ_UNDO || state == CBM_READ_PROCESSING) && threadId != INVAIL_CBM_THREAD_NUM) {
+                    pg_usleep(1000);
+                } else {
+                    break;
+                }
+            }
+            if (pg_atomic_read_u32(&head->CBMRecord.parseState) != CBM_READ_UNDO) {
+                ResetCBMReaderStatus(pg_atomic_read_u32(&head->CBMRecord.threadIndex), false);
+            }
+            CBMQueuePopFront();
+            head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
+            continue;
+        }
+
+        if (state == CBM_READ_DONE || state == CBM_READ_FAIL || state == CBM_READ_RECEND) {
+            if (state != CBM_READ_FAIL) {
+                t_thrd.cbm_cxt.XlogCbmSys->endLSN = head->CBMRecord.endPtr;
+                uint32 threadIndex = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
+                FlushCBMPagesToDiskByCBMWriter(t_thrd.cbm_cxt.XlogCbmSys, (CBM_RECORD*)&head->CBMRecord, threadIndex);
+                ereport(DEBUG1, (errmsg("We had tarck LSN  %08X/%08X to %08X/%08X this time.",
+                                        (uint32)(head->CBMRecord.startPtr >> 32),
+                                        (uint32)head->CBMRecord.startPtr,
+                                        (uint32)(head->CBMRecord.endPtr >> 32),
+                                        (uint32)head->CBMRecord.endPtr)));
+
+                (void)LWLockAcquire(CBMFreeListLock, LW_EXCLUSIVE);
+                Assert(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList != NULL);
+                if (g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].pageFreeList != NULL) {
+                    DLListConcat(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].pageFreeList, g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList);
+                    DLFreeList(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList);
+                } else {
+                    g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].pageFreeList = g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList;
+                }
+                g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].parsePageFreeList = DLNewList();
+                (void)LWLockRelease(CBMFreeListLock);
+                t_thrd.cbm_cxt.XlogCbmSys->startLSN = head->CBMRecord.endPtr;
+                SetCBMTrackedLSN(t_thrd.cbm_cxt.XlogCbmSys->startLSN);
+            } 
+            if (state == CBM_READ_FAIL || state == CBM_READ_RECEND) {
+                isErrorInReadProcess = true;
+                ereport(LOG, (errmsg("CBM Writer: something wrong with parsing xlog file.")));
+                pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
+                
+                SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+                /* Must set currentQueueNode, or CBM Reader will get wrong pointer. */
+                t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = NULL;
+                SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+		        continue;
+            }
+            CBMQueuePopFront();
+            head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
+        } else if (state == CBM_READ_PROCESSING) {
+            int threadIndex = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
+            if (!CheckCBMWorkersStatus(threadIndex)) {
+                ereport(LOG, (errmsg("Thread CBM Reader check status %lu abnormal in parse waiting.", threadIndex)));
+                head->CBMRecord.hashPtr = NULL;
+                pg_atomic_write_u32(&head->CBMRecord.parseState, CBM_READ_UNDO);
+                pg_atomic_write_u32(&head->CBMRecord.threadIndex, 0);
+                SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+                t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = head;
+                SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+                WakeUpCBMWorkers();
+            }
+        } else {
+            /* If we have many task to wait parse, check all CBM READER is normal. */
+            WaitAndCheckCBMReaderWorkReboot(CBM_THREAD_INVALID, false, t_thrd.cbm_cxt.shutdown_requested);
+        }
+        pg_usleep(1000);
+    }
+    if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode ||
+            t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+        ereport(PANIC, (errmsg("CBM queue node pop error")));
+    }
+
+    return !isErrorInReadProcess;
+}
+
+static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastCBMRecord)
+{
+    int CBMReaderIndex = t_thrd.cbm_cxt.CBMReaderIndex;
+    bool isRecEnd = cbmRecord->isRecEnd;
     XLogRecord *record = NULL;
     XLogReaderState *xlogreader = NULL;
     char *errormsg = NULL;
     XLogPageReadPrivateCBM readprivate;
-    XLogRecPtr startPoint = t_thrd.cbm_cxt.XlogCbmSys->startLSN;
+    XLogRecPtr startPoint = cbmRecord->startPtr;
+    XLogRecPtr lastRecord = InvalidXLogRecPtr;
     bool parseSkip = false;
+    bool isNewSegFile = cbmRecord->isNewSegFile;
+    XLogRecPtr firstRecord;
+    bool skipStraightForward = false;;
+
 
     if (ENABLE_DSS) {
         readprivate.datadir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
     } else {
         readprivate.datadir = t_thrd.proc_cxt.DataDir;
     }
-    readprivate.tli = timeLine;
+    readprivate.tli = cbmRecord->timeLine;
+
     xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);
     if (xlogreader == NULL)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("memory is temporarily unavailable while allocate xlog reader")));
 
-    do {
+    /* If we are in new seg file, we should find out the first xlog to parse. */
+    if (isNewSegFile) {
+        firstRecord = XLogFindNextRecord(xlogreader, startPoint);
+
+        if (XLByteEQ(firstRecord, InvalidXLogRecPtr)) {
+            ereport(LOG, (errmsg("could not find a valid record after %X/%X", (uint32)(startPoint >> 32), (uint32)(startPoint))));
+            pg_atomic_write_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult, CBM_PARSE_FAILED);
+            t_thrd.cbm_cxt.cbmPageHash = NULL;
+            cbmRecord->parseState = CBM_READ_FAIL;
+            skipStraightForward = true;
+            parseSkip = true;
+        } else {
+            ereport(DEBUG1, (errmsg("CBM Reader thread : %d , seg begin at: %X/%X, first xlog begin at:  %X/%X", 
+                                    t_thrd.cbm_cxt.CBMReaderIndex, (uint32)(startPoint >> 32), (uint32)(startPoint), (uint32)(firstRecord >> 32), (uint32)(firstRecord))));
+            startPoint = firstRecord;
+            cbmRecord->startPtr = startPoint;
+        }
+    }
+
+    while (!skipStraightForward) {
+        if (startPoint != InvalidXLogRecPtr) {
+            lastRecord = startPoint;
+        } else {
+            lastRecord = xlogreader->EndRecPtr;
+        }
         record = XLogReadRecord(xlogreader, startPoint, &errormsg);
+        
         if (record == NULL) {
             XLogRecPtr errptr;
 
@@ -871,59 +1309,81 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
                             (errmsg("could not read WAL record at %08X/%08X", (uint32)(errptr >> 32), (uint32)errptr)));
 
                 if (XLByteEQ(startPoint, InvalidXLogRecPtr)) {
-                    ereport(LOG, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
+                    ereport(DEBUG1, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
                                          (uint32)(xlogreader->EndRecPtr >> 32), (uint32)xlogreader->EndRecPtr)));
 
-                    t_thrd.cbm_cxt.XlogCbmSys->endLSN = xlogreader->EndRecPtr;
+                    cbmRecord->endPtr = xlogreader->EndRecPtr;
+                    if (t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum == 0) {
+                        CreateDummyCBMEtyPageAndInsert();
+                    }
+                    cbmRecord->hashPtr = t_thrd.cbm_cxt.cbmPageHash;
+                    cbmRecord->totalPageNum = t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum;
+                    t_thrd.cbm_cxt.cbmPageHash = NULL;
+                
+                    pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_RECEND); 
                     parseSkip = false;
-                } else
+                } else {
+                    t_thrd.cbm_cxt.cbmPageHash = NULL;
+                    pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_FAIL); 
                     parseSkip = true;
-
+                }
                 break;
             } else {
-                t_thrd.cbm_cxt.XlogCbmSys->xlogParseFailed = true;
-
+                pg_atomic_write_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult, CBM_PARSE_FAILED);
+                t_thrd.cbm_cxt.cbmPageHash = NULL;
+                pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_FAIL); 
                 if (errormsg != NULL)
-                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    ereport(LOG, (errcode(ERRCODE_DATA_EXCEPTION),
                                     errmsg("could not read WAL record at %08X/%08X: %s", (uint32)(errptr >> 32),
                                            (uint32)errptr, errormsg)));
                 else
-                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not read WAL record at %08X/%08X",
+                    ereport(LOG, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not read WAL record at %08X/%08X",
                                                                             (uint32)(errptr >> 32), (uint32)errptr)));
+                parseSkip = true;
+		break;
             }
         }
 
         TrackChangeBlock(xlogreader);
 
         advanceXlogPtrToNextPageIfNeeded(&(xlogreader->EndRecPtr));
-
-        if (XLByteLE(t_thrd.cbm_cxt.XlogCbmSys->endLSN, xlogreader->EndRecPtr)) {
-            ereport(LOG, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
+        
+        if (XLByteLE(cbmRecord->endPtr, xlogreader->EndRecPtr)) {
+            ereport(DEBUG1, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
                                  (uint32)(xlogreader->EndRecPtr >> 32), (uint32)xlogreader->EndRecPtr)));
 
             /*
              * Force the coming startLSN be set to a valid xlog record start LSN
              * if this is a forced cbm track with a non-record-end stop position.
              */
-            if (!isRecEnd)
-                t_thrd.cbm_cxt.XlogCbmSys->endLSN = xlogreader->EndRecPtr;
+            if (!isLastCBMRecord) {
+                cbmRecord->endPtr = xlogreader->EndRecPtr;
+            } else if (!isRecEnd) {
+                cbmRecord->endPtr = xlogreader->EndRecPtr;
+            }
 
+            if (t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum == 0) {
+                CreateDummyCBMEtyPageAndInsert();
+            }
+            cbmRecord->totalPageNum = t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum;
+            cbmRecord->hashPtr = t_thrd.cbm_cxt.cbmPageHash;
+            t_thrd.cbm_cxt.cbmPageHash = NULL;
+            pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_DONE); 
             parseSkip = false;
             break;
         }
 
         startPoint = InvalidXLogRecPtr; /* continue reading at next record */
-    } while (true);
-
-    XLogReaderFree(xlogreader);
-    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd != -1) {
-        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
-            ereport(WARNING, (errcode_for_file_access(),
-                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
-
-        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
     }
+    t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum = 0;
+    XLogReaderFree(xlogreader);
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd != -1) {
+        if (close(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(),
+                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath)));
 
+        t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = -1;
+    }
     return parseSkip;
 }
 
@@ -931,6 +1391,7 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                            char *readBuf, TimeLineID *pageTLI, char* xlog_path)
 {
+    int cbmReaderIndex = t_thrd.cbm_cxt.CBMReaderIndex;
     XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
     uint32 targetPageOff;
     int rc = 0;
@@ -941,34 +1402,34 @@ static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr
      * See if we need to switch to a new segment because the requested record
      * is not in the currently open one.
      */
-    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0 &&
-        !XLByteInSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo)) {
-        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd >= 0 &&
+        !XLByteInSeg(targetPagePtr, t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo)) {
+        if (close(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd) != 0)
             ereport(WARNING, (errcode_for_file_access(),
-                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
+                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath)));
 
-        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+        t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = -1;
     }
 
-    XLByteToSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo);
+    XLByteToSeg(targetPagePtr, t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo);
 
-    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd < 0) {
         char xlogfname[MAXFNAMELEN];
 
         rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", readprivate->tli,
-                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) / XLogSegmentsPerXLogId),
-                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
+                        (uint32)((t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo) / XLogSegmentsPerXLogId),
+                        (uint32)((t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
         securec_check_ss(rc, "", "");
-
-        rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,  "%s/" XLOGDIR "/%s",
-                        readprivate->datadir, xlogfname);
+        
+        rc = snprintf_s(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,
+                "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
         securec_check_ss(rc, "\0", "\0");
 
-        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+        t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath,
                                                                O_RDONLY | PG_BINARY, 0);
 
-        if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
-            ereport(WARNING, (errmsg("could not open file \"%s\": %s", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+        if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd < 0) {
+            ereport(WARNING, (errmsg("could not open file \"%s\": %s", t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath,
                                      strerror(errno))));
             return -1;
         }
@@ -977,14 +1438,15 @@ static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr
     /*
      * At this point, we have the right segment open.
      */
-    Assert(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd != -1);
+    Assert(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd != -1);
 
     PGSTAT_INIT_TIME_RECORD();
     PGSTAT_START_TIME_RECORD();
-    if (pread(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd, readBuf, XLOG_BLCKSZ, (off_t)targetPageOff) != XLOG_BLCKSZ) {
+   
+    if (pread(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd, readBuf, XLOG_BLCKSZ, (off_t)targetPageOff) != XLOG_BLCKSZ) {
         PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
         ereport(WARNING, (errmsg("could not read page from file \"%s\" at page offset %u: %s",
-                                 t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, targetPageOff, strerror(errno))));
+                                 t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath, targetPageOff, strerror(errno))));
         return -1;
     }
     PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
@@ -1760,6 +2222,7 @@ static void RegisterBlockChange(const RelFileNode &rNode, ForkNumber forkNum, Bl
 static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo, uint8 pageType,
                                         BlockNumber truncBlkNo)
 {
+    int threadIndex = t_thrd.cbm_cxt.CBMReaderIndex;
     Assert((BlockNumberIsValid(blkNo) && pageType == PAGETYPE_MODIFY) ||
         (!BlockNumberIsValid(blkNo) &&
         (pageType == PAGETYPE_DROP || pageType == PAGETYPE_TRUNCATE || pageType == PAGETYPE_CREATE)));
@@ -1776,20 +2239,19 @@ static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber for
     INIT_CBMPAGETAG(cbmPageTag, rNode, forkNum);
 
     if (pageType == PAGETYPE_DROP) {
-        CBMHashRemove(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, true);
     } else if (pageType == PAGETYPE_TRUNCATE &&
         (((forkNum == MAIN_FORKNUM || forkNum == VISIBILITYMAP_FORKNUM) && rNode.relNode != InvalidOid) ||
         (forkNum == UNDO_FORKNUM && IS_UNDO_RELFILENODE(rNode)))) {
         Assert(BlockNumberIsValid(truncBlkNo));
 
         if (IS_UNDO_RELFILENODE(rNode)) {
-            CBMPageEtyTruncateBefore(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, truncBlkNo, true);
+            CBMPageEtyTruncateBefore(cbmPageTag, t_thrd.cbm_cxt.cbmPageHash, truncBlkNo, true);
         } else {
-            CBMPageEtyTruncate(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, truncBlkNo, true);
+            CBMPageEtyTruncate(cbmPageTag, t_thrd.cbm_cxt.cbmPageHash, truncBlkNo, true);
         }
     }
 
-    cbmPageEntry = (CbmHashEntry *)hash_search(t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, (void *)&cbmPageTag, HASH_ENTER,
+    cbmPageEntry = (CbmHashEntry *)hash_search(t_thrd.cbm_cxt.cbmPageHash, (void *)&cbmPageTag, HASH_ENTER,
                                                &found);
 
     if (cbmPageEntry == NULL)
@@ -1851,18 +2313,18 @@ static void CreateNewCBMPageAndInsert(CbmHashEntry *cbmPageEntry, BlockNumber bl
     BlockNumber pageFirstBlock = BLKNO_TO_CBM_PAGEFIRSTBOCK(blkNo);
     Dlelem *elt = NULL;
 
-    if (DLGetHead(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList)) {
+    if (DLGetHead(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList)) {
         int rc = 0;
-        elt = DLRemHead(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList);
+        elt = DLRemHead(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList);
         cbmPageHeader = (CbmPageHeader *)DLE_VAL(elt);
         Assert(cbmPageHeader);
 
         rc = memset_s(cbmPageHeader, CBMPAGESIZE, 0, CBMPAGESIZE);
         securec_check(rc, "\0", "\0");
     } else {
-        /* For now, only cbm writer thread can do cbm-parsing-xlog */
-        Assert(CurrentMemoryContext == t_thrd.cbm_cxt.cbmwriter_context);
-        MemoryContextSwitchTo(t_thrd.cbm_cxt.cbmwriter_page_context);
+        /* For now, only cbm read thread can do cbm-parsing-xlog */
+        Assert(CurrentMemoryContext == t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
+        MemoryContextSwitchTo(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderFreeContext);
         cbmPageHeader = (CbmPageHeader *)palloc_extended(CBMPAGESIZE, MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
 
         if (cbmPageHeader == NULL)
@@ -1870,7 +2332,7 @@ static void CreateNewCBMPageAndInsert(CbmHashEntry *cbmPageEntry, BlockNumber bl
                             errmsg("memory is temporarily unavailable while allocate new CBM page")));
 
         elt = DLNewElem((void *)cbmPageHeader);
-        MemoryContextSwitchTo(t_thrd.cbm_cxt.cbmwriter_context);
+        MemoryContextSwitchTo(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
     }
 
     INIT_CBMPAGEHEADER(cbmPageHeader, cbmPageEntry->cbmTag, pageFirstBlock);
@@ -1878,7 +2340,7 @@ static void CreateNewCBMPageAndInsert(CbmHashEntry *cbmPageEntry, BlockNumber bl
 
     InsertCbmPageElemToEntry(cbmPageEntry, elt, pageFirstBlock);
 
-    t_thrd.cbm_cxt.XlogCbmSys->totalPageNum++;
+    t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum++;
 
     ereport(DEBUG1, (errmsg("create new CBM page: rel %u/%u/%u forknum %d first blkno %u "
                             "page type %d truncate blkno %u",
@@ -1894,7 +2356,7 @@ static void CreateDummyCBMEtyPageAndInsert(void)
     bool found = false;
 
     INIT_DUMMYCBMPAGETAG(dummyPageTag);
-    dummyPageEntry = (CbmHashEntry *)hash_search(t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, (void *)&dummyPageTag,
+    dummyPageEntry = (CbmHashEntry *)hash_search(t_thrd.cbm_cxt.cbmPageHash, (void *)&dummyPageTag,
                                                  HASH_ENTER, &found);
 
     if (dummyPageEntry == NULL)
@@ -1910,12 +2372,12 @@ static void CreateDummyCBMEtyPageAndInsert(void)
     CreateNewCBMPageAndInsert(dummyPageEntry, InvalidBlockNumber, PAGETYPE_MODIFY, InvalidBlockNumber);
 }
 
-static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter)
+static void FlushCBMPagesToDiskByCBMWriter(XlogBitmap *xlogCbmSys, CBM_RECORD* CbmRecord, uint32 pageListIndex)
 {
     HASH_SEQ_STATUS status;
     CbmHashEntry *cbmPageEntry = NULL;
 
-    hash_seq_init(&status, xlogCbmSys->cbmPageHash);
+    hash_seq_init(&status, CbmRecord->hashPtr);
 
     while ((cbmPageEntry = (CbmHashEntry *)hash_seq_search(&status)) != NULL) {
         Dlelem *eltCbmSegPageList = NULL;
@@ -1939,7 +2401,7 @@ static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter)
         qsort(cbmPageHeaderArray, cbmPageEntry->pageNum, sizeof(CbmPageHeader *), CBMPageSeqCmp);
 
         for (pageNum = 0; pageNum < cbmPageEntry->pageNum; pageNum++) {
-            FlushOneCBMPage((char *)(cbmPageHeaderArray[pageNum]), xlogCbmSys);
+            FlushOneCBMPageByCBMWriter((char *)(cbmPageHeaderArray[pageNum]), xlogCbmSys, CbmRecord, pageListIndex);
 
             ereport(DEBUG1,
                     (errmsg("flush CBM page: rel %u/%u/%u forknum %d first blkno %u "
@@ -1950,18 +2412,18 @@ static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter)
                             cbmPageHeaderArray[pageNum]->truncBlkNo)));
         }
         pfree(cbmPageHeaderArray);
-        DestoryCbmHashEntry(cbmPageEntry, isCBMWriter, xlogCbmSys, false, NULL);
-        if (hash_search(xlogCbmSys->cbmPageHash, (void *)&cbmPageEntry->cbmTag, HASH_REMOVE, NULL) == NULL)
+        DestoryCbmHashEntryByCBMWriter(cbmPageEntry, g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[pageListIndex].parsePageFreeList);
+        if (hash_search(CbmRecord->hashPtr, (void *)&cbmPageEntry->cbmTag, HASH_REMOVE, NULL) == NULL)
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("CBM hash table corrupted")));
     }
 
-    Assert(xlogCbmSys->totalPageNum == 0);
+    Assert(CbmRecord->totalPageNum == 0);
 
     if (pg_fsync(xlogCbmSys->out.fd) != 0)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("fsync CBM file \"%s\" failed during flushing", xlogCbmSys->out.name)));
 
-    if (isCBMWriter && (xlogCbmSys->out.offset >= MAXCBMFILESIZE || checkUserRequstAndRotateCbm())) {
+    if (xlogCbmSys->out.offset >= MAXCBMFILESIZE || checkUserRequstAndRotateCbm()) {
         RotateCBMFile();
     }
 }
@@ -1994,6 +2456,28 @@ static void FlushOneCBMPage(const char *page, XlogBitmap *xlogCbmSys)
 
     xlogCbmSys->out.offset += (off_t)CBMPAGESIZE;
     xlogCbmSys->totalPageNum--;
+}
+
+static void FlushOneCBMPageByCBMWriter(const char *page, XlogBitmap* xlogCbmSys, CBM_RECORD* cbmRecord, uint32 threadIndex)
+{
+    CbmPageHeader *cbmPageHeader = (CbmPageHeader *)page;
+
+    cbmPageHeader->isLastBlock = cbmRecord->totalPageNum == 1;
+    cbmPageHeader->pageStartLsn = cbmRecord->startPtr;
+    cbmPageHeader->pageEndLsn = cbmRecord->endPtr;
+    cbmPageHeader->pageCrc = CBMPageCalcCRC(page);
+
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
+    ssize_t size = pwrite(xlogCbmSys->out.fd, page, (size_t)CBMPAGESIZE, xlogCbmSys->out.offset);
+    PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+
+    if (size != (ssize_t)CBMPAGESIZE)
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write CBM file \"%s\", page offset %ld",
+                                                          xlogCbmSys->out.name, xlogCbmSys->out.offset)));
+
+    xlogCbmSys->out.offset += (off_t)CBMPAGESIZE;
+    cbmRecord->totalPageNum--;
 }
 
 static void RotateCBMFile(void)
@@ -2701,8 +3185,8 @@ static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, 
                 cbmPageEntry->pageNum--;
 
                 if (isCBMWriter) {
-                    t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
-                    DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                    t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum--;
+                    DLAddTail(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, eltPagelist);
                 } else {
                     pfree(DLE_VAL(eltPagelist));
                     DLFreeElem(eltPagelist);
@@ -2738,8 +3222,8 @@ static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, 
                     cbmPageEntry->pageNum--;
 
                     if (isCBMWriter) {
-                        t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
-                        DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                        t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum--;
+                        DLAddTail(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, eltPagelist);
                     } else {
                         pfree(DLE_VAL(eltPagelist));
                         DLFreeElem(eltPagelist);
@@ -2811,8 +3295,8 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                 cbmPageEntry->pageNum--;
 
                 if (isCBMWriter) {
-                    t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
-                    DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                    t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum--;
+                    DLAddTail(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, eltPagelist);
                 } else {
                     pfree(DLE_VAL(eltPagelist));
                     DLFreeElem(eltPagelist);
@@ -2848,8 +3332,8 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                     cbmPageEntry->pageNum--;
 
                     if (isCBMWriter) {
-                        t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
-                        DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                        t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum--;
+                        DLAddTail(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, eltPagelist);
                     } else {
                         pfree(DLE_VAL(eltPagelist));
                         DLFreeElem(eltPagelist);
@@ -3524,6 +4008,28 @@ static bool ForeachEntryForPage(CbmHashEntry *cbmPageEntry, Dlelem **eltCbmSegPa
     return *eltPagelist != NULL;
 }
 
+static void DestoryCbmHashEntryByCBMWriter(CbmHashEntry *cbmPageEntry, Dllist *pageFreeList)
+{
+    Dlelem *eltCbmSegPageList = NULL;
+    Dlelem *eltPagelist = NULL;
+    CbmSegPageList *cbmSegPageList = NULL;
+    while ((eltCbmSegPageList = DLRemHead(&cbmPageEntry->cbmSegPageList)) != NULL) {
+        cbmSegPageList = (CbmSegPageList *)DLE_VAL(eltCbmSegPageList);
+        Assert(eltCbmSegPageList);
+        while ((eltPagelist = DLRemHead(&cbmSegPageList->pageDllist)) != NULL) {
+            Assert(eltPagelist);
+            if (eltPagelist != NULL) {
+                DLAddTail(pageFreeList, eltPagelist);
+            }
+            cbmPageEntry->pageNum--;
+        }
+        pfree(DLE_VAL(eltCbmSegPageList));
+        DLFreeElem(eltCbmSegPageList);
+    }
+    Assert(0 == cbmPageEntry->pageNum);
+    Assert(DLGetHead(&cbmPageEntry->cbmSegPageList) == NULL && DLGetTail(&cbmPageEntry->cbmSegPageList) == NULL);
+}
+
 static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitmap *xlogCbmSys, bool changeTotalNum,
                                 StringInfo log)
 {
@@ -3547,7 +4053,7 @@ static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitm
                 } else {
                     pfree(DLE_VAL(eltPagelist));
                     DLFreeElem(eltPagelist);
-                }
+                } 
             }
             cbmPageEntry->pageNum--;
         }
@@ -3602,4 +4108,41 @@ timeout:
     /* mute the compiler */
     return;
 }
-                                
+                      
+static bool CBMQueueInsertAfter(XLogRecPtr startPtr, XLogRecPtr endPtr, TimeLineID timeLine, bool isRecEnd) {
+    CBM_QUEUE_NODE* newNode = (CBM_QUEUE_NODE*)palloc0(sizeof(CBM_QUEUE_NODE));
+    newNode->CBMRecord.startPtr = startPtr;
+    newNode->CBMRecord.endPtr = endPtr;
+    newNode->CBMRecord.timeLine = timeLine;
+    newNode->CBMRecord.isRecEnd = isRecEnd;
+    newNode->CBMRecord.isNewSegFile = true;
+    pg_atomic_write_u32(&newNode->CBMRecord.threadIndex, INVAIL_CBM_THREAD_NUM);
+    SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+    t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev->next = newNode;
+    newNode->prev = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev;
+    newNode->next = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
+    t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev = newNode;
+
+    if (!(newNode->prev == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode || newNode->CBMRecord.startPtr == newNode->prev->CBMRecord.endPtr)) {
+        SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+        ereport(PANIC, (errmsg("The CBM queue is not in order.")));
+    }
+
+    SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+    return true;
+}
+
+static void CBMQueuePopFront() {
+    SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+    if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+        SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+        return;
+    }
+    CBM_QUEUE_NODE* popNode = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
+    popNode->next->prev = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
+    t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next = popNode->next;
+    popNode->next = NULL;
+    popNode->prev = NULL;
+    pfree(popNode);
+    SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+}             

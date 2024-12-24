@@ -94,6 +94,9 @@ const int MAX_AUDIT_NUM = 48;
 /* Maximum number of max replication slots */
 #define MAX_REPLICATION_SLOT_NUM 100
 
+#define MAX_CBM_THREAD_NUM 6
+#define INVAIL_CBM_THREAD_NUM 9
+
 #ifndef ENABLE_MULTIPLE_NODES
 const int DB_CMPT_MAX = 4;
 #endif
@@ -777,6 +780,58 @@ typedef struct knl_g_parallel_redo_context {
     int buffer_pin_wait_buf_len;
 } knl_g_parallel_redo_context;
 
+#define MAX_CBM_READERS_NUMBER 4
+
+/* CBM Reader status. */
+static const uint32 CBM_THREAD_INVALID = 0;
+static const uint32 CBM_THREAD_INIT = 1;
+static const uint32 CBM_THREAD_NORMAL = 2;
+static const uint32 CBM_THREAD_WORKING = 3;
+
+/* CBM Record status. */
+static const uint32 CBM_READ_UNDO = 0;
+static const uint32 CBM_READ_PROCESSING = 1;
+static const uint32 CBM_READ_DONE = 2;
+static const uint32 CBM_READ_FAIL = 3;
+static const uint32 CBM_READ_RECEND = 4;
+
+/* Last xlog parse status. */
+static const uint32 CBM_PARSE_SUCCESS = 0;
+static const uint32 CBM_PARSE_FAILED = 1;
+
+/* CBM Reader is ready to accept task. */
+static const uint32 CBM_ACCEPT_TASK = 0;
+static const uint32 CBM_REJECT_TASK = 1;
+
+/* CBM xlog read structure */
+typedef struct CBMXlogReadStruct {
+    int fd;
+    XLogSegNo logSegNo;
+    char filePath[MAXPGPATH];
+} CBMXlogRead;
+
+typedef struct CBMReaderWorkerStruct {
+    int threadIndex;
+    ThreadId thid;
+    volatile uint32 workState;
+    Dllist* pageFreeList;
+    Dllist* parsePageFreeList;
+    Dllist readerPageFreeList;
+    CBMXlogRead xlogRead;
+    volatile int totalPageNum;
+    volatile int readerTotalPageNum;
+    MemoryContext cbmReaderFreeContext;
+    MemoryContext cbmReaderNormalContext;
+}CBMReaderWorker;
+
+typedef struct knl_g_cbm_context {
+    CBMReaderWorker CBMThreadStatusList[MAX_CBM_THREAD_NUM];
+    volatile uint32 threadNum;
+    volatile uint32 skipIncomingRequest;
+    MemoryContext cbmTopContext;
+    slock_t CBMTaskListSpinLock;
+} knl_g_cbm_context;
+
 typedef struct knl_g_heartbeat_context {
     volatile bool heartbeat_running;
 } knl_g_heartbeat_context;
@@ -859,6 +914,7 @@ typedef struct knl_g_comm_context {
     knl_g_mctcp_context mctcp_cxt;
     knl_g_commutil_context commutil_cxt;
     knl_g_parallel_redo_context predo_cxt; /* parallel redo context */
+    knl_g_cbm_context cbm_cxt;
     MemoryContext comm_global_mem_cxt;
     bool force_cal_space_info;
     bool cal_all_space_info_in_progress;
@@ -1002,7 +1058,7 @@ typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
 typedef struct WALInitSegLockPadded WALInitSegLockPadded;
 typedef struct XlogFlushStats XlogFlushStatistics;
 typedef struct WALSyncRepWaitLockPadded WALSyncRepWaitLockPadded;
-
+typedef struct CBMTaskLockPadded CBMTaskLockPadded;
 typedef struct WalSenderStat {
     uint64 sendTimes;
     TimestampTz firstSendTime;
@@ -1079,6 +1135,7 @@ typedef struct knl_g_wal_context {
     WalRecvWriterStats* walRecvWriterStats;
     char* ssZeroBuffer; /* an all-zero buffer used to write zero when initing xlog file */
     WALSyncRepWaitLockPadded* walSyncRepWaitLock;
+    CBMTaskLockPadded* cbmWaitTaskLock;
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {
@@ -1404,6 +1461,7 @@ typedef struct knl_instance_context {
     MemoryContext wal_context;
     MemoryContext account_context;
     MemoryContext builtin_proc_context;
+    MemoryContext cbmwriter_page_context;
     MemoryContextGroup* mcxt_group;
 
     knl_g_advisor_conntext adv_cxt;
@@ -1465,6 +1523,7 @@ typedef struct knl_instance_context {
     knl_g_streaming_dr_context streaming_dr_cxt;
     struct PLGlobalPackageRuntimeCache* global_session_pkg;
     knl_g_startup_context startup_cxt;
+
 
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];

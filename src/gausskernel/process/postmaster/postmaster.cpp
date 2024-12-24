@@ -8028,6 +8028,23 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+        bool isCBMReaderThread = false;
+        for (int i = 0; i < MAX_CBM_THREAD_NUM; i++) {
+            if (pid == g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].thid) {
+                Assert(!dummyStandbyMode);
+                g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].thid = 0;
+                if (!EXIT_STATUS_0(exitstatus)) {
+                    HandleChildCrash(pid, exitstatus, _("cbm reader process"));
+                }
+                isCBMReaderThread = true;
+                break;
+            }
+        }
+
+        if (isCBMReaderThread) {
+            continue;
+        }
+
         /*
         * Check if this child was a undo recycle process.
         */
@@ -13737,6 +13754,9 @@ static void SetAuxType()
         case CBMWRITER:
             t_thrd.bootstrap_cxt.MyAuxProcType = CBMWriterProcess;
             break;
+        case CBMREADER:
+            t_thrd.bootstrap_cxt.MyAuxProcType = CBMReaderProcess;
+            break;
         case STARTUP:
             t_thrd.bootstrap_cxt.MyAuxProcType = StartupProcess;
             break;
@@ -13837,6 +13857,11 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
         }
         case PAGEREDO: {
             SetMyPageRedoWorker(arg);
+            break;
+        }
+        case CBMREADER: {
+            t_thrd.cbm_cxt.CBMReaderIndex = ((CBMReaderWorker*)arg->payload)->threadIndex;
+            t_thrd.cbm_cxt.CBMReaderStatus = (CBMReaderWorker*)arg->payload;
             break;
         }
         case BGWORKER: {
@@ -14035,6 +14060,12 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
         case CBMWRITER:
             /* don't set signals, cbmwriter has its own agenda */
             CBMWriterMain(); /* should never return */
+            proc_exit(1);
+            break;
+
+        case CBMREADER:
+            /* CBMReader entry point. */
+            CBMReaderMain();
             proc_exit(1);
             break;
 
@@ -14338,6 +14369,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case DATARECIVER:
         case DATARECWRITER:
         case CBMWRITER:
+        case CBMREADER:
         case STARTUP:
         case PAGEWRITER_THREAD:
         case PAGEREPAIR_THREAD:
@@ -14890,6 +14922,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<DATARECIVER>, DATARECIVER, "datareceiver", "data receiver" },
     { GaussDbThreadMain<DATARECWRITER>, DATARECWRITER, "datarecwriter", "data receive writer" },
     { GaussDbThreadMain<CBMWRITER>, CBMWRITER, "CBMwriter", "CBM writer" },
+    { GaussDbThreadMain<CBMREADER>, CBMREADER, "CBMReader", "CBM reader" },
     { GaussDbThreadMain<PAGEWRITER_THREAD>, PAGEWRITER_THREAD, "pagewriter", "page writer" },
     { GaussDbThreadMain<PAGEREPAIR_THREAD>, PAGEREPAIR_THREAD, "pagerepair", "page repair" },
     { GaussDbThreadMain<HEARTBEAT>, HEARTBEAT, "heartbeat", "heart beat" },

@@ -318,6 +318,37 @@ static void knl_g_mctcp_init(knl_g_mctcp_context* mctcp_cxt)
     mctcp_cxt->mc_tcp_send_timeout = 0;
 }
 
+static void knl_g_cbm_init(knl_g_cbm_context* cbm_cxt)
+{
+    Assert(cbm_cxt != NULL);
+    for (int i = 0; i < MAX_CBM_THREAD_NUM; i++) {
+        cbm_cxt->CBMThreadStatusList[i].thid = 0;
+        cbm_cxt->CBMThreadStatusList[i].threadIndex = i;
+        pg_atomic_write_u32(&cbm_cxt->CBMThreadStatusList[i].workState, CBM_THREAD_INVALID);
+        cbm_cxt->CBMThreadStatusList[i].pageFreeList = NULL;
+        cbm_cxt->CBMThreadStatusList[i].parsePageFreeList = NULL;
+        DLInitList(&cbm_cxt->CBMThreadStatusList[i].readerPageFreeList);
+        cbm_cxt->CBMThreadStatusList[i].totalPageNum = 0;
+        cbm_cxt->CBMThreadStatusList[i].readerTotalPageNum = 0;
+        cbm_cxt->CBMThreadStatusList[i].xlogRead.fd = -1;
+        cbm_cxt->CBMThreadStatusList[i].xlogRead.logSegNo = 0;
+        cbm_cxt->CBMThreadStatusList[i].xlogRead.fd = -1;
+        cbm_cxt->CBMThreadStatusList[i].cbmReaderFreeContext = AllocSetContextCreate(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+            "CBM Free Page Reader Context", ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);;
+        cbm_cxt->CBMThreadStatusList[i].cbmReaderNormalContext = AllocSetContextCreate(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+            "CBM Normal Reader Context", ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+        errno_t rc = memset_s(cbm_cxt->CBMThreadStatusList[i].xlogRead.filePath, MAXPGPATH, 0,
+            sizeof(cbm_cxt->CBMThreadStatusList[i].xlogRead.filePath));
+        securec_check(rc, "\0", "\0");
+    }
+    cbm_cxt->threadNum = 0;
+    cbm_cxt->skipIncomingRequest = false;
+    cbm_cxt->cbmTopContext = NULL;
+    SpinLockInit(&(cbm_cxt->CBMTaskListSpinLock));
+}
+
 static void knl_g_commutil_init(knl_g_commutil_context* commutil_cxt)
 {
     Assert(commutil_cxt != NULL);
@@ -486,6 +517,7 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     knl_g_mctcp_init(&g_instance.comm_cxt.mctcp_cxt);
     knl_g_commutil_init(&g_instance.comm_cxt.commutil_cxt);
     knl_g_parallel_redo_init(&g_instance.comm_cxt.predo_cxt);
+    knl_g_cbm_init(&g_instance.comm_cxt.cbm_cxt);
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; ++i) {
         knl_g_parallel_decode_init(&g_instance.comm_cxt.pdecode_cxt[i]);
     }

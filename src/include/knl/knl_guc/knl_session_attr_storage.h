@@ -231,6 +231,8 @@ typedef struct knl_session_attr_storage {
     int cstore_insert_mode;
     int pageWriterSleep;
     bool enable_cbm_tracking;
+    int cbm_threads_num;
+    int cbm_xlog_files_epoch;
     bool enable_copy_server_files;
     bool enable_access_server_directory;
     int target_rto;

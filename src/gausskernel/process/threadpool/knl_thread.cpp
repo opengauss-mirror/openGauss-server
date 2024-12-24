@@ -216,8 +216,9 @@ static void knl_t_cbm_init(knl_t_cbm_context* cbm_cxt)
 
     cbm_cxt->got_SIGHUP = false;
     cbm_cxt->shutdown_requested = false;
-    cbm_cxt->cbmwriter_context = NULL;
-    cbm_cxt->cbmwriter_page_context = NULL;
+    cbm_cxt->CBMReaderIndex = -1;
+    cbm_cxt->cbmPageHash = NULL;
+    cbm_cxt->totalPageNum = 0;
 }
 
 static void knl_t_shemem_ptr_init(knl_t_shemem_ptr_context* shemem_ptr_cxt)

@@ -639,6 +639,9 @@ typedef enum {
      */
     PageWriterProcess,
     PageRedoProcess,
+#ifdef PGXC
+    CBMReaderProcess,
+#endif
     TpoolListenerProcess,
     TsCompactionConsumerProcess,
     CsnMinSyncProcess,
@@ -664,6 +667,7 @@ typedef enum {
 #define AmWLMArbiterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WLMArbiterWorkerProcess)
 #define AmCPMonitorProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CPMonitorProcess)
 #define AmCBMWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CBMWriterProcess)
+#define AmCBMRealWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CBMRealWriterProcess)
 #define AmRemoteServiceProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == RemoteServiceProcess)
 #define AmPageWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess)
 #define AmPageWriterMainProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess && \

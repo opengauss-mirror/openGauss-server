@@ -145,3 +145,5 @@ RedoTruncateLock 135
 ExrtoRecycleResidualUndoLock 137
 ShareInputScanLock 138
 ParallelIndexScanLock 139
+
+CBMFreeListLock 140

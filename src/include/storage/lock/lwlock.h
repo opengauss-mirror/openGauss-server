@@ -301,6 +301,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_IMCS_HASH_LOCK,
     LWTRANCHE_IMCS_DESC_LOCK,
 #endif
+    LWTRANCHE_CBM_TASK_WAIT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

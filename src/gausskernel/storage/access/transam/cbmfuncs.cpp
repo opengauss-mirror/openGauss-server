@@ -121,7 +121,7 @@ Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(merged_file_name));
 }
 
-/*
+/* 
  * Normally, we return one row for each changed tblspc/db/rel/fork.
  * However, since string length for one blocknumber output can be as long as MAX_STRLEN_PER_BLOCKNO,
  * considering additional one space and one comma, we may return multiple rows
