@@ -2180,48 +2180,157 @@ Datum gms_get_hash_value(PG_FUNCTION_ARGS)
     return DirectFunctionCall1(int4_numeric, Int32GetDatum(resultHash));
 }
 
+/*
+ * ArrayToText:
+ *  - Skip leading negative index, start from index 1.
+ *  - end read if meet null.
+ */
+static void ArrayToText(FunctionCallInfo fcinfo, ArrayType* v, char* fldsep, int* len, StringInfo buf)
+{
+    int nitems = 0;
+    int* dims = NULL;
+    int ndims = 0;
+    Oid elementType;
+    int typlen;
+    bool typbyval = false;
+    char typalign;
+    bool printed = false;
+    char* p = NULL;
+    bits8* bitmap = NULL;
+    int bitmask;
+    int i = 0;
+    int* lb = NULL;
+    int lower;
+    ArrayMetaState* myExtra = NULL;
+
+    ndims = ARR_NDIM(v);
+    dims = ARR_DIMS(v);
+    nitems = ArrayGetNItems(ndims, dims);
+
+    if (nitems == 0) {
+        return;
+    }
+
+    elementType = ARR_ELEMTYPE(v);
+
+    /*
+     * We arrange to look up info about element type, including its output
+     * conversion proc, only once per series of calls, assuming the element
+     * type doesn't change underneath us.
+     */
+    myExtra = (ArrayMetaState*)fcinfo->flinfo->fn_extra;
+    if (myExtra == NULL) {
+        fcinfo->flinfo->fn_extra = MemoryContextAlloc(fcinfo->flinfo->fn_mcxt, sizeof(ArrayMetaState));
+        myExtra = (ArrayMetaState*)fcinfo->flinfo->fn_extra;
+        myExtra->element_type = ~elementType;
+    }
+
+    if (myExtra->element_type != elementType) {
+        /*
+         * Get info about element type, including its output conversion proc
+         */
+        get_type_io_data(elementType,
+            IOFunc_output,
+            &myExtra->typlen,
+            &myExtra->typbyval,
+            &myExtra->typalign,
+            &myExtra->typdelim,
+            &myExtra->typioparam,
+            &myExtra->typiofunc);
+        fmgr_info_cxt(myExtra->typiofunc, &myExtra->proc, fcinfo->flinfo->fn_mcxt);
+        myExtra->element_type = elementType;
+    }
+    typlen = myExtra->typlen;
+    typbyval = myExtra->typbyval;
+    typalign = myExtra->typalign;
+
+    p = ARR_DATA_PTR(v);
+    bitmap = ARR_NULLBITMAP(v);
+    bitmask = 1;
+
+    lb = ARR_LBOUND(v);
+    lower = lb[0];
+
+    /* point to index 1 */
+    for (; i < nitems && lower++ < 1; i++) {
+        /* checking for not NULL  */
+        if (!(bitmap && (*bitmap & bitmask) == 0)) {
+            p = att_addlength_pointer(p, typlen, p);
+            p = (char*)att_align_nominal(p, typalign);
+        }
+
+        /* advance bitmap pointer if any */
+        if (bitmap != NULL) {
+            bitmask <<= 1;
+            if (bitmask == 0x100) {
+                bitmap++;
+                bitmask = 1;
+            }
+        }
+    }
+
+    for (; i < nitems; i++) {
+        Datum itemvalue;
+        char* value = NULL;
+
+        /* Get source element, checking for NULL */
+        if (bitmap && (*bitmap & bitmask) == 0) {
+            /* if meet NULL, we just end read */
+            break;
+        } else {
+            itemvalue = fetch_att(p, typbyval, typlen);
+
+            value = OutputFunctionCall(&myExtra->proc, itemvalue);
+
+            if (printed)
+                appendStringInfo(buf, "%s%s", fldsep, value);
+            else
+                appendStringInfoString(buf, value);
+            printed = true;
+
+            p = att_addlength_pointer(p, typlen, p);
+            p = (char*)att_align_nominal(p, typalign);
+            (*len)++;
+        }
+
+        /* advance bitmap pointer if any */
+        if (bitmap != NULL) {
+            bitmask <<= 1;
+            if (bitmask == 0x100) {
+                bitmap++;
+                bitmask = 1;
+            }
+        }
+    }
+}
+
 Datum gms_table_to_comma(PG_FUNCTION_ARGS)
 {
     TupleDesc tupdesc;
-    Datum values[2];
-    bool nulls[2];
-    FmgrInfo flinfo;
-    FunctionCallInfoData arrFcinfo;
-    Datum result;
-
-    if (PG_ARGISNULL(0)) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid Input value")));
-    }
+    Datum values[2] = {Int32GetDatum(0), 0};
+    bool nulls[2] = {false, true};
+    int len = 0;
+    StringInfo buf;
 
     tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "tablen", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "list", CSTRINGOID, -1, 0);
     BlessTupleDesc(tupdesc);
 
-    fmgr_info(ARRAYTOSTRINGFUNCOID, &flinfo);
-    InitFunctionCallInfoData(arrFcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
+    if (PG_ARGISNULL(0)) {
+        return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls));
+    }
 
-    arrFcinfo.arg[0] = PG_GETARG_DATUM(0);
-    arrFcinfo.arg[1] = CStringGetTextDatum(",");
-    arrFcinfo.argnull[0] = false;
-    arrFcinfo.argnull[1] = false;
-    arrFcinfo.can_ignore = false;
-	
-    result = array_to_text(&arrFcinfo);
+    buf = makeStringInfo();
+    ArrayToText(fcinfo, PG_GETARG_ARRAYTYPE_P(0), ",", &len, buf);
 
-    if (arrFcinfo.isnull) {
-        values[0] = Int32GetDatum(0);
-        nulls[0] = false;
-
-        values[1] = (Datum) 0;
-        nulls[1] = true;
-    } else {
-        values[0] = DirectFunctionCall2(array_length, PG_GETARG_DATUM(0), Int32GetDatum(1));
-        nulls[0] = false;
-
-        values[1] = CStringGetDatum(TextDatumGetCString(result));
+    if (buf->len > 0) {
+        values[0] = len;
+        values[1] = CStringGetDatum(buf->data);
         nulls[1] = false;
     }
+
+    DestroyStringInfo(buf);
     
     return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls));
 }

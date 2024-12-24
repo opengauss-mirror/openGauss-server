@@ -1770,7 +1770,7 @@ declare
 begin
     gms_utility.table_to_comma(NULL, tablen, list);
     gms_output.put_line('tablen: '|| tablen ||', result: '|| list);
-end; -- error
+end;
 /
 declare
     tab varchar2[];
@@ -1859,6 +1859,120 @@ begin
     tab(1) := 'build';
     gms_utility.table_to_comma(tab, tablen);
 end; -- error
+/
+
+-- test null input
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := null;
+    gms_utility.table_to_comma(tab,tablen,list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- 0
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'a123';
+    tab(2) :=null;
+    gms_utility.table_to_comma(tab,tablen,list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- len 1
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'a123';
+    tab(2) := '   ';
+    gms_utility.table_to_comma(tab,tablen,list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; 
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'a123';
+    tab(2) := '';
+    gms_utility.table_to_comma(tab,tablen,list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; 
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'a123,,,';
+    tab(2) := 'qqqw';
+    gms_utility.table_to_comma(tab,tablen,list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; 
+/
+declare
+    tab varchar2[];
+    tablen binary_integer;
+    list varchar2(4000);
+begin
+    gms_utility.table_to_comma(tab, tablen, list);
+    raise info 'result is: %; length is: %', list, tablen;
+end;
+/
+
+-- array index valid
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'apple, p  ie';
+    tab(2) := 'hello,world';
+    tab(-1) := 'test.a.b';
+    gms_utility.table_to_comma(tab, tablen, list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- 2
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(-1) := 'apple, p  ie';
+    tab(-2) := 'hello,world';
+    tab(-3) := 'test.a.b';
+    gms_utility.table_to_comma(tab, tablen, list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- 0
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(0) := 'apple, p  ie';
+    tab(1) := 'hello,world';
+    tab(2) := 'test.a.b';
+    gms_utility.table_to_comma(tab, tablen, list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- 2
+/
+declare
+    tab varchar2[];
+    tablen integer;
+    list varchar2(32767);
+begin
+    tab(1) := 'hello,world';
+    tab(5) := 'apple, p  ie';
+    gms_utility.table_to_comma(tab, tablen, list);
+    raise info 'result is: %; length is: %', list, tablen;
+end; -- 1
 /
 
 reset behavior_compat_options;
