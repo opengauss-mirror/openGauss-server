@@ -96,6 +96,8 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
+#include "catalog/gs_dependencies.h"
+#include "catalog/gs_dependencies_obj.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
 #include "catalog/pg_subscription_rel.h"
@@ -341,6 +343,8 @@ static const FormData_pg_attribute Desc_gs_opt_model[Natts_gs_opt_model] = {Sche
 static const FormData_pg_attribute Desc_gs_model_warehouse[Natts_gs_model_warehouse] = {Schema_gs_model_warehouse};
 
 static const FormData_pg_attribute Desc_gs_package[Natts_gs_package] = {Schema_gs_package};
+static const FormData_pg_attribute Desc_gs_dependencies[Natts_gs_dependencies] = {Schema_gs_dependencies};
+static const FormData_pg_attribute Desc_gs_dependencies_obj[Natts_gs_dependencies_obj] = {Schema_gs_dependencies_obj};
 static const FormData_pg_attribute Desc_gs_db_privilege[Natts_gs_db_privilege] = {Schema_gs_db_privilege};
 static const FormData_pg_attribute Desc_pg_subscription[Natts_pg_subscription] = {Schema_pg_subscription};
 static const FormData_pg_attribute Desc_pg_publication[Natts_pg_publication] = {Schema_pg_publication};
@@ -943,6 +947,24 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         Natts_pg_subscription_rel,
         Desc_pg_subscription_rel,
+        false,
+        true},
+    {DependenciesRelationId,
+        "gs_dependencies",
+        DependenciesRelationId_Rowtype_Id,
+        false,
+        false,
+        Natts_gs_dependencies,
+        Desc_gs_dependencies,
+        false,
+        true},
+    {DependenciesObjRelationId,
+        "gs_dependencies_obj",
+        DependenciesObjRelationId_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_dependencies_obj,
+        Desc_gs_dependencies_obj,
         false,
         true},
     {PackageRelationId,

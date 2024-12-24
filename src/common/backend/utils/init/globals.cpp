@@ -76,12 +76,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92959;
+const uint32 GRAND_VERSION_NUM = 92961;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 MATEDATE_ERROR_PLPGSQL_DEPENDENCY = 92961;
 const uint32 FLUSH_LSN_FUN_VERSION_NUM = 92951;
 const uint32 PUBLICATION_DDL_AT_VERSION_NUM = 92949;
 const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM = 92948;
