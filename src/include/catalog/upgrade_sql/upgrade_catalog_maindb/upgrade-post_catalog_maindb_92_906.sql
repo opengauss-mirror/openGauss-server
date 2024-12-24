@@ -24,7 +24,7 @@ CREATE FUNCTION pg_catalog.ss_txnstatus_cache_stat(
     OUT avg_eviction_refcnt float8
 ) 
 RETURNS SETOF record 
-LANGUAGE internal STABLE NOT FENCED NOT SHIPPABLE ROWS 100 
+LANGUAGE INTERNAL VOLATILE STRICT NOT FENCED NOT SHIPPABLE ROWS 1000 
 AS 'ss_txnstatus_cache_stat';
 
 -- those type of view will recreate.
