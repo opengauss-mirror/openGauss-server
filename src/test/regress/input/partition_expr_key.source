@@ -398,6 +398,23 @@ select * from test_exprkey_move_part;
 update test_exprkey_move_part set a=1001 where a=1000;
 select * from test_exprkey_move_part;
 
+-- test split expkey partition
+DROP TABLE IF EXISTS tb1 cascade;
+CREATE TABLE tb1 (
+    id serial NOT NULL,
+    inqueuetime timestamp NOT NULL,
+    url_count int NOT NULL DEFAULT 0,
+    constraint tb1_id_inqueuetime_pk primary key(id,inqueuetime)
+)
+PARTITION BY RANGE (date_part('year', inqueuetime))(
+    PARTITION p1 VALUES LESS THAN (2000),
+    PARTITION p4 VALUES LESS THAN (maxvalue)
+);
+alter table tb1 split partition p4 at(2001) into (partition p5,partition p6);
+
+-- test split expkey partition with updating index
+alter table tb1 split partition p1 at(1000) into (partition p11,partition p12) update global index;
+
 \c regression
 
 drop database if exists part_expr_key_db;
