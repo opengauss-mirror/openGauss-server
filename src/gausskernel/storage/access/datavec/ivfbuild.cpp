@@ -585,7 +585,8 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
     indexInfo = BuildIndexInfo(ivfspool->index);
     indexInfo->ii_Concurrent = false;
     InitBuildState(&buildstate, ivfspool->heap, ivfspool->index, indexInfo);
-    rc = memcpy_s(buildstate.centers->items, VECTOR_SIZE(buildstate.centers->dim) * buildstate.centers->maxlen, ivfcenters, VECTOR_SIZE(buildstate.centers->dim) * buildstate.centers->maxlen);
+    Size centersSize = buildstate.centers->itemsize * buildstate.centers->maxlen;
+    rc = memcpy_s(buildstate.centers->items, centersSize, ivfcenters, centersSize);
     securec_check(rc, "\0", "\0");
     buildstate.centers->length = buildstate.centers->maxlen;
     ivfspool->sortstate = tuplesort_begin_heap(buildstate.tupdesc, 1, attNums, sortOperators, sortCollations,
@@ -690,7 +691,7 @@ static IvfflatShared *IvfflatParallelInitshared(IvfflatBuildState *buildstate, i
     tuplesort_initialize_shared(sharedsort, scantuplesortstates);
     ivfshared->sharedsort = sharedsort;
 
-    estcenters = VECTOR_SIZE(buildstate->dimensions) * buildstate->lists;
+    estcenters = buildstate->centers->itemsize * buildstate->lists;
     ivfcenters = (char *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), estcenters);
     errno_t rc = memcpy_s(ivfcenters, estcenters, buildstate->centers->items, estcenters);
     securec_check(rc, "\0", "\0");
