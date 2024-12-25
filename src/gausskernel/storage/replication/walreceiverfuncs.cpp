@@ -585,14 +585,14 @@ void ShutdownWalRcv(void)
      * Wait for walreceiver to acknowledge its death by setting state to
      * WALRCV_STOPPED.
      */
-    for (int i = 1;; i++) {
+    for (int i = 0;; i++) {
         SpinLockAcquire(&walrcv->mutex);
         walrcvpid = walrcv->pid;
         SpinLockRelease(&walrcv->mutex);
         if ((walrcvpid != 0) && (i % 2000 == 0)) {
             (void)gs_signal_send(walrcvpid, SIGTERM);
             /* reset i after send signal */
-            i = 1;
+            i = 0;
         }
         if (!WalRcvInProgress()) {
             break;
