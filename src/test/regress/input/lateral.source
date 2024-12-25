@@ -593,6 +593,19 @@ call test_cursor_3();
 drop procedure test_cursor_3;
 
 
+CREATE TABLE t1 ( a INTEGER );
+CREATE TABLE t2 ( a INTEGER );
+CREATE TABLE t3 ( a INTEGER );
+insert into t1 values (1),(2),(3);
+insert into t2 values (1),(2),(3);
+insert into t3 values (1),(2),(3);
+SELECT * FROM t1 LEFT JOIN t2 USING ( a ),
+LATERAL ( SELECT * FROM t3 WHERE t3.a = t2.a LIMIT 1 ) t3d,
+LATERAL ( SELECT * FROM t3 WHERE t3.a > t1.a LIMIT 1 ) t4d;
+drop table t1;
+drop table t2;
+drop table t3;
+
 drop table tt1;
 drop table tt2;
 drop table tt3;

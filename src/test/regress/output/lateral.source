@@ -789,15 +789,15 @@ select * from
     lateral (select q1, coalesce(ss1.x,q2) as y from int8_tbl d) ss2
   ) on c.q2 = ss2.q1,
   lateral (select ss2.y offset 0) ss3;
-                                                           QUERY PLAN                                                           
---------------------------------------------------------------------------------------------------------------------------------
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
  Nested Loop
-   Output: c.q1, c.q2, a.q1, a.q2, b.q1, (COALESCE(b.q2, 42::bigint)), d.q1, (COALESCE(COALESCE(b.q2, 42::bigint), d.q2)), ($0)
+   Output: c.q1, c.q2, a.q1, a.q2, b.q1, (COALESCE(b.q2, 42::bigint)), d.q1, (COALESCE($1, d.q2)), ($0)
    ->  Hash Right Join
-         Output: c.q1, c.q2, a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+         Output: c.q1, c.q2, a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE($1, d.q2))
          Hash Cond: (d.q1 = c.q2)
          ->  Nested Loop
-               Output: a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
+               Output: a.q1, a.q2, b.q1, d.q1, (COALESCE(b.q2, 42::bigint)), (COALESCE($1, d.q2))
                ->  Hash Left Join
                      Output: a.q1, a.q2, b.q1, (COALESCE(b.q2, 42::bigint))
                      Hash Cond: (a.q2 = b.q1)
@@ -807,10 +807,8 @@ select * from
                            Output: b.q1, (COALESCE(b.q2, 42::bigint))
                            ->  Seq Scan on lateral_test.int8_tbl b
                                  Output: b.q1, COALESCE(b.q2, 42::bigint)
-               ->  Materialize
-                     Output: d.q1, (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
-                     ->  Seq Scan on lateral_test.int8_tbl d
-                           Output: d.q1, COALESCE(COALESCE(b.q2, 42::bigint), d.q2)
+               ->  Seq Scan on lateral_test.int8_tbl d
+                     Output: d.q1, COALESCE((COALESCE(b.q2, 42::bigint)), d.q2)
          ->  Hash
                Output: c.q1, c.q2
                ->  Seq Scan on lateral_test.int8_tbl c
@@ -818,8 +816,8 @@ select * from
    ->  Limit
          Output: ($0)
          ->  Result
-               Output: (COALESCE(COALESCE(b.q2, 42::bigint), d.q2))
-(28 rows)
+               Output: (COALESCE($1, d.q2))
+(26 rows)
 
 -- case that breaks the old ph_may_need optimization
 explain (verbose, costs off)
@@ -2642,6 +2640,24 @@ NOTICE:       last_name_name : 4567890123456789
 (1 row)
 
 drop procedure test_cursor_3;
+CREATE TABLE t1 ( a INTEGER );
+CREATE TABLE t2 ( a INTEGER );
+CREATE TABLE t3 ( a INTEGER );
+insert into t1 values (1),(2),(3);
+insert into t2 values (1),(2),(3);
+insert into t3 values (1),(2),(3);
+SELECT * FROM t1 LEFT JOIN t2 USING ( a ),
+LATERAL ( SELECT * FROM t3 WHERE t3.a = t2.a LIMIT 1 ) t3d,
+LATERAL ( SELECT * FROM t3 WHERE t3.a > t1.a LIMIT 1 ) t4d;
+ a | a | a 
+---+---+---
+ 1 | 1 | 2
+ 2 | 2 | 3
+(2 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
 drop table tt1;
 drop table tt2;
 drop table tt3;
