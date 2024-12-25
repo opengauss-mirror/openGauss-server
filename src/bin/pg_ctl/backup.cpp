@@ -780,8 +780,10 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
     struct stat st;
     int nRet = 0;
     bool forbid_write = false;
-    char pg_control_file[MAXPGPATH] = {0};
     errno_t errorno = EOK;
+    const size_t BUFFER_SIZE = 4 * 1024 * 1024; // 4MB buffer
+    char* buffer = (char*)malloc(BUFFER_SIZE);
+    size_t buffer_offset = 0;
 
     if (!GetCurrentPath(current_path, res, rownum)) {
         return false;
@@ -793,32 +795,21 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COPY_OUT) {
         pg_log(PG_WARNING, _("could not get COPY data stream: %s"), PQerrorMessage(conn));
-        DisconnectConnection();
         PQclear(res);
-        return false;
+        goto error;
     }
     PQclear(res);
-
-    if (ss_instance_config.dss.enable_dss) {
-        errorno = snprintf_s(pg_control_file, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control",
-                             ss_instance_config.dss.vgname);
-        securec_check_ss_c(errorno, "\0", "\0");
-    }
 
     while (1) {
         int r;
 
         if (build_interrupted) {
             pg_log(PG_WARNING, _("build walreceiver process terminated abnormally\n"));
-            DisconnectConnection();
-            return false;
+            goto error;
         }
 
-        if (copybuf != NULL) {
-            PQfreemem(copybuf);
-            copybuf = NULL;
-        }
-
+        FREE_AND_RESET(copybuf);
+        
         r = PQgetCopyData(conn, &copybuf, 0);
         if (r == -1) {
             /*
@@ -826,6 +817,13 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              */
             if (file != NULL) {
                 /* punch hole before closing file */
+                if (ss_instance_config.dss.enable_dss && buffer_offset > 0 && !forbid_write) {
+                    if (fwrite(buffer, buffer_offset, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        goto error;
+                    }
+                    buffer_offset = 0;
+                }
                 PunchHoleForCompressedFile(file, filename);
                 fclose(file);
                 file = NULL;
@@ -833,10 +831,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             break;
         } else if (r == -2) {
             pg_log(PG_WARNING, _("could not read COPY data: %s\n"), PQerrorMessage(conn));
-
-            DisconnectConnection();
-            FREE_AND_RESET(copybuf);
-            return false;
+            goto error;
         }
 
         if (file == NULL) {
@@ -847,26 +842,19 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              */
             if (r != BUILD_PATH_LEN) {
                 pg_log(PG_WARNING, _("invalid tar block header size: %d\n"), r);
-
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+                goto error;
             }
             totaldone += BUILD_PATH_LEN;
 
             if (sscanf_s(copybuf + 1048, "%20lo", &current_len_left) != 1) {
                 pg_log(PG_WARNING, _("could not parse file size\n"));
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+                goto error;
             }
 
             /* Set permissions on the file */
             if (sscanf_s(&copybuf[1024], "%07o ", &filemode) != 1) {
                 pg_log(PG_WARNING, _("could not parse file mode\n"));
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+                goto error;
             }
 
             /*
@@ -874,9 +862,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              */
             if (current_len_left > INT_MAX - 511) {
                 pg_log(PG_WARNING, _("current_len_left is invalid\n"));
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+                goto error;
             }
             current_padding = ((current_len_left + 511) & ~511) - current_len_left;
 
@@ -897,89 +883,70 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (filename[strlen(filename) - 1] == '/') {
                 int len = strlen("/pg_xlog");
                 const int bufOffset = 1080;
-                /*
-                 * Ends in a slash means directory or symlink to directory
-                 */
-                if (copybuf[bufOffset] == '5') {
-                    /*
-                     * Directory
-                     */
-                    filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                    if (stat(filename, &st) == 0 && S_ISDIR(st.st_mode)) {
-                        continue;
-                    } else {
-                        if (mkdir(filename, S_IRWXU) != 0) {
-                            /*
-                             * When streaming WAL, pg_xlog will have been created
-                             * by the wal receiver process, so just ignore failure
-                             * on that.
-                             */
-                            if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
-                                pg_log(PG_WARNING, _("could not create directory \"%s\": %s\n"), filename,
-                                    strerror(errno));
-
-                                DisconnectConnection();
-                                FREE_AND_RESET(copybuf);
-                                return false;
+                
+                // Determine the type of file based on the link indicator
+                switch (copybuf[bufOffset]) {
+                    case '5': { // Directory
+                        filename[strlen(filename) - 1] = '\0'; // Remove trailing slash
+                        if (stat(filename, &st) == 0 && S_ISDIR(st.st_mode)) {
+                            continue;
+                        } else {
+                            if (mkdir(filename, S_IRWXU) != 0) {
+                                // When streaming WAL, pg_xlog will have been created by the wal receiver process
+                                if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
+                                    pg_log(PG_WARNING, _("could not create directory \"%s\": %s\n"), filename,
+                                           strerror(errno));
+                                    goto error;
+                                }
+                            }
+#ifndef WIN32
+                            if (chmod(filename, filemode))
+                                pg_log(PG_WARNING, _("could not set permissions on directory \"%s\": %s\n"), filename,
+                                       strerror(errno));
+#endif
+                        }
+                        break;
+                    }
+                    case '2': { // Symbolic link for absolute tablespace
+                        filename[strlen(filename) - 1] = '\0'; // Remove trailing slash
+                        if (is_dss_file(filename)) {
+                            if (strstr(filename, "pg_replication") != NULL || strstr(filename, "pg_xlog") != NULL) {
+                                continue;
                             }
                         }
-#ifndef WIN32
-                        if (chmod(filename, filemode))
-                            pg_log(PG_WARNING, _("could not set permissions on directory \"%s\": %s\n"), filename,
-                                strerror(errno));
-
-#endif
-                    }
-                } else if (copybuf[bufOffset] == '2') {
-                    /*
-                     * Symbolic link for absolute tablespace. please refer to function _tarWriteHeader
-                     * description: we need refactor the communication protocol for well maintaining code
-                     */
-                    filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                    if (is_dss_file(filename)) {
-                        if (strstr(filename, "pg_replication") != NULL || strstr(filename, "pg_xlog") != NULL) {
-                            continue;
+                        if (symlink(&copybuf[bufOffset + 1], filename) != 0) {
+                            if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
+                                pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
+                                    filename, &copybuf[1081], strerror(errno));
+                                goto error;
+                            }
                         }
+                        break;
                     }
-                    if (symlink(&copybuf[bufOffset + 1], filename) != 0) {
-                        if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
-                            pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
-                                filename, &copybuf[1081], strerror(errno));
-                            DisconnectConnection();
-                            FREE_AND_RESET(copybuf);
-                            return false;
+                    case '3': { // Symbolic link for relative tablespace
+                        filename[strlen(filename) - 1] = '\0'; // Remove trailing slash
+                        if (is_dss_file(absolut_path)) {
+                            nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s",
+                                              &copybuf[bufOffset + 1]);
+                        } else {
+                            nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s/%s",
+                                              basedir, &copybuf[bufOffset + 1]);
                         }
-                    }
-                } else if (copybuf[bufOffset] == '3') {
-                    /*
-                     * Symbolic link for relative tablespace. please refer to function _tarWriteHeader
-                     */
-                    filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                    if (is_dss_file(absolut_path)) {
-                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s",
-                                          &copybuf[bufOffset + 1]);
-                    } else {
-                        nRet = snprintf_s(absolut_path, sizeof(absolut_path), sizeof(absolut_path) - 1, "%s/%s",
-                                          basedir, &copybuf[bufOffset + 1]);
-                    }
-                    securec_check_ss_c(nRet, "\0", "\0");
-
-                    if (symlink(absolut_path, filename) != 0) {
-                        if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
-                            pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
-                                filename, &copybuf[1081], strerror(errno));
-                            DisconnectConnection();
-                            FREE_AND_RESET(copybuf);
-                            return false;
+                        securec_check_ss_c(nRet, "\0", "\0");
+                        if (symlink(absolut_path, filename) != 0) {
+                            if (!streamwal || strcmp(filename + strlen(filename) - len, "/pg_xlog") != 0) {
+                                pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
+                                    filename, &copybuf[1081], strerror(errno));
+                                goto error;
+                            }
                         }
+                        break;
                     }
-                } else {
-                    pg_log(PG_WARNING, _("unrecognized link indicator \"%c\"\n"), copybuf[1080]);
-                    DisconnectConnection();
-                    FREE_AND_RESET(copybuf);
-                    return false;
+                    default:
+                        pg_log(PG_WARNING, _("unrecognized link indicator \"%c\"\n"), copybuf[bufOffset]);
+                        goto error;
                 }
-                continue; /* directory or link handled */
+                continue; // directory or link handled
             }
 
             canonicalize_path(filename);
@@ -993,9 +960,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             }
             if (NULL == file) {
                 pg_log(PG_WARNING, _("could not create file \"%s\": %s\n"), filename, strerror(errno));
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+                goto error;
             }
 
 #ifndef WIN32
@@ -1018,6 +983,13 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              * Continuing blocks in existing file
              */
             if (current_len_left == 0 && r == (int)current_padding) {
+                if (ss_instance_config.dss.enable_dss && buffer_offset > 0 && !forbid_write) {
+                    if (fwrite(buffer, buffer_offset, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        goto error;
+                    }
+                    buffer_offset = 0;
+                }
                 /*
                  * Received the padding block for this file, ignore it and
                  * close the file, then move on to the next tar header.
@@ -1028,11 +1000,26 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
-                pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
-                DisconnectConnection();
-                FREE_AND_RESET(copybuf);
-                return false;
+            if (!forbid_write) {
+                if (ss_instance_config.dss.enable_dss) {
+                    if (buffer_offset + r > BUFFER_SIZE) {
+                        /* Flush buffer to file if it exceeds the buffer size */
+                        if (fwrite(buffer, buffer_offset, 1, file) != 1) {
+                            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                            goto error;
+                        }
+                        buffer_offset = 0;
+                    }
+                    /* Copy data to buffer */
+                    errorno = memcpy_s(buffer + buffer_offset, BUFFER_SIZE - buffer_offset, copybuf, r);
+                    securec_check_c(errorno, "", "");
+                    buffer_offset += r;
+                } else {
+                    if (fwrite(copybuf, r, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        goto error;
+                    }
+                }
             }
 
             totaldone += r;
@@ -1042,11 +1029,14 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
 
             current_len_left -= r;
             if (current_len_left == 0 && current_padding == 0) {
-                /*
-                 * Received the last block, and there is no padding to be
-                 * expected. Close the file and move on to the next tar
-                 * header.
-                 */
+                if (ss_instance_config.dss.enable_dss && buffer_offset > 0 && !forbid_write) {
+                    /* Flush any remaining data in the buffer before closing the file */
+                    if (fwrite(buffer, buffer_offset, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        goto error;
+                    }
+                    buffer_offset = 0;
+                }
 
                 /* punch hole before closing file */
                 PunchHoleForCompressedFile(file, filename);
@@ -1057,24 +1047,27 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
         } /* continuing data in existing file */
     }     /* loop over all data blocks */
 
-    if (showprogress && build_mode != COPY_SECURE_FILES_BUILD) {
-        progress_report(rownum, filename, true);
-    }
-
     if (file != NULL) {
         fclose(file);
         file = NULL;
         pg_log(PG_WARNING, _("COPY stream ended before last file was finished\n"));
-        DisconnectConnection();
-        FREE_AND_RESET(copybuf);
-        return false;
+        goto error;
     }
 
-    if (copybuf != NULL) {
-        PQfreemem(copybuf);
-        copybuf = NULL;
+    FREE_AND_RESET(buffer);
+    FREE_AND_RESET(copybuf);
+    
+    if (showprogress && build_mode != COPY_SECURE_FILES_BUILD) {
+        progress_report(rownum, filename, true);
     }
+
     return true;
+
+error:
+    DisconnectConnection();
+    FREE_AND_RESET(copybuf);
+    FREE_AND_RESET(buffer);
+    return false;
 }
 
 /*
@@ -1682,7 +1675,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 #endif
 
-    if (ss_instance_config.dss.enable_dss && !ss_instance_config.dss.enable_dorado) {
+    if (ss_instance_config.dss.enable_dss && ss_instance_config.dss.enable_stream) {
         BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
