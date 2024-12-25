@@ -95,12 +95,10 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapshot->xmin;
     }
 
-    if (!TransactionIdIsNormal(dms_snapshot.localxmin)) {
+    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
-    } else {
-        u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin = dms_snapshot.localxmin;
     }
-
+    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
     u_sess->utils_cxt.RecentXmin = snapshot->xmin;
     return snapshot;
 }
