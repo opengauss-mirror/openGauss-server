@@ -5224,7 +5224,7 @@ static bool do_actual_build(uint32 term)
             securec_check_ss_c(tnRet, "\0", "\0");
         }
         start_time = time(NULL);
-        if (needstartafterbuild == true) {
+        if (needstartafterbuild == true && !ss_instance_config.dss.enable_dss) {
             if (chdir(cwd) != 0) {
                 pg_fatal(_("the current work directory: %s could not be changed"), gs_strerror(errno));
                 exit(1);
