@@ -36,7 +36,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           174
+#define DMS_LOCAL_VERSION           176
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -444,6 +444,7 @@ typedef union st_dms_buf_ctrl
         unsigned long long edp_map;             // records edp instance
         long long last_ckpt_time; // last time when local edp page is added to group.
         volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm and ss_buf_try_remote
+        volatile unsigned int lock_ss_ckpt_copy; // concurrency control for rebuild/ckpt_copy_item
         unsigned long long seq; // for dms page swap message-sequence
         void *buf_ctrl;
     #ifdef OPENGAUSS
@@ -979,6 +980,7 @@ typedef unsigned short (*dms_get_tlock_mode)(void *db_handle, char *resid);
 typedef void (*dms_set_current_point)(void *db_handle);
 
 typedef void (*dms_get_db_role)(void *db_handle, unsigned int *role);
+typedef int (*dms_sync_node_lfn)(void *db_handle, int reform_type, unsigned long long online_list);
 typedef void (*dms_check_lrpl_takeover)(void *db_handle, unsigned int *need_takeover);
 typedef void (*dms_reset_link)(void *db_handle);
 typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
@@ -1011,6 +1013,9 @@ typedef int (*dms_az_failover_promote_phase2)(void *db_handle);
 typedef int (*dms_check_shutdown_consistency)(void *db_handle, instance_list_t *old_remove);
 typedef int (*dms_check_db_readwrite)(void *db_handle);
 typedef unsigned int (*dms_check_is_maintain)();
+
+typedef dms_session_e(*dms_get_session_type)(unsigned int sid);
+typedef unsigned char(*dms_get_intercept_type)(unsigned int sid);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1176,6 +1181,7 @@ typedef struct st_dms_callback {
     dms_update_node_lfn update_node_lfn;
 
     dms_get_db_role get_db_role;
+    dms_sync_node_lfn sync_node_lfn;
     dms_check_lrpl_takeover check_lrpl_takeover;
     dms_reset_link reset_link;
     dms_set_online_list set_online_list;
@@ -1207,6 +1213,8 @@ typedef struct st_dms_callback {
     dms_check_shutdown_consistency check_shutdown_consistency;
     dms_check_db_readwrite check_db_readwrite;
     dms_check_is_maintain check_is_maintain;
+    dms_get_session_type get_session_type;
+    dms_get_intercept_type get_intercept_type;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1268,6 +1276,7 @@ typedef struct st_dms_profile {
     unsigned char enable_dyn_trace;
     unsigned char enable_reform_trace;
     unsigned long long drc_buf_size;
+    unsigned int spin_sleep_time_nsec;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -1307,9 +1316,9 @@ typedef struct st_drc_local_lock_res_result {
 } drc_local_lock_res_result_t;
 
 typedef enum en_reform_callback_stat {
-    REFORM_CALLBACK_STAT_CKPT_LATCH = 0,
-    REFORM_CALLBACK_STAT_BUCKET_LOCK,
+    REFORM_CALLBACK_STAT_BUCKET_LOCK = 0,
     REFORM_CALLBACK_STAT_SS_READ_LOCK,
+    REFORM_CALLBACK_STAT_SS_CKPT_COPY_LOCK,
     REFORM_CALLBACK_STAT_REBUILD_TLOCK_REMOTE,
     REFORM_CALLBACK_STAT_GET_DISK_LSN,
     REFORM_CALLBACK_STAT_DRC_EXIST,
@@ -1404,6 +1413,24 @@ typedef struct st_mem_info_stat {
     unsigned long long used;
     double used_percentage;
 } mem_info_stat_t;
+
+typedef enum en_dms_param_index {
+    DMS_PARAM_SS_INTERCONNECT_URL = 0,
+    DMS_PARAM_SS_ELAPSED_SWITCH,
+#if defined(_DEBUG) || defined(DEBUG) || defined(DB_DEBUG_VERSION)
+    DMS_PARAM_SS_FI_PACKET_LOSS_ENTRIES,
+    DMS_PARAM_SS_FI_NET_LATENCY_ENTRIES,
+    DMS_PARAM_SS_FI_CPU_LATENCY_ENTRIES,
+    DMS_PARAM_SS_FI_PROCESS_FAULT_ENTRIES,
+    DMS_PARAM_SS_FI_CUSTOM_FAULT_ENTRIES,
+    DMS_PARAM_SS_FI_PACKET_LOSS_PROB,
+    DMS_PARAM_SS_FI_NET_LATENCY_MS,
+    DMS_PARAM_SS_FI_CPU_LATENCY_MS,
+    DMS_PARAM_SS_FI_PROCESS_FAULT_PROB,
+    DMS_PARAM_SS_FI_CUSTOM_FAULT_PARAM,
+#endif
+    DMS_PARAM_SS_COUNT,
+} dms_param_index;
 
 #ifdef __cplusplus
 }

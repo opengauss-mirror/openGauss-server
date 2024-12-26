@@ -2358,6 +2358,16 @@ int CBBufCtrlRcyClean(void *db_handle, unsigned char thread_index, unsigned char
     return GS_SUCCESS;
 }
 
+dms_session_e CBDmsGetSessionType(unsigned int sid)
+{
+    return DMSGetProcType4RequestPage();
+}
+
+unsigned char CBDmsGetInterceptType(unsigned int sid)
+{
+    return 0;
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2428,4 +2438,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->dms_thread_deinit = DmsThreadDeinit;
     callback->opengauss_do_ckpt_immediate = CBDoCheckpointImmediately;
     callback->dms_ctl_rcy_clean_parallel = CBBufCtrlRcyClean;
+
+    callback->get_session_type = CBDmsGetSessionType;
+    callback->get_intercept_type = CBDmsGetInterceptType;
 }
