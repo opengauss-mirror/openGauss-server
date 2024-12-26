@@ -386,14 +386,7 @@ get_header_errormsg(Page page, char **errormsg)
     PageHeader  phdr = (PageHeader) page;
         *errormsg = (char *)pgut_malloc(ERRMSG_MAX_LEN);
 
-    if (PageGetPageSize(phdr) != BLCKSZ) {
-        nRet = snprintf_s(*errormsg, ERRMSG_MAX_LEN,ERRMSG_MAX_LEN - 1, "page header invalid, "
-            "page size %lu is not equal to block size %u",
-            PageGetPageSize(phdr), BLCKSZ);
-        securec_check_ss_c(nRet, "\0", "\0");
-    }
-
-    else if (phdr->pd_lower < SizeOfPageHeaderData) {
+    if (phdr->pd_lower < SizeOfPageHeaderData) {
         nRet = snprintf_s(*errormsg, ERRMSG_MAX_LEN,ERRMSG_MAX_LEN - 1, "page header invalid, "
             "pd_lower %i is less than page header size %lu",
             phdr->pd_lower, SizeOfPageHeaderData);
