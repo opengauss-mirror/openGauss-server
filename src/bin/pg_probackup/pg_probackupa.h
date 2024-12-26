@@ -72,7 +72,7 @@ extern const char  *PROGRAM_FULL_PATH;
 #define HEADER_MAP_TMP              "page_header_map_tmp"
 #define PG_RELATIVE_TBLSPC_DIR       "pg_location"
 #define PG_REPLSLOT_DIR              "pg_replslot"
-
+#define PG_AB_RELATIVE_TBLSPC_DIR       "/pg_location"
 /* Timeout defaults */
 #define ARCHIVE_TIMEOUT_DEFAULT        300
 
