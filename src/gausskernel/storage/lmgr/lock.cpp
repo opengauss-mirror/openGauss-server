@@ -4044,7 +4044,6 @@ int LockWaiterCount(const LOCKTAG *locktag)
 
 static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
 {
-    dms_context_t dms_ctx;
     dms_drlatch_t dlatch;
     bool ret = true;
     bool timeout = true;
@@ -4053,8 +4052,8 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
     int needWaitMilliSec = 0;
     TimestampTz startTime;
     LOCKMODE lockmode;
+    uint32 sid = (uint32)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + GLOBAL_ALL_PROCS);
 
-    InitDmsContext(&dms_ctx);
     TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
 
     needWaitMilliSec = (waitSec == 0) ? u_sess->attr.attr_storage.LockWaitTimeout : waitSec * SEC2MILLISEC;
@@ -4065,9 +4064,9 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
     {
         do {
             if (lockmode < AccessExclusiveLock && SS_NORMAL_STANDBY) {
-                ret = dms_latch_timed_s(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false);
+                ret = dms_latch_timed_s(&dlatch, sid, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false, NULL);
             } else if (lockmode >= AccessExclusiveLock && SS_NORMAL_PRIMARY) {
-                ret = dms_latch_timed_x(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT);
+                ret = dms_latch_timed_x(&dlatch, sid, SS_ACQUIRE_LOCK_DO_NOT_WAIT, NULL);
             } else {
                 // skip if lockmode do not meet ss lock request, or openGauss in reform process
                 skipAcquire = true;
@@ -4113,16 +4112,14 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
 
 static void SSDmsLockRelease(LOCALLOCK *locallock)
 {
-    dms_context_t dms_ctx;
     dms_drlatch_t dlatch;
 
     if (!locallock->ssLock) {
         return;
     }
 
-    InitDmsContext(&dms_ctx);
     TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
 
     locallock->ssLock = FALSE;
-    dms_unlatch(&dms_ctx, &dlatch);
+    dms_unlatch(&dlatch, NULL);
 }

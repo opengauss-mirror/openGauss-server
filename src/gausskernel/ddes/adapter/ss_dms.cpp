@@ -281,19 +281,19 @@ int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned
         resend_after_reform);
 }
 
-bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks)
+bool dms_latch_timed_x(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat)
 {
-    return (bool)g_ss_dms_func.dms_latch_timed_x(dms_ctx, dlatch, wait_ticks);
+    return (bool)g_ss_dms_func.dms_latch_timed_x(dlatch, sid, wait_ticks, dms_stat);
 }
 
-bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force)
+bool dms_latch_timed_s(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, unsigned char is_force, void *dms_stat)
 {
-    return (bool)g_ss_dms_func.dms_latch_timed_s(dms_ctx, dlatch, wait_ticks, is_force);
+    return (bool)g_ss_dms_func.dms_latch_timed_s(dlatch, sid, wait_ticks, is_force, dms_stat);
 }
 
-void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch)
+void dms_unlatch(dms_drlatch_t *dlatch, void *dms_stat)
 {
-    g_ss_dms_func.dms_unlatch(dms_ctx, dlatch);
+    g_ss_dms_func.dms_unlatch(dlatch, dms_stat);
 }
 
 int dms_register_thread_init(dms_thread_init_t thrd_init)

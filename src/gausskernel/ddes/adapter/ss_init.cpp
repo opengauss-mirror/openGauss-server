@@ -419,6 +419,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->inst_map = 0;
     profile->parallel_thread_num = dms_attr->parallel_thread_num;
     profile->max_wait_time = DMS_MSG_MAX_WAIT_TIME;
+    profile->spin_sleep_time_nsec = SS_SPIN_WAIT_TIME;
 
     if (dms_attr->enable_ssl && g_instance.attr.attr_security.EnableSSL) {
         InitDmsSSL();
