@@ -729,19 +729,34 @@ void removeObjectDependency(DumpableObject* dobj, DumpId refId)
 
 bool repairDependencyPkgLoops(DumpableObject** loop, int nLoop)
 {
-    if (nLoop == 3 && loop[0]->objType == DO_FUNC && loop[1]->objType == DO_PACKAGE &&
-        loop[2]->objType == DO_PRE_DATA_BOUNDARY) {
-        for (int i = 0; i < loop[0]->nDeps; i++) {
-            DumpId dumpId = loop[0]->dependencies[i];
-            DumpableObject* funcObj = dumpIdMap[dumpId];
-            if (funcObj->catId.oid > FirstNormalObjectId && funcObj->objType != DO_NAMESPACE &&
-                funcObj->objType != DO_PACKAGE) {
-                return false;
+    int i = 0;
+    int j = 0;
+
+    for (i = 0; i < nLoop; i++) {
+        if (loop[i]->objType == DO_FUNC && ((FuncInfo*)loop[i])->propackageid > 0) {
+            for (j = 0; j < loop[i]->nDeps; j++) {
+                DumpId dumpId = loop[i]->dependencies[j];
+                DumpableObject* funcObj = dumpIdMap[dumpId];
+                if (funcObj->catId.oid > FirstNormalObjectId &&
+                    (funcObj->objType == DO_TABLE || funcObj->objType == DO_DUMMY_TYPE)) {
+                    return false;
+                }
             }
         }
-        removeObjectDependency(loop[1], loop[2]->dumpId);
-        return true;
     }
+    for (i = 0; i < nLoop; i++) {
+        if (loop[i]->objType == DO_FUNC && ((FuncInfo*)loop[i])->propackageid > 0) {
+            for (j = 0; j < nLoop; j++) {
+                if (loop[j]->objType == DO_PACKAGE &&
+                    ((FuncInfo*)loop[i])->propackageid == loop[j]->catId.oid &&
+                    loop[j+1]->objType == DO_PRE_DATA_BOUNDARY) {
+                    removeObjectDependency(loop[j], loop[j+1]->dumpId);
+                    return true;
+                }
+            }
+        }
+    }
+
     return false;
 }
 
