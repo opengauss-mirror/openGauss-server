@@ -75,3 +75,33 @@ CREATE FUNCTION pg_catalog.query_all_drc_info
     out CONVERTING_REQ_MODE int4
 )
 RETURNS SETOF record LANGUAGE INTERNAL as 'query_all_drc_info';
+
+DROP FUNCTION IF EXISTS pg_catalog.gs_get_preparse_location() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2874;
+CREATE OR REPLACE FUNCTION pg_catalog.gs_get_preparse_location(
+    OUT preparse_start_location text, 
+    OUT preparse_end_location text, 
+    OUT last_valid_record text
+) RETURNS SETOF record LANGUAGE INTERNAL as 'gs_get_preparse_location' stable;
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement(bigint) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3702;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    in_sessionid bigint, 
+    OUT sessionid bigint, 
+    OUT username text, OUT name text, 
+    OUT statement text, 
+    OUT prepare_time timestamp with time zone, 
+    OUT parameter_types regtype[], 
+    OUT from_sql boolean
+) RETURNS SETOF record LANGUAGE INTERNAL as 'pg_prepared_statement' stable;
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2510;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    OUT name text, 
+    OUT statement text, 
+    OUT prepare_time timestamp with time zone,
+    OUT parameter_types regtype[], 
+    OUT from_sql boolean
+) RETURNS SETOF record LANGUAGE INTERNAL as 'pg_prepared_statement' stable;

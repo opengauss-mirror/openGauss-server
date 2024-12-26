@@ -89,3 +89,42 @@ AS $function$query_all_drc_info$function$;
 
 comment on function pg_catalog.query_node_reform_info_from_dms(int4) is 'query node reform info from dms';
 comment on function pg_catalog.query_all_drc_info(int4) is 'query all drc info';
+
+DROP FUNCTION IF EXISTS pg_catalog.gs_get_preparse_location() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2874;
+CREATE OR REPLACE FUNCTION pg_catalog.gs_get_preparse_location(
+    OUT preparse_start_location text, 
+    OUT preparse_end_location text, 
+    OUT last_valid_record text
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE NOT FENCED NOT SHIPPABLE ROWS 10
+AS $function$gs_get_preparse_location$function$;
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2510;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    OUT name text, 
+    OUT statement text, 
+    OUT prepare_time timestamp with time zone,
+    OUT parameter_types regtype[], 
+    OUT from_sql boolean
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$pg_prepared_statement$function$;
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement(bigint) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3702;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    in_sessionid bigint, 
+    OUT sessionid bigint, 
+    OUT username text, OUT name text, 
+    OUT statement text, 
+    OUT prepare_time timestamp with time zone, 
+    OUT parameter_types regtype[], 
+    OUT from_sql boolean
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$pg_prepared_statement_global$function$;
