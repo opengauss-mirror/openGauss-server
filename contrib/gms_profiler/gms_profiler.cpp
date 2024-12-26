@@ -1086,12 +1086,16 @@ static bool cmdtype_is_loop(int cmdtype)
 
 static void plpgsql_cb_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-    //elog(NOTICE, "function begin: \"%s\"", func->fn_signature);
+    /* annoymous blocks don't have fn_oid, do nothing! */
+    if (0 == memcmp("inline_code_block", func->fn_signature, strlen("inline_code_block")))
+        return;
     begin_profile_block(func->fn_oid);
 }
 static void plpgsql_cb_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-    //elog(NOTICE, "function end: \"%s\"", func->fn_signature);
+    /* annoymous blocks don't have fn_oid, do nothing! */
+    if (0 == memcmp("inline_code_block", func->fn_signature, strlen("inline_code_block")))
+        return;
     end_profile_block(func->fn_oid);
 }
 
@@ -1223,6 +1227,10 @@ Datum flush_data(PG_FUNCTION_ARGS)
 
     elog(DEBUG1, "flush_data state %d runid %d current_unit_number %u max_unit_number %u",
          profiler_cxt->state, profiler_cxt->runid, profiler_cxt->current_unit_number, profiler_cxt->max_unit_number);
+
+    /* If not call start_profiler before, do nothing! */
+    if (profiler_cxt->state == PROFILER_INACTIVE)
+        PG_RETURN_INT32(PROFILER_ERROR_OK);
 
     PG_TRY();
     {

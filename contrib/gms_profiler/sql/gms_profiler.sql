@@ -148,4 +148,26 @@ drop procedure if exists test_profiler_resume2;
 drop procedure if exists test_profiler_version_check;
 drop procedure if exists test_profiler_start_ext;
 
+DECLARE
+	j BINARY_INTEGER;
+BEGIN
+	j := GMS_PROFILER.FLUSH_DATA;
+END;
+/
+
+DECLARE
+	i BINARY_INTEGER;
+	j BINARY_INTEGER;
+BEGIN
+	i := 1;
+	j := GMS_PROFILER.START_PROFILER('sysdate');
+END;
+/
+
+DECLARE
+	j BINARY_INTEGER;
+BEGIN
+	j := GMS_PROFILER.FLUSH_DATA;
+END;
+/
 reset client_min_messages;
