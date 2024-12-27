@@ -73,9 +73,11 @@
 #include "access/csnlog.h"
 #include "access/multixact.h"
 #include "access/subtrans.h"
+#include "access/tableam.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "commands/async.h"
 #include "commands/copy.h"
+#include "funcapi.h"
 #include "lib/ilist.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -86,6 +88,7 @@
 #include "storage/lock/lwlock_be.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "storage/lock/s_lock.h"
 #include "storage/spin.h"
 #include "storage/cucache_mgr.h"
@@ -1303,7 +1306,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("too many LWLocks taken")));
     }
 
-    remember_lwlock_acquire(lock);
+    remember_lwlock_acquire(lock, mode);
 
     /*
      * Lock out cancel/die interrupts until we exit the code section protected
@@ -1430,7 +1433,10 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
 
     /* Add lock to list of locks held by this backend */
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks++].mode = mode;
+    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
+    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
+        t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+    t_thrd.storage_cxt.num_held_lwlocks++;
 
     /*
      * Fix the process wait semaphore's count for any absorbed wakeups.
@@ -1479,7 +1485,10 @@ bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode)
     } else {
         /* Add lock to list of locks held by this backend */
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks++].mode = mode;
+        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
+        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
+            t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+        t_thrd.storage_cxt.num_held_lwlocks++;
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE(T_NAME(lock), mode);
     }
     return !mustwait;
@@ -1543,7 +1552,7 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
 #ifdef LWLOCK_STATS
             lwstats->block_count++;
 #endif
-            remember_lwlock_acquire(lock);
+            remember_lwlock_acquire(lock, mode);
 
             for (;;) {
                 /* "false" means cannot accept cancel/die interrupt here. */
@@ -1599,7 +1608,10 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
         LOG_LWDEBUG("LWLockAcquireOrWait", lock, "succeeded");
         /* Add lock to list of locks held by this backend */
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks++].mode = mode;
+        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
+        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
+            t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+        t_thrd.storage_cxt.num_held_lwlocks++;
         TRACE_POSTGRESQL_LWLOCK_WAIT_UNTIL_FREE(T_NAME(lock), mode);
     }
 
@@ -1809,6 +1821,7 @@ void LWLockRelease(LWLock *lock)
     uint64 oldstate;
     bool check_waiters = false;
     int i;
+    TimestampTz now = t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : (TimestampTz)0;
 
     /* Remove lock from list of locks held.  Usually, but not always, it will
      * be the latest-acquired lock; so search array backwards. */
@@ -1821,9 +1834,22 @@ void LWLockRelease(LWLock *lock)
     if (i < 0) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
+    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
+    if (t_thrd.storage_cxt.trace_lwlock_time &&
+        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
+        force_backtrace_messages = true;
+        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
+        u_sess->attr.attr_common.backtrace_min_messages = LOG;
+        ereport(LOG, (errmodule(MOD_LWLOCK), (errmsg("lwlock %s mode %d is held "
+            "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
+            now - t_thrd.storage_cxt.lwlock_held_times[i]))));
+        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
+    }
+
     t_thrd.storage_cxt.num_held_lwlocks--;
     for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
         t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
+        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
     }
 
     PRINT_LWDEBUG("LWLockRelease", lock, mode);
@@ -1980,7 +2006,11 @@ void LWLockOwn(LWLock *lock)
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
 
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks++].lock = lock;
+    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
+    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
+        t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+
+    t_thrd.storage_cxt.num_held_lwlocks++;
 
     HOLD_INTERRUPTS();
 }
@@ -2000,6 +2030,7 @@ void LWLockDisown(LWLock *lock)
 {
     uint64 expected_state;
     int i;
+    TimestampTz now = t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : (TimestampTz)0;
 
     /* Ensure that lock is held */
     expected_state = pg_atomic_read_u64(&lock->state);
@@ -2017,9 +2048,22 @@ void LWLockDisown(LWLock *lock)
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
 
+    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
+    if (t_thrd.storage_cxt.trace_lwlock_time &&
+        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
+        force_backtrace_messages = true;
+        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
+        u_sess->attr.attr_common.backtrace_min_messages = LOG;
+        ereport(LOG, (errmodule(MOD_LWLOCK), (errmsg("lwlock %s mode %d is held "
+            "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
+            now - t_thrd.storage_cxt.lwlock_held_times[i]))));
+        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
+    }
+
     t_thrd.storage_cxt.num_held_lwlocks--;
     for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
         t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
+        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
     }
 
     RESUME_INTERRUPTS();
@@ -2041,6 +2085,12 @@ uint32 get_held_lwlocks_maxnum(void)
 void *get_held_lwlocks(void)
 {
     return (void *)t_thrd.storage_cxt.held_lwlocks;
+}
+
+/* get lwlock held times */
+void *get_lwlock_held_times(void)
+{
+    return (void *)t_thrd.storage_cxt.lwlock_held_times;
 }
 
 #define COPY_LWLOCK_HANDLE(src, dst) do { \
@@ -2214,5 +2264,263 @@ void CheckLWLockPartNumRange(void)
                     LWLockPartInfo[i].minNumPartition, LWLockPartInfo[i].maxNumPartition)));
         }
     }
+}
+
+const int GS_LWLOCK_STATUS_COL_NUM = 9;
+typedef struct LWLockStatInfo {
+    lwlock_id_mode lwlock;
+    TimestampTz start_time;
+    bool granted;
+} LWLockStatInfo;
+
+typedef struct LWLockInstanceData {
+    int lwlocks_num;                 /* number of locks held */
+    LWLockStatInfo* lwlocks;    /* lwlocks */
+    ThreadId pid;                    /* pid of this PGPROC */
+    uint64 sessionid;                /* session id of this PGPROC */
+    GlobalSessionId globalSessionId; /* global session id */
+} LWLockInstanceData;
+
+typedef struct LWLockData {
+    int nelements; /* The length of the array */
+    LWLockInstanceData* lwlocks;
+} LWLockData;
+
+typedef struct GsLWLockStatus {
+    LWLockData *lwLockData;
+    int currInstanceIdx;
+    int currLockInfoIdx;
+    TableDistributionInfo *remoteStatus;
+} GsLWLockStatus;
+
+/* Get the head row */
+static TupleDesc GetGsLWLockStatusFuncTupleDesc()
+{
+    TupleDesc tupdesc = NULL;
+    tupdesc = CreateTemplateTupleDesc(GS_LWLOCK_STATUS_COL_NUM, false);
+    AttrNumber attrIdx = 1;
+    TupleDescInitEntry(tupdesc, attrIdx, "node_name", TEXTOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "lock_name", TEXTOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "lock_unique_id", INT8OID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "pid", INT8OID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "sessionid", INT8OID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "global_sessionid", TEXTOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "mode", TEXTOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "granted", BOOLOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "start_time", TIMESTAMPTZOID, -1, 0);
+    return BlessTupleDesc(tupdesc);
+}
+
+static void copy_lwlock_infos(void *held_locks, void *held_times, LWLockStatInfo *dst, int num_locks)
+{
+    LWLockHandle *src_locks = (LWLockHandle *)held_locks;
+    TimestampTz *src_times = (TimestampTz *)held_times;
+    for (int i = 0; i < num_locks; i++) {
+        dst[i].lwlock.lock_addr.lock = src_locks[i].lock;
+        dst[i].lwlock.lock_sx = src_locks[i].mode;
+        dst[i].start_time = src_times[i];
+        dst[i].granted = true;
+    }
+}
+
+static bool IsVaildBeentry(volatile PgBackendStatus *beentry)
+{
+    return (beentry->st_procpid > 0 || beentry->st_sessionid > 0);
+}
+
+static void GetBeentryLWLockInfo(LWLockInstanceData *localEntry, volatile PgBackendStatus *beentry)
+{
+    for (;;) {
+        localEntry->lwlocks_num = 0;
+        localEntry->pid = 0;
+        localEntry->sessionid = 0;
+        int beforeChangeCount;
+        int afterChangeCount;
+        pgstat_save_changecount_before(beentry, beforeChangeCount);
+        /* the only Prerequisites is that thread is valid. */
+        if (IsVaildBeentry(beentry)) {
+            int *lw_held_num = beentry->lw_held_num;
+            void *lw_held_locks = beentry->lw_held_locks;
+            void *lw_held_times = beentry->lw_held_times;
+            LWLock *lw_want_lock = beentry->lw_want_lock;
+            LWLockMode lw_want_mode = beentry->lw_want_mode;
+            TimestampTz lw_want_start_time = beentry->lw_want_start_time;
+            if (lw_held_num != NULL && lw_held_locks != NULL && lw_held_times != NULL) {
+                localEntry->lwlocks_num = *lw_held_num;
+                if ((uint32)localEntry->lwlocks_num > get_held_lwlocks_maxnum()) {
+                    localEntry->lwlocks_num = 0;
+                    break;
+                }
+                copy_lwlock_infos(lw_held_locks, lw_held_times, localEntry->lwlocks, localEntry->lwlocks_num);
+            }
+            if (lw_want_lock != NULL) {
+                localEntry->lwlocks[localEntry->lwlocks_num].lwlock.lock_addr.lock = lw_want_lock;
+                localEntry->lwlocks[localEntry->lwlocks_num].lwlock.lock_sx = lw_want_mode;
+                localEntry->lwlocks[localEntry->lwlocks_num].start_time = lw_want_start_time;
+                localEntry->lwlocks[localEntry->lwlocks_num].granted = false;
+                localEntry->lwlocks_num++;
+            }
+            localEntry->pid = beentry->st_procpid;
+            localEntry->sessionid = beentry->st_sessionid;
+            localEntry->globalSessionId.sessionId = beentry->globalSessionId.sessionId;
+            localEntry->globalSessionId.nodeId = beentry->globalSessionId.nodeId;
+            localEntry->globalSessionId.seq = beentry->globalSessionId.seq;
+        }
+        pgstat_save_changecount_after(beentry, afterChangeCount);
+        if (beforeChangeCount == afterChangeCount && (beforeChangeCount & 1) == 0) {
+            break;
+        }
+        /* Make sure we can break out of loop if stuck... */
+        CHECK_FOR_INTERRUPTS();
+    }
+}
+
+static LWLockData* GetLWLockStatusData(void)
+{
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
+    LWLockData *data = (LWLockData *)palloc0(sizeof(LWLockData));
+    if (!u_sess->attr.attr_common.pgstat_track_activities) {
+        ereport(INFO, (errmsg("The collection of information is disabled because track_activities is off.")));
+        data->nelements = 0;
+        return data;
+    }
+    LWLockInstanceData *localEntry = (LWLockInstanceData *)palloc0(sizeof(LWLockInstanceData));
+    localEntry->lwlocks = (LWLockStatInfo *)palloc0((get_held_lwlocks_maxnum() + 1) * sizeof(LWLockStatInfo));
+    Size totalLockInfoSize = sizeof(LWLockInstanceData) * BackendStatusArray_size;
+    data->lwlocks = (LWLockInstanceData *)palloc0(totalLockInfoSize);
+    for (int i = 1; i <= BackendStatusArray_size; ++i) {
+        GetBeentryLWLockInfo(localEntry, beentry);
+        /* Only valid entries get included into the local array */
+        if (localEntry->lwlocks_num > 0 && (localEntry->pid > 0 || localEntry->sessionid > 0)) {
+            data->lwlocks[data->nelements].lwlocks_num = localEntry->lwlocks_num;
+            Size lockSize = localEntry->lwlocks_num * sizeof(LWLockStatInfo);
+            data->lwlocks[data->nelements].lwlocks = (LWLockStatInfo *)palloc(lockSize);
+            errno_t errorno = memcpy_s(data->lwlocks[data->nelements].lwlocks, lockSize, localEntry->lwlocks, lockSize);
+            securec_check(errorno, "", "");
+            data->lwlocks[data->nelements].pid = localEntry->pid;
+            data->lwlocks[data->nelements].sessionid= localEntry->sessionid;
+            data->lwlocks[data->nelements].globalSessionId = localEntry->globalSessionId;
+            data->nelements++;
+        }
+        beentry--;
+    }
+    pfree(localEntry->lwlocks);
+    pfree(localEntry);
+    return data;
+}
+
+static const char* GetLWLockModeType(LWLockMode mode)
+{
+    if (mode == LW_EXCLUSIVE) {
+        return "Exclusive";
+    } else if (mode == LW_SHARED) {
+        return "Shared";
+    } else if (mode == LW_WAIT_UNTIL_FREE) {
+        return "Wait until free";
+    } else {
+        return "Unknown";
+    }
+}
+
+static uint64 GetLockIndex(LWLock* lockAddr)
+{
+    return (uint64)((char*)lockAddr - (char*)t_thrd.shemem_ptr_cxt.mainLWLockArray)/sizeof(LWLockPadded);
+}
+
+Datum gs_lwlock_status(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+    GsLWLockStatus* mystatus = NULL;
+    LWLockData* lwLockData = NULL;
+    LWLockInstanceData* instance = NULL;
+    HeapTuple tuple = NULL;
+    Datum result;
+    Datum values[GS_LWLOCK_STATUS_COL_NUM];
+    bool nulls[GS_LWLOCK_STATUS_COL_NUM];
+    errno_t rc;
+    int i = 0;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldcontext;
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        funcctx->tuple_desc = GetGsLWLockStatusFuncTupleDesc();
+        mystatus = (GsLWLockStatus*)palloc0(sizeof(GsLWLockStatus));
+        funcctx->user_fctx = (void*)mystatus;
+        mystatus->lwLockData = GetLWLockStatusData();
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+    mystatus = (GsLWLockStatus*)funcctx->user_fctx;
+    lwLockData = mystatus->lwLockData;
+
+    while (mystatus->currInstanceIdx < lwLockData->nelements) {
+        instance = &lwLockData->lwlocks[mystatus->currInstanceIdx];
+        Assert(instance->lwlocks_num > 0);
+        int curIdx = mystatus->currLockInfoIdx;
+        int attrIdx = 0;
+        bool skip = (instance->lwlocks[curIdx].lwlock.lock_addr.lock == NULL);
+        if (!skip) {
+            values[attrIdx++] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+            values[attrIdx++] = CStringGetTextDatum(T_NAME(instance->lwlocks[curIdx].lwlock.lock_addr.lock));
+            values[attrIdx++] = Int64GetDatum(GetLockIndex(instance->lwlocks[curIdx].lwlock.lock_addr.lock));
+            values[attrIdx++] = Int64GetDatum(instance->pid);
+            values[attrIdx++] = Int64GetDatum(instance->sessionid);
+            char* gId = GetGlobalSessionStr(instance->globalSessionId);
+            values[attrIdx++] = CStringGetTextDatum(gId);
+            pfree(gId);
+            values[attrIdx++] = CStringGetTextDatum(GetLWLockModeType(instance->lwlocks[curIdx].lwlock.lock_sx));
+            values[attrIdx++] = BoolGetDatum(instance->lwlocks[curIdx].granted);
+            values[attrIdx] = TimestampTzGetDatum(instance->lwlocks[curIdx].start_time);
+            nulls[attrIdx] = (values[attrIdx] == 0);
+        }
+        mystatus->currLockInfoIdx++;
+        /* till the end, continue next instance */
+        if (mystatus->currLockInfoIdx == instance->lwlocks_num) {
+            mystatus->currLockInfoIdx = 0;
+            mystatus->currInstanceIdx++;
+            pfree_ext(instance->lwlocks);
+        }
+        if (skip) {
+            continue;
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        result = HeapTupleGetDatum(tuple);
+        SRF_RETURN_NEXT(funcctx, result);
+    }
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && mystatus->remoteStatus != NULL) {
+        Tuplestorestate *tupstore = (mystatus->remoteStatus)->state->tupstore;
+        TupleTableSlot *slot = (mystatus->remoteStatus)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState((mystatus->remoteStatus)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(mystatus->remoteStatus);
+            SRF_RETURN_DONE(funcctx);
+        }
+        for (i = 0; i < GS_LWLOCK_STATUS_COL_NUM; i++) {
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        (void)ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
 }
 
