@@ -1131,7 +1131,7 @@ ERROR:  function "canonicalize" with 2 parameters doesn't exist
 CONTEXT:  SQL statement "CALL gms_utility.canonicalize('koll.rooy.nuuop.a',canon_name)"
 PL/pgSQL function inline_code_block line 3 at SQL statement
 call test_canonicalize('koll.rooy.nuuop.a', 200);
-INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1194,7 +1194,7 @@ CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) 
 SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
 PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 call test_canonicalize('koll."ro oy".nuuop.a', 200);
-INFO:  canon_name: ["KOLL"."ro oy"."NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."ro oy"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1240,14 +1240,14 @@ INFO:  canon_name: [koll]
 (1 row)
 
 call test_canonicalize('   "  koll.rooy"  .nuuop.a', 200);
-INFO:  canon_name: ["  koll.rooy"."NUUOP"."A".]
+INFO:  canon_name: ["  koll.rooy"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
 (1 row)
 
 call test_canonicalize('koll.rooy.nuuop.a', 200);
-INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1255,14 +1255,14 @@ INFO:  canon_name: ["KOLL"."ROOY"."NUUOP"."A".]
 
 -- special char
 call test_canonicalize('"~!#@@#$%)(#@(!@))<>?/*-+".nuuop.a', 200);
-INFO:  canon_name: ["~!#@@#$%)(#@(!@))<>?/*-+"."NUUOP"."A".]
+INFO:  canon_name: ["~!#@@#$%)(#@(!@))<>?/*-+"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
 (1 row)
 
 call test_canonicalize('koll.rooy#_$nuuop.a', 200);
-INFO:  canon_name: ["KOLL"."ROOY#_$NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."ROOY#_$NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1341,7 +1341,7 @@ CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) 
 SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
 PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 call test_canonicalize('"123"."123"', 200); -- error
-INFO:  canon_name: ["123"."123".]
+INFO:  canon_name: ["123"."123"]
  test_canonicalize 
 -------------------
  
@@ -1370,7 +1370,7 @@ CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) 
 SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
 PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 call test_canonicalize('"123".gaussdb', 200);
-INFO:  canon_name: ["123"."GAUSSDB".]
+INFO:  canon_name: ["123"."GAUSSDB"]
  test_canonicalize 
 -------------------
  
@@ -1382,21 +1382,21 @@ CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) 
 SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
 PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 call test_canonicalize('gaussdb."123"', 200);
-INFO:  canon_name: ["GAUSSDB"."123".]
+INFO:  canon_name: ["GAUSSDB"."123"]
  test_canonicalize 
 -------------------
  
 (1 row)
 
 call test_canonicalize('gaussdb."123nuuop"', 200);
-INFO:  canon_name: ["GAUSSDB"."123nuuop".]
+INFO:  canon_name: ["GAUSSDB"."123nuuop"]
  test_canonicalize 
 -------------------
  
 (1 row)
 
 call test_canonicalize('koll._rooy.nuuop.a', 200); -- ok for og, error for A
-INFO:  canon_name: ["KOLL"."_ROOY"."NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."_ROOY"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1413,7 +1413,7 @@ CONTEXT:  PL/pgSQL function gms_utility.canonicalize(character varying,integer) 
 SQL statement "CALL gms_utility.canonicalize(name,canon_name,len)"
 PL/pgSQL function test_canonicalize(character varying,integer) line 4 at SQL statement
 call test_canonicalize('koll."_rooy".nuuop.a', 200);
-INFO:  canon_name: ["KOLL"."_rooy"."NUUOP"."A".]
+INFO:  canon_name: ["KOLL"."_rooy"."NUUOP"."A"]
  test_canonicalize 
 -------------------
  
@@ -1959,6 +1959,49 @@ select valid from pg_object where object_type='p' and object_oid in (select oid 
 (0 rows)
 
 drop procedure proc_err;
+-- test depend views
+create table employees (
+    employee_id serial primary key,
+    employee_name varchar(100),
+    department_id int,
+    salary numeric(10, 2)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employee_id_seq" for serial column "employees.employee_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+create table departments (
+    department_id serial primary key,
+    department_name varchar(100)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "departments_department_id_seq" for serial column "departments.department_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "departments_pkey" for table "departments"
+insert into employees (employee_name, department_id, salary) values
+('alice', 1, 75000.00),
+('bob', 2, 80000.00),
+('charlie', 1, 60000.00),
+('david', 3, 90000.00);
+insert into departments (department_name) values
+('hr'),
+('engineering'),
+('marketing');
+create view high_salary_employees as
+select * from employees where salary > 70000;
+create view high_salary_employees_with_department as
+select
+    hse.employee_name,
+    d.department_name,
+    hse.salary
+from high_salary_employees hse
+join departments d on hse.department_id = d.department_id;
+call gms_utility.compile_schema('test_utility_compile', true);
+ compile_schema 
+----------------
+ 
+(1 row)
+
+drop view high_salary_employees_with_department;
+drop view high_salary_employees;
+drop table departments;
+drop table employees;
 drop schema test_utility_compile cascade;
 ---------------------------
 -- name tokenize

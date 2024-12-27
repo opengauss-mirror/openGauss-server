@@ -1339,6 +1339,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     ScanKeyInit(&key_dep[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_objid));
     scan_dep = systable_beginscan(rel_dep, DependDependerIndexId, true, NULL, keyNum, key_dep);
     bool circularDependency = false;
+    List* depViewList = NIL;
     while (HeapTupleIsValid((tup_dep = systable_getnext(scan_dep)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup_dep);
         if (depform->refclassid != RelationRelationId || depform->deptype != DEPENDENCY_NORMAL ||
@@ -1375,9 +1376,15 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
                 }
             }
         } else if (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) {
+            /* when force compile view, and depend on multiple columns from other views, recompile only once */
+            if (force && depViewList != NIL  && list_member_oid(depViewList, dep_objid)) {
+                continue;
+            }
+            depViewList = lappend_oid(depViewList, dep_objid);
             char type = relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW;
             ValidateDependResult result = ValidateDependView(dep_objid, type, list, force);
             if (result == ValidateDependCircularDepend) {
+                list_free_ext(depViewList);
                 list_free(*list);
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -1395,11 +1402,13 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
             circularDependency |= (result == ValidateDependCircularDepend);
         }
         if (!isValid) {
+            list_free_ext(depViewList);
             systable_endscan(scan_dep);
             heap_close(rel_dep, RowExclusiveLock);
             return ValidateDependInvalid;
         }
     }
+    list_free_ext(depViewList);
     systable_endscan(scan_dep);
     /*
      * 3.3 find views or tables which depend on this view directly,
