@@ -124,9 +124,6 @@ static void save_xlogloc(const char *xloglocation);
 static XLogRecPtr GetMinArchiveSlotLSN(void);
 static XLogRecPtr GetMinLogicalSlotLSN(void);
 static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr);
-
-/* compressed Function */
-static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size);
 static bool SendUndoMeta(FILE *fp, struct stat *statbuf);
 const int undometaSize = UNDOSPACE_META_PAGE_SIZE + 2 * UNDOSPACE_SPACE_PAGE_SIZE;
 const int undometaRetryMax = 3;
@@ -193,7 +190,7 @@ static void send_xlog_location()
     char fullpath[MAXPGPATH] = {0};
     struct stat statbuf;
     int rc = 0;
-    
+
     if (ENABLE_DSS) {
         rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, SS_XLOGDIR);
     } else {
@@ -859,7 +856,7 @@ void SendBaseBackup(BaseBackupCmd *cmd)
 
         set_ps_display(activitymsg, false);
     }
-    
+
     if (ENABLE_DSS) {
         int rc = 0;
         char fullpath[MAXPGPATH] = {0};
@@ -1292,7 +1289,7 @@ bool IsSkipPath(const char * pathName)
     /* skip pg_control in dss */
     if (ENABLE_DSS) {
         char full_path[MAXPGPATH];
-        int rc = snprintf_s(full_path, sizeof(full_path), sizeof(full_path) - 1, "%s/pg_control", 
+        int rc = snprintf_s(full_path, sizeof(full_path), sizeof(full_path) - 1, "%s/pg_control",
                             g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name);
         securec_check_ss(rc, "\0", "\0");
         if (strcmp(pathName, full_path) == 0) {
@@ -1342,6 +1339,162 @@ static bool IsDCFPath(const char *pathname)
 
 #define SEND_DIR_ADD_SIZE(size, statbuf) ((size) = (size) + (((statbuf).st_size + 511) & ~511) + BUILD_PATH_LEN)
 
+/** The class for read pages from transparent page compression file and send the stream to
+remote backup client.  */
+class TpcFileStreamSender {
+public:
+    /** Constructor.
+     @param[in]     fileName    the file name.
+     @param[in]     basepathLen the basepath length of the file.
+     @param[in/out] stat        the file's stat information. */
+    TpcFileStreamSender(const char *fileName, int basepathLen, struct stat& stat)
+        : m_fileName(fileName),
+          m_basepathLen(basepathLen),
+          m_statBuf(stat) {}
+
+    /** Open the file segment file for read and allocate some resources.
+     @return  true  if we succeed to open the file. otherwise return false. */
+    bool OpenFileForRead();
+
+    /** Send the file name as the tar header. */
+    void SendHeader()
+    {
+        const char *tarFileName = m_fileName + m_basepathLen + 1;
+        _tarWriteHeader(tarFileName, NULL, static_cast<struct stat *>(&m_statBuf));
+    }
+
+    /** Send the all file content as streams. */
+    void SendStreams();
+
+    /** deconstructor */
+    ~TpcFileStreamSender()
+    {
+        if (m_streamExtent != nullptr) {
+            pfree(m_streamExtent);
+            m_streamExtent = nullptr;
+        }
+
+        if (m_rawExtent != nullptr) {
+            pfree(m_rawExtent);
+            m_rawExtent = nullptr;
+        }
+
+        if (m_file != nullptr) {
+            FreeFile(m_file);
+        }
+    }
+
+private:
+    /** Send buffer content stream to backup client.
+     @param[in]  ptr      the buffer pointer
+     @param[in]  ptrLen   the buffer length. */
+    void SendStream(char *ptr, size_t ptrLen)
+    {
+        size_t sentLen = 0;
+        while (sentLen < ptrLen) {
+            auto leftLen = ptrLen - sentLen;
+            auto toSend = leftLen > TAR_SEND_SIZE ? TAR_SEND_SIZE : leftLen;
+            if (pq_putmessage_noblock('d', ptr + sentLen, toSend)) {
+                ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("failed to send compressed stream for backup")));
+            }
+            sentLen += toSend;
+        }
+    }
+
+    /** Read current content to raw buffer: m_raw_extent.
+     @param[in]  blockNoValidate  the start block no needs to validated
+     @return true if we succeed to read the extent. otherwise return false */
+    bool ReadCurrentExtent(uint16 blockNoValidate);
+
+    /** Reorganize the new compressed extent as the stream content of backup format.
+    @return true if we succeed to Reorganize the new compressed extent. */
+    bool StreamCurrentExtent();
+
+    /** Get the global logical block number according to relative n-th block in
+     compression extent.
+     @param[in]  no  the relative n-th block in compression extent
+     @return The global logical block number */
+    BlockNumber LogicalBlockFromExtentBlock(BlockNumber no) const
+    {
+        return (CFS_LOGIC_BLOCKS_PER_FILE * m_segNo +
+                m_currentExtent * CFS_LOGIC_BLOCKS_PER_EXTENT +
+                no);
+    }
+
+    /** Get the PCA object from the raw compressed extent.
+     @return The raw PCA object. */
+    CfsExtentHeader *GetRawPca() const
+    {
+        Assert(m_rawExtent != nullptr);
+        auto pcaOffset = gExtentSizeInBytes - BLCKSZ;
+        return reinterpret_cast<CfsExtentHeader *>(m_rawExtent + pcaOffset);
+    }
+
+    /** Get the PCA object from the stream compressed extent.
+     @return The streamed PCA object. */
+    CfsExtentHeader *GetStreamPca() const
+    {
+        Assert(m_streamExtent != nullptr);
+        auto pcaOffset = gExtentSizeInBytes - BLCKSZ;
+        return reinterpret_cast<CfsExtentHeader *>(m_streamExtent + pcaOffset);
+    }
+
+    /** Reorganize the raw compressed page chunks to compact compressed pages.
+     @param[in]     ptr        the buffer start pointer for the compact compressed pages
+                               added.
+     @param[in]     nthBlock   the relative block number in the compressed pages extent.
+     @param[in/out] chunkPos   curret allocated chunk_pos in new stream extent content.
+     @return  the compressed page size in stream compress extent. return -1 in any failure
+     cases. */
+    int AddCompactCompressedPage(char *ptr, uint16 nthBlock, uint32 &chunkPos);
+
+    /** validate blocks chunk addresses from the specific block.
+     @param[in]    blockNoValidate  the relative block on in the extent
+     @return true if all blocks chunk adresses are validate from blockNoValidate. otherwise
+     return false. */
+    bool ValidateRawPCABlocksAddrFrom(uint16 blockNoValidate);
+
+    /** The file name need to read. */
+    const char *m_fileName{nullptr};
+
+    /** The basepath length.  */
+    int m_basepathLen{-1};
+
+    /** The reading file stat. */
+    struct stat& m_statBuf;
+
+    /** The file handler. */
+    FILE *m_file{nullptr};
+
+    /** The segment number of the logical relfilenode. */
+    int m_segNo{0};
+
+    /** The total extent number of the compressed file. */
+    size_t m_nExtents{0};
+
+    /** The raw extent buffer of transprant page compression. */
+    char *m_rawExtent{nullptr};
+
+    /** The stream buffer sent to remote backup client. */
+    char *m_streamExtent{nullptr};
+
+    /** The current extent number of current reading. */
+    size_t m_currentExtent{0};
+
+    /** The times has been read of current extent. */
+    size_t m_retriedRead{0};
+
+    /** The size of extent in bytes for transprant page compression file. */
+    static constexpr size_t gExtentSizeInBytes = CFS_EXTENT_SIZE * BLCKSZ;
+
+    /** The max times for reading extent if some corrupted pages found. */
+    static const size_t gSNMaxFileReadTimes = 60;
+
+    /** The interval time when we try to read the same extent again. */
+    static const size_t gSRetrySleepIntervalUs = 1000000;
+};
+
 /**
  * send file or compressed file
  * @param sizeOnly send or not
@@ -1355,7 +1508,16 @@ static int64 SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct 
     // we must ensure the page integrity when in IncrementalCheckpoint
     if (!sizeOnly && g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
         IsCompressedFile(pathbuf, strlen(pathbuf))) {
-        SendCompressedFile(pathbuf, basepathlen, (*statbuf), true, &size);
+        TpcFileStreamSender sender(pathbuf, basepathlen, *statbuf);
+
+        if (!sender.OpenFileForRead()) {
+            return size;
+        }
+
+        sender.SendHeader();
+        sender.SendStreams();
+
+        SEND_DIR_ADD_SIZE(size, *statbuf);
     } else {
         bool sent = false;
         if (!sizeOnly) {
@@ -1444,13 +1606,13 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_key_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_ca_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_crl_file) == 0 ||
-                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0 
- #ifdef USE_TASSL              
+                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0
+ #ifdef USE_TASSL
                 || strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_cert_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_key_file) == 0 ||
                 strcmp(de->d_name, ssl_enc_cipher_file) == 0 || strcmp(de->d_name, ssl_enc_rand_file) == 0
 #endif
-                ) 
+                )
             {
                 continue;
             }
@@ -1530,10 +1692,10 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
          */
 
         /* when ss dorado replication enabled, "+data/pg_replication/" also need to copy when backup */
-        if (strcmp(pathbuf, "./pg_xlog") == 0 || 
-            (ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 && 
+        if (strcmp(pathbuf, "./pg_xlog") == 0 ||
+            (ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 &&
             strstr(pathbuf + strlen(dssdir), "/pg_xlog") != NULL) ||
-            (ENABLE_DSS && strcmp(pathbuf, dssdir) == 0 && 
+            (ENABLE_DSS && strcmp(pathbuf, dssdir) == 0 &&
             strstr(pathbuf + strlen(dssdir), "/pg_replication") != NULL)) {
             if (!sizeonly) {
                 /* If pg_xlog is a symlink, write it as a directory anyway */
@@ -1578,7 +1740,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                     if (ENABLE_DSS && is_dss_file(pathbuf)) {
                         _tarWriteHeader(pathbuf, NULL, &statbuf);
                     } else {
-                        _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);    
+                        _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
                     }
                 }
             }
@@ -1603,7 +1765,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                     if (ENABLE_DSS && is_dss_file(pathbuf)) {
                         _tarWriteHeader(pathbuf, linkpath, &statbuf);
                     } else {
-                        _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);    
+                        _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
                     }
 #else
                     /*
@@ -1634,7 +1796,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
         }
 
         /* Allow symbolic links in pg_tblspc only */
-        if ((strcmp(path, "./pg_tblspc") == 0 || 
+        if ((strcmp(path, "./pg_tblspc") == 0 ||
             (ENABLE_DSS && strncmp(pathbuf, dssdir, strlen(dssdir)) == 0 &&
             strstr(pathbuf + strlen(dssdir), "/pg_tblspc") != NULL)) &&
 #ifndef WIN32
@@ -1859,7 +2021,7 @@ bool is_row_data_file(const char *path, int *segNo, UndoFileType *undoFileType)
     } else if (S_ISDIR(path_st.st_mode)) {
         return false;
     }
-    
+
     /* memcpy path without "_compress" for row data file judge */
     char tablePath[MAXPGPATH] = {0};
     if (IsCompressedFile(path, strlen(path))) {
@@ -1931,7 +2093,7 @@ static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, 
     } else {
         asize = sendDir(".", 1, true, tablespaces, true);
     }
-    
+
     /* Add a node for the base directory at the end */
     tablespaceinfo *ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
     ti->size = opt->progress ? asize : -1;
@@ -1975,7 +2137,7 @@ static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, 
                     sendDir(dssdir, 1, false, tablespaces, true);
                 }
         }
-        
+
         /* In the main tar, include pg_control last. */
         if (iterti->path == NULL) {
             struct stat statbuf;
@@ -2064,127 +2226,291 @@ static FILE *SizeCheckAndAllocate(char *readFileName, const struct stat &statbuf
 
 }
 
-static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size)
+/** Open the file segment file for read and allocate some resources.
+ @return  true  if we succeed to open the file. otherwise return false. */
+bool TpcFileStreamSender::OpenFileForRead()
 {
-    char* tarfilename = readFileName + basePathLen + 1;
-    SendFilePreInit();
-    FILE* compressFd = SizeCheckAndAllocate(readFileName, statbuf, missingOk);
-    if (compressFd == NULL) {
-        return;
+    if (INT2SIZET(t_thrd.libpq_cxt.PqSendBufferSize) < MaxBuildAllocSize) {
+        t_thrd.libpq_cxt.PqSendBuffer = (char *)repalloc(t_thrd.libpq_cxt.PqSendBuffer, MaxBuildAllocSize);
+        t_thrd.libpq_cxt.PqSendBufferSize = MaxBuildAllocSize;
+    }
+
+    m_file = SizeCheckAndAllocate(const_cast<char *>(m_fileName), m_statBuf, true);
+    if (m_file == NULL) {
+        return false;
     }
 
     struct stat fileStat;
-    if (fstat(fileno(compressFd), &fileStat) != 0) {
+    if (fstat(fileno(m_file), &fileStat) != 0) {
         if (errno != ENOENT) {
             ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("could not stat file or directory \"%s\": ", readFileName)));
+                            errmsg("[BACKUP] could not stat file or directory \"%s\": ",
+                                    m_fileName)));
+            return false;
         }
     }
 
-    int segmentNo = 0;
     UndoFileType undoFileType = UNDO_INVALID;
-    if (!is_row_data_file(readFileName, &segmentNo, &undoFileType)) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("%s is not a relation file.", readFileName)));
+    if (!is_row_data_file(m_fileName, &m_segNo, &undoFileType)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("[BACKUP] %s is not a relation file.", m_fileName)));
+        return false;
     }
-    
-    /* send the pkg header containing msg like file size */
-    _tarWriteHeader(tarfilename, NULL, (struct stat*)(&statbuf));
 
-    off_t totalLen = 0;
-    auto maxExtent = (fileStat.st_size / BLCKSZ) / CFS_EXTENT_SIZE;
+    m_nExtents = fileStat.st_size / gExtentSizeInBytes;
 
-    CfsReadStruct cfsReadStruct{compressFd, NULL, 0};
-    for (int extentIndex = 0; extentIndex < maxExtent; extentIndex++) {
-        cfsReadStruct.extentCount = (BlockNumber)extentIndex;
-        size_t extentLen = 0;
-        auto mmapHeaderResult = MMapHeader(compressFd, (BlockNumber)extentIndex, true);
+    auto currentMemory = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    m_rawExtent = static_cast<char *>(palloc(gExtentSizeInBytes));
+    m_streamExtent = static_cast<char *>(palloc(gExtentSizeInBytes));
+    MemoryContextSwitchTo(currentMemory);
+    return true;
+}
 
-        cfsReadStruct.header = mmapHeaderResult.header;
-        cfsReadStruct.extentCount = (BlockNumber)extentIndex;
-        off_t sendLen = 0;
-        size_t bufferSize = (size_t)(TAR_SEND_SIZE - sendLen);
-        char extentHeaderPage[BLCKSZ] = {0};
-        CfsExtentHeader *header = (CfsExtentHeader*)extentHeaderPage;
-        header->chunk_size = cfsReadStruct.header->chunk_size;
-        header->algorithm = cfsReadStruct.header->algorithm;
-
-        uint16 chunkIndex = 1;
-        BlockNumber blockNumber;
-        for (blockNumber = 0; blockNumber < cfsReadStruct.header->nblocks; ++blockNumber) {
-            size_t len = CfsReadCompressedPage(t_thrd.basebackup_cxt.buf_block + sendLen, bufferSize, blockNumber,
-                                               &cfsReadStruct,
-                                               (CFS_LOGIC_BLOCKS_PER_FILE * segmentNo +
-                                               extentIndex * CFS_LOGIC_BLOCKS_PER_EXTENT + blockNumber));
-            /* valid check */
-            if (len == COMPRESS_FSEEK_ERROR) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("fseek error")));
-            } else if (len == COMPRESS_FREAD_ERROR) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("fread error")));
-            } else if (len == COMPRESS_CHECKSUM_ERROR) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("checksum error")));
-            } else if (len == COMPRESS_BLOCK_ERROR) {
-                ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE, errmsg("blocknum \"%u\" exceeds max block number",
-                    blockNumber)));
-            }
-            sendLen += (off_t)len;
-            if (sendLen > TAR_SEND_SIZE - BLCKSZ) {
-                if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)sendLen)) {
-                    MmapFree(&mmapHeaderResult);
-                    ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
-                }
-                sendLen = 0;
-            }
-            CfsExtentAddress *cfsExtentAddress = GetExtentAddress(header, (uint16)blockNumber);
-            uint8 nchunks = (uint8)(len / header->chunk_size);
-            for (size_t i = 0; i  < nchunks; i++) {
-                cfsExtentAddress->chunknos[i] = chunkIndex++;
-            }
-            cfsExtentAddress->nchunks = nchunks;
-            cfsExtentAddress->allocated_chunks = nchunks;
-            cfsExtentAddress->checksum = AddrChecksum32(cfsExtentAddress, nchunks);
-            extentLen += len;
+/** Send buffer content to backup client.
+ @param[in]  ptr      the buffer pointer
+ @param[in]  ptrLen   the buffer length. */
+void TpcFileStreamSender::SendStreams()
+{
+    for (m_currentExtent = 0; m_currentExtent < m_nExtents; m_currentExtent++) {
+        if (!StreamCurrentExtent()) {
+            return;
         }
-        if (sendLen != 0) {
-            if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)sendLen)) {
-                MmapFree(&mmapHeaderResult);
-                ereport(ERROR,
-                    (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
-            }
-        }
-        header->nblocks = blockNumber;
-        header->allocated_chunks = (pg_atomic_uint32)(chunkIndex - 1);
 
-        /* send zero chunks to remote */
-        size_t extentSize = CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ;
-        if (extentLen < extentSize) {
-            auto rc = memset_s(t_thrd.basebackup_cxt.buf_block, TAR_SEND_SIZE, 0, TAR_SEND_SIZE);
-            securec_check(rc, "\0", "\0");
-            int left = extentSize - extentLen;
-            while (left > 0) {
-                auto currentSendLen = TAR_SEND_SIZE < left ? TAR_SEND_SIZE : left;
-                if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)currentSendLen)) {
-                    MmapFree(&mmapHeaderResult);
-                    ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
-                }
-                left -= TAR_SEND_SIZE;
+#ifdef USE_ASSERT_CHECKING
+        auto new_pca = GetStreamPca();
+        auto ptr = m_streamExtent;
+        for (uint16 i = 0; i < new_pca->nblocks; i++) {
+            auto blockAddr = GetExtentAddress(new_pca, i);
+            auto compressedPageSize = blockAddr->nchunks * new_pca->chunk_size;
+            /* for the new page, its chunks must be compact. */
+            Assert(blockAddr->nchunks == blockAddr->allocated_chunks);
+            if (compressedPageSize != BLCKSZ) {
+                Assert(CompressedChecksum(ptr));
+            } else {
+                auto actualChecksum = pg_checksum_page(ptr, LogicalBlockFromExtentBlock(i));
+                Assert(actualChecksum == (PageHeader(ptr))->pd_checksum);
             }
+            ptr += compressedPageSize;
         }
-        /* send CfsHeader Page */
-        if (pq_putmessage_noblock('d', extentHeaderPage, BLCKSZ)) {
-            MmapFree(&mmapHeaderResult);
-            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
-        }
-        totalLen += (off_t)(extentSize + BLCKSZ);
-        MmapFree(&mmapHeaderResult);
+#endif
+        SendStream(m_streamExtent, gExtentSizeInBytes);
     }
-    size_t pad = (size_t)(((totalLen + 511) & ~511) - totalLen);
-    if (pad > 0) {
-        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad), "", "");
-        (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
+
+    /* Pad to 512 byte boundary, for per tar format requirements. */
+    size_t totalSent = m_nExtents * gExtentSizeInBytes;
+    size_t padSize = ((totalSent + 511) & (~511)) - totalSent;
+
+    if (padSize > 0) {
+        Assert(padSize < 512);
+        securec_check(memset_s(m_streamExtent, padSize, 0, padSize), "\0", "\0");
+        SendStream(m_streamExtent, padSize);
     }
-    SEND_DIR_ADD_SIZE(*size, statbuf);
+}
+
+/** validate blocks chunk addresses from the specific block.
+ @param[in]    blockNoValidate  the relative block on in the extent
+ @return true if all blocks chunk adresses are validated as passed from blockNoValidate.
+ Otherwise return false. */
+bool TpcFileStreamSender::ValidateRawPCABlocksAddrFrom(uint16 blockNoValidate) {
+    auto pca = GetRawPca();
+    auto nBlocks = pca->nblocks;
+
+    if (nBlocks > CFS_LOGIC_BLOCKS_PER_EXTENT || blockNoValidate > nBlocks ||
+        pca->chunk_size > CHUNK_SIZE_LIST[0]) {
+        ereport(LOG, (errmsg("[BACKUP] found invalid PCA format during check block chunks address "
+                                "from block %u in file %s, current extent: %lu, total blocks in extent: "
+                                "%u, PCA chunk size: %u", blockNoValidate, m_fileName,
+                                m_currentExtent, nBlocks, pca->chunk_size)));
+        return false;
+    }
+
+    for (uint16 blkNo = blockNoValidate; blkNo < nBlocks; ++blkNo) {
+        auto block_addr = GetExtentAddress(pca, blkNo);
+        if (block_addr->checksum != AddrChecksum32(block_addr, block_addr->allocated_chunks) ||
+            block_addr->allocated_chunks > (BLCKSZ / pca->chunk_size)) {
+            ereport(LOG, (errmsg("[BACKUP] failed to validate block %u chunk address in file %s, "
+                                    "current extent: %lu, allocated chunks: %u", blkNo,
+                                    m_fileName, m_currentExtent, block_addr->allocated_chunks)));
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/** Read current content to raw buffer: m_raw_extent.
+ @param[in]  blockNoValidate  the start block no needs to validated
+ @return  true if we succeed to read the extent. otherwise return false */
+bool TpcFileStreamSender::ReadCurrentExtent(uint16 blockNoValidate)
+{
+    Assert(blockNoValidate < CFS_LOGIC_BLOCKS_PER_EXTENT);
+    for (; m_retriedRead < gSNMaxFileReadTimes; m_retriedRead++) {
+        /* invalid raw buf firstly for safely repeat using. */
+        auto rc = memset_s(m_rawExtent, gExtentSizeInBytes, 0xFF, gExtentSizeInBytes);
+        securec_check(rc, "\0", "\0");
+        if (rc != EOK) {
+            break;
+        }
+
+        /* sleep where we try to read current extent again. */
+        if (m_retriedRead != 0) {
+            pg_usleep(gSRetrySleepIntervalUs);
+            ereport(LOG, (errmsg("[BACKUP] retry to read extent: %lu in file %s, retry times: %lu",
+                                 m_currentExtent, m_fileName, m_retriedRead)));
+        }
+
+        if (fseeko(m_file, m_currentExtent * gExtentSizeInBytes, SEEK_SET) != 0) {
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("[BACKUP] failed to seek file: %s on position: %lu",
+                                   m_fileName, m_currentExtent * gExtentSizeInBytes)));
+            return false;
+        }
+
+        if (fread(m_rawExtent, 1, gExtentSizeInBytes, m_file) != gExtentSizeInBytes &&
+            ferror(m_file)) {
+            ereport(ERROR, (errcode_for_file_access(),
+                errmsg("[BACKUP] failed to read file: %s on postion: %lu",
+                       m_fileName, m_currentExtent * gExtentSizeInBytes)));
+            return false;
+        }
+
+        if (!ValidateRawPCABlocksAddrFrom(blockNoValidate)) {
+            continue;
+        }
+
+        return true;
+    }
+
+    ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("[BACKUP] failed to read the valid %luth extent in file %s "
+                               "because of the corrupted PCA page, total read times: %lu",
+                               m_currentExtent, m_fileName, m_retriedRead)));
+    return false;
+}
+
+/** Reorganize the raw compressed page chunks to compact compressed pages.
+ @param[in]     ptr        the buffer start pointer for the compact compressed pages
+                           added.
+ @param[in]     nthBlock   the relative block number in the compressed pages extent.
+ @param[in/out] chunkPos   curret allocated chunk_pos in new stream extent content.
+ @return  the compressed page size in stream compress extent. return -1 in any failure
+cases. */
+int TpcFileStreamSender::AddCompactCompressedPage(char *ptr, uint16 nthBlock, uint32 &chunkPos)
+{
+    do {
+        auto pca = GetRawPca();
+        auto copiedPtr = ptr;
+        CfsExtentAddress *block_addr = GetExtentAddress(pca, nthBlock);
+        for (uint8 i = 0; i < block_addr->nchunks; i++) {
+            auto start_index = i;
+            auto chunk_start_pos = OffsetOfPageCompressChunk(pca->chunk_size, block_addr->chunknos[i]);
+
+            /* find continus chunks. */
+            while (i < block_addr->nchunks - 1 &&
+                    block_addr->chunknos[i + 1] == block_addr->chunknos[i] + 1) {
+                i++;
+            }
+
+            auto sizeToCopy = (i - start_index + 1) * pca->chunk_size;
+
+            if (memcpy_s(copiedPtr, sizeToCopy, m_rawExtent + chunk_start_pos, sizeToCopy) != EOK) {
+                return -1;
+            }
+
+            copiedPtr += sizeToCopy;
+        }
+
+        if (unlikely(block_addr->nchunks) == 0) {
+            return 0;
+        }
+
+        /* validate the compressed page. */
+        auto compressedPageSize = block_addr->nchunks * pca->chunk_size;
+        if (compressedPageSize == BLCKSZ) {
+            auto logicalBlkNo = LogicalBlockFromExtentBlock(nthBlock);
+            auto actualChecksum = pg_checksum_page(ptr, logicalBlkNo);
+            if (actualChecksum != (PageHeader(ptr))->pd_checksum) {
+                ereport(LOG, (errmsg("[BACKUP] found corrupted fake compressed page: %u for backup "
+                                     "in %luth extent of file %s, actual checksum: %u, epected checksum: %u",
+                                     logicalBlkNo, m_currentExtent, m_fileName, actualChecksum,
+                                     (PageHeader(ptr))->pd_checksum)));
+                continue;
+            }
+        } else {
+            if (compressedPageSize != 0 && !CompressedChecksum(ptr)) {
+                ereport(LOG, (errmsg("[BACKUP] found corrupted compressed page: %u for backup in "
+                                     "%luth extent of file %s", LogicalBlockFromExtentBlock(nthBlock),
+                                     m_currentExtent, m_fileName)));
+                continue;
+            }
+        }
+
+        /* reorganize the chunk position according to the new chunk layout */
+        CfsExtentAddress *newBlockAddr = GetExtentAddress(GetStreamPca(), nthBlock);
+        for (uint8 i = 0; i < block_addr->nchunks; i++) {
+            newBlockAddr->chunknos[i] = chunkPos++;
+        }
+
+        newBlockAddr->nchunks = block_addr->nchunks;
+        newBlockAddr->allocated_chunks = block_addr->nchunks;
+        newBlockAddr->checksum = AddrChecksum32(newBlockAddr, newBlockAddr->nchunks);
+
+        return copiedPtr - ptr;
+    } while ((++m_retriedRead) < gSNMaxFileReadTimes && ReadCurrentExtent(nthBlock));
+
+    return -1;
+}
+
+/** Reorganize the new compressed extent as the stream content of backup format.
+ @return  true if we succeed to Reorganize the new compressed extent. */
+bool TpcFileStreamSender::StreamCurrentExtent()
+{
+    uint32 newChunkPos = 1;
+
+    /* reset the retry read times. */
+    m_retriedRead = 0;
+
+    if (!ReadCurrentExtent(0)) {
+        ereport(ERROR, (errcode_for_file_access(),
+                errmsg("[BACKUP] failed to read extent %lu of file %s for the first time, "
+                       "total read times: %lu", m_currentExtent, m_fileName, m_retriedRead)));
+        return false;
+    }
+
+    auto pca = GetRawPca();
+    auto nBlocks = pca->nblocks;
+    auto rc = memset_s(m_streamExtent, gExtentSizeInBytes, 0, gExtentSizeInBytes);
+    securec_check(rc, "\0", "\0");
+    if (rc != EOK) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("[BACKUP] faile to memset")));
+        return false;
+    }
+
+    char *ptr = m_streamExtent;
+    CfsExtentHeader *newPca = GetStreamPca();
+    newPca->algorithm = pca->algorithm;
+    newPca->chunk_size = pca->chunk_size;
+
+    for (uint16 nthBlock = 0; nthBlock < nBlocks; nthBlock++) {
+        auto size = AddCompactCompressedPage(ptr, nthBlock, newChunkPos);
+
+        if (size < 0) {
+            ereport(ERROR, (errcode_for_file_access(),
+                    errmsg("[BACKUP] failed to stream the valid %uth block in extent %lu of "
+                           "file %s, total read times: %lu", nthBlock, m_currentExtent,
+                           m_fileName, m_retriedRead)));
+            return false;
+        }
+
+        /* read the next block */
+        ptr += size;
+    }
+
+    Assert(static_cast<size_t>(ptr - m_streamExtent) < gExtentSizeInBytes);
+    newPca->nblocks = nBlocks;
+    newPca->allocated_chunks = newChunkPos - 1;
+
+    return true;
 }
 
 /*
@@ -2231,7 +2557,7 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     if ((fname = strstr(readfilename, UNDO_META_FILE)) != NULL) {
         return SendUndoMeta(fp, statbuf);
     }
-    
+
     /* Because pg_control file is shared in all instance when dss is enabled. Here pg_control of primary id
      * need to send to main standby in standby cluster, so we must seek a postion accoring to primary id.
      * Then content of primary id will be read.
@@ -2240,7 +2566,7 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
         int read_size = BUFFERALIGN(sizeof(ControlFileData));
         statbuf->st_size = read_size;
     }
-    
+
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {
         if (t_thrd.walsender_cxt.walsender_ready_to_stop)
             ereport(ERROR, (errcode_for_file_access(), errmsg("base backup receive stop message, aborting backup")));
@@ -2457,7 +2783,7 @@ static bool SendUndoMeta(FILE *fp, struct stat *statbuf)
     Assert(statbuf != NULL);
     if (statbuf->st_size != undometaSize) {
         (void)FreeFile(fp);
-        ereport(ERROR, (errmsg("Undometa size[%d] error", statbuf->st_size)));
+        ereport(ERROR, (errmsg("Undometa size[%ld] error", statbuf->st_size)));
     }
     pgoff_t len = 0;
     MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
