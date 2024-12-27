@@ -224,10 +224,6 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
             long index;
             float value;
 
-            if (nnz == SPARSEVEC_MAX_NNZ) {
-                ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                                errmsg("sparsevec cannot have more than %d non-zero elements", SPARSEVEC_MAX_NNZ)));
-            }
             if (nnz == maxNnz) {
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -358,6 +354,7 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
                  errmsg("invalid input syntax for type sparsevec: \"%s\"", lit), errdetail("Junk after closing.")));
 
     CheckDim(dim);
+    CheckNnz(nnz, dim);
     CheckExpectedDim(typmod, dim);
 
     qsort(elements, nnz, sizeof(SparseInputElement), CompareIndices);
