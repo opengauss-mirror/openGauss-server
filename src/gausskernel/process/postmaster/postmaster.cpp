@@ -198,6 +198,7 @@
 
 #ifdef ENABLE_HTAP
 #include "access/htap/imcstore_delta.h"
+#include "access/htap/imcucache_mgr.h"
 #endif
 
 #include "access/twophase.h"
@@ -9759,6 +9760,10 @@ void ExitPostmaster(int status)
     /* Save llt data to disk before postmaster exit */
 #ifdef ENABLE_LLT
     HLLT_Coverage_SaveCoverageData();
+#endif
+
+#ifdef ENABLE_HTAP
+    IMCUDataCacheMgr::ResetInstance();
 #endif
 
     // flush stdout buffer before _exit

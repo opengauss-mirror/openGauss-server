@@ -167,6 +167,9 @@ public:
     ~CacheMgr(){};
     void Init(int64 cache_size, uint32 each_block_size, MgrCacheType type, uint32 each_slot_length);
     void Destroy(void);
+#ifdef ENABLE_HTAP
+    void FreeImcstoreCache(void);
+#endif
 
     /* operate cache block */
     void InitCacheBlockTag(CacheTag* cacheTag, int32 type, const void* key, int32 length) const;

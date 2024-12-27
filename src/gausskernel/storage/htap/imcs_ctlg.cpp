@@ -36,6 +36,7 @@
 #include "utils/guc_storage.h"
 #include "pgxc/execRemote.h"
 #include "libpq/libpq.h"
+#include "replication/walreceiver.h"
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcs_ctlg.h"
 
@@ -87,6 +88,21 @@ bool CheckIsInTrans()
         return true;
     }
     return false;
+}
+
+void CheckWalRcvIsRunning(uint32 nScan)
+{
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        if (pg_atomic_read_u32(&g_instance.imcstore_cxt.is_walrcv_down) == WALRCV_STATUS_DOWN) {
+            ereport(ERROR, (errmsg("HTAP parallel populate error, walreceiver is not running, is_walrcv_down: %d",
+                WALRCV_STATUS_DOWN)));
+        }
+        if (nScan % CHECK_WALRCV_FREQ == 0 && !WalRcvIsRunning()) {
+            pg_atomic_write_u32(&g_instance.imcstore_cxt.is_walrcv_down, WALRCV_STATUS_DOWN);
+            ereport(ERROR, (errmsg("HTAP parallel populate error, walreceiver is not running, is_walrcv_down: %d",
+                WALRCV_STATUS_DOWN)));
+        }
+    }
 }
 
 static FORCE_INLINE int CompareAttrNumberFunc(const void *left, const void *right)
@@ -280,7 +296,14 @@ void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNat
     }
     PG_CATCH();
     {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+            pg_atomic_read_u32(&g_instance.imcstore_cxt.is_walrcv_down) == WALRCV_STATUS_DOWN) {
+            pg_atomic_write_u32(&g_instance.imcstore_cxt.is_walrcv_down, WALRCV_STATUS_UP);
+            IMCUDataCacheMgr::ResetInstance();
+            PG_RE_THROW();
+        }
         IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
+        IMCU_CACHE->ClearImcsMem(RelationGetRelid(rel), &(rel->rd_node));
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -439,6 +462,7 @@ void ParallelPopulateImcsMain(const BgWorkerContext *bwc)
     uint32 curStartBlock;
     uint32 curEndBlock;
     uint32 preBlkno;
+    uint32 nScan = 0;
 
     PopulateSharedContext *shared = (PopulateSharedContext *)bwc->bgshared;
     Relation rel = ParallelImcsOpenRelation(shared->rel);
@@ -478,6 +502,8 @@ void ParallelPopulateImcsMain(const BgWorkerContext *bwc)
             }
             imcstoreInsert.AppendOneTuple(val, null);
             imcs_free_uheap_tuple(tuple);
+
+            CheckWalRcvIsRunning(nScan++);
         }
 
         /* make sure that last batch data is inserted */
@@ -950,18 +976,20 @@ static int HandleImcsResponse(PGXCNodeHandle *conn, RemoteQueryState *combiner)
     return RESPONSE_EOF;
 }
 
-static void HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
+static bool HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
 {
+    bool hasError = false;
     RemoteQueryState *combiner = NULL;
     combiner = CreateResponseCombiner(connCount, COMBINE_TYPE_NONE);
     while (connCount > 0) {
         if (pgxc_node_receive(connCount, tempConnections, NULL)) {
             int errorCode;
             char *errorMsg = getSocketError(&errorCode);
-
-            ereport(ERROR, (errcode(errorCode),
-                errmsg("Failed to read response from Datanodes while sending rel_id for HTAP populate. Detail: %s\n",
+            hasError = true;
+            ereport(WARNING, (errcode(errorCode),
+                errmsg("Failed to read response from Datanodes while sending rel_id for HTAP populate. Detail: %s",
                 errorMsg)));
+            break;
         }
         int i = 0;
         while (i < connCount) {
@@ -972,11 +1000,14 @@ static void HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
                 if (--connCount > i)
                     tempConnections[i] = tempConnections[connCount];
             } else {
+                hasError = true;
                 tempConnections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
-                ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+                ereport(WARNING, (errcode(ERRCODE_CONNECTION_EXCEPTION),
                     errmsg("Unexpected response from %s while sending rel_id for HTAP populate",
                     tempConnections[i]->remoteNodeName),
                     errdetail("%s", (combiner->errorMessage == NULL) ? "none" : combiner->errorMessage)));
+                if (--connCount > i)
+                    tempConnections[i] = tempConnections[connCount];
             }
         }
         /* report error if any */
@@ -984,6 +1015,7 @@ static void HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
     }
     ValidateAndCloseCombiner(combiner);
     pfree_ext(tempConnections);
+    return hasError;
 }
 
 static void PackBasicImcstoredRequest(
@@ -1076,7 +1108,10 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
         temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
     }
 
-    HandlePgxcReceive(connCount, temp_connections);
+    if (HandlePgxcReceive(connCount, temp_connections)) {
+        IMCU_CACHE->UpdatePrimaryImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        ereport(ERROR, (errmsg("HTAP populate failed, some standby occurs error.")));
+    }
 }
 
 void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
@@ -1119,7 +1154,9 @@ void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
         temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
     }
 
-    HandlePgxcReceive(connCount, temp_connections);
+    if (HandlePgxcReceive(connCount, temp_connections)) {
+        ereport(ERROR, (errmsg("HTAP unpopulate failed, some standby occurs error.")));
+    }
 }
 
 void CopyTupleInfo(Tuple tuple, Datum* curVal, uint32 *blkno)

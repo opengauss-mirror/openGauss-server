@@ -1391,6 +1391,7 @@ typedef struct knl_g_imcstore_context {
     MpmcBoundedQueue<IMCStoreVacuumTarget> *vacuum_queue;
 
     pg_atomic_uint32 imcs_tbl_cnt;
+    pg_atomic_uint32 is_walrcv_down;
 } knl_g_imcstore_context;
 #endif
 

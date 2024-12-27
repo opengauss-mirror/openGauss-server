@@ -52,6 +52,10 @@
 #include "access/ustore/knl_whitebox_test.h"
 #endif
 
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_ctlg.h"
+#endif
+
 const int SIZE_OF_TWO_UINT64 = 16;
 
 knl_instance_context g_instance;
@@ -304,6 +308,7 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
     InitIMCStoreVacuumQueue(context);
 
     pg_atomic_init_u32(&(context->imcs_tbl_cnt), 0);
+    pg_atomic_init_u32(&(context->is_walrcv_down), WALRCV_STATUS_UP);
 }
 #endif
 
