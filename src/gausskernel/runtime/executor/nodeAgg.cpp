@@ -977,7 +977,7 @@ static void process_ordered_aggregate_single(
         } else {
             advance_transition_function(aggstate, peraggstate, pergroupstate);
             /* forget the old value, if any */
-            if (!oldIsNull && !peraggstate->inputtypeByVal)
+            if (!oldIsNull && !peraggstate->inputtypeByVal && !peraggstate->aggref->aggstar)
                 pfree(DatumGetPointer(oldVal));
             /* and remember the new one for subsequent equality checks */
             oldVal = *newVal;
@@ -988,7 +988,7 @@ static void process_ordered_aggregate_single(
         MemoryContextSwitchTo(oldContext);
     }
 
-    if (!oldIsNull && !peraggstate->inputtypeByVal)
+    if (!oldIsNull && !peraggstate->inputtypeByVal && !peraggstate->aggref->aggstar)
         pfree(DatumGetPointer(oldVal));
 
     tuplesort_end(peraggstate->sortstates[aggstate->current_set]);
@@ -4268,7 +4268,7 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
             Assert(node->aggstrategy != AGG_HASHED);
 
             /* If we have only one input, we need its len/byval info. */
-            if (numInputs == 1) {
+            if (numInputs == 1 && !aggref->aggstar) {
                 get_typlenbyval(inputTypes[numDirectArgs], &peraggstate->inputtypeLen, &peraggstate->inputtypeByVal);
             } else if (numDistinctCols > 0) {
                 /* we will need an extra slot to store prior values */

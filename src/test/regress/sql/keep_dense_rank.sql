@@ -58,6 +58,18 @@ insert into keep_table values (7, NULL, 24);
 insert into keep_table values (8, NULL, 24);
 select sum(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep_table;
 select count(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep_table;
+drop table t1 cascade;
+create table t1(a clob, b int, c int);
+insert into t1 values('10',20,1);
+insert into t1 values('10',21,2);
+insert into t1 values('11',20,4);
+insert into t1 values('11',21,8);
+insert into t1 values('12',21,10);
+
+select avg(all a) from t1;
+select avg(all a) keep(dense_rank first order by b) from t1;
+select count(*) keep(dense_rank first order by b) from t1;
+drop table t1 cascade;
 \c regression;
 drop database if exists keep_func_adb;
 --only A_FORMAT support keep func
