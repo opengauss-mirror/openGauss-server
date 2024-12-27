@@ -819,7 +819,7 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 #define ANYSETOID		3272
 
 DATA(insert OID = 4408 ( undefined		PGNSP PGUID  -2 f u W f t \054 0 0 0 undefinedin undefinedout undefinedrecv undefinedsend - - - c p f 0 -1 0 0 _null_ _null_ _null_ ));
-DESCR("undefined objects as PLSQL compilation time");
+DESCR("undefined objects at PLSQL compilation time");
 #define UNDEFINEDOID		4408
 /*
  * macros
