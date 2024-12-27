@@ -2821,6 +2821,9 @@ typedef struct knl_t_storage_context {
     bool isSwitchoverLockHolder;
     int num_held_lwlocks;
     struct LWLockHandle* held_lwlocks;
+    TimestampTz* lwlock_held_times;
+    bool trace_lwlock_time;
+
     int lock_addin_request;
     bool lock_addin_request_allowed;
     int counts_for_pid;

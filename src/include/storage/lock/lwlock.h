@@ -448,6 +448,7 @@ extern void wakeup_victim(LWLock *lock, ThreadId victim_tid);
 extern int *get_held_lwlocks_num(void);
 extern uint32 get_held_lwlocks_maxnum(void);
 extern void* get_held_lwlocks(void);
+extern void* get_lwlock_held_times(void);
 extern void copy_held_lwlocks(void* heldlocks, lwlock_id_mode* dst, int num_heldlocks);
 extern const char* GetLWLockIdentifier(uint32 classId, uint16 eventId);
 extern LWLockMode GetHeldLWLockMode(LWLock* lock);

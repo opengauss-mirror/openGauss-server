@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_lwlock_status() CASCADE;

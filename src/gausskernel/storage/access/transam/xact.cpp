@@ -2566,6 +2566,7 @@ static void StartTransaction(bool begin_on_gtm)
     CallXactCallbacks(XACT_EVENT_START);
 #endif
 
+    t_thrd.storage_cxt.trace_lwlock_time = module_logging_is_on(MOD_LWLOCK);
     if (module_logging_is_on(MOD_TRANS_XACT)) {
         ereport(LOG, (errmodule(MOD_TRANS_XACT),
                       errmsg("start transaction succ. In Node %s, trans state: %s -> %s.",
@@ -3177,6 +3178,7 @@ static void CommitTransaction(bool STP_commit)
     oldstate = s->state;
     s->state = TRANS_DEFAULT;
 
+    t_thrd.storage_cxt.trace_lwlock_time = false;
     if (module_logging_is_on(MOD_TRANS_XACT)) {
         ereport(LOG, (errmodule(MOD_TRANS_XACT),
                       errmsg("Local Node %s: local commit process completed, trans state : %s -> %s",
@@ -3614,6 +3616,7 @@ static void PrepareTransaction(bool STP_commit)
      * back to default
      */
     s->state = TRANS_DEFAULT;
+    t_thrd.storage_cxt.trace_lwlock_time = false;
 
     RESUME_INTERRUPTS();
 
@@ -4067,6 +4070,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     t_thrd.xact_cxt.callPrint = false;
     u_sess->catalog_cxt.myLobTempToastNamespace = InvalidOid;
     u_sess->plsql_cxt.ActiveLobToastOid = InvalidOid;
+    t_thrd.storage_cxt.trace_lwlock_time = false;
 }
 
 static void CleanupTransaction(void)
