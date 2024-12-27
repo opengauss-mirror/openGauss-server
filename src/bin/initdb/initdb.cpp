@@ -5412,10 +5412,24 @@ static bool CheckInitialPasswd(const char* dbuser, const char* pass_wd)
     }
 
     /* passwd must contain at least eight characters*/
+    /* password can't contain more than 32 characters. */
     slen = strlen(pass_wd);
-    if (slen < 8) {
-        write_stderr(_("passwd must contain at least eight characters\n"));
+    if (slen < 8 || slen > 32) {
+        write_stderr(_("passwd must contain at least eight characters and"
+                       "password can't contain more than 32 characters.\n"));
         return false;
+    }
+
+    /* password cannot contain characters except numbers, alphabetic characters and specified special characters. */
+    ptr = pass_wd;
+    while (*ptr != '\0') {
+        if (isalnum(*ptr) || IsSpecialCharacter(*ptr)) {
+            ptr++;
+        } else {
+            write_stderr(_("Password cannot contain characters except numbers, alphabetic characters and"
+                           "specified special characters.\n"));
+            return false;
+        }
     }
 
     /* passwd should not equal to the rolname*/
