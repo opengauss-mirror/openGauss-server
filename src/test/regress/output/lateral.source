@@ -2658,6 +2658,20 @@ LATERAL ( SELECT * FROM t3 WHERE t3.a > t1.a LIMIT 1 ) t4d;
 drop table t1;
 drop table t2;
 drop table t3;
+create table apply(apply int);
+create table lateral(lateral int);
+select * from apply;
+ apply 
+-------
+(0 rows)
+
+select * from lateral;
+ lateral 
+---------
+(0 rows)
+
+drop table apply;
+drop table lateral;
 drop table tt1;
 drop table tt2;
 drop table tt3;

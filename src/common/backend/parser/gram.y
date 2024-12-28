@@ -31628,6 +31628,7 @@ unreserved_keyword:
 			| ALWAYS
 			| APP
 			| APPEND
+			| APPLY
 			| ARCHIVE
 			| ASSERTION
 			| ASSIGNMENT
@@ -31856,7 +31857,7 @@ unreserved_keyword:
 			| LC_COLLATE_P
 			| LC_CTYPE_P
 			| LEAKPROOF
-                        | LEVEL
+			| LEVEL
 			| LINES
 			| LIST
 			| LISTEN
@@ -32034,7 +32035,7 @@ unreserved_keyword:
 			| SHIPPABLE
 			| SHOW
 			| SHUTDOWN
-                        | SIBLINGS
+			| SIBLINGS
 			| SIMPLE
 			| SIZE
 			| SKIP
@@ -32051,7 +32052,7 @@ unreserved_keyword:
 			| STABLE
 			| STACKED_P
 			| STANDALONE_P
-                        | START
+			| START
 			| STARTING
 			| STARTS
 			| STATEMENT
@@ -32110,7 +32111,7 @@ unreserved_keyword:
 			| UNUSABLE
 			| UPDATE
 			| USE_P
-                        | USEEOF
+			| USEEOF
 			| VACUUM
 			| VALID
 			| VALIDATE
