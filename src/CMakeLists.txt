@@ -286,6 +286,7 @@ file(GLOB libstdc_files ${GCC_LIB_PATH}/lib64/libstdc++.so.6.0.*)
 file(GLOB to_remove ${GCC_LIB_PATH}/lib64/libstdc++.so.6.*.py)
 list(REMOVE_ITEM libstdc_files ${to_remove})
 install(CODE "execute_process(
+    COMMAND rm -f ${prefix_home}/lib/libstdc++.so.6
     COMMAND cp ${libstdc_files} ${prefix_home}/lib/libstdc++.so.6)"
 )
 
