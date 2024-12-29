@@ -1,0 +1,12 @@
+ customer_name | total_spent
+---------------+-------------
+ Alice         |      250.00
+ Bob           |      200.00
+ Charlie       |
+(3 rows)
+
+ customer_name | order_amount
+---------------+--------------
+ Alice         |      150.00
+ Bob           |      200.00
+(2 rows)

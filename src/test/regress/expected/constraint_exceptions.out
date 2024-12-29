@@ -1,0 +1,10 @@
+ERROR:  duplicate key value violates unique constraint "products_product_name_key"
+DETAIL:  Key (product_name)=(Laptop) already exists.
+
+ERROR:  new row for relation "products" violates check constraint "products_price_check"
+DETAIL:  Failing row contains (2, Smartphone, -500.00).
+
+ product_name |  price
+--------------+---------
+ Laptop       | 1000.00
+(1 row)

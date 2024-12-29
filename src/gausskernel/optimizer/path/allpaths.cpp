@@ -4405,6 +4405,20 @@ void debug_print_rel(PlannerInfo* root, RelOptInfo* rel)
     printf("\n");
     fflush(stdout);
 }
+void set_plain_rel_pathlist(PlannerInfo *root, RelOptInfo *rel, int rti, RangeTblEntry *rte)
+{
+    /* 判断是否需要全表扫描 */
+    if (rel->rows > 10000)
+    {
+        elog(NOTICE, "Switching to index scan for large tables");
+        add_path(rel, (Path *) create_index_path(root, rel, NULL, 0));
+    }
+    else
+    {
+        /* 默认路径 */
+        add_path(rel, (Path *) create_seqscan_path(root, rel, NULL, 0));
+    }
+}
 
 #endif /* OPTIMIZER_DEBUG */
 
