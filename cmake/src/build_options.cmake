@@ -109,7 +109,7 @@ else()
 endif()
 
 message(STATUS "status ENV{DEBUG_TYPE}" $ENV{DEBUG_TYPE})
-if($ENV{DEBUG_TYPE} STREQUAL "debug" OR ${ENABLE_LLT} OR ${ENABLE_UT})
+if("${DEBUG_TYPE}" STREQUAL "debug" OR ${CMAKE_BUILD_TYPE} OR ${ENABLE_MOT})
     #there are two definitions for debug in mppdb, but they are confilct sometimes. such as roach(DEBUG) and *.S(NO DEBUG)
     set(USE_ASSERT_CHECKING ON)
     set(OPTIMIZE_LEVEL -O0 -g)

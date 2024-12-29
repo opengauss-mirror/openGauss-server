@@ -571,6 +571,22 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define FLOAT4TOBPCHARFUNCOID 4070
 #define FLOAT8TOBPCHARFUNCOID 4071
 #define NUMERICTOBPCHARFUNCOID 4072
+#define F_VALIDATE_EMAIL 5001
+DATA(insert OID = 5001 ( validate_email  PGNSP PGUID 12 1 0 0 f f f f t i 1 16 "25" _null_ _null_ _null_ validate_email _null_ _null_ _null_ ));
+#define F_GENERATE_ORDER_ID 5002
+DATA(insert OID = 5002 ( generate_order_id PGNSP PGUID 12 1 0 0 f f f f t i 0 25 "" _null_ _null_ _null_ generate_order_id _null_ _null_ _null_ ));
+#define F_IS_WEEKEND 5003
+DATA(insert OID = 5003 ( is_weekend PGNSP PGUID 12 1 0 0 f f f f t i 1 16 "1082" _null_ _null_ _null_ is_weekend _null_ _null_ _null_ ));
+#define F_GET_QUERY_EXEC_TIME 5007
+DATA(insert OID = 5007 ( get_query_execution_time PGNSP PGUID 12 1 0 0 f f f f t i 1 701 "23" _null_ _null_ _null_ get_query_execution_time _null_ _null_ _null_ ));
+#define F_PG_STAT_DISK_IO 5008
+DATA(insert OID = 5008 ( pg_stat_disk_io PGNSP PGUID 12 1 0 0 f f f f t i 0 2249 "" _null_ _null_ _null_ pg_stat_disk_io _null_ _null_ _null_ ));
+#define F_RECORD_TABLE_CHANGES 5009
+DATA(insert OID = 5009 ( record_table_changes PGNSP PGUID 12 1 0 0 f f f f t i 0 2279 "" _null_ _null_ _null_ record_table_changes _null_ _null_ _null_ ));
+#define F_HASH_INSERT_OPT 5010
+DATA(insert OID = 5010 ( hash_insert_opt PGNSP PGUID 12 1 0 0 f f f f t i 1 2278 "2278" _null_ _null_ _null_ hash_insert_opt _null_ _null_ _null_ ));
+
+
 
 #endif   /* PG_PROC_H */
 

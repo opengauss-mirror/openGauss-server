@@ -823,3 +823,6 @@ test: ledger_table_case
 
 # wlm_memory_trace
 test: wlm_memory_trace
+test: trigger_functionality
+test: complex_queries
+test: constraint_exceptions
