@@ -3178,7 +3178,8 @@ bool CheckSegmentStorageOption(List *options)
              */
             if (def->arg) {
                 const char *valstr = defGetString(def);
-                if (pg_strcasecmp(valstr, "off") == 0)
+                bool is_segment = DatumGetBool(DirectFunctionCall1(boolin, CStringGetDatum(valstr)));
+                if (!is_segment)
                     result = false;
             }
             break;
