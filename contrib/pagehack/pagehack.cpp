@@ -89,6 +89,7 @@
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
 #include "utils/timestamp.h"
+#include "utils/rel.h"
 #include "cstore.h"
 #include "common/build_query/build_query.h"
 #include <libgen.h>
@@ -109,6 +110,7 @@
 #define BASE_PAGE_MAP_BIT_SIZE (BASE_PAGE_MAP_SIZE * BITS_PER_BYTE)
 #define DIVIDED_BY_TWO 2
 #define WAL_ID_OFFSET 32
+
 
 typedef unsigned char* binary;
 static const char* indents[] = {  // 10 tab is enough to used.
@@ -818,6 +820,7 @@ typedef enum HackingType {
     HACKING_UHEAP, /* uheap page */
     HACKING_INDEX, /* index page */
     HACKING_UNDO,  /* undo page */
+    HACKING_PCA,   /* pca page */
     HACKING_FILENODE,
     HACKING_INTERNAL_INIT, /* pg_internal.init */
     HACKING_TWOPHASE,      /* two phase file */
@@ -847,6 +850,7 @@ static const char* HACKINGTYPE[] = {"heap",
     "uheap",
     "btree_index",
     "undo",
+    "pca",
     "filenode_map",
     "pg_internal_init",
     "twophase",
@@ -990,6 +994,7 @@ static void usage(const char* progname)
            "\n"
            "Usage:\n"
            "  %s [OPTIONS]\n"
+           "  PCA page parsing case: pagehack -f filename -t pca\n"
            "\nHacking options:\n"
            "  -f FILENAME  the database file to hack\n",
         progname,
@@ -3120,12 +3125,66 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
     return true;
 }
 
+static bool parse_a_pca_page(PageCompression* pageCompression, CfsExtentHeader* header, BlockNumber extend_idx)
+{
+    CfsExtentAddress* CfsExtentAddress;
+
+    Assert(header != nullptr);
+
+    fprintf(stdout, "PCA page information of extend%d:\n", extend_idx);
+    fprintf(stdout, "\tnblock: %u\n", header->nblocks);
+    fprintf(stdout, "\tallocated_chunks: %u\n", header->allocated_chunks);
+    fprintf(stdout, "\tchunk_size: %u\n", header->chunk_size);
+    switch (static_cast<uint8>(header->algorithm)) {
+        case static_cast<uint8>(CompressTypeOption::COMPRESS_TYPE_PGLZ):
+            fprintf(stdout, "\talgorithm: pglz\n");
+            break;
+        case static_cast<uint8>(CompressTypeOption::COMPRESS_TYPE_ZSTD):
+            fprintf(stdout, "\talgorithm: zstd\n");
+            break;
+        case static_cast<uint8>(CompressTypeOption::COMPRESS_TYPE_PGZSTD):
+            fprintf(stdout, "\talgorithm: pgzstd\n");
+            break;
+        default:
+            fprintf(stderr, "\tUnrecognized compression algorithm\n");
+            return false;
+    }
+    fprintf(stdout, "\trecycleInOrder: %u\n", header->recycleInOrder);
+
+    for (size_t i = 0; i < header->nblocks; ++i) {
+        CfsExtentAddress = pageCompression->GetPCAExtendAddress(header, i);
+        
+        fprintf(stdout, "\tblock: %u's \n", i);
+
+        uint32 current_checksum = AddrChecksum32(CfsExtentAddress, CfsExtentAddress->allocated_chunks);
+        fprintf(stdout, "\t\tPage's checksum: %u , recaculate checksum: %u ", CfsExtentAddress->checksum, current_checksum);
+        if (CfsExtentAddress->checksum == current_checksum) {
+            fprintf(stdout, ", they are same\n");
+        } else {
+            fprintf(stdout, ", they are different\n");
+        }
+        
+        fprintf(stdout, "\t\tchunkno: [ ");
+
+        uint8 nchunks = CfsExtentAddress->nchunks;
+        for (uint8 chunkNum = 0; chunkNum < nchunks; chunkNum++) {
+            fprintf(stdout, "%u ", CfsExtentAddress->chunknos[chunkNum]);
+        }
+        fprintf(stdout, "]\n");
+    }
+
+    return true;
+}
+
 static BlockNumber CalculateMaxBlockNumber(BlockNumber maxBlockNumber, BlockNumber start, BlockNumber number)
 {
     /* parse */
     BlockNumber endBlockNumber = InvalidBlockNumber;
-    if (start >= maxBlockNumber) {
+    if (start > maxBlockNumber) {
         (void)fprintf(stderr, "start point exceeds the total block number of relation.\n");
+        return InvalidBlockNumber;
+    } else if (start == maxBlockNumber) {
+        (void)fprintf(stderr, "it is an empty relation\n");
         return InvalidBlockNumber;
     } else if ((start + number) > maxBlockNumber) {
         (void)fprintf(stderr, "don't have %u blocks from block %u in the relation, only %u blocks\n", number, start,
@@ -3137,6 +3196,27 @@ static BlockNumber CalculateMaxBlockNumber(BlockNumber maxBlockNumber, BlockNumb
         endBlockNumber = number + start;
     }
     return endBlockNumber;
+}
+
+static BlockNumber parse_file_segno(const char* filename, size_t filename_len) {
+    char point = '.';
+    const char* last_point = strrchr(filename, point);
+    BlockNumber segno = 0;
+
+    if (last_point == NULL) {
+        segno = 0;
+    } else {
+        /* parse the file's segno */
+        for (size_t i = last_point - filename + 1; i < filename_len; ++i) {
+            if (filename[i] >= '0' && filename[i] <= '9') {
+                segno = segno * 10 + filename[i] - '0';
+            } else {
+                break;
+            }
+        }
+    }
+
+    return segno;
 }
 
 static void MarkBufferDirty(char *buffer, size_t len)
@@ -3207,6 +3287,58 @@ static int parse_page_file(const char *filename, SegmentType type, const uint32 
         start++;
     }
     delete pageCompression;
+    return true;
+}
+
+static bool parse_pca_page_file(const char *filename, const uint32 start_point, const uint32 number_read)
+{
+    BlockNumber start;
+    BlockNumber blknum;
+    BlockNumber number;
+    BlockNumber extentNumber;
+
+    if (!IsCompressedFile(filename, strlen(filename))) {
+        fprintf(stderr, "%s is not a compressed file\n", filename);
+        return false;
+    }
+
+    SegNo = parse_file_segno(filename, strlen(filename));
+    fprintf(stdout, "file's segno is %d\n", SegNo);
+    
+    std::unique_ptr<PageCompression> pageCompression = std::make_unique<PageCompression>();
+    if (pageCompression == NULL) {
+        fprintf(stderr, "compression page new failed\n");
+        return false;
+    }
+    
+    if (pageCompression->Init(filename, (BlockNumber)SegNo) != SUCCESS) {
+        fprintf(stderr, "init compressed file failed, filename: %s , SegNo: %d\n", filename, SegNo);
+        return false;
+    }
+
+    start = start_point;
+    blknum = pageCompression->GetMaxBlockNumber();
+    number = CalculateMaxBlockNumber(blknum, start, number_read);
+    extentNumber = pageCompression->GetExtentNumber();
+
+    if (number == InvalidBlockNumber) {
+        return false;
+    }
+
+    for (BlockNumber extIdx = 0; extIdx < extentNumber; ++extIdx)
+    {
+        /* read header */
+        auto header = pageCompression->GetHeaderByExtentNumber(extIdx);
+        if (header == nullptr) {
+            fprintf(stderr, "PCA page read failed\n");
+            return false;
+        }
+        if (!parse_a_pca_page(pageCompression.get(), header, extIdx)) {
+            fprintf(stderr, "parsing extend%d PCA page failed\n", extIdx);
+            return false;
+        }
+    }
+    
     return true;
 }
 
@@ -6097,6 +6229,13 @@ int main(int argc, char** argv)
         case HACKING_UNDO:
             if (!parse_page_file(filename, SEG_UNDO, start_point, num_block)) {
                 fprintf(stderr, "Error during parsing heap file %s\n", filename);
+                exit(1);
+            }
+            break;
+
+        case HACKING_PCA:
+            if (!parse_pca_page_file(filename, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing pca file %s\n", filename);
                 exit(1);
             }
             break;

@@ -64,13 +64,16 @@ public:
     FILE* fd = nullptr;
     BlockNumber GetSegmentNo() const;
     BlockNumber GetMaxBlockNumber() const;
+    BlockNumber GetExtentNumber() const;
     size_t ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign = false);
     bool WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber, int32 size, CfsCompressOption *option = nullptr);
     bool DecompressedPage(const char *src, char *dest) const;
     bool WriteBackUncompressedData(const char *uncompressed, size_t uncompressedLen, char *buffer, size_t size,
                                    BlockNumber blkNumber);
+    CfsExtentAddress* GetPCAExtendAddress(CfsExtentHeader* header, BlockNumber blockNum);
     COMPRESS_ERROR_STATE TruncateFile(BlockNumber newBlockNumber);
     const char *GetInitPath() const;
+    CfsExtentHeader* GetHeaderByExtentNumber(BlockNumber extentCount, CfsCompressOption *option = nullptr);
 public:
     static bool SkipCompressedFile(const char *fileName, size_t len);
     static bool IsIntegratedPage(const char *buffer, int segmentNo, BlockNumber blkNumber);
@@ -83,7 +86,6 @@ private:
     CfsHeaderMap cfsHeaderMap;
     BlockNumber segmentNo;
     CfsExtentHeader* GetStruct(BlockNumber blockNum, CfsCompressOption *option = nullptr);
-    CfsExtentHeader* GetHeaderByExtentNumber(BlockNumber extentCount, CfsCompressOption *option = nullptr);
 };
 
 #endif  // OPENGAUSS_SERVER_PAGECOMPRESSION_H

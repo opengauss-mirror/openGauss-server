@@ -235,6 +235,11 @@ BlockNumber PageCompression::GetMaxBlockNumber() const
     return this->blockNumber;
 }
 
+BlockNumber PageCompression::GetExtentNumber() const
+{
+    return this->extentIdx + 1;
+}
+
 bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber, int32 size,
                                                 CfsCompressOption *option)
 {
@@ -564,6 +569,11 @@ bool PageCompression::WriteBackUncompressedData(const char *compressed, size_t c
         free(workBuffer);
     }
     return result;
+}
+
+CfsExtentAddress* PageCompression::GetPCAExtendAddress(CfsExtentHeader* header, BlockNumber blockNum)
+{
+    return GetExtentAddress(header, (uint16)blockNum);
 }
 
 COMPRESS_ERROR_STATE PageCompression::TruncateFile(BlockNumber newBlockNumber)
