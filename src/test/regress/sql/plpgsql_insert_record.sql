@@ -193,4 +193,45 @@ drop function testInsertRecordError5;
 drop function testInsertRecordError6;
 drop function testForInsertRec;
 drop function testForInsertRecError1;
+
+CREATE TABLE yc_define (
+    yc_name character varying(128),
+    yc_alias character varying(64)
+);
+
+CREATE OR REPLACE FUNCTION proc_insert_sy_table(sy_table_name_in   VARCHAR(200),
+                                      sy_name_field_in   VARCHAR(200),
+                                      sy_alias_field_in  VARCHAR(200),
+                                      new_sy_name_in     VARCHAR(200),
+                                      new_sy_alias_in    VARCHAR(200),
+                                      out ret bool)
+RETURNS bool
+LANGUAGE 'plpgsql'
+AS $$
+BEGIN
+    ret = true;
+    RETURN true;
+END$$;
+
+CREATE OR REPLACE FUNCTION ti_yc_define_trigger_function()
+RETURNS TRIGGER
+LANGUAGE 'plpgsql'
+AS $$
+declare
+    res bool;
+BEGIN
+    res := proc_insert_sy_table('yc_define', 'yc_name', 'yc_alias', NEW.yc_name, NEW.yc_alias);
+    RETURN NEW;
+END$$;
+
+CREATE TRIGGER ti_yc_define
+BEFORE INSERT ON yc_define FOR EACH ROW
+EXECUTE PROCEDURE ti_yc_define_trigger_function();
+
+insert into yc_define (yc_name,yc_alias) values ('风场F022洺 E3CBClosureCounter','F022.T5_L3.WTG131.WCNV.CBClosureCounter');
+insert into yc_define (yc_name,yc_alias) values ('风场F022洺 E3CBClosureCounter','F022.T5_L3.WTG131.WCNV.CBClosureCounter');
+
+drop table yc_define;
+drop function proc_insert_sy_table;
+drop function ti_yc_define_trigger_function;
 drop schema if exists plpgsql_table;
