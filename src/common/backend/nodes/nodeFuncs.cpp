@@ -853,6 +853,9 @@ Oid exprCollation(const Node* expr)
         case T_UserVar:
             if (IsA(((UserVar*)expr)->value, FuncExpr)) {
                 coll = ((const FuncExpr*)(((UserVar*)expr)->value))->funccollid;
+            } else if (IsA(((UserVar*)expr)->value, RelabelType)) {
+                RelabelType* r = (RelabelType*)(((UserVar*)expr)->value);
+                coll = exprCollation((const Node*)(r->arg));
             } else {
                 coll = ((const Const*)(((UserVar*)expr)->value))->constcollid;
             }
