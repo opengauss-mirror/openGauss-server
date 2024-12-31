@@ -6632,6 +6632,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     int i_proargtypes;
     int i_prorettype;
     int i_proacl;
+    int i_propackageid;
     Oid* triggerFuncOid = NULL;
     int triggerFuncOidNum = 0;
 
@@ -6663,7 +6664,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     if (fout->remoteVersion >= 70300) {
         /* enable_hashjoin in this sql */
         appendPQExpBuffer(query,
-            "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, "
+            "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, propackageid,"
             "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
             "prorettype, proacl, "
             "pronamespace, "
@@ -6694,7 +6695,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
         appendPQExpBuffer(query, ")");
     } else if (fout->remoteVersion >= 70100) {
         appendPQExpBuffer(query,
-            "SELECT tableoid, oid, proname, prolang, "
+            "SELECT tableoid, oid, proname, prolang, propackageid,"
             "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, prorettype, "
             "'{=X}' AS proacl, "
             "0::oid AS pronamespace, "
@@ -6709,7 +6710,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
             "SELECT "
             "(SELECT oid FROM pg_class "
             " WHERE relname = 'pg_proc') AS tableoid, "
-            "oid, proname, prolang, "
+            "oid, proname, prolang, propackageid,"
             "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, prorettype, "
             "'{=X}' AS proacl, "
             "0::oid AS pronamespace, "
@@ -6739,6 +6740,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     i_proargtypes = PQfnumber(res, "proargtypes");
     i_prorettype = PQfnumber(res, "prorettype");
     i_proacl = PQfnumber(res, "proacl");
+    i_propackageid = PQfnumber(res, "propackageid");
 
     for (i = 0; i < ntups; i++) {
         finfo[i].dobj.objType = DO_FUNC;
@@ -6753,6 +6755,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
         finfo[i].prorettype = atooid(PQgetvalue(res, i, i_prorettype));
         finfo[i].proacl = gs_strdup(PQgetvalue(res, i, i_proacl));
         finfo[i].nargs = (int)strtol(PQgetvalue(res, i, i_pronargs), &endptr, 10);
+        finfo[i].propackageid = atooid(PQgetvalue(res, i, i_propackageid));
         if (finfo[i].nargs > INT_MAX / (int)sizeof(Oid)) {
             exit_horribly(NULL, "the number is overflow.\n");
         }

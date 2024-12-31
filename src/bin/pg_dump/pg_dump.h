@@ -175,6 +175,7 @@ typedef struct _funcInfo {
     Oid* argtypes;
     Oid prorettype;
     char* proacl;
+    Oid propackageid;
 } FuncInfo;
 
 
