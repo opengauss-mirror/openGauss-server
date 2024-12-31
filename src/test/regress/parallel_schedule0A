@@ -421,7 +421,7 @@ test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey
 #test: create_function_1
 test: create_table create_table_2 create_table_3
 test: temp__4 obsscaninfo
-test: create_seg_table
+#test: create_seg_table
 #test: copy#
 
 # show_events

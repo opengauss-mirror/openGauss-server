@@ -10108,11 +10108,6 @@ CreateMatViewStmt:
                                 errmsg("It's not supported to specify distribute key on incremental materialized views")));
                    }
 #endif
-                   if (ENABLE_DMS) {
-                        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("matview is not supported while DMS and DSS enabled.")));
-                   }
-
 				   $$ = (Node *) ctas;
 			   }
 		| CREATE MATERIALIZED VIEW create_mv_target build_deferred AS SelectStmt
@@ -10126,12 +10121,6 @@ CreateMatViewStmt:
 					$4->rel->relpersistence = RELPERSISTENCE_PERMANENT;
 					$4->skipData = $5;
 					$4->ivm = false;
-
-					if (ENABLE_DMS) {
-						ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("matview is not supported while DMS and DSS enabled.")));
-					}
-
 					$$ = (Node *) ctas;
 				}
 		| CREATE MATERIALIZED VIEW create_mv_target AS SelectStmt opt_with_data
@@ -10145,12 +10134,6 @@ CreateMatViewStmt:
 					$4->rel->relpersistence = RELPERSISTENCE_PERMANENT;
 					$4->skipData = !($7);
 					$4->ivm = false;
-
-					if (ENABLE_DMS) {
-						ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("matview is not supported while DMS and DSS enabled.")));
-					}
-
 					$$ = (Node *) ctas;
 				}
 	   ;
