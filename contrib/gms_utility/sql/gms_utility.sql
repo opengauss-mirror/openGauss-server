@@ -942,6 +942,48 @@ select valid from pg_object where object_type='p' and object_oid in (select oid 
 
 drop procedure proc_err;
 
+-- test depend views
+create table employees (
+    employee_id serial primary key,
+    employee_name varchar(100),
+    department_id int,
+    salary numeric(10, 2)
+);
+
+create table departments (
+    department_id serial primary key,
+    department_name varchar(100)
+);
+
+insert into employees (employee_name, department_id, salary) values
+('alice', 1, 75000.00),
+('bob', 2, 80000.00),
+('charlie', 1, 60000.00),
+('david', 3, 90000.00);
+
+insert into departments (department_name) values
+('hr'),
+('engineering'),
+('marketing');
+
+create view high_salary_employees as
+select * from employees where salary > 70000;
+
+create view high_salary_employees_with_department as
+select
+    hse.employee_name,
+    d.department_name,
+    hse.salary
+from high_salary_employees hse
+join departments d on hse.department_id = d.department_id;
+
+call gms_utility.compile_schema('test_utility_compile', true);
+
+drop view high_salary_employees_with_department;
+drop view high_salary_employees;
+drop table departments;
+drop table employees;
+
 drop schema test_utility_compile cascade;
 
 ---------------------------

@@ -721,7 +721,7 @@ static char* CanonicalizeParseInternal(char* name, int len, bool allowAllDigit,
         if (digit) {
             appendStringInfo(result, "%s", tmp->data);
         } else {
-            appendStringInfo(result, dotted ? "\"%s\"." : "%s", tmp->data);
+            appendStringInfo(result, dotted ? "\"%s\"" : "%s", tmp->data);
         }
     }
 
