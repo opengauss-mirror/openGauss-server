@@ -9,6 +9,7 @@
 # usecases for improving coverage 
 # --------------------------
 # these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+test: ai_vector
 test: timecapsule_partition_ustore_test_1
 test: timecapsule_partition_ustore_test_2
 test: ddl
