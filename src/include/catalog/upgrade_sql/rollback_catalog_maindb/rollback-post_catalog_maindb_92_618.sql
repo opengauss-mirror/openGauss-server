@@ -1,1 +1,0 @@
-DROP FUNCTION IF EXISTS pg_catalog.dispatch_stat_detail();
