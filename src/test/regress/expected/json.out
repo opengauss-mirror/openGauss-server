@@ -1214,6 +1214,13 @@ CONTEXT:  referenced column: json_object
 select json_object('{a,b,"","d e f"}','{1,2,3,"a b c"}');
 ERROR:  empty value not allowed for object key
 CONTEXT:  referenced column: json_object
+-- test for empty lists
+select json_object();
+ json_object 
+-------------
+ {}
+(1 row)
+
 -- execced max stack depath
 select json_in(REPEAT('{"a":[', 100000)::cstring);
 ERROR:  stack depth limit exceeded

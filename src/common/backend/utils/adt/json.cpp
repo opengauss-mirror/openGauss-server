@@ -1957,6 +1957,10 @@ Datum json_build_array_noargs(PG_FUNCTION_ARGS)
  */
 Datum json_object(PG_FUNCTION_ARGS)
 {
+    if (fcinfo->nargs == 0) {
+        PG_RETURN_DATUM(CStringGetTextDatum("{}"));
+    }
+
     ArrayType *in_array = PG_GETARG_ARRAYTYPE_P(0);
     int ndims = ARR_NDIM(in_array);
     StringInfoData result;
