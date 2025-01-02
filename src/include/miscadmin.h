@@ -668,7 +668,7 @@ typedef enum {
 #define AmWLMArbiterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WLMArbiterWorkerProcess)
 #define AmCPMonitorProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CPMonitorProcess)
 #define AmCBMWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CBMWriterProcess)
-#define AmCBMRealWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CBMRealWriterProcess)
+#define AmCBMReaderProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CBMReaderProcess)
 #define AmRemoteServiceProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == RemoteServiceProcess)
 #define AmPageWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess)
 #define AmPageWriterMainProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess && \

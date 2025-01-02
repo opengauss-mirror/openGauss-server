@@ -165,7 +165,7 @@ typedef enum NodeTag {
      *
      * These should correspond one-to-one with Plan node types.
      */
-    T_PlanState = 200,
+    T_PlanState = 201,
     T_ResultState,
     T_ProjectSetState,
     T_VecToRowState,

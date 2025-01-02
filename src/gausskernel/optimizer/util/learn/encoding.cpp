@@ -49,9 +49,9 @@ typedef struct {
 } OperationInfo;
 
 #ifdef USE_SPQ
-const unsigned int G_MAX_OPERATION_NUMBER = 69;
+const unsigned int G_MAX_OPERATION_NUMBER = 70;
 #else
-const unsigned int G_MAX_OPERATION_NUMBER = 65;
+const unsigned int G_MAX_OPERATION_NUMBER = 66;
 #endif
 
 const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {

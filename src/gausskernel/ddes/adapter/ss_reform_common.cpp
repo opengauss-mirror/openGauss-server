@@ -106,7 +106,7 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
 }
 
 int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf,
-    int readLen)
+    int readLen, int readFile)
 {
     uint32 preReadOff;
 
@@ -130,7 +130,7 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
             // pre-reading for dss
             uint32 targetPageOff = targetPagePtr % XLogSegSize;
             preReadOff = targetPageOff - targetPageOff % XLogPreReadSize;
-            ssize_t actualBytes = pread(t_thrd.xlog_cxt.readFile, xlogreader->preReadBuf, XLogPreReadSize, preReadOff);
+            ssize_t actualBytes = pread(readFile, xlogreader->preReadBuf, XLogPreReadSize, preReadOff);
             if (actualBytes != XLogPreReadSize) {
                 return false;
             }
@@ -146,8 +146,17 @@ XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private
     XLogReaderState *state = XLogReaderAllocate(pagereadfunc, private_data, alignedSize);
     if (state != NULL) {
         state->preReadStartPtr = InvalidXlogPreReadStartPtr;
-        state->preReadBufOrigin = (char *)palloc_extended(XLogPreReadSize + alignedSize,
-            MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+        if (AmCBMReaderProcess()) {
+            /* If I am CBM Reader Process, we will use the my context buffer as originBuf. */
+            if (t_thrd.cbm_cxt.preReadBuff == NULL) {
+                t_thrd.cbm_cxt.preReadBuff = (char *)palloc_extended(XLogPreReadSize + alignedSize,
+                    MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+            }
+            state->preReadBufOrigin = t_thrd.cbm_cxt.preReadBuff;
+        } else {
+            state->preReadBufOrigin = (char *)palloc_extended(XLogPreReadSize + alignedSize,
+                MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+        }
         if (state->preReadBufOrigin == NULL) {
             pfree(state->errormsg_buf);
             state->errormsg_buf = NULL;

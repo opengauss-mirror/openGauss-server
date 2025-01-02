@@ -93,6 +93,7 @@ typedef struct XlogBitmapStruct {
     HTAB* cbmPageHash;
     int totalPageNum;
     Dllist pageFreeList;
+    CBMXlogRead xlogRead;
 } XlogBitmap;
 
 typedef struct cbmpageheader {

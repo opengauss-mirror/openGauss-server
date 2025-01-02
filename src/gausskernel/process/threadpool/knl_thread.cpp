@@ -219,6 +219,7 @@ static void knl_t_cbm_init(knl_t_cbm_context* cbm_cxt)
     cbm_cxt->CBMReaderIndex = -1;
     cbm_cxt->cbmPageHash = NULL;
     cbm_cxt->totalPageNum = 0;
+    cbm_cxt->preReadBuff = NULL;
 }
 
 static void knl_t_shemem_ptr_init(knl_t_shemem_ptr_context* shemem_ptr_cxt)

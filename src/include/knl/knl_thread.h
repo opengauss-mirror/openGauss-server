@@ -848,6 +848,7 @@ typedef struct knl_t_cbm_context {
     HTAB* cbmPageHash;
     Dllist pageFreeList;
     int totalPageNum;
+    char* preReadBuff;
 } knl_t_cbm_context;
 
 /* thread local pointer to the shared memory */
