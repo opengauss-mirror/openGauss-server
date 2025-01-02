@@ -9332,7 +9332,13 @@ read_sql_construct6(int until,
                     if (datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
                         PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
                         PLpgSQL_rec *rec = (PLpgSQL_rec *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[rec_field->recparentno];
+                        MemoryContext old_cxt = NULL;
+                        if (u_sess->plsql_cxt.curr_compile_context->compile_cxt != NULL)
+                            old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_cxt);
                         rec->field_need_check = lappend_int(rec->field_need_check, dno);
+                        if (old_cxt != NULL) {
+                            MemoryContextSwitchTo(old_cxt);
+                        }
                     }
                     if(prev_tok != '.' && list_length(idents) >= 3) {
                         plpgsql_cast_reference_list(idents, &ds, false);

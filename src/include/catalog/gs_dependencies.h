@@ -30,14 +30,14 @@
 #define DependenciesRelationId 7111
 #define DependenciesRelationId_Rowtype_Id 7112
 
-CATALOG(gs_dependencies,7111) BKI_SCHEMA_MACRO BKI_WITHOUT_OIDS
+CATALOG(gs_dependencies,7111) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(7112) BKI_SCHEMA_MACRO
 {
-   NameData schemaname;
-   NameData packagename;
-   int4 refobjpos;
-   Oid refobjoid;
+    NameData schemaname;
+    NameData packagename;
+    int4 refobjpos;
+    Oid refobjoid;
 #ifdef CATALOG_VARLEN
-   text objectname;
+    text objectname;
 #endif
 } FormData_gs_dependencies;
 
