@@ -297,7 +297,8 @@ void set_recursive_cteplan_ref(Plan* node, RecursiveRefContext* context)
 
     /* First, assign join type of nearest node */
     if (nodeTag(node) == T_HashJoin || nodeTag(node) == T_VecHashJoin || nodeTag(node) == T_MergeJoin ||
-        nodeTag(node) == T_VecMergeJoin || nodeTag(node) == T_NestLoop || nodeTag(node) == T_VecNestLoop) {
+         nodeTag(node) == T_VecMergeJoin || nodeTag(node) == T_NestLoop || nodeTag(node) == T_VecNestLoop ||
+         nodeTag(node) == T_AsofJoin || nodeTag(node) == T_VecAsofJoin) {
         context->join_type = nodeTag(node);
     }
 

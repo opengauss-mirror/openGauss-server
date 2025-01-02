@@ -687,3 +687,84 @@ bool SonicHashFilePartition::isValid()
     }
     return true;
 }
+
+SonicSortPartition::SonicSortPartition(const char *cxtname, bool hasHash, TupleDesc tupleDesc, int64 workMem)
+    : SonicHashPartition(cxtname, tupleDesc->natts, workMem)
+{
+    MemoryContext old_ctx = MemoryContextSwitchTo(m_context);
+    m_data = NULL;
+    m_sortState = NULL;
+    m_isSpill = false;
+    m_hash = NULL;
+    m_bucket = NULL;
+    m_hashSize = 0;
+    m_bucketTypeSize = 0;
+    m_mask = 0;
+    m_cmpIdx = 0;
+    m_fetchCount = 0;
+    const uint8 HashDataDescNum = 4;
+
+    if (hasHash) {
+        /* init m_hash to store the hash value */
+        DatumDesc *desc = (DatumDesc *)palloc0(sizeof(DatumDesc));
+        getDataDesc(desc, HashDataDescNum, NULL, false);
+        m_hash = New(m_context) SonicIntTemplateDatumArray<uint32>(m_context, INIT_DATUM_ARRAY_SIZE, false, desc);
+    }
+
+    (void)MemoryContextSwitchTo(old_ctx);
+
+    m_status = partitionStatusMemory;
+}
+
+/*
+ * @Description: init m_data according to desc per column
+ * @return - void.
+ */
+void SonicSortPartition::init(uint16 colIdx, DatumDesc *desc)
+{
+    Assert(false);
+}
+
+/*
+ * @Description: put hash values into SonicIntTemplateDatumArray
+ * @in hashValue - pointer of hash values
+ * @in nrows - rows to put
+ */
+void SonicSortPartition::putHash(uint32 *hashValues, uint64 nrows)
+{
+    Assert(false);
+}
+
+/*
+ * @Description: free context, file buffer and close file handler
+ */
+void SonicSortPartition::freeResources()
+{
+    if (m_sortState != NULL) {
+        batchsort_end(m_sortState);
+    }
+    if (m_context != NULL) {
+        /* reset the m_context */
+        MemoryContextReset(m_context);
+        /* Delete child context for m_hashContext */
+        MemoryContextDelete(m_context);
+        m_context = NULL;
+    }
+}
+
+/* @Description: check if data is valid
+ * @return - true if every m_data[column] has the same number of rows.
+ */
+bool SonicSortPartition::isValid()
+{
+    return true;
+}
+
+/* @Description: set select flag
+ * @in  row number
+ */
+void SonicSortPartition::SetMatch(int idx)
+{
+    Assert(idx < m_data->m_rows);
+    m_data->m_sel[idx] = true;
+}

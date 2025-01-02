@@ -1,0 +1,157 @@
+/*
+ * This file is used to test the function of ExecVecAsofJoin()
+ */
+----
+--- Create Table and Insert Data
+----
+CREATE TABLE prices(
+	ticker char(10),
+	pa integer,
+	wh timestamp,
+	price DECIMAL(10,2))with(orientation=column);
+CREATE TABLE holdings(  
+	ticker char(10),
+	pa integer,
+	wh timestamp,
+	shares DECIMAL(10,2))with(orientation=column);
+ 
+insert into  prices values('APPL', 1, '2001-01-01 00:00:00', 1);
+insert into  prices values('APPL', 1,  '2001-01-01 00:01:00', 2);
+insert into  prices values('APPL', 1, '2001-01-01 00:02:00', 3);
+insert into  prices values('MSFT', 2, '2001-01-01 00:00:00', 1);
+insert into  prices values('MSFT', 2, '2001-01-01 00:01:00', 2);
+insert into  prices values('MSFT', 2, '2001-01-01 00:02:00', 3);
+insert into  prices values('GOOG', 1, '2001-01-01 00:00:00', 1);
+insert into  prices values('GOOG', 1,'2001-01-01 00:01:00', 2);
+insert into  prices values('GOOG', 1,'2001-01-01 00:02:00', 3);
+insert into  holdings values('APPL', 1, '2000-12-31 23:59:30', 5.16);
+insert into  holdings values('APPL', 2, '2001-01-01 00:00:30', 2.94);
+insert into  holdings values('APPL', 1, '2001-01-01 00:01:30', 24.13);
+insert into  holdings values('MSFT', 1, '2000-12-31 23:59:30', 9.33);
+insert into  holdings values('MSFT', 2, '2001-01-01 00:00:30', 23.45);
+insert into  holdings values('MSFT', 1, '2001-01-01 00:01:30', 10.58);
+insert into  holdings values('DATA', 1, '2000-12-31 23:59:30', 6.65);
+insert into  holdings values('DATA', 1, '2001-01-01 00:00:30', 17.95);
+insert into  holdings values('DATA', 1, '2001-01-01 00:01:30', 18.37);
+----
+--- Normal Case
+----
+set query_dop = 1;
+SELECT h.ticker, h.wh, price * shares AS total 
+FROM holdings h 
+ASOF JOIN prices p ON h.ticker = p.ticker AND h.wh >= p.wh order by h.ticker;
+   ticker   |            wh            |  total  
+------------+--------------------------+---------
+ APPL       | Mon Jan 01 00:00:30 2001 |  2.9400
+ APPL       | Mon Jan 01 00:01:30 2001 | 48.2600
+ MSFT       | Mon Jan 01 00:00:30 2001 | 23.4500
+ MSFT       | Mon Jan 01 00:01:30 2001 | 21.1600
+(4 rows)
+
+explain (verbose on, costs off) 
+SELECT h.ticker, h.wh, price * shares AS total 
+FROM holdings h 
+ASOF JOIN prices p ON h.ticker = p.ticker AND h.wh >= p.wh order by h.ticker;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Row Adapter
+   Output: h.ticker, h.wh, ((p.price * h.shares))
+   ->  Vector Sort
+         Output: h.ticker, h.wh, ((p.price * h.shares))
+         Sort Key: h.ticker
+         ->  Vector Asof Join
+               Output: h.ticker, h.wh, (p.price * h.shares)
+               Part Cond: (h.ticker = p.ticker)
+               Merge Cond: (h.wh >= p.wh)
+               ->  CStore Scan on public.holdings h
+                     Output: h.ticker, h.wh, h.shares
+               ->  CStore Scan on public.prices p
+                     Output: p.price, p.ticker, p.wh
+(13 rows)
+
+SELECT h.ticker, h.wh
+FROM (
+  SELECT ticker, 
+   wh,
+   pa
+  FROM holdings 
+)  h ASOF JOIN (
+  SELECT ticker, 
+   wh,
+   pa
+  FROM prices
+) p
+  ON h.ticker = p.ticker AND h.pa = p.pa  AND h.wh >= p.wh order by h.ticker;
+   ticker   |            wh            
+------------+--------------------------
+ APPL       | Mon Jan 01 00:01:30 2001
+ MSFT       | Mon Jan 01 00:00:30 2001
+(2 rows)
+
+SELECT h.ticker, h.wh
+FROM (
+  SELECT ticker, 
+   wh, 
+   pa+1 as pas
+  FROM holdings
+)  h ASOF JOIN (
+  SELECT ticker, 
+   wh, 
+   pa+1 as pas
+  FROM prices
+) p
+  ON h.ticker = p.ticker  AND h.wh >= p.wh AND h.pas >= p.pas order by h.ticker;
+   ticker   |            wh            
+------------+--------------------------
+ APPL       | Mon Jan 01 00:00:30 2001
+ APPL       | Mon Jan 01 00:01:30 2001
+ MSFT       | Mon Jan 01 00:00:30 2001
+(3 rows)
+
+-- SMP case
+set query_dop = 2;
+SELECT h.ticker, h.wh, price * shares AS total 
+FROM holdings h 
+ASOF JOIN prices p ON h.ticker = p.ticker AND h.wh >= p.wh order by h.ticker;
+   ticker   |            wh            |  total  
+------------+--------------------------+---------
+ APPL       | Mon Jan 01 00:00:30 2001 |  2.9400
+ APPL       | Mon Jan 01 00:01:30 2001 | 48.2600
+ MSFT       | Mon Jan 01 00:00:30 2001 | 23.4500
+ MSFT       | Mon Jan 01 00:01:30 2001 | 21.1600
+(4 rows)
+
+explain (verbose on, costs off)
+SELECT h.ticker, h.wh, price * shares AS total 
+FROM holdings h 
+ASOF JOIN prices p ON h.ticker = p.ticker AND h.wh >= p.wh order by h.ticker;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Row Adapter
+   Output: h.ticker, h.wh, ((p.price * h.shares))
+   ->  Vector Sort
+         Output: h.ticker, h.wh, ((p.price * h.shares))
+         Sort Key: h.ticker
+         ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: h.ticker, h.wh, ((p.price * h.shares))
+               ->  Vector Asof Join
+                     Output: h.ticker, h.wh, (p.price * h.shares)
+                     Part Cond: (h.ticker = p.ticker)
+                     Merge Cond: (h.wh >= p.wh)
+                     ->  Vector Streaming(type: LOCAL REDISTRIBUTE dop: 2/1)
+                           Output: h.ticker, h.wh, h.shares
+                           Distribute Key: h.ticker
+                           ->  CStore Scan on public.holdings h
+                                 Output: h.ticker, h.wh, h.shares
+                     ->  Vector Streaming(type: LOCAL REDISTRIBUTE dop: 2/1)
+                           Output: p.price, p.ticker, p.wh
+                           Distribute Key: p.ticker
+                           ->  CStore Scan on public.prices p
+                                 Output: p.price, p.ticker, p.wh
+(21 rows)
+
+----
+--- Clean table and resource
+----
+drop table prices;
+drop table holdings;

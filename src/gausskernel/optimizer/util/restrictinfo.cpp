@@ -23,9 +23,9 @@
 
 static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bool is_pushed_down,
     bool outerjoin_delayed, bool pseudoconstant, Index security_level, Relids required_relids, Relids outer_relids,
-    Relids nullable_relids);
+    Relids nullable_relids, bool is_asof);
 static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool outerjoin_delayed, bool pseudoconstant,
-    Index sucurity_level, Relids required_relids, Relids outer_relids, Relids nullable_relids);
+    Index sucurity_level, Relids required_relids, Relids outer_relids, Relids nullable_relids, bool is_asof);
 
 /*
  *
@@ -42,7 +42,7 @@ static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool oute
  * later.
  */
 RestrictInfo* make_restrictinfo(Expr* clause, bool is_pushed_down, bool outerjoin_delayed, bool pseudoconstant,
-    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids)
+    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids, bool is_asof)
 {
     /*
      * If it's an OR clause, build a modified copy with RestrictInfos inserted
@@ -56,7 +56,8 @@ RestrictInfo* make_restrictinfo(Expr* clause, bool is_pushed_down, bool outerjoi
             security_level,
             required_relids,
             outer_relids,
-            nullable_relids);
+            nullable_relids,
+            is_asof);
 
     /* Shouldn't be an AND clause, else AND/OR flattening messed up */
     AssertEreport(!and_clause((Node*)clause), MOD_OPT, "");
@@ -69,7 +70,8 @@ RestrictInfo* make_restrictinfo(Expr* clause, bool is_pushed_down, bool outerjoi
         security_level,
         required_relids,
         outer_relids,
-        nullable_relids);
+        nullable_relids,
+        is_asof);
 }
 
 /*
@@ -188,7 +190,7 @@ List* make_restrictinfo_from_bitmapqual(Path* bitmapqual, bool is_pushed_down, b
         else {
             /* Here's the magic part not available to outside callers */
             result = list_make1(make_restrictinfo_internal(
-                make_orclause(withoutris), make_orclause(withris), is_pushed_down, false, false, 0, NULL, NULL, NULL));
+                make_orclause(withoutris), make_orclause(withris), is_pushed_down, false, false, 0, NULL, NULL, NULL, false));
         }
     } else if (IsA(bitmapqual, IndexPath)) {
         IndexPath* ipath = (IndexPath*)bitmapqual;
@@ -206,7 +208,7 @@ List* make_restrictinfo_from_bitmapqual(Path* bitmapqual, bool is_pushed_down, b
                  */
                 if (!predicate_implied_by(list_make1(pred), result))
                     result =
-                        lappend(result, make_restrictinfo(pred, is_pushed_down, false, false, 0, NULL, NULL, NULL));
+                        lappend(result, make_restrictinfo(pred, is_pushed_down, false, false, 0, NULL, NULL, NULL, false));
             }
         }
     } else {
@@ -255,7 +257,7 @@ List* make_restrictinfos_from_actual_clauses(PlannerInfo* root, List* clause_lis
             root->hasPseudoConstantQuals = true;
         }
 
-        rinfo = make_restrictinfo(clause, true, false, pseudoconstant, 0, NULL, NULL, NULL);
+        rinfo = make_restrictinfo(clause, true, false, pseudoconstant, 0, NULL, NULL, NULL, false);
         result = lappend(result, rinfo);
     }
     return result;
@@ -268,7 +270,7 @@ List* make_restrictinfos_from_actual_clauses(PlannerInfo* root, List* clause_lis
  */
 static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bool is_pushed_down,
     bool outerjoin_delayed, bool pseudoconstant, Index security_level, Relids required_relids, Relids outer_relids,
-    Relids nullable_relids)
+    Relids nullable_relids, bool is_asof)
 {
     RestrictInfo* restrictinfo = makeNode(RestrictInfo);
     errno_t rc = EOK; /* Initialize rc to keep compiler slient */
@@ -282,6 +284,7 @@ static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bo
     restrictinfo->security_level = security_level;
     restrictinfo->outer_relids = outer_relids;
     restrictinfo->nullable_relids = nullable_relids;
+    restrictinfo->is_asof = is_asof;
 
     /*
      * If it's potentially delayable by lower-level security quals, figure out
@@ -380,7 +383,7 @@ static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bo
  * contained rels.
  */
 static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool outerjoin_delayed, bool pseudoconstant,
-    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids)
+    Index security_level, Relids required_relids, Relids outer_relids, Relids nullable_relids, bool is_asof)
 {
     if (or_clause((Node*)clause)) {
         List* orlist = NIL;
@@ -395,7 +398,8 @@ static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool oute
                     security_level,
                     NULL,
                     outer_relids,
-                    nullable_relids));
+                    nullable_relids,
+                    is_asof));
         return (Expr*)make_restrictinfo_internal(clause,
             make_orclause(orlist),
             is_pushed_down,
@@ -404,7 +408,8 @@ static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool oute
             security_level,
             required_relids,
             outer_relids,
-            nullable_relids);
+            nullable_relids,
+            is_asof);
     } else if (and_clause((Node*)clause)) {
         List* andlist = NIL;
         ListCell* temp = NULL;
@@ -418,7 +423,8 @@ static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool oute
                     security_level,
                     required_relids,
                     outer_relids,
-                    nullable_relids));
+                    nullable_relids,
+                    is_asof));
         return make_andclause(andlist);
     } else
         return (Expr*)make_restrictinfo_internal(clause,
@@ -429,7 +435,8 @@ static Expr* make_sub_restrictinfos(Expr* clause, bool is_pushed_down, bool oute
             security_level,
             required_relids,
             outer_relids,
-            nullable_relids);
+            nullable_relids,
+            is_asof);
 }
 
 /*

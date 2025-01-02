@@ -3265,6 +3265,12 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             (void)finalize_primnode((Node*)((Join*)plan)->joinqual, &context);
             (void)finalize_primnode((Node*)((MergeJoin*)plan)->mergeclauses, &context);
             break;
+        
+        case T_AsofJoin:
+            (void)finalize_primnode((Node*)((Join*)plan)->joinqual, &context);
+            (void)finalize_primnode((Node*)((AsofJoin*)plan)->hashclauses, &context);
+            (void)finalize_primnode((Node*)((AsofJoin*)plan)->mergeclauses, &context);
+            break;
 
         case T_HashJoin: {
             (void)finalize_primnode((Node*)((Join*)plan)->joinqual, &context);

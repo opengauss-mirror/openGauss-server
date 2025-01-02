@@ -3670,6 +3670,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * target list of the query according to the new targetlist
                      * set above. For now do this only for SELECT statements.
                      */
+
                     if (IsA(result_plan, RemoteQuery) && parse->commandType == CMD_SELECT && !permit_gather(root)) {
                         pgxc_rqplan_adjust_tlist(
                             root, (RemoteQuery*)result_plan, ((RemoteQuery*)result_plan)->is_simple ? false : true);
@@ -10179,6 +10180,28 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
             CostVectorHashJoin((Join*)result_plan, planContext);
         } break;
 
+        case T_AsofJoin: {
+           
+            Join* j = (Join*)result_plan;
+            if (j->jointype != JOIN_INNER)
+                return true;
+
+            AsofJoin* aj = (AsofJoin*)result_plan;
+            /* Find unsupport expr in *Hash* clause */
+            if (vector_engine_unsupport_expression_walker((Node*)aj->hashclauses, planContext))
+                return true;
+            /* Find unsupport expr in *Join* clause */
+            if (vector_engine_unsupport_expression_walker((Node*)aj->join.joinqual, planContext))
+                return true;
+            if (vector_engine_unsupport_expression_walker((Node*)aj->join.nulleqqual, planContext))
+                return true;
+
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
+                return true;
+            if (vector_engine_walker_internal(result_plan->righttree, check_rescan, planContext))
+                return true;
+        } break;
+
         case T_Append: {
             Append* append = (Append*)result_plan;
             ListCell* lc = NULL;
@@ -10526,6 +10549,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
             }
         case T_MergeJoin:
         case T_NestLoop:
+        case T_AsofJoin:
             result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
             result_plan->righttree = vectorize_plan(result_plan->righttree, ignore_remotequery, forceVectorEngine);
 
@@ -10588,11 +10612,13 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
                 plan = vectorize_plan(plan, ignore_remotequery, forceVectorEngine);
                 lfirst(lc) = plan;
                 if (!IsVecOutput(plan)) {
+
                     if (u_sess->attr.attr_sql.enable_force_vector_engine)
                         lfirst(lc) = (Plan*)make_rowtovec(plan);
                     isVec = false;
                 }
             }
+
             if (isVec == true || u_sess->attr.attr_sql.enable_force_vector_engine) {
                 return build_vector_plan(result_plan);
             } else {
@@ -10675,6 +10701,9 @@ static Plan* build_vector_plan(Plan* plan)
             break;
         case T_MergeJoin:
             plan->type = T_VecMergeJoin;
+            break;
+        case T_AsofJoin:
+            plan->type = T_VecAsofJoin;
             break;
         case T_WindowAgg:
             plan->type = T_VecWindowAgg;

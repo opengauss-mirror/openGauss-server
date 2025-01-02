@@ -1199,6 +1199,18 @@ typedef struct HashJoin {
 } HashJoin;
 
 /* ----------------
+ *		asof join node
+ * ----------------
+ */
+
+typedef struct AsofJoin {
+    Join join;
+    List* hashclauses;
+    List* mergeclauses; /* mergeclauses as expression trees */
+    bool streamBothSides;
+} AsofJoin;
+
+/* ----------------
  *		materialization node
  * ----------------
  */
@@ -1578,6 +1590,7 @@ typedef struct VecPartIterator : public PartIterator {
 // vector aggregation.
 
 typedef struct HashJoin VecHashJoin;
+typedef struct AsofJoin VecAsofJoin;
 typedef struct Agg VecAgg;
 typedef struct SetOp VecSetOp;
 typedef struct Unique VecUnique;

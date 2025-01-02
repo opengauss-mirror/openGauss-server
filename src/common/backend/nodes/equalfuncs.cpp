@@ -785,6 +785,7 @@ static bool _equalJoinExpr(const JoinExpr* a, const JoinExpr* b)
     COMPARE_SCALAR_FIELD(rtindex);
     COMPARE_SCALAR_FIELD(is_straight_join);
     COMPARE_SCALAR_FIELD(is_apply_join);
+    COMPARE_SCALAR_FIELD(isAsof);
 
     return true;
 }

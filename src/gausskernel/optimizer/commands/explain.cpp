@@ -2316,6 +2316,8 @@ static void ExplainNode(
         case T_VecNestLoop:
         case T_VecMergeJoin:
         case T_MergeJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_HashJoin:
         case T_VecHashJoin: {
             const char* jointype = NULL;
@@ -2656,6 +2658,7 @@ static void ExplainNode(
     switch (nodeTag(plan)) {
         case T_NestLoop:
         case T_MergeJoin:
+        case T_AsofJoin:
         case T_HashJoin:
             if (es->format != EXPLAIN_FORMAT_TEXT || (es->verbose && ((Join *) plan)->inner_unique))
                 ExplainProperty("Inner Unique", ((Join *) plan)->inner_unique?"true":"false", true, es);
@@ -2986,6 +2989,13 @@ static void ExplainNode(
         }
             show_vechash_info((VecHashJoinState*)planstate, es);
             break;
+
+        case T_AsofJoin:
+        case T_VecAsofJoin: {
+            show_upper_qual(((VecAsofJoin*)plan)->hashclauses, "Part Cond", planstate, ancestors, es);
+            show_upper_qual(((VecAsofJoin*)plan)->join.joinqual, "Merge Cond", planstate, ancestors, es);
+            show_skew_optimization(planstate, es);
+        } break;            
         case T_VecAgg:
         case T_Agg:
             show_groupby_keys((AggState*)planstate, ancestors, es);
@@ -3473,6 +3483,8 @@ static void CalculateProcessedRows(
         case T_VecNestLoop:
         case T_VecMergeJoin:
         case T_MergeJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_HashJoin:
         case T_VecHashJoin:
             *processed_rows = (*inner_rows) + (*outter_rows);
@@ -3793,6 +3805,8 @@ static void show_skew_optimization(const PlanState* planstate, ExplainState* es)
         case T_VecNestLoop:
         case T_HashJoin:
         case T_VecHashJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_MergeJoin:
         case T_VecMergeJoin:
             skew_opt = ((Join*)planstate->plan)->skewoptimize;
@@ -10495,6 +10509,12 @@ void PlanTable::set_plan_table_join_options(Plan* plan, char** options)
         case T_VecHashJoin: {
             HashJoin* hashjoin = (HashJoin*)plan;
             if (hashjoin->hashclauses == NULL)
+                *options = "CARTESIAN";
+        } break;
+        case T_AsofJoin:
+        case T_VecAsofJoin: {
+            VecAsofJoin* asofjoin = (VecAsofJoin*)plan;
+            if (asofjoin->hashclauses == NULL || asofjoin->mergeclauses == NULL)
                 *options = "CARTESIAN";
         } break;
         default:

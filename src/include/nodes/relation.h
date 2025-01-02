@@ -781,7 +781,7 @@ typedef struct RelOptInfo {
     struct Path* cheapest_unique_path;
     List* cheapest_parameterized_paths;
 
-    
+
     /* parameterization information needed for both base rels and join rels */
     /* (see also lateral_vars and lateral_referencers) */
     Relids direct_lateral_relids; /* rels directly laterally referenced */
@@ -1586,6 +1586,24 @@ typedef struct HashPath {
     double joinRows;
 } HashPath;
 
+/*
+ * A asofjoin path has these fields.
+ *
+ * The remarks above for mergeclauses apply for hashclauses as well.
+ *
+ * Hashjoin does not care what order its inputs appear in, so we have
+ * no need for sortkeys.
+ */
+typedef struct AsofPath {
+    JoinPath jpath;
+    List *path_hashclauses;   /* join clauses used for hashing */
+    List *path_mergeclauses;  /* join clauses to be used for merge */
+    List *outersortkeys;      /* keys for explicit sort, if any */
+    List *innersortkeys;      /* keys for explicit sort, if any */
+    OpMemInfo outer_mem_info; /* Mem info for outer explicit sort */
+    OpMemInfo inner_mem_info; /* Mem info for inner explicit sort */
+} AsofPath;
+
 #ifdef PGXC
 /*
  * A remotequery path represents the queries to be sent to the datanode/s
@@ -1848,6 +1866,9 @@ typedef struct RestrictInfo {
 
     /* transient workspace for use while considering a specific join path */
     bool outer_is_left; /* T = outer var on left, F = on right */
+
+    /* true if clause is asofjoinable, else false: */
+    bool is_asof;
 
     /* valid if clause is hashjoinable, else InvalidOid: */
     Oid hashjoinoperator; /* copy of clause operator */
@@ -2254,6 +2275,10 @@ typedef struct JoinCostWorkspace {
     /* private for cost_hashjoin code */
     int numbuckets;
     int numbatches;
+
+    /* private for cost_asofjoin code */
+    double inner_distinct_num;
+    double outer_distinct_num;
 
     /* Meminfo for joins */
     OpMemInfo outer_mem_info;

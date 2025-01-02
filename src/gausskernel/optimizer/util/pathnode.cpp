@@ -229,8 +229,10 @@ PathCostComparison compare_join_single_node_distribution(Path* path1, Path* path
         return COSTS_DIFFERENT;
     }
 
-    if((path1->pathtype != T_NestLoop && path1->pathtype != T_MergeJoin && path1->pathtype != T_HashJoin)
-        || (path2->pathtype != T_NestLoop && path2->pathtype != T_MergeJoin && path2->pathtype != T_HashJoin)) {    
+    if((path1->pathtype != T_NestLoop && path1->pathtype != T_MergeJoin 
+     && path1->pathtype != T_HashJoin && path1->pathtype != T_AsofJoin )
+    || (path2->pathtype != T_NestLoop && path2->pathtype != T_MergeJoin 
+    && path2->pathtype != T_HashJoin && path2->pathtype != T_AsofJoin)) {    
         return COSTS_DIFFERENT;
     } 
 
@@ -4528,6 +4530,85 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
 }
 
 /*
+ * create_asofjoin_path
+ *	  Creates a pathnode corresponding to a asof join between two relations.
+ *
+ * 'joinrel' is the join relation
+ * 'jointype' is the type of join required
+ * 'workspace' is the result from initial_cost_hashjoin
+ * 'extra' contains various information about the join
+ * 'semifactors' contains valid data if jointype is SEMI or ANTI
+ * 'outer_path' is the cheapest outer path
+ * 'inner_path' is the cheapest inner path
+ * 'restrict_clauses' are the RestrictInfo nodes to apply at the join
+ * 'required_outer' is the set of required outer rels
+ * 'hashclauses' are the RestrictInfo nodes to use as hash clauses
+ *		(this should be a subset of the restrict_clauses list)
+ * 'mergeclauses' are the RestrictInfo nodes to use as merge clauses
+ *		(this should be a subset of the restrict_clauses list)
+ * 'outersortkeys' are the sort varkeys for the outer relation
+ * 'innersortkeys' are the sort varkeys for the inner relation
+ */
+AsofPath* create_asofjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinCostWorkspace* workspace,
+    JoinPathExtraData *extra, Path* outer_path, Path* inner_path, List* restrict_clauses, Relids required_outer, 
+    List* hashclauses,  List* mergeclauses, List* outersortkeys, List* innersortkeys, int dop)
+{
+    AsofPath* pathnode = makeNode(AsofPath);
+    bool try_eq_related_indirectly = false;
+
+    pathnode->jpath.path.pathtype = T_AsofJoin;
+    pathnode->jpath.path.parent = joinrel;
+    pathnode->jpath.path.pathtarget = joinrel->reltarget;
+    pathnode->jpath.path.param_info =
+        get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, extra->sjinfo, required_outer, &restrict_clauses);
+
+    /*
+     * A hashjoin never has pathkeys, since its output ordering is
+     * unpredictable due to possible batching.      XXX If the inner relation is
+     * small enough, we could instruct the executor that it must not batch,
+     * and then we could assume that the output inherits the outer relation's
+     * ordering, which might save a sort step.      However there is considerable
+     * downside if our estimate of the inner relation size is badly off. For
+     * the moment we don't risk it.  (Note also that if we wanted to take this
+     * seriously, joinpath.c would have to consider many more paths for the
+     * outer rel than it does now.)
+     */
+    pathnode->jpath.path.pathkeys = NIL;
+    pathnode->jpath.path.dop = dop;
+    pathnode->jpath.jointype = jointype;
+    pathnode->jpath.inner_unique = extra->inner_unique;
+    pathnode->jpath.outerjoinpath = outer_path;
+    pathnode->jpath.innerjoinpath = inner_path;
+    pathnode->jpath.joinrestrictinfo = restrict_clauses;
+    pathnode->path_hashclauses = hashclauses;
+    pathnode->path_mergeclauses = mergeclauses;
+    pathnode->outersortkeys = outersortkeys;
+    pathnode->innersortkeys = innersortkeys;
+
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(inner_path, outer_path);
+
+#ifdef STREAMPLAN
+    pathnode->jpath.path.locator_type = locator_type_join(inner_path->locator_type, outer_path->locator_type);
+    ProcessRangeListJoinType(&pathnode->jpath.path, outer_path, inner_path);
+
+    if (IS_STREAM_PLAN) {
+        /* add location information for asof join path */
+        Distribution* distribution = ng_get_join_distribution(outer_path, inner_path);
+        ng_copy_distribution(&pathnode->jpath.path.distribution, distribution);
+    }
+#endif
+
+    /* final_cost_asofjoin will fill in pathnode->num_batches */
+    final_cost_asofjoin(root,
+        pathnode,
+        workspace,
+        extra,
+        dop);
+
+    return pathnode;
+}
+
+/*
  * create_projection_path
  *	  Creates a pathnode that represents performing a projection.
  *
@@ -6757,6 +6838,33 @@ static JoinPath* add_join_redistribute_path(PlannerInfo* root, RelOptInfo* joinr
             required_outer,
             hashclauses,
             joinDop);
+    } else if (nodetag == T_AsofJoin) {
+        initial_cost_asofjoin(root, 
+            workspace,
+            jointype, 
+            hashclauses,
+            stream_path_outer,
+            stream_path_inner,
+            restrictlist,
+            outer_pathkeys,
+            inner_pathkeys,
+            &extra,
+            joinDop);
+
+        joinpath = (JoinPath*)create_asofjoin_path(root,
+            joinrel,
+            jointype,
+            workspace,
+            &extra,
+            stream_path_outer,
+            stream_path_inner,
+            restrictlist,
+            required_outer,
+            hashclauses,
+            restrictlist,
+            outer_pathkeys,
+            inner_pathkeys,
+            joinDop);
     } else {
         initial_cost_nestloop(
             root, workspace, jointype, stream_path_outer, stream_path_inner, &extra, joinDop);
@@ -8391,6 +8499,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
     list_free_ext(rrinfo_inner);
     list_free_ext(rrinfo_outer);
 }
+
 
 /*
  * @Description:

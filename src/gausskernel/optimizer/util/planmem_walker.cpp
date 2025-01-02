@@ -433,7 +433,15 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
                 return true;
 #endif
             break;
-
+        case T_AsofJoin:
+        case T_VecAsofJoin:
+            if (walk_join_node_fields((Join*)node, walker, context))
+                return true;
+            if (p2walker((Node*)((VecAsofJoin*)node)->hashclauses, context))
+                return true;
+            if (p2walker((Node*)((VecAsofJoin*)node)->mergeclauses, context))
+                return true;
+            break;
         case T_VecToRow:
         case T_RowToVec:
         case T_VecMaterial:

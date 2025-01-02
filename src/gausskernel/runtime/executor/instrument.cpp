@@ -970,6 +970,10 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             pname = "Vector Nest Loop";
             plan_type = JOIN_OP;
             break;
+        case T_VecAsofJoin:
+            pname = "Vector Asof Join";
+            plan_type = JOIN_OP;
+            break;
         case T_MergeJoin:
             pname = "Merge Join"; /* "Join" gets added by jointype switch */
             plan_type = JOIN_OP;

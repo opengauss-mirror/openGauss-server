@@ -84,6 +84,7 @@ typedef enum NodeTag {
     T_NestLoop,
     T_MergeJoin,
     T_HashJoin,
+    T_AsofJoin,
     T_Material,
     T_Sort,
     T_SortGroup,
@@ -363,6 +364,7 @@ typedef enum NodeTag {
     T_NestPath,
     T_MergePath,
     T_HashPath,
+    T_AsofPath,
     T_TidPath,
     T_ForeignPath,
     T_ExtensiblePath,
@@ -738,6 +740,7 @@ typedef enum NodeTag {
     T_VecNestLoop,
     T_VecMergeJoin,
     T_VecHashJoin,
+    T_VecAsofJoin,
     T_VecMaterial,
     T_VecSort,
     T_VecGroup,
@@ -771,6 +774,7 @@ typedef enum NodeTag {
     T_RowToVecState,
     T_VecAggState,
     T_VecHashJoinState,
+    T_VecAsofJoinState,
     T_VecStreamState,
     T_VecSortState,
     T_VecForeignScanState,
@@ -1150,7 +1154,8 @@ typedef enum JoinType {
     /*
      * We might need additional join types someday.
      */
-    JOIN_STRAIGHT
+    JOIN_STRAIGHT,
+    JOIN_ASOF_INNER
 } JoinType;
 
 /*

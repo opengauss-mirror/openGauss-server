@@ -4137,7 +4137,7 @@ static bool foreign_grouping_ok(PlannerInfo *root, RelOptInfo *grouped_rel, Node
              */
             Assert(!IsA(expr, RestrictInfo));
             rinfo = make_restrictinfo(expr, true, false, false, root->qualSecurityLevel, grouped_rel->relids,
-                NULL, NULL);
+                NULL, NULL, false);
             if (is_foreign_expr(root, grouped_rel, expr)) {
                 fpinfo->remote_conds = lappend(fpinfo->remote_conds, rinfo);
             } else {

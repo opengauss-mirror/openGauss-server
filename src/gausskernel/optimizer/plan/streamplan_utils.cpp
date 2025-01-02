@@ -147,6 +147,14 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->join.joinqual));
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->hashclauses));
         } break;
+        case T_AsofJoin:
+        case T_VecAsofJoin: {
+            VecAsofJoin *splan = (VecAsofJoin *)result_plan;
+
+            res_list = list_concat_unique(res_list, check_eval((Node *)splan->join.joinqual));
+            res_list = list_concat_unique(res_list, check_eval((Node *)splan->hashclauses));
+            res_list = list_concat_unique(res_list, check_eval((Node *)splan->mergeclauses));
+        } break;
         case T_Limit:
         case T_VecLimit: {
             Limit* splan = (Limit*)result_plan;
@@ -359,6 +367,7 @@ void stream_path_walker(Path* path, ContainStreamContext* context)
 
         case T_NestLoop:
         case T_HashJoin:
+        case T_AsofJoin:
         case T_MergeJoin: {
             JoinPath* jp = (JoinPath*)path;
 
@@ -1204,6 +1213,7 @@ bool is_local_redistribute_needed(Plan* subplan)
             break;
         }
         case T_HashJoin:
+        case T_AsofJoin:
         case T_NestLoop: {
             /*
              * If any side need to add local distribute,

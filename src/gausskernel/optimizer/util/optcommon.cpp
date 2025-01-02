@@ -114,6 +114,11 @@ void GetPlanNodePlainText(
                 *sname = *pt_operation = "Vector Hash Join";
             }
             break;
+        case T_AsofJoin:
+        case T_VecAsofJoin:
+            *pname = "Vector Asof";
+            *sname = *pt_operation = "Vector Asof Join";
+            break;
         case T_SeqScan:
             *pt_operation = "TABLE ACCESS";
             if (!((Scan*)plan)->tablesample) {

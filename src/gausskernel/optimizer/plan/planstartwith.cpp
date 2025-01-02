@@ -1965,6 +1965,7 @@ static void BindPlanNodePseudoEntries(PlannerInfo *root, Plan *plan,
         /* process regular case */
         case T_Hash:
         case T_HashJoin:
+        case T_AsofJoin:
         case T_SubqueryScan:
         case T_CteScan:
         case T_NestLoop:

@@ -579,7 +579,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(gather_count);
     WRITE_INT_FIELD(num_nodes);
 
-    if ((t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) && 
+    if ((t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) &&
         node->nodesDefinition != NULL) {
 	    for (int i = 0; i < node->num_nodes; i++) {
 	        /* Write the field name only one time and just append the value of each field */
@@ -1836,6 +1836,17 @@ static void _outVecHashJoin(StringInfo str, VecHashJoin* node)
     WRITE_BOOL_FIELD(rebuildHashTable);
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
+}
+
+static void _outVecAsofJoin(StringInfo str, VecAsofJoin* node)
+{
+    WRITE_NODE_TYPE("VECASOFJOIN");
+
+    _outJoinPlanInfo(str, (Join*)node);
+
+    WRITE_NODE_FIELD(hashclauses);
+    WRITE_NODE_FIELD(mergeclauses);
+    WRITE_BOOL_FIELD(streamBothSides);
 }
 
 static void _outVecHashAgg(StringInfo str, VecAgg* node)
@@ -3298,6 +3309,9 @@ static void _outJoinExpr(StringInfo str, JoinExpr* node)
     if (t_thrd.proc->workingVersionNum >= APPLY_JOIN_VERSION_NUMBER) {
         WRITE_BOOL_FIELD(is_apply_join);
     }
+    if (t_thrd.proc->workingVersionNum >= ASOFJOIN_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isAsof);
+    }
 }
 
 static void _outFromExpr(StringInfo str, FromExpr* node)
@@ -3606,6 +3620,16 @@ static void _outHashPath(StringInfo str, HashPath* node)
 
     WRITE_NODE_FIELD(path_hashclauses);
     WRITE_INT_FIELD(num_batches);
+}
+
+static void _outAsofPath(StringInfo str, AsofPath* node)
+{
+    WRITE_NODE_TYPE("ASOFPATH");
+
+    _outJoinPathInfo(str, (JoinPath*)node);
+
+    WRITE_NODE_FIELD(path_hashclauses);
+    WRITE_NODE_FIELD(path_mergeclauses);
 }
 
 static void _outPlannerGlobal(StringInfo str, PlannerGlobal* node)
@@ -6170,7 +6194,7 @@ static void _outVecLimit(StringInfo str, VecLimit* node)
             }
 
             for (size_t i = 0; i < node->numCols; i++) {
-                if (node->collations[i] >= FirstBootstrapObjectId 
+                if (node->collations[i] >= FirstBootstrapObjectId
                         && IsStatisfyUpdateCompatibility(node->collations[i])) {
                     appendStringInfo(str, " :collname ");
                     _outToken(str, get_collation_name(node->collations[i]));
@@ -7028,6 +7052,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_HashPath:
                 _outHashPath(str, (HashPath*)obj);
                 break;
+            case T_AsofPath:
+                _outAsofPath(str, (AsofPath*)obj);
+                break;
             case T_PlannerGlobal:
                 _outPlannerGlobal(str, (PlannerGlobal*)obj);
                 break;
@@ -7409,6 +7436,11 @@ static void _outNode(StringInfo str, const void* obj)
 
             case T_VecHashJoin:
                 _outVecHashJoin(str, (VecHashJoin*)obj);
+                break;
+
+            case T_AsofJoin:
+            case T_VecAsofJoin:
+                _outVecAsofJoin(str, (VecAsofJoin*)obj);
                 break;
 
             case T_VecAgg:

@@ -254,7 +254,7 @@ static void consider_new_or_clause(PlannerInfo *root, RelOptInfo *rel, Expr *orc
      * Build a RestrictInfo from the new OR clause.  We can assume it's valid
      * as a base restriction clause.
      */
-    or_rinfo = make_restrictinfo(orclause, true, false, false, join_or_rinfo->security_level, NULL, NULL, NULL);
+    or_rinfo = make_restrictinfo(orclause, true, false, false, join_or_rinfo->security_level, NULL, NULL, NULL, false);
 
     /*
      * Estimate its selectivity.  (We could have done this earlier, but doing

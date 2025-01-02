@@ -135,6 +135,7 @@
 #include "vecexecutor/vecnodesort.h"
 #include "vecexecutor/vecmodifytable.h"
 #include "vecexecutor/vechashjoin.h"
+#include "vecexecutor/vecasofjoin.h"
 #include "vecexecutor/vechashagg.h"
 #include "vecexecutor/vecpartiterator.h"
 #include "vecexecutor/vecappend.h"
@@ -415,6 +416,9 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_VecHashJoin:
             return (PlanState*)ExecInitVecHashJoin((VecHashJoin*)node, estate, eflags);
+        case T_AsofJoin:
+        case T_VecAsofJoin:
+            return (PlanState*)ExecInitVecAsofJoin((VecAsofJoin*)node, estate, eflags);
         case T_VecAgg:
             return (PlanState*)ExecInitVecAggregation((VecAgg*)node, estate, eflags);
         case T_CStoreIndexScan:
@@ -1312,6 +1316,10 @@ static void ExecEndNodeByType(PlanState* node)
             ExecEndVecHashJoin((VecHashJoinState*)node);
             break;
 
+        case T_VecAsofJoinState:
+            ExecEndVecAsofJoin((VecAsofJoinState*)node);
+            break;
+            
         case T_VecAggState:
             ExecEndVecAggregation((VecAggState*)node);
             break;

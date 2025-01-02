@@ -540,6 +540,27 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
     return true;
 }
 
+static inline bool IsAsofRelOptInfo(RelOptInfo* rel)
+{
+    ListCell *cell = NULL;
+    foreach (cell, rel->joininfo) {
+        RestrictInfo* ri = (RestrictInfo*)lfirst(cell);
+        if (ri->is_asof) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * IsAsofJoin
+ *	check is it asof join
+ */
+bool IsAsofJoin(RelOptInfo* rel1, RelOptInfo* rel2)
+{
+    return IsAsofRelOptInfo(rel1) && IsAsofRelOptInfo(rel2);
+}
+
 /*
  * make_join_rel
  *	   Find or create a join RelOptInfo that represents the join of
@@ -661,7 +682,9 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
             if (u_sess->attr.attr_sql.dolphin && sjinfo->is_straight_join) {
                 break;
             }
-            add_paths_to_joinrel(root, joinrel, rel2, rel1, JOIN_INNER, sjinfo, restrictlist);
+            if (!IsAsofJoin(rel1, rel2)) {
+                add_paths_to_joinrel(root, joinrel, rel2, rel1, JOIN_INNER, sjinfo, restrictlist);
+            }
             break;
         case JOIN_LEFT:
         case JOIN_LEFT_ANTI_FULL:

@@ -538,6 +538,8 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
         case T_VecNestLoop:
         case T_MergeJoin:
         case T_VecMergeJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_HashJoin:
         case T_VecHashJoin:
             set_join_references(root, (Join*)plan, rtoffset);
@@ -1647,7 +1649,7 @@ static void set_join_references(PlannerInfo* root, Join* join, int rtoffset)
         MergeJoin* mj = (MergeJoin*)join;
 
         mj->mergeclauses = fix_join_expr(root, mj->mergeclauses, outer_itlist, inner_itlist, (Index)0, rtoffset);
-    } else if (IsA(join, HashJoin) || IsA(join, VecHashJoin)) {
+    } else if (IsA(join, HashJoin) || IsA(join, VecHashJoin) || IsA(join, AsofJoin) || IsA(join, VecAsofJoin)) {
         HashJoin* hj = (HashJoin*)join;
 
         hj->hashclauses = fix_join_expr(root, hj->hashclauses, outer_itlist, inner_itlist, (Index)0, rtoffset);

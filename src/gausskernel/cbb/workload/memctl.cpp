@@ -343,6 +343,8 @@ static bool IsMemoryIntensiveOperator(Node* node)
         case T_Sort:
         case T_HashJoin:
         case T_VecHashJoin:
+        case T_AsofJoin:
+        case T_VecAsofJoin:
         case T_VecSort:
             return true;
         /* only hashagg setop is memory intensive */

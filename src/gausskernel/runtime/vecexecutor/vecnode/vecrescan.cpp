@@ -47,6 +47,7 @@
 #include "vecexecutor/vecsubqueryscan.h"
 #include "vecexecutor/vecappend.h"
 #include "vecexecutor/vechashjoin.h"
+#include "vecexecutor/vecasofjoin.h"
 #include "vecexecutor/vechashagg.h"
 #include "vecexecutor/vecnodeforeignscan.h"
 #include "vecexecutor/vecnodecstoreindexheapscan.h"
@@ -61,7 +62,6 @@
 #include "vecexecutor/vectsstorescan.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
 #include "vecexecutor/vecwindowagg.h"
-
 /*
  * VecExecReScan
  *		Reset a plan node so that its output can be re-scanned.
@@ -199,6 +199,9 @@ void VecExecReScan(PlanState* node)
             break;
         case T_VecHashJoinState:
             ExecReScanVecHashJoin((VecHashJoinState*)node);
+            break;
+        case T_VecAsofJoinState:
+            ExecReScanVecAsofJoin((VecAsofJoinState*)node);
             break;
         case T_VecAggState:
             ExecReScanVecAggregation((VecAggState*)node);

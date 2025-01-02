@@ -922,7 +922,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 /* ordinary key words in alphabetical order */
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER, SLICE, DATANODE */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
-	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND APPLY ARCHIVE ARRAY AS ASC
+	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND APPLY ARCHIVE ARRAY AS ASC ASOF_P
         ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_DOUBLE_INF BINARY_DOUBLE_NAN BINARY_INTEGER BIT BLANKS
@@ -1130,7 +1130,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
  * They wouldn't be given a precedence at all, were it not that we need
  * left-associativity among the JOIN rules themselves.
  */
-%left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL ENCRYPTED APPLY OUTER_P
+%left		JOIN CROSS LEFT FULL RIGHT ASOF_P INNER_P NATURAL ENCRYPTED APPLY OUTER_P
 /* kluge to keep xml_whitespace_option from causing shift/reduce conflicts */
 %right		PRESERVE STRIP_P
 %token <keyword> CONSTRUCTOR FINAL MAP MEMBER RESULT SELF STATIC_P UNDER
@@ -26352,6 +26352,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					n->usingClause = NIL;
@@ -26363,6 +26364,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = $2;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					if ($5 != NULL && IsA($5, List))
@@ -26377,6 +26379,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = FALSE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $3;
 					if ($4 != NULL && IsA($4, List))
@@ -26385,11 +26388,28 @@ joined_table:
 						n->quals = $4; /* ON clause */
 					$$ = n;
 				}
+
+			| table_ref ASOF_P JOIN table_ref join_qual
+				{
+					/* letting join_type reduce to empty doesn't work */
+					JoinExpr *n = makeNode(JoinExpr);
+					n->jointype = JOIN_INNER;
+					n->isNatural = FALSE;
+					n->isAsof = TRUE;
+					n->larg = $1;
+					n->rarg = $4;
+					if ($4 != NULL && IsA($5, List))
+						n->usingClause = (List *) $5; /* USING clause */
+					else
+						n->quals = $5; /* ON clause */
+					$$ = n;
+				}
 			| table_ref NATURAL join_type JOIN table_ref
 				{
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = $3;
 					n->isNatural = TRUE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $5;
 					n->usingClause = NIL; /* figure out which columns later... */
@@ -26402,6 +26422,7 @@ joined_table:
 					JoinExpr *n = makeNode(JoinExpr);
 					n->jointype = JOIN_INNER;
 					n->isNatural = TRUE;
+					n->isAsof = FALSE;
 					n->larg = $1;
 					n->rarg = $4;
 					n->usingClause = NIL; /* figure out which columns later... */
@@ -31630,6 +31651,7 @@ unreserved_keyword:
 			| APPEND
 			| APPLY
 			| ARCHIVE
+			| ASOF_P
 			| ASSERTION
 			| ASSIGNMENT
 			| AT
