@@ -51,7 +51,7 @@
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
 #include "storage/file/fio_device.h"
-#define CBM_WRITE_WORKERS_NUM 1
+#include "ddes/dms/ss_reform_common.h"
 
 /* we can put the following globals into XlogCbmSys */
 static XLogRecPtr tmpTargetLSN = InvalidXLogRecPtr;
@@ -90,6 +90,10 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd);
 static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastCBMRecord);
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                            char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
+static int CBMXLogPageReadNormal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, 
+                                 XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
+static int CBMXLogPageReadSS(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                             char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
 static void DestoryCbmHashEntryByCBMWriter(CbmHashEntry *cbmPageEntry, Dllist *pageFreeList);
 static void TrackChangeBlock(XLogReaderState *record);
 static void TrackRelPageModification(XLogReaderState *record);
@@ -189,7 +193,8 @@ extern void InitXlogCbmSys(void)
     CBMFileHomeInitialize();
 
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = -1;
-    for(int i = 0; i < MAX_CBM_READERS_NUMBER; i++) {
+    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+    for (int i = 0; i < MAX_CBM_THREAD_NUM; i++) {
         g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].xlogRead.fd = -1;
     }
     ResetXlogCbmSys();
@@ -378,7 +383,7 @@ extern void ResetXlogCbmSys(void)
     DLInitList(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList);
     t_thrd.cbm_cxt.XlogCbmSys->totalPageNum = 0;
 
-    for(int i = 0; i < MAX_CBM_READERS_NUMBER; i++) {
+    for (int i = 0; i < MAX_CBM_THREAD_NUM; i++) {
         ResetCBMReaderStatus(i, false);
     }
     if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode == NULL) {
@@ -386,6 +391,15 @@ extern void ResetXlogCbmSys(void)
         t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
         t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
     }
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0) {
+        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not close file \"%s\" during reset",
+                                                                t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
+    }
+    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo = 0;
+    rc = memset_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, 0, MAXPGPATH);
+    securec_check(rc, "\0", "\0");
 }
 
 extern void CBMTrackInit(bool startupXlog, XLogRecPtr startupCPRedo)
@@ -867,6 +881,7 @@ extern void CBMWriteAndFollowXlog(void)
     XLogRecPtr checkPointRedo;
     XLogRecPtr tmpEndLSN;
     XLogRecPtr tmpForceEnd;
+    XLogRecPtr originStartLSN;
     bool isRecEnd = false;
     (void)LWLockAcquire(ControlFileLock, LW_SHARED);
     checkPointRedo = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
@@ -963,12 +978,12 @@ extern void CBMWriteAndFollowXlog(void)
                              (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN)));
     }
     t_thrd.cbm_cxt.XlogCbmSys->endLSN = tmpEndLSN;
-
+    originStartLSN = t_thrd.cbm_cxt.XlogCbmSys->startLSN;
     if (!ParseXlogIntoTaskFluent(isRecEnd)) {
         ereport(LOG, (errmsg("Found no any valid xlog record From the already tracked xlog "
                              "LSN %08X/%08X. Skip CBM track this time",
-                             (uint32)(t_thrd.cbm_cxt.XlogCbmSys->startLSN >> 32),
-                             (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN)));
+                             (uint32)(originStartLSN >> 32),
+                             (uint32)originStartLSN)));
 
         t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
         pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_ACCEPT_TASK);
@@ -977,8 +992,8 @@ extern void CBMWriteAndFollowXlog(void)
     }
 
     ereport(LOG, (errmsg("We had tarck LSN  %08X/%08X to %08X/%08X this time.",
-                             (uint32)(t_thrd.cbm_cxt.XlogCbmSys->startLSN >> 32),
-                             (uint32)t_thrd.cbm_cxt.XlogCbmSys->startLSN,
+                             (uint32)(originStartLSN >> 32),
+                             (uint32)originStartLSN,
                              (uint32)(t_thrd.cbm_cxt.XlogCbmSys->endLSN >> 32),
                              (uint32)t_thrd.cbm_cxt.XlogCbmSys->endLSN)));
 
@@ -1122,11 +1137,53 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
     XLogSegNo startSegNo = 0;
     XLogSegNo endSegNo = 0;
     bool isErrorInReadProcess = false;
+    XLogReaderState *xlogreader = NULL;
+    XLogRecPtr firstRecord;
+    XLogPageReadPrivateCBM readprivate;
+
+    if (ENABLE_DSS) {
+        readprivate.datadir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
+    } else {
+        readprivate.datadir = t_thrd.proc_cxt.DataDir;
+    }
+    readprivate.tli = timeLine;
+    
+    xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);
+    if (xlogreader == NULL) {
+        ereport(WARNING, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        return false;
+    }
 
     while (startPoint != endPoint) {
+        if (startPoint % XLogSegmentSize == 0) {
+            /* If it is start position of xlog. */
+            firstRecord = XLogFindNextRecord(xlogreader, startPoint);
+            if (XLByteEQ(firstRecord, endPoint)) {
+                /* 
+                 * Attention: only enter here when the first record position
+                 * is the endLsn, it mean we should not read any xlog record
+                 * in this xlog file. And we will modify the last xlog record's
+                 * end ptr.
+                 */
+                ereport(LOG, (errmsg("No need to contruct CBM Node : ",
+                                                "xlog start: %08X/%08X, endPoint: %08X/%08X",
+                                                (uint32)(startPoint >> 32), (uint32)(startPoint),
+                                                (uint32)(firstRecord >> 32), (uint32)(firstRecord))));
+                if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
+                    /*
+                     * In normal case, this condition is always satisfied.
+                     * We will set last record to end with endPoint;
+                     */
+                    t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev->CBMRecord.endPtr = endPoint;
+                }
+                break;
+            }
+        }
         XLByteToSeg(startPoint, startSegNo);
         XLByteToSeg(endPoint, endSegNo);
         if ((endSegNo - startSegNo) >= (uint64)xlogFileGap) {
+            /* If we need to splite new xlog , we should set find end point of xlog file. */
             XLogSegNoOffsetToRecPtr(startSegNo + xlogFileGap, 0, tempEnd);
         } else {
             tempEnd = endPoint;
@@ -1179,7 +1236,7 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
                 t_thrd.cbm_cxt.XlogCbmSys->endLSN = head->CBMRecord.endPtr;
                 uint32 threadIndex = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
                 FlushCBMPagesToDiskByCBMWriter(t_thrd.cbm_cxt.XlogCbmSys, (CBM_RECORD*)&head->CBMRecord, threadIndex);
-                ereport(DEBUG1, (errmsg("We had tarck LSN  %08X/%08X to %08X/%08X this time.",
+                ereport(LOG, (errmsg("We had tarck LSN  %08X/%08X to %08X/%08X this time.",
                                         (uint32)(head->CBMRecord.startPtr >> 32),
                                         (uint32)head->CBMRecord.startPtr,
                                         (uint32)(head->CBMRecord.endPtr >> 32),
@@ -1246,7 +1303,6 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
     char *errormsg = NULL;
     XLogPageReadPrivateCBM readprivate;
     XLogRecPtr startPoint = cbmRecord->startPtr;
-    XLogRecPtr lastRecord = InvalidXLogRecPtr;
     bool parseSkip = false;
     bool isNewSegFile = cbmRecord->isNewSegFile;
     XLogRecPtr firstRecord;
@@ -1259,11 +1315,23 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
         readprivate.datadir = t_thrd.proc_cxt.DataDir;
     }
     readprivate.tli = cbmRecord->timeLine;
-
-    xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);
-    if (xlogreader == NULL)
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+    
+    if (ENABLE_DMS) {
+        /* We use Pre-read to accelerate the reading speed. */
+        xlogreader = SSXLogReaderAllocate(&CBMXLogPageReadSS, &readprivate, ALIGNOF_BUFFER);
+    } else {
+        xlogreader = XLogReaderAllocate(&CBMXLogPageReadNormal, &readprivate);   
+    }
+    if (xlogreader == NULL) {
+        ereport(LOG, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        pg_atomic_write_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult, CBM_PARSE_FAILED);
+        t_thrd.cbm_cxt.cbmPageHash = NULL;
+        cbmRecord->parseState = CBM_READ_FAIL;
+        skipStraightForward = true;
+        parseSkip = true;
+    }
+
 
     /* If we are in new seg file, we should find out the first xlog to parse. */
     if (isNewSegFile) {
@@ -1277,19 +1345,18 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
             skipStraightForward = true;
             parseSkip = true;
         } else {
-            ereport(DEBUG1, (errmsg("CBM Reader thread : %d , seg begin at: %X/%X, first xlog begin at:  %X/%X", 
+            ereport(LOG, (errmsg("CBM Reader thread : %d , seg begin at: %X/%X, first xlog begin at:  %X/%X", 
                                     t_thrd.cbm_cxt.CBMReaderIndex, (uint32)(startPoint >> 32), (uint32)(startPoint), (uint32)(firstRecord >> 32), (uint32)(firstRecord))));
             startPoint = firstRecord;
             cbmRecord->startPtr = startPoint;
         }
+    } else {
+        ereport(LOG, (errmsg("CBM Reader thread : %d , seg begin at: %X/%X, no need to find first xlog", 
+                t_thrd.cbm_cxt.CBMReaderIndex, (uint32)(startPoint >> 32), (uint32)(startPoint))));
+        
     }
 
     while (!skipStraightForward) {
-        if (startPoint != InvalidXLogRecPtr) {
-            lastRecord = startPoint;
-        } else {
-            lastRecord = xlogreader->EndRecPtr;
-        }
         record = XLogReadRecord(xlogreader, startPoint, &errormsg);
         
         if (record == NULL) {
@@ -1309,7 +1376,7 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
                             (errmsg("could not read WAL record at %08X/%08X", (uint32)(errptr >> 32), (uint32)errptr)));
 
                 if (XLByteEQ(startPoint, InvalidXLogRecPtr)) {
-                    ereport(DEBUG1, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
+                    ereport(LOG, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
                                          (uint32)(xlogreader->EndRecPtr >> 32), (uint32)xlogreader->EndRecPtr)));
 
                     cbmRecord->endPtr = xlogreader->EndRecPtr;
@@ -1340,7 +1407,7 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
                     ereport(LOG, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not read WAL record at %08X/%08X",
                                                                             (uint32)(errptr >> 32), (uint32)errptr)));
                 parseSkip = true;
-		break;
+		        break;
             }
         }
 
@@ -1349,7 +1416,7 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
         advanceXlogPtrToNextPageIfNeeded(&(xlogreader->EndRecPtr));
         
         if (XLByteLE(cbmRecord->endPtr, xlogreader->EndRecPtr)) {
-            ereport(DEBUG1, (errmsg("reach CBM parse end. The next xlog record starts at %08X/%08X",
+            ereport(LOG, (errmsg("CBM Reader parse down. The next xlog record starts at %08X/%08X",
                                  (uint32)(xlogreader->EndRecPtr >> 32), (uint32)xlogreader->EndRecPtr)));
 
             /*
@@ -1376,6 +1443,11 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
         startPoint = InvalidXLogRecPtr; /* continue reading at next record */
     }
     t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum = 0;
+    if (ENABLE_DSS && ENABLE_DMS && AmCBMReaderProcess()) {
+        /* Only dont need to free under CBM Reader with DSS and DMS. */
+        xlogreader->preReadBufOrigin = NULL;
+        xlogreader->preReadBuf = NULL;
+    }
     XLogReaderFree(xlogreader);
     if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd != -1) {
         if (close(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd) != 0)
@@ -1390,6 +1462,160 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
 /* XLogreader callback function, to read a WAL page */
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                            char *readBuf, TimeLineID *pageTLI, char* xlog_path)
+{
+    XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
+    uint32 targetPageOff;
+    int rc = 0;
+
+    targetPageOff = targetPagePtr % XLogSegSize;
+
+    /*
+     * See if we need to switch to a new segment because the requested record
+     * is not in the currently open one.
+     */
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0 &&
+        !XLByteInSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo)) {
+        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(),
+                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
+
+        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+    }
+
+    XLByteToSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo);
+
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
+        char xlogfname[MAXFNAMELEN];
+
+        rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", readprivate->tli,
+                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) / XLogSegmentsPerXLogId),
+                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,  "%s/" XLOGDIR "/%s",
+                        readprivate->datadir, xlogfname);
+        securec_check_ss(rc, "\0", "\0");
+
+        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+                                                               O_RDONLY | PG_BINARY, 0);
+
+        if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
+            ereport(WARNING, (errmsg("could not open file \"%s\": %s", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+                                     strerror(errno))));
+            return -1;
+        }
+    }
+
+    /*
+     * At this point, we have the right segment open.
+     */
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd != -1);
+
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
+    if (pread(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd, readBuf, XLOG_BLCKSZ, (off_t)targetPageOff) != XLOG_BLCKSZ) {
+        PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+        ereport(WARNING, (errmsg("could not read page from file \"%s\" at page offset %u: %s",
+                                 t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, targetPageOff, strerror(errno))));
+        return -1;
+    }
+    PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+
+    *pageTLI = readprivate->tli;
+    return XLOG_BLCKSZ;
+}
+
+static int CBMXLogPageReadSS(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                           char *readBuf, TimeLineID *pageTLI, char* xlog_path)
+{
+    XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
+    uint32 targetPageOff;
+    uint32 actualBytes;
+    int rc = 0;
+
+#ifdef USE_ASSERT_CHECKING
+    XLogSegNo targetSegNo;
+
+    XLByteToSeg(targetPagePtr, targetSegNo);
+#endif
+
+    targetPageOff = targetPagePtr % XLogSegSize;
+
+    /*
+     * See if we need to switch to a new segment because the requested record
+     * is not in the currently open one.
+     */
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd >= 0 &&
+        !XLByteInSeg(targetPagePtr, t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo)) {
+        if (close(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(),
+                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath)));
+
+        t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = -1;
+    }
+
+    XLByteToSeg(targetPagePtr, t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo);
+
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd < 0) {
+        char xlogfname[MAXFNAMELEN];
+
+        rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", readprivate->tli,
+                        (uint32)((t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo) / XLogSegmentsPerXLogId),
+                        (uint32)((t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
+        securec_check_ss(rc, "", "");
+        
+        rc = snprintf_s(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,
+                "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
+        securec_check_ss(rc, "\0", "\0");
+
+        t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath,
+                                                               O_RDONLY | PG_BINARY, 0);
+
+        if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd < 0) {
+            ereport(WARNING, (errmsg("could not open file \"%s\": %s", t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath,
+                                     strerror(errno))));
+            return -1;
+        }
+    }
+
+    /*
+     * At this point, we have the right segment open and if we're streaming we
+     * know the requested record is in it.
+     */
+    Assert(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd != -1);
+
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
+
+    actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, XLOG_BLCKSZ,
+                                                t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd);
+
+    if (actualBytes != XLOG_BLCKSZ) {
+        PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+        ereport(WARNING, (errmsg("could not read page from file \"%s\" at page offset %u: %s",
+                                 t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.filePath, targetPageOff, TRANSLATE_ERRNO)));
+        goto next_record_is_invalid;
+    }
+
+    Assert(targetSegNo == t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.logSegNo);
+    Assert((uint32)reqLen <= XLOG_BLCKSZ);
+
+    *pageTLI = readprivate->tli;
+
+    return XLOG_BLCKSZ;
+
+next_record_is_invalid:
+    if (t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd >= 0) {
+        (void)close(t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd);
+    }
+    t_thrd.cbm_cxt.CBMReaderStatus->xlogRead.fd = -1;
+
+    return -1;
+}
+
+/* XLogreader callback function, to read a WAL page in normal cluster. */
+static int CBMXLogPageReadNormal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, 
+                                XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *pageTLI, char* xlog_path)
 {
     int cbmReaderIndex = t_thrd.cbm_cxt.CBMReaderIndex;
     XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
@@ -3033,15 +3259,18 @@ static void ValidateCBMPageHeader(cbmpageheader *cbmPageHeader)
     if (XLByteLE(pageEndLsn, pageStartLsn) || RelFileNodeEquals(rNode, InvalidRelFileNode) ||
         (BlockNumberIsValid(firstBlkNo) && pageType != PAGETYPE_MODIFY) ||
         (!BlockNumberIsValid(firstBlkNo) &&
-         !((pageType & PAGETYPE_DROP) || (pageType & PAGETYPE_TRUNCATE) || (pageType & PAGETYPE_CREATE))) ||
+        !((pageType & PAGETYPE_DROP) || (pageType & PAGETYPE_TRUNCATE) || (pageType & PAGETYPE_CREATE))) ||
         (BlockNumberIsValid(truncBlkNo) && !(pageType & PAGETYPE_TRUNCATE)) ||
         (!BlockNumberIsValid(truncBlkNo) && (pageType & PAGETYPE_TRUNCATE)))
         ereport(ERROR, (errcode(ERRCODE_FETCH_DATA_FAILED),
                         errmsg("invalid CBM page header: rel %u/%u/%u forknum %d "
-                               "first blkno %u page type %d truncate blkno %u",
+                               "first blkno %u page type %d truncate blkno %u"
+                               "startLsn %08X/%08X endLsn %08X/%08X",
                                cbmPageHeader->rNode.spcNode, cbmPageHeader->rNode.dbNode, cbmPageHeader->rNode.relNode,
                                cbmPageHeader->forkNum, cbmPageHeader->firstBlkNo, cbmPageHeader->pageType,
-                               cbmPageHeader->truncBlkNo)));
+                               cbmPageHeader->truncBlkNo, (uint32)(cbmPageHeader->pageStartLsn >> 32),
+                               (uint32)cbmPageHeader->pageStartLsn, (uint32)(cbmPageHeader->pageEndLsn >> 32), 
+                               (uint32)cbmPageHeader->pageEndLsn)));
 }
 
 static void CBMHashRemove(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, bool isCBMWriter)
@@ -4122,8 +4351,14 @@ static bool CBMQueueInsertAfter(XLogRecPtr startPtr, XLogRecPtr endPtr, TimeLine
     newNode->prev = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev;
     newNode->next = (CBM_QUEUE_NODE*)t_thrd.cbm_cxt.XlogCbmSys->headQueueNode;
     t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev = newNode;
-
-    if (!(newNode->prev == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode || newNode->CBMRecord.startPtr == newNode->prev->CBMRecord.endPtr)) {
+    /*
+     * Attention, we will take it these error conditions:
+     * 1. if newNode has not prev Node, only check newNode's startPtr < newNode's endPtr;
+     * 2. if newNode have prev Node, should check pre's endPtr == newNode's startPtr,
+     *      and check newNode startPtr < endPtr;
+     */
+    if (!(newNode->prev == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode || XLByteEQ(newNode->CBMRecord.startPtr, newNode->prev->CBMRecord.endPtr))
+            || !XLByteLT(newNode->CBMRecord.startPtr, newNode->CBMRecord.endPtr)) {
         SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
         ereport(PANIC, (errmsg("The CBM queue is not in order.")));
     }

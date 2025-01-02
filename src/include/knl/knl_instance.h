@@ -94,8 +94,8 @@ const int MAX_AUDIT_NUM = 48;
 /* Maximum number of max replication slots */
 #define MAX_REPLICATION_SLOT_NUM 100
 
-#define MAX_CBM_THREAD_NUM 6
-#define INVAIL_CBM_THREAD_NUM 9
+#define MAX_CBM_THREAD_NUM 10
+#define INVAIL_CBM_THREAD_NUM 99
 
 #ifndef ENABLE_MULTIPLE_NODES
 const int DB_CMPT_MAX = 4;
@@ -780,7 +780,6 @@ typedef struct knl_g_parallel_redo_context {
     int buffer_pin_wait_buf_len;
 } knl_g_parallel_redo_context;
 
-#define MAX_CBM_READERS_NUMBER 4
 
 /* CBM Reader status. */
 static const uint32 CBM_THREAD_INVALID = 0;
