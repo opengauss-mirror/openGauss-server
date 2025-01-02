@@ -24,7 +24,7 @@ BEGIN
 END;
 /
 
-select * from gms_debug.initialize();
+select * from gms_debug.initialize('datanode1-2');
 
 select pg_sleep(1);
 

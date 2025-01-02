@@ -1540,9 +1540,12 @@ void add_gms_debug_func(Oid funcOid, int commIdx)
 
 void ReleaseDebugCommIdx(int idx)
 {
-    if (idx < 0 || idx >= PG_MAX_DEBUG_CONN)
+    if (idx < 0 || idx >= PG_MAX_DEBUG_CONN) {
         return;
-    Assert(g_instance.pldebug_cxt.debug_comm[idx].Used());
+    }
+    if (!g_instance.pldebug_cxt.debug_comm[idx].Used()) {
+        return;
+    }
     PlDebuggerComm* comm = &g_instance.pldebug_cxt.debug_comm[idx];
     AutoMutexLock debuglock(&comm->mutex);
     debuglock.lock();

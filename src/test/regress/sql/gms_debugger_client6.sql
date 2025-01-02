@@ -34,6 +34,8 @@ BEGIN
 END $$;
 
 set search_path = gms_debugger_test6;
+set behavior_compat_options='proc_outparam_override';
+
 
 CREATE or REPLACE FUNCTION gms_continue()
 returns void as $$
@@ -41,7 +43,7 @@ declare
     run_info  gms_debug.runtime_info;
     ret     binary_integer;
 begin
-    ret := gms_debug.continue(run_info, 0, 2);
+    ret := gms_debug.continue(run_info, gms_debug.break_any_return, 2);
     RAISE NOTICE 'breakpoint= %', run_info.breakpoint;
     RAISE NOTICE 'stackdepth= %', run_info.stackdepth;
     RAISE NOTICE 'line= %', run_info.line#;
@@ -70,7 +72,7 @@ declare
     run_info  gms_debug.runtime_info;
     ret     binary_integer;
 begin
-    ret := gms_debug.continue(run_info, 8, 2);
+    ret := gms_debug.continue(run_info, gms_debug.break_any_return, 2);
     RAISE NOTICE 'breakpoint= %', run_info.breakpoint;
     RAISE NOTICE 'stackdepth= %', run_info.stackdepth;
     RAISE NOTICE 'line= %', run_info.line#;
@@ -79,9 +81,8 @@ begin
 end;
 $$ LANGUAGE plpgsql;
 
-
 -- attach debug server
-select * from gms_debug.attach_session('datanode1-0');
+select * from gms_debug.attach_session('datanode1-5');
 
 select pg_sleep(3);
 

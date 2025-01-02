@@ -1,5 +1,6 @@
 -- setups
 create extension if not exists gms_debug;
+NOTICE:  extension "gms_debug" already exists in schema "public", skipping
 drop schema if exists gms_debugger_test3 cascade;
 NOTICE:  schema "gms_debugger_test3" does not exist, skipping
 create schema gms_debugger_test3;
@@ -23,10 +24,10 @@ BEGIN
     return b;
 END;
 /
-select * from gms_debug.initialize();
+select * from gms_debug.initialize('datanode1-2');
  initialize  
 -------------
- datanode1-0
+ datanode1-2
 (1 row)
 
 select pg_sleep(1);
@@ -44,10 +45,20 @@ select * from test_debug3(1);
 
 -- start debug - 2nd run - to be aborted
 select * from test_debug3(1);
-ERROR:  receive abort message
-CONTEXT:  PL/pgSQL function test_debug3(integer) line 13 at assignment
+ test_debug3 
+-------------
+         101
+(1 row)
+
+select * from gms_debug.debug_off();
+ debug_off 
+-----------
+ 
+(1 row)
+
 drop schema gms_debugger_test3 cascade;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function test_debug3(integer)
-drop cascades to function gms_next()
 drop cascades to function gms_continue()
+drop cascades to function gms_next()
+drop cascades to function gms_step()

@@ -273,30 +273,6 @@ return 8;
 END;
 $$ language plpgsql IMMUTABLE;
 
-CREATE FUNCTION gms_debug.break_return() RETURNS int AS $$
-BEGIN
-return 16;
-END;
-$$ language plpgsql IMMUTABLE;
-
-CREATE FUNCTION gms_debug.break_exception() RETURNS int AS $$
-BEGIN
-return 32;
-END;
-$$ language plpgsql IMMUTABLE;
-
-CREATE FUNCTION gms_debug.break_handler() RETURNS int AS $$
-BEGIN
-return 64;
-END;
-$$ language plpgsql IMMUTABLE;
-
-CREATE FUNCTION gms_debug.abort_execution() RETURNS int AS $$
-BEGIN
-return 128;
-END;
-$$ language plpgsql IMMUTABLE;
-
 CREATE FUNCTION gms_debug.reason_none() RETURNS int AS $$
 BEGIN
 return 0;
