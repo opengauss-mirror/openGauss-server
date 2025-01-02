@@ -466,6 +466,10 @@ void AioCompltrMain(int ac, char** av)
     }
     /* compltrIdx identifies this thread. */
     int compltrIdx = atoi(av[3]);
+    if (compltrIdx < 0 || compltrIdx >= MAX_AIOCOMPLTR_THREADS) {
+        ereport(WARNING, (errmsg("invalid AIO argument: compltrIdx = %d", compltrIdx)));
+        exit(1);
+    }
 
     /*
      * Global thread local shortcuts to the completer descriptor

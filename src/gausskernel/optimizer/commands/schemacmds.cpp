@@ -134,13 +134,13 @@ Oid CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!g_instance.attr.attr_common.allowSystemTableMods &&
+    if (!g_instance.attr.attr_common.support_extended_features &&
         stmt->temptype == Temp_None &&
         (isTempNamespaceName(stmt->schemaname) || isToastTempNamespaceName(stmt->schemaname))) {
         ereport(ERROR,
             (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("unacceptable schema name \"%s\"", schemaName),
-                errdetail("The prefix \"pg_temp_\" is reserved.")));
+                errdetail("The prefix \"pg_temp_\" and \"pg_toast_temp_\" is reserved.")));
     }
 #endif
 

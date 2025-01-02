@@ -403,6 +403,9 @@ int gslog_dumper::parse_file_head(void)
     /* host name */
     ret = memcpy_s(m_host_name, LOG_MAX_NODENAME_LEN, m_log_buffer + off, hostname_len);
     secure_check_ret(ret);
+    if (hostname_len - 1 >= LOG_MAX_NODENAME_LEN) {
+        ereport(ERROR, (errmsg("invalid index inside parse_file_head function: hostname_len = %d", hostname_len)));
+    }
     ASSERT(m_host_name[hostname_len - 1] == '\0');
     if (m_host_name[hostname_len - 1] != '\0') {
         return -1;
@@ -414,6 +417,9 @@ int gslog_dumper::parse_file_head(void)
     /* node name */
     ret = memcpy_s(m_node_name, LOG_MAX_NODENAME_LEN, m_log_buffer + off, nodename_len);
     secure_check_ret(ret);
+    if (nodename_len - 1 >= LOG_MAX_NODENAME_LEN) {
+        ereport(ERROR, (errmsg("invalid index inside parse_file_head function: nodename_len = %d", nodename_len)));
+    }
     ASSERT(m_node_name[nodename_len - 1] == '\0');
     if (m_node_name[nodename_len - 1] != '\0') {
         return -1;
@@ -425,6 +431,9 @@ int gslog_dumper::parse_file_head(void)
     /* time zone */
     ret = memcpy_s(log_timezone->TZname, TZ_STRLEN_MAX + 1, m_log_buffer + off, timezone_len);
     secure_check_ret(ret);
+    if (timezone_len - 1 >= TZ_STRLEN_MAX + 1) {
+        ereport(ERROR, (errmsg("invalid index inside parse_file_head function: timezone_len = %d", timezone_len)));
+    }
     ASSERT(log_timezone->TZname[timezone_len - 1] == '\0');
     off += timezone_len;
 
