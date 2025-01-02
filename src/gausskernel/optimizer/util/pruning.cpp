@@ -1182,6 +1182,7 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
 
     /* Do not pruning if collation of operator is different from collation of partkey. */
     if (((Var*)larg)->varcollid != arrayExpr->inputcollid) {
+        result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
         result->isPbeSinlePartition = false;
         return result;
@@ -1346,6 +1347,7 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr(PartitionType partTy
 
     /* Do not pruning if collation of operator is different from collation of partkey. */
     if (((Var*)larg)->varcollid != arrayExpr->inputcollid) {
+        result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
         result->isPbeSinlePartition = false;
         return result;

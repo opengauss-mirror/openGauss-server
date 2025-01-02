@@ -682,6 +682,21 @@ alter table test_convert_to convert to charset default;
 select pg_get_tabledef('test_convert_to');
 select * from test_convert_to;
 
+CREATE TABLE test_p_primary
+(
+    f1  varchar(32) collate utf8mb4_general_ci,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN('2450815'),
+        PARTITION P2 VALUES LESS THAN('2451179'),
+        PARTITION P3 VALUES LESS THAN('2451544')
+);
+insert into test_p_primary values (1,2,3);
+insert into test_p_primary values (2450825,2,3);
+explain (costs off) select * from test_p_primary where f1 in ('1','2450825' COLLATE "en_US");
 
 create database b_ascii encoding = 0;
 \c b_ascii
