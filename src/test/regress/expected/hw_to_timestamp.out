@@ -1261,3 +1261,10 @@ ERROR:  invalid input syntax for type interval: "invalid_timestamp"
 LINE 1: SELECT EXTRACT(TIMEZONE_ABBR FROM 'invalid_timestamp');
                                           ^
 CONTEXT:  referenced column: timezone_extract
+SET TIMEZONE TO '-8:30';
+SELECT EXTRACT(TIMEZONE_ABBR FROM TIMESTAMP WITH TIME ZONE '2024-09-02 10:30:00+320');
+ timezone_extract 
+------------------
+ Unknown
+(1 row)
+
