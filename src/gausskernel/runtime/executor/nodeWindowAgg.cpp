@@ -254,10 +254,10 @@ static void advance_windowaggregate(
             if (fcinfo->argnull[i] && strcmp(get_func_name(perfuncstate->wfunc->winfnoid), "bit_and") == 0 &&
                 is_binary_type_in_dolphin(aggtranstype) &&
                 peraggstate->transValueIsNull && IsA(tle, Var)) {
+                MemoryContextSwitchTo(old_context);
                 Var* var = (Var*)tle;
                 peraggstate->transValue = get_bit_and_initval(aggtranstype, var->vartypmod);
                 peraggstate->transValueIsNull = false;
-                MemoryContextSwitchTo(old_context);
                 return;
             } else if (fcinfo->argnull[i]) {
                 MemoryContextSwitchTo(old_context);
