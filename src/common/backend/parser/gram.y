@@ -969,7 +969,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P LOCKED LOG_ON LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
+	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
@@ -1075,6 +1075,8 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %left		POSTFIXOP		/* dummy for postfix Op rules */
 %nonassoc   lower_than_index
 %nonassoc   INDEX
+%nonassoc   lower_than_under
+%nonassoc   UNDER
 %nonassoc   ROTATE
 %nonassoc   higher_than_rotate
 %nonassoc   LATERAL_P
@@ -5812,7 +5814,7 @@ split_dest_rangesubpartition_define_list:
  *****************************************************************************/
 
 AlterCompositeTypeStmt:
-			ALTER TYPE_P any_name alter_type_cmds
+			ALTER TYPE_P type_name alter_type_cmds
 				{
 					AlterTableStmt *n = makeNode(AlterTableStmt);
 
@@ -10217,19 +10219,19 @@ RefreshMatViewStmt:
        ;
 
 CreateMatViewLogStmt:
-			CREATE MATERIALIZED VIEW LOG_ON qualified_name
+			CREATE MATERIALIZED VIEW LOG_P ON qualified_name
 				{
 					CreateMatViewLogStmt* stmt = makeNode(CreateMatViewLogStmt);
-					stmt->relation = $5;
+					stmt->relation = $6;
 					$$ = (Node*)stmt;
 				}
 		;
 
 DropMatViewLogStmt:
-			DROP MATERIALIZED VIEW LOG_ON qualified_name
+			DROP MATERIALIZED VIEW LOG_P ON qualified_name
 				{
 					DropMatViewLogStmt* stmt = makeNode(DropMatViewLogStmt);
-					stmt->relation = $5;
+					stmt->relation = $6;
 					$$ = (Node*)stmt;
 				}
 		;
@@ -11019,7 +11021,7 @@ AlterExtensionContentsStmt:
 					n->objname = list_make1(makeString($6));
 					$$ = (Node *)n;
 				}
-			| ALTER EXTENSION name add_drop TYPE_P any_name
+			| ALTER EXTENSION name add_drop TYPE_P type_name
 				{
 					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
 					n->extname = $3;
@@ -12914,7 +12916,7 @@ DefineStmt:
 					n->methodlist = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE OR REPLACE TYPE_P any_name as_is '(' OptTableFuncElementList ')'
+			| CREATE OR REPLACE TYPE_P type_name as_is '(' OptTableFuncElementList ')'
 				{
 					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
 
@@ -12960,7 +12962,7 @@ DefineStmt:
 					n->typebody = NULL;
 					$$ = (Node *)n;					
 				}
-			| CREATE OR REPLACE TYPE_P any_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
+			| CREATE OR REPLACE TYPE_P type_name as_is OBJECT_P '(' OptTableFuncElementList ')' final_clause
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 						ereport(errstate, 
@@ -13017,7 +13019,7 @@ DefineStmt:
 					n->typebody = NULL;
 					$$ = (Node *)n;						
 				}
-			| CREATE OR REPLACE TYPE_P any_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
+			| CREATE OR REPLACE TYPE_P type_name as_is OBJECT_P '(' TableFuncElementList ',' Method_specList ')' final_clause
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 						ereport(errstate, 
@@ -13043,7 +13045,7 @@ DefineStmt:
 					n->typebody = NULL;
 					$$ = (Node *)n;						
 				}
-			| CREATE TYPE_P type_name UNDER any_name '(' TableFuncElementList ')' final_clause
+			| CREATE TYPE_P type_name UNDER type_name '(' TableFuncElementList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13070,7 +13072,7 @@ DefineStmt:
 						n->typebody = NULL;
 						$$ = (Node *)n;	
 				}
-			| CREATE OR REPLACE TYPE_P any_name UNDER any_name '(' TableFuncElementList ')' final_clause
+			| CREATE OR REPLACE TYPE_P type_name UNDER type_name '(' TableFuncElementList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13097,7 +13099,7 @@ DefineStmt:
 						n->typebody = NULL;
 						$$ = (Node *)n;	
 				}
-			| CREATE TYPE_P type_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
+			| CREATE TYPE_P type_name UNDER type_name '(' TableFuncElementList ',' Method_specList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13124,7 +13126,7 @@ DefineStmt:
 						n->typebody = NULL;
 						$$ = (Node *)n;		
 				}
-			| CREATE OR REPLACE TYPE_P any_name UNDER any_name '(' TableFuncElementList ',' Method_specList ')' final_clause
+			| CREATE OR REPLACE TYPE_P type_name UNDER type_name '(' TableFuncElementList ',' Method_specList ')' final_clause
 				{
 						if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT && !IsInitdb) {
 							ereport(errstate, 
@@ -13205,7 +13207,7 @@ DefineStmt:
 					n->typecategory = TYPCATEGORY_VARRAY;
 					$$ = (Node *)n;
 				}
-			| CREATE OR REPLACE TYPE_P any_name as_is VARRAY '(' ICONST ')' OF func_type
+			| CREATE OR REPLACE TYPE_P type_name as_is VARRAY '(' ICONST ')' OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
 					n->typname = $5;
@@ -13225,7 +13227,7 @@ DefineStmt:
 					n->typecategory = TYPCATEGORY_TABLEOF;
 					$$ = (Node *)n;
 				}
-			| CREATE OR REPLACE TYPE_P any_name as_is TABLE OF func_type
+			| CREATE OR REPLACE TYPE_P type_name as_is TABLE OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
 					n->replace = true;
@@ -13970,7 +13972,7 @@ enum_val_list:	Sconst
  *****************************************************************************/
 
 AlterEnumStmt:
-		ALTER TYPE_P any_name ADD_P VALUE_P opt_if_not_exists Sconst
+		ALTER TYPE_P type_name ADD_P VALUE_P opt_if_not_exists Sconst
 			{
 				AlterEnumStmt *n = makeNode(AlterEnumStmt);
 				n->typname = $3;
@@ -13981,7 +13983,7 @@ AlterEnumStmt:
 				n->skipIfNewValExists = $6;
 				$$ = (Node *) n;
 			}
-		 | ALTER TYPE_P any_name ADD_P VALUE_P opt_if_not_exists Sconst BEFORE Sconst
+		 | ALTER TYPE_P type_name ADD_P VALUE_P opt_if_not_exists Sconst BEFORE Sconst
 			{
 				AlterEnumStmt *n = makeNode(AlterEnumStmt);
 				n->typname = $3;
@@ -13992,7 +13994,7 @@ AlterEnumStmt:
 				n->skipIfNewValExists = $6;
 				$$ = (Node *) n;
 			}
-		 | ALTER TYPE_P any_name ADD_P VALUE_P opt_if_not_exists Sconst AFTER Sconst
+		 | ALTER TYPE_P type_name ADD_P VALUE_P opt_if_not_exists Sconst AFTER Sconst
 			{
 				AlterEnumStmt *n = makeNode(AlterEnumStmt);
 				n->typname = $3;
@@ -14003,7 +14005,7 @@ AlterEnumStmt:
 				n->skipIfNewValExists = $6;
 				$$ = (Node *) n;
 			}
-		 | ALTER TYPE_P any_name RENAME VALUE_P Sconst TO Sconst
+		 | ALTER TYPE_P type_name RENAME VALUE_P Sconst TO Sconst
 			{
 				AlterEnumStmt *n = makeNode(AlterEnumStmt);
 				n->typname = $3;
@@ -14314,6 +14316,26 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 					}
 					$$ = (Node *)n;
 				}
+			| DROP MATERIALIZED VIEW IF_P EXISTS any_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_MATVIEW;
+					n->missing_ok = TRUE;
+					n->objects = $6;
+					n->behavior = $7;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP MATERIALIZED VIEW any_name_list opt_drop_behavior
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_MATVIEW;
+					n->missing_ok = FALSE;
+					n->objects = $4;
+					n->behavior = $5;
+					n->concurrent = false;
+					$$ = (Node *)n;
+				}
 			| DROP TYPE_P type_name_list opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
@@ -14390,7 +14412,6 @@ drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
 			| SEQUENCE								{ $$ = OBJECT_SEQUENCE; }
 			| LARGE_P SEQUENCE						{ $$ = OBJECT_LARGE_SEQUENCE; }
 			| VIEW									{ $$ = OBJECT_VIEW; }
-			| MATERIALIZED VIEW 					{ $$ = OBJECT_MATVIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }
 			| COLLATION								{ $$ = OBJECT_COLLATION; }
@@ -19773,7 +19794,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER TYPE_P any_name RENAME TO name
+			| ALTER TYPE_P type_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TYPE;
@@ -19782,7 +19803,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER TYPE_P any_name RENAME ATTRIBUTE name TO name opt_drop_behavior
+			| ALTER TYPE_P type_name RENAME ATTRIBUTE name TO name opt_drop_behavior
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_ATTRIBUTE;
@@ -20095,7 +20116,7 @@ AlterObjectSchemaStmt:
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TYPE_P any_name SET SCHEMA name
+			| ALTER TYPE_P type_name SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
 					n->objectType = OBJECT_TYPE;
@@ -20237,7 +20258,7 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
-			| ALTER TYPE_P any_name OWNER TO TypeOwner
+			| ALTER TYPE_P type_name OWNER TO TypeOwner
 				{
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_TYPE;
@@ -31670,7 +31691,7 @@ unreserved_keyword:
 			| BLANKS
 			| BLOB_P
 			| BLOCKCHAIN
-			| BODY_P
+			| BODY_P %prec lower_than_under
 			| BUILD
 			| BY
 			| BYTE_P
@@ -32123,6 +32144,7 @@ unreserved_keyword:
 			| TYPES_P
 			| UNBOUNDED
 			| UNCOMMITTED
+			| UNDER
 			| UNENCRYPTED
 			| UNKNOWN
 			| UNLIMITED

@@ -3,49 +3,68 @@
 CREATE SCHEMA keywords;
 SET CURRENT_SCHEMA TO keywords;
 
-declare
-keyword_name varchar;
-catcode_name char;
-create_sql varchar;
-drop_sql varchar;
-begin
-    for keyword_name,catcode_name in (select word,catcode from pg_get_keywords()) loop
-        if catcode_name = 'U' or catcode_name = 'C' then
-            create_sql = 'create table keywords.' || keyword_name || '(' || keyword_name|| ' int)';
-            drop_sql = 'drop table keywords.' || keyword_name;
-        elsif catcode_name = 'T' then
-            create_sql = 'create function keywords.' || keyword_name || '() returns int language sql as ''select 1''';
-            drop_sql = 'drop function keywords.' || keyword_name;
-        else
-            continue;
-        end if;
-        begin
-            EXECUTE IMMEDIATE create_sql;
-            EXECUTE IMMEDIATE drop_sql;
-            EXCEPTION when OTHERS then
-            raise notice 'test failed. test sql: %; %;', create_sql, drop_sql;
-        end;
-    end loop;
-end;
+CREATE OR REPLACE PROCEDURE keywords.test_stmt(sql_stmt VARCHAR) AS
+BEGIN
+    EXECUTE IMMEDIATE sql_stmt;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'Test failed. sql: ''%''', sql_stmt;
+END;
 /
 
--- Unreserved keywords
-CREATE TABLE following (final int);
-DROP TABLE following;
-CREATE TYPE following;
-DROP TYPE following;
+CREATE PROCEDURE keywords.test_table(keyword_name VARCHAR) AS
+BEGIN
+    PERFORM keywords.test_stmt('CREATE TABLE keywords.' || keyword_name || ' (' || keyword_name || ' INT)');
+    PERFORM keywords.test_stmt('DROP TABLE keywords.' || keyword_name);
+END;
+/
 
--- Col name keywords
-CREATE TABLE float (forward int);
-DROP TABLE float;
-CREATE TYPE grouping; -- Will fail
-DROP TYPE grouping; -- Will fail
+CREATE PROCEDURE keywords.test_index(keyword_name VARCHAR) AS
+BEGIN
+    PERFORM keywords.test_stmt('CREATE TABLE keywords.tbl (v INT)');
+    PERFORM keywords.test_stmt('CREATE INDEX keywords.' || keyword_name || ' ON keywords.tbl(v)');
+    PERFORM keywords.test_stmt('DROP INDEX keywords.' || keyword_name);
+    PERFORM keywords.test_stmt('DROP TABLE keywords.tbl');
+END;
+/
 
--- Type name keywords
-CREATE TABLE full (freeze int); -- Will fail
-DROP TABLE full; -- Will fail
-CREATE TYPE full;
-DROP TYPE full;
+CREATE PROCEDURE keywords.test_type(keyword_name VARCHAR) AS
+BEGIN
+    PERFORM keywords.test_stmt('CREATE TYPE keywords.' || keyword_name || ' AS (v INT)');
+    PERFORM keywords.test_stmt('DROP TYPE keywords.' || keyword_name);
+END;
+/
+
+CREATE PROCEDURE keywords.test_func(keyword_name VARCHAR) AS
+BEGIN
+    PERFORM keywords.test_stmt('CREATE FUNCTION keywords.' || keyword_name || '() RETURNS INT LANGUAGE SQL AS ''SELECT 1''');
+    PERFORM keywords.test_stmt('DROP FUNCTION keywords.' || keyword_name);
+END;
+/
+
+-- To hide hints
+\set VERBOSITY terse
+
+-- Traverse all keywords
+DECLARE
+    keyword_name VARCHAR;
+    catcode_name CHAR;
+BEGIN
+    FOR keyword_name, catcode_name IN (SELECT word, catcode FROM pg_get_keywords()) LOOP
+        IF catcode_name = 'U' OR catcode_name = 'C' THEN
+            PERFORM keywords.test_table(keyword_name);
+            PERFORM keywords.test_index(keyword_name);
+        ELSIF catcode_name = 'T' THEN
+            PERFORM keywords.test_type(keyword_name);
+            PERFORM keywords.test_func(keyword_name);
+        ELSE
+            CONTINUE;
+        END IF;
+    END LOOP;
+END;
+/
+
+\unset VERBOSITY
 
 SET CURRENT_SCHEMA TO DEFAULT;
-DROP SCHEMA keywords;
+DROP SCHEMA keywords CASCADE;
