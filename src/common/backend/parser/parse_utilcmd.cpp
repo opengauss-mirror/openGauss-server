@@ -2115,6 +2115,7 @@ static void transformTableLikeClause(
             int i;
             Oid seqId = InvalidOid;
             bool is_autoinc = false;
+            bool has_on_update = false;
 
             /* Find default in constraint structure */
             Assert(constr != NULL);
@@ -2124,12 +2125,13 @@ static void transformTableLikeClause(
                     this_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin);
                     if (attrdef[i].has_on_update) {
                         update_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin_on_update);
+                        has_on_update = true;
                     }
                     break;
                 }
             }
             Assert(this_default != NULL || update_default != NULL);
-            if (!attrdef->has_on_update) {
+            if (!has_on_update) {
                 if (IsA(this_default, AutoIncrement)) {
                     AutoIncrementCheckOrientation(cxt);
                     if (cxt->relation->relpersistence == RELPERSISTENCE_TEMP) {
