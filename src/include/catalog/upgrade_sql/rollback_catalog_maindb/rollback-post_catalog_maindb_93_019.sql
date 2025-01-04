@@ -140,6 +140,8 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_int4(vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_float8(vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_numeric(vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_text(vector) CASCADE;
+        DROP FUNCTION IF EXISTS pg_catalog.vector_to_varchar(vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_to_sparsevec(vector, int4, boolean) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<->(vector, vector) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.<#>(vector, vector) CASCADE;

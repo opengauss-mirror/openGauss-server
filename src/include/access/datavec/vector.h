@@ -63,6 +63,8 @@ Datum vector_to_float4(PG_FUNCTION_ARGS);
 Datum vector_to_int4(PG_FUNCTION_ARGS);
 Datum vector_to_float8(PG_FUNCTION_ARGS);
 Datum vector_to_numeric(PG_FUNCTION_ARGS);
+Datum vector_to_text(PG_FUNCTION_ARGS);
+Datum vector_to_varchar(PG_FUNCTION_ARGS);
 Datum l2_distance(PG_FUNCTION_ARGS);
 Datum vector_l2_squared_distance(PG_FUNCTION_ARGS);
 Datum inner_product(PG_FUNCTION_ARGS);
