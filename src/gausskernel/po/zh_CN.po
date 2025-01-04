@@ -48736,13 +48736,6 @@ msgstr "暂不支持增量物化视图的选项"
 msgid "It's not supported to specify distribute key on incremental materialized views"
 msgstr "不支持在增量物化视图上指定分布键"
 
-# input.c:213
-#
-#: gram.y:9776
-#, c-format
-msgid "matview is not supported while DMS and DSS enabled."
-msgstr "当DMS和DSS启用时, 不支持matview。"
-
 #: gram.y:9863 gram.y:9890
 #, c-format
 msgid "large sequence is not supported."
