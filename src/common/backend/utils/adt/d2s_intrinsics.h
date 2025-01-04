@@ -145,22 +145,22 @@ inline uint64 umulh(const uint64 a, const uint64 b)
 
 inline uint64 div5(const uint64 x)
 {
-    return umulh(x, UINT64CONST(0xCCCCCCCCCCCCCCCD)) >> 2;
+    return umulh(x, 0xCCCCCCCCCCCCCCCDull) >> 2;
 }
 
 inline uint64 div10(const uint64 x)
 {
-    return umulh(x, UINT64CONST(0xCCCCCCCCCCCCCCCD)) >> 3;
+    return umulh(x, 0xCCCCCCCCCCCCCCCDull) >> 3;
 }
 
 inline uint64 div100(const uint64 x)
 {
-    return umulh(x >> 2, UINT64CONST(0x28F5C28F5C28F5C3)) >> 2;
+    return umulh(x >> 2, 0x28F5C28F5C28F5C3ull) >> 2;
 }
 
 inline uint64 div1e8(const uint64 x)
 {
-    return umulh(x, UINT64CONST(0xABCC77118461CEFD)) >> 26;
+    return umulh(x, 0xABCC77118461CEFDull) >> 26;
 }
 
 #else /* RYU_32_BIT_PLATFORM */
