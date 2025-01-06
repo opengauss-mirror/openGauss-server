@@ -1370,6 +1370,7 @@ typedef struct knl_g_dms_context {
     char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;
+    int* reform_check_status;
     ss_xmin_info_t SSXminInfo;
     ss_fake_seesion_context_t SSFakeSessionCxt;
 } knl_g_dms_context;

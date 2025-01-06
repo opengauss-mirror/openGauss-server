@@ -1763,6 +1763,11 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->pincount_array = (PinnedBufferItem *)palloc0(sizeof(PinnedBufferItem) * REFCOUNT_ARRAY_ENTRIES);
     dms_cxt->need_check_pincount = false;
     dms_cxt->in_ondemand_redo = false;
+    int max_threads = g_instance.attr.attr_storage.dms_attr.parallel_thread_num;
+    t_thrd.dms_cxt.reform_check_status = (int*)palloc(max_threads * sizeof(int));
+    for (int i = 0; i < max_threads; i++) {
+        t_thrd.dms_cxt.reform_check_status[i] = InvalidBuffer;
+    }
 }
 
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
