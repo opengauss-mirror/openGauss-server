@@ -165,9 +165,6 @@ bool CheckEnableImcsScan(RelOptInfo *rel, RangeTblEntry *rte)
     /* 1. get all scan attrs */
     Bitmapset *scanAttrs = NULL;
     pull_varattnos((Node*)rel->reltarget->exprs, rel->relid, &scanAttrs);
-    if (scanAttrs == NULL) {
-        return false;
-    }
     ListCell *cell = NULL;
     foreach(cell, rel->baserestrictinfo) {
         RestrictInfo* info = (RestrictInfo*)lfirst(cell);
