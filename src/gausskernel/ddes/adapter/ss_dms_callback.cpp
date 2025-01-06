@@ -1199,6 +1199,68 @@ static void CBMemReset(void *context)
     PG_END_TRY();
 }
 
+static void *CBDMSMemAlloc(size_t size)
+{
+    void *ptr = NULL;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    if (t_thrd.dms_cxt.memContext == NULL) {
+        MemoryContextInit();
+        t_thrd.dms_cxt.memContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "DMSMemContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+    }
+    MemoryContext old_cxt = MemoryContextSwitchTo(t_thrd.dms_cxt.memContext);
+
+    PG_TRY();
+    {
+        ptr = palloc(size);
+        if (ptr == NULL) {
+            ereport(FATAL, (errmsg("Failed to allocate memory for DMSMemContext.")));
+        }
+    }
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        FlushErrorState();
+    }
+    PG_END_TRY();
+    (void)MemoryContextSwitchTo(old_cxt);
+    return ptr;
+}
+
+static void CBDMSMemFree(void *pointer)
+{
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+
+    PG_TRY();
+    {
+        pfree(pointer);
+    }
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        FlushErrorState();
+    }
+    PG_END_TRY();
+}
+
+static void *CBDrcMemAlloc(size_t size)
+{
+    void *ptr = NULL;
+    ptr = palloc_huge(DMSDrcContext, size);
+    if (ptr == NULL) {
+        ereport(FATAL, (errmsg("Failed to allocate memory for DMSDrcContext.")));
+    }
+    return ptr;
+}
+
+static void CBDrcMemFree(void *pointer)
+{
+    pfree(pointer);
+}
+
 static int32 CBProcessLockAcquire(char *data, uint32 len)
 {
     if (unlikely(len != sizeof(SSBroadcastDDLLock))) {
@@ -2440,6 +2502,12 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->mem_alloc = CBMemAlloc;
     callback->mem_free = CBMemFree;
     callback->mem_reset = CBMemReset;
+
+    callback->dms_malloc_prot = CBDMSMemAlloc;
+    callback->dms_free_prot = CBDMSMemFree;
+
+    callback->drc_malloc_prot = CBDrcMemAlloc;
+    callback->drc_free_prot = CBDrcMemFree;
 
     callback->get_page_lsn = CBGetPageLSN;
     callback->get_global_lsn = CBGetGlobalLSN;
