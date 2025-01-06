@@ -52,6 +52,7 @@ MemoryContext ProcSubXidCacheContext = NULL;
 MemoryContext PmTopMemoryContext = NULL;  // save the topm of postmaster thread
 /* Shared memory context for stream thread connection info. */
 MemoryContext StreamInfoContext = NULL;
+MemoryContext DMSDrcContext = NULL;
 
 /*
  * Standard top-level contexts. For a description of the purpose of each

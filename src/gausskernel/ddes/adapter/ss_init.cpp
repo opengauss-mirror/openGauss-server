@@ -443,6 +443,12 @@ static inline void DMSDfxStatReset(){
 
 void DMSInit()
 {
+    MemoryContextInit();
+    t_thrd.dms_cxt.memContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "DMSMemContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
     if (ss_dms_func_init() != DMS_SUCCESS) {
         ereport(FATAL, (errmsg("failed to init dms library")));
     }

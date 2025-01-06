@@ -1744,6 +1744,7 @@ static void knl_t_sql_patch_init(knl_t_sql_patch_context* sql_patch_cxt)
 static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
 {
     dms_cxt->msgContext = NULL;
+    dms_cxt->memContext = NULL;
     dms_cxt->buf_in_aio = false;
     dms_cxt->is_reform_proc = false;
     dms_cxt->CloseAllSessionsFailed = false;

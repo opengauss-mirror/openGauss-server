@@ -3435,6 +3435,7 @@ typedef struct knl_t_publication_context {
 
 typedef struct knl_t_dms_context {
     MemoryContext msgContext;
+    MemoryContext memContext;
     bool buf_in_aio;
     bool is_reform_proc;
     bool CloseAllSessionsFailed;
