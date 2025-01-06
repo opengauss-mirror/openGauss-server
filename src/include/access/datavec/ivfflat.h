@@ -232,6 +232,7 @@ typedef struct IvfflatScanList {
 
 typedef struct IvfflatScanOpaqueData {
     const IvfflatTypeInfo *typeInfo;
+    int listCount;
     int probes;
     int dimensions;
     bool first;
