@@ -115,8 +115,8 @@ void IMCStore::InitScan(CStoreScanState* state, Snapshot snapshot)
     m_deltaMaskMax = 0;
 
     m_imcuStorage = (IMCUStorage**)palloc(sizeof(IMCUStorage*) * (m_imcstoreDesc->imcsNatts + 1));
+    m_firstColIdx = m_imcstoreDesc->imcsNatts; // ctid
     for (int i = 0; i < m_imcstoreDesc->imcsNatts + 1; ++i) {     // with ctid
-        m_firstColIdx = i;
         // Here we must use physical column id
         CFileNode cFileNode(m_relation->rd_node, i, MAIN_FORKNUM);
         m_imcuStorage[i] = New(CurrentMemoryContext) IMCUStorage(cFileNode);
@@ -286,7 +286,8 @@ bool IMCStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ Vector
         cuid = m_endCUID;
     } else {
         int idx = m_CUDescIdx[m_cursor];
-        CUDesc* cuDescPtr = m_CUDescInfo[0]->cuDescArray + idx;
+        CUDesc* cuDescPtr = OnlySysOrConstCol() ? m_virtualCUDescInfo->cuDescArray + idx
+                                                : m_CUDescInfo[0]->cuDescArray + idx;
         cuid = cuDescPtr->cu_id;
     }
 
@@ -379,7 +380,7 @@ bool IMCStore::LoadCUDesc(
 
     Assert(col >= 0);
     Assert(loadCUDescInfoPtr);
-    if (col >= m_relation->rd_att->natts) {
+    if (col > m_relation->rd_att->natts) {
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
             errmsg("col index exceed col number, col:%d, number:%d", col, m_relation->rd_att->natts)));
     }
@@ -552,7 +553,11 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 
 void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid)
 {
-    Assert(rowgroup && rowgroup->m_delta && rowgroup->m_cuDescs && rowgroup->m_cuDescs[m_ctidCol]);
+    if (rowgroup == NULL || rowgroup->m_delta == NULL) {
+        ereport(ERROR, (errmsg(
+            "Try build delete mask for htap error, row group is invalid.")));
+    }
+
     DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
     ItemPointer item = NULL;
     DeltaOperationType ctidtpye;
@@ -567,6 +572,10 @@ void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 
             continue;
         }
 
+        if (rowgroup->m_cuDescs == NULL || rowgroup->m_cuDescs[m_ctidCol] == NULL) {
+            ereport(ERROR, (errmsg(
+                "Try build delete mask for htap error, cudesc of row group (%d) is invalid.", cuid)));
+        }
         int rowIdx = FindRowIDByCtid(cuPtr, item, rowgroup->m_cuDescs[m_ctidCol]->row_count);
         if (rowIdx < 0) {
             continue;
@@ -574,7 +583,7 @@ void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 
         m_hasDeadRow = true;
         if ((rowIdx >> 3) > MAX_IMCSTORE_DEL_BITMAP_SIZE) {
             ereport(ERROR, (errmsg(
-                "Try build delete mask for hatp error, row index exceeds MAX_IMCSTORE_DEL_BITMAP_SIZE")));
+                "Try build delete mask for htap error, row index exceeds MAX_IMCSTORE_DEL_BITMAP_SIZE")));
         }
         m_cuDelMask[rowIdx >> 3] |= (1 << (rowIdx % 8));
     }
