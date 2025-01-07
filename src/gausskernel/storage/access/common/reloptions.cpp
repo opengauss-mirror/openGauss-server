@@ -3208,18 +3208,6 @@ static bool ValidateSegmentOption(List *options)
     return result;
 }
 
-void CheckSegmentCompressOption(List *options, char relkind, StorageType storage_type, char *storeChar)
-{
-    if (ValidateSegmentOption(options)) {
-        return;
-    }
-
-    if (!IsInitdb && (storage_type == SEGMENT_PAGE) && (relkind == RELKIND_RELATION) &&
-        (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("compresstype can not be used in segment table.")));
-    }
-}
-
 #ifdef USE_SPQ
 /*
  * before check spq reloption, make sure guc params of spq_enable_btbuild is on

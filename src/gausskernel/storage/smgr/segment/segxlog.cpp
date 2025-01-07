@@ -522,7 +522,7 @@ void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const cha
 
 void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
 {
-    BlockNumber logic_start = ExtentIdToLogicBlockNum(xlog_data->extent_id);
+    BlockNumber logic_start = extent_id_to_logic_blocknum(xlog_data->extent_id);
     for (int i=0; i<ExtentSizeByCount(xlog_data->extent_id); i++) {
         BlockNumber blk = logic_start + i;
         if (blk >= xlog_data->nblocks) {

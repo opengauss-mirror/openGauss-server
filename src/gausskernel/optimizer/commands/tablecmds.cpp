@@ -1299,14 +1299,14 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                         errmsg("There is a conflict caused by storage_type and orientation")));
     }
 
-    bool noSupportTable = segment || isCStore || isTsStore || relkind != RELKIND_RELATION ||
+    bool noSupportTable = isCStore || isTsStore || relkind != RELKIND_RELATION ||
                           stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
                           stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
                           stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP;
     if (noSupportTable && tableCreateSupport.compressType) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("compresstype can not be used in segment table, "
-                               "column table, view, unlogged table or temp table.")));
+                        errmsg("compresstype can not be used in column table, "
+                               "view, unlogged table or temp table.")));
     }
 
     if (tableCreateSupport.compressType && ENABLE_DMS) {
@@ -3053,8 +3053,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Only support segment storage type while parameter enable_segment is ON.")));
     }
-
-    CheckSegmentCompressOption(stmt->options, relkind, storage_type, storeChar);
 
     /*
      * Create the relation.  Inherited defaults and constraints are passed in

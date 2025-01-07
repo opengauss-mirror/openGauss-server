@@ -310,6 +310,5 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport *tableCreateSup
 bool ReadBoolFromDefElem(DefElem* defElem);
 void CheckCompressOption(TableCreateSupport *tableCreateSupport);
 bool CheckSegmentStorageOption(List *options);
-void CheckSegmentCompressOption(List *options, char relkind, StorageType storage_type, char* storeChar);
 #endif /* RELOPTIONS_H */
 

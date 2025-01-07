@@ -2076,6 +2076,7 @@ void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
             // buffer descriptor contains the physical location
             Assert(buf_desc->extra->seg_fileno <= EXTENT_TYPES && buf_desc->extra->seg_fileno > EXTENT_INVALID);
             buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
+            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
             buf_tag->blockNum = buf_desc->extra->seg_blockno;
         } else if (SS_BEFORE_RECOVERY) {
             buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
@@ -2086,6 +2087,7 @@ void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
             Assert(loc.blocknum != InvalidBlockNumber);
             buf_tag->rnode.relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
             buf_tag->blockNum = loc.blocknum;
+            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
         }
         if (buf_tag->blockNum == InvalidBlockNumber || buf_tag->rnode.relNode == EXTENT_INVALID) {
             Assert(0);

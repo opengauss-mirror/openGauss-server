@@ -30,6 +30,8 @@
 #include "executor/executor.h"
 #include "miscadmin.h"
 #include "storage/smgr/segment.h"
+#include "storage/cfs/cfs_md.h"
+#include "storage/page_compression.h"
 
 XLogRecPtr log_seg_physical_file_extend(SegLogicFile *segfile);
 

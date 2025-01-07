@@ -2065,7 +2065,7 @@ static void WriteZeroPageToDisk(SMgrRelation smgr, ForkNumber forknum, BlockNumb
             .dbNode = spc->dbNode,
             .relNode = pblk->relNode,
             .bucketNode = SegmentBktId,
-            .opt = 0
+            .opt = smgr->smgr_rnode.node.opt
         };
         seg_physical_write(spc, fakenode, forknum, pblk->block, (char *)bufBlock, false);
     } else {
@@ -2125,7 +2125,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                     .dbNode = spc->dbNode,
                     .relNode = pblk->relNode,
                     .bucketNode = SegmentBktId,
-                    .opt = 0
+                    .opt = smgr->smgr_rnode.node.opt
                 };
                 seg_physical_read(spc, fakenode, forkNum, pblk->block, (char *)bufBlock);
                 if (PageIsVerified((Page)bufBlock, pblk->block)) {
@@ -5229,7 +5229,7 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             .dbNode = spc->dbNode,
             .relNode = bufdesc->extra->seg_fileno,
             .bucketNode = SegmentBktId,
-            .opt = 0
+            .opt = reln->smgr_rnode.node.opt
         };
 
         SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno,
@@ -7513,7 +7513,7 @@ void IssuePendingWritebacks(WritebackContext *context)
          * from a column relation so don't forget to get column number from forknum
          */
         reln = smgropen(tag.rnode, InvalidBackendId, GetColumnNum(tag.forkNum));
-        smgrwriteback(reln, tag.forkNum, tag.blockNum, nblocks);
+        smgrwriteback(reln, tag.forkNum, tag.blockNum, nblocks, tag.rnode);
     }
 
     context->nr_pending = 0;

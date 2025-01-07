@@ -2020,6 +2020,19 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
     pg_flush_data(vfdcache[file].fd, offset, nbytes);
 }
 
+/**
+ * Write back interface for compress segment files.
+ * @param[in]     file     the file handle.
+ * @param[in]     offset   the offset from file header.
+ * @param[in/out] nbytes   byte counts.
+ */
+void seg_write_back(File file, off_t offset, uint32 nbytes)
+{
+    Assert(file > 0);
+    pg_flush_data(file, offset, nbytes);
+    return;
+}
+
 // FilePRead
 // 		Read from a file at a given offset , using pread() for multithreading safe
 // 		NOTE: The file offset is not changed.
@@ -2157,6 +2170,26 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
     }
     return returnCode;
 }
+/** read interface for compress segment files.
+ * @param[in]     file     the file handle.
+ * @param[in]     offset   the offset from file header.
+ * @param[in]     wait_event_info   Wait Events.
+ * @return  the compressed page size in stream compress extent. return -1 in any failure
+ */
+int seg_file_read(File fd, char *buf, int amount, off_t off, uint32 wait_event_info)
+{
+    pgstat_report_waitevent(wait_event_info);
+    int nbytes = pread(fd, buf, amount, off);
+    if (nbytes != amount) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                        errcode_for_file_access(),
+                        errmsg("could not read expected len from file:%d, off:%ld, amount:%d", fd, off, amount),
+                        errdetail("errno: %d", errno)));
+    }
+    pgstat_report_waitevent(WAIT_EVENT_END);
+    return nbytes;
+}
 
 // FilePWrite
 // 		Write to a file at a given offset, using pwrite() for multithreading safe
@@ -2270,6 +2303,27 @@ retry:
     }
 
     return returnCode;
+}
+
+/** write interface for compress segment files.
+ * @param[in]     file     the file handle.
+ * @param[in]     offset   the offset from file header.
+ * @param[in]     wait_event_info   Wait Events.
+ * @param[in/out] nbytes   byte counts.
+ */
+int seg_file_write(File fd, const char *buf, int amount, off_t offset, uint32 wait_event_info)
+{
+    pgstat_report_waitevent(wait_event_info);
+    int nbytes = pwrite(fd, buf, amount, offset);
+    pgstat_report_waitevent(WAIT_EVENT_END);
+    if (nbytes != amount) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                        errcode_for_file_access(),
+                        errmsg("could not write segment block offset:%ld, amount:%d in file %d", offset, amount, fd),
+                        errdetail("errno: %d", errno)));
+    }
+    return nbytes;
 }
 
 #ifndef ENABLE_LITE_MODE
@@ -4093,6 +4147,18 @@ void FileAllocate(File file, uint32 offset, uint32 size)
     if (fallocate(vfdcache[file].fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("fallocate failed on relation: \"%s\": ", FilePathName(file))));
+    }
+}
+/** punch hole interface for compress segment files.
+ * @param[in]     file     the file handle.
+ * @param[in]     offset   the offset from file header.
+ * @param[in]     size     the punch hole size.
+ * @param[in]     wait_event_info   Wait Events.
+ */
+void seg_file_allocate(File fd, uint32 offset, uint32 size)
+{
+    if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed fd: \"%d\"", fd)));
     }
 }
 

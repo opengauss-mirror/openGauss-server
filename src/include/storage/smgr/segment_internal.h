@@ -36,6 +36,7 @@
 #include "storage/file/fio_device_com.h"
 #include "utils/segment_test.h"
 #include "libaio.h"
+#include "storage/cfs/cfs_converter.h"
 
 const int DF_MAP_GROUP_RESERVED = 3;
 const int DF_MAX_MAP_GROUP_CNT = 33;
@@ -92,20 +93,6 @@ typedef struct SegLogicFile {
     pthread_mutex_t filelock;
 } SegLogicFile;
 
-void df_ctrl_init(SegLogicFile *sf, RelFileNode relNode, ForkNumber forknum);
-void df_open_files(SegLogicFile *sf);
-void df_extend(SegLogicFile *sf, BlockNumber target_blocks);
-void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum);
-void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums);
-void df_pwrite_block(SegLogicFile *sf, const char *buffer, BlockNumber blocknum);
-void df_fsync(SegLogicFile *sf);
-void df_unlink(SegLogicFile *sf);
-void df_create_file(SegLogicFile *sf, bool redo);
-void df_shrink(SegLogicFile *sf, BlockNumber target);
-void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
-bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
-SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block);
-
 /*
  * Data files status in the segment space;
  */
@@ -150,7 +137,12 @@ typedef enum ExtentSize {
     EXT_SIZE_128 = 128,
     EXT_SIZE_1024 = 1024,
     EXT_SIZE_8192 = 8192,
-    INVALID_EXT_SIZE = 0,
+    CFS_EXT_SIZE_1 = 1,
+    CFS_EXT_SIZE_8 = 8,
+    CFS_EXT_SIZE_128 = 127,
+    CFS_EXT_SIZE_1024 = 1016, // 127 * 8
+    CFS_EXT_SIZE_8192 = 8128, // 127 * 64
+    INVALID_EXT_SIZE = 0
 } ExtentSize;
 
 typedef enum ExtentBoundary {
@@ -163,6 +155,9 @@ typedef enum ExtentTotalPages {
     EXT_SIZE_8_TOTAL_PAGES = 128,
     EXT_SIZE_128_TOTAL_PAGES = 16384,
     EXT_SIZE_1024_TOTAL_PAGES = 131072,
+    CFS_EXT_SIZE_8_TOTAL_PAGES = 128,
+    CFS_EXT_SIZE_128_TOTAL_PAGES = 16257, // 128 + 127 *127
+    CFS_EXT_SIZE_1024_TOTAL_PAGES = 130049, // 128 +127 *127 + 127* 8 * 112
 } ExtentTotalPages;
 
 typedef enum EXTENT_TYPE {
@@ -409,7 +404,7 @@ void spc_free_extent(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNu
 
 void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, const char *buffer, BlockNumber blocknum);
 void spc_read_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, char *buffer, BlockNumber blocknum);
-void spc_writeback(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+void spc_writeback(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
 void spc_shrink(Oid spcNode, Oid dbNode, int extent_size);
 BlockNumber spc_size(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
 void spc_datafile_create(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
@@ -490,7 +485,7 @@ inline static uint32 ExtentIdToLevel0PageOffset(uint32 extent_id)
     return (extent_id - BMT_HEADER_LEVEL0_SLOTS) % BMT_LEVEL0_SLOTS;
 }
 
-inline static BlockNumber ExtentIdToLogicBlockNum(uint32 extent_id)
+inline static BlockNumber extent_id_to_logic_blocknum(uint32 extent_id)
 {
     if (extent_id < EXT_SIZE_8_BOUNDARY) {
         return extent_id * EXT_SIZE_8;
@@ -500,6 +495,19 @@ inline static BlockNumber ExtentIdToLogicBlockNum(uint32 extent_id)
         return (extent_id - EXT_SIZE_128_BOUNDARY) * EXT_SIZE_1024 + EXT_SIZE_128_TOTAL_PAGES;
     } else {
         return (extent_id - EXT_SIZE_1024_BOUNDARY) * EXT_SIZE_8192 + EXT_SIZE_1024_TOTAL_PAGES;
+    }
+}
+
+inline static BlockNumber extent_id_to_logic_blocknum_in_cfs(uint32 extent_id)
+{
+    if (extent_id < EXT_SIZE_8_BOUNDARY) {
+        return extent_id * CFS_EXT_SIZE_8;
+    } else if (extent_id < EXT_SIZE_128_BOUNDARY) {
+        return (extent_id - EXT_SIZE_8_BOUNDARY) * CFS_EXT_SIZE_128 + CFS_EXT_SIZE_8_TOTAL_PAGES;
+    } else if (extent_id < EXT_SIZE_1024_BOUNDARY) {
+        return (extent_id - EXT_SIZE_128_BOUNDARY) * CFS_EXT_SIZE_1024 + CFS_EXT_SIZE_128_TOTAL_PAGES;
+    } else {
+        return (extent_id - EXT_SIZE_1024_BOUNDARY) * CFS_EXT_SIZE_8192 + CFS_EXT_SIZE_1024_TOTAL_PAGES;
     }
 }
 
@@ -641,6 +649,12 @@ inline EXTENT_TYPE EXTENT_SIZE_TO_TYPE(int extent_size)
         return EXTENT_1024;
     } else if (extent_size == EXT_SIZE_8192) {
         return EXTENT_8192;
+    } else if (extent_size == CFS_EXT_SIZE_128) {
+        return EXTENT_128;
+    } else if (extent_size == CFS_EXT_SIZE_1024) {
+        return EXTENT_1024;
+    } else if (extent_size == CFS_EXT_SIZE_8192) {
+        return EXTENT_8192;
     } else {
         Assert(0);
         return EXTENT_INVALID;
@@ -651,7 +665,8 @@ inline EXTENT_TYPE EXTENT_SIZE_TO_TYPE(int extent_size)
 #define EXTENT_SIZE_TO_GROUPID(ext_size) (EXTENT_SIZE_TO_TYPE(ext_size) - 1)
 #define EXTENT_GROUPID_TO_SIZE(egid) (EXTENT_TYPE_TO_SIZE(egid + 1))
 #define EXTENT_GROUPID_TO_TYPE(egid) (egid + 1)
-
+/* get fd for sgement compressed page */
+int df_get_fd(SegLogicFile *sf, BlockNumber blocknum);
 /* Segment page store xlog-related function */
 extern void eg_init_segment_head_buffer_content(Buffer seg_head_buffer, BlockNumber seg_head_blocknum, XLogRecPtr lsn);
 extern void eg_init_bitmap_page_content(Page bitmap_page, BlockNumber first_page);
@@ -661,5 +676,18 @@ static const int SEGMENT_SPACE_INFO_VIEW_COL_NUM = 8;
 static const int SEGMENT_SPACE_EXTENT_USAGE_COL_NUM = 5;
 
 SegmentSpaceStat spc_storage_stat(SegSpace *spc, int group_id, ForkNumber forknum);
+void df_ctrl_init(SegLogicFile *sf, RelFileNode relNode, ForkNumber forknum);
+void df_open_files(SegLogicFile *sf);
+void df_extend(SegLogicFile *sf, BlockNumber target_blocks);
+void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum);
+void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums);
+void df_pwrite_block(SegLogicFile *sf, const char *buffer, BlockNumber blocknum);
+void df_fsync(SegLogicFile *sf);
+void df_unlink(SegLogicFile *sf);
+void df_create_file(SegLogicFile *sf, bool redo);
+void df_shrink(SegLogicFile *sf, BlockNumber target);
+void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
+bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
+SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block);
 
 #endif

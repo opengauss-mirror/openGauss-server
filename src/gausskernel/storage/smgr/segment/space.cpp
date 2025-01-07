@@ -42,6 +42,7 @@
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_aio.h"
 #include "storage/file/fio_device.h"
+#include "storage/cfs/cfs_md.h"
 
 static void SSInitSegLogicFile(SegSpace *spc);
 
@@ -93,18 +94,35 @@ void spc_free_extent(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNu
 
 void spc_read_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, char *buffer, BlockNumber blocknum)
 {
+    SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
-    df_pread_block(seg->segfile, buffer, blocknum);
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+        int fd = df_get_fd(seg->segfile, blocknum);
+        CfsReadPage(rel, relNode, fd, seg->extent_size, forknum, blocknum, buffer, SEG_STORAGE);
+    } else {
+        df_pread_block(seg->segfile, buffer, blocknum);
+    }
+    return;
 }
 
 void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, const char *buffer, BlockNumber blocknum)
 {
+    SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
-    df_pwrite_block(seg->segfile, buffer, blocknum);
+    ereport(LOG, (errmsg("spc_write_block, blocknum:%d, relNode:%d", blocknum, relNode.relNode)));
+
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+        int fd = df_get_fd(seg->segfile, blocknum);
+        CfsWritePage(rel, relNode, fd, seg->extent_size, forknum, blocknum, buffer, SEG_STORAGE);
+        int sliceno = DF_OFFSET_TO_SLICENO(((off_t)blocknum) * BLCKSZ);
+        seg_register_dirty_file(seg->segfile, sliceno);
+    } else {
+        df_pwrite_block(seg->segfile, buffer, blocknum);
+    }    
 }
 
 int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
@@ -130,12 +148,20 @@ int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum
     return ret;
 }
 
-void spc_writeback(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
+void spc_writeback(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
 {
-    int egid = EXTENT_SIZE_TO_GROUPID(extent_size);
-    SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
+    SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));  
+    int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
+    SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
-    df_flush_data(sf, blocknum, nblocks);
+    SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
+    ereport(LOG, (errmsg("spc_writeback, blocknum:%d, nblocks:%d, forknum:%d, relNode:%d",  blocknum, nblocks, forknum, relNode.relNode)));
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+        int fd = df_get_fd(sf, blocknum);
+        CfsWriteBack(rel, relNode, fd, seg->extent_size, forknum, blocknum, nblocks, SEG_STORAGE);
+    } else {
+        df_flush_data(sf, blocknum, nblocks);
+    }
 }
 
 BlockNumber spc_size(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum)
@@ -509,10 +535,12 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
  * logic_rnode and logic_start_blocknum is used to get blocks' buffer if possible
  */
 static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 logic_start_blocknum,
-                        BlockNumber nblocks, BlockNumber phy_from_extent, BlockNumber phy_to_extent)
+                        BlockNumber nblocks, BlockNumber phy_from_extent, BlockNumber phy_to_extent,
+                        ForkNumber forknum)
 {
     char *content = NULL;
     char *unaligned_content = NULL;
+    bool compress = IS_SEG_COMPRESSED_RNODE(logic_rnode, forknum);
     if (ENABLE_DSS) {
         unaligned_content = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
         content = (char*)BUFFERALIGN(unaligned_content);
@@ -533,6 +561,12 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
         if (logic_start_blocknum + i >= nblocks) {
             return;
         }
+
+        if (compress && ((i + 1) % CFS_EXTENT_SIZE == 0)) {
+            ereport(LOG, (errmsg("[segment page]we need not to copy pca page, logic_start_blocknum:%d, offset:%d",
+                                 logic_start_blocknum, i)));
+            continue;
+        }
         /*
          * In the extent to be moved, there may exist some blocks cached in shared buffer. Thus we need to
          * copy content from buffer instead of file. Note that we can not use 'ReadBuffer' interface directly,
@@ -541,6 +575,7 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
          * leads to dead lock.
          *
          */
+        SMgrRelation rel = smgropen(logic_rnode, InvalidBackendId, GetColumnNum(forknum));
         Buffer buf = try_get_moved_pagebuf(&logic_rnode, seg->forknum, logic_start_blocknum + i);
         if (BufferIsValid(buf)) {
             /*
@@ -564,7 +599,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
             }
         } else {
             BlockNumber from_block = phy_from_extent + i;
-            df_pread_block(seg->segfile, content, from_block);
+            spc_read_block(seg->space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
+                forknum, content, from_block);
             pagedata = content;
         }
 
@@ -591,7 +627,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
                 t_thrd.proc->dw_pos = pos;
                 t_thrd.proc->flush_new_dw = !flush_old_file;
                 PageSetChecksumInplace((Page)pagedata, to_block);
-                df_pwrite_block(seg->segfile, pagedata, to_block);
+                spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
+                    forknum, pagedata, to_block);
                 if (flush_old_file) {
                     g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
                 } else {
@@ -600,7 +637,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
                 t_thrd.proc->dw_pos = -1;
             } else {
                 PageSetChecksumInplace((Page)pagedata, to_block);
-                df_pwrite_block(seg->segfile, pagedata, to_block);
+                spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
+                    forknum, pagedata, to_block);
             }
         }
         END_CRIT_SECTION();
@@ -739,8 +777,9 @@ Oid get_valid_relation_oid(Oid spcNode, Oid relNode)
     }
 }
 
-void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePointer iptr)
+void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePointer iptr, ForkNumber forknum)
 {
+    BlockNumber logic_start;
     uint32 extent_id = SPC_INVRSPTR_GET_SPECIAL_DATA(iptr);
     BlockNumber owner = iptr.owner;
 
@@ -761,7 +800,8 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
                         logic_rnode.spcNode, logic_rnode.dbNode, logic_rnode.spcNode)));
         return;
     }
-
+    SMgrRelation rel = smgropen(logic_rnode, InvalidBackendId, GetColumnNum(forknum));
+    logic_rnode.opt = rel->smgr_rnode.node.opt;
     /*
      * Lock the segment head buffer first. So concurrent workers can not
      * (1) modify the block map tree (2) free the segment
@@ -806,7 +846,12 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
     }
 
     /* Check is passed. Now we can do the data movement */
-    BlockNumber logic_start = ExtentIdToLogicBlockNum(extent_id);
+    if (!IS_SEG_COMPRESSED_RNODE(EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
+        seg->forknum)) {
+        logic_start = extent_id_to_logic_blocknum(extent_id);
+    } else {
+        logic_start = extent_id_to_logic_blocknum_in_cfs(extent_id);
+    }
 
     XLogAtomicOpStart();
 
@@ -814,7 +859,7 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
     BlockNumber new_extent = eg_alloc_extent(seg, InvalidBlockNumber, iptr);
 
     /* eg_alloc_extent implicate START_CRIT_SECTION; We do not worry any Error during copy_extent */
-    copy_extent(seg, logic_rnode, logic_start, owner_seghead->nblocks, extent, new_extent);
+    copy_extent(seg, logic_rnode, logic_start, owner_seghead->nblocks, extent, new_extent, forknum);
 
     SEGMENTTEST(SEGMENT_COPY_EXTENT, (errmsg("error happens just after copy extent")));
 
@@ -860,13 +905,13 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
     XLogAtomicOpCommit();
 }
 
-void move_one_extent(SegExtentGroup *seg, BlockNumber extent, Buffer *ipbuf)
+void move_one_extent(SegExtentGroup *seg, BlockNumber extent, Buffer *ipbuf, ForkNumber forknum)
 {
     ExtentInversePointer iptr = GetInversePointer(seg, extent, ipbuf);
     ExtentUsageType usage = SPC_INVRSPTR_GET_USAGE(iptr);
 
     if (usage == DATA_EXTENT) {
-        move_data_extent(seg, extent, iptr);
+        move_data_extent(seg, extent, iptr, forknum);
     } else {
         uint32 usage = SPC_INVRSPTR_GET_USAGE(iptr);
         uint32 special = SPC_INVRSPTR_GET_SPECIAL_DATA(iptr);
@@ -964,7 +1009,7 @@ BlockNumber ShrinkVictimSelector::next()
 }
 
 /* Move extents which is behind targetSize */
-void move_extents(SegExtentGroup *seg, BlockNumber target_size)
+void move_extents(SegExtentGroup *seg, BlockNumber target_size, ForkNumber forknum)
 {
     /*
      * Copy meta-data from map head, and release the buffer.
@@ -978,7 +1023,7 @@ void move_extents(SegExtentGroup *seg, BlockNumber target_size)
     BlockNumber victim = selector.next();
     while (victim != InvalidBlockNumber) {
         CHECK_FOR_INTERRUPTS();
-        move_one_extent(seg, victim, &ipbuf);
+        move_one_extent(seg, victim, &ipbuf, forknum);
         victim = selector.next();
     }
 
@@ -1192,7 +1237,7 @@ void spc_shrink(Oid spcNode, Oid dbNode, int extent_type, ForkNumber forknum)
     get_space_shrink_target(seg, &target_size, &old_group_count, &new_group_count);
 
     // move extents to the front of data file
-    move_extents(seg, target_size);
+    move_extents(seg, target_size, forknum);
 
     /*
      * We must lock the segment extent group here, to forbid any extent allocation.

@@ -2,12 +2,12 @@
 #define OPENGAUSS_CFS_BUFFERS_H
 
 #include "storage/cfs/cfs.h"
-#include "storage/cfs/cfs_converter.h"
+#include "storage/smgr/storage_converter.h"
 #include "storage/cfs/cfs_repair.h"
 
 struct CfsBufferKey {
     RelFileNodeV2 relFileNode;
-    uint32 ExtentCount;
+    uint32 extent_header;
 };
 
 /*====================================*/

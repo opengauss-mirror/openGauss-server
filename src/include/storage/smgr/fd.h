@@ -82,7 +82,9 @@ extern off_t FileSeek(File file, off_t offset, int whence);
 extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0);
 extern void FileWriteback(File file, off_t offset, off_t nbytes);
 extern char* FilePathName(File file);
+extern void seg_write_back(File file, off_t offset, uint32 size);
 extern void FileAllocate(File file, uint32 offset, uint32 size);
+extern void seg_file_allocate(File file, uint32 offset, uint32 size);
 extern void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size);
 extern void FileAsyncCUClose(File* vfdList, int32 vfdnum);
 extern int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn);
@@ -99,8 +101,10 @@ extern void* MmapExtentAddress(File fd, int pc_memory_map_size, off_t offset);
 // Threading virtual files IO interface, using pread() / pwrite()
 //
 extern int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_event_info = 0);
+extern int seg_file_read(File file, char* buffer, int amount, off_t offset, uint32 wait_event_info = 0);
 extern int FilePWrite(File file, const char *buffer, int amount, off_t offset, uint32 wait_event_info = 0,
     int fastExtendSize = 0);
+extern int seg_file_write(File file, const char *buffer, int amount, off_t offset, uint32 wait_event_info = 0);
 
 extern int AllocateSocket(const char* ipaddr, int port);
 extern int FreeSocket(int sockfd);

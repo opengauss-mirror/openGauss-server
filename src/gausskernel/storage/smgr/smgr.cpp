@@ -55,7 +55,8 @@ typedef struct f_smgr {
     SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
     void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
-    void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+    void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+        RelFileNode relNode);
     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
     void (*smgr_truncate)(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
     void (*smgr_immedsync)(SMgrRelation reln, ForkNumber forknum);
@@ -794,9 +795,10 @@ void smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cons
  *	smgrwriteback() -- Trigger kernel writeback for the supplied range of
  *					   blocks.
  */
-void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
+void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                   BlockNumber nblocks, RelFileNode relNode)
 {
-    (*(smgrsw[reln->smgr_which].smgr_writeback))(reln, forknum, blocknum, nblocks);
+    (*(smgrsw[reln->smgr_which].smgr_writeback))(reln, forknum, blocknum, nblocks, relNode);
 }
 
 /*

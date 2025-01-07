@@ -15,10 +15,10 @@
 #include "storage/smgr/smgr.h"
 #include "pgstat.h"
 #include "postmaster/cfs_shrinker.h"
+#include "storage/smgr/storage_converter.h"
 
 #define CFS_PCA_AND_ASSIST_BUFFER_SIZE (2 * CFS_EXTENT_SIZE * BLCKSZ)
 #define CFS_WRITE_RETRY_TIMES 8
-
 
 /** extend chunks for blocks
  @param[in/out] cfsExtentHeader     pca page header.
@@ -82,11 +82,6 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
  @param[in/out] alignbuf      src page buffer. */
 static void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca, char *alignbuf);
 
-CfsLocationConvert cfsLocationConverts[2] = {
-    StorageConvert,
-    NULL
-};
-
 char* CfsHeaderPagerCheckStatusList[] = {"verified success.",
     "verified failed but repaired some values.",
     "verified failed."};
@@ -94,13 +89,48 @@ char* CfsHeaderPagerCheckStatusList[] = {"verified success.",
 void CfsRecycleChunk(SMgrRelation reln, ForkNumber forknum);
 void CfsShrinkerShmemListPush(const RelFileNode &rnode, ForkNumber forknum, char parttype);
 
-int CfsReadPage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, char *buffer,
-                   CFS_STORAGE_TYPE type)
+/** Get the real file handler.
+ * @param[in]     sRel        SMgrRelation.
+ * @param[in]     forknum  fork number.
+ * @param[in]     logicBlockNumber  logic block number.
+ * @param[in] skipSync   inidicate whether to skip sync.
+ * @return  the real file handler. return -1 in any failure cases.
+ */
+int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync, int type)
+{
+    int fd = -1;
+    MdfdVec *v = NULL;
+    if (type == EXTENT_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_FAIL);
+    } else if (type == WRITE_BACK_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_RETURN_NULL);
+    } else if (type == EXTENT_CREATE_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_CREATE);
+    }
+    if (v != NULL) {
+        fd = v->mdfd_vfd;
+    }
+    return fd;
+} 
+
+int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                BlockNumber logicBlockNumber, char *buffer, EXTEND_STORAGE_TYPE type)
 {
     errno_t rc;
-    ExtentLocation location = cfsLocationConverts[type](reln, forknum, logicBlockNumber, false, EXTENT_OPEN_FILE);
+    int nbytes;
+    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     if (location.fd < 0) {
         return -1;
+    }
+
+    if (location.is_segment_page && (!location.is_compress_allowed)) {
+        nbytes = seg_file_read(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
+            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        ereport(LOG,(errmodule(MOD_SEGMENT_PAGE), errmsg("don't compress block due to it's a slice-acrossed block,"
+            "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        return nbytes;
     }
 
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
@@ -125,7 +155,7 @@ int CfsReadPage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNum
     }
 
     RelFileCompressOption option;
-    TransCompressOptions(reln->smgr_rnode.node, &option);
+    TransCompressOptions(relNode, &option);
 
     auto chunkSize = CHUNK_SIZE_LIST[option.compressChunkSize];
 
@@ -142,7 +172,11 @@ int CfsReadPage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNum
             i++;
         }
         int readAmount = (int)(chunkSize * ((int)(i - (int)start) + 1));
-        int nbytes = FilePRead(location.fd, bufferPos, readAmount, seekPos, (uint32)WAIT_EVENT_DATA_FILE_READ);
+        if (location.is_segment_page) {
+            nbytes = seg_file_read(location.fd, bufferPos, readAmount, seekPos, (uint32)WAIT_EVENT_DATA_FILE_READ);
+        } else {
+            nbytes = FilePRead(location.fd, bufferPos, readAmount, seekPos, (uint32)WAIT_EVENT_DATA_FILE_READ);
+        }
         if (nbytes != readAmount) {
             rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
             securec_check(rc, "\0", "\0");
@@ -182,6 +216,7 @@ char *CfsCompressPage(const char *buffer, RelFileCompressOption *option, uint8 *
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("mdwrite_pc unrecognized compression algorithm %d,chunk_size:%d,level:%d,prealloc_chunk:%d",
                 (int)algorithm, (int)chunk_size, level, (int)prealloc_chunk)));
+        Assert(0);
     }
 
     char *work_buffer = (char *) palloc((unsigned long)work_buffer_size);
@@ -214,13 +249,23 @@ inline static uint4 PageCompressChunkSize(SMgrRelation reln)
     return CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE((reln)->smgr_rnode.node.opt)];
 }
 
-void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
-                  CFS_STORAGE_TYPE type)
+void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                  BlockNumber blocknum, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
 {
     while (nblocks > 0) {
-        ExtentLocation location = cfsLocationConverts[type](reln, forknum, blocknum, true, WRITE_BACK_OPEN_FILE);
+        ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum);
         if (location.fd == -1) {
             return;
+        }
+        if (location.is_segment_page && (!location.is_compress_allowed)) {
+            seg_write_back(location.fd, blocknum * BLCKSZ, BLCKSZ);
+            nblocks -= 1;
+            blocknum += 1;
+            ereport(LOG, (errmodule(MOD_SEGMENT_PAGE), errmsg("don't compress block due to it's a slice-acrossed"
+                "block, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d, type:%d,"
+                "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                blocknum, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+            continue;
         }
         unsigned int segnum_start = blocknum / CFS_LOGIC_BLOCKS_PER_FILE;
         unsigned int segnum_end = (blocknum + nblocks - 1) / CFS_LOGIC_BLOCKS_PER_FILE;
@@ -232,7 +277,7 @@ void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, B
         for (BlockNumber iblock = 0; iblock < nflush; ++iblock) {
             uint32 chunkSize = PageCompressChunkSize(reln);
             location =
-                cfsLocationConverts[type](reln, forknum, blocknum + iblock, true, WRITE_BACK_OPEN_FILE);
+                g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum + iblock);
 
             pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
             if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
@@ -265,7 +310,12 @@ void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, B
                 } else {
                     seekPos = OffsetOfPageCompressChunk((uint16)chunkSize, (int)seekPosChunk);
                     pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
-                    FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+                    if (location.is_segment_page) {
+                        seg_write_back(location.fd, seekPos, (off_t)nchunks * chunkSize);
+                    } else {
+                        FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+                    }
+
                     seekPosChunk = cfsExtentAddress->chunknos[i];
                     lastChunk = seekPosChunk;
                 }
@@ -274,7 +324,11 @@ void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, B
             if (!firstEnter) {
                 seekPos = (off_t) chunkSize * seekPosChunk;
                 pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
-                FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+                if (location.is_segment_page) {
+                    seg_write_back(location.fd, seekPos, (off_t)nchunks * chunkSize);
+                } else {
+                    FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+                }
             }
 
             pca_buf_free_page(ctrl, location, false);
@@ -576,14 +630,23 @@ static inline uint32 SingleBlockChunkNumForRecycle(CfsExtentHeader *cfsExtentHea
     return BLCKSZ / cfsExtentHeader->chunk_size;
 }
 
-size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer,
-                    bool sipSync, bool isExtend, CFS_STORAGE_TYPE type)
+size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
+    const char *buffer, EXTEND_STORAGE_TYPE type)
 {
     /* quick return if page is extend page */
-    if (PageIsNew(buffer)) {
+    if (buffer == nullptr || PageIsNew(buffer)) {
         return BLCKSZ;
     }
-    ExtentLocation location = cfsLocationConverts[type](reln, forknum, logicBlockNumber, sipSync, EXTENT_OPEN_FILE);
+    int nbytes;
+    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+
+    if (location.is_segment_page && (!location.is_compress_allowed)) {
+        nbytes = seg_file_write(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        ereport(LOG, (errmsg("CfsWritePage with out compress, logicBlockNumber:%u, fd:%d, extent_size:%d,"
+                             "forknum:%d,type:%d, RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                             logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        return BLCKSZ;
+    }
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -602,12 +665,18 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
 
     /* get compress detail */
     RelFileCompressOption option;
-    TransCompressOptions(reln->smgr_rnode.node, &option);
+    TransCompressOptions(relNode, &option);
     uint16 chunkSize = cfsExtentHeader->chunk_size;
 
     /* compress page */
     uint8 nchunks;
-    char *compressedBuffer = CfsCompressPage(buffer, &option, &nchunks);
+    char *compressedBuffer;
+    if (location.is_segment_page && (!location.is_compress_allowed)) {
+        compressedBuffer = (char *)buffer;
+        nchunks = (uint8)(BLCKSZ / location.chunk_size);
+    } else {
+        compressedBuffer = CfsCompressPage(buffer, &option, &nchunks);
+    }
 
     /* set address */
     uint8 need_chunks = option.compressPreallocChunks > nchunks ? (uint8)option.compressPreallocChunks : (uint8)nchunks;
@@ -631,8 +700,13 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
         if ((seekPos + extentStartOffset) > (((BlockNumber)RELSEG_SIZE) * BLCKSZ)) {
             *((uint32 *)NULL) = 1;
         }
-        int nbytes = FilePWrite(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
+        if (location.is_segment_page) {
+            nbytes = seg_file_write(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
+                                    (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        } else {
+            nbytes = FilePWrite(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
                                 (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        }
         if (nbytes != write_amount) {
             /* free compressed buffer */
             if (compressedBuffer != NULL && compressedBuffer != buffer) {
@@ -692,26 +766,84 @@ void InitExtentHeader(const ExtentLocation& location)
     securec_check(rc, "\0", "\0");
 
     cfsExtentHeader->algorithm = location.algorithm;
-    cfsExtentHeader->chunk_size = location.chrunk_size;
+    cfsExtentHeader->chunk_size = location.chunk_size;
 
     pca_buf_free_page(ctrl, location, true);
 }
 
-void CfsExtendExtent(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer,
-                     CFS_STORAGE_TYPE type)
+void cfs_extend_for_seg(const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
+                        BlockNumber logicBlockNumber, const char *buffer,
+                        EXTEND_STORAGE_TYPE type, const ExtentLocation &location)
 {
-    ExtentLocation location = cfsLocationConverts[type](reln, forknum, logicBlockNumber, true, EXTENT_OPEN_FILE);
     if (location.fd < 0) {
         return;
     }
+    if (location.is_segment_page && (!location.is_compress_allowed)) {
+        ereport(LOG,(errmsg("[sgement compress]don't need to truncate due to it's a slice-acrossed block,"
+            "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        return;
+    }
+    ereport(LOG,
+        (errmsg("[sgement compress]cfs_extend_for_seg:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+    if (location.extentOffset == 0) {
+        /* extend and fallocate */
+        auto start = location.extentStart * BLCKSZ;
+        InitExtentHeader(location);
+        if (location.is_segment_page && location.is_compress_allowed) {
+            seg_file_allocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        }
+        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("[sgement compress]InitExtentHeader relNode relFileNode:%d, opt:%d, headerNum: %u.", relNode.relNode, relNode.opt, location.headerNum)));
+    }
+    pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
+    if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
+        pca_buf_free_page(ctrl, location, false);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("[sgement compress]Failed to load pca during extent, fd: %d, headerNum: %u.", location.fd, location.headerNum)));
+    }
+    CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
+
+    if (pg_atomic_read_u32(&cfsExtentHeader->nblocks) < location.extentOffset + 1) {
+        pg_atomic_write_u32(&cfsExtentHeader->nblocks, location.extentOffset + 1);
+    }
+
+    pca_buf_free_page(ctrl, location, true);
+    return;
+}
+
+void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
+    const char *buffer, EXTEND_STORAGE_TYPE type)
+{
+    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    if (location.fd < 0) {
+        return;
+    }
+
+    if (location.is_segment_page && (!location.is_compress_allowed)) {
+        ereport(LOG,(errmsg("CfsExtendExtent dont need truncate, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d, RelFileNode.relNode:%d,\
+            RelFileNode.opt:%d", logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        return;
+    }
+    ereport(LOG, (errmsg("CfsExtendExtent:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+                         "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                         logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
 
     if (location.extentOffset == 0) {
         /* extend and fallocate */
         auto start = location.extentStart * BLCKSZ;
         InitExtentHeader(location);
-        FileAllocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        if (!location.is_segment_page) {
+            FileAllocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        }
+        
+        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("InitExtentHeader relNode relFileNode:%d, opt:%d, headerNum: %u.", relNode.relNode, relNode.opt, location.headerNum)));
     }
-    (void)CfsWritePage(reln, forknum, logicBlockNumber, buffer, true, true, type);
+    (void)CfsWritePage(reln, relNode, fd, extent_size, forknum, logicBlockNumber, buffer, type);
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -727,6 +859,7 @@ void CfsExtendExtent(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlo
     Assert (cfsExtentHeader->nblocks > location.extentOffset);
 
     pca_buf_free_page(ctrl, location, true);
+    return;
 }
 
 BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo, off_t len)
@@ -761,10 +894,10 @@ BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo,
     return result;
 }
 
-void CfsMdPrefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync,
-                   CFS_STORAGE_TYPE type)
+void CfsMdPrefetch(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
+                   EXTEND_STORAGE_TYPE type)
 {
-    ExtentLocation location = cfsLocationConverts[type](reln, forknum, logicBlockNumber, skipSync, EXTENT_OPEN_FILE);
+    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     if (location.fd < 0) {
         return;
     }
@@ -794,16 +927,19 @@ void CfsMdPrefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlock
     pca_buf_free_page(ctrl, location, false);
 }
 
-off_t CfsMdTruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync,
-                    CFS_STORAGE_TYPE type)
+off_t CfsMdTruncate(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
+                    EXTEND_STORAGE_TYPE type)
 {
-    ExtentLocation location = cfsLocationConverts[type](reln, forknum, logicBlockNumber, skipSync, EXTENT_OPEN_FILE);
+    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     /* if logicBlockNumber is the first block of extent, truncate all after blocks */
     if (logicBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT == 0) {
         return location.extentStart * BLCKSZ;  // ok
     }
 
     auto truncateOffset = (location.headerNum + 1) * BLCKSZ;
+    if (location.is_segment_page) {
+        return truncateOffset;
+    }
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -834,7 +970,7 @@ off_t CfsMdTruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
 
     /* File allocate (file hole) */
     uint32 start = location.extentStart * BLCKSZ + max * cfsExtentHeader->chunk_size;
-    uint32 len = (uint32)((CFS_MAX_LOGIC_CHRUNKS_NUMBER(cfsExtentHeader->chunk_size) - max) *
+    uint32 len = (uint32)((CFS_MAX_LOGIC_CHUNKS_NUMBER(cfsExtentHeader->chunk_size) - max) *
                           cfsExtentHeader->chunk_size);
     if (len >= MIN_FALLOCATE_SIZE) {
         start += (len % MIN_FALLOCATE_SIZE);
@@ -877,8 +1013,9 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
     char *pca_page_res, uint32 strLen, bool *need_repair_pca)
 {
     errno_t rc = 0;
+    int fd = CfsGetFd(reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
     ExtentLocation location =
-        cfsLocationConverts[COMMON_STORAGE](reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
+        g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, MAIN_FORKNUM, logicBlockNumber);
 
     /* load the pca page directly */
     CfsExtentHeader *pca_disk = (CfsExtentHeader *)palloc0(BLCKSZ);
@@ -895,13 +1032,13 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
     /* lock the extent by LW_EXCLUSIVE */
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NO_READ);
 
-    CfsHeaderPagerCheckStatus disk_status = CheckAndRepairCompressAddress(pca_disk, location.chrunk_size,
+    CfsHeaderPagerCheckStatus disk_status = CheckAndRepairCompressAddress(pca_disk, location.chunk_size,
                                                                           location.algorithm, location);
     CfsHeaderPagerCheckStatus mem_status = CFS_HEADER_CHECK_STATUS_ERROR;
     if (ctrl->load_status == CTRL_PAGE_IS_LOADED) {
         rc = memcpy_s(pca_mem, BLCKSZ, ctrl->pca_page, BLCKSZ);
         securec_check(rc, "\0", "\0");
-        mem_status = CheckAndRepairCompressAddress(pca_mem, location.chrunk_size,
+        mem_status = CheckAndRepairCompressAddress(pca_mem, location.chunk_size,
                                                    location.algorithm, location);
     }
     pfree(pca_disk);
@@ -1022,7 +1159,7 @@ int WriteRepairFile_Compress_Extent_Impl(const RelFileCompressOption &option, in
     /* File allocate (file hole) */
     uint32 start = offset * BLCKSZ + max_chrunkno * cfsExtentHeader->chunk_size;
     uint32 len =
-        (CFS_MAX_LOGIC_CHRUNKS_NUMBER(cfsExtentHeader->chunk_size) - max_chrunkno) * cfsExtentHeader->chunk_size;
+        (CFS_MAX_LOGIC_CHUNKS_NUMBER(cfsExtentHeader->chunk_size) - max_chrunkno) * cfsExtentHeader->chunk_size;
     if (len >= MIN_FALLOCATE_SIZE) {
         len -= start % MIN_FALLOCATE_SIZE;
         start += start % MIN_FALLOCATE_SIZE;
@@ -1053,8 +1190,8 @@ int WriteRepairFile_Compress_extent(SMgrRelation reln, BlockNumber logicBlockNum
         return fd;
     }
 
-    ExtentLocation location =
-        cfsLocationConverts[COMMON_STORAGE](reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
+    ExtentLocation location = g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd,
+        CFS_EXTENT_SIZE, MAIN_FORKNUM, logicBlockNumber);
 
     /* lock the extent by LW_EXCLUSIVE */
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NO_READ);
@@ -1234,8 +1371,9 @@ void MdRecoveryPcaPage(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
     CfsExtentHeader *extHeader = NULL;
     CfsExtentAddress *extAddr = NULL;
 
+    int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, WRITE_BACK_OPEN_FILE);
     /* buffer init is ahead of dw, buffer can be used for reading pca */
-    ExtentLocation location = StorageConvert(reln, forknum, blocknum, skipFsync, WRITE_BACK_OPEN_FILE);
+    ExtentLocation location = StorageConvert(reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, forknum, blocknum);
     // protect ext from reading and writing during pca recovery
     ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
@@ -1276,9 +1414,10 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
     /* it must be compressed file at now */
     Assert(relation != NULL && IS_COMPRESSED_MAINFORK(relation, extInfo->forknum));
 
-    ExtentLocation location = StorageConvert(relation, extInfo->forknum,
-                                             extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT,
-                                             false, WRITE_BACK_OPEN_FILE);
+    int fd = CfsGetFd(relation, extInfo->forknum,
+        extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT, false, EXTENT_OPEN_FILE);
+    ExtentLocation location = StorageConvert(relation, relation->smgr_rnode.node, fd, CFS_EXTENT_SIZE, extInfo->forknum,
+                                             extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
     ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -1299,8 +1438,13 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
     CfsReadFile(assistFd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ, 0);
 
     /* if FileWrite can be used instand of FilePWrite */
-    nbytes = FilePWrite(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
-                        location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    if (location.is_segment_page) {
+        nbytes = seg_file_write(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
+                                location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    } else {
+        nbytes = FilePWrite(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
+                            location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    }
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
         pfree(unaligned_buf);
         pca_buf_free_page(ctrl, location, false);
@@ -1332,7 +1476,7 @@ ExtentLocation FormExtLocation(SMgrRelation sRel, BlockNumber logicBlockNumber)
         .extentStart = extentStart,
         .extentOffset = extentOffset,
         .headerNum = extentHeader,
-        .chrunk_size = (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
+        .chunk_size = (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
         .algorithm = (uint8)option.compressAlgorithm
     };
 }
@@ -1396,7 +1540,13 @@ static void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assist
     uint32 start = location.extentStart * BLCKSZ + punchOffset;
     uint32 punchSize = (location.headerNum - location.extentStart) * BLCKSZ - punchOffset;
 
-    if (punchSize != 0) {
+    if (punchSize == 0) {
+        return;
+    }
+
+    if (location.is_segment_page) {
+        seg_file_allocate(location.fd, start, punchSize);
+    } else {
         FileAllocate(location.fd, start, punchSize);
     }
 }
@@ -1408,6 +1558,7 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     char *srcBuf = alignbuf; // src buf includes 128 pages
     char *assistBuf = srcBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ; // assist includes 129 page;
     char *assistInfobuf = assistBuf + CFS_EXTENT_SIZE * BLCKSZ; // assist info is stored in last added page
+    int nbytes;
 
     CfsExtInfo *extInfo = (CfsExtInfo *)(void *)assistInfobuf;
     location.extentNumber = extInfo->extentNumber;
@@ -1434,8 +1585,15 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     CfsWriteFile(assistfd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ + BLCKSZ, 0);
 
     Assert(ctrl->ref_num == 1);
-    int nbytes = FilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
-                            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    
+    if (location.is_segment_page) {
+        nbytes = seg_file_write(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
+            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    } else {
+        nbytes = FilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
+            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+    }
+    
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
         pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to write the %d ext to file %s",
