@@ -9904,6 +9904,7 @@ read_sql_construct6(int until,
             }
             case T_DATUM:
                 {
+                    bool ispkgVar = false;
                     idents = yylval.wdatum.idents;
                     int dno = yylval.wdatum.datum->dno;
                     PLpgSQL_datum *datum = (PLpgSQL_datum *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
@@ -9911,6 +9912,9 @@ read_sql_construct6(int until,
                         PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
                         PLpgSQL_rec *rec = (PLpgSQL_rec *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[rec_field->recparentno];
                         MemoryContext old_cxt = NULL;
+                        if (rec->pkg != NULL) {
+                            ispkgVar = rec->ispkg;
+                        }
                         if (u_sess->plsql_cxt.curr_compile_context->compile_cxt != NULL)
                             old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_cxt);
                         rec->field_need_check = lappend_int(rec->field_need_check, dno);
@@ -9918,8 +9922,12 @@ read_sql_construct6(int until,
                             MemoryContextSwitchTo(old_cxt);
                         }
                     }
-                    if(prev_tok != '.' && list_length(idents) >= 3) {
-                        plpgsql_cast_reference_list(idents, &ds, false);
+                    if (prev_tok != '.' && list_length(idents) >= 3 && !ispkgVar) {
+                        plpgsql_cast_reference_list(idents, &ds, false);    
+                        ds_changed = true;
+                        break;
+                    } else if (ispkgVar && PkgVarNeedCast(idents)) {
+                        plpgsql_cast_reference_list(idents, &ds, true);    
                         ds_changed = true;
                         break;
                     } else {

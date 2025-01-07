@@ -2343,7 +2343,9 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
                                 return make_datum_param(expr, dno, cref->location, nse->name, nse);
                             }
                             case 3: {
-                                if (row->ispkg && InvalidOid != row->pkg->pkg_oid) {
+                                if (row->ispkg &&
+                                    InvalidOid != row->pkg->pkg_oid &&
+                                    expr->func->pkg_oid != row->pkg->pkg_oid) {
                                     PLpgSQL_nsitem* tempns = NULL;
                                     PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
                                     char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
@@ -2357,16 +2359,18 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
                                 break;
                             }
                             case 4: {
-                                if (row->ispkg && InvalidOid != row->pkg->pkg_oid) {
+                                if (row->ispkg &&
+                                    InvalidOid != row->pkg->pkg_oid &&
+                                    expr->func->pkg_oid != row->pkg->pkg_oid) {
                                     PLpgSQL_nsitem* tempns = NULL;
                                     PLpgSQL_datum* tempdatum = row->pkg->datums[row->varnos[i]];
                                     char* refname = ((PLpgSQL_variable*)tempdatum)->refname;
                                     tempns = plpgsql_ns_lookup(expr->ns, false, name1, name2, refname, NULL);
                                     if (tempns != NULL) {
                                         return make_datum_param(expr, tempns->itemno, cref->location, nse->name, nse);
-                                    } else {
-                                        return make_datum_param(expr, row->varnos[i], cref->location, nse->name, nse);
                                     }
+                                } else {
+                                    return make_datum_param(expr, row->varnos[i], cref->location, nse->name, nse);
                                 }
                                 break;
                             }
