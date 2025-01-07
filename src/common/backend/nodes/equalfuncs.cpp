@@ -1808,15 +1808,13 @@ static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeT
     COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typevar);
     COMPARE_NODE_FIELD(coldeflist);
-    if (t_thrd.proc->workingVersionNum >= OBJECT_TYPE_VERSION_NUM) {
-        COMPARE_NODE_FIELD(methodlist);
-        COMPARE_SCALAR_FIELD(typekind);
-        COMPARE_SCALAR_FIELD(final);
-        COMPARE_SCALAR_FIELD(issubtype);
-        COMPARE_NODE_FIELD(supertype);
-        COMPARE_STRING_FIELD(typespec);
-        COMPARE_STRING_FIELD(typebody);
-    }
+    COMPARE_NODE_FIELD(methodlist);
+    COMPARE_SCALAR_FIELD(typekind);
+    COMPARE_SCALAR_FIELD(final);
+    COMPARE_SCALAR_FIELD(issubtype);
+    COMPARE_NODE_FIELD(supertype);
+    COMPARE_STRING_FIELD(typespec);
+    COMPARE_STRING_FIELD(typebody);
 
     return true;
 }
@@ -1826,10 +1824,8 @@ static bool _equalTableOfTypeStmt(const TableOfTypeStmt* a, const TableOfTypeStm
     COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typname);
     COMPARE_NODE_FIELD(reftypname);
-    if (t_thrd.proc->workingVersionNum >= OBJECT_TYPE_VERSION_NUM) {
-        COMPARE_SCALAR_FIELD(typtype);
-        COMPARE_SCALAR_FIELD(typecategory);
-    }
+    COMPARE_SCALAR_FIELD(typtype);
+    COMPARE_SCALAR_FIELD(typecategory);
 
     return true;
 }

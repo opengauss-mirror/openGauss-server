@@ -4361,13 +4361,13 @@ BEGIN
   'CREATE OR REPLACE PROCEDURE
    pg_catalog.getAnydatasetExcept(
        v_anydataset IN pg_catalog.ANYDATASET, 
-       index IN int, 
+       idx IN int, 
        typecode IN int
    ) AS 
    BEGIN
      IF (v_anydataset IS NULL) THEN
        RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
-     ELSIF (index > v_anydataset.count) OR (index < 1) THEN
+     ELSIF (idx > v_anydataset.count) OR (idx < 1) THEN
        RAISE EXCEPTION ''index out of range'';
      ELSIF (v_anydataset.state = 0) THEN
        RAISE EXCEPTION ''incorrect usage of method GET'';
@@ -4448,11 +4448,11 @@ BEGIN
     MEMBER FUNCTION GETBDOUBLE(
        self        IN pg_catalog.ANYDATASET, 
        dbl         OUT BINARY_DOUBLE,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 101);
-      dbl = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 101);
+      dbl = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4468,11 +4468,11 @@ BEGIN
     MEMBER FUNCTION GETBLOB(
        self        IN pg_catalog.ANYDATASET,
        b           OUT BLOB,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 113);
-      b = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 113);
+      b = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4488,11 +4488,11 @@ BEGIN
     MEMBER FUNCTION GETCHAR(
        self        IN pg_catalog.ANYDATASET,
        c           OUT CHAR,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 96);
-      c = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 96);
+      c = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4508,11 +4508,11 @@ BEGIN
     MEMBER FUNCTION GETDATE(
        self        IN pg_catalog.ANYDATASET,
        dat         OUT DATE,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 12);
-      dat = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 12);
+      dat = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4528,11 +4528,11 @@ BEGIN
     MEMBER FUNCTION GETNCHAR(
        self        IN pg_catalog.ANYDATASET, 
        nc          OUT NCHAR,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 286);
-      nc = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 286);
+      nc = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4548,11 +4548,11 @@ BEGIN
     MEMBER FUNCTION GETNUMBER(
        self        IN pg_catalog.ANYDATASET,
        num         OUT NUMBER,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 2);
-      num = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 2);
+      num = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4568,11 +4568,11 @@ BEGIN
     MEMBER FUNCTION GETNVARCHAR2(
        self        IN pg_catalog.ANYDATASET, 
        nc          OUT NVARCHAR2,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 287);
-      nc = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 287);
+      nc = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4588,11 +4588,11 @@ BEGIN
     MEMBER FUNCTION GETRAW(
        self        IN pg_catalog.ANYDATASET,
        r           OUT RAW,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 95);
-      r = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 95);
+      r = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4608,11 +4608,11 @@ BEGIN
     MEMBER FUNCTION GETTIMESTAMP(
        self        IN pg_catalog.ANYDATASET, 
        ts          OUT TIMESTAMP,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 187);
-      ts = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 187);
+      ts = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4628,11 +4628,11 @@ BEGIN
     MEMBER FUNCTION GETTIMESTAMPTZ(
        self        IN pg_catalog.ANYDATASET, 
        ts          OUT TIMESTAMP WITH TIME ZONE, 
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 188);
-      ts = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 188);
+      ts = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4648,11 +4648,11 @@ BEGIN
     MEMBER FUNCTION GETVARCHAR(
        self        IN pg_catalog.ANYDATASET,
        c           OUT VARCHAR,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 1);
-      c = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 1);
+      c = textout(self.data[idx]);
       return 0;
     end;
 
@@ -4668,11 +4668,11 @@ BEGIN
     MEMBER FUNCTION GETVARCHAR2(
        self        IN pg_catalog.ANYDATASET,
        c           OUT VARCHAR2,
-       index       IN int)
+       idx         IN int)
     RETURN int AS
     begin
-      pg_catalog.getAnydatasetExcept(self, index, 9);
-       c = textout(self.data[index]);
+      pg_catalog.getAnydatasetExcept(self, idx, 9);
+       c = textout(self.data[idx]);
       return 0;
     end;
 
