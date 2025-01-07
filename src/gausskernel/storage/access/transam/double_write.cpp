@@ -2014,7 +2014,7 @@ void dw_init()
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double Write init")));
 
     /* when double write is enabled, increamental checkpoint must be enabled too */
-    if (dw_enabled()) {
+    if (dw_allow_enabled()) {
         dw_enable_init();
     } else {
         /* Notice: double write can be disabled alone when the read/write page unit is atomic */
@@ -2443,7 +2443,7 @@ void dw_exit(bool single)
     knl_g_dw_context *dw_cxt = NULL;
     uint32 expected = 0;
 
-    if (!dw_enabled()) {
+    if (!dw_allow_enabled()) {
         /* Double write is not enabled, nothing to do. */
         return;
     }

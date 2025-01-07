@@ -9747,9 +9747,7 @@ void StartupXLOG(void)
         /* process assist file of chunk recycling */
         dw_ext_init();
         dw_init();
-        if (ENABLE_DMS) {
-            g_instance.dms_cxt.dw_init = true;
-        }
+        g_instance.dms_cxt.dw_init = true;
     }
 
     /* Recover meta of undo subsystem. */
@@ -11861,6 +11859,7 @@ void ShutdownXLOG(int code, Datum arg)
             g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
         }
         /* Shutdown double write. */
+        g_instance.dms_cxt.dw_init = false;
         dw_exit(true);
         dw_exit(false);
         return;
@@ -11931,6 +11930,7 @@ void ShutdownXLOG(int code, Datum arg)
     }
 
     /* Shutdown double write. */
+    g_instance.dms_cxt.dw_init = false;
     dw_exit(true);
     dw_exit(false);
 
