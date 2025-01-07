@@ -43,6 +43,38 @@ show events where job_name='e1';
  e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
 (1 row)
 
+create table event_t(c1 int);
+select pkg_service.job_submit(1111,'insert into event_t values(1);',to_date('2060-11-11'),'''1min''::interval');
+ job_submit 
+------------
+       1111
+(1 row)
+
+show events;
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events like 'e%';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+show events where job_name='e1';
+ job_name | schema_name | log_user | priv_user | job_status |        start_date        | interval |         end_date         | enable | failure_msg 
+----------+-------------+----------+-----------+------------+--------------------------+----------+--------------------------+--------+-------------
+ e1       | event_s     | event_a  | event_a   | s          | Mon Jan 16 21:05:40 2023 | null     | Sat Jan 01 08:00:00 4000 | f      | 
+(1 row)
+
+select pkg_service.job_cancel(1111);
+ job_cancel 
+------------
+ 
+(1 row)
+
+drop table event_t;
 drop event if exists e1;
 drop user if exists event_a;
 reset current_schema;
