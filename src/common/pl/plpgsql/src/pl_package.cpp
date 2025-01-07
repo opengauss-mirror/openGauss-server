@@ -144,6 +144,7 @@ static Node* plpgsql_describe_ref(ParseState* pstate, ColumnRef* cref)
 }
 
 static void build_pkg_row_variable(int varno, PLpgSQL_package* pkg, const char* pkgName, const char* nspName);
+static void build_pkg_cursorrow_variable(PLpgSQL_datum* datum, const char* pkgName, const char* nspName);
 
 bool IsOnlyCompilePackage()
 {
@@ -271,6 +272,23 @@ static void build_pkg_row_variable(int varno, PLpgSQL_package* pkg, const char* 
     }
 }
 
+static void build_pkg_cursorrow_variable(PLpgSQL_datum* datum, const char* pkgName, const char* nspName)
+{
+    PLpgSQL_rec* rec = (PLpgSQL_rec*)datum;
+
+    if (rec && HeapTupleIsValid(rec->tup)) {
+        PLpgSQL_recfield* newm = (PLpgSQL_recfield*)palloc(sizeof(PLpgSQL_recfield) * rec->tupdesc->natts);
+        for (int i = 0; i < rec->tupdesc->natts; i++) {
+            Form_pg_attribute attr = &rec->tupdesc->attrs[i];
+            if (!attr->attisdropped) {
+                newm[i].fieldname = pstrdup(NameStr(attr->attname));
+                newm[i].dtype = PLPGSQL_DTYPE_RECFIELD;
+                newm[i].recparentno = rec->dno;
+                plpgsql_adddatum((PLpgSQL_datum*)(newm + i));
+            }
+        }
+    }
+}
 
 int plpgsql_build_pkg_variable(List* name, PLpgSQL_datum* datum, bool isSamePkg)
 {
@@ -316,6 +334,19 @@ int plpgsql_build_pkg_variable(List* name, PLpgSQL_datum* datum, bool isSamePkg)
             }
             if (!isSamePkg) {
                 build_pkg_row_variable(row->dno, row->pkg, pkgname, nspname);
+            }
+            return varno;
+        }
+        case PLPGSQL_DTYPE_CURSORROW: {
+            /* "record" type -- build a record variable */
+            PLpgSQL_rec* rec = (PLpgSQL_rec*)datum;
+
+            varno = isSamePkg ? rec->dno : plpgsql_adddatum(datum, false);
+            if (rec->addNamespace) {
+                plpgsql_ns_additem(PLPGSQL_NSTYPE_CURSORROW, varno, rec->refname, pkgname, nspname);
+            }
+            if (!isSamePkg) {
+                build_pkg_cursorrow_variable(datum, pkgname, nspname);
             }
             return varno;
         }

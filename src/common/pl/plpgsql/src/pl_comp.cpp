@@ -3340,6 +3340,37 @@ bool plpgsql_parse_tripword(char* word1, char* word2, char* word3, PLwdatum* wda
                         }
                     }
                 }
+                if (tempdatum->dtype == PLPGSQL_DTYPE_CURSORROW) {
+                    PLpgSQL_rec* rec = (PLpgSQL_rec*)tempdatum;
+                    if (rec && HeapTupleIsValid(rec->tup)) {
+                        bool exist = false;
+                        PLpgSQL_recfield* newm = (PLpgSQL_recfield*)palloc(sizeof(PLpgSQL_recfield));
+                        for (int i = 0; i < rec->tupdesc->natts; i++) {
+                            Form_pg_attribute attr = &rec->tupdesc->attrs[i];
+                            if (!attr->attisdropped && strcmp(NameStr(attr->attname), word3) == 0) {
+                                exist = true;
+                                newm->dtype = PLPGSQL_DTYPE_RECFIELD;
+                                newm->fieldname = pstrdup(word3);
+                                newm->recparentno = dno;
+
+                                int varno = plpgsql_adddatum((PLpgSQL_datum*)newm);
+
+                                wdatum->datum = (PLpgSQL_datum*)newm;
+                                wdatum->ident = NULL;
+                                wdatum->quoted = false; /* not used */
+                                wdatum->idents = idents;
+                                wdatum->dno = varno;
+                                *tok_flag = PLPGSQL_TOK_PACKAGE_VARIABLE;
+                                return true;
+                            }
+                        }
+                        if (!exist) {
+                            pfree(newm);
+                            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
+                                            errmsg("record \"%s\" has no field \"%s\"", rec->refname, word3)));
+                        }
+                    }
+                }
             }
             list_free(idents2);
         }

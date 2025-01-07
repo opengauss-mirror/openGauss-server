@@ -74,6 +74,8 @@ char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref)
             return ref ? ((PLpgSQL_var*)datum)->refname : ((PLpgSQL_var*)datum)->varname;
         case PLPGSQL_DTYPE_REC:
             return ref ? ((PLpgSQL_rec*)datum)->refname : ((PLpgSQL_rec*)datum)->varname;
+        case PLPGSQL_DTYPE_CURSORROW:
+            return ref ? ((PLpgSQL_rec*)datum)->refname : ((PLpgSQL_rec*)datum)->varname;
         case PLPGSQL_DTYPE_ROW:
             return ref ? ((PLpgSQL_row*)datum)->refname : ((PLpgSQL_row*)datum)->varname;
         case PLPGSQL_DTYPE_RECORD:
@@ -128,6 +130,10 @@ void add_parent_func_compile(PLpgSQL_compile_context* context)
                     case PLPGSQL_DTYPE_VARRAY:
                         varno = plpgsql_adddatum(copy_datum, true);
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_VARRAY, varno, varname, NULL, NULL, true);
+                        break;
+                    case PLPGSQL_DTYPE_CURSORROW:
+                        varno = plpgsql_adddatum(copy_datum, true);
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_CURSORROW, varno, varname, NULL, NULL, true);
                         break;
                     case PLPGSQL_DTYPE_REC:
                         varno = plpgsql_adddatum(copy_datum, true);
@@ -2233,6 +2239,7 @@ void plpgsql_dumptree(PLpgSQL_function* func)
                 }
                 printf("\n");
             } break;
+            case PLPGSQL_DTYPE_CURSORROW:
             case PLPGSQL_DTYPE_REC:
                 printf("REC %s\n", ((PLpgSQL_rec*)d)->refname);
                 break;
