@@ -879,6 +879,8 @@ typedef void(*dms_leave_page)(void *db_handle, unsigned char changed, unsigned i
 typedef char *(*dms_mem_alloc)(void *context, unsigned int size);
 typedef void(*dms_mem_free)(void *context, void *ptr);
 typedef void(*dms_mem_reset)(void *context);
+typedef void *(*dms_drc_alloc)(size_t size);
+typedef void(*dms_drc_free)(void *ptr);
 // The maximum length of output_msg is 128 bytes.
 typedef int (*dms_process_broadcast)(void *db_handle, dms_broadcast_context_t *broad_ctx);
 typedef int (*dms_process_broadcast_ack)(void *db_handle, dms_broadcast_context_t *broad_ctx);
@@ -1104,6 +1106,9 @@ typedef struct st_dms_callback {
     dms_mem_alloc mem_alloc;
     dms_mem_free mem_free;
     dms_mem_reset mem_reset;
+
+    dms_drc_alloc drc_malloc_prot;
+    dms_drc_free drc_free_prot;
 
     dms_process_broadcast process_broadcast;
     dms_process_broadcast_ack process_broadcast_ack;

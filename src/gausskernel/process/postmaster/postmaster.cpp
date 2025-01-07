@@ -3103,6 +3103,12 @@ int PostmasterMain(int argc, char* argv[])
 
         if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
             /* need to initialize before STARTUP */
+            DMSDrcContext = AllocSetContextCreate(g_instance.instance_context,
+                "DMSDrcContext",
+                ALLOCSET_DEFAULT_MINSIZE,
+                ALLOCSET_DEFAULT_INITSIZE,
+                ALLOCSET_DEFAULT_MAXSIZE,
+                SHARED_CONTEXT);
             DMSInit();
             if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
                 g_instance.pid_cxt.DmsAuxiliaryPID = initialize_util_thread(DMS_AUXILIARY_THREAD);
