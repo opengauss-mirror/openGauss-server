@@ -1738,7 +1738,9 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
             if (!(bufDesc->state & BM_DIRTY)) {
                 MarkBufferDirty(bufferinfo->buf);
             }
-            if (!bufferinfo->dirtyflag && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
+            if (!bufferinfo->pageinfo.ignorecheck &&
+                !bufferinfo->dirtyflag &&
+                bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
                 int mode = WARNING;
 #ifdef USE_ASSERT_CHECKING
                 mode = PANIC;
@@ -1869,8 +1871,9 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         (uint32)(redoblocktate->blockparse.blockhead.end_ptr >> 32), (uint32)redoblocktate->blockparse.blockhead.end_ptr,
         XLogBlockHeadGetValidInfo(&redoblocktate->blockparse.blockhead), redoaction)));
 #ifdef USE_ASSERT_CHECKING
-    if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
-        DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
+    if (block_valid != BLOCK_DATA_UNDO_TYPE) {
+        bool replayed = bufferinfo->pageinfo.ignorecheck ? false : true;
+        DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), replayed);
     }
 #endif
     AddReadBlock(redoblocktate, (u_sess->instr_cxt.pg_buffer_usage->shared_blks_read - readcount));

@@ -92,9 +92,7 @@ typedef struct {
 typedef struct {
     Page page;  // pagepointer
     Size pagesize;
-#ifdef USE_ASSERT_CHECKING
     bool ignorecheck;
-#endif
 } RedoPageInfo;
 
 typedef struct {

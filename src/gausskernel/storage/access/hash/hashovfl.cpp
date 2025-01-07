@@ -663,9 +663,6 @@ BlockNumber _hash_freeovflpage(Relation rel, Buffer bucketbuf, Buffer ovflbuf,
 
         recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_SQUEEZE_PAGE);
 
-        if (!xlrec.is_prim_bucket_same_wrt) {
-            PageSetLSN(BufferGetPage(bucketbuf), recptr);
-        }
         PageSetLSN(BufferGetPage(wbuf), recptr);
         PageSetLSN(BufferGetPage(ovflbuf), recptr);
 
@@ -929,10 +926,6 @@ readpage:
                                             ndeletable * sizeof(OffsetNumber));
 
                         recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_MOVE_PAGE_CONTENTS);
-
-                        if (!xlrec.is_prim_bucket_same_wrt) {
-                            PageSetLSN(BufferGetPage(bucket_buf), recptr);
-                        }
 
                         PageSetLSN(BufferGetPage(wbuf), recptr);
                         PageSetLSN(BufferGetPage(rbuf), recptr);
