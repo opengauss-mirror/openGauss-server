@@ -8187,24 +8187,6 @@ ColConstraintElem:
 					n->cooked_expr = NULL;
 					$$ = (Node *)n;
 				}
-			| DEFAULT FCONST_F
-				{
-					Constraint *n = makeNode(Constraint);
-					n->contype = CONSTR_DEFAULT;
-					n->location = @1;
-					n->raw_expr = makeFloatConst($2, @2);
-					n->cooked_expr = NULL;
-					$$ = (Node *)n;
-				}
-			| DEFAULT FCONST_D
-				{
-					Constraint *n = makeNode(Constraint);
-					n->contype = CONSTR_DEFAULT;
-					n->location = @1;
-					n->raw_expr = makeFloatConst($2, @2);;
-					n->cooked_expr = NULL;
-					$$ = (Node *)n;
-				}
 			| ON_UPDATE_TIME UPDATE b_expr
 				{
 #ifndef ENABLE_MULTIPLE_NODES
@@ -28539,16 +28521,6 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->model_args_location = @6;
 					$$ = (Node*) n;				
 				}
-			| FCONST_F
-				{
-					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float4"), NULL, NULL, NULL, @1);	
-				}
-			| FCONST_D
-				{
-					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);	
-				}
 		;
 
 /*
@@ -31346,6 +31318,16 @@ AexprConst: Iconst
 			| FCONST
 				{
 					$$ = makeFloatConst($1, @1);
+				}
+			| FCONST_F
+				{
+					Node *num = makeFloatConst($1, @1);
+					$$ = makeTypeCast(num, SystemTypeName("float4"), NULL, NULL, NULL, @1);	
+				}
+			| FCONST_D
+				{
+					Node *num = makeFloatConst($1, @1);
+					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);	
 				}
 			| Sconst
 				{

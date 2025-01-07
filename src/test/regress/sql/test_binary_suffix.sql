@@ -383,4 +383,24 @@ INSERT INTO employees (emp_id, emp_name, hire_date) VALUES (1, 'John Doe', '2024
 SELECT * FROM employees;
 DROP TABLE employees;
 
+CREATE TABLE employees2 (
+emp_id INT PRIMARY KEY,
+emp_name VARCHAR(100) NOT NULL,
+emp_salary DECIMAL(10, 2) DEFAULT -3.14f,
+hire_date DATE DEFAULT CURRENT_DATE
+);
+INSERT INTO employees2 (emp_id, emp_name, hire_date) VALUES (1, 'John Doe', '2024-01-01');
+SELECT * FROM employees2;
+DROP TABLE employees2;
+
+CREATE TABLE employees3 (
+emp_id INT PRIMARY KEY,
+emp_name VARCHAR(100) NOT NULL,
+emp_salary DECIMAL(10, 2) DEFAULT -3.14d + 1,
+hire_date DATE DEFAULT CURRENT_DATE
+);
+INSERT INTO employees3 (emp_id, emp_name, hire_date) VALUES (1, 'John Doe', '2024-01-01');
+SELECT * FROM employees3;
+DROP TABLE employees3;
+
 drop schema if exists test_binary cascade;
