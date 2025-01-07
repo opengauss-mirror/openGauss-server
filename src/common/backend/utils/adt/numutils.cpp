@@ -48,26 +48,26 @@ decimalLength32(const uint32 v)
 static inline int decimalLength64(const uint64 v)
 {
     int t;
-    static const uint64 PowersOfTen[] = {UINT64CONST(1),
-                                         UINT64CONST(10),
-                                         UINT64CONST(100),
-                                         UINT64CONST(1000),
-                                         UINT64CONST(10000),
-                                         UINT64CONST(100000),
-                                         UINT64CONST(1000000),
-                                         UINT64CONST(10000000),
-                                         UINT64CONST(100000000),
-                                         UINT64CONST(1000000000),
-                                         UINT64CONST(10000000000),
-                                         UINT64CONST(100000000000),
-                                         UINT64CONST(1000000000000),
-                                         UINT64CONST(10000000000000),
-                                         UINT64CONST(100000000000000),
-                                         UINT64CONST(1000000000000000),
-                                         UINT64CONST(10000000000000000),
-                                         UINT64CONST(100000000000000000),
-                                         UINT64CONST(1000000000000000000),
-                                         UINT64CONST(10000000000000000000UL)};
+    constexpr uint64 PowersOfTen[] = {1u,
+                                      10u,
+                                      100u,
+                                      1000u,
+                                      10000u,
+                                      100000u,
+                                      1000000u,
+                                      10000000u,
+                                      100000000u,
+                                      1000000000u,
+                                      10000000000u,
+                                      100000000000u,
+                                      1000000000000u,
+                                      10000000000000u,
+                                      100000000000000u,
+                                      1000000000000000u,
+                                      10000000000000000u,
+                                      100000000000000000u,
+                                      1000000000000000000u,
+                                      10000000000000000000u};
 
     /*
      * Compute base-10 logarithm by dividing the base-2 logarithm by a

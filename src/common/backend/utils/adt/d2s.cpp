@@ -98,7 +98,7 @@ static inline bool multipleOfPowerOf5(const uint64 value, const uint32 p)
 static inline bool multipleOfPowerOf2(const uint64 value, const uint32 p)
 {
     /* The same as `return __builtin_ctzll(value) >= p;` */
-    return (value & ((UINT64CONST(1) << p) - 1)) == 0;
+    return (value & ((1ull << p) - 1)) == 0;
 }
 
 /*
@@ -318,7 +318,7 @@ static inline floating_decimal_64 d2d(const uint64 ieeeMantissa, const uint32 ie
         m2 = ieeeMantissa;
     } else {
         e2 = ieeeExponent - DOUBLE_BIAS - DOUBLE_MANTISSA_BITS - 2;
-        m2 = (UINT64CONST(1) << DOUBLE_MANTISSA_BITS) | ieeeMantissa;
+        m2 = (1ull << DOUBLE_MANTISSA_BITS) | ieeeMantissa;
     }
 
 #if STRICTLY_SHORTEST
@@ -896,7 +896,7 @@ static inline bool d2d_small_int(const uint64 ieeeMantissa, const uint32 ieeeExp
          * of a fraction if e2 < -DOUBLE_MANTISSA_BITS which we already
          * checked. (e.g. 0.5 gives ieeeMantissa == 0 and e2 == -53)
          */
-        const uint64 mask = (UINT64CONST(1) << -e2) - 1;
+        const uint64 mask = (1ull << -e2) - 1;
         const uint64 fraction = ieeeMantissa & mask;
 
         if (fraction == 0) {
@@ -906,7 +906,7 @@ static inline bool d2d_small_int(const uint64 ieeeMantissa, const uint32 ieeeExp
              * Note: since 2^53 < 10^16, there is no need to adjust
              * decimalLength().
              */
-            const uint64 m2 = (UINT64CONST(1) << DOUBLE_MANTISSA_BITS) | ieeeMantissa;
+            const uint64 m2 = (1ull << DOUBLE_MANTISSA_BITS) | ieeeMantissa;
 
             v->mantissa = m2 >> -e2;
             v->exponent = 0;
@@ -934,7 +934,7 @@ int double_to_shortest_decimal_bufn(double f, char* result)
 
     /* Decode bits into sign, mantissa, and exponent. */
     const bool ieeeSign = ((bits >> (DOUBLE_MANTISSA_BITS + DOUBLE_EXPONENT_BITS)) & 1) != 0;
-    const uint64 ieeeMantissa = bits & ((UINT64CONST(1) << DOUBLE_MANTISSA_BITS) - 1);
+    const uint64 ieeeMantissa = bits & ((1ull << DOUBLE_MANTISSA_BITS) - 1);
     const uint32 ieeeExponent = (uint32)((bits >> DOUBLE_MANTISSA_BITS) & ((1u << DOUBLE_EXPONENT_BITS) - 1));
 
     /* Case distinction; exit early for the easy cases. */
