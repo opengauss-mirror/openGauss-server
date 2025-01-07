@@ -816,7 +816,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  wal_receiver_connect_timeout                     | integer | s    | 0         | 2147483
  wal_receiver_status_interval                     | integer | s    | 0         | 2147483
  wal_receiver_timeout                             | integer | ms   | 0         | 2147483647
- wal_segment_size                                 | integer | 8kB  | 2048      | 2048
+ wal_segment_size                                 | integer | 8kB  | 2048      | 131072
  walsender_max_send_size                          | integer | kB   | 8         | 2147483647
  wal_sender_timeout                               | integer | ms   | 0         | 2147483647
  wal_sync_method                                  | enum    |      |           | 

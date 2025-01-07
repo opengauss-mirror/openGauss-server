@@ -3117,7 +3117,7 @@ static void InitStorageConfigureNamesInt()
             &u_sess->attr.attr_storage.wal_segment_size,
             (XLOG_SEG_SIZE / XLOG_BLCKSZ),
             (XLOG_SEG_SIZE / XLOG_BLCKSZ),
-            (XLOG_SEG_SIZE / XLOG_BLCKSZ),
+            (DSS_XLOG_SEG_SIZE / XLOG_BLCKSZ),
             NULL,
             NULL,
             NULL},

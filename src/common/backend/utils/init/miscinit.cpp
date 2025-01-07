@@ -76,6 +76,8 @@
 
 #define InvalidPid ((pid_t)(-1))
 
+const char* DSS_WAL_SEGMENT_SIZE_STR = "131072";
+
 Alarm alarmItemTooManyDbUserConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
 /* ----------------------------------------------------------------
@@ -2167,4 +2169,5 @@ void initDSSConf(void)
 
     /* set xlog seg size to 1GB */
     XLogSegmentSize = DSS_XLOG_SEG_SIZE;
+    SetConfigOption("wal_segment_size", DSS_WAL_SEGMENT_SIZE_STR, PGC_INTERNAL, PGC_S_OVERRIDE);
 }
