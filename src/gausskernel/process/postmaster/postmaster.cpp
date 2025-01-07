@@ -3053,7 +3053,9 @@ int PostmasterMain(int argc, char* argv[])
 
 #ifdef ENABLE_MOT
     /* Initialize the MOT engine */
-    InitMOT();
+    if (g_instance.attr.attr_common.enable_mot_server) {
+        InitMOT();
+    }
 #endif
 
     /*

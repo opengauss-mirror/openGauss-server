@@ -77,6 +77,7 @@
 #include "table.h"
 #include "txn.h"
 #include "checkpoint_manager.h"
+#include "checkpoint_utils.h"
 #include <queue>
 #include "redo_log_handler_type.h"
 #include "ext_config_loader.h"
@@ -171,6 +172,14 @@ static void InitMOTHandler();
 
 void MOTRecover()
 {
+    if (!g_instance.attr.attr_common.enable_mot_server) {
+        bool hasMotTable = MOT::CheckpointUtils::CheckMotTable();
+        if (hasMotTable) {
+            ereport(FATAL, (errmsg("find exist mot tables when enable_mot_server = off, "
+            "please set enable_mot_server = on to start")));
+        }
+    }
+
     if (!MOTAdaptor::m_initialized) {
         // This is the case when StartupXLOG is called during bootstrap.
         return;
@@ -246,6 +255,17 @@ void InitMOT()
     (void)JitExec::JitInitialize();
 }
 
+/**
+ * Check if mot server is enable
+ */
+void MOTCheckIsEnable()
+{
+    if (!g_instance.attr.attr_common.enable_mot_server) {
+        ereport(ERROR, (errmsg("MOT engine is not initialized"),
+            errhint("Set enable_mot_server = on to initialize mot engine")));
+    }
+}
+
 /*
  * Shutdown the engine.
  */
@@ -295,7 +315,7 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
     fdwroutine->GetForeignSessionMemSize = MOTGetForeignSessionMemSize;
     fdwroutine->NotifyForeignConfigChange = MOTNotifyForeignConfigChange;
 
-    if (!u_sess->mot_cxt.callbacks_set) {
+    if (!u_sess->mot_cxt.callbacks_set && g_instance.attr.attr_common.enable_mot_server) {
         RegisterXactCallback(MOTXactCallback, NULL);
         RegisterSubXactCallback(MOTSubxactCallback, NULL);
         u_sess->mot_cxt.callbacks_set = true;

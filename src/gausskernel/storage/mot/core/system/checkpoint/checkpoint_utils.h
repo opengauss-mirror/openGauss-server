@@ -61,7 +61,7 @@ const char* const IPD_FILE_SUFFIX = ".ptd";
 const char* const END_FILE_SUFFIX = ".end";
 
 // Max path length
-const size_t MAX_PATH = 1024;
+const size_t CHECKPOINT_MAX_PATH = 1024;
 
 /**
  * @brief A wrapper function that checks if a file exists
@@ -70,6 +70,7 @@ const size_t MAX_PATH = 1024;
  */
 bool IsFileExists(const std::string& fileName);
 
+bool CheckMotTable();
 /**
  * @brief A wrapper function that checks if a dir exists
  * @param fileName The directory name to check

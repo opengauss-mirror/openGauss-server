@@ -931,6 +931,10 @@
  * --enable-mot */
 #cmakedefine ENABLE_MOT
 
+/* Define to 1 if you want to use rdtscp instruction for x86 architecture
+ * --enable-x86-rdtscp */
+#cmakedefine ENABLE_X86_RDTSCP
+
 /* Define to 1 if you want to use mysql fdw
  *  * --enable-mysql-fdw */
 #cmakedefine ENABLE_MYSQL_FDW

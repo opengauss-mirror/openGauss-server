@@ -32,6 +32,9 @@
 /** @brief Initializes MOT engine. */
 extern void InitMOT();
 
+/** @brief Check if mot server is enable. */
+extern void MOTCheckIsEnable();
+
 /** @brief Shutdown the MOT engine. */
 extern void TermMOT();
 

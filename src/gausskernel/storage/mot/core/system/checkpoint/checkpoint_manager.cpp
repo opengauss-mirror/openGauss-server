@@ -660,7 +660,7 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
 void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
 {
     errno_t erc;
-    char buf[CheckpointUtils::MAX_PATH];
+    char buf[CheckpointUtils::CHECKPOINT_MAX_PATH];
     std::string oldCheckpointDir;
     if (!CheckpointUtils::SetWorkingDir(oldCheckpointDir, checkpointId)) {
         MOT_LOG_ERROR("removeCheckpointDir: failed to set working directory");
@@ -677,11 +677,11 @@ void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
             }
 
             struct stat statbuf = {0};
-            erc = memset_s(buf, CheckpointUtils::MAX_PATH, 0, CheckpointUtils::MAX_PATH);
+            erc = memset_s(buf, CheckpointUtils::CHECKPOINT_MAX_PATH, 0, CheckpointUtils::CHECKPOINT_MAX_PATH);
             securec_check(erc, "\0", "\0");
             erc = snprintf_s(buf,
-                CheckpointUtils::MAX_PATH,
-                CheckpointUtils::MAX_PATH - 1,
+                CheckpointUtils::CHECKPOINT_MAX_PATH,
+                CheckpointUtils::CHECKPOINT_MAX_PATH - 1,
                 "%s/%s",
                 oldCheckpointDir.c_str(),
                 p->d_name);

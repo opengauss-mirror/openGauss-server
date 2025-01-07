@@ -124,10 +124,10 @@ bool SeekFile(int fd, off64_t offset)
 bool GetWorkingDir(std::string& dir)
 {
     dir.clear();
-    char cwd[MAX_PATH] = {0};
+    char cwd[CHECKPOINT_MAX_PATH] = {0};
     size_t checkpointDirLength = GetGlobalConfiguration().m_checkpointDir.length();
     if (checkpointDirLength > 0) {
-        errno_t erc = strncpy_s(cwd, MAX_PATH, GetGlobalConfiguration().m_checkpointDir.c_str(), checkpointDirLength);
+        errno_t erc = strncpy_s(cwd, CHECKPOINT_MAX_PATH, GetGlobalConfiguration().m_checkpointDir.c_str(), checkpointDirLength);
         securec_check(erc, "\0", "\0");
     } else if (!getcwd(cwd, sizeof(cwd))) {
         MOT_REPORT_SYSTEM_ERROR(getcwd, "N/A", "Failed to get current working directory");
@@ -206,6 +206,84 @@ void Hexdump(const char* msg, char* b, uint32_t buflen)
         }
         (void)fprintf(stderr, "%s\n", line);
     }
+}
+
+bool CheckMotTable()
+{
+    MOT_LOG_INFO("start check if there are mot tables");
+
+    uint64_t m_checkpointId;
+    if (CheckpointControlFile::GetCtrlFile() == nullptr) {
+        MOT_LOG_WARN("CheckpointUtils: no ctrl file");
+        return false;
+    }
+
+    if (CheckpointControlFile::GetCtrlFile()->GetMetaVersion() > MetadataProtoVersion::METADATA_VER_CURR) {
+        MOT_LOG_WARN("CheckpointRecovery: metadata version %u is greater than current %u",
+            CheckpointControlFile::GetCtrlFile()->GetMetaVersion(),
+            MetadataProtoVersion::METADATA_VER_CURR);
+        return false;
+    }
+
+    if (CheckpointControlFile::GetCtrlFile()->GetId() == CheckpointControlFile::INVALID_ID) {
+        m_checkpointId = CheckpointControlFile::INVALID_ID;  // no mot control was found.
+        MOT_LOG_WARN("CheckpointUtils: invalid ctrl file id");
+        return false;
+    } else {
+        m_checkpointId = CheckpointControlFile::GetCtrlFile()->GetId();
+    }
+
+    std::string m_workingDir;
+    if (!CheckpointUtils::SetWorkingDir(m_workingDir, m_checkpointId)) {
+        MOT_LOG_WARN("CheckpointUtils: failed to obtain checkpoint's working dir");
+        return false;
+    }
+
+    std::string mapFile;
+    CheckpointUtils::MakeMapFilename(mapFile, m_workingDir, m_checkpointId);
+    int fd = -1;
+    if (!CheckpointUtils::OpenFileRead(mapFile, fd)) {
+        MOT_LOG_WARN("CheckpointUtils: Failed to open map file '%s'", mapFile.c_str());
+        return false;
+    }
+
+    CheckpointUtils::MapFileHeader mapFileHeader;
+    if (CheckpointUtils::ReadFile(fd, (char*)&mapFileHeader, sizeof(CheckpointUtils::MapFileHeader)) !=
+        sizeof(CheckpointUtils::MapFileHeader)) {
+        MOT_LOG_WARN("CheckpointUtils: Failed to read map file '%s' header", mapFile.c_str());
+        (void)CheckpointUtils::CloseFile(fd);
+        return false;
+    }
+
+    if (mapFileHeader.m_magic != CheckpointUtils::HEADER_MAGIC) {
+        MOT_LOG_WARN("CheckpointUtils: Failed to verify map file'%s'", mapFile.c_str());
+        (void)CheckpointUtils::CloseFile(fd);
+        return false;
+    }
+
+    CheckpointManager::MapFileEntry entry;
+    int count = 0;
+    for (uint64_t i = 0; i < mapFileHeader.m_numEntries; i++) {
+        if (CheckpointUtils::ReadFile(fd, (char*)&entry, sizeof(CheckpointManager::MapFileEntry)) !=
+            sizeof(CheckpointManager::MapFileEntry)) {
+            MOT_LOG_WARN("CheckpointUtils: Failed to read map file '%s' entry: %lu",
+                mapFile.c_str(),
+                i);
+            (void)CheckpointUtils::CloseFile(fd);
+            return false;
+        }
+        if (entry.m_maxSegId >= 0) {
+            MOT_LOG_ERROR("CheckpointUtils: find mot tables when enable_mot_server = off");
+            return true;
+        }
+    }
+
+    if (CheckpointUtils::CloseFile(fd)) {
+        MOT_LOG_WARN("CheckpointUtils: Failed to close map file");
+        return false;
+    }
+
+    return false;
 }
 }  // namespace CheckpointUtils
 }  // namespace MOT

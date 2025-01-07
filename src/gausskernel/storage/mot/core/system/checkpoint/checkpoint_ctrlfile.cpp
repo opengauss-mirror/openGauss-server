@@ -64,7 +64,7 @@ bool CheckpointControlFile::Init()
     }
 
     do {
-        if (GetGlobalConfiguration().m_checkpointDir.length() >= CheckpointUtils::MAX_PATH) {
+        if (GetGlobalConfiguration().m_checkpointDir.length() >= CheckpointUtils::CHECKPOINT_MAX_PATH) {
             MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
                 "Checkpoint",
                 "Invalid checkpoint_dir configuration, length exceeds max path length");

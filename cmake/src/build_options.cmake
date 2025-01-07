@@ -59,6 +59,7 @@ option(ENABLE_LITE_MODE "enable lite in single_node mode,the old is --enable-lit
 option(ENABLE_FINANCE_MODE "enable finance in single_node mode,the old is --enable-finance-mode" OFF)
 option(ENABLE_DEBUG "enable privategauss,the old is --enable-pribategauss" OFF)
 option(ENABLE_MOT "enable mot in single_node mode,the old is --enable-mot" OFF)
+option(ENABLE_X86_RDTSCP "enable rdtscp instruction for x86 architecture in single_node mode,the old is --enable-x86-rdtscp" OFF)
 option(ENABLE_NUMA "enable numa,the old is --enable-numa" ON)
 option(ENABLE_LSE "enable lse,the old is --enable-lse" ON)
 option(ENABLE_MYSQL_FDW "enable export or import data with mysql,the old is --enable-mysql-fdw" OFF)
@@ -232,6 +233,10 @@ endif()
 
 if(${USE_SPQ})
     set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DUSE_SPQ")
+endif()
+
+if(${ENABLE_X86_RDTSCP})
+    set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DENABLE_X86_RDTSCP")
 endif()
 
 if(${ENABLE_HTAP})
