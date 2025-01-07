@@ -334,7 +334,6 @@ static void hash_xlog_split_complete(XLogReaderState *record)
  */
 static void hash_xlog_move_page_contents(XLogReaderState *record)
 {
-    XLogRecPtr lsn = record->EndRecPtr;
     xl_hash_move_page_contents *xldata = (xl_hash_move_page_contents *) XLogRecGetData(record);
     RedoBufferInfo bucketbuf;
     RedoBufferInfo writebuf;
@@ -359,10 +358,7 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
-            PageSetLSN(bucketbuf.pageinfo.page, lsn);
-            MarkBufferDirty(bucketbuf.buf);
-        }
+        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
     }
@@ -414,7 +410,6 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
  */
 static void hash_xlog_squeeze_page(XLogReaderState *record)
 {
-    XLogRecPtr lsn = record->EndRecPtr;
     xl_hash_squeeze_page *xldata = (xl_hash_squeeze_page *) XLogRecGetData(record);
     RedoBufferInfo bucketbuf;
     RedoBufferInfo writebuf;
@@ -440,10 +435,7 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
-            PageSetLSN(bucketbuf.pageinfo.page, lsn);
-            MarkBufferDirty(bucketbuf.buf);
-        }
+        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
     }
@@ -540,7 +532,6 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
  */
 static void hash_xlog_delete(XLogReaderState *record)
 {
-    XLogRecPtr lsn = record->EndRecPtr;
     xl_hash_delete *xldata = (xl_hash_delete *) XLogRecGetData(record);
     RedoBufferInfo bucketbuf;
     RedoBufferInfo deletebuf;
@@ -558,11 +549,11 @@ static void hash_xlog_delete(XLogReaderState *record)
     if (xldata->is_primary_bucket_page) {
         action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &deletebuf);
     } else {
-        /* read bucketbuf for a cleanup lock on primary bucket page */
-        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
-            PageSetLSN(bucketbuf.pageinfo.page, lsn);
-            MarkBufferDirty(bucketbuf.buf);
-        }
+        /*
+         * we don't care for return value as the purpose of reading bucketbuf
+         * is to ensure a cleanup lock on primary bucket page.
+         */
+        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
 
         action = XLogReadBufferForRedo(record, 1, &deletebuf);
     }

@@ -1135,7 +1135,10 @@ static void HashXlogMovePageContentsBlock(XLogBlockHead *blockhead, XLogBlockDat
     char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
 
     if (block_id == HASH_MOVE_BUK_BLOCK_NUM) {
-        PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+        /*
+         * just reading bucketbuf is to ensure a cleanup lock on primary bucket page.
+         */
+        bufferinfo->pageinfo.ignorecheck = true;
     }
 
     if (block_id == HASH_MOVE_ADD_BLOCK_NUM) {
@@ -1168,7 +1171,10 @@ static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
     char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
 
     if (block_id == HASH_SQUEEZE_BUK_BLOCK_NUM) {
-        PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+        /*
+         * just reading bucketbuf is to ensure a cleanup lock on primary bucket page.
+         */
+        bufferinfo->pageinfo.ignorecheck = true;
     }
 
     if (block_id == HASH_SQUEEZE_ADD_BLOCK_NUM) {
@@ -1244,10 +1250,11 @@ static void HashXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
             MakeRedoBufferDirty(bufferinfo);
         }
     } else {
-        if (action == BLK_NEEDS_REDO) {
-            PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
-            MakeRedoBufferDirty(bufferinfo);
-        }
+        Assert(block_id == HASH_DELETE_BUK_BLOCK_NUM);
+        /*
+         * just reading bucketbuf is to ensure a cleanup lock on primary bucket page.
+         */
+        bufferinfo->pageinfo.ignorecheck = true;
     }
 }
 
