@@ -66,6 +66,11 @@ PG_FUNCTION_INFO_V1(gms_lob_og_cloblength);
 PG_FUNCTION_INFO_V1(gms_lob_og_bloblength);
 PG_FUNCTION_INFO_V1(gms_lob_og_null);
 
+void set_extension_index(uint32 index)
+{
+    gmslob_index = index;
+}
+
 void init_session_vars(void) {
     RepallocSessionVarsArrayIfNecessary();
     GmsLobContext* psc = 
@@ -180,6 +185,10 @@ static void gms_lob_og_lob_exit(int code, Datum arg)
 {
     HASH_SEQ_STATUS scan;
     LobHashEnt *hentry = NULL;
+
+    if (u_sess->attr.attr_common.extension_session_vars_array == NULL) {
+        return;
+    }
 
     if (get_session_context()->gmsLobNameHash == NULL) {
         return;
