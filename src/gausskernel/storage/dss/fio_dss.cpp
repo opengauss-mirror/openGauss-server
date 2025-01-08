@@ -398,7 +398,7 @@ ssize_t dss_align_read(int handle, void *buf, size_t size, off_t offset, bool us
         }
     } RETRY_ON_CONNECT_ERR_END;
 
-    if (unalign_buff != NULL) {
+    if (unalign_buff != NULL && size > 0) {
         int move = (int)size - (int)newSize;
         errno_t rc = memcpy_s(buf, size, buff, size);
         securec_check_c(rc, "\0", "\0");
