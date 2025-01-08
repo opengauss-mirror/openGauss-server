@@ -36,6 +36,7 @@
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/gs_dependencies_obj.h"
@@ -1065,6 +1066,12 @@ long DeleteSubprogramDenpendOnProcedure(Oid classId, Oid objectId, bool is_delet
             continue;
         }
 
+        /*
+         * only delete subprogram.
+         */
+        if (!OidIsValid(GetProprocoidByOid(depTuple->objid))) {
+            continue;
+        }
         address.classId = depTuple->classid;
         address.objectId = depTuple->objid;
         address.objectSubId = 0;

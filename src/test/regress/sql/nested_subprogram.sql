@@ -1824,5 +1824,29 @@ end;
 /
 drop table test;
 
+CREATE OR REPLACE FUNCTION WM_CONCAT_START(A TEXT[], S TEXT)  RETURN TEXT[]  AS
+BEGIN
+RETURN A || S;
+END;
+/
+CREATE OR REPLACE FUNCTION WM_CONCAT_END(A TEXT[]) RETURN TEXT AS
+BEGIN
+RETURN array_to_string(A, ',');
+END;
+/
+CREATE AGGREGATE WM_CONCAT(
+BASETYPE = TEXT,
+SFUNC = WM_CONCAT_START,
+STYPE = TEXT[],
+FINALFUNC =WM_CONCAT_END
+);
+
+CREATE OR REPLACE FUNCTION WM_CONCAT_END(A TEXT[]) RETURN TEXT AS
+BEGIN
+RETURN array_to_string(A, ',');
+END;
+/
+select * from pg_aggregate where aggfinalfn = 'WM_CONCAT_END'::regproc;
+
 \c regression
 drop database nested_subprogram;

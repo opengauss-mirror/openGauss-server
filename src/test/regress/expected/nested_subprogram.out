@@ -2231,5 +2231,32 @@ DETAIL:  N/A
 CONTEXT:  compilation of PL/pgSQL function "p_1" near line 1
 compilation of PL/pgSQL function "p_1" near line 1
 drop table test;
+CREATE OR REPLACE FUNCTION WM_CONCAT_START(A TEXT[], S TEXT)  RETURN TEXT[]  AS
+BEGIN
+RETURN A || S;
+END;
+/
+CREATE OR REPLACE FUNCTION WM_CONCAT_END(A TEXT[]) RETURN TEXT AS
+BEGIN
+RETURN array_to_string(A, ',');
+END;
+/
+CREATE AGGREGATE WM_CONCAT(
+BASETYPE = TEXT,
+SFUNC = WM_CONCAT_START,
+STYPE = TEXT[],
+FINALFUNC =WM_CONCAT_END
+);
+CREATE OR REPLACE FUNCTION WM_CONCAT_END(A TEXT[]) RETURN TEXT AS
+BEGIN
+RETURN array_to_string(A, ',');
+END;
+/
+select * from pg_aggregate where aggfinalfn = 'WM_CONCAT_END'::regproc;
+ aggfnoid  |   aggtransfn    | aggcollectfn |  aggfinalfn   | aggsortop | aggtranstype | agginitval | agginitcollect | aggkind | aggnumdirectargs 
+-----------+-----------------+--------------+---------------+-----------+--------------+------------+----------------+---------+------------------
+ wm_concat | wm_concat_start | -            | wm_concat_end |         0 |         1009 |            |                | n       |                0
+(1 row)
+
 \c regression
 drop database nested_subprogram;
