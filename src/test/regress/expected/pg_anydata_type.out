@@ -636,7 +636,7 @@ NOTICE:  name Varchar, count 2
 NOTICE:  100.8, 0
 NOTICE:  .9, 0
 ERROR:  index out of range
-CONTEXT:  SQL statement "CALL pg_catalog.getanydatasetexcept(self,index,1)"
+CONTEXT:  SQL statement "CALL pg_catalog.getanydatasetexcept(self,idx,1)"
 PL/pgSQL function pg_catalog.getvarchar(anydataset,integer) line 2 at PERFORM
 SQL statement "CALL pg_catalog.getvarchar(v_anydataset ,v_string,3)"
 PL/pgSQL function inline_code_block line 28 at assignment
