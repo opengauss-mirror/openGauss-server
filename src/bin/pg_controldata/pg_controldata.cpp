@@ -45,8 +45,6 @@ static void usage(const char* prog_name)
     printf(_("  %s [OPTION] [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
 #ifndef ENABLE_LITE_MODE
-    printf(_("  -I, --instance-id=INSTANCE_ID\n"));
-    printf(_("                    display information of specified instance (default all)\n"));
     printf(_("      --enable-dss  enable shared storage mode\n"));
     printf(_("      --socketpath=SOCKETPATH\n"));
     printf(_("                    dss connect socket file path\n"));
@@ -303,7 +301,7 @@ int main(int argc, char* argv[])
     int option_value;
     int option_index;
     int display_id;
-    int ss_nodeid = MIN_INSTANCEID;
+    const int SS_NODEID = MIN_INSTANCEID;
     off_t ControlFileSize;
     char* endstr = nullptr;
 
@@ -330,20 +328,9 @@ int main(int argc, char* argv[])
         }
     }
 
-    while ((option_value = getopt_long(argc, argv, "I:V", long_options, &option_index)) != -1) {
+    while ((option_value = getopt_long(argc, argv, "V", long_options, &option_index)) != -1) {
         switch (option_value) {
 #ifndef ENABLE_LITE_MODE
-            case 'I':
-                ss_nodeid = strtol(optarg, &endstr, 10);
-                if ((endstr != nullptr && endstr[0] != '\0') || ss_nodeid < MIN_INSTANCEID ||
-                     ss_nodeid > REFORMER_CTL_INSTANCEID) {
-                    fprintf(stderr, _("%s: unexpected node id specified, "
-                        "the instance-id should be an integer in the range of %d - %d\n"),
-                        progname, MIN_INSTANCEID, REFORMER_CTL_INSTANCEID);
-                    exit_safely(1);
-                }
-                display_all = false;
-                break;
             case 1:
                 enable_dss = true;
                 break;
@@ -413,11 +400,11 @@ int main(int argc, char* argv[])
         exit_safely(2);
     }
 
-    display_id = ss_nodeid;
-    seekpos = (int)BLCKSZ * ss_nodeid;
+    display_id = SS_NODEID;
+    seekpos = (int)BLCKSZ * SS_NODEID;
     if (seekpos >= ControlFileSize) {
         fprintf(stderr, _("%s: cound not read beyond end of file \"%s\", file_size: %ld, instance_id: %d\n"),
-                progname, ControlFilePath, ControlFileSize, ss_nodeid);
+                progname, ControlFilePath, ControlFileSize, SS_NODEID);
         close(fd);
         exit_safely(2);
     }
