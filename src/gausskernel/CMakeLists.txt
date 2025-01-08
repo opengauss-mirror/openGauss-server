@@ -279,6 +279,7 @@ set(gaussdb_objects ${gaussdb_objects} ${gaussdb_server_objects})
 list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:common_interfaces_libpq>
     $<TARGET_OBJECTS:lib_gstrace_common>
+    $<TARGET_OBJECTS:gausskernel_storage_matrix_mem>
 )
 set(gaussdb_LINK_OPTIONS ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} -Wl,-E)
 

@@ -48,6 +48,7 @@
 #include "access/multi_redo_api.h"
 #include "utils/hotkey.h"
 #include "lib/lrucache.h"
+#include "storage/matrix_mem.h"
 #ifdef ENABLE_WHITEBOX
 #include "access/ustore/knl_whitebox_test.h"
 #endif
@@ -313,6 +314,13 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
     context->should_clean = false;
 }
 #endif
+
+static void knl_g_matrix_mem_context_init(knl_g_matrix_mem_context* matrix_mem_cxt)
+{
+    Assert(matrix_mem_cxt != NULL);
+    matrix_mem_cxt->matrix_mem_func = {0};
+    matrix_mem_cxt->matrix_mem_inited = false;
+}
 
 static void knl_g_mctcp_init(knl_g_mctcp_context* mctcp_cxt)
 {
@@ -1110,6 +1118,7 @@ void knl_instance_init()
     knl_g_imcstore_init(&g_instance.imcstore_cxt);
 #endif
 
+    knl_g_matrix_mem_context_init(&g_instance.matrix_mem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
     knl_g_heartbeat_init(&g_instance.heartbeat_cxt);

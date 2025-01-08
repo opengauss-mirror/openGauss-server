@@ -76,7 +76,7 @@
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_xmin.h"
 #include "ddes/dms/ss_dms_callback.h"
-
+#include "storage/matrix_mem.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcstore_delta.h"
 #endif
@@ -1397,6 +1397,11 @@ typedef struct knl_g_imcstore_context {
 } knl_g_imcstore_context;
 #endif
 
+typedef struct knl_g_matrix_mem_context {
+    MatrixMemFunc matrix_mem_func;
+    bool matrix_mem_inited;
+} knl_g_matrix_mem_context;
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -1518,6 +1523,7 @@ typedef struct knl_instance_context {
     knl_g_imcstore_context imcstore_cxt;
 #endif
 
+    knl_g_matrix_mem_context matrix_mem_cxt;
     knl_g_segment_context segment_cxt;
     knl_g_pldebug_context pldebug_cxt;
     knl_g_spi_plan_context spi_plan_cxt;

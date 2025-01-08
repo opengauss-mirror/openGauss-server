@@ -227,6 +227,7 @@
 #include "funcapi.h"
 #include "utils/memprot.h"
 #include "pgstat.h"
+#include "storage/matrix_mem.h"
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
@@ -2708,7 +2709,11 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     InitDolpinProtoIfNeeded();
-    
+
+#ifdef __aarch64__
+    MatrixMemFuncInit();
+#endif
+
     /*
         * Set up an on_proc_exit function that's charged with closing the sockets
         * again at postmaster shutdown.  You might think we should have done this
@@ -9771,6 +9776,10 @@ void ExitPostmaster(int status)
 
 #ifdef ENABLE_HTAP
     IMCUDataCacheMgr::ResetInstance();
+#endif
+
+#ifdef __aarch64__
+    MatrixMemFuncUnInit();
 #endif
 
     // flush stdout buffer before _exit
