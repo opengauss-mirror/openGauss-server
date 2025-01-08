@@ -575,5 +575,27 @@ begin
     raise notice '%, %', v_string, v_type;  
 end;
 /
+declare
+    v_anytype    anytype;
+	v_anydataset anydataset;
+	v_string     varchar(4000);
+	v_type       int;
+begin
+    anydataset.beginCreate(1, v_anytype, v_anydataset);
+    
+    v_anydataset.addInstance();
+    v_anydataset.setVarchar('hello');
+    anydataset.endCreate(v_anydataset);
+    v_type := v_anydataset.getVarchar(v_string,1);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,0);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,2);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,-1);
+    raise notice 'notice: %',v_string;
+	
+end;
+/
 
 drop schema anydata_type cascade;
