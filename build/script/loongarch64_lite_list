@@ -78,6 +78,8 @@
 ./share/postgresql/extension/gms_raw.control
 ./share/postgresql/extension/gms_match--1.0.sql
 ./share/postgresql/extension/gms_match.control
+./share/postgresql/extension/gms_assert--1.0.sql
+./share/postgresql/extension/gms_assert.control
 ./share/postgresql/extension/shark--1.0.sql
 ./share/postgresql/extension/shark.control
 ./share/postgresql/timezone/GB-Eire
@@ -778,6 +780,7 @@
 ./lib/postgresql/gms_debug.so
 ./lib/postgresql/gms_raw.so
 ./lib/postgresql/gms_match.so
+./lib/postgreql/gms_assert.so
 ./lib/postgresql/shark.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
