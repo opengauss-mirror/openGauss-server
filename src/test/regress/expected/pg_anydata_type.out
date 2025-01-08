@@ -635,9 +635,31 @@ NOTICE:  2, 2
 NOTICE:  name Varchar, count 2
 NOTICE:  100.8, 0
 NOTICE:  .9, 0
-ERROR:  index out of range
-CONTEXT:  SQL statement "CALL pg_catalog.getanydatasetexcept(self,idx,1)"
-PL/pgSQL function pg_catalog.getvarchar(anydataset,integer) line 2 at PERFORM
-SQL statement "CALL pg_catalog.getvarchar(v_anydataset ,v_string,3)"
-PL/pgSQL function inline_code_block line 28 at assignment
+NOTICE:  <NULL>, 0
+declare
+    v_anytype    anytype;
+	v_anydataset anydataset;
+	v_string     varchar(4000);
+	v_type       int;
+begin
+    anydataset.beginCreate(1, v_anytype, v_anydataset);
+    
+    v_anydataset.addInstance();
+    v_anydataset.setVarchar('hello');
+    anydataset.endCreate(v_anydataset);
+    v_type := v_anydataset.getVarchar(v_string,1);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,0);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,2);
+    raise notice 'notice: %',v_string;
+    v_type := v_anydataset.getVarchar(v_string,-1);
+    raise notice 'notice: %',v_string;
+	
+end;
+/
+NOTICE:  notice: hello
+NOTICE:  notice: <NULL>
+NOTICE:  notice: <NULL>
+NOTICE:  notice: <NULL>
 drop schema anydata_type cascade;

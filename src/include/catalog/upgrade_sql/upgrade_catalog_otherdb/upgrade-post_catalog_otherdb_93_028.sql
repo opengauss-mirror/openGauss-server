@@ -621,7 +621,7 @@ BEGIN
      IF (v_anydataset IS NULL) THEN
        RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
      ELSIF (idx > v_anydataset.count) OR (idx < 1) THEN
-       RAISE EXCEPTION ''index out of range'';
+       v_anydataset.data[idx] = NULL;
      ELSIF (v_anydataset.state = 0) THEN
        RAISE EXCEPTION ''incorrect usage of method GET'';
      ELSIF (v_anydataset.typecode != typecode) THEN
