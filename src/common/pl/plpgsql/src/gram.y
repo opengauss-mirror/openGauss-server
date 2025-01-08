@@ -13809,13 +13809,13 @@ static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, ch
 
         ScanKeyInit(&skey[0], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(fn_oid));
         desc = heap_open(ProcedureRelationId, AccessShareLock);
-        sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 1, skey);
+        sysscan = systable_beginscan(desc, InvalidOid, false, NULL, 1, skey);
 
         /* get all functions under packageoid */
         while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
-                parentFuncOid = fn_oid;
-                break;
-            }
+            parentFuncOid = fn_oid;
+            break;
+        }
 
         systable_endscan(sysscan);
         heap_close(desc, NoLock);
