@@ -4,10 +4,16 @@ begin
 gms_output.enable;
 gms_output.put_line(gms_inaddr.get_host_address('localhost'));
 gms_output.put_line(gms_inaddr.get_host_name('127.0.0.1'));
+gms_output.put_line(gms_inaddr.get_host_address(null));
+gms_output.put_line(gms_inaddr.get_host_name(null));
 end
 /
 127.0.0.1
 localhost
+--?.*
+--?.*
+CREATE TABLE tb1_22 (col1 number primary key, check(col1<100),col2 nchar(15) not null,address1 varchar2 default gms_inaddr.GET_HOST_NAME,name1 varchar2 default gms_inaddr.get_host_address);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb1_22_pkey" for table "tb1_22"
 begin
 gms_output.enable;
 gms_output.put_line(gms_inaddr.get_host_address('localhostxx'));
@@ -22,8 +28,15 @@ gms_output.enable;
 gms_output.put_line(gms_inaddr.get_host_name('10.254.180.400'));
 end;
 /
-ERROR:  error happen when fetch hostname: Name or service not known
+ERROR:  illegal ip format, please check your input
 CONTEXT:  SQL statement "CALL gms_output.put_line(gms_inaddr.get_host_name('10.254.180.400'))"
 PL/pgSQL function inline_code_block line 3 at PERFORM
+begin
+gms_output.enable;
+gms_output.put_line(gms_inaddr.get_host_name('::1'));
+end;
+/
+localhost
+drop table tb1_22;
 drop extension gms_output;
 drop extension gms_inaddr;

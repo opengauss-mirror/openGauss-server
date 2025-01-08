@@ -374,7 +374,6 @@ const char* gai_strerror(int errcode)
  *
  * Bugs:	- Only supports NI_NUMERICHOST and NI_NUMERICSERV
  *		  It will never resolv a hostname.
- *		- No IPv6 support.
  */
 int getnameinfo(const struct sockaddr* sa, int salen, char* node, int nodelen, char* service, int servicelen, int flags)
 {
@@ -399,12 +398,6 @@ int getnameinfo(const struct sockaddr* sa, int salen, char* node, int nodelen, c
         return EAI_FAIL;
     }
 
-#ifdef HAVE_IPV6
-    if (sa->sa_family == AF_INET6) {
-        return EAI_FAMILY;
-    }
-#endif
-
     if (node != NULL) {
         if (sa->sa_family == AF_INET) {
             if (inet_net_ntop(AF_INET,
@@ -414,7 +407,13 @@ int getnameinfo(const struct sockaddr* sa, int salen, char* node, int nodelen, c
                     nodelen) == NULL) {
                 return EAI_MEMORY;
             }
-        } else {
+        }
+        else if (sa->sa_family == AF_INET6) {
+            if (inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)raddr)->sin6_addr, 128, node, nodelen) == NULL) {
+                return EAI_MEMORY;
+            }
+        }
+        else {
             return EAI_MEMORY;
         }
     }
@@ -423,7 +422,10 @@ int getnameinfo(const struct sockaddr* sa, int salen, char* node, int nodelen, c
         int ret = -1;
 
         if (sa->sa_family == AF_INET) {
-            ret = snprintf_s(service, servicelen, servicelen - 1, "%d", ntohs(((struct sockaddr_in*)sa)->sin_port));
+            ret = snprintf_s(service, servicelen, servicelen - 1, "%d", ntohs(static_cast<struct sockaddr_in*>(sa)->sin_port));
+        }
+        else if (sa->sa_family == AF_INET6) {
+            ret = snprintf_s(service, servicelen, servicelen - 1, "%d", ntohs(static_cast<struct sockaddr_in6*>(sa)->sin6_port));
         }
         if (ret == -1 || ret > servicelen) {
             return EAI_MEMORY;
