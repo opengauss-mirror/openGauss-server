@@ -1806,7 +1806,11 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
             if (func->datums[i]->ispkg) {
                 estate.datums[i] = func->datums[i];  
             } else if (func->datums[i]->inherit && func->parent_func) {
-                // 如果是嵌套两层，可能嵌套第二层会修改继承嵌套第一层的issub，导致没有复制到数据
+                /*
+                 * If there is a two-level nesting, it is possible that 
+                 * the second level of nesting may modify the issub inherited
+                 * from the first level, resulting in data not being copied.
+                 */
                 if(!copy_parent_func_exec_param(func, &estate, i)) {
                     estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
                 }  

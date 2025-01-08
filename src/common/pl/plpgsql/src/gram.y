@@ -13820,16 +13820,19 @@ static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, ch
         systable_endscan(sysscan);
         heap_close(desc, NoLock);
     }
- 
-   /* 用户创建了子程序，然后在新的 session 中调用外层函数时，此时不会在内核中解析函数体，
-    * u_sess->parser_cxt.has_subprogram 始终为 false，导致外层程序自定义类型未创建，
-    * 在子程序中调用不到外层程序自定义的类型而报错，此处先查找依赖于外层程序的子程序，找到
-    * 代表该程序含有子程序，则创建type;
-    * 直接调用不会走到 ProcedureCreate_extend 中调用 DeleteSubprogramDenpendOnProcedure
-    */ 
+
+    /*
+     * when user created a subprogram, and called the outer function in a new session,
+     * the function body is not parsed in the kernel at this time. u_sess->parser_cxt.has_subprogram
+     * is always false, causing the outer program's custom type to not be created. As a result, the
+     * subprogram cannot call the custom type defined by the outer program and reports an error. First,
+     * search for subprograms that depend on the outer program. If the program is found to contain subprograms,
+     * then create the type. Direct calls will not call function DeleteSubprogramDenpendOnProcedure.     
+     */
+
     long counter  = 0;
     counter = DeleteSubprogramDenpendOnProcedure(ProcedureRelationId, fn_oid, false);
-    // 只在含有子程序的 procedure/function 创建.
+    // create only for procedures/functions that contain subprograms.
     if (u_sess->parser_cxt.has_subprogram || OidIsValid(parentFuncOid) || counter > 0) {
         char* casttypename = CastPackageTypeName(typname,
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid, false, true);
