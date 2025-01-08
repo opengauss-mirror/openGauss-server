@@ -1251,12 +1251,10 @@ static void CBDMSMemFree(void *pointer)
 static void *CBDrcMemAlloc(size_t size)
 {
     void *ptr = NULL;
-    MemoryContext old_cxt = MemoryContextSwitchTo(DMSDrcContext);
-    ptr = palloc(size);
+    ptr = palloc_huge(DMSDrcContext, size);
     if (ptr == NULL) {
         ereport(FATAL, (errmsg("Failed to allocate memory for DMSDrcContext.")));
     }
-    (void)MemoryContextSwitchTo(old_cxt);
     return ptr;
 }
 
