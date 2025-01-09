@@ -20,6 +20,44 @@ SELECT NTH_VALUE(TEN, 3) FROM FIRST IGNORE NULLS OVER (PARTITION BY FOUR order b
 SELECT NTH_VALUE(TEN, 1) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
 SELECT NTH_VALUE(TEN, 2) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
 SELECT NTH_VALUE(TEN, 3) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
+--add for issue IBCABM:A兼容性，NTH_VALUE函数的 IGNORE NULLS未生效
+drop table if exists sales_data;
+CREATE TABLE sales_data(
+sales_id INT,
+sales_date DATE,
+employee_id INT,
+sales_amount number
+);
+
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(1, date'2024-01-01', 101, 1000.00);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(2, date'2024-01-02', 101, NULL);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(3, date'2024-01-03', 101, 1500.00);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(4, date'2024-01-04', 102, 2000.00);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(5, date'2024-01-05', 102, 2500.00);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(6,date'2024-01-06', 102, NULL);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(7, date'2024-01-07', 103, 3000.00);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(8, date'2024-01-08', 103, NULL);
+INSERT INTO sales_data (sales_id, sales_date, employee_id, sales_amount) VALUES
+(9, date'2024-01-09', 103, 3500.00);
+
+select * from sales_data;
+
+SELECT
+employee_id,
+sales_date,
+sales_amount,
+NTH_VALUE(sales_amount, 2) IGNORE NULLS OVER (PARTITION BY employee_id ORDER BY sales_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS nth_value_ignore_nulls
+FROM sales_data;
+
+
 --check error case
 SELECT NTH_VALUE(TEN, 0) FROM LAST IGNORE NULLS OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
 SELECT NTH_VALUE(TEN, 1) IGNORE NULLS FROM LAST OVER (PARTITION BY FOUR order by ten desc) AS NTH_VALUE, TEN, FOUR FROM temp_table ORDER BY FOUR, TEN desc;
