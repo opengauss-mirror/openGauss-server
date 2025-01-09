@@ -1341,7 +1341,7 @@ static void sync_restored_files(parray *dest_files,
         }
 
         /* TODO: write test for case: file to be synced is missing */
-            if (fio_sync(to_fullpath, FIO_BACKUP_HOST) != 0) {
+            if (fio_sync(to_fullpath, FIO_DB_HOST) != 0) {
                 /* Handling the file permission issue for gs_secure_files/version.cfg */
                 if (strstr(to_fullpath, GS_SECURE_FILES_VERSION_CFG)) {
                     mode_t permissions = dest_file->mode & FILE_PERMISSION_MASK_ALL;
