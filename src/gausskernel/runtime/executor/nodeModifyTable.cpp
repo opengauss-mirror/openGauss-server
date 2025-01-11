@@ -3340,7 +3340,8 @@ uint64 GetDeleteLimitCount(ExprContext* econtext, PlanState* scan, Limit *limitP
                 errmsg("LIMIT must not be null for delete.")));
     }
     iCount = DatumGetInt64(val);
-    if (iCount <= 0) {
+    /* delete limit 0 is supported in b-formated db */
+    if ((iCount < 0) || (iCount == 0 && !DB_IS_CMPT(B_FORMAT))) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
                 errmodule(MOD_EXECUTOR),
@@ -3646,6 +3647,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 #endif
         if (!node->isinherit) {
             partExprKeyStr = node->partExprKeyStrArray[estate->result_rel_index];
+        }
+        if (operation == CMD_DELETE && estate->deleteLimitCount == 0 && estate->withLimitCount) {
+            break;
         }
         if (estate->deleteLimitCount != 0 && estate->es_processed == estate->deleteLimitCount) {
             break;
@@ -4167,6 +4171,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
             mt_state->mt_plans[i] = ExecInitNode(outerPlan(sub_plan), estate, eflags);
             estate->deleteLimitCount = GetDeleteLimitCount(mt_state->limitExprContext,
                                                            mt_state->mt_plans[i], (Limit*)sub_plan);
+            estate->withLimitCount = true;
         } else {
             mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
         }
