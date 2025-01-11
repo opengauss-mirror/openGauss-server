@@ -669,6 +669,8 @@ typedef struct EState {
 
     uint64 deleteLimitCount; /* delete Limit */
 
+    bool withLimitCount; /* true if delete with limit, false if only delete without limit, only apply for b-db */
+
     uint64 es_last_processed; /* last value of es_processed for ModifyTable plan*/
 
     Oid es_lastoid; /* last oid processed (by INSERT) */
