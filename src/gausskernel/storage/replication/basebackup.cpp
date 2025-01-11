@@ -1239,7 +1239,7 @@ bool IsSkipDir(const char * dirName)
 
     /* skip directory in dss */
     if (ENABLE_DSS) {
-        if (strcmp(dirName, "pg_doublewrite") > 0) {
+        if (strcmp(dirName, "pg_doublewrite") == 0) {
             return true;
         }
 
