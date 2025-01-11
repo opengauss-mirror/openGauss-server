@@ -1644,6 +1644,21 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     PQclear(res);
     res = NULL;
 
+    /* Check if table is a view */
+    if (tableinfo.relkind == 'v' || tableinfo.relkind == 'o') {
+        PGresult* result = NULL;
+
+        printfPQExpBuffer(&buf, "SELECT pg_catalog.pg_get_viewdef('%s'::pg_catalog.oid, true);", oid);
+        result = PSQLexec(buf.data, false);
+        if (result == NULL)
+            goto error_return;
+
+        if (verbose && PQntuples(result) > 0)
+            view_def = pg_strdup(PQgetvalue(result, 0, 0));
+
+        PQclear(result);
+    }
+
     /*
      * Get column info
      *
@@ -1847,21 +1862,6 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
     for (i = 0; i < cols; i++)
         printTableAddHeader(&cont, headers[i], true, 'l');
-
-    /* Check if table is a view */
-    if ((tableinfo.relkind == 'v' || tableinfo.relkind == 'o') && verbose) {
-        PGresult* result = NULL;
-
-        printfPQExpBuffer(&buf, "SELECT pg_catalog.pg_get_viewdef('%s'::pg_catalog.oid, true);", oid);
-        result = PSQLexec(buf.data, false);
-        if (result == NULL)
-            goto error_return;
-
-        if (PQntuples(result) > 0)
-            view_def = pg_strdup(PQgetvalue(result, 0, 0));
-
-        PQclear(result);
-    }
 
     /* Generate table cells to be printed */
     for (i = 0; i < numrows; i++) {
