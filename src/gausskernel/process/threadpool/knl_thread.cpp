@@ -521,6 +521,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->xlog_atomic_op = NULL;
     xlog_cxt->currentRetryTimes = 0;
     xlog_cxt->uwalInfoHis = NIL;
+    xlog_cxt->last_forwarder_lsn = 0;
 }
 
 static void knl_t_index_init(knl_t_index_context* index_cxt)

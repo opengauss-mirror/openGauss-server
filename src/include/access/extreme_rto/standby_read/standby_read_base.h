@@ -61,11 +61,13 @@ typedef uint64 BasePagePosition;
 typedef struct _StandbyReadMetaInfo {
     uint32 batch_id;
     uint32 redo_id;
-    uint64 lsn_table_recyle_position;
+    uint64 lsn_table_recycle_position;
     uint64 lsn_table_next_position;  // next position can insert node, shoud jump page header before use
     BasePagePosition base_page_recyle_position;
     BasePagePosition base_page_next_position;  // next position can insert page
     XLogRecPtr recycle_lsn_per_worker;
+    bool is_lsn_table_recycle_position_init;
+    slock_t mutex;
 } StandbyReadMetaInfo;
 
 typedef struct WalFilter {

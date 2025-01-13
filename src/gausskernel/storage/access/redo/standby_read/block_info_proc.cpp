@@ -26,6 +26,8 @@
 #include "access/extreme_rto/standby_read/lsn_info_meta.h"
 #include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "storage/smgr/relfilenode.h"
+#include "access/extreme_rto/dispatcher.h"
+#include "access/extreme_rto/page_redo.h"
 
 namespace extreme_rto_standby_read {
 
@@ -61,8 +63,13 @@ inline uint32 block_info_meta_page_offset(BlockNumber block_num)
 BlockMetaInfo* get_block_meta_info_by_relfilenode(
     const BufferTag& buf_tag, BufferAccessStrategy strategy, ReadBufferMode mode, Buffer* buffer, bool need_share_lock)
 {
+    Assert(!IsSegmentFileNode(buf_tag.rnode) || IsSegmentPhysicalRelNode(buf_tag.rnode));
     RelFileNode standby_read_rnode = buf_tag.rnode;
-    standby_read_rnode.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+    if (IsSegmentFileNode(standby_read_rnode)) {
+        standby_read_rnode.bucketNode -= EXRTO_STANDBY_READ_BUCKET_OFFSET;
+    } else {
+        standby_read_rnode.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+    }
     SMgrRelation smgr = smgropen(standby_read_rnode, InvalidBackendId);
     bool hit = false;
 
@@ -141,7 +148,8 @@ void insert_lsn_to_block_info(
     Page page = BufferGetPage(block_info_buf);
 #endif
     XLogRecPtr current_page_lsn = PageGetLSN(base_page);
-    if (!is_block_meta_info_valid(block_info)) {
+    uint64 global_recycle_lsn_info_page = pg_atomic_read_u64(&extreme_rto::g_dispatcher->global_recycle_lsn_info_page);
+    if (!is_block_meta_info_valid(block_info) || block_info->lsn_info_list.prev < global_recycle_lsn_info_page) {
         if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
             block_info_page_init(page);
         }
@@ -149,18 +157,13 @@ void insert_lsn_to_block_info(
         init_block_info(block_info, current_page_lsn);
     }
 
-    if (block_info->record_num == 0 ||
-        (block_info->record_num % (uint32)g_instance.attr.attr_storage.base_page_saved_interval) == 0) {
-        insert_base_page_to_lsn_info(meta_info,
-            &block_info->lsn_info_list,
-            &block_info->base_page_info_list,
-            buf_tag,
-            base_page,
-            current_page_lsn,
-            next_lsn);
-    } else {
-        insert_lsn_to_lsn_info(meta_info, &block_info->lsn_info_list, next_lsn);
-    }
+    insert_base_page_to_lsn_info(meta_info,
+                                 &block_info->lsn_info_list,
+                                 &block_info->base_page_info_list,
+                                 buf_tag,
+                                 base_page,
+                                 current_page_lsn,
+                                 next_lsn);
 
     ++(block_info->record_num);
     Assert(block_info->max_lsn <= next_lsn);
@@ -193,8 +196,8 @@ void insert_lsn_to_block_info_for_opt(
     /* if block is invalid or block is valid but all the lsn object of this block has been recycled(no data in lsn info
      * files belongs to this block), we reset this block
      */
-    if (!is_block_meta_info_valid(block_info) ||
-        block_info->lsn_info_list.prev < meta_info->lsn_table_recyle_position) {
+    uint64 global_recycle_lsn_info_page = pg_atomic_read_u64(&extreme_rto::g_dispatcher->global_recycle_lsn_info_page);
+    if (!is_block_meta_info_valid(block_info) || block_info->lsn_info_list.prev < global_recycle_lsn_info_page) {
         if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
             block_info_page_init(page);
         }
@@ -203,12 +206,12 @@ void insert_lsn_to_block_info_for_opt(
     }
 
     insert_base_page_to_lsn_info(meta_info,
-        &block_info->lsn_info_list,
-        &block_info->base_page_info_list,
-        buf_tag,
-        base_page,
-        current_page_lsn,
-        next_lsn);
+                                 &block_info->lsn_info_list,
+                                 &block_info->base_page_info_list,
+                                 buf_tag,
+                                 base_page,
+                                 current_page_lsn,
+                                 next_lsn);
 
     ++(block_info->record_num);
     Assert(block_info->max_lsn <= next_lsn);
@@ -218,9 +221,8 @@ void insert_lsn_to_block_info_for_opt(
     UnlockReleaseBuffer(block_info_buf);
 }
 
-StandbyReadRecyleState recyle_block_info(const BufferTag &buf_tag, LsnInfoPosition base_page_info_pos,
-                                         XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn,
-                                         XLogRecPtr *block_info_max_lsn)
+StandbyReadRecyleState recycle_block_info(StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag,
+    XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn, XLogRecPtr *block_info_max_lsn)
 {
     Buffer buffer = InvalidBuffer;
     BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_NORMAL, &buffer);
@@ -246,7 +248,8 @@ StandbyReadRecyleState recyle_block_info(const BufferTag &buf_tag, LsnInfoPositi
     } else if (XLogRecPtrIsValid(next_base_page_lsn)) {
         LsnInfoPosition min_page_info_pos = LSN_INFO_LIST_HEAD;
         XLogRecPtr min_lsn = InvalidXLogRecPtr;
-        recycle_one_lsn_info_list(buf_tag, base_page_info_pos, recyle_lsn, &min_page_info_pos, &min_lsn);
+        recycle_one_lsn_info_list(meta_info, block_meta_info->base_page_info_list.next,
+                                  recyle_lsn, &min_page_info_pos, &min_lsn);
 
         Assert(INFO_POSITION_IS_VALID(min_page_info_pos));
         if (block_meta_info->base_page_info_list.next != min_page_info_pos) {
@@ -272,8 +275,8 @@ static void reset_tmp_lsn_info_array(StandbyReadLsnInfoArray* lsn_info)
     }
 }
 
-bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, XLogRecPtr read_lsn,
-    StandbyReadLsnInfoArray* lsn_info)
+bool get_page_lsn_info(const BufferTag& old_buf_tag, const BufferTag& buf_tag, BufferAccessStrategy strategy,
+    XLogRecPtr read_lsn, StandbyReadLsnInfoArray* lsn_info)
 {
     Buffer buf;
     BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, strategy, RBM_NORMAL, &buf, true);
@@ -299,7 +302,7 @@ bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, 
                          block_meta_info->max_lsn, read_lsn))));
     }
     reset_tmp_lsn_info_array(lsn_info);
-    get_lsn_info_for_read(buf_tag, block_meta_info->base_page_info_list.prev, lsn_info, read_lsn);
+    get_lsn_info_for_read(old_buf_tag, block_meta_info->base_page_info_list.prev, lsn_info, read_lsn);
     UnlockReleaseBuffer(buf);
 
     return true;
@@ -330,6 +333,10 @@ void remove_one_block_info_file(const RelFileNode rnode)
  
     if (!found && g_instance.bgwriter_cxt.invalid_buf_proc_latch != NULL) {
         SetLatch(g_instance.bgwriter_cxt.invalid_buf_proc_latch);
+    }
+    
+    if (IsSegmentFileNode(rnode)) {
+        return;
     }
 
     SMgrRelation srel = smgropen(rnode, InvalidBackendId);

@@ -34,6 +34,7 @@
 #include "pgstat.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "replication/ss_disaster_cluster.h"
+#include "access/multi_redo_api.h"
 #include "knl/knl_thread.h"
 
 /* 
@@ -579,14 +580,15 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
     return BufferDescriptorGetBuffer(bufHdr);
 }
 
-Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
+Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
+                            BlockNumber blockNum, ReadBufferMode mode)
 {
     bool found = false;
 
     /* Make sure we will have room to remember the buffer pin */
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
-    BufferDesc *bufHdr = SegBufferAlloc(spc, rnode, forkNum, blockNum, &found);
+    BufferDesc *bufHdr = SegBufferAlloc(rnode, forkNum, blockNum, &found);
 
     if (!found) {
         SegmentCheck(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));
@@ -685,7 +687,7 @@ found_branch:
     return BufferDescriptorGetBuffer(bufHdr);
 }
 
-BufferDesc * FoundBufferInHashTable(int buf_id, LWLock *new_partition_lock, bool *foundPtr)
+BufferDesc *FoundBufferInHashTable(int buf_id, LWLock *new_partition_lock, bool *foundPtr)
 {
     BufferDesc *buf = GetBufferDescriptor(buf_id);
     bool valid = SegPinBuffer(buf);
@@ -701,7 +703,7 @@ BufferDesc * FoundBufferInHashTable(int buf_id, LWLock *new_partition_lock, bool
     return buf;
 }
 
-BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
+BufferDesc *SegBufferAlloc(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
                                   bool *foundPtr)
 {
     BufferDesc *buf;

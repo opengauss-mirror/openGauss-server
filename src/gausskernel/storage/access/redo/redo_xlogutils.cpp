@@ -2034,7 +2034,63 @@ void init_redo_buffer_info(RedoBufferInfo *rb_info, const BufferTag &buf_tag, Bu
     rb_info->dirtyflag = false; /* initial value, actually, dirtyflag is useless in extreme RTO read */
 }
 
-void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_info, Buffer base_page_buf)
+bool redo_target_state(XLogRecParseState *state, RedoBufferInfo *buf_info)
+{
+    if (!find_target_state(state, buf_info->blockinfo)) {
+        return false;
+    }
+
+    buf_info->lsn = state->blockparse.blockhead.end_ptr;
+    buf_info->blockinfo.pblk = state->blockparse.blockhead.pblk;
+    wal_block_redo_for_extreme_rto_read(state, buf_info);
+    return true;
+}
+
+bool redo_target_seg_state(const BufferTag &new_buf_tag, XLogRecParseState *state, RedoBufferInfo *buf_info)
+{
+    uint8 xl_info = XLogBlockHeadGetInfo(&state->blockparse.blockhead) & ~XLR_INFO_MASK;
+    bool redo_done = false;
+    switch (xl_info) {
+        case XLOG_SEG_ATOMIC_OPERATION:
+        case XLOG_SEG_SEGMENT_EXTEND:
+        case XLOG_SEG_INIT_MAPPAGE:
+        case XLOG_SEG_INIT_INVRSPTR_PAGE:
+        case XLOG_SEG_ADD_NEW_GROUP:
+        case XLOG_SEG_TRUNCATE: {
+            XLogRecParseState* child_state_list =
+                (XLogRecParseState*)state->blockparse.extra_rec.blocksegfullsyncrec.childState;
+            XLogRecParseState* next_state = child_state_list;
+            while (next_state != NULL) {
+                if (redo_target_state(next_state, buf_info)) {
+                    redo_done = true;
+                }
+                next_state = (XLogRecParseState*)next_state->nextrecord;
+            }
+            XLogBlockParseStateRelease(state);
+            break;
+        }
+        case XLOG_SEG_NEW_PAGE: {
+            buf_info->lsn = state->blockparse.blockhead.end_ptr;
+            BufferTag *buf_tag = (BufferTag*)state->blockparse.extra_rec.blocksegnewpageinfo.mainData;
+            if (!RelFileNodeEquals(new_buf_tag.rnode, buf_tag->rnode) ||
+                new_buf_tag.forkNum != buf_tag->forkNum ||
+                new_buf_tag.blockNum != buf_tag->blockNum) {
+                return false;
+            }
+            buf_info->blockinfo.pblk = state->blockparse.blockhead.pblk;
+            segpage_redo_new_page_for_standby_read(
+                (XLogBlockSegNewPage*)&state->blockparse.extra_rec.blocksegnewpageinfo, buf_info);
+            redo_done = true;
+            break;
+        }
+        default:
+            return redo_target_state(state, buf_info);
+    }
+    return redo_done;
+}
+
+void redo_target_page(const BufferTag &old_buf_tag, const BufferTag &new_buf_tag,
+                      StandbyReadLsnInfoArray *lsn_info, Buffer base_page_buf)
 {
     char *error_msg = NULL;
     RedoParseManager redo_pm;
@@ -2048,7 +2104,7 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
     }
 
     RedoBufferInfo buf_info;
-    init_redo_buffer_info(&buf_info, buf_tag, base_page_buf);
+    init_redo_buffer_info(&buf_info, old_buf_tag, base_page_buf);
     for (uint32 i = 0; i < lsn_info->lsn_num; i++) {
         XLogRecord *record = XLogReadRecord(xlog_reader, lsn_info->lsn_array[i], &error_msg);
         if (record == NULL) {
@@ -2071,13 +2127,17 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
                             errdetail("Failed while wal parse to block.")));
         }
         XLogRecParseState *state_iter = state;
-        while (state_iter != NULL) {
-            if (find_target_state(state_iter, buf_info.blockinfo)) {
-                break;
+        bool redo_done = false;
+        while (!redo_done && state_iter != NULL) {
+            if ((XLogBlockHeadGetRmid(&state_iter->blockparse.blockhead) == RM_SEGPAGE_ID)) {
+                redo_done = redo_target_seg_state(new_buf_tag, state_iter, &buf_info);
+            } else {
+                redo_done = redo_target_state(state_iter, &buf_info);
             }
             state_iter = (XLogRecParseState *)(state_iter->nextrecord);
         }
-        if (state_iter == NULL) {
+
+        if (!redo_done) {
             ereport(ERROR, (errmsg("redo_target_page: internal error, xlog in lsn %X/%X doesn't contain target block.",
                                    (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
         }

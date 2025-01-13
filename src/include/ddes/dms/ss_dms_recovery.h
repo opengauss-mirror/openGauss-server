@@ -62,7 +62,7 @@
 
 #define ENABLE_REALTIME_BUILD_TARGET_RTO (ENABLE_DMS && \
     g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto > 0 && \
-    g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
+    SS_SINGLE_CLUSTER)
 #define SS_PRIMARY_ENABLE_TARGET_RTO (ENABLE_REALTIME_BUILD_TARGET_RTO && \
     SS_NORMAL_PRIMARY && g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus > DISABLE)
 #define SS_STANDBY_ENABLE_TARGET_RTO (SS_NORMAL_STANDBY && \

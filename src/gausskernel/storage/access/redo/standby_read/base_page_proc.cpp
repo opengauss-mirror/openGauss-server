@@ -30,11 +30,11 @@
 
 namespace extreme_rto_standby_read {
 
-inline RelFileNode make_base_page_relfilenode(uint32 batch_id, uint32 redo_worker_id, BasePagePosition position)
+inline RelFileNode make_base_page_relfilenode(BasePagePosition position)
 {
     RelFileNode rnode;
     rnode.spcNode = EXRTO_BASE_PAGE_SPACE_OID;
-    rnode.dbNode = (batch_id << LOW_WORKERID_BITS) | redo_worker_id;
+    rnode.dbNode = 0;
     rnode.relNode = (uint32)((position / BLCKSZ) >> UINT64_HALF);
     rnode.bucketNode = InvalidBktId;
     rnode.opt = DefaultFileNodeOpt;
@@ -42,12 +42,14 @@ inline RelFileNode make_base_page_relfilenode(uint32 batch_id, uint32 redo_worke
     return rnode;
 }
 
-Buffer buffer_read_base_page(uint32 batch_id, uint32 redo_id, BasePagePosition position, ReadBufferMode mode)
+Buffer buffer_read_base_page(BasePagePosition position, ReadBufferMode mode)
 {
-    RelFileNode rnode = make_base_page_relfilenode(batch_id, redo_id, position);
+    RelFileNode rnode = make_base_page_relfilenode(position);
     BlockNumber blocknum = (BlockNumber)(position / BLCKSZ);
     bool hit = false;
     SMgrRelation smgr = smgropen(rnode, InvalidBackendId);
+    uint32 batch_id = 0;
+    uint32 redo_id = 0;
     Buffer buffer =
         ReadBuffer_common(smgr, RELPERSISTENCE_PERMANENT, MAIN_FORKNUM, blocknum, mode, NULL, &hit, NULL);
     if (buffer == InvalidBuffer) {
@@ -59,37 +61,20 @@ Buffer buffer_read_base_page(uint32 batch_id, uint32 redo_id, BasePagePosition p
     return buffer;
 }
 
-void generate_base_page(StandbyReadMetaInfo* meta_info, const Page src_page)
+void generate_base_page(const Page src_page, BasePagePosition base_page_pos)
 {
-    BasePagePosition position = meta_info->base_page_next_position;
+    Buffer dest_buf = buffer_read_base_page(base_page_pos, RBM_ZERO_AND_LOCK);
 
-    Buffer dest_buf = buffer_read_base_page(meta_info->batch_id, meta_info->redo_id, position, RBM_ZERO_AND_LOCK);
-
-#ifdef ENABLE_UT
-    Page dest_page = get_page_from_buffer(dest_buf);
-#else
     Page dest_page = BufferGetPage(dest_buf);
-#endif
     errno_t rc = memcpy_s(dest_page, BLCKSZ, src_page, BLCKSZ);
     securec_check(rc, "\0", "\0");
     MarkBufferDirty(dest_buf);
     UnlockReleaseBuffer(dest_buf);
-
-    meta_info->base_page_next_position += BLCKSZ;
 }
 
-void read_base_page(const BufferTag& buf_tag, BasePagePosition position, BufferDesc* dest_buf_desc)
+void read_base_page(BasePagePosition position, BufferDesc* dest_buf_desc)
 {
-    extreme_rto::RedoItemTag redo_item_tag;
-    INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
-
-    const uint32 worker_num_per_mng = extreme_rto::get_page_redo_worker_num_per_manager();
-    /* batch id and worker id start from 1 when reading a page */
-    uint32 batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num()) + 1;
-    uint32 redo_worker_id = extreme_rto::GetWorkerId(&redo_item_tag, worker_num_per_mng) + 1;
-
-    Buffer buffer = buffer_read_base_page(batch_id, redo_worker_id, position, RBM_NORMAL);
-
+    Buffer buffer = buffer_read_base_page(position, RBM_NORMAL);
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
 #ifdef ENABLE_UT
     Page src_page = get_page_from_buffer(buffer);
@@ -103,20 +88,12 @@ void read_base_page(const BufferTag& buf_tag, BasePagePosition position, BufferD
     UnlockReleaseBuffer(buffer);
 }
 
-void recycle_base_page_file(uint32 batch_id, uint32 redo_id, BasePagePosition recycle_pos)
+void recycle_base_page_file(BasePagePosition recycle_pos)
 {
-    RelFileNode rnode = make_base_page_relfilenode(batch_id, redo_id, recycle_pos);
+    RelFileNode rnode = make_base_page_relfilenode(recycle_pos);
     SMgrRelation smgr = smgropen(rnode, InvalidBackendId);
 
     smgrdounlink(smgr, true, (BlockNumber)(recycle_pos / BLCKSZ));
 }
 
-#ifdef ENABLE_UT
-Page get_page_from_buffer(Buffer buf)
-{
-    return BufferGetPage(buf);
-}
-#endif
-
 }  // namespace extreme_rto_standby_read
-

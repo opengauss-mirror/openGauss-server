@@ -134,10 +134,15 @@ DecodedXLogBlockOp XLogAtomicDecodeBlockData(char *data, int len);
 /*
  * APIs used for segment store metadata.
  */
-BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, bool *foundPtr);
+BufferDesc *SegBufferAlloc(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, bool *foundPtr);
 Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc = NULL);
 void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock);
-Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
+Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
+                            BlockNumber blockNum, ReadBufferMode mode);
+Buffer standby_read_seg_buffer(SegSpace *spc, const RelFileNode &rnode, ForkNumber forkNum,
+                               BlockNumber blockNum, ReadBufferMode mode);
+Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
+                      BlockNumber blockNum, ReadBufferMode mode);
 void SegReleaseBuffer(Buffer buffer);
 void SegUnlockReleaseBuffer(Buffer buffer);
 void SegMarkBufferDirty(Buffer buffer);

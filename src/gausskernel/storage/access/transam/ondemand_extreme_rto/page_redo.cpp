@@ -2636,7 +2636,7 @@ void StartupSendHashmapPruneMarkToBatchRedo()
     }
 }
 
-void SendLsnFowarder()
+void SendLsnForwarder()
 {
     // update and read in the same thread, so no need atomic operation
     g_GlobalLsnForwarder.record.ReadRecPtr = g_redoWorker->lastReplayedReadRecPtr;
@@ -2662,7 +2662,7 @@ void PushToWorkerLsn()
         refCount = pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount);
         RedoInterruptCallBack();
     } while (refCount != 0 && !ReadPageWorkerStop());
-    SendLsnFowarder();
+    SendLsnForwarder();
 }
 
 void ResetRtoXlogReadBuf(XLogRecPtr targetPagePtr)

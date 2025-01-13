@@ -1934,6 +1934,7 @@ int32 seg_physical_aio_prep_pwrite(SegSpace *spc, RelFileNode &rNode, ForkNumber
 
     return spc_aio_prep_pwrite(spc, rNode, forknum, blocknum, buffer, iocb_ptr, tempAioExtra);
 }
+
 static bool check_meta_data(BlockNumber extent, uint32 extent_size, uint32* offset_block)
 {
     if (extent < DF_MAP_HEAD_PAGE + 1 || extent_size == EXTENT_1) {

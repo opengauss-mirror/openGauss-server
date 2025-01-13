@@ -136,9 +136,23 @@ enum SMGR_READ_STATUS {
 #define EXRTO_MANAGER (3)
 
 #define IS_UNDO_RELFILENODE(rnode) ((rnode).dbNode == UNDO_DB_OID || (rnode).dbNode == UNDO_SLOT_DB_OID)
-#define IS_EXRTO_RELFILENODE(rnode) ((rnode).spcNode == EXRTO_BASE_PAGE_SPACE_OID || \
-                                     (rnode).spcNode == EXRTO_LSN_INFO_SPACE_OID || \
-                                     (rnode).spcNode == EXRTO_BLOCK_INFO_SPACE_OID)
+#define IS_EXRTO_RELFILENODE(rnode) ((rnode).spcNode == EXRTO_BASE_PAGE_SPACE_OID ||  \
+                                     (rnode).spcNode == EXRTO_LSN_INFO_SPACE_OID ||   \
+                                     (rnode).spcNode == EXRTO_BLOCK_INFO_SPACE_OID || \
+                                     is_standby_read_seg_relnode(rnode))
+
+inline bool is_standby_read_seg_relnode(const RelFileNode &rnode)
+{
+    return (rnode.bucketNode >= MIN_EXRTO_STANDBY_READ_BUCKETID &&
+            rnode.bucketNode <= MAX_EXRTO_STANDBY_READ_BUCKETID);
+}
+
+inline bool is_segment_logical_relnode(const RelFileNode &rnode)
+{
+    const int extent_8192 = 5;
+    return (IsSegmentFileNode(rnode) && rnode.bucketNode > extent_8192);
+}
+
 /*
  * On Windows, we have to interpret EACCES as possibly meaning the same as
  * ENOENT, because if a file is unlinked-but-not-yet-gone on that platform,

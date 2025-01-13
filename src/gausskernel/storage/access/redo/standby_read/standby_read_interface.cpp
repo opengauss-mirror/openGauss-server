@@ -29,6 +29,7 @@
 #include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
 #include "access/multi_redo_api.h"
 #include "pgstat.h"
+#include "postgres_ext.h"
 #include "storage/smgr/relfilenode.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
@@ -48,28 +49,40 @@ const char* EXRTO_FILE_SUB_DIR[] = {
 const uint32 EXRTO_FILE_PATH_LEN = 1024;
 const uint32 XID_THIRTY_TWO = 32;
 
-void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node, bool is_start_lsn, Oid relnode)
+void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node,
+                            bool is_start_lsn, const RelFileNode& orig_node)
 {
     read_node.spcNode = (Oid)(read_lsn >> 32);
     read_node.dbNode = (Oid)(read_lsn);
-    read_node.relNode = relnode;
+    read_node.relNode = orig_node.relNode;
     read_node.opt = 0;
     if (is_start_lsn) {
         /* means read_lsn is the start ptr of xlog */
-        read_node.bucketNode = ExrtoReadStartLSNBktId;
+        read_node.opt = EXRTO_READ_STANDBY_START_LSN_OPT;
     } else {
         /* means read_lsn is the end ptr of xlog */
-        read_node.bucketNode = ExrtoReadEndLSNBktId;
+        read_node.opt = EXRTO_READ_STANDBY_END_LSN_OPT;
+    }
+    if (IsSegmentFileNode(orig_node)) {
+        read_node.bucketNode = orig_node.bucketNode - EXRTO_STANDBY_READ_BUCKET_OFFSET;
+    } else {
+        read_node.bucketNode = EXRTO_READ_SPECIAL_LSN;
     }
 }
 
-BufferDesc *alloc_standby_read_buf(const BufferTag &buf_tag, BufferAccessStrategy strategy, bool &found,
-                                   XLogRecPtr read_lsn, bool is_start_lsn)
+BufferDesc *alloc_standby_seg_read_buf(const BufferTag &buf_tag, bool &found, XLogRecPtr read_lsn, bool is_start_lsn)
 {
     RelFileNode read_node;
-    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode.relNode);
-    BufferDesc *buf_desc = BufferAlloc(read_node, 0, buf_tag.forkNum, buf_tag.blockNum, strategy, &found, NULL);
+    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode);
+    BufferDesc *buf_desc = SegBufferAlloc(read_node, buf_tag.forkNum, buf_tag.blockNum, &found);
+    return buf_desc;
+}
 
+BufferDesc *alloc_standby_read_buf(const BufferTag &buf_tag, BufferAccessStrategy strategy, bool &found, XLogRecPtr read_lsn, bool is_start_lsn)
+{
+    RelFileNode read_node;
+    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode);
+    BufferDesc *buf_desc = BufferAlloc(read_node, 0, buf_tag.forkNum, buf_tag.blockNum, strategy, &found, NULL);
     return buf_desc;
 }
 
@@ -120,6 +133,50 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
     return BufferDescriptorGetBuffer(buf_desc);
 }
 
+Buffer get_newest_seg_page_for_read(SegSpace *spc, const RelFileNode& rnode, ForkNumber forknum,
+                                    BlockNumber blocknum, ReadBufferMode mode, XLogRecPtr read_lsn)
+{
+    Buffer newest_seg_buf = ReadBufferFastNormal(spc, rnode, forknum, blocknum, mode);
+    if (BufferIsInvalid(newest_seg_buf)) {
+        return InvalidBuffer;
+    }
+
+    LockBuffer(newest_seg_buf, BUFFER_LOCK_SHARE);
+    Page newest_page = BufferGetPage(newest_seg_buf);
+    XLogRecPtr page_lsn = PageGetLSN(newest_page);
+    if (XLByteLT(read_lsn, page_lsn)) {
+        UnlockReleaseBuffer(newest_seg_buf);
+        return InvalidBuffer;
+    }
+
+    BufferTag buf_tag = {
+        .rnode = rnode,
+        .forkNum = forknum,
+        .blockNum = blocknum,
+    };
+
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+    bool hit = false;
+    BufferDesc *buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, page_lsn, false);
+    if (hit) {
+        UnlockReleaseBuffer(newest_seg_buf);
+        return BufferDescriptorGetBuffer(buf_desc);
+    }
+    Page read_page = (Page)BufHdrGetBlock(buf_desc);
+
+    errno_t rc = memcpy_s(read_page, BLCKSZ, newest_page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+
+    UnlockReleaseBuffer(newest_seg_buf);
+    buf_desc->extra->lsn_on_disk = PageGetLSN(read_page);
+#ifdef USE_ASSERT_CHECKING
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
+#endif
+
+    SegTerminateBufferIO(buf_desc, false, BM_VALID);
+    return BufferDescriptorGetBuffer(buf_desc);
+}
+
 Buffer get_newest_page_for_read_new(
     Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
 {
@@ -163,10 +220,87 @@ Buffer get_newest_page_for_read_new(
     return BufferDescriptorGetBuffer(buf_desc);
 }
 
+Buffer standby_read_seg_buffer(
+    SegSpace *spc, const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
+{
+    Assert(IsSegmentPhysicalRelNode(rnode));
+    XLogRecPtr read_lsn = MAX_XLOG_REC_PTR;
+
+    if (u_sess->utils_cxt.CurrentSnapshot != NULL && XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
+        read_lsn = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
+    } else if (XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn)) {
+        read_lsn = t_thrd.proc->exrto_read_lsn;
+    }
+
+    Buffer read_buf = get_newest_seg_page_for_read(spc, rnode, forkNum, blockNum, mode, read_lsn);
+    if (read_buf != InvalidBuffer) {
+        // newest page's lsn smaller than read lsn
+        return read_buf;
+    }
+
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+    // read lsn info
+    StandbyReadLsnInfoArray *lsn_info = &t_thrd.exrto_recycle_cxt.lsn_info;
+    BufferTag buf_tag = {
+        .rnode = rnode,
+        .forkNum = forkNum,
+        .blockNum = blockNum,
+    };
+    buffer_in_progress_pop();
+    bool result = extreme_rto_standby_read::get_page_lsn_info(buf_tag, buf_tag, NULL, read_lsn, lsn_info);
+    if (!result) {
+        ereport(
+            ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             (errmsg("standby_read_buf couldnot found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
+                     "gen_snaptime:%ld thread_read_lsn:%08X/%08X",
+                     buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                     buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
+                     g_instance.comm_cxt.predo_cxt.exrto_snapshot->gen_snap_time,
+                     (uint32)(t_thrd.proc->exrto_read_lsn >> XID_THIRTY_TWO), (uint32)t_thrd.proc->exrto_read_lsn))));
+        return InvalidBuffer;
+    }
+    buffer_in_progress_push();
+
+    // read lsn info
+    XLogRecPtr expected_lsn = InvalidXLogRecPtr;
+    bool is_start_lsn = true;
+    if (lsn_info->lsn_num == 0) {
+        expected_lsn = lsn_info->base_page_lsn;
+        is_start_lsn = false;
+    } else {
+        Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] > 0);
+        Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] < read_lsn);
+        Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] >= lsn_info->base_page_lsn);
+        expected_lsn = lsn_info->lsn_array[lsn_info->lsn_num - 1];
+    }
+
+    bool hit = false;
+    BufferDesc* buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, expected_lsn, is_start_lsn);
+    if (hit) {
+        return BufferDescriptorGetBuffer(buf_desc);
+    }
+    buffer_in_progress_pop();
+    // read_base_page
+    extreme_rto_standby_read::read_base_page(lsn_info->base_page_pos, buf_desc);
+    if (lsn_info->lsn_num > 0) {
+        redo_target_page(buf_tag, buf_tag, lsn_info, BufferDescriptorGetBuffer(buf_desc));
+    }
+    Page page = BufferGetPage(BufferDescriptorGetBuffer(buf_desc));
+    buf_desc->extra->lsn_on_disk = PageGetLSN(page);
+#ifdef USE_ASSERT_CHECKING
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
+#endif
+    buffer_in_progress_push();
+    SegTerminateBufferIO(buf_desc, false, BM_VALID);
+
+    return BufferDescriptorGetBuffer(buf_desc);
+}
+
 Buffer standby_read_buf(
     Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
 {
-    if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+    if (!g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
         return extreme_rto_standby_read::standby_read_buf_new(reln, fork_num, block_num, mode, strategy);
     }
     /* Open it at the smgr level */
@@ -179,11 +313,6 @@ Buffer standby_read_buf(
     }
 
     bool hit = false;
-    BufferTag buf_tag = {
-        .rnode = reln->rd_smgr->smgr_rnode.node,
-        .forkNum = fork_num,
-        .blockNum = block_num,
-    };
 
     XLogRecPtr read_lsn = MAX_XLOG_REC_PTR;
     if (u_sess->utils_cxt.CurrentSnapshot != NULL && XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
@@ -193,7 +322,6 @@ Buffer standby_read_buf(
     }
 
     Buffer read_buf = get_newest_page_for_read(reln, fork_num, block_num, mode, strategy, read_lsn);
-
     if (read_buf != InvalidBuffer) {
         // newest page's lsn smaller than read lsn
         return read_buf;
@@ -201,15 +329,29 @@ Buffer standby_read_buf(
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     // read lsn info
     StandbyReadLsnInfoArray *lsn_info = &t_thrd.exrto_recycle_cxt.lsn_info;
-    bool result = extreme_rto_standby_read::get_page_lsn_info(buf_tag, strategy, read_lsn, lsn_info);
+
+    BufferTag old_buf_tag = {
+        .rnode = reln->rd_smgr->smgr_rnode.node,
+        .forkNum = fork_num,
+        .blockNum = block_num,
+    };
+    BufferTag buf_tag = old_buf_tag;
+    if (is_segment_logical_relnode(old_buf_tag.rnode)) {
+        SegPageLocation loc = seg_get_physical_location(old_buf_tag.rnode, old_buf_tag.forkNum,
+                                                        old_buf_tag.blockNum, false);
+        buf_tag.rnode.relNode = EXTENT_SIZE_TO_TYPE(loc.extent_size);
+        buf_tag.blockNum = loc.blocknum;
+    }
+
+    bool result = extreme_rto_standby_read::get_page_lsn_info(old_buf_tag, buf_tag, strategy, read_lsn, lsn_info);
     if (!result) {
         ereport(
             ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
              (errmsg("standby_read_buf couldnot found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
                      "gen_snaptime:%ld thread_read_lsn:%08X/%08X",
-                     buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
-                     buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
+                     old_buf_tag.rnode.spcNode, old_buf_tag.rnode.dbNode, old_buf_tag.rnode.relNode, old_buf_tag.forkNum,
+                     old_buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
                      g_instance.comm_cxt.predo_cxt.exrto_snapshot->gen_snap_time,
                      (uint32)(t_thrd.proc->exrto_read_lsn >> XID_THIRTY_TWO), (uint32)t_thrd.proc->exrto_read_lsn))));
         return InvalidBuffer;
@@ -228,16 +370,16 @@ Buffer standby_read_buf(
         expected_lsn = lsn_info->lsn_array[lsn_info->lsn_num - 1];
     }
 
-    BufferDesc* buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, expected_lsn, is_start_lsn);
+    BufferDesc* buf_desc = alloc_standby_read_buf(old_buf_tag, strategy, hit, expected_lsn, is_start_lsn);
 
     if (hit) {
         return BufferDescriptorGetBuffer(buf_desc);
     }
     buffer_in_progress_pop();
     // read_base_page
-    extreme_rto_standby_read::read_base_page(buf_tag, lsn_info->base_page_pos, buf_desc);
+    extreme_rto_standby_read::read_base_page(lsn_info->base_page_pos, buf_desc);
     if (lsn_info->lsn_num > 0) {
-        redo_target_page(buf_tag, lsn_info, BufferDescriptorGetBuffer(buf_desc));
+        redo_target_page(old_buf_tag, buf_tag, lsn_info, BufferDescriptorGetBuffer(buf_desc));
     }
     Page page = BufferGetPage(BufferDescriptorGetBuffer(buf_desc));
     buf_desc->extra->lsn_on_disk = PageGetLSN(page);
@@ -332,7 +474,7 @@ bool check_need_drop_buffer(StandbyReadMetaInfo *meta_info, const BufferTag tag)
         uint64 total_block_num =
             get_total_block_num(type, tag.rnode.relNode, tag.blockNum);
         uint64 recycle_pos = ((type == BASE_PAGE) ? meta_info->base_page_recyle_position
-                                                    : meta_info->lsn_table_recyle_position);
+                                                    : meta_info->lsn_table_recycle_position);
         return (total_block_num < (recycle_pos / BLCKSZ));
     }
 
@@ -423,14 +565,14 @@ Datum gs_hot_standby_space_info(PG_FUNCTION_ARGS)
         StandbyReadMetaInfo meta_info = page_redo_worker->standby_read_meta_info;
 
         uint64 lsn_file_size_per_thread = 0;
-        if (meta_info.lsn_table_next_position > meta_info.lsn_table_recyle_position) {
-            lsn_file_size_per_thread = meta_info.lsn_table_next_position - meta_info.lsn_table_recyle_position;
-            /* in 0~lsn_table_recyle_position No data is stored,
+        if (meta_info.lsn_table_next_position > meta_info.lsn_table_recycle_position) {
+            lsn_file_size_per_thread = meta_info.lsn_table_next_position - meta_info.lsn_table_recycle_position;
+            /* in 0~lsn_table_recycle_position No data is stored,
                means the size of one lsn info file does not reach maxsize
-               eg:0~100KB(lsn_table_recyle_position), 100KB~(16M+100KB)(lsn_table_next_position), filenum:2, size:16M */
+               eg:0~100KB(lsn_table_recycle_position), 100KB~(16M+100KB)(lsn_table_next_position), filenum:2, size:16M */
             lsn_file_num += meta_info.lsn_table_next_position / EXRTO_LSN_INFO_FILE_MAXSIZE +
                             ((meta_info.lsn_table_next_position % EXRTO_LSN_INFO_FILE_MAXSIZE) > 0 ? 1 : 0) -
-                            (meta_info.lsn_table_recyle_position / EXRTO_LSN_INFO_FILE_MAXSIZE);
+                            (meta_info.lsn_table_recycle_position / EXRTO_LSN_INFO_FILE_MAXSIZE);
         }
         lsn_file_size += lsn_file_size_per_thread;
 
@@ -749,8 +891,7 @@ void dump_base_page_info_lsn_info(const BufferTag &buf_tag, LsnInfoPosition head
             break;
         }
 
-        Buffer base_page_datum_buffer =
-            buffer_read_base_page(batch_id, worker_id, base_page_info->base_page_position, RBM_NORMAL);
+        Buffer base_page_datum_buffer = buffer_read_base_page(base_page_info->base_page_position, RBM_NORMAL);
         LockBuffer(base_page_datum_buffer, BUFFER_LOCK_SHARE);
 
         UnlockReleaseBuffer(base_page_datum_buffer);
@@ -937,14 +1078,8 @@ Buffer standby_read_buf_new(
     }
     ReleaseBuffer(read_buf);
 
-    extreme_rto::RedoItemTag redo_item_tag;
-    INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
-    const uint32 worker_num_per_mng = (uint32)extreme_rto::get_page_redo_worker_num_per_manager();
-    /* batch id and worker id start from 1 when reading a page */
-    uint32 batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num()) + 1;
-    uint32 redo_worker_id = extreme_rto::GetWorkerId(&redo_item_tag, worker_num_per_mng) + 1;
+    Buffer base_page_buffer = buffer_read_base_page(base_page_pos, RBM_NORMAL);
 
-    Buffer base_page_buffer = buffer_read_base_page(batch_id, redo_worker_id, base_page_pos, RBM_NORMAL);
     bool hit = false;
     LockBuffer(base_page_buffer, BUFFER_LOCK_SHARE);
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);

@@ -46,6 +46,7 @@ static const uint32 PAGE_WORK_QUEUE_SIZE = 8192;
 
 static const uint32 EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
+static const uint32 MAX_LSN_SIZE_PER_FORWARDER = 1024 * 1024 * 10;
 
 typedef enum {
     REDO_BATCH,
@@ -242,6 +243,7 @@ void WaitAllRedoWorkerQueueEmpty();
 void WaitAllReplayWorkerIdle();
 void DispatchClosefdMarkToAllRedoWorker();
 void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
+void wait_trxn_worker_queue_empty_or_exceed(XLogRecPtr end_lsn);
 
 const char *RedoWokerRole2Str(RedoRole role);
 uint32 GetWorkerId(const RedoItemTag *redo_item_tag, uint32 worker_count);

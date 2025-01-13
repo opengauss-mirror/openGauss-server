@@ -45,8 +45,20 @@ typedef unsigned int Oid;
 #define InvalidBktId      (-1)
 #define SegmentBktId      (16384)
 
+#define EXRTO_READ_SPECIAL_LSN (-7)
+#define MAX_SEGMENT_BUCKETID (2000)
+#define MIN_SEGMENT_BUCKETID (0)
+#define EXRTO_STANDBY_READ_BUCKET_OFFSET (2200)
+#define MIN_EXRTO_STANDBY_READ_BUCKETID (-(EXRTO_STANDBY_READ_BUCKET_OFFSET))
+#define MAX_EXRTO_STANDBY_READ_BUCKETID (MAX_SEGMENT_BUCKETID - EXRTO_STANDBY_READ_BUCKET_OFFSET)
+#define EXRTO_READ_STANDBY_START_LSN_OPT (1)
+#define EXRTO_READ_STANDBY_END_LSN_OPT (2)
+#define EXRTO_READ_STANDBY_INIT_LSN_OPT (3)
 #define BUCKET_NODE_IS_VALID(bucket_node) ((bucket_node) > InvalidBktId && (bucket_node) < SegmentBktId)
 #define BUCKET_OID_IS_VALID(bucketOid) ((bucketOid) >= FirstNormalObjectId)
+#define BUCKET_NODE_IS_EXRTO_READ(bucket_node)                                                                \
+    (((bucket_node) >= MIN_EXRTO_STANDBY_READ_BUCKETID && (bucket_node) <= MAX_EXRTO_STANDBY_READ_BUCKETID) || \
+    (bucket_node == EXRTO_READ_SPECIAL_LSN))
 
 #define OID_MAX  UINT_MAX
 

@@ -119,7 +119,7 @@ bool check_if_need_force_recycle()
             continue;
         }
         total_base_page_size += (meta_info.base_page_next_position - meta_info.base_page_recyle_position);
-        total_lsn_info_size += (meta_info.lsn_table_next_position - meta_info.lsn_table_recyle_position);
+        total_lsn_info_size += (meta_info.lsn_table_next_position - meta_info.lsn_table_recycle_position);
     }
 
     /* the unit of max_standby_base_page_size and max_standby_lsn_info_size is KB */
@@ -138,23 +138,51 @@ void do_standby_read_recyle(XLogRecPtr recycle_lsn)
     uint32 worker_nums = g_dispatcher->allWorkersCnt;
     PageRedoWorker** workers = g_dispatcher->allWorkers;
     XLogRecPtr min_recycle_lsn = InvalidXLogRecPtr;
+    XLogRecPtr before_min_lsn_position = UINT64_MAX;
+    XLogRecPtr before_min_base_page_position = UINT64_MAX;
+    XLogRecPtr after_min_lsn_position = UINT64_MAX;
+    XLogRecPtr after_min_base_page_position = UINT64_MAX;
     for (uint32 i = 0; i < worker_nums; ++i) {
         PageRedoWorker* page_redo_worker = workers[i];
         if (page_redo_worker->role != REDO_PAGE_WORKER || (page_redo_worker->isUndoSpaceWorker)) {
             continue;
         }
+
+        before_min_lsn_position = rtl::min(before_min_lsn_position,
+                                           page_redo_worker->standby_read_meta_info.lsn_table_recycle_position);
+        before_min_base_page_position = rtl::min(before_min_base_page_position,
+                                                 page_redo_worker->standby_read_meta_info.base_page_recyle_position);
+
         extreme_rto_standby_read::standby_read_recyle_per_workers(&page_redo_worker->standby_read_meta_info, recycle_lsn);
+
+        after_min_lsn_position = rtl::min(after_min_lsn_position,
+                                          page_redo_worker->standby_read_meta_info.lsn_table_recycle_position);
+        after_min_base_page_position = rtl::min(after_min_base_page_position,
+                                                page_redo_worker->standby_read_meta_info.base_page_recyle_position);
+
         if (XLogRecPtrIsInvalid(min_recycle_lsn) ||
             XLByteLT(page_redo_worker->standby_read_meta_info.recycle_lsn_per_worker, min_recycle_lsn)) {
             min_recycle_lsn = page_redo_worker->standby_read_meta_info.recycle_lsn_per_worker;
         }
         pg_usleep(1000); // sleep 1ms
     }
-    if (XLByteLT(g_instance.comm_cxt.predo_cxt.global_recycle_lsn, min_recycle_lsn)) {
-        pg_atomic_write_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn, min_recycle_lsn);
+    if (after_min_lsn_position / EXRTO_LSN_INFO_FILE_MAXSIZE >
+        before_min_lsn_position / EXRTO_LSN_INFO_FILE_MAXSIZE) {
+        g_dispatcher->global_recycle_lsn_info_page = after_min_lsn_position;
+        extreme_rto_standby_read::recycle_lsn_info_file(after_min_lsn_position);
+    }
+    if (after_min_base_page_position / EXRTO_BASE_PAGE_FILE_MAXSIZE >
+        before_min_base_page_position / EXRTO_BASE_PAGE_FILE_MAXSIZE) {
+        extreme_rto_standby_read::recycle_base_page_file(after_min_base_page_position);
+    }
+
+    if (XLogRecPtrIsInvalid(min_recycle_lsn) && min_recycle_lsn > MAX_LSN_SIZE_PER_FORWARDER &&
+        XLByteLT(g_instance.comm_cxt.predo_cxt.global_recycle_lsn, min_recycle_lsn - MAX_LSN_SIZE_PER_FORWARDER)) {
+        pg_atomic_write_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn,
+                            min_recycle_lsn - MAX_LSN_SIZE_PER_FORWARDER);
         ereport(LOG,
-                 (errmsg(EXRTOFORMAT("[exrto_recycle] update global recycle lsn: %08X/%08X"),
-                          (uint32)(min_recycle_lsn >> UINT64_HALF), (uint32)min_recycle_lsn)));
+            (errmsg(EXRTOFORMAT("[exrto_recycle] update global recycle lsn: %08X/%08X"),
+                    (uint32)(min_recycle_lsn >> UINT64_HALF), (uint32)(min_recycle_lsn - MAX_LSN_SIZE_PER_FORWARDER))));
     }
     delete_by_lsn(recycle_lsn);
 }

@@ -50,6 +50,7 @@
 #include "instruments/instr_event.h"
 #include "instruments/instr_statement.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "replication/ss_disaster_cluster.h"
 
 #define NLOCKENTS()                                           \
     mul_size(g_instance.attr.attr_storage.max_locks_per_xact, \
