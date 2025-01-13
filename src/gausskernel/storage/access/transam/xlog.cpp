@@ -11198,14 +11198,18 @@ void StartupXLOG(void)
     if (SS_PRIMARY_MODE) {
         g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_NORMAL;
         g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
-        /* for other nodes in cluster */
+        /*
+         * for other nodes in cluster
+         * set recoveryInstId = SS_MY_INST_ID when recovery and full checkpoint is done.  
+         */
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
+        g_instance.dms_cxt.SSReformerControl.recoveryInstId = SS_MY_INST_ID;
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
         SSRequestAllStandbyReloadReformCtrlPage();
         if (ENABLE_ONDEMAND_REALTIME_BUILD) {
-            ereport(LOG, (errmsg("[SS][On-demand] StartupXLOG recovery instance id is %d in control file",
+            ereport(LOG, (errmsg("[SS][On-demand] StartupXLOG: recovery instance id is %d in control file",
                     g_instance.dms_cxt.SSReformerControl.recoveryInstId)));
         }
     }
