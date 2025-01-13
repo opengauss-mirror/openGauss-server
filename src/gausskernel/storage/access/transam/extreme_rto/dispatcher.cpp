@@ -41,6 +41,7 @@
 #include "access/gin_private.h"
 #include "access/xlogutils.h"
 #include "access/gin.h"
+#include "access/generic_xlog.h"
 
 #include "catalog/storage_xlog.h"
 #include "storage/buf/buf_internals.h"
@@ -148,6 +149,7 @@ static bool DispatchRepSlotRecord(XLogReaderState *record, List *expectedTLIs, T
 static bool DispatchHeap3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchDefaultRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchBarrierRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchGenericRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 #ifdef ENABLE_MOT
 static bool DispatchMotRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
 #endif
@@ -225,6 +227,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
         XLOG_CFS_SHRINK_OPERATION },
     { DispatchLogicalDDLMsgRecord, RmgrRecordInfoValid, RM_LOGICALDDLMSG_ID, XLOG_LOGICAL_DDL_MESSAGE,
         XLOG_LOGICAL_DDL_MESSAGE },
+    { DispatchGenericRecord, RmgrRecordInfoValid, RM_GENERIC_ID, XLOG_GENERIC_LOG, XLOG_GENERIC_LOG },
 };
 
 const int REDO_WAIT_SLEEP_TIME = 5000; /* 5ms */
@@ -1430,6 +1433,12 @@ static bool DispatchGistRecord(XLogReaderState *record, List *expectedTLIs, Time
 
 /* Run from the dispatcher thread. */
 static bool DispatchSpgistRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchRecordWithPages(record, expectedTLIs);
+    return false;
+}
+
+static bool DispatchGenericRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchRecordWithPages(record, expectedTLIs);
     return false;

@@ -30,6 +30,7 @@
 #include "access/xlog_internal.h"
 #include "access/transam.h"
 #include "access/xlogproc.h"
+#include "access/generic_xlog.h"
 #include "catalog/storage_xlog.h"
 #include "access/visibilitymap.h"
 #include "access/multi_redo_api.h"
@@ -342,8 +343,18 @@ void DoRecordCheck(XLogRecParseState *recordstate, XLogRecPtr pageLsn, bool repl
 
     RedoParseManager *manager = recordstate->manager;
     if (manager->refOperate != NULL) {
-        manager->refOperate->checkFunc(recordstate->refrecord, pageLsn,
-                                       recordstate->blockparse.extra_rec.blockdatarec.blockhead.cur_block_id, replayed);
+        XLogReaderState *record = (XLogReaderState *)recordstate->refrecord;
+
+        if ((XLogRecGetInfo(record) & XLR_INFO_MASK) == XLOG_MERGE_RECORD) {
+            for (int blockid = 0; blockid <= record->max_block_id; blockid++) {
+                manager->refOperate->checkFunc(recordstate->refrecord, pageLsn,
+                                               blockid, replayed);
+            }
+        } else {
+            manager->refOperate->checkFunc(recordstate->refrecord, pageLsn,
+                                           recordstate->blockparse.extra_rec.blockdatarec.blockhead.cur_block_id,
+                                           replayed);
+        }
     }
 }
 #endif
@@ -1321,6 +1332,9 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
         case RM_SEGPAGE_ID:
             SegPageRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
+        case RM_GENERIC_ID:
+            GenericRedoDataBlock(blockhead, blockdatarec, bufferinfo);
+            break;
         default:
             ereport(PANIC, (errmsg("XLogBlockDataCommonRedo: unknown rmid %u", rmid)));
     }
@@ -1947,6 +1961,9 @@ static const XLogParseBlock g_xlogParseBlockTable[RM_MAX_ID + 1] = {
     { UBTree2RedoParseToBlock, RM_UBTREE2_ID },
     { segpage_redo_parse_to_block, RM_SEGPAGE_ID }, 
     { NULL, RM_REPLORIGIN_ID },
+    { NULL, RM_COMPRESSION_REL_ID },
+    { NULL, RM_LOGICALDDLMSG_ID },
+    { GenericRedoParseToBlock, RM_GENERIC_ID },
 };
 inline XLogRecParseState *XLogParseToBlockCommonFunc(XLogReaderState *record, uint32 *blocknum)
 {
