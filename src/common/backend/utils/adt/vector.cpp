@@ -1587,7 +1587,7 @@ void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, Blo
             XLogRegisterBuffer(i, bufpack[i], flags);
         }
 
-        recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI);
+        recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI | XLOG_MERGE_RECORD);
 
         for (i = 0; i < nbufs; i++) {
             PageSetLSN(BufferGetPage(bufpack[i]), recptr);

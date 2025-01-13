@@ -14378,11 +14378,23 @@ void xlog_redo(XLogReaderState *record)
          * XLOG_FPI and XLOG_FPI_FOR_HINT records, they use a different info
          * code just to distinguish them for statistics purposes.
          */
-        if (XLogReadBufferForRedo(record, 0, &buffer) != BLK_RESTORED) {
-            ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
-                            errmsg("unexpected XLogReadBufferForRedo result when restoring backup block")));
+        if ((XLogRecGetInfo(record) & XLR_INFO_MASK) == XLOG_MERGE_RECORD){
+            for (uint8 block_id = 0; block_id <= record->max_block_id; block_id++) {
+                if (XLogReadBufferForRedo(record, block_id, &buffer) != BLK_RESTORED) {
+                    ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
+                                    errmsg("unexpected XLogReadBufferForRedo result when restoring backup block, block id: %d", block_id)));
+                }
+                
+                UnlockReleaseBuffer(buffer.buf);
+            }
+        } else {
+            if (XLogReadBufferForRedo(record, 0, &buffer) != BLK_RESTORED) {
+                ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
+                                errmsg("unexpected XLogReadBufferForRedo result when restoring backup block")));
+            }
+
+            UnlockReleaseBuffer(buffer.buf);
         }
-        UnlockReleaseBuffer(buffer.buf);
     } else if (info == XLOG_BACKUP_END) {
         XLogRecPtr startpoint;
         errno_t rc = EOK;
