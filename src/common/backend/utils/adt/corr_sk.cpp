@@ -299,7 +299,11 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
         result = spearman_rho_corr;
     } else {
         if (fabs(spearman_rho_corr) == 1) {
-            result = 0;
+            if (mode == ModeType::ONE_SIDED_SIG_NEG) {
+                result = 1;
+            } else {
+                result = 0;
+            }
         } else {
             // T-statistic
             float8 t_stat = calculate_t_statistic(spearman_rho_corr, n);
