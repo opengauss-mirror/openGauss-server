@@ -1592,6 +1592,11 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     params->pqKsub = metap->pqKsub;
     UnlockReleaseBuffer(buf);
 
+    if (*enablePQ && !g_instance.hnswpq_inited) {
+        ereport(ERROR, (errmsg("the SQL involves operations related to HNSWPQ, "
+                               "but this instance has not currently loaded the HNSWPQ dynamic library.")));
+    }
+
     if (*enablePQ) {
         params->funcType = getPQfunctionType(procinfo, HnswOptionalProcInfo(index, HNSW_NORM_PROC));
         params->dim = dim;
