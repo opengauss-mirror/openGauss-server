@@ -564,6 +564,60 @@ Datum vector_to_numeric(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Convert vector to text[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_text);
+Datum vector_to_text(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+    char* tmp = nullptr;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        tmp = DatumGetCString(DirectFunctionCall1(float4out, Float4GetDatum(vec->x[i])));
+        datums[i] = DirectFunctionCall1(textin, CStringGetDatum(tmp));
+        pfree_ext(tmp);
+    }
+
+    /* Use TYPALIGN_INT for text */
+    result = construct_array(datums, vec->dim, TEXTOID, -1, false, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
+ * Convert vector to varchar[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_varchar);
+Datum vector_to_varchar(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+    char* tmp = nullptr;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        tmp = DatumGetCString(DirectFunctionCall1(float4out, Float4GetDatum(vec->x[i])));
+        datums[i] = DirectFunctionCall3(varcharin, CStringGetDatum(tmp), ObjectIdGetDatum(0), Int32GetDatum(-1));
+        pfree_ext(tmp);
+    }
+
+    /* Use TYPALIGN_INT for varchar */
+    result = construct_array(datums, vec->dim, VARCHAROID, -1, false, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
  * Convert half vector to vector
  */
 PGDLLEXPORT PG_FUNCTION_INFO_V1(halfvec_to_vector);

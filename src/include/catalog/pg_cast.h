@@ -598,7 +598,7 @@ DATA(insert ( 1042 3272 3314 i f _null_));
 DATA(insert ( 3272 3969 3323 i f _null_));
 DATA(insert ( 3969 3272 3321 i f _null_));
 
-/* vector <-> int[] float4[] float8[] numeric[] */
+/* vector <-> int[] float4[] float8[] numeric[] text[] varchar[] */
 DATA(insert OID = 8299 (8305 8305 8214 i f _null_));
 DATA(insert OID = 8298 (1007 8305 8215 a f _null_));
 DATA(insert OID = 8297 (1021 8305 8216 a f _null_));
@@ -608,6 +608,8 @@ DATA(insert OID = 8294 (8305 1021 8219 i f _null_));
 DATA(insert OID = 8293 (8305 1007 8212 i f _null_));
 DATA(insert OID = 8292 (8305 1022 8213 i f _null_));
 DATA(insert OID = 8291 (8305 1231 8221 i f _null_));
+DATA(insert OID = 8290 (8305 1009 8222 i f _null_));
+DATA(insert OID = 8289 (8305 1015 8223 i f _null_));
 
 /* sparsevec <-> int[] float4[] float8[] numeric[] vector */
 DATA(insert OID = 8285 (8307 8307 8228 i f _null_));

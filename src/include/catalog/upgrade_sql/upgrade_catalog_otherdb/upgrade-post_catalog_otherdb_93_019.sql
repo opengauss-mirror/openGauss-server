@@ -331,6 +331,22 @@ AS 'vector_to_numeric'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
+DROP FUNCTION IF EXISTS pg_catalog.vector_to_text(vector) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8222;
+CREATE FUNCTION pg_catalog.vector_to_text(vector)
+RETURNS _text
+AS 'vector_to_text'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.vector_to_varchar(vector) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8223;
+CREATE FUNCTION pg_catalog.vector_to_varchar(vector)
+RETURNS _varchar
+AS 'vector_to_varchar'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
 DROP FUNCTION IF EXISTS pg_catalog.ivfflatbuild(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8417;
 CREATE FUNCTION pg_catalog.ivfflatbuild(internal, internal, internal)
@@ -824,6 +840,8 @@ COMMENT ON FUNCTION pg_catalog.vector_to_float4(vector, int4, boolean) IS 'NULL'
 COMMENT ON FUNCTION pg_catalog.vector_to_int4(vector) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.vector_to_float8(vector) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.vector_to_numeric(vector) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.vector_to_text(vector) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.vector_to_varchar(vector) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatbuild(internal, internal, internal) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatbuildempty(internal) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.ivfflatinsert(internal, internal, internal, internal, internal, internal) IS 'NULL';
@@ -894,6 +912,16 @@ DROP CAST IF EXISTS (vector AS vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8299;
 CREATE CAST (vector AS vector)
 	WITH FUNCTION vector(vector, int4, boolean) AS IMPLICIT;
+
+DROP CAST IF EXISTS (vector AS _varchar) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8289;
+CREATE CAST (vector AS _varchar)
+	WITH FUNCTION vector_to_varchar(vector) AS IMPLICIT;
+
+DROP CAST IF EXISTS (vector AS _text) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8290;
+CREATE CAST (vector AS _text)
+	WITH FUNCTION vector_to_text(vector) AS IMPLICIT;
 
 DROP CAST IF EXISTS (vector AS _numeric) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8291;
