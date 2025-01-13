@@ -5190,8 +5190,8 @@ static void parse_lsn_info_head(LsnInfoPageHeader *header)
     PageXLogRecPtr lsn = header->lsn;
     fprintf(stdout, "%slsn: xlogid %u, xrecoff %u, lsn %lu\n",
             indents[indentLevel], lsn.xlogid, lsn.xrecoff, ((uint64)lsn.xlogid << WAL_ID_OFFSET) | lsn.xrecoff);
-    fprintf(stdout, "%schecksum: %u, flags: %u, version: %u",
-            indents[indentLevel], header->checksum, header->flags, header->version);
+    fprintf(stdout, "%schecksum: %u, flags: %u, version: %u, next_lsn_info_page: %lu",
+            indents[indentLevel], header->checksum, header->flags, header->version, header->next_lsn_info_page);
     fprintf(stdout, "%sbase page map: ", indents[indentLevel]);
     for (uint32 loop = 0; loop < BASE_PAGE_MAP_SIZE; loop++) {
         parse_map_position(header->base_page_map[loop]);

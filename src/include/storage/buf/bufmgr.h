@@ -435,12 +435,14 @@ extern long RedoDatabaseForOndemandExtremeRTO(Oid dbId);
 extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
 extern Buffer standby_read_buf(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
-                        BufferAccessStrategy strategy);
+                                BufferAccessStrategy strategy);
+                  
 typedef struct SMgrRelationData *SMgrRelation;
 BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
                         BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
 Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+
 Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead);
 void buffer_in_progress_pop();

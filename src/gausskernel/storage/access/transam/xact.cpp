@@ -80,6 +80,7 @@
 #include "replication/syncrep.h"
 #include "replication/origin.h"
 #include "replication/libpqsw.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/procarray.h"
@@ -7226,7 +7227,11 @@ void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay
              */
             if (!is_old_delay_ddl && RecoveryInProgress() && IS_EXRTO_READ) {
                 RelFileNode block_meta_file = relFileNode;
-                block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+                if (IsSegmentFileNode(block_meta_file)) {
+                    block_meta_file.bucketNode -= EXRTO_STANDBY_READ_BUCKET_OFFSET;
+                } else {
+                    block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+                }
                 extreme_rto_standby_read::remove_one_block_info_file(block_meta_file);
             }
 

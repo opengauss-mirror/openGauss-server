@@ -48,6 +48,7 @@
 #include "gstrace/postmaster_gstrace.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/dss/fio_dss.h"
+#include "replication/ss_disaster_cluster.h"
 
 #include <zstd.h>
 

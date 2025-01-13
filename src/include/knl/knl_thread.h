@@ -805,6 +805,7 @@ typedef struct knl_t_xlog_context {
     UwalInfo uwalInfo;
     List* uwalInfoHis;
     XLogRecPtr uwalFileRenamePtr;
+    XLogRecPtr last_forwarder_lsn;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {

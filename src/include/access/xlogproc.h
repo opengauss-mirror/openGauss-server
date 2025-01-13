@@ -1302,8 +1302,10 @@ extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bloc
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
 bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
-void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
-void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
+void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr read_ptr, XLogRecPtr lsn);
+void segpage_redo_new_page_for_standby_read(XLogBlockSegNewPage *block_data_rec, RedoBufferInfo *buf_info);
+void redo_target_page(const BufferTag &old_buf_tag, const BufferTag &new_buf_tag,
+                      StandbyReadLsnInfoArray *lsn_info, Buffer base_page_buf);
 void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo);
 
 // shared-storage

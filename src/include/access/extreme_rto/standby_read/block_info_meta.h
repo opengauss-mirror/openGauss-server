@@ -84,11 +84,11 @@ void insert_lsn_to_block_info(
 void insert_lsn_to_block_info_for_opt(
     StandbyReadMetaInfo *mete_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn);
 
-StandbyReadRecyleState recyle_block_info(const BufferTag &buf_tag, LsnInfoPosition base_page_info_pos,
-                                         XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn,
-                                         XLogRecPtr *block_info_max_lsn);
-bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, XLogRecPtr read_lsn,
-    StandbyReadLsnInfoArray* lsn_info);
+StandbyReadRecyleState recycle_block_info(StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag,
+    XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn, XLogRecPtr *block_info_max_lsn);
+
+bool get_page_lsn_info(const BufferTag& old_buf_tag, const BufferTag& buf_tag, BufferAccessStrategy strategy,
+    XLogRecPtr read_lsn, StandbyReadLsnInfoArray* lsn_info);
 static inline bool is_block_info_page_valid(BlockInfoPageHeader* header)
 {
     return ((header->flags & BLOCK_INFO_PAGE_VALID_FLAG) == BLOCK_INFO_PAGE_VALID_FLAG);

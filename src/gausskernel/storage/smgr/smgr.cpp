@@ -441,7 +441,8 @@ void smgrclose(SMgrRelation reln, BlockNumber blockNum)
     int forknum;
     int max_forknum;
 
-    if (reln->smgr_which == EXRTO_MANAGER && reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID) {
+    if (reln->smgr_which == EXRTO_MANAGER && (reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID ||
+                                              is_standby_read_seg_relnode(reln->smgr_rnode.node))) {
         max_forknum = EXRTO_FORK_NUM;
     } else {
         max_forknum = reln->md_fdarray_size;
@@ -607,7 +608,8 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
     DelFileTag *entry = NULL;
     bool found = false;
 
-    if (which == EXRTO_MANAGER && reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID) {
+    if (which == EXRTO_MANAGER && (reln->smgr_rnode.node.spcNode == EXRTO_BLOCK_INFO_SPACE_OID ||
+                                   is_standby_read_seg_relnode(reln->smgr_rnode.node))) {
         max_forknum = EXRTO_FORK_NUM;
     } else {
         max_forknum = reln->md_fdarray_size;

@@ -1808,11 +1808,19 @@ Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_
                           BufferAccessStrategy strategy)
 {   
     /* In ss replication dorado cluster mode, it is not supported that standby read in extreme rto. */
-    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker() &&
-        !SS_DISASTER_STANDBY_CLUSTER) {
+    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker()) {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
     } else {
         return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
+    }
+}
+
+Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
+{
+    if (!RecoveryInProgress() || !IS_EXRTO_STANDBY_READ || !is_exrto_standby_read_worker()) {
+        return ReadBufferFastNormal(spc, rnode, forkNum, blockNum, mode);
+    } else {
+        return standby_read_seg_buffer(spc, rnode, forkNum, blockNum, mode);
     }
 }
 
@@ -2564,9 +2572,11 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
 
     if (!ENABLE_DMS && IsSegmentFileNode(smgr->smgr_rnode.node) && RecoveryInProgress() &&
         !t_thrd.xlog_cxt.InRecovery) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("bucket and undo segment standby read is not yet supported.")));
+        if (IS_UNDO_RELFILENODE(smgr->smgr_rnode.node)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("undo segment standby read is not yet supported.")));
+        }
     }
 
     TRACE_POSTGRESQL_BUFFER_READ_START(forkNum, blockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
@@ -6159,8 +6169,9 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
         uint64 old_buf_state;
         buf_state = pg_atomic_read_u64(&buf_desc->state);
         //  temp buf just for old page version, could not write to disk
-        if (IS_EXRTO_READ && (buf_state & BM_IS_TMP_BUF)) {
-            return;
+        if (BUCKET_NODE_IS_EXRTO_READ(buf_desc->tag.rnode.bucketNode) &&
+            buf_desc->tag.rnode.opt <= EXRTO_READ_STANDBY_INIT_LSN_OPT) {
+            return; 
         }
 
         /*
@@ -6351,6 +6362,10 @@ retry:
         (void)LWLockAcquire(buf->content_lock, LW_EXCLUSIVE, need_update_lockid);
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), (errmsg("unrecognized buffer lock mode: %d", mode))));
+    }
+
+    if (BUCKET_NODE_IS_EXRTO_READ(buf->tag.rnode.bucketNode)) {
+        return;
     }
 
     /*

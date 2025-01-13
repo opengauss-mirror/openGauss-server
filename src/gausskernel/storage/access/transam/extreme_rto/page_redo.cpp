@@ -1695,8 +1695,9 @@ void StartupSendFowarder(RedoItem *item)
     AddPageRedoItem(g_dispatcher->trxnLine.managerThd, item);
 }
 
-void SendLsnFowarder()
+void SendLsnForwarder()
 {
+    t_thrd.xlog_cxt.last_forwarder_lsn = g_redoWorker->lastReplayedEndRecPtr;
     // update and read in the same thread, so no need atomic operation
     g_GlobalLsnForwarder.record.ReadRecPtr = g_redoWorker->lastReplayedReadRecPtr;
     g_GlobalLsnForwarder.record.EndRecPtr = g_redoWorker->lastReplayedEndRecPtr;
@@ -1725,7 +1726,7 @@ void PushToWorkerLsn(bool force)
             RedoInterruptCallBack();
         } while (refCount != 0 && !ReadPageWorkerStop());
         cur_recor_count = 0;
-        SendLsnFowarder();
+        SendLsnForwarder();
     } else {
         if (g_instance.attr.attr_storage.EnableHotStandby && pm_state_is_hot_standby()) {
             if (!exceed_send_lsn_forworder_interval()) {
@@ -1740,17 +1741,25 @@ void PushToWorkerLsn(bool force)
         if (pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount) != 0) {
             return;
         }
-        SendLsnFowarder();
+        SendLsnForwarder();
         cur_recor_count = 0;
     }
 }
 
-inline bool send_lsn_forwarder_for_check_to_hot_standby(XLogRecPtr lsn)
+inline bool SendLsnForwarderForCheckToHotStandby(XLogRecPtr lsn)
 {
-    if (t_thrd.xlog_cxt.reachedConsistency) {
-        // means has send lsn forwarder for consistenstcy check
+    if (!g_instance.attr.attr_storage.EnableHotStandby) {
         return false;
     }
+
+    if (t_thrd.xlog_cxt.reachedConsistency) {
+        if (lsn - t_thrd.xlog_cxt.last_forwarder_lsn >= MAX_LSN_SIZE_PER_FORWARDER) {
+            return true;
+        }
+        /* means has send lsn forwarder for consistenstcy check */
+        return false;
+    }
+
     if (XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint)) {
         return false;
     }
@@ -1931,6 +1940,14 @@ void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key)
             securec_check(rc, "", "");
             SPSCBlockingQueuePut(worker->queue, &g_cleanInvalidPageMark);
         }
+    }
+}
+
+void wait_trxn_worker_queue_empty_or_exceed(XLogRecPtr end_lsn)
+{
+    PageRedoWorker *worker = g_dispatcher->trxnLine.redoThd;
+    while (!SPSCBlockingQueueIsEmpty(worker->queue) && worker->lastReplayedEndRecPtr < end_lsn) {
+        RedoInterruptCallBack();
     }
 }
 
@@ -2141,7 +2158,7 @@ void XLogReadPageWorkerMain()
 
         g_redoWorker->lastReplayedReadRecPtr = xlogreader->ReadRecPtr;
         g_redoWorker->lastReplayedEndRecPtr = xlogreader->EndRecPtr;
-        PushToWorkerLsn(send_lsn_forwarder_for_check_to_hot_standby(g_redoWorker->lastReplayedEndRecPtr));
+        PushToWorkerLsn(SendLsnForwarderForCheckToHotStandby(g_redoWorker->lastReplayedEndRecPtr));
         if (FORCE_FINISH_ENABLED) {
             CheckAndDoForceFinish(xlogreader);
         }

@@ -145,28 +145,15 @@ static inline uint64 get_force_recycle_pos(uint64 recycle_pos, uint64 insert_pos
 
 XLogRecPtr calculate_force_recycle_lsn_per_worker(StandbyReadMetaInfo *meta_info)
 {
-    uint64 base_page_recycle_pos;
     uint64 lsn_info_recycle_pos;
-    XLogRecPtr base_page_recycle_lsn = InvalidXLogRecPtr;
     XLogRecPtr lsn_info_recycle_lsn = InvalidXLogRecPtr;
     Buffer buffer;
     Page page;
 
-    /* for base page */
-    if (meta_info->base_page_recyle_position < meta_info->base_page_next_position) {
-        base_page_recycle_pos =
-            get_force_recycle_pos(meta_info->base_page_recyle_position, meta_info->base_page_next_position);
-        buffer = extreme_rto_standby_read::buffer_read_base_page(
-            meta_info->batch_id, meta_info->redo_id, base_page_recycle_pos, RBM_NORMAL);
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
-        base_page_recycle_lsn = PageGetLSN(BufferGetPage(buffer));
-        UnlockReleaseBuffer(buffer);
-    }
-
     /* for lsn info */
-    if (meta_info->lsn_table_recyle_position < meta_info->lsn_table_next_position) {
+    if (meta_info->lsn_table_recycle_position < meta_info->lsn_table_next_position) {
         lsn_info_recycle_pos =
-            get_force_recycle_pos(meta_info->lsn_table_recyle_position, meta_info->lsn_table_next_position);
+            get_force_recycle_pos(meta_info->lsn_table_recycle_position, meta_info->lsn_table_next_position);
         page = extreme_rto_standby_read::get_lsn_info_page(
             meta_info->batch_id, meta_info->redo_id, lsn_info_recycle_pos, RBM_NORMAL, &buffer);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
@@ -183,7 +170,7 @@ XLogRecPtr calculate_force_recycle_lsn_per_worker(StandbyReadMetaInfo *meta_info
         UnlockReleaseBuffer(buffer);
     }
 
-    return rtl::max(base_page_recycle_lsn, lsn_info_recycle_lsn);
+    return lsn_info_recycle_lsn;
 }
 
 void calculate_force_recycle_lsn(XLogRecPtr &recycle_lsn)
@@ -295,7 +282,7 @@ void proc_array_get_oldeset_readlsn(
     LWLockRelease(ProcArrayLock);
 }
 
-void proc_array_get_oldeset_xmin_for_undo(TransactionId &oldest_xmin)
+void proc_array_get_oldest_xmin_for_undo(TransactionId &oldest_xmin)
 {
     ProcArrayStruct *proc_array = g_instance.proc_array_idx;
 
@@ -392,7 +379,7 @@ TransactionId exrto_calculate_recycle_xmin_for_undo()
     Assert(IS_EXRTO_READ);
     TransactionId oldest_xmin = InvalidTransactionId;
     TransactionId snapshot_xmin = InvalidTransactionId;
-    proc_array_get_oldeset_xmin_for_undo(oldest_xmin);
+    proc_array_get_oldest_xmin_for_undo(oldest_xmin);
 
     /*
      * If there is no backend read threads, set read oldest lsn to snapshot lsn.

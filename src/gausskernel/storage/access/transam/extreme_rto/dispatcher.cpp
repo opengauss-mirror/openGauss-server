@@ -557,6 +557,9 @@ static void StartPageRedoWorkers(uint32 totalThrdNum)
     g_dispatcher->allWorkers = (PageRedoWorker **)palloc0(sizeof(PageRedoWorker *) * totalThrdNum);
     g_dispatcher->allWorkersCnt = totalThrdNum;
     g_dispatcher->pageLines = (PageRedoPipeline *)palloc(sizeof(PageRedoPipeline) * batchNum);
+    g_dispatcher->next_lsn_info_page = 0;
+    g_dispatcher->next_base_page = 0;
+    g_dispatcher->global_recycle_lsn_info_page = 0;
 
     for (started = 0; started < totalThrdNum; started++) {
         g_dispatcher->allWorkers[started] = CreateWorker(started);
@@ -583,6 +586,7 @@ static void StartPageRedoWorkers(uint32 totalThrdNum)
             // start from 1 not 0
             g_dispatcher->pageLines[i].redoThd[j]->standby_read_meta_info.batch_id = i + 1;
             g_dispatcher->pageLines[i].redoThd[j]->standby_read_meta_info.redo_id = j + 1;
+            SpinLockInit(&(g_dispatcher->pageLines[i].redoThd[j]->standby_read_meta_info.mutex));
         }
         g_dispatcher->pageLines[i].redoThdNum = batchWorkerPerMng;
     }

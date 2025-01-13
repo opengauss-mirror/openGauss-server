@@ -31,7 +31,9 @@
 #include "commands/tablespace.h"
 #include "executor/executor.h"
 #include "storage/smgr/segment.h"
-
+#include "access/extreme_rto/dispatcher.h"
+#include "access/extreme_rto/batch_redo.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
 /*
  * Truncate segment size
  */
@@ -781,12 +783,21 @@ static void redo_space_drop(XLogReaderState *record)
     XLogDropSegmentSpace(spcNode, dbNode);
 }
 
-void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn)
+void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr read_ptr, XLogRecPtr lsn)
 {
     char page[BLCKSZ] __attribute__((__aligned__(ALIGNOF_BUFFER))) = {0};
-
     errno_t er = memcpy_s(page, BLCKSZ, data, BLCKSZ);
     securec_check(er, "\0", "\0");
+
+    if (IS_EXRTO_STANDBY_READ) {
+        StandbyReadMetaInfo *meta_info = NULL;
+        extreme_rto::RedoItemTag redo_item_tag;
+        INIT_REDO_ITEM_TAG(redo_item_tag, tag->rnode, tag->forkNum, tag->blockNum);
+        uint32 batch_id = extreme_rto::GetSlotId(tag->rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num());
+        uint32 worker_id = extreme_rto::GetWorkerId(&redo_item_tag, extreme_rto::get_page_redo_worker_num_per_manager());
+        meta_info = &extreme_rto::g_dispatcher->pageLines[batch_id].redoThd[worker_id]->standby_read_meta_info;
+        extreme_rto_standby_read::insert_lsn_to_block_info(meta_info, *tag, page, read_ptr);
+    }
 
     PageSetLSN(page, lsn);
     PageSetChecksumInplace(page, tag->blockNum);
@@ -816,7 +827,6 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn
     }
 }
 
-
 /*
  * This xlog only copy data to the new block, without modifying data in buffer. If the logic block being in the
  * buffer pool, its pblk points to the old block. The buffer descriptor can not have the logic blocknumber and the new
@@ -826,8 +836,11 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn
 static void redo_new_page(XLogReaderState *record)
 {
     Assert(record != NULL);
-    BufferTag *tag = (BufferTag *)XLogRecGetData(record);
-    seg_redo_new_page_copy_and_flush(tag, (char *)XLogRecGetData(record) + sizeof(BufferTag), record->EndRecPtr);
+    BufferTag *tag = (BufferTag*)XLogRecGetData(record);
+    seg_redo_new_page_copy_and_flush(tag,
+                                     (char *)XLogRecGetData(record) + sizeof(BufferTag),
+                                     record->ReadRecPtr, 
+                                     record->EndRecPtr);
 }
 
 void segpage_smgr_redo(XLogReaderState *record)

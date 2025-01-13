@@ -133,6 +133,9 @@ typedef struct {
     RecordBufferState rtoXlogBufState;
     PageRedoWorker **allWorkers; /* Array of page redo workers. */
     uint32 allWorkersCnt;
+    pg_atomic_uint64 next_lsn_info_page;
+    pg_atomic_uint64 next_base_page;
+    pg_atomic_uint64 global_recycle_lsn_info_page;
     RedoItem *freeHead; /* Head of freed-item list. */
     RedoItem *freeStateHead;
     RedoItem *allocatedRedoItem;

@@ -228,6 +228,15 @@ static XLogRecParseState *segpage_parse_new_page(XLogReaderState *record, uint32
     return recordstatehead;
 }
 
+void segpage_redo_new_page_for_standby_read(XLogBlockSegNewPage *block_data_rec, RedoBufferInfo *buf_info)
+{
+    Page src_page = block_data_rec->mainData + sizeof(BufferTag);
+    errno_t rc = memcpy_s(buf_info->pageinfo.page, BLCKSZ, src_page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+    PageSetLSN(buf_info->pageinfo.page, buf_info->lsn);
+    MakeRedoBufferDirty(buf_info);
+}
+
 XLogRecParseState *segpage_redo_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -449,9 +458,10 @@ void SegPageRedoSpaceDrop(XLogBlockHead *blockhead)
 void SegPageRedoNewPage(XLogBlockHead *blockhead, XLogBlockSegNewPage *newPageInfo)
 {
     Assert(newPageInfo->dataLen != 0);
-    BufferTag *tag = (BufferTag *)newPageInfo->mainData;
-
-    seg_redo_new_page_copy_and_flush(tag, newPageInfo->mainData + sizeof(BufferTag), blockhead->end_ptr);
+    seg_redo_new_page_copy_and_flush((BufferTag*)newPageInfo->mainData,
+                                     newPageInfo->mainData + sizeof(BufferTag),
+                                     blockhead->start_ptr,
+                                     blockhead->end_ptr);
 }
 
 void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo)

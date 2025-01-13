@@ -36,7 +36,6 @@
 #define ENABLE_SS_TXNSTATUS_CACHE false
 #define ENABLE_SS_BCAST_SNAPSHOT false
 #define ENABLE_SS_BCAST_GETOLDESTXMIN false
-#define SS_SINGLE_CLUSTER false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)

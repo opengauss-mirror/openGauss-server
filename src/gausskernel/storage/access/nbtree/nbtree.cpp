@@ -37,6 +37,7 @@
 #include "vecexecutor/vecnodecstorescan.h"
 #include "commands/tablespace.h"
 #include "access/amapi.h"
+#include "replication/ss_disaster_cluster.h"
 
 /* Working state needed by btvacuumpage */
 typedef struct {

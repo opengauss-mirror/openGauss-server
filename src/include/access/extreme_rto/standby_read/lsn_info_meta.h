@@ -35,7 +35,7 @@
 
 namespace extreme_rto_standby_read {
 const static uint32 BASE_PAGE_MAP_SIZE = 16;
-const static uint32 LSN_INFO_PAGE_HEAD_PAD_SIZE = 32;
+const static uint32 LSN_INFO_PAGE_HEAD_PAD_SIZE = 24;
 const static uint32 LSN_INFO_PAGE_VERSION = 1; /* currently the first version of extreme rto standby read */
 const static uint32 LSN_NUM_PER_NODE = 5;
 const static uint32 BYTE_BITS = 8;
@@ -46,6 +46,7 @@ typedef struct _LsnInfoPageHeader {
     uint16 flags;
     uint32 version;
     uint8 base_page_map[BASE_PAGE_MAP_SIZE];
+    uint64 next_lsn_info_page;
     uint8 pad[LSN_INFO_PAGE_HEAD_PAD_SIZE];
 } LsnInfoPageHeader;
 
@@ -136,14 +137,15 @@ void insert_base_page_to_lsn_info(StandbyReadMetaInfo* meta_info, LsnInfoDoubleL
 void get_lsn_info_for_read(const BufferTag& buf_tag, LsnInfoPosition latest_lsn_base_page_pos,
     StandbyReadLsnInfoArray* lsn_info_list, XLogRecPtr read_lsn);
 
-Buffer buffer_read_base_page(uint32 batch_id, uint32 redo_id, BasePagePosition position, ReadBufferMode mode);
-void generate_base_page(StandbyReadMetaInfo* meta_info, const Page src_page);
-void read_base_page(const BufferTag& buf_tag, BasePagePosition position, BufferDesc* dest_buf_desc);
-void recycle_base_page_file(uint32 batch_id, uint32 redo_id, BasePagePosition recycle_pos);
+Buffer buffer_read_base_page(BasePagePosition position, ReadBufferMode mode);
+void generate_base_page(const Page src_page, BasePagePosition base_page_pos);
+void read_base_page(BasePagePosition position, BufferDesc* dest_buf_desc);
+void recycle_base_page_file(BasePagePosition recycle_pos);
 
 void set_base_page_map_bit(Page page, uint32 base_page_loc);
 bool is_base_page_map_bit_set(Page page, uint32 which_bit);
-void recycle_one_lsn_info_list(const BufferTag& buf_tag, LsnInfoPosition page_info_pos,
+void recycle_lsn_info_file(BasePagePosition recycle_pos);
+void recycle_one_lsn_info_list(const StandbyReadMetaInfo *meta_info, LsnInfoPosition page_info_pos,
     XLogRecPtr recycle_lsn, LsnInfoPosition *min_page_info_pos, XLogRecPtr *min_lsn);
 void standby_read_recyle_per_workers(StandbyReadMetaInfo *standby_read_meta_info, XLogRecPtr recycle_lsn);
 LsnInfoPosition get_nearest_base_page_pos(

@@ -35,6 +35,8 @@ typedef enum {
     SS_DISASTER_DORADO = 2,
 } SSDisasterMode;
 
+#define SS_SINGLE_CLUSTER (ENABLE_DMS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
+
 /* stream cluster in share storage mode */
 #define SS_STREAM_CLUSTER \
         (ENABLE_DSS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_STREAM)
