@@ -1308,6 +1308,12 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                         errmsg("compresstype can not be used in segment table, "
                                "column table, view, unlogged table or temp table.")));
     }
+
+    if (tableCreateSupport.compressType && ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Compression is not supported while DMS and DSS enabled.\n")));
+    }
+
     CheckCompressOption(&tableCreateSupport);
 
     if (isUstore && !isCStore && !hasCompression && !tableCreateSupport.compressType) {
@@ -2958,12 +2964,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         !IsCStoreNamespace(namespaceId) && (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0) &&
         (stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT) && !u_sess->attr.attr_storage.enable_recyclebin) {
         bool isSegmentType = (storage_type == SEGMENT_PAGE);
-        if (!isSegmentType && (u_sess->attr.attr_storage.enable_segment || bucketinfo != NULL)) {
-            storage_type = SEGMENT_PAGE;
-            DefElem *storage_def = makeDefElem("segment", (Node *)makeString("on"));
-            stmt->options = lappend(stmt->options, storage_def);
-            reloptions = transformRelOptions((Datum)0, stmt->options, NULL, validnsps, true, false);
-        }
     } else if (storage_type == SEGMENT_PAGE) {
         if (u_sess->attr.attr_storage.enable_recyclebin) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
