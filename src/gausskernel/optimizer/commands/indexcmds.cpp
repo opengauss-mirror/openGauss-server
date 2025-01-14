@@ -863,7 +863,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     relationId = RelationGetRelid(rel);
     namespaceId = RelationGetNamespace(rel);
 
-    if (stmt->missing_ok && OidIsValid(get_relname_relid(stmt->idxname, namespaceId))) {
+    if (stmt->missing_ok && stmt->idxname != NULL && OidIsValid(get_relname_relid(stmt->idxname, namespaceId))) {
         ereport(NOTICE,
             (errcode(ERRCODE_DUPLICATE_TABLE),
                 errmsg("relation \"%s\" already exists, skipping", stmt->idxname)));
