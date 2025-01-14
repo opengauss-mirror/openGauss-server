@@ -897,19 +897,17 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         }
 
         if (!samerel) {
-            if (IsSegmentFileNode(regbuf->rnode) || isCompressedTable) {
-                if (IsSegmentFileNode(regbuf->rnode)) {
-                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
-                    hashbucket_flag = true;
-                } else if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
-                    Assert(!isCompressedTable);
-                    RelFileNodeV2 relFileNodeV2;
-                    RelFileNodeV2Copy(relFileNodeV2, regbuf->rnode);
-                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeV2), &regbuf->rnode, remained_size);
-                } else {
-                    info |= XLR_REL_COMPRESS;
-                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
-                }
+            if (isCompressedTable) {
+                Assert(t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION);
+                info |= XLR_REL_COMPRESS;
+            }
+            if (IsSegmentFileNode(regbuf->rnode)) {
+                hashbucket_flag = true;
+            }
+
+            // Need to pass bucketNode and opt info when it's a segment or compressed table.
+            if (hashbucket_flag || isCompressedTable) {
+                XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
             } else {
                 XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeOld), &regbuf->rnode, remained_size);
                 no_hashbucket_flag = true;
