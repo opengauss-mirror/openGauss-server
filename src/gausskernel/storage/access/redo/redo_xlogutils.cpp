@@ -345,7 +345,7 @@ void DoRecordCheck(XLogRecParseState *recordstate, XLogRecPtr pageLsn, bool repl
     if (manager->refOperate != NULL) {
         XLogReaderState *record = (XLogReaderState *)recordstate->refrecord;
 
-        if ((XLogRecGetInfo(record) & XLR_INFO_MASK) == XLOG_MERGE_RECORD) {
+        if ((XLogRecGetRmid(record) == RM_XLOG_ID) && ((XLogRecGetInfo(record) & XLR_INFO_MASK) == XLOG_MERGE_RECORD)) {
             for (int blockid = 0; blockid <= record->max_block_id; blockid++) {
                 manager->refOperate->checkFunc(recordstate->refrecord, pageLsn,
                                                blockid, replayed);
