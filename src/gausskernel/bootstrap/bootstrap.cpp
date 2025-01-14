@@ -734,6 +734,9 @@ void InsertOneTuple(Oid objectid)
         ereport(FATAL, (errmsg("Built-in functions should not be added into pg_proc")));
     }
 
+    if (IsBootingPgClass(t_thrd.bootstrap_cxt.boot_reldesc) && EnableInitDBSegment) {
+        ChangePgClassBucketValueForSegment();
+    }
     tupDesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr,
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,
         t_thrd.bootstrap_cxt.attrtypes,

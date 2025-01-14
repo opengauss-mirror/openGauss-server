@@ -14577,16 +14577,15 @@ static void PreRedoTableInOndemandRecovery(Oid relId) {
     }
 
     /* Check if support target relation type when enable DMS. If not, no need to redo. */
-    if (relation->rd_rel->relkind == RELKIND_RELATION ||
+    if ((relation->rd_rel->relkind == RELKIND_RELATION && IsSegmentPhysicalRelNode(relation->rd_node)) ||
         RelationIsTableAccessMethodUStoreType(relation->rd_options) ||
         RelationIsCUFormat(relation) ||
-        relation->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED ||
         RowRelationIsCompressed(relation)) {
         if (SS_IN_ONDEMAND_RECOVERY) {
             heap_close(relation, ExclusiveLock);
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("[On-demand]Only support ASTORE while DMS and DSS enable.\n"
-                    "unlogged table is not supported.\nCompression is not supported.")));
+                    errmsg("[On-demand]Only support segment storage type and ASTORE while DMS and DSS enable.\n"
+                    "Compression is not supported.")));
         }
     }
 
