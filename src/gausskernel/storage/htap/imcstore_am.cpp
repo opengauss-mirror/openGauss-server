@@ -350,6 +350,7 @@ void IMCStore::InitPartReScan(Relation rel)
     // because new partition has different file handler, so we must
     // destroy the old *m_cuStorage*, which will close the open fd,
     // and then create an new object for next partition.
+    m_firstColIdx = m_imcstoreDesc->imcsNatts;
     for (int i = 0; i < m_imcstoreDesc->imcsNatts + 1; ++i) {
         // Here we must use physical column id
         CFileNode cFileNode(m_relation->rd_node, i, MAIN_FORKNUM);
@@ -408,7 +409,7 @@ bool IMCStore::LoadCUDesc(
 
     CUDesc* cuDescArray = loadCUDescInfoPtr->cuDescArray;
     bool needLengthInfo = false;
-    if (col > 0) {
+    if (col > 0 && !OnlySysOrConstCol()) {
         needLengthInfo = m_relation->rd_att->attrs[col].attlen < 0;
     }
 
@@ -431,7 +432,13 @@ bool IMCStore::LoadCUDesc(
             continue;
         }
 
-        int imcsColIndex = m_imcstoreDesc->attmap[col];
+        int imcsColIndex = -1;
+        if (OnlySysOrConstCol()) {
+            Assert(m_imcstoreDesc->imcsNatts == col);
+            imcsColIndex = m_imcstoreDesc->imcsNatts;
+        } else {
+            imcsColIndex = m_imcstoreDesc->attmap[col];
+        }
         Assert(imcsColIndex >= 0);
 
         cuDescArray[loadCUDescInfoPtr->curLoadNum] = *rowgroup->m_cuDescs[imcsColIndex];
