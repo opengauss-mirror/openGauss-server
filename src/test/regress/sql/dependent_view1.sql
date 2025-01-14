@@ -384,5 +384,34 @@ drop view v2;
 drop table t1;
 drop table t2;
 
+-- test \d with table column type changed
+create table t1(b char);
+create view v1 as select * from t1;
+\d v1;
+alter table t1 ALTER COLUMN b type int;
+\d v1;
+\d t1;
+drop view v1;
+drop table t1;
+
+create table t1 (c1 int, c2 varchar(10));
+create view v1 as select * from t1;
+drop table t1;
+\d v1;
+create table t1 (c1 text, c2 float8);
+\d v1;
+drop view v1;
+drop table t1;
+
+-- test \d+ with table column type changed
+create table t1 (c1 int, c2 varchar(10));
+create view v1 as select * from t1;
+drop table t1;
+\d+ v1;
+create table t1 (c1 text, c2 float8);
+\d+ v1;
+drop view v1;
+drop table t1;
+
 drop schema test_view_table_depend cascade;
 reset current_schema;
