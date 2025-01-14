@@ -239,6 +239,7 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
     } else {
         /* Scan the page */
         maxoff = UHeapPageGetMaxOffsetNumber(page);
+        OffsetNumber maxTupleCount = CalculatedMaxUHeapTuplesPerPage(UPageGetTDSlotCount(page));
         for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
             RowPtr *itemid = NULL;
 
@@ -252,6 +253,21 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
              * deleted.
              */
             itemid = UPageGetRowPtr(page, offnum);
+            if (maxoff >= maxTupleCount && RowPtrIsDeleted(itemid)) {
+                int tdSlot = RowPtrGetTDSlot(itemid);
+                if (tdSlot == UHEAPTUP_SLOT_FROZEN) {
+                    UHeapPruneRecordDead(&prstate, offnum, relation);
+                    ndeleted ++;
+                    continue;
+                }
+                TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot);
+                TransactionId xid = td->xactid;
+                if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
+                    UHeapPruneRecordDead(&prstate, offnum, relation);
+                    ndeleted ++;
+                }
+                continue;
+            }
             if (!RowPtrIsUsed(itemid) || RowPtrIsDead(itemid) || RowPtrIsDeleted(itemid)) {
                 continue;
             }
@@ -537,6 +553,7 @@ int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, Transact
      * rows.
      */
     maxoff = UHeapPageGetMaxOffsetNumber(page);
+    OffsetNumber maxTupleCount = CalculatedMaxUHeapTuplesPerPage(UPageGetTDSlotCount(page));
     for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         RowPtr *itemid = NULL;
 
@@ -550,6 +567,21 @@ int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, Transact
          * deleted.
          */
         itemid = UPageGetRowPtr(page, offnum);
+        if (maxoff >= maxTupleCount && RowPtrIsDeleted(itemid)) {
+            int tdSlot = RowPtrGetTDSlot(itemid);
+            if (tdSlot == UHEAPTUP_SLOT_FROZEN) {
+                UHeapPruneRecordDead(&prstate, offnum, relation);
+                ndeleted ++;
+                continue;
+            }
+            TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot);
+            TransactionId xid = td->xactid;
+            if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
+                UHeapPruneRecordDead(&prstate, offnum, relation);
+                ndeleted ++;
+            }
+            continue;
+        }
         if (!RowPtrIsUsed(itemid) || RowPtrIsDead(itemid) || RowPtrIsDeleted(itemid)) {
             continue;
         }
