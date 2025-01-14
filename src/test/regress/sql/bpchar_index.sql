@@ -114,3 +114,17 @@ create index test_byte_partition_hash_index on test_byte_partition using hash(ci
 explain (verbose, costs off) select city from test_byte_partition where city = 'beijing';
 explain (verbose, costs off) select city from test_byte_partition where city > 'beijing';
 drop table test_byte_partition;
+
+set enable_seqscan=off;
+drop table if exists test_char_index;
+create table test_char_index (id int, city char (10 char));
+create unique index test_char_index_btree on test_char_index using btree(city);
+insert into test_char_index values(1, 'beijing');
+insert into test_char_index values(2, 'shanghai');
+insert into test_char_index values(3, 'tianjin');
+insert into test_char_index values(4, 'guangzhou');
+select * from test_char_index where city > 'beijing' limit 2;
+select * from test_char_index limit 3;
+select * from test_char_index where city > 'beijing';
+drop table test_char_index;
+set enable_seqscan=on;
