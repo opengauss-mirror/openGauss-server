@@ -150,8 +150,7 @@ void DeltaTable::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId
     }
     page->Insert(type, ctid, xid);
     ++rowNumber;
-    if (!vacuumInProcess && rowNumber > AUTO_VACUUM_TRIGGER_LIMIT) {
-        IMCStoreVacuumPushWork(relid, cuId);
+    if (!vacuumInProcess && rowNumber > AUTO_VACUUM_TRIGGER_LIMIT && IMCStoreVacuumPushWork(relid, cuId)) {
         // change the statistic to avoid push work in a short time
         vacuumInProcess = true;
     }

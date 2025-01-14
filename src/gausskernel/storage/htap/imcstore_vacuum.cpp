@@ -60,8 +60,15 @@ void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context)
     on_proc_exit(&IMCStoreVacuumQueueCleanup, (Datum)context->vacuum_queue);
 }
 
-void IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
+bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
 {
+    pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
+    bool needClean = g_instance.imcstore_cxt.should_clean;
+    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+    if (needClean) {
+        return false;
+    }
+
     IMCStoreVacuumTarget target = {
         .relOid = relid,
         .rowGroupId = cuId,
@@ -74,6 +81,7 @@ void IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
         pg_usleep(VACUMM_WAIT_TIME);
     }
     SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
+    return true;
 }
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
@@ -407,12 +415,24 @@ void IMCStoreVacuumWorkerMain(void)
         bool dbnameInited;
         pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
         dbnameInited = g_instance.imcstore_cxt.dbname != NULL;
-        pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
         if (dbnameInited) {
+            ereport(LOG, (errmsg("IMCStoreVacuum: Init DB name, current DB name: %s.",
+                g_instance.imcstore_cxt.dbname)));
             t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(g_instance.imcstore_cxt.dbname, InvalidOid, username);
-            t_thrd.proc_cxt.PostInit->InitHTAPImcsVacuum();
+            PG_TRY();
+            {
+                t_thrd.proc_cxt.PostInit->InitHTAPImcsVacuum();
+            }
+            PG_CATCH();
+            {
+                pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
+            pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
             break;
         }
+        pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
         // wait weakup, or check per second
         int rc = WaitLatch(&g_instance.imcstore_cxt.vacuum_latch,
             WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)VACUMM_WAIT_TIME);
@@ -426,6 +446,18 @@ void IMCStoreVacuumWorkerMain(void)
     IMCStoreVacuumTarget target;
     while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM) {
         int rc = 0;
+
+        if (g_instance.imcstore_cxt.should_clean) {
+            pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
+            ereport(LOG, (errmsg("IMCStoreVacuum: reset vacuum thread.")));
+            if (g_instance.imcstore_cxt.vacuum_queue) {
+                delete g_instance.imcstore_cxt.vacuum_queue;
+                g_instance.imcstore_cxt.vacuum_queue = new MpmcBoundedQueue<IMCStoreVacuumTarget>(VACUUMQUEUE_SIZE);
+            }
+            g_instance.imcstore_cxt.should_clean = false;
+            pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+            break;
+        }
 
         /*
          * Process any requests or signals received recently.

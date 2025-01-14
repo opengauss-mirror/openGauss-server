@@ -547,6 +547,7 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
         if (IsValidCacheSlotID(slotId)) {
             IMCU_CACHE->UnPinDataBlock(slotId);
         }
+        PG_RE_THROW();
     }
     PG_END_TRY();
 }

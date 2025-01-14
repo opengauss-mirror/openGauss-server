@@ -46,6 +46,8 @@
 
 #define MAX_IMCS_ROWS_ONE_CU(rel) \
     (((RelationIsAstoreFormat(rel)) ? MaxHeapTuplesPerPage : MaxUHeapTuplesPerPage(rel)) * MAX_IMCS_PAGES_ONE_CU)
+#define IMCS_IS_PRIMARY_MODE (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE)
+#define IMCS_IS_STANDBY_MODE (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE)
 
 #define imcs_free_uheap_tuple(tup)                                             \
     do {                                                                       \
@@ -76,6 +78,10 @@ typedef struct IMCSPopulateSharedContext {
     uint32* curTotalScanBlks;
     pg_atomic_uint32 cuThreadId;
 } PopulateSharedContext;
+
+extern void CheckAndSetDBName();
+
+extern void ResetDBNameIfNeed();
 
 extern void CheckForEnableImcs(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts,
     Oid specifyPartOid = InvalidOid);

@@ -40,6 +40,76 @@
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcs_ctlg.h"
 
+bool CheckDBName(const char* dbname)
+{
+    if (strcmp(dbname, get_database_name(u_sess->proc_cxt.MyDatabaseId)) != 0) {
+        return false;
+    } else {
+        pg_atomic_add_fetch_u32(&g_instance.imcstore_cxt.dbname_reference_count, 1);
+        return true;
+    }
+}
+
+void CheckAndSetDBName()
+{
+    bool checkSuccess = true;
+    uint32 dbnameRefCount = 0;
+    char* dbname = nullptr;
+
+    pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
+    dbnameRefCount = pg_atomic_read_u32(&g_instance.imcstore_cxt.dbname_reference_count);
+    /* means that imcstore tables exist */
+    if (dbnameRefCount > 0) {
+        dbname = g_instance.imcstore_cxt.dbname;
+        checkSuccess = CheckDBName(dbname);
+    }
+    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+
+    if (!checkSuccess) {
+        ereport(ERROR, (errmsg("try populate a table locate in a different database,"
+            "please populate in the database: %s.", dbname)));
+    }
+    if (dbnameRefCount > 0) {
+        return;
+    }
+
+    /* dbnameRefCount == 0, means the first imcstore table, need to set dbname */
+    pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
+    dbnameRefCount = pg_atomic_read_u32(&g_instance.imcstore_cxt.dbname_reference_count);
+    if (dbnameRefCount == 0) {
+        pg_atomic_add_fetch_u32(&g_instance.imcstore_cxt.dbname_reference_count, 1);
+        g_instance.imcstore_cxt.dbname = pg_strdup(get_database_name(u_sess->proc_cxt.MyDatabaseId));
+        if (IMCS_IS_PRIMARY_MODE) {
+            ereport(LOG, (errmsg("HTAP: Set DB name: %s.", g_instance.imcstore_cxt.dbname)));
+        } else {
+            SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
+        }
+    } else {
+        dbname = g_instance.imcstore_cxt.dbname;
+        checkSuccess = CheckDBName(dbname);
+    }
+    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+
+    if (!checkSuccess) {
+        ereport(ERROR, (errmsg("try populate a table locate in a different database,"
+            "please populate in the database: %s.", dbname)));
+    }
+}
+
+void ResetDBNameIfNeed()
+{
+    pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
+    if (pg_atomic_sub_fetch_u32(&g_instance.imcstore_cxt.dbname_reference_count, 1) == 0) {
+        if (!IMCS_IS_PRIMARY_MODE) {
+            g_instance.imcstore_cxt.should_clean = true;
+            SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
+        }
+        ereport(LOG, (errmsg("No imcstore tables left, cur DB name: %s, Reset it.", g_instance.imcstore_cxt.dbname)));
+        g_instance.imcstore_cxt.dbname = nullptr;
+    }
+    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+}
+
 void CheckForEnableImcs(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts, Oid specifyPartOid)
 {
     Oid relOid = RelationGetRelid(rel);
@@ -311,27 +381,6 @@ void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNat
 
 void EnableImcstoreForRelation(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
 {
-    pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
-    char* dbname = g_instance.imcstore_cxt.dbname;
-    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
-
-    if (unlikely(dbname == nullptr)) {
-        pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
-            if (g_instance.imcstore_cxt.dbname == nullptr) {
-                g_instance.imcstore_cxt.dbname = pg_strdup(get_database_name(u_sess->proc_cxt.MyDatabaseId));
-                dbname = g_instance.imcstore_cxt.dbname;
-                // weakup vacuum process
-                SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
-            } else {
-                dbname = g_instance.imcstore_cxt.dbname;
-            }
-        pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
-    }
-
-    if (strcmp(dbname, get_database_name(u_sess->proc_cxt.MyDatabaseId)) != 0) {
-        ereport(ERROR, (errmsg("try populate a table locate in a different database.")));
-    }
-
     if (u_sess->attr.attr_common.enable_parallel_populate) {
         ParallelPopulateImcs(rel, imcsAttsNum, imcsNatts);
     } else {

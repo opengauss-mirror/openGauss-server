@@ -339,6 +339,10 @@ void IMCUDataCacheMgr::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int
 {
     bool found = false;
     Oid relOid = RelationGetRelid(rel);
+    /* No need to be checked for partitions, because it has been checked for the parent rel. */
+    if (!OidIsValid(rel->parentId)) {
+        CheckAndSetDBName();
+    }
     LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
     MemoryContext oldcontext = MemoryContextSwitchTo(m_imcs_context);
     IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_ENTER, &found);
@@ -394,6 +398,9 @@ void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
             MemoryContextDelete(imcsDesc->imcuDescContext);
+        }
+        if (!imcsDesc->isPartition) {
+            ResetDBNameIfNeed();
         }
         (void)hash_search(m_imcs_hash, &relOid, HASH_REMOVE, NULL);
         LWLockRelease(m_imcs_lock);
