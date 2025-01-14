@@ -178,6 +178,11 @@ static bool CalculateLowerUpperPointers(Page page, OffsetNumber offsetNumber, It
      */
     if (offsetNumber == limit || needshuffle) {
         lower = uphdr->pd_lower + sizeof(ItemIdData);
+        if (uphdr->potential_freespace >= sizeof(ItemIdData)) {
+            uphdr->potential_freespace -= sizeof(ItemIdData);
+        } else {
+            uphdr->potential_freespace = 0;
+        }
     } else {
         lower = uphdr->pd_lower;
     }
@@ -435,7 +440,7 @@ Size PageGetUHeapFreeSpace(Page page)
 
         nline = UHeapPageGetMaxOffsetNumber(page);
         if (nline >= CalculatedMaxUHeapTuplesPerPage(UPageGetTDSlotCount(page))) {
-            if (PageHasFreeLinePointers((PageHeader)page)) {
+            if (UPageHasFreeLinePointers(page)) {
                 /*
                  * Since this is just a hint, we must confirm that there is
                  * indeed a free line pointer

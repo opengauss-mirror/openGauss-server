@@ -91,6 +91,13 @@ typedef struct {
 /* Controls the overall probability of conducting FSM update during page pruning */
 #define FSM_UPDATE_HEURISTI_PROBABILITY 0.3
 
+#define UHeapGetFreespaceDelta(page) \
+    ((page)->potential_freespace > ((page)->pd_upper - (page)->pd_lower) ? \
+     ((page)->potential_freespace - ((page)->pd_upper - (page)->pd_lower)) : 0)
+
+#define FSMUpdateHeuristic(delta) \
+    ((gs_random() % MaxPossibleUHeapPageFixedSpace) < ((delta) * (delta) * 1.0 / MaxPossibleUHeapPageFixedSpace))
+
 typedef struct {
     Relation relation;
     Buffer buffer;

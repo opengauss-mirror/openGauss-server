@@ -195,12 +195,22 @@ loop:
          */
 
         pageFreeSpace = PageGetUHeapFreeSpace(page);
+        bool findAvaliableBuffer = false;
         if (len + saveFreeSpace <= pageFreeSpace) {
-            /* use this page as future insert target, too */
+            findAvaliableBuffer = true;
+        } else if (len + saveFreeSpace <= ((UHeapPageHeader)page)->potential_freespace) {
+            if (UHeapPagePruneOpt(relation, buffer, InvalidOffsetNumber, 0)) {
+                pageFreeSpace = PageGetUHeapFreeSpace(page);
+                if (len + saveFreeSpace <= pageFreeSpace) {
+                    findAvaliableBuffer = true;
+                }
+            }
+        }
+        if (findAvaliableBuffer) {
+             /* use this page as future insert target, too */
             RelationSetTargetBlock(relation, targetBlock);
             return buffer;
         }
-
         /*
          * Not enough space, so we must give up our page locks
          * and pin (if any) and prepare to look elsewhere.  We don't care
@@ -420,6 +430,21 @@ start:
      * Check if we have a starting block already. If so, read the latest
      * value and start pruning there.
      */
+    if (pgStatInfo->startBlockArray == NULL) {
+        /*
+         * Grab the starting block for pruning.
+         */
+        PgStat_StartBlockTableKey tabkey;
+        tabkey.dbid = u_sess->proc_cxt.MyDatabaseId;
+        tabkey.relid = RelationGetRelid(relation);
+        tabkey.parentid = RelationIsPartition(relation) ? relation->parentId : InvalidOid;
+        startBlockEntry = GetStartBlockHashEntry(&tabkey);
+        Assert(startBlockEntry);
+
+        pgStatInfo->startBlockIndex = GetTopTransactionId() % START_BLOCK_ARRAY_SIZE;
+        pgStatInfo->startBlockArray = startBlockEntry->starting_blocks;
+    }
+
     if (pgStatInfo->startBlockArray != NULL) {
         /* Temporarily tell other backends we are working on this subset.
          * pg_atomic_exchange_u32 should return the old value.
@@ -520,6 +545,7 @@ BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_blo
     BlockNumber pruneTryCnt = 0;
     *next_block = start_block;
     PgStat_TableStatus *pgStatInfo = relation->pgstat_info;
+    int delta;
 
     /* Handle the case of relation truncation */
     if (nblocks == 0) {
@@ -597,11 +623,13 @@ BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_blo
         }
 
         /* Done with the easy cases, we try to prune it now */
-        pruned = UHeapPagePruneOpt(relation, buffer, InvalidOffsetNumber, 0);
-        freespace = PageGetUHeapFreeSpace(page);
+        delta = UHeapGetFreespaceDelta((UHeapPageHeader)page);
+        if (FSMUpdateHeuristic(delta)) {
+            pruned = UHeapPagePruneOpt(relation, buffer, InvalidOffsetNumber, 0);
+        }
         UnlockReleaseBuffer(buffer);
-
         if (pruned) {
+            freespace = PageGetUHeapFreeSpace(page);
             RecordPageWithFreeSpace(relation, blkno, freespace);
             if (required_size <= freespace) {
                 result = blkno;
