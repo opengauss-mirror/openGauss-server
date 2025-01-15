@@ -390,7 +390,6 @@ typedef struct PQParams {
     int pqKsub;
     int funcType;
     int dim;
-    int pqMode;
     size_t subItemSize;
     char *pqTable;
 } PQParams;
@@ -443,6 +442,7 @@ typedef struct HnswBuildState {
     float *pqDistanceTable;
     uint16 pqcodeSize;
     PQParams *params;
+    int pqMode;
 
     VectorArray samples;
     BlockSamplerData bs;
@@ -569,6 +569,7 @@ typedef struct HnswScanOpaqueData {
 
     bool enablePQ;
     PQParams params;
+    int pqMode;
 
     /* used in ustore only */
     VectorScanData vs;
@@ -608,6 +609,7 @@ typedef struct HnswVacuumState {
 typedef struct PQSearchInfo {
     PQParams params;
     int lc;
+    int pqMode;
     uint8 *qPQCode;
     float *pqDistanceTable;
 } PQSearchInfo;

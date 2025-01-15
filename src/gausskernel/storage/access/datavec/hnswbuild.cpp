@@ -139,7 +139,6 @@ PQParams *InitPQParamsInMemory(HnswBuildState *buildstate)
     params->pqKsub = buildstate->pqKsub;
     params->funcType = getPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
     params->dim = buildstate->dimensions;
-    params->pqMode = HNSW_PQMODE_DEFAULT;
     params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
     params->pqTable = buildstate->pqTable;
     return params;
@@ -482,7 +481,7 @@ static void CreateMetaPage(HnswBuildState *buildstate)
         metap->pqTableSize = (uint32)buildstate->pqTableSize;
         metap->pqTableNblk = (uint16)(
             (metap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
-        if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             uint32 disTableLen = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub;
             metap->pqDisTableSize = (uint32)disTableLen * sizeof(float);
             metap->pqDisTableNblk = (uint16)(
@@ -537,7 +536,7 @@ static void CreateAppendMetaPage(HnswBuildState *buildstate)
         appMetap->pqTableSize = (uint32)buildstate->pqTableSize;
         appMetap->pqTableNblk = (uint16)(
             (appMetap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
-        if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             uint32 disTableLen = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub;
             appMetap->pqDisTableSize = (uint32)disTableLen * sizeof(float);
             appMetap->pqDisTableNblk = (uint16)(
@@ -1259,6 +1258,7 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
         buildstate->pqcodeSize = 0;
         buildstate->params = NULL;
     }
+    buildstate->pqMode = HNSW_PQMODE_DEFAULT;
     buildstate->pqDistanceTable = NULL;
 
     buildstate->isUStore = buildstate->heap ? RelationIsUstoreFormat(buildstate->heap) : false;
@@ -1273,7 +1273,7 @@ static void FreeBuildState(HnswBuildState *buildstate, bool parallel)
     MemoryContextDelete(buildstate->tmpCtx);
     if (buildstate->enablePQ && !parallel) {
         pfree(buildstate->pqTable);
-        if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             pfree(buildstate->pqDistanceTable);
         }
         pfree(buildstate->params);
@@ -1389,7 +1389,7 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
         rc = memcpy_s(pqTable, buildstate->pqTableSize, buildstate->pqTable, buildstate->pqTableSize);
         securec_check_c(rc, "\0", "\0");
         hnswshared->pqTable = pqTable;
-        if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             pqDistanceTable = (float *) MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
                                                                pqDistanceTableSize);
             rc = memcpy_s(pqDistanceTable, pqDistanceTableSize, buildstate->pqDistanceTable, pqDistanceTableSize);
@@ -1511,7 +1511,7 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Hnsw
 
     if (buildstate->enablePQ) {
         BuildPQtable(buildstate);
-        if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             int pqM = buildstate->pqM;
             int pqKsub = buildstate->pqKsub;
             buildstate->pqDistanceTable = (float *)palloc(pqM * pqKsub * pqKsub * sizeof(float));
