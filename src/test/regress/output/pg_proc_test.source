@@ -3,7 +3,7 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
 -------------+------+-------------------------------------
         2276 | 3058 | concat
         2276 | 3059 | concat_ws
-        1185 | 3119 | standby_statement_history
+        1184 | 3119 | standby_statement_history
         2276 | 3239 | json_build_array
         2276 | 3261 | json_build_object
           25 | 3262 | json_extract_path
