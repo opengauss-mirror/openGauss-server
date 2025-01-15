@@ -788,14 +788,6 @@ void standard_ExecutorFinish(QueryDesc *queryDesc)
  */
 void ExecutorEnd(QueryDesc *queryDesc)
 {
-    /* 
-     * for a very few cases, query plan not be recorded during the execution phase, 
-     * we record again before executor end. 
-     */
-    if (unlikely(u_sess->statement_cxt.is_exceed_query_plan_threshold)) {
-        instr_stmt_report_query_plan(queryDesc);
-    }
-
     if (ExecutorEnd_hook) {
         (*ExecutorEnd_hook)(queryDesc);
     } else {
