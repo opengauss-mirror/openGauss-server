@@ -435,3 +435,30 @@ CREATE [ INCREMENTAL ] MATERIALIZED VIEW table_name
     AS query
     [ WITH [ NO ] DATA ]
 
+create table imv_ind_t(a int);
+create incremental materialized view imv_ind_v as select * from imv_ind_t;
+-- failed, drop mlog index
+declare
+    oid int := (select oid from pg_class where relname = 'imv_ind_t');
+    index_name varchar(20) := 'mlog_' || oid || '_index';
+    sql_stmt text := 'Drop index ' || index_name;
+begin
+    execute sql_stmt;
+END;
+/
+--?ERROR:  Use 'Drop index' to drop index mlog_.*_index of mlog table is not allowed.
+--?CONTEXT:  SQL statement "Drop index mlog_.*_index"
+PL/pgSQL function inline_code_block line 5 at EXECUTE statement
+-- copy
+copy imv_ind_t from stdin;
+refresh incremental materialized view imv_ind_v;
+select * from imv_ind_v;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+drop table imv_ind_t cascade;
+NOTICE:  drop cascades to materialized view imv_ind_v
