@@ -4109,14 +4109,6 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
          */
         RelationPutHeapTuple(relation, buffer, heap_tuples[ndone], xid);
 
-        /* try to insert tuple into mlog-table. */
-        if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
-            /* judge whether need to insert into mlog-table */
-            insert_into_mlog_table(relation, relation->rd_mlogoid,
-                                   heap_tuples[ndone], &heap_tuples[ndone]->t_self,
-                                   GetCurrentTransactionId(), 'I');
-        }
-
         for (nthispage = 1; ndone + nthispage < ntuples; nthispage++) {
             HeapTuple heaptup = heap_tuples[ndone + nthispage];
 
@@ -4133,17 +4125,6 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
              */
             if (needwal && need_cids) {
                 (void)log_heap_new_cid(relation, heaptup);
-            }
-
-            /* try to insert tuple into mlog-table. */
-            if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
-                /* judge whether need to insert into mlog-table */
-                if (relation->rd_tam_type == TAM_USTORE) {
-                    heaptup = UHeapToHeap(relation->rd_att, (UHeapTuple)heaptup);
-                }
-                insert_into_mlog_table(relation, relation->rd_mlogoid,
-                                   heaptup, &heaptup->t_self,
-                                   GetCurrentTransactionId(), 'I');
             }
         }
 
@@ -4337,6 +4318,20 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
 
         if (is_compressed) {
             break;
+        }
+    }
+
+    /* try to insert tuple into mlog-table. */
+    for (i = 0; i < ntuples; i++) {
+        HeapTuple heaptup = heap_tuples[i];
+        /* judge whether need to insert into mlog-table */
+        if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
+            if (relation->rd_tam_ops == TableAmUstore) {
+                heaptup = UHeapToHeap(relation->rd_att, (UHeapTuple)heaptup);
+            }
+            insert_into_mlog_table(relation, relation->rd_mlogoid,
+                                heaptup, &heaptup->t_self,
+                                GetCurrentTransactionId(), 'I');
         }
     }
 
