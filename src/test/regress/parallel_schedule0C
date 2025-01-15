@@ -206,3 +206,5 @@ test: alter_index_disable
 test: dump_alter_index_disable
 
 test: dump_alter_index_invisible
+
+test: record_slow_sql_in_proc_commit
