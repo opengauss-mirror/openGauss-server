@@ -70,6 +70,77 @@ drop table test_2 cascade;
 
 set behavior_compat_options='allow_procedure_compile_check,disable_record_type_in_dml';
 
+create table t1(col1 int ,col2 varchar(10));
+insert into t1 values(1,'one');
+insert into t1 values(2,'two');
+
+create or replace package pck32 is
+	cursor cur_1 is select * from t1 where col1=1;
+    source cur_1%rowtype;
+	procedure ppp1;
+end pck32;
+/
+
+create or replace package body pck32 is
+procedure ppp1() is
+begin
+    pck32.source.col1 := 6; 
+    raise notice '%', pck32.source.col1;
+end;
+end pck32;
+/
+
+call pck32.ppp1();
+drop package pck32;
+drop table t1 cascade;
+
+create or replace package pck2 is
+TYPE r1 is record (a01 int, b01 int);
+TYPE r2 is record (a02 r1, b02 int);
+TYPE r3 is record (a03 r2, b03 int);
+v1 int;
+va r3;
+procedure p1();
+end pck2;
+/
+create or replace package body pck2 is
+procedure p1() is
+begin
+select 1 into va.a03.a02.a01;
+  v1 := va.a03.a02.a01;
+  va.a03.a02.b01 := 11;
+  raise info '%, %', v1, pck2.va.a03.a02.b01;
+end;
+end pck2;
+/
+call pck2.p1();
+
+DROP PACKAGE pck2;
+
+create or replace package pck3 is
+TYPE r1 is record (a01 int, b01 int);
+TYPE r2 is record (a02 r1, b02 int);
+TYPE r3 is record (a03 r2, b03 int);
+procedure p1();
+end pck3;
+/
+create or replace package body pck3 is
+procedure p1() is
+declare
+  v1 int;
+  va r3;
+begin
+  select 1 into va.a03.a02.a01;
+  v1 := va.a03.a02.a01;
+  va.a03.a02.b01 := 11;
+  raise info '%, %', v1, va.a03.a02.b01;
+end;
+end pck3;
+/
+call pck3.p1();
+
+DROP PACKAGE pck3;
+
 create table t_CurRowtype_Def_Case0001(col1 int primary key,col2 varchar(100));
 insert into t_CurRowtype_Def_Case0001 values(1,'one');
 insert into t_CurRowtype_Def_Case0001 values(2,'two');
