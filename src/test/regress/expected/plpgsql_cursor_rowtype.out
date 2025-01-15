@@ -2649,6 +2649,45 @@ create table employees(oid int, first_name varchar(20), last_name varchar(20));
 -- ==========================================================
 -- if table exist data
 insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+drop table if exists t_CurRowtype_Use_Case0007_5;
+NOTICE:  table "t_currowtype_use_case0007_5" does not exist, skipping
+create table t_CurRowtype_Use_Case0007_5(col1 varchar(30),col2 varchar(30));
+insert into t_CurRowtype_Use_Case0007_5 values ('col1_a', 'col2_aa');
+insert into t_CurRowtype_Use_Case0007_5 values ('col1_b', 'col2_bb');
+create or replace package pac_CurRowtype_Use_Case0007_6 is
+cursor cur1 is select col1,col2 from t_CurRowtype_Use_Case0007_5;
+var1 cur1%rowtype;
+procedure p_CurRowtype_Use_Case0007_6(a cur1%rowtype);
+end pac_CurRowtype_Use_Case0007_6;
+/
+create or replace package body pac_CurRowtype_Use_Case0007_6 is
+procedure p_CurRowtype_Use_Case0007_6(a cur1%rowtype) is
+begin
+  var1.col1:='pack6_proc_col1';
+  var1.col2:='pack6_proc_col2';
+  raise info 'package6: % , %', var1.col1,var1.col2;
+  --dbms_output.put_line('package6:'||var1.col1||var1.col2);
+end;
+end pac_CurRowtype_Use_Case0007_6;
+/
+--record类型给包中的cursor%rowtype赋值，oracle可以通过
+declare
+  type typ_CurRowtype_Use_Case0006_1 is record 
+  (
+    c1  t_CurRowtype_Use_Case0007_5.col1%type default '20',
+    c2  t_CurRowtype_Use_Case0007_5.col2%type default 'twenty'
+  );
+  target typ_CurRowtype_Use_Case0006_1;
+begin
+pac_CurRowtype_Use_Case0007_6.p_CurRowtype_Use_Case0007_6(target);
+end;
+/
+INFO:  package6: pack6_proc_col1 , pack6_proc_col2
+CONTEXT:  SQL statement "CALL pac_currowtype_use_case0007_6.p_currowtype_use_case0007_6(target)"
+PL/pgSQL function inline_code_block line 8 at PERFORM
+drop package pac_CurRowtype_Use_Case0007_6;
+--?.*
+drop table  t_CurRowtype_Use_Case0007_5;
 -- FUNC: normale
 create or replace function f1(b int) returns int
 as $$
