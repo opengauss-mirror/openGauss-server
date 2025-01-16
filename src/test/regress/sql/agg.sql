@@ -247,6 +247,29 @@ corr_k(value4, value6) AS corr_k_value4_value6,
 corr_k(value5, value6) AS corr_k_value5_value6
 FROM test_data1;
 
+CREATE TABLE test_data2 (
+id NUMBER PRIMARY KEY,
+value1 DOUBLE PRECISION,
+value2 DOUBLE PRECISION
+);
+INSERT INTO test_data2 (id, value1, value2) VALUES (1, 10, 20);
+INSERT INTO test_data2 (id, value1, value2) VALUES (2, 20, 40);
+INSERT INTO test_data2 (id, value1, value2) VALUES (3, 30, 60);
+
+SELECT CORR_K(value1, value2) AS K1,
+CORR_K(value1, value2,'COEFFICIENT') AS K2,
+CORR_K(value1, value2,'ONE_SIDED_SIG') AS K3,
+CORR_K(value1, value2,'ONE_SIDED_SIG_POS') AS K4,
+CORR_K(value1, value2,'ONE_SIDED_SIG_NEG') AS K5,
+CORR_K(value1, value2,'TWO_SIDED_SIG') AS K6 FROM test_data2;
+
+SELECT CORR_S(value1, value2) AS S1,
+CORR_S(value1, value2,'COEFFICIENT') AS S2,
+CORR_S(value1, value2,'ONE_SIDED_SIG') AS S3,
+CORR_S(value1, value2,'ONE_SIDED_SIG_POS') AS S4,
+CORR_S(value1, value2,'ONE_SIDED_SIG_NEG') AS S5,
+CORR_S(value1, value2,'TWO_SIDED_SIG') AS S6 FROM test_data2;
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
@@ -255,5 +278,6 @@ drop table customers1;
 drop table EMP;
 drop table test_data;
 drop table test_data1;
+drop table test_data2;
 drop table t1;
 drop schema aggregate CASCADE;
