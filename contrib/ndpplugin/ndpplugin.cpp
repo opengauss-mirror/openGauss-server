@@ -90,6 +90,7 @@ static void NdpInstanceUninit(int status, Datum arg)
         delete g_ndp_instance.pageContext;
         g_ndp_instance.pageContext = nullptr;
     }
+    CleanClientHandle();
     g_ndp_instance.status = UNINITIALIZED;
     pthread_mutex_unlock(&g_ndp_instance.mutex);
 }
@@ -104,7 +105,17 @@ void NdpInstanceInit()
     // if not using ssl, use memory pool
     NdpSharedMemoryAlloc();
 #endif
-
+    DependencePath paths = {
+        .ulogPath = LIB_ULOG,
+        .rpcPath = LIB_RPC_UCX,
+        .sslDLPath = LIB_OPENSSL_DL,
+        .sslPath = LIB_SSL,
+        .cryptoPath = LIB_CRYPTO
+    };
+    RpcStatus status = RpcClientInit(paths);
+    if (status != RPC_OK) {
+        ereport(WARNING, (errmsg("RpcClientIint error.")));
+    }
     g_ndp_instance.status = INITIALIZED;
     /* PostmasterMain(process_shared_preload_libraries) inits g_ndp_instance first */
     on_proc_exit(NdpInstanceUninit, 0);
@@ -834,7 +845,6 @@ Tuple NdpScanGetTuple(TableScanDesc sscan, ScanDirection dir, TupleTableSlot* sl
         }
 
         // init NdpScanDesc, rs_startblock must AU aligned in begin_scan
-        Assert(IS_AU_ALIGNED(scan->rs_base.rs_startblock));
         ndpScan->handledBlock = scan->rs_base.rs_startblock;
         ndpScan->nBlock = scan->rs_base.rs_nblocks;
         ndpScan->curPageType = INVALID_PAGE;
@@ -1125,19 +1135,6 @@ NdpContext* NdpCreateContext()
     context->tableCount = 0;
     context->u_sess = u_sess;
 
-    DependencePath paths = {
-        .ulogPath = LIB_ULOG,
-        .rpcPath = LIB_RPC_UCX,
-        .sslDLPath = LIB_OPENSSL_DL,
-        .sslPath = LIB_SSL,
-        .cryptoPath = LIB_CRYPTO
-    };
-    RpcStatus status = RpcClientInit(paths);
-    if (status != RPC_OK) {
-        hash_destroy(context->channelCache);
-        pfree(context);
-        return NULL;
-    }
     return context;
 }
 NdpContext* GetNdpContext()
@@ -1481,6 +1478,7 @@ void _PG_init(void)
         return;
     }
 #endif
+    knl_u_ndp_init(&u_sess->ndp_cxt);
     NdpInstanceInit();
     pthread_mutex_unlock(&g_ndp_instance.mutex);
 
@@ -1497,7 +1495,6 @@ void _PG_init(void)
         ExecutorEnd_hook = NdpExecutorEnd;
     }
     HOOK_INIT = true;
-    knl_u_ndp_init(&u_sess->ndp_cxt);
 }
 
 void _PG_fini(void)

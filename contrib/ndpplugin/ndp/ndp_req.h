@@ -107,14 +107,14 @@ typedef struct AioDesc {
 
 typedef class NdpIOTask {
 public:
-    NdpIOTask(uintptr_t h, NdpIORequest* req) : handle(h), header(req), aioDesc(nullptr), aioRet(STATUS_OK) {}
+    NdpIOTask(uintptr_t h) : handle(h), aioDesc(nullptr), aioRet(STATUS_OK) {}
 
     ~NdpIOTask();
 
     Status InitBuffer();
 
     uintptr_t handle;
-    NdpIORequest* header;
+    NdpIORequest header;
     AioDesc* aioDesc;
     Status aioRet;
 } NdpIOTask;

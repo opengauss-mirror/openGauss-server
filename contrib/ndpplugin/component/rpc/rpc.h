@@ -32,7 +32,7 @@
 
 constexpr char* LIB_ULOG = "libulog.so";
 constexpr char* LIB_SSL = "libssl.so";
-constexpr char* LIB_RPC_UCX = "librpc_ucx.so";
+constexpr char* LIB_RPC_UCX = "libhcom4db.so";
 constexpr char* LIB_OPENSSL_DL = "libopenssl_dl.so";
 constexpr char* LIB_CRYPTO = "libcrypto.so";
 
@@ -125,6 +125,8 @@ void RpcClientDisconnect(RpcClient clientHandle);
 
 RpcStatus RpcSendAdminReq(NdpAdminRequest* req, NdpAdminResponse* resp, size_t size, RpcClient clientHandle);
 RpcStatus RpcSendIOReq(RpcMessage* request, RpcMessage* response, RpcCallDone* done, RpcClient clientHandle);
+bool HcomGetStatus();
+void CleanClientHandle();
 #else
 RpcStatus RpcServerInit(void);
 

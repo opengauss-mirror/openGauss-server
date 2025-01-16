@@ -14,6 +14,7 @@
 #include "catalog/pg_operator.h"
 #include "utils/builtins.h"
 #include "ndp_check.h"
+#include "component/rpc/rpc.h"
 
 // operations not define in pg_operator.h
 #define BPCHARLEOID 1059
@@ -532,7 +533,10 @@ bool CheckNdpSupport(Query* querytree, PlannedStmt *stmt)
     if (!u_sess->ndp_cxt.enable_ndp) {
         return false;
     }
-
+    if (!HcomGetStatus()) {
+        ereport(WARNING, (errmsg("HcomGetStatus failed.")));
+        return false;
+    }
     /* only plain relations are supported */
     if (!stmt || stmt->commandType != CMD_SELECT) {
         return false;

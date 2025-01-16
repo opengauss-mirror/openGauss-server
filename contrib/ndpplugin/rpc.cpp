@@ -37,8 +37,8 @@
 #define CHECK_RPC_STATUS(status) if ((status) != STATUS_OK) return RPC_ERROR
 #define CHECK_NDP_RPC_STATUS(status) if ((status) != RPC_OK) return RPC_ERROR
 
-#ifdef ENABLE_SSL
-#define OCK_RPC_CONFIG_USE_SSL_CALLBACK (1ul << (2))
+#define OCK_RPC_CONFIG_USE_SSL_CALLBACK (1UL << (2))
+#define OCK_RPC_CONFIG_USE_RPC_CONFIGS (1UL << (0))
 typedef uintptr_t OckRpcServerContext;
 using OckRpcServerCtxBuilderHandler = OckRpcServerContext (*)(RpcServer server);
 using OckRpcServerCtxCleanupHandler = void (*)(RpcServer server, OckRpcServerContext ctx);
@@ -101,13 +101,9 @@ typedef struct {
     OckRpcTlsGetPrivateKey getPriKey;       /* get the private key and keypass */
 } OckRpcCreateConfig;
 
-#ifdef NDP_CLIENT
 using ClientConnectWithCfg = RpcStatus (*)(const char* ip, uint16_t port, RpcClient* client, OckRpcCreateConfig* cfg);
-#else
 using ServerCreateWithCfg = RpcStatus (*)(const char* ip, uint16_t port, RpcServer* server, OckRpcCreateConfig* cfg);
-#endif
-
-#endif
+using ServerStart = RpcStatus (*)(RpcServer server);
 
 #ifdef NDP_CLIENT
 using ClientConnect = RpcStatus (*)(const char *ip, uint16_t port, RpcClient *client);
@@ -116,32 +112,32 @@ using ClientCall = RpcStatus (*)(RpcClient client, uint16_t msgId, RpcMessage *r
                                  RpcCallDone *done);
 using ClientSetTimeout = void (*)(RpcClient client, int64_t timeout);
 typedef struct RpcUcxFunc {
-    ClientConnect clientConnect;
-#ifdef ENABLE_SSL
+    ServerCreateWithCfg hcomCreateWithCfg;
+    ServerStart serverStart;
     ClientConnectWithCfg clientConnectWithCfg;
-#endif
     ClientDisconnect clientDisconnect;
     ClientCall clientCall;
     ClientSetTimeout clientSetTimeout;
 } RpcUcxFunc;
-
+const char* hcomName = "hcom_client";
+RpcClient hcomClient = 0;
 #else
-using ServerCreate = RpcStatus (*)(const char *ip, uint16_t port, RpcServer *server);
+const char* hcomName = "hcom_server";
 using ServerAddService =  RpcStatus (*)(RpcServer server, RpcService *service);
-using ServerStart = RpcStatus (*)(RpcServer server);
 using ServerDestroy = void (*)(RpcServer server);
 using ServerReply = RpcStatus (*)(RpcServerContext ctx, uint16_t msgId, RpcMessage *reply, RpcCallDone *done);
 using ServerCleanupCtx = void (*)(RpcServerContext ctx);
+using ServerCloneCtx = RpcServerContext (*)(RpcServerContext ctx);
+using ServerDeCloneCtx = void (*)(RpcServerContext ctx);
 typedef struct RpcUcxFunc {
-    ServerCreate serverCreate;
-#ifdef ENABLE_SSL
-    ServerCreateWithCfg serverCreateWithCfg;
-#endif
+    ServerCreateWithCfg hcomCreateWithCfg;
     ServerAddService serverAddService;
     ServerStart serverStart;
     ServerDestroy serverDestroy;
     ServerReply serverReply;
     ServerCleanupCtx serverCleanCtx;
+    ServerCloneCtx serverCloneCtx;
+    ServerDeCloneCtx serverDeCloneCtx;
 } RpcUcxFunc;
 #endif
 
@@ -274,8 +270,6 @@ RpcStatus LoadUlog(char* ulogPath)
 
 RpcStatus InitRpcEnv(DependencePath paths)
 {
-    CHECK_NDP_RPC_STATUS(LoadUlog(paths.ulogPath));
-
 #ifdef ENABLE_SSL
     CHECK_NDP_RPC_STATUS(InitSslDl(paths.sslDLPath, paths.sslPath, paths.cryptoPath));
 #endif
@@ -288,11 +282,7 @@ RpcStatus InitRpcEnv(DependencePath paths)
 #ifndef NDP_CLIENT
 static RpcStatus RpcServerDlsym(void)
 {
-    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerCreate", (void **)&g_rpcUcxFunc.serverCreate));
-
-#ifdef ENABLE_SSL
-    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerCreateWithCfg", (void **)&g_rpcUcxFunc.serverCreateWithCfg));
-#endif
+    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerCreateWithCfg", (void **)&g_rpcUcxFunc.hcomCreateWithCfg));
 
     CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerAddService", (void **)&g_rpcUcxFunc.serverAddService));
 
@@ -303,6 +293,10 @@ static RpcStatus RpcServerDlsym(void)
     CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerReply", (void **)&g_rpcUcxFunc.serverReply));
 
     CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerCleanupCtx", (void **)&g_rpcUcxFunc.serverCleanCtx));
+
+    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcCloneCtx", (void **)&g_rpcUcxFunc.serverCloneCtx));
+
+    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcDeCloneCtx", (void **)&g_rpcUcxFunc.serverDeCloneCtx));
 
     return RPC_OK;
 }
@@ -331,16 +325,24 @@ RpcStatus InitRpcServer(KnlRpcContext& ctx, DependencePath paths)
 
     CHECK_NDP_RPC_STATUS(InitRpcServerConfig());
 
-#ifdef ENABLE_SSL
     OckRpcCreateConfig cfg;
+#ifdef ENABLE_SSL
     cfg.mask = OCK_RPC_CONFIG_USE_SSL_CALLBACK;
     cfg.getCaAndVerify = nullptr;
     cfg.getCert = GetCert;
     cfg.getPriKey = GetPrivateKey;
-    RpcStatus status = g_rpcUcxFunc.serverCreateWithCfg(ctx.ip, ctx.port, &ctx.serverHandle, &cfg);
 #else
-    RpcStatus status = g_rpcUcxFunc.serverCreate(ctx.ip, ctx.port, &ctx.serverHandle);
+    cfg.mask = OCK_RPC_CONFIG_USE_RPC_CONFIGS;
 #endif
+    RpcConfigPair pairs[4];
+    cfg.configs.size = 4;
+    cfg.configs.pairs = pairs;
+    pairs[0] = (RpcConfigPair){.key = "server.create.type", .value = "TCP"};
+    pairs[1] = (RpcConfigPair){.key = "server.create.name", .value = hcomName};
+    pairs[2] = (RpcConfigPair){.key = "server.create.segsize", .value = "16777216"};
+    pairs[3] = (RpcConfigPair){.key = "worker.thread.groups", .value = "4"};
+
+    RpcStatus status = g_rpcUcxFunc.hcomCreateWithCfg(ctx.ip, ctx.port, &ctx.serverHandle, &cfg);
     if (status != RPC_OK) {
         LOG_ERROR << "OckRpcServerCreate failed, ip " << ctx.ip << "port" << ctx.port;
         CloseDl(g_rpcUcxDl);
@@ -382,15 +384,25 @@ static void RpcAdminProc(RpcServerContext handle, RpcMessage msg)
     g_rpcUcxFunc.serverCleanCtx(handle);
 }
 
+void NdpServerCallDone(RpcStatus status, void* arg)
+{
+    if (status != RPC_OK) {
+        LOG_WARN << "NdpServerCallDone fail" << status;
+    }
+    NdpIOTask* task = (NdpIOTask*)arg;
+    g_rpcUcxFunc.serverDeCloneCtx(task->handle);
+    delete task;
+}
+
 RpcStatus SendIOTaskErrReply(NdpIOTask* task, NDP_ERRNO error)
 {
     NdpIOResponse res;
     res.status = error;
     RpcMessage reply = {.data = nullptr, .len = 0};
     reply.data = &res;
-    g_rpcUcxFunc.serverReply(task->handle, RPC_IO_REQ, &reply, nullptr);
+    RpcCallDone callDone = {.cb = &NdpServerCallDone, .arg = (void*)task};
+    g_rpcUcxFunc.serverReply(task->handle, RPC_IO_REQ, &reply, &callDone);
     g_rpcUcxFunc.serverCleanCtx(task->handle);
-    delete task;
 }
 #ifdef FAULT_INJECT
 static void IOInject(NdpIOTask* &task)
@@ -409,7 +421,11 @@ static void IOInject(NdpIOTask* &task)
 
 static void RpcIOProc(RpcServerContext handle, RpcMessage msg)
 {
-    NdpIOTask* task = new NdpIOTask(handle, reinterpret_cast<NdpIORequest*>(msg.data));
+    RpcServerContext cHandle = g_rpcUcxFunc.serverCloneCtx(handle);
+    NdpIOTask* task = new NdpIOTask(cHandle);
+    errno_t rc = memcpy_s(&(task->header), sizeof(NdpIORequest), msg.data, sizeof(NdpIORequest));
+    securec_check(rc, "", "");
+
 #ifdef NDP_ASYNC_CEPH
     if (!SubmitAioReadData(task)) {
         LOG_DEBUG << "rpc IO message is received successfully.";
@@ -430,7 +446,7 @@ RpcStatus RpcIOTaskHandler(NdpIOTask* task)
     }
 #endif
     RpcServerContext handle = task->handle;
-    NdpIORequest *header = task->header;
+    NdpIORequest *header = &(task->header);
 #ifdef NDP_ASYNC_CEPH
     t_thrd.ndpWorkerCtx->scanPages = task->aioDesc->readBuf;
 #endif
@@ -467,14 +483,13 @@ RpcStatus RpcIOTaskHandler(NdpIOTask* task)
             reinterpret_cast<NdpIOResponse *>(reply.data)->status = NDP_ERR;
         }
     }
-
-    RpcStatus status = g_rpcUcxFunc.serverReply(handle, RPC_IO_REQ, &reply, nullptr);
+    RpcCallDone callDone = {.cb = &NdpServerCallDone, .arg = (void*)task};
+    RpcStatus status = g_rpcUcxFunc.serverReply(handle, RPC_IO_REQ, &reply, &callDone);
     if (status != RPC_OK) {
         LOG_WARN << "send reply failed";
     }
 
     g_rpcUcxFunc.serverCleanCtx(handle);
-    delete task;
     return status;
 }
 
@@ -535,11 +550,11 @@ RpcStatus RpcServerInit(void)
 
 static RpcStatus RpcClientDlsym(void)
 {
-    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcClientConnect", (void **)&g_rpcUcxFunc.clientConnect));
+    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerCreateWithCfg", (void **)&g_rpcUcxFunc.hcomCreateWithCfg));
 
-#ifdef ENABLE_SSL
+    CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcServerStart", (void **)&g_rpcUcxFunc.serverStart));
+
     CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcClientConnectWithCfg", (void **)&g_rpcUcxFunc.clientConnectWithCfg));
-#endif
 
     CHECK_RPC_STATUS(LoadSymbol(g_rpcUcxDl, "OckRpcClientDisconnect", (void **)&g_rpcUcxFunc.clientDisconnect));
 
@@ -560,28 +575,76 @@ RpcStatus RpcClientInit(DependencePath& paths)
         g_rpcUcxDl = nullptr;
         return RPC_ERROR;
     }
-
-    return RPC_OK;
-}
-
-RpcStatus RpcClientConnect(char *ip, uint16_t port, RpcClient& clientHandle)
-{
-#ifdef ENABLE_SSL
     OckRpcCreateConfig cfg;
+#ifdef ENABLE_SSL
     cfg.mask = OCK_RPC_CONFIG_USE_SSL_CALLBACK;
     cfg.getCaAndVerify = GetCAAndVerify;
     cfg.getCert = nullptr;
     cfg.getPriKey = nullptr;
-    RpcStatus rpcStatus = g_rpcUcxFunc.clientConnectWithCfg(ip, port, &clientHandle, &cfg);
 #else
-    RpcStatus rpcStatus = g_rpcUcxFunc.clientConnect(ip, port, &clientHandle);
+    cfg.mask = OCK_RPC_CONFIG_USE_RPC_CONFIGS;
 #endif
-    if (rpcStatus != RPC_OK) {
-        ereport(LOG, (errmsg("RpcClientConnect failed, ip: %s, port: %d", ip, port)));
-        return rpcStatus;
+    RpcConfigPair pairs[4];
+    cfg.configs.size = 4;
+    cfg.configs.pairs = pairs;
+    pairs[0] = (RpcConfigPair){.key = "server.create.type", .value = "TCP"};
+    pairs[1] = (RpcConfigPair){.key = "server.create.name", .value = hcomName};
+    pairs[2] = (RpcConfigPair){.key = "server.create.segsize", .value = "16777216"};
+    pairs[3] = (RpcConfigPair){.key = "worker.thread.groups", .value = "4"};
+    RpcStatus status = g_rpcUcxFunc.hcomCreateWithCfg("127.0.0.1", u_sess->ndp_cxt.ndp_port, &hcomClient, &cfg);
+    if (status != RPC_OK) {
+        ereport(LOG, (errmsg("RpcClientInit hcomCreateWithCfg failed, port[%d]", u_sess->ndp_cxt.ndp_port)));
+        CloseDl(g_rpcUcxDl);
+        g_rpcUcxDl = nullptr;
+        return RPC_ERROR;
+    }
+    status = g_rpcUcxFunc.serverStart(hcomClient);
+    if (status != RPC_OK) {
+        ereport(LOG, (errmsg("RpcClientInit serverStart failed, port[%d]", u_sess->ndp_cxt.ndp_port)));
+        CloseDl(g_rpcUcxDl);
+        g_rpcUcxDl = nullptr;
+        return RPC_ERROR;
+    }
+
+    return RPC_OK;
+}
+
+bool HcomGetStatus()
+{
+    return g_rpcUcxDl != nullptr;
+}
+
+void CleanClientHandle()
+{
+    if (g_rpcUcxDl != nullptr) {
+        CloseDl(g_rpcUcxDl);
+        g_rpcUcxDl = nullptr;
+    }
+}
+
+RpcStatus RpcClientConnect(char *ip, uint16_t port, RpcClient& clientHandle)
+{
+        OckRpcCreateConfig cfg;
+#ifdef ENABLE_SSL
+    cfg.mask = OCK_RPC_CONFIG_USE_SSL_CALLBACK;
+    cfg.getCaAndVerify = GetCAAndVerify;
+    cfg.getCert = nullptr;
+    cfg.getPriKey = nullptr;
+#else
+    cfg.mask = OCK_RPC_CONFIG_USE_RPC_CONFIGS;
+#endif
+    RpcConfigPair pairs[2];
+    cfg.configs.size = 2;
+    cfg.configs.pairs = pairs;
+    pairs[0] = (RpcConfigPair){.key = "server.create.name", .value = hcomName};
+    pairs[1] = (RpcConfigPair){.key = "client.enable.selfpolling", .value = "no"};
+    RpcStatus status = g_rpcUcxFunc.clientConnectWithCfg(ip,port, &clientHandle, &cfg);
+    if (status != RPC_OK) {
+        ereport(LOG, (errmsg("RpcClienConnect failed, name[%s], ip[%s], port[%d]", hcomName, ip, port)));
+        return status;
     }
     g_rpcUcxFunc.clientSetTimeout(clientHandle, REPLY_TIMEOUT);
-
+    
     return RPC_OK;
 }
 
