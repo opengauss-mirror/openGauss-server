@@ -248,3 +248,24 @@ drop table only_mlog_t1, only_mlog_record;
 \h create materialized view log
 \h drop materialized view log
 \h create materialized view
+
+create table imv_ind_t(a int);
+create incremental materialized view imv_ind_v as select * from imv_ind_t;
+-- failed, drop mlog index
+declare
+    oid int := (select oid from pg_class where relname = 'imv_ind_t');
+    index_name varchar(20) := 'mlog_' || oid || '_index';
+    sql_stmt text := 'Drop index ' || index_name;
+begin
+    execute sql_stmt;
+END;
+/
+-- copy
+copy imv_ind_t from stdin;
+1
+2
+3
+\.
+refresh incremental materialized view imv_ind_v;
+select * from imv_ind_v;
+drop table imv_ind_t cascade;
