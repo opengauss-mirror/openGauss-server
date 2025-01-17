@@ -134,3 +134,20 @@ AS $function$pg_prepared_statement_global$function$;
 
 comment on function pg_catalog.pg_prepared_statement() is 'get the prepared statements for this session';
 comment on function pg_catalog.pg_prepared_statement(bigint) is 'get the prepared statements for specified session';
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8889;
+DROP FUNCTION IF EXISTS pg_catalog.ss_txnstatus_cache_stat() CASCADE;
+CREATE OR REPLACE FUNCTION pg_catalog.ss_txnstatus_cache_stat(
+    OUT vcache_gets bigint,
+    OUT hcache_gets bigint,
+    OUT nio_gets bigint,
+    OUT avg_hcache_gettime_us double precision,
+    OUT avg_nio_gettime_us double precision,
+    OUT cache_hit_rate double precision,
+    OUT hcache_eviction bigint,
+    OUT avg_eviction_refcnt double precision
+)
+ RETURNS SETOF record
+ LANGUAGE internal
+ STRICT NOT FENCED NOT SHIPPABLE
+AS $function$ss_txnstatus_cache_stat$function$;
