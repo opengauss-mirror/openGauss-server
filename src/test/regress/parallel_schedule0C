@@ -184,10 +184,9 @@ test: alter_foreign_schema
 
 # test for slow_sql
 test: slow_sql
+test: record_slow_sql_in_proc_commit
 # test user@host
 test: user_host_test
 
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
-
-
