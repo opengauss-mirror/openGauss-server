@@ -223,7 +223,10 @@ static const char *BuiltinTrancheNames[] = {
     "ClogSlruBankLock",
     "CsnlogSlruBankLock",
     "MultixactOffsetSlruBankLock",
-    "MultixactMemberSlruBankLock"
+    "MultixactMemberSlruBankLock",
+    "CRBufAssignLock",
+    "CRBufMappingLock",
+    "CRBufLruLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -709,6 +712,10 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_SCANNING_XLOG_TRACK_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_SCANNING_XLOG_TRACK);
+    }
+
+    for (id = 0; id < NUM_BUFFER_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_CR_BUF_MAPPING, id);
     }
 
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);

@@ -1665,9 +1665,17 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
         so->scanMode = PBRCR_SCAN_MODE;
     } else {
         so->scanMode = PCR_SCAN_MODE;
-        /* todo switch to cr pool */
-        crPage = (Page)palloc0(BLCKSZ);
-        ConstructCRPage(scan, crPage, so->currPos.buf);
+        desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
+            snapshot->snapshotcsn, snapshot->curcid);
+        if (desc == NULL) {
+            desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
+                snapshot->snapshotcsn, snapshot->curcid);
+            crPage = CRBufferGetPage(desc->buf_id);
+            ConstructCRPage(scan, crPage, so->currPos.buf);
+        } else {
+            crPage = CRBufferGetPage(desc->buf_id);
+            LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+        }
         page = crPage;
     }
     ereport(DEBUG5, (errmsg("pcr readpage relfilenode:%u, blkno:%u, snapshot:%u, scanMode:%d (0:PCR 1:PBRCR) ",
@@ -1755,8 +1763,17 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
     if (so->scanMode == PBRCR_SCAN_MODE) {
         if (needCheckVisNum >= SCAN_MODE_SWITCH_THRESHOLD && !specialSnapshot) {
             so->scanMode = PCR_SCAN_MODE;
-            crPage = (Page)palloc0(BLCKSZ);
-            ConstructCRPage(scan, crPage, so->currPos.buf);
+            desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
+                snapshot->snapshotcsn, snapshot->curcid);
+            if (desc == NULL) {
+                desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM,
+                    BufferGetBlockNumber(so->currPos.buf), snapshot->snapshotcsn, snapshot->curcid);
+                crPage = CRBufferGetPage(desc->buf_id);
+                ConstructCRPage(scan, crPage, so->currPos.buf);
+            } else {
+                crPage = CRBufferGetPage(desc->buf_id);
+                LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+            }
             page = crPage;
         }
         bool tupleVisible = false;

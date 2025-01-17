@@ -121,6 +121,7 @@ enum ModuleId {
     MOD_DB4AI,      /* DB4AI & AUTOML */
     MOD_PLDEBUGGER,
     MOD_ADVISOR,    /* sql advisor */
+    MOD_PCR,		/* pcr */
 
     MOD_SEC,           /* Security default module */
     MOD_SEC_FE,        /* Security sub-module: full encryption */

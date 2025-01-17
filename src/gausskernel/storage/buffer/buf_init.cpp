@@ -32,6 +32,7 @@
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
 #endif
+#include "storage/buf/crbuf.h"
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
@@ -211,6 +212,8 @@ void InitBufferPool(void)
     if (ENABLE_DMS) {
         InitDmsBufCtrl();
     }
+
+    InitCRBufPool();
 }
 
 /*
@@ -250,6 +253,9 @@ Size BufferShmemSize(void)
     if (ENABLE_DMS) {
         size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(dms_buf_ctrl_t))) + ALIGNOF_BUFFER + PG_CACHE_LINE_SIZE;
     }
+
+    size = add_size(size, mul_size(CR_BUFFER_NUM, sizeof(CRBufferDescPadded))) + PG_CACHE_LINE_SIZE;
+    size = add_size(size, mul_size(CR_BUFFER_NUM, BLCKSZ)), + PG_CACHE_LINE_SIZE;
 
     return size;
 }

@@ -25,6 +25,7 @@
 
 #include "access/ubtreepcr.h"
 #include "access/ustore/knl_undorequest.h"
+#include "storage/buf/crbuf.h"
 
 const int DOUBLE_SIZE = 2;
 typedef struct UBTreeRedoRollbackItemData {
@@ -542,7 +543,10 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
     BTScanInsert itupKey = UBTreeMakeScanKey(rel, itup);
     Oid partOid = InvalidOid;
 
-    if (RelationIsGlobalIndex(rel)) {
+	if (!RecoveryInProgress())
+		CRBufferUnused(buffer);
+
+	if (RelationIsGlobalIndex(rel)) {
         bool isnull = false;
         partOid = DatumGetUInt32(index_getattr(itup, IndexRelationGetNumberOfAttributes(rel),
             RelationGetDescr(rel), &isnull));

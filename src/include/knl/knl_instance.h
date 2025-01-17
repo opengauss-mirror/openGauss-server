@@ -1020,6 +1020,15 @@ typedef struct knl_g_flashback_context {
     TransactionId globalOldestXminInFlashback;
 } knl_g_flashback_context;
 
+typedef struct knl_g_crbuf_context {
+    LWLock *cr_buf_assign_lock;
+    LWLock *cr_buf_lru_lock;
+    Buffer cr_lru_first;
+    Buffer cr_lru_last;
+    int hwm;
+    int capacity;
+} knl_g_crbuf_context;
+
 struct NumaMemAllocInfo {
     void* numaAddr; /* Start address returned from numa_alloc_xxx */
     size_t length;
@@ -1507,6 +1516,7 @@ typedef struct knl_instance_context {
 
     knl_g_undo_context undo_cxt;
     knl_g_flashback_context flashback_cxt;
+    knl_g_crbuf_context crbuf_cxt;
 
 #ifdef ENABLE_MOT
     knl_g_mot_context mot_cxt;

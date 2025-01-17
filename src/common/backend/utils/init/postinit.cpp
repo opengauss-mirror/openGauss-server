@@ -98,6 +98,8 @@
 #include "gs_policy/policy_common.h"
 #include "utils/knl_relcache.h"
 #include "commands/extension.h"
+#include "storage/buf/crbuf.h"
+
 #ifndef WIN32_ONLY_COMPILER
 #include "dynloader.h"
 #else
@@ -639,6 +641,7 @@ void BaseInit(void)
     InitSync();
     smgrinit();
     InitBufferPoolAccess();
+    InitCRBufPoolAccess();
     if (!ENABLE_DSS) {
         undo::UndoLogInit();
     }
