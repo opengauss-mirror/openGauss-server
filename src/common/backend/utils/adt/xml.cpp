@@ -4277,7 +4277,7 @@ static void XMLTYPE_SUPPORT()
 {
     if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
-                errmsg("Functions for xmltype is onle supported in database which dbcompatibility = 'A'.")));
+                errmsg("Functions for xmltype are only supported in database which dbcompatibility = 'A'.")));
     }
 }
 
