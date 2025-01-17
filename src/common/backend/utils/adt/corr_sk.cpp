@@ -293,6 +293,9 @@ Datum corr_s_final_fn(PG_FUNCTION_ARGS)
     float8 covariance = sum_diff / (float8)(n - 1);
     float8 xr_st_dev = calculate_standard_deviation(x_ranks, n, mean_rank);
     float8 yr_st_dev = calculate_standard_deviation(y_ranks, n, mean_rank);
+    if (xr_st_dev == 0 || yr_st_dev == 0) {
+        PG_RETURN_NULL();
+    }
     float8 spearman_rho_corr = covariance / (xr_st_dev * yr_st_dev);
 
     if (mode == ModeType::COEFFICIENT) {
@@ -383,6 +386,9 @@ Datum corr_k_final_fn(PG_FUNCTION_ARGS)
     }
 
     uint32 n0 = n * (n - 1) / 2;
+    if (n0 == tiedX || n0 == tiedY) {
+        PG_RETURN_NULL();
+    }
     float8 tau_b = (float8)(concordant - discordant) / sqrt((n0 - tiedX) * (n0 - tiedY));
 
     if (mode == ModeType::COEFFICIENT) {
