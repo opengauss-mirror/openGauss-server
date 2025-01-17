@@ -520,7 +520,7 @@ void FlushPQInfo(HnswBuildState * buildstate)
 
     /* Flush pq table */
     FlushPQInfoInternal(index, pqTable, HNSW_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
-    if (buildstate->params->pqMode == HNSW_PQMODE_SDC) {
+    if (buildstate->pqMode == HNSW_PQMODE_SDC) {
         /* Flush pq distance table */
         FlushPQInfoInternal(index, (char*)pqDistanceTable,
                             HNSW_PQTABLE_START_BLKNO + pqTableNblk, pqDisTableNblk, pqDisTableSize);
@@ -761,9 +761,9 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
         if (enablePQ && pqinfo->lc == 0) {
             ePQCode = LoadPQcode(etup);
             params = &pqinfo->params;
-            if (params->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
+            if (pqinfo->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
                 *distance = 0;
-            } else if (params->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
+            } else if (pqinfo->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
                 *distance = 0;
             } else {
                 GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance);
@@ -1591,6 +1591,7 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     params->pqM = metap->pqM;
     params->pqKsub = metap->pqKsub;
     UnlockReleaseBuffer(buf);
+    int pqMode = HNSW_PQMODE_DEFAULT;
 
     if (*enablePQ && !g_instance.hnswpq_inited) {
         ereport(ERROR, (errmsg("the SQL involves operations related to HNSWPQ, "
@@ -1600,7 +1601,6 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     if (*enablePQ) {
         params->funcType = getPQfunctionType(procinfo, HnswOptionalProcInfo(index, HNSW_NORM_PROC));
         params->dim = dim;
-        params->pqMode = HNSW_PQMODE_DEFAULT;
         params->subItemSize = typeInfo->itemSize(dim / params->pqM);
         /* Now save pqTable and pqDistanceTable in the relcache entry. */
         if (index->pqTable == NULL) {
@@ -1608,7 +1608,7 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
             index->pqTable = LoadPQtable(index);
             (void)MemoryContextSwitchTo(oldcxt);
         }
-        if (index->pqDistanceTable == NULL && params->pqMode == HNSW_PQMODE_SDC) {
+        if (index->pqDistanceTable == NULL && pqMode == HNSW_PQMODE_SDC) {
             MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
             index->pqDistanceTable = LoadPQDisTable(index);
             (void)MemoryContextSwitchTo(oldcxt);

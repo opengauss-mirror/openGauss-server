@@ -46,6 +46,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     PQParams *params = &so->params;
     bool enablePQ = so->enablePQ;
     int hnswEfSearch = so->length;
+    int pqMode = so->pqMode;
     /* Get m and entry point */
     HnswGetMetaPageInfo(index, &m, &entryPoint);
 
@@ -58,7 +59,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
         float *query = DatumGetVector(q)->x;
 
         pqinfo.params = *params;
-        if (params->pqMode == HNSW_PQMODE_SDC) {
+        if (pqMode == HNSW_PQMODE_SDC) {
             qPQCode = (uint8 *)palloc(params->pqM * sizeof(uint8));
             ComputeVectorPQCode(query, params, qPQCode);
             pqinfo.qPQCode = qPQCode;
@@ -69,6 +70,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
             GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable);
         }
 
+        pqinfo.pqMode = pqMode;
         pqinfo.lc = entryPoint->level;
         ep = list_make1(HnswEntryCandidate(
                         base, entryPoint, q, index, procinfo, collation, false, NULL, enablePQ, &pqinfo));
@@ -144,6 +146,7 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so->collation = index->rd_indcollation[0];
 
     dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    so->pqMode = HNSW_PQMODE_DEFAULT;
     InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ);
     so->params = params;
 
