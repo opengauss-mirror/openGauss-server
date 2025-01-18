@@ -5,7 +5,7 @@
 # It is just a wrapper to package_internal.sh
 # Example: ./build_opengauss.sh -3rd path/third_party_binarylibs/
 # change it to "N", if you want to build with original build system based on solely Makefiles
-declare CMAKE_PKG="N"
+declare CMAKE_PKG="Y"
 declare SCRIPT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}"); pwd)
 declare ROOT_DIR=$(dirname "${SCRIPT_DIR}")
 declare ROOT_DIR=$(dirname "${ROOT_DIR}")

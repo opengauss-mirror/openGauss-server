@@ -184,6 +184,7 @@ typedef struct knl_u_executor_context {
     void *EventTriggerState; 
 
     bool isFlashBack;
+    bool isPbeFunctionCallOpt;
 } knl_u_executor_context;
 
 typedef struct knl_u_sig_context {
