@@ -991,6 +991,7 @@ typedef struct knl_g_wal_context {
     uint64 totalXlogIterBytes;
     uint64 totalXlogIterTimes;
     XlogFlushStatistics* xlogFlushStats;
+    bool lowConOpt;
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {

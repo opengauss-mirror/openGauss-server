@@ -3394,6 +3394,9 @@ bool XLogBackgroundFlush(void)
          * an entry associated with the first uncopied record found in the current loop.
          */
         if (next_entry_ptr->status == WAL_NOT_COPIED) {
+            if (g_instance.wal_cxt.lowConOpt) {
+                break;
+            }
             if (((curr_entry_ptr->endLSN - startLSN) > curAverageXlogFlushBytes) ||
                 (GetCurrentTimestamp() - stTime >= (uint64)g_instance.attr.attr_storage.wal_flush_timeout)) {
                 break;
