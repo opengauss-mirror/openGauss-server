@@ -2964,6 +2964,12 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         !IsCStoreNamespace(namespaceId) && (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0) &&
         (stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT) && !u_sess->attr.attr_storage.enable_recyclebin) {
         bool isSegmentType = (storage_type == SEGMENT_PAGE);
+        if (!isSegmentType && (u_sess->attr.attr_storage.enable_segment || bucketinfo != NULL)) {
+            storage_type = SEGMENT_PAGE;
+            DefElem *storage_def = makeDefElem("segment", (Node *)makeString("on"));
+            stmt->options = lappend(stmt->options, storage_def);
+            reloptions = transformRelOptions((Datum)0, stmt->options, NULL, validnsps, true, false);
+        }
     } else if (storage_type == SEGMENT_PAGE) {
         if (u_sess->attr.attr_storage.enable_recyclebin) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
@@ -3029,13 +3035,23 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     }
 
     if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
-        if (pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0 ||
+        if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE
+            && (stmt->relation->relpersistence != RELPERSISTENCE_UNLOGGED)
+            && (stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
+            && (stmt->relation->relpersistence != RELPERSISTENCE_GLOBAL_TEMP))||
+            pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0 ||
             pg_strcasecmp(COMPRESSION_NO, StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO)) != 0 ||
             IsCompressedByCmprsInPgclass((RelCompressType)stmt->row_compress)) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Only support ASTORE while DMS and DSS enabled.\n"
+                errmsg("Only support segment storage ASTORE while DMS and DSS enabled.\n"
                 "Compression is not supported.")));
         }
+    }
+
+    if (!IsInitdb && u_sess->attr.attr_storage.enable_segment && storage_type == SEGMENT_PAGE &&
+        !CheckSegmentStorageOption(stmt->options)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Only support segment storage type while parameter enable_segment is ON.")));
     }
 
     CheckSegmentCompressOption(stmt->options, relkind, storage_type, storeChar);
