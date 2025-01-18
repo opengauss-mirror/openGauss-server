@@ -680,7 +680,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_ondemand_recovery_mem_size                    | integer | kB   | 1048576   | 104857600
  ss_parallel_thread_count                         | integer |      | 0         | 64
  ss_rdma_work_config                              | string  |      |           | 
- ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576
+ ss_recv_msg_pool_size                            | integer | kB   | 32768     | 1048576
  ss_scrlock_server_bind_core                      | string  |      |           | 
  ss_scrlock_server_port                           | integer |      | 0         | 65535
  ss_scrlock_worker_bind_core                      | string  |      |           | 
