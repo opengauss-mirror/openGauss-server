@@ -1306,29 +1306,39 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *xl
                         elog(ERROR, "Tablespace directory is not an absolute path: %s\n",
                             linked_path);
 
-                    char newLinkPath[MAXPGPATH];
-                    char *tableSpaceChar;
-                    errno_t rc = strncpy_s(newLinkPath, strlen(data_dir) + 1, data_dir, strlen(data_dir));
-                    securec_check(rc, "\0", "\0");
-                    tableSpaceChar = (char*)strstr(linked_path, PG_AB_RELATIVE_TBLSPC_DIR);
+                    char *tableSpaceChar = (char*)strstr(linked_path, PG_AB_RELATIVE_TBLSPC_DIR);
                     if (tableSpaceChar == NULL) {
-                        elog(ERROR, "Tablespace directory is invalid: %s\n", linked_path);
+                        /* It is a extrnal path. */
+                        join_path_components(to_path, data_dir, dir->rel_path);
+
+                        elog(VERBOSE, "Create directory \"%s\" and symbolic link \"%s\"",
+                            linked_path, to_path);
+
+                        /* create tablespace directory */
+                        fio_mkdir(linked_path, pg_tablespace_mode, location);
+                        if (fio_symlink(linked_path, to_path, incremental, location) < 0)
+                            elog(ERROR, "Could not create symbolic link \"%s\": %s",
+                                to_path, strerror(errno));
+
+                    } else {
+                        /* not a external path, the soft line needs to be relocated inside the new node */
+                        char newLinkPath[MAXPGPATH];
+                        errno_t rc = sprintf_s(newLinkPath, MAXPGPATH, "%s%s", data_dir, tableSpaceChar);
+                        securec_check_ss_c(rc, "\0", "\0");
+
+                        join_path_components(to_path, data_dir, dir->rel_path);
+
+                        elog(LOG, "Create directory \"%s\" and symbolic link \"%s\"",
+                            newLinkPath, to_path);
+
+                        /* create tablespace directory */
+                        fio_mkdir(newLinkPath, pg_tablespace_mode, location);
+
+                        /* create link to linked_path */
+                        if (fio_symlink(newLinkPath, to_path, incremental, location) < 0)
+                            elog(ERROR, "Could not create symbolic link \"%s\": %s",
+                                to_path, strerror(errno));
                     }
-
-                    errno_t ret = strcat_s(newLinkPath, MAXPGPATH, tableSpaceChar);
-                    securec_check(ret, "\0", "\0");
-                    join_path_components(to_path, data_dir, dir->rel_path);
-
-                    elog(LOG, "Create directory \"%s\" and symbolic link \"%s\"",
-                        newLinkPath, to_path);
-
-                    /* create tablespace directory */
-                    fio_mkdir(newLinkPath, pg_tablespace_mode, location);
-
-                    /* create link to linked_path */
-                    if (fio_symlink(newLinkPath, to_path, incremental, location) < 0)
-                        elog(ERROR, "Could not create symbolic link \"%s\": %s",
-                            to_path, strerror(errno));
 
                     continue;
                 }
