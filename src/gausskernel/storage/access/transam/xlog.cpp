@@ -4267,7 +4267,7 @@ void PreInitXlogFileForPrimary(int wal_file_init_num)
 
     g_xlog_stat_shared->walAuxWakeNum++;
 
-    if (g_instance.wal_cxt.globalEndPosSegNo == InvalidXLogSegPtr || !SS_NORMAL_PRIMARY) {
+    if (g_instance.wal_cxt.globalEndPosSegNo == InvalidXLogSegPtr || (ENABLE_DMS && !SS_NORMAL_PRIMARY)) {
         return;
     }
     startSegNo = g_instance.wal_cxt.globalEndPosSegNo + 1;
