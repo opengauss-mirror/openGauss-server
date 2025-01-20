@@ -549,6 +549,13 @@ static void knl_u_plancache_init(knl_u_plancache_context* pcache_cxt)
     pcache_cxt->generic_roots = NULL;
 }
 
+static void knl_u_parameterization_init(knl_u_parameterization_context* param_cxt)
+{
+    param_cxt->first_saved_plan = NULL;
+    param_cxt->param_cached_plan_count = 0;
+    param_cxt->parameterized_queries = NULL;
+}
+
 static void knl_u_typecache_init(knl_u_typecache_context* tycache_cxt)
 {
     tycache_cxt->TypeCacheHash = NULL;
@@ -1557,6 +1564,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_parser_init(&sess_cxt->parser_cxt);
     knl_u_pgxc_init(&sess_cxt->pgxc_cxt);
     knl_u_plancache_init(&sess_cxt->pcache_cxt);
+    knl_u_parameterization_init(&sess_cxt->param_cxt);
     knl_u_plpgsql_init(&sess_cxt->plsql_cxt);
     knl_u_xact_init(&sess_cxt->xact_cxt);
     knl_u_postgres_init(&sess_cxt->postgres_cxt);
