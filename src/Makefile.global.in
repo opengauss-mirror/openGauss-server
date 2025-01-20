@@ -311,6 +311,7 @@ ifeq ($(with_3rd), NONE)
   DCF_HOME = $(top_builddir)/$(COMPONENTPATH)/dcf
   DSS_HOME = $(top_builddir)/$(COMPONENTPATH)/dss
   DMS_HOME = $(top_builddir)/$(COMPONENTPATH)/dms
+  HCOM4DB_HOME = $(top_builddir)/$(COMPONENTPATH)/hcom4db
 else
   BINARYPATH = kernel/dependency
   PLATFORMPATH = kernel/platform
@@ -367,6 +368,7 @@ endif
   DCF_HOME = $(with_3rd)/kernel/component/dcf
   DSS_HOME = $(with_3rd)/kernel/component/dss
   DMS_HOME = $(with_3rd)/kernel/component/dms
+  HCOM4DB_HOME = $(with_3rd)/kernel/component/hcom4db
 endif
 
 ifeq ($(with_openeuler_os), yes)
@@ -678,6 +680,11 @@ DSS_LIB_PATH = $(DSS_HOME)/lib
 # dms component
 #############################################################################
 DMS_LIB_PATH = $(DMS_HOME)/lib
+
+#############################################################################
+# hcom4db component
+#############################################################################
+HCOM4DB_LIB_PATH = $(HCOM4DB_HOME)/lib
 
 ############################################################################
 #

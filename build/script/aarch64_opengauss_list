@@ -948,6 +948,7 @@
 ./lib/libpagecompression.so*
 ./lib/libdssapi.so
 ./lib/libdms.so
+./lib/libhcom4db.so
 ./lib/libodbc.so*
 ./lib/libasan.so*
 ./lib/libubsan.so*
