@@ -2477,7 +2477,7 @@ void RemoveTypeMethod(Oid typeoid)
 
     ScanKeyInit(&skey[0], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typeoid));
     desc = heap_open(ProcedureRelationId, AccessShareLock);
-    sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 1, skey);
+    sysscan = systable_beginscan(desc, InvalidOid, false, NULL, 1, skey);
 
     /* Get all method according to type_oid */
     while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
@@ -2499,14 +2499,15 @@ void RemoveTypeMethod(Oid typeoid)
 static void GetObjectTypeMapOrderMethod(Oid typeoid, char *mapOrder, Oid* mapid, Oid* orderid)
 {
     Relation desc;
-    ScanKeyData skey[2];
+    int keyNums = 2;
+    ScanKeyData skey[keyNums];
     SysScanDesc sysscan;
     HeapTuple tuple;
 
     ScanKeyInit(&skey[0], Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(mapOrder));
     ScanKeyInit(&skey[1], Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typeoid));
     desc = heap_open(ProcedureRelationId, AccessShareLock);
-    sysscan = systable_beginscan(desc, ProcedureNameArgsNspNewIndexId, true, NULL, 2, skey);
+    sysscan = systable_beginscan(desc, InvalidOid, false, NULL, keyNums, skey);
 
     /* Get all method according to type_oid */
     while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
