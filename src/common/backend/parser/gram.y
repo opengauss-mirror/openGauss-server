@@ -3270,25 +3270,7 @@ FunctionSetResetClause:
 
 
 VariableShowStmt:
-			SHOW WARNINGS
-				{
-#ifdef ENABLE_MULTIPLE_NODES
-					ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("Un-support feature"),
-							errdetail("Show warnings feature is unsupported on distributed mode.")));
-#else
-					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
-					{
-						VariableShowStmt *n = makeNode(VariableShowStmt);
-						n->name = "show_warnings";
-						n->offset = 0;
-						n->count = MAX_ERROR_COUNT;
-						$$ = (Node *) n;
-					}
-#endif
-				}
-			| SHOW WARNINGS LIMIT Iconst
+			SHOW WARNINGS LIMIT Iconst
 				{
 #ifdef ENABLE_MULTIPLE_NODES
 					ereport(ERROR,
@@ -3446,6 +3428,22 @@ VariableShowStmt:
 				n->from_clause = NULL;
 				n->where_clause = NULL;
 				$$ = (Node *)n;
+				} else if (strcmp($2, "warnings") == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show warnings feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_warnings";
+						n->offset = 0;
+						n->count = MAX_ERROR_COUNT;
+						$$ = (Node *) n;
+					}
+#endif
 				} else {
 					VariableShowStmt *n = makeNode(VariableShowStmt);
 					n->name = $2;
@@ -31918,6 +31916,7 @@ unreserved_keyword:
 			| NOMINVALUE
 			| NOTHING
 			| NOTIFY
+			| NOVALIDATE
 			| NOWAIT
 			| NULLCOLS
 			| NULLS_P
@@ -31978,8 +31977,7 @@ unreserved_keyword:
 			| RANDOMIZED
 			| RANGE
 			| RATIO
-			| RAW  '(' Iconst ')'				{	$$ = "raw";}
-			| RAW  %prec UNION				{	$$ = "raw";}
+			| RAW  				{	$$ = "raw";}
 			| READ
 			| REASSIGN
 			| REBUILD
@@ -32096,6 +32094,8 @@ unreserved_keyword:
 			| THAN
 			| TIES
 			| TIMESTAMP_FORMAT_P
+			| TIMEZONE_HOUR_P
+			| TIMEZONE_MINUTE_P
 			| TIME_FORMAT_P
 			| TRANSACTION
 			| TRANSFORM
@@ -32136,6 +32136,7 @@ unreserved_keyword:
 			| VISIBLE
 			| VOLATILE
 			| WAIT
+			| WARNINGS
 			| WEAK
 			| WHILE_P
 			| WHITESPACE_P

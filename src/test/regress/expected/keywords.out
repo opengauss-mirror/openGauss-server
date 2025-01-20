@@ -55,24 +55,6 @@ BEGIN
     END LOOP;
 END;
 /
-NOTICE:  Test failed. sql: 'CREATE TABLE keywords.novalidate (novalidate INT)'
-NOTICE:  Test failed. sql: 'DROP TABLE keywords.novalidate'
-NOTICE:  Test failed. sql: 'CREATE INDEX keywords.novalidate ON keywords.tbl(v)'
-NOTICE:  Test failed. sql: 'DROP INDEX keywords.novalidate'
-NOTICE:  Test failed. sql: 'CREATE TABLE keywords.raw (raw INT)'
-NOTICE:  Test failed. sql: 'DROP TABLE keywords.raw'
-NOTICE:  Test failed. sql: 'CREATE TABLE keywords.timezone_hour (timezone_hour INT)'
-NOTICE:  Test failed. sql: 'DROP TABLE keywords.timezone_hour'
-NOTICE:  Test failed. sql: 'CREATE INDEX keywords.timezone_hour ON keywords.tbl(v)'
-NOTICE:  Test failed. sql: 'DROP INDEX keywords.timezone_hour'
-NOTICE:  Test failed. sql: 'CREATE TABLE keywords.timezone_minute (timezone_minute INT)'
-NOTICE:  Test failed. sql: 'DROP TABLE keywords.timezone_minute'
-NOTICE:  Test failed. sql: 'CREATE INDEX keywords.timezone_minute ON keywords.tbl(v)'
-NOTICE:  Test failed. sql: 'DROP INDEX keywords.timezone_minute'
-NOTICE:  Test failed. sql: 'CREATE TABLE keywords.warnings (warnings INT)'
-NOTICE:  Test failed. sql: 'DROP TABLE keywords.warnings'
-NOTICE:  Test failed. sql: 'CREATE INDEX keywords.warnings ON keywords.tbl(v)'
-NOTICE:  Test failed. sql: 'DROP INDEX keywords.warnings'
 \unset VERBOSITY
 SET CURRENT_SCHEMA TO DEFAULT;
 DROP SCHEMA keywords CASCADE;
