@@ -174,6 +174,7 @@ static void InsertCbmPageElemToEntry(CbmHashEntry *cbmPageEntry, Dlelem *elt, Bl
 static bool ForeachEntryForPage(CbmHashEntry *cbmPageEntry, Dlelem **eltCbmSegPageList, Dlelem **eltPagelist);
 static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitmap *xlogCbmSys, bool changeTotalNum,
                                 StringInfo log);
+static void DestoryCbmHashEntryByCBMReader(CbmHashEntry *cbmPageEntry, bool changeTotalNum, StringInfo log);
 static Dlelem *FindPageElemFromEntry(CbmHashEntry *cbmPageEntry, BlockNumber pageFirstBlock);
 static bool checkUserRequstAndRotateCbm();
 static void CBMQueuePopFront();
@@ -229,6 +230,7 @@ extern bool CreateCBMReaderWorkers() {
             ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", i)));
         } else {
             ereport(LOG, (errmsg("The %d CBM Reader worker thread create failed.", i)));
+            return false;
         }
     }
 
@@ -1356,9 +1358,7 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
              * Force the coming startLSN be set to a valid xlog record start LSN
              * if this is a forced cbm track with a non-record-end stop position.
              */
-            if (!isLastCBMRecord) {
-                cbmRecord->endPtr = xlogreader->EndRecPtr;
-            } else if (!isRecEnd) {
+            if (!isLastCBMRecord || !isRecEnd) {
                 cbmRecord->endPtr = xlogreader->EndRecPtr;
             }
 
@@ -2239,6 +2239,7 @@ static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber for
     INIT_CBMPAGETAG(cbmPageTag, rNode, forkNum);
 
     if (pageType == PAGETYPE_DROP) {
+        CBMHashRemove(cbmPageTag, t_thrd.cbm_cxt.cbmPageHash, true);
     } else if (pageType == PAGETYPE_TRUNCATE &&
         (((forkNum == MAIN_FORKNUM || forkNum == VISIBILITYMAP_FORKNUM) && rNode.relNode != InvalidOid) ||
         (forkNum == UNDO_FORKNUM && IS_UNDO_RELFILENODE(rNode)))) {
@@ -3111,7 +3112,11 @@ static void CBMPageEtyRemove(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, bo
     appendStringInfo(log, "remove all cbm pages of rel %u/%u/%u forknum %d", cbmPageTag.rNode.spcNode,
                      cbmPageTag.rNode.dbNode, cbmPageTag.rNode.relNode, cbmPageTag.forkNum);
 
-    DestoryCbmHashEntry(cbmPageEntry, isCBMWriter, t_thrd.cbm_cxt.XlogCbmSys, true, log);
+    if (isCBMWriter) {
+        DestoryCbmHashEntryByCBMReader(cbmPageEntry, true, log);
+    } else {
+        DestoryCbmHashEntry(cbmPageEntry, isCBMWriter, t_thrd.cbm_cxt.XlogCbmSys, true, log);
+    }
 
     if (removeEntry && hash_search(cbmPageHash, (void *)&cbmPageTag, HASH_REMOVE, NULL) == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("CBM hash table corrupted")));
@@ -4054,6 +4059,34 @@ static void DestoryCbmHashEntry(CbmHashEntry *cbmPageEntry, bool reuse, XlogBitm
                     pfree(DLE_VAL(eltPagelist));
                     DLFreeElem(eltPagelist);
                 } 
+            }
+            cbmPageEntry->pageNum--;
+        }
+        pfree(DLE_VAL(eltCbmSegPageList));
+        DLFreeElem(eltCbmSegPageList);
+    }
+    Assert(0 == cbmPageEntry->pageNum);
+    Assert(DLGetHead(&cbmPageEntry->cbmSegPageList) == NULL && DLGetTail(&cbmPageEntry->cbmSegPageList) == NULL);
+}
+
+static void DestoryCbmHashEntryByCBMReader(CbmHashEntry *cbmPageEntry, bool changeTotalNum, StringInfo log)
+{
+    Dlelem *eltCbmSegPageList = NULL;
+    Dlelem *eltPagelist = NULL;
+    CbmSegPageList *cbmSegPageList = NULL;
+    while ((eltCbmSegPageList = DLRemHead(&cbmPageEntry->cbmSegPageList)) != NULL) {
+        cbmSegPageList = (CbmSegPageList *)DLE_VAL(eltCbmSegPageList);
+        Assert(eltCbmSegPageList);
+        while ((eltPagelist = DLRemHead(&cbmSegPageList->pageDllist)) != NULL) {
+            Assert(eltPagelist);
+            if (log != NULL) {
+                appendStringInfo(log, " page first blocknum %u", ((CbmPageHeader *)DLE_VAL(eltPagelist))->firstBlkNo);
+            }
+            if (eltPagelist != NULL) {
+                DLAddTail(&t_thrd.cbm_cxt.CBMReaderStatus->readerPageFreeList, eltPagelist);
+                if (changeTotalNum) {
+                    t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum--;
+                }
             }
             cbmPageEntry->pageNum--;
         }
