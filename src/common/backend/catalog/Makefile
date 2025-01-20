@@ -25,7 +25,7 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
        gs_db_privilege.o pg_publication.o pg_subscription.o gs_utf8_collation.o gs_collation.o gs_gbk_collation.o\
-       gs_gb18030_collation.o pg_proc_ext.o query_imcstore_views.o
+       gs_gb18030_collation.o pg_proc_ext.o query_imcstore_views.o pg_statistic_history.o pg_statistic_lock.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 
@@ -62,7 +62,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	gs_matview_dependency.h gs_matview_log.h pgxc_slice.h gs_opt_model.h gs_dependencies.h gs_dependencies_obj.h gs_package.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
 	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
-	pg_subscription_rel.h pg_proc_ext.h pg_object_type.h \
+	pg_subscription_rel.h pg_proc_ext.h pg_object_type.h pg_statistic_history.h pg_statistic_lock.h\
     )
 
 # location of Catalog.pm

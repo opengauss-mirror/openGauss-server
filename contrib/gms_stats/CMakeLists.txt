@@ -14,7 +14,13 @@ set_target_properties(gms_stats PROPERTIES PREFIX "")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats.control
     DESTINATION share/postgresql/extension/
-) 
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats--1.1.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats--1.0--1.1.sql
+    DESTINATION share/postgresql/extension/
+)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats--1.0.sql
     DESTINATION share/postgresql/extension/
 )

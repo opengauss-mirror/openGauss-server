@@ -3,7 +3,7 @@ MODULE_big = gms_stats
 OBJS	= gms_stats.o
 
 EXTENSION = gms_stats
-DATA = gms_stats--1.0.sql
+DATA = gms_stats--1.1.sql gms_stats--1.0--1.1.sql gms_stats--1.0.sql
 
 exclude_option = -fPIE
 override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))

@@ -37,6 +37,8 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
+#include "catalog/pg_statistic_lock.h"
+#include "catalog/pg_statistic_history.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/namespace.h"
 #include "catalog/storage_gtt.h"
@@ -512,13 +514,15 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
     }
 
     /*
-     * We can ANALYZE any table except pg_statistic. See update_attstats
+     * We can ANALYZE any table except pg_statistic、pg_statistic_history、pg_statistic_lock. See update_attstats
      */
-    if (RelationGetRelid(onerel) == StatisticRelationId) {
+    Oid relid = RelationGetRelid(onerel);
+    if (relid == StatisticRelationId || relid == StatisticHistoryRelationId || relid == StatisticLockRelationId) {
         AssertEreport(RelationIsNonpartitioned(onerel), MOD_OPT, "pg_statistic can not be a partitioned table.");
 
         if (!IsInitdb && !IS_SINGLE_NODE) {
-            elog(WARNING, "System catalog pg_statistic can not be analyzed, skip it.");
+            elog(WARNING, "System catalog pg_statistic、pg_statistic_history、pg_statistic_lock "
+                           "can not be analyzed, skip it.");
         }
 
         relation_close(onerel, lockmode);
@@ -4341,6 +4345,10 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
 
             /* do signle column stats update */
             update_stats_catalog<true>(pgstat, oldcontext, relid, relkind, inh, stats, natts, relpersistence);
+            /* do stats history update */
+            if (t_thrd.proc->workingVersionNum >= STATISTIC_HISTORY_VERSION_NUMBER) {
+                InsertColumnStatisticHistory(relid, relkind, inh, stats);
+            }
         }
     }
 

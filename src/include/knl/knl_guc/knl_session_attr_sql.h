@@ -263,6 +263,7 @@ typedef struct knl_session_attr_sql {
 #endif
     bool var_eq_const_selectivity;
     int vectorEngineStrategy;
+    int gms_stats_history_retention;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     bool enable_custom_parser;
     bool dolphin;

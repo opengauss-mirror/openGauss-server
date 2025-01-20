@@ -1,5 +1,5 @@
 # gms_stats extension
 comment = 'collection of stats data for PL/SQL applications'
-default_version = '1.0'
+default_version = '1.1'
 module_pathname = '$libdir/gms_stats'
 relocatable = false

@@ -114,6 +114,8 @@
 #include "catalog/pg_shseclabel.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
+#include "catalog/pg_statistic_history.h"
+#include "catalog/pg_statistic_lock.h"
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
@@ -359,6 +361,10 @@ static const FormData_pg_attribute Desc_pg_object_type[Natts_pg_object_type] = {
 static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
 static const FormData_pg_attribute Desc_gs_sql_patch_origin[Natts_gs_sql_patch] = {Schema_gs_sql_patch};
 static const FormData_pg_attribute Desc_pg_proc_ext[Natts_pg_proc_ext] = {Schema_pg_proc_ext};
+static const FormData_pg_attribute Desc_pg_statistic_history[Natts_pg_statistic_history] = {
+    Schema_pg_statistic_history
+};
+static const FormData_pg_attribute Desc_pg_statistic_lock[Natts_pg_statistic_lock] = {Schema_pg_statistic_lock};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -870,6 +876,24 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_pg_directory,
         Desc_pg_directory,
+        false,
+        true},
+    {StatisticHistoryRelationId,
+        "pg_statistic_history",
+        StatisticHistoryRelation_Rowtype_Id,
+        false,
+        false,
+        Natts_pg_statistic_history,
+        Desc_pg_statistic_history,
+        false,
+        true},
+    {StatisticLockRelationId,
+        "pg_statistic_lock",
+        StatisticLockRelation_Rowtype_Id,
+        false,
+        false,
+        Natts_pg_statistic_lock,
+        Desc_pg_statistic_lock,
         false,
         true},
     {DbPrivilegeId,

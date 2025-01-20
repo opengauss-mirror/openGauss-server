@@ -63,6 +63,8 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
+#include "catalog/pg_statistic_history.h"
+#include "catalog/pg_statistic_lock.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
@@ -5027,6 +5029,14 @@ void RemoveStatistics(Oid relid, AttrNumber attnum)
 
     systable_endscan(scan);
     heap_close(pgstatistic, RowExclusiveLock);
+
+    if (t_thrd.proc->workingVersionNum >= STATISTIC_HISTORY_VERSION_NUMBER) {
+        RemoveStatisticHistory(relid, attnum);
+        if (attnum == 0) {
+            Oid namespaceid = get_rel_namespace(relid);
+            RemoveStatisticLockTab(namespaceid, relid);
+        }
+    }
 }
 
 /*

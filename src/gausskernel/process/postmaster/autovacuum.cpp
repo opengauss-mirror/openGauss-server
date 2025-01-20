@@ -87,6 +87,8 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_database.h"
 #include "catalog/pgxc_class.h"
+#include "catalog/pg_statistic_history.h"
+#include "catalog/pg_statistic_lock.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
 #include "commands/matview.h"
@@ -1882,6 +1884,44 @@ static void fetch_global_autovac_info()
     DeleteApplicationNameFromPoolerParams();
 }
 
+static void ClearStatsHistoryTimeoutRecords()
+{
+    ScanKeyData skey[1];
+    SysScanDesc sysscan;
+    HeapTuple tuple;
+    TimestampTz retentionTime;
+    TimestampTz currentTimestamp = GetCurrentTimestamp();
+    int retention = u_sess->attr.attr_sql.gms_stats_history_retention;
+
+#ifdef HAVE_INT64_TIMESTAMP
+        retentionTime = retention * USECS_PER_DAY;
+#else
+        retentionTime = retention * SECS_PER_DAY;
+#endif
+
+    ScanKeyInit(&skey[0], Anum_pg_statistic_history_current_analyzetime, BTLessStrategyNumber, F_TIMESTAMP_LT,
+        TimestampTzGetDatum(currentTimestamp - retentionTime));
+
+    Relation rel = heap_open(StatisticHistoryRelationId, RowExclusiveLock);
+    sysscan = systable_beginscan(rel, StatisticHistoryCurrTimeRelidIndexId, true, SnapshotNow, 1, skey);
+    while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
+        simple_heap_delete(rel, &tuple->t_self);
+    }
+
+    systable_endscan(sysscan);
+    heap_close(rel, RowExclusiveLock);
+}
+
+static bool check_table_is_locked(autovac_table* tab)
+{
+    if (t_thrd.proc->workingVersionNum < STATISTIC_HISTORY_VERSION_NUMBER) {
+        return false;
+    }
+
+    Oid namespaceid = get_rel_namespace(tab->at_relid);
+    return CheckRelationLocked(namespaceid, tab->at_relid);
+}
+
 /*
  * Process a database table-by-table
  *
@@ -2755,10 +2795,13 @@ static void do_autovacuum(void)
                 enable_sig_alarm(u_sess->attr.attr_storage.autoanalyze_timeout * 1000, true);
             }
 
-            if (local_autovacuum || vacObj->is_internal_relation)
-                autovacuum_local_vac_analyze(tab, bstrategy);
-            else
-                autovacuum_do_vac_analyze(tab, bstrategy);
+            /* Skip autovacuum as the vacuumed table is locked */
+            if (!check_table_is_locked(tab)) {
+                if (local_autovacuum || vacObj->is_internal_relation)
+                    autovacuum_local_vac_analyze(tab, bstrategy);
+                else
+                    autovacuum_do_vac_analyze(tab, bstrategy);
+            }
 
             if (vacObj->flags & VACFLG_SUB_PARTITION) {
                 // Get partitioned/subpartitioned table's oid
@@ -2776,6 +2819,12 @@ static void do_autovacuum(void)
 
             /* Cancel any active statement timeout before committing */
             disable_sig_alarm(true);
+
+            if (t_thrd.proc->workingVersionNum >= STATISTIC_HISTORY_VERSION_NUMBER
+                /* gms_stats_history_retention =  -1, means never clear data in pg_statistic_history */
+                && u_sess->attr.attr_sql.gms_stats_history_retention != -1) {
+                ClearStatsHistoryTimeoutRecords();
+            }
 
             /*
              * Clear a possible query-cancel signal, to avoid a late reaction

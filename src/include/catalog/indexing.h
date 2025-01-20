@@ -703,6 +703,14 @@ DECLARE_UNIQUE_INDEX(pg_event_trigger_oid_index, 3487, on pg_event_trigger using
 DECLARE_UNIQUE_INDEX(pg_proc_ext_proc_oid_index, 3488, on pg_proc_ext using btree(proc_oid oid_ops));
 #define ProcExtProcOidIndexId  3488
 
+DECLARE_INDEX(pg_statistic_history_tab_statype_attnum_index, 4887, on pg_statistic_history using btree(starelid oid_ops, statype char_ops, staattnum int2_ops));
+#define StatisticHistoryTabTypAttnumIndexId 4887
+DECLARE_INDEX(pg_statistic_history_current_analyzetime_relid_index, 4888, on pg_statistic_history using btree(current_analyzetime timestamptz_ops, starelid oid_ops));
+#define StatisticHistoryCurrTimeRelidIndexId 4888
+
+DECLARE_INDEX(pg_statistic_lock_index, 4899, on pg_statistic_lock using btree(namespaceid oid_ops, stalocktype char_ops, relid oid_ops, partid oid_ops));
+#define StatisticLockIndexId 4899
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 

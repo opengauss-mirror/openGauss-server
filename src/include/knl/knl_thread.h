@@ -1534,6 +1534,8 @@ typedef struct knl_t_vacuum_context {
 
     bool in_vacuum;
 
+    TimestampTz vacuumAnalyzeTime;
+
 } knl_t_vacuum_context;
 
 #ifdef ENABLE_HTAP
