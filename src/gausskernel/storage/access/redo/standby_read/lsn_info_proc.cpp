@@ -239,12 +239,12 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
     Assert(!IsSegmentFileNode(buf_tag->rnode) || IsSegmentPhysicalRelNode(buf_tag->rnode));
     Page page = NULL;
     BasePageInfo base_page_info = NULL;
-    uint32 batch_id = meta_info->batch_id;
-    uint32 worker_id = meta_info->redo_id;
     Buffer buffer = InvalidBuffer;
     bool need_update_old_page_header = false;
 
     SpinLockAcquire(&(meta_info->mutex));
+    uint32 batch_id = meta_info->batch_id;
+    uint32 worker_id = meta_info->redo_id;
     LsnInfoPosition insert_pos = meta_info->lsn_table_next_position;
     *base_page_pos = pg_atomic_fetch_add_u64(&(extreme_rto::g_dispatcher->next_base_page), BLCKSZ);
     LsnInfoPosition next_insert_pos = LSN_INFO_LIST_HEAD;
@@ -276,7 +276,7 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
     }
     Assert(offset % LSN_INFO_NODE_SIZE == 0);
     /* update meta info */
-    meta_info->lsn_table_next_position = insert_pos + LSN_INFO_NODE_SIZE;
+    meta_info->lsn_table_next_position = insert_pos + BASE_PAGE_INFO_NODE_SIZE;
     SpinLockRelease(&(meta_info->mutex));
 
     if (need_update_old_page_header) {
@@ -289,6 +289,7 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
         Assert(is_lsn_info_page_valid(old_page_header));
         Assert(old_page_header->next_lsn_info_page == 0);
         old_page_header->next_lsn_info_page = next_insert_pos;
+        standby_read_meta_page_set_lsn(pipe_old_page, next_lsn);
         MarkBufferDirty(pipe_old_buffer);
         UnlockReleaseBuffer(pipe_old_buffer);
     }

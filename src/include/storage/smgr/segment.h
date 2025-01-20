@@ -139,7 +139,7 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
 void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock);
 Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
                             BlockNumber blockNum, ReadBufferMode mode);
-Buffer standby_read_seg_buffer(SegSpace *spc, const RelFileNode &rnode, ForkNumber forkNum,
+Buffer standby_read_seg_buffer(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
                                BlockNumber blockNum, ReadBufferMode mode);
 Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
                       BlockNumber blockNum, ReadBufferMode mode);

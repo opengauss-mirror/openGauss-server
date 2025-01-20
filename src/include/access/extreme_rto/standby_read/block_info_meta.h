@@ -82,7 +82,7 @@ BlockMetaInfo *get_block_meta_info_by_relfilenode(const BufferTag &buf_tag, Buff
 void insert_lsn_to_block_info(
     StandbyReadMetaInfo *mete_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn);
 void insert_lsn_to_block_info_for_opt(
-    StandbyReadMetaInfo *mete_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn);
+    StandbyReadMetaInfo *mete_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn, bool force_base_page);
 
 StandbyReadRecyleState recycle_block_info(StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag,
     XLogRecPtr next_base_page_lsn, XLogRecPtr recyle_lsn, XLogRecPtr *block_info_max_lsn);

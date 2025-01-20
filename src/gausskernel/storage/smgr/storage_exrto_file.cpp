@@ -84,7 +84,7 @@ static void exrto_get_file_path(const RelFileNode node, ForkNumber forknum, uint
             batch_id, worker_id, segno);
     } else {
         if (is_standby_read_seg_relnode(node)) {
-            uint32 bucketid = node.bucketNode + EXRTO_STANDBY_READ_BUCKET_OFFSET;
+            uint32 bucketid = SegmentBktId;
             rc = snprintf_s(filename, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%u_%u_%u_%d_%s.%u",
                 node.spcNode, node.dbNode, node.relNode, bucketid, forkNames[forknum], (uint32)segno);
         } else {

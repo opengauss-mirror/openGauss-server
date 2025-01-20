@@ -1395,11 +1395,10 @@ void XlogDropRowReation(RelFileNode rnode)
     if (IS_EXRTO_READ) {
         RelFileNodeBackend standbyReadRnode;
         standbyReadRnode.node = rnode;
-        standbyReadRnode.node.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
         if (IsSegmentFileNode(rnode)) {
-            standbyReadRnode.node.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+            standbyReadRnode.node.bucketNode = EXRTO_SEGMENT_STANDBY_READ_BUCKETID;
         } else {
-            standbyReadRnode.node.bucketNode -= EXRTO_STANDBY_READ_BUCKET_OFFSET;
+            standbyReadRnode.node.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
         }
 
         standbyReadRnode.backend = InvalidBackendId;
