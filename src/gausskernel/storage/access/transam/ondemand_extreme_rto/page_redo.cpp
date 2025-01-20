@@ -336,6 +336,35 @@ loop:
 #endif /* __x86_64__ || __aarch64__ */
 }
 
+/* automic write for lastQueueTopReadRecPtr and lastQueueTopEndRecPtr */
+void SetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
+{
+    volatile PageRedoWorker *tmpWk = worker;
+#if defined(__x86_64__) || defined(__aarch64__)
+    uint128_u exchange;
+    uint128_u current;
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr);
+
+    Assert(sizeof(tmpWk->lastQueueTopReadRecPtr) == 8);
+    Assert(sizeof(tmpWk->lastQueueTopEndRecPtr) == 8);
+
+    exchange.u64[0] = (uint64)readPtr;
+    exchange.u64[1] = (uint64)endPtr;
+
+loop:
+    current = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr, compare, exchange);
+    if (!UINT128_IS_EQUAL(compare, current)) {
+        UINT128_COPY(compare, current);
+        goto loop;
+    }
+#else
+    SpinLockAcquire(&tmpWk->ptrLck);
+    tmpWk->lastQueueTopReadRecPtr = readPtr;
+    tmpWk->lastQueueTopEndRecPtr = endPtr;
+    SpinLockRelease(&tmpWk->ptrLck);
+#endif /* __x86_64__ || __aarch64__ */
+}
+
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
@@ -351,6 +380,25 @@ void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRec
     SpinLockAcquire(&tmpWk->ptrLck);
     *readPtr = tmpWk->lastReplayedReadRecPtr;
     *endPtr = tmpWk->lastReplayedEndRecPtr;
+    SpinLockRelease(&tmpWk->ptrLck);
+#endif /* __x86_64__ || __aarch64__ */
+}
+
+/* automic write for lastQueueTopReadRecPtr and lastQueueTopEndRecPtr */
+void GetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
+{
+    volatile PageRedoWorker *tmpWk = worker;
+#if defined(__x86_64__) || defined(__aarch64__)
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr);
+    Assert(sizeof(tmpWk->lastQueueTopReadRecPtr) == 8);
+    Assert(sizeof(tmpWk->lastQueueTopEndRecPtr) == 8);
+
+    *readPtr = (XLogRecPtr)compare.u64[0];
+    *endPtr = (XLogRecPtr)compare.u64[1];
+#else
+    SpinLockAcquire(&tmpWk->ptrLck);
+    *readPtr = tmpWk->lastQueueTopReadRecPtr;
+    *endPtr = tmpWk->lastQueueTopEndRecPtr;
     SpinLockRelease(&tmpWk->ptrLck);
 #endif /* __x86_64__ || __aarch64__ */
 }
@@ -878,10 +926,16 @@ static void WaitSegRedoWorkersQueueEmpty()
     }
 }
 
-static void WaitTrxnRedoWorkersQueueEmpty()
+static void WaitTrxnRedoManagerQueueSync(XLogRecParseState *parsestate)
 {
+    XLogRecPtr readPtr;
+    XLogRecPtr endPtr;
     while (!SPSCBlockingQueueIsEmpty(g_dispatcher->trxnLine.managerThd->queue) ||
         !SPSCBlockingQueueIsEmpty(g_dispatcher->trxnQueue)) {
+        GetQueueTopReadEndPtr(g_dispatcher->trxnLine.managerThd, &readPtr, &endPtr);
+        if (XLByteLE(parsestate->blockparse.blockhead.end_ptr, endPtr)) {
+            break;
+        }
         pg_usleep(100000L);   /* 100 ms */
         RedoInterruptCallBack();
     }
@@ -891,7 +945,7 @@ void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
 {
     PageManagerPruneIfRealtimeBuildFailover();
     WaitSegRedoWorkersQueueEmpty();
-    WaitTrxnRedoWorkersQueueEmpty();
+    WaitTrxnRedoManagerQueueSync(parsestate);
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
     HASH_SEQ_STATUS status;
@@ -1827,6 +1881,7 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
     } else if (item == (void *)&g_hashmapPruneMark) {
         TrxnManagerProcHashMapPrune();
     } else {
+        SetQueueTopReadEndPtr(g_redoWorker, item->record.ReadRecPtr, item->record.EndRecPtr);
         if (XLByteLT(item->record.EndRecPtr, g_redoWorker->nextPrunePtr)) {
             if (XactHasSegpageRelFiles(&item->record)) {
                 uint32 expected = 1;
