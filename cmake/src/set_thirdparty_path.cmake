@@ -84,6 +84,7 @@ set(SECUREDYNAMICLIB_HOME ${PLATFORM_PATH}/Huawei_Secure_C/Dynamic_Lib)
 set(DCF_HOME ${COMPONENT_PATH}/dcf)
 set(DMS_HOME ${COMPONENT_PATH}/dms)
 set(DSS_HOME ${COMPONENT_PATH}/dss)
+set(HCOM4DB_HOME ${COMPONENT_PATH}/hcom4db)
 
 set(MOCKCPP_HOME ${BUILDTOOLS_PATH}/mockcpp/${LIB_UNIFIED_SUPPORT})
 set(GTEST_HOME ${BUILDTOOLS_PATH}/gtest/${LIB_UNIFIED_SUPPORT})
@@ -281,6 +282,11 @@ set(DCF_LIB_PATH ${DCF_HOME}/lib)
 # dms component
 #############################################################################
 set(DMS_LIB_PATH ${DMS_HOME}/lib)
+
+#############################################################################
+# hcom4db component
+#############################################################################
+set(HCOM4DB_LIB_PATH ${HCOM4DB_HOME}/lib)
 
 #############################################################################
 # dss component
