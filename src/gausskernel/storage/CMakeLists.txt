@@ -26,6 +26,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/xlog_share_storage
     ${CMAKE_CURRENT_SOURCE_DIR}/dorado_operation
     ${CMAKE_CURRENT_SOURCE_DIR}/dss
+    ${CMAKE_CURRENT_SOURCE_DIR}/matrix_mem
 )
 
 if("${ENABLE_HTAP}" STREQUAL "ON")
@@ -61,6 +62,7 @@ add_subdirectory(tcap)
 add_subdirectory(xlog_share_storage)
 add_subdirectory(dorado_operation)
 add_subdirectory(dss)
+add_subdirectory(matrix_mem)
 
 if("${ENABLE_HTAP}" STREQUAL "ON")
     add_subdirectory(htap)
