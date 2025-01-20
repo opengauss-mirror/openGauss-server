@@ -7820,6 +7820,10 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
         if (CheckForFailoverTrigger() || CheckForSwitchoverTrigger() || CheckForStandbyTrigger()) {
             break;
         }
+        
+        /* recovery_min_apply_delay maybe change, so we need recalculate recoveryDelayUntilTime */
+        u_sess->attr.attr_storage.recoveryDelayUntilTime =
+            TimestampTzPlusMilliseconds(xtime, u_sess->attr.attr_storage.recovery_min_apply_delay);
 
         /* Wait for difference between GetCurrentTimestamp() and recoveryDelayUntilTime */
         TimestampDifference(GetCurrentTimestamp(), u_sess->attr.attr_storage.recoveryDelayUntilTime, &secs, &microsecs);
