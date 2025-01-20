@@ -74,25 +74,28 @@ static void check_mergejoinable(RestrictInfo* restrictinfo);
  * RELOPT_BASEREL.	(Note: build_simple_rel recurses internally to build
  * "other rel" RelOptInfos for the members of any appendrels we find here.)
  */
-void add_base_rels_to_query(PlannerInfo* root, Node* jtnode)
+void add_base_rels_to_query(PlannerInfo* root, Node* jtnode, Bitmapset** checkDuplicate)
 {
     if (jtnode == NULL)
         return;
     if (IsA(jtnode, RangeTblRef)) {
         int varno = ((RangeTblRef*)jtnode)->rtindex;
 
-        (void)build_simple_rel(root, varno, RELOPT_BASEREL);
+        if (!bms_is_member(varno, *checkDuplicate)) {
+            (void)build_simple_rel(root, varno, RELOPT_BASEREL);
+            *checkDuplicate = bms_add_member(*checkDuplicate, varno);
+        }
     } else if (IsA(jtnode, FromExpr)) {
         FromExpr* f = (FromExpr*)jtnode;
         ListCell* l = NULL;
 
         foreach (l, f->fromlist)
-            add_base_rels_to_query(root, (Node*)lfirst(l));
+            add_base_rels_to_query(root, (Node*)lfirst(l), checkDuplicate);
     } else if (IsA(jtnode, JoinExpr)) {
         JoinExpr* j = (JoinExpr*)jtnode;
 
-        add_base_rels_to_query(root, j->larg);
-        add_base_rels_to_query(root, j->rarg);
+        add_base_rels_to_query(root, j->larg, checkDuplicate);
+        add_base_rels_to_query(root, j->rarg, checkDuplicate);
     } else {
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -539,6 +542,7 @@ List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved)
     Relids qualscope = NULL;
     Relids inner_join_rels = NULL;
     List *postponed_qual_list = NIL;
+    List* result2 = NIL;
 
     /* Start recursion at top of jointree */
     AssertEreport(
@@ -549,6 +553,23 @@ List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved)
 
     /* Shouldn't be any leftover quals */
     Assert(postponed_qual_list == NIL);
+
+    if (root->parse->commandType == CMD_DELETE ||
+    root->parse->commandType == CMD_UPDATE) {
+        Bitmapset* checkDuplicate = NULL;
+        List* result2 = NIL;
+        ListCell* lc = NULL;
+        foreach (lc, result) {
+            RangeTblRef* rtf = (RangeTblRef*)lfirst(lc);
+            if (!bms_is_member(rtf->rtindex, checkDuplicate)) {
+                result2 = lappend(result2, rtf);
+                checkDuplicate = bms_add_member(checkDuplicate, rtf->rtindex);
+            }
+        }
+        list_free(result);
+        bms_free(checkDuplicate);
+        result = result2;
+    }
 
     return result;
 }

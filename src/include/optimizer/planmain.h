@@ -154,7 +154,7 @@ extern bool isEqualExpr(Node* node);
 extern bool check_subplan_in_qual(List* tlist, List* qual);
 extern bool check_subplan_exec_datanode(PlannerInfo* root, Node* node);
 
-extern void add_base_rels_to_query(PlannerInfo* root, Node* jtnode);
+extern void add_base_rels_to_query(PlannerInfo* root, Node* jtnode, Bitmapset** checkDuplicate);
 extern void build_base_rel_tlists(PlannerInfo* root, List* final_tlist);
 extern void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_needed, bool create_new_ph);
 extern void find_lateral_references(PlannerInfo *root);
