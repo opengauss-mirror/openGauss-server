@@ -66,7 +66,7 @@ BlockMetaInfo* get_block_meta_info_by_relfilenode(
     Assert(!IsSegmentFileNode(buf_tag.rnode) || IsSegmentPhysicalRelNode(buf_tag.rnode));
     RelFileNode standby_read_rnode = buf_tag.rnode;
     if (IsSegmentFileNode(standby_read_rnode)) {
-        standby_read_rnode.bucketNode -= EXRTO_STANDBY_READ_BUCKET_OFFSET;
+        standby_read_rnode.bucketNode = EXRTO_SEGMENT_STANDBY_READ_BUCKETID;
     } else {
         standby_read_rnode.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
     }
@@ -174,7 +174,7 @@ void insert_lsn_to_block_info(
 }
 
 void insert_lsn_to_block_info_for_opt(
-    StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn)
+    StandbyReadMetaInfo *meta_info, const BufferTag &buf_tag, const Page base_page, XLogRecPtr next_lsn, bool force_base_page)
 {
     Buffer block_info_buf = InvalidBuffer;
     BlockMetaInfo *block_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_ZERO_ON_ERROR, &block_info_buf);
@@ -196,8 +196,8 @@ void insert_lsn_to_block_info_for_opt(
     /* if block is invalid or block is valid but all the lsn object of this block has been recycled(no data in lsn info
      * files belongs to this block), we reset this block
      */
-    uint64 global_recycle_lsn_info_page = pg_atomic_read_u64(&extreme_rto::g_dispatcher->global_recycle_lsn_info_page);
-    if (!is_block_meta_info_valid(block_info) || block_info->lsn_info_list.prev < global_recycle_lsn_info_page) {
+    if (!is_block_meta_info_valid(block_info) ||
+        block_info->lsn_info_list.prev < meta_info->lsn_table_recycle_position) {
         if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
             block_info_page_init(page);
         }
@@ -205,13 +205,17 @@ void insert_lsn_to_block_info_for_opt(
         init_block_info(block_info, current_page_lsn);
     }
 
-    insert_base_page_to_lsn_info(meta_info,
-                                 &block_info->lsn_info_list,
-                                 &block_info->base_page_info_list,
-                                 buf_tag,
-                                 base_page,
-                                 current_page_lsn,
-                                 next_lsn);
+    if (block_info->record_num % (uint32)g_instance.attr.attr_storage.base_page_saved_interval == 0 || force_base_page) {
+        insert_base_page_to_lsn_info(meta_info,
+                                     &block_info->lsn_info_list,
+                                     &block_info->base_page_info_list,
+                                     buf_tag,
+                                     base_page,
+                                     current_page_lsn,
+                                     next_lsn);
+    } else {
+        insert_lsn_to_lsn_info(meta_info, &block_info->lsn_info_list, next_lsn);
+    }
 
     ++(block_info->record_num);
     Assert(block_info->max_lsn <= next_lsn);

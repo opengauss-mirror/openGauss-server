@@ -54,6 +54,7 @@
 #include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "access/extreme_rto/batch_redo.h"
 #include "access/extreme_rto/page_redo.h"
+#include "access/extreme_rto/dispatcher.h"
 #include "access/twophase.h"
 #include "access/redo_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -1850,23 +1851,44 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         if (unlikely(bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM)) {
             ereport(PANIC, (errmsg("forknum is illegal: %d", bufferinfo->blockinfo.forknum)));
         }
-        BufferTag buf_tag;
-        INIT_BUFFERTAG(
-            buf_tag, bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
+        BufferTag old_buf_tag;
+        INIT_BUFFERTAG(old_buf_tag, bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
+        BufferTag buf_tag = old_buf_tag;
 
+        bool is_seg_page = IsSegmentLogicalRelNode(bufferinfo->blockinfo.rnode);
+        if (is_seg_page) {
+            buf_tag.rnode.relNode = blockhead->pblk.relNode;
+            buf_tag.blockNum = blockhead->pblk.block;
+        }
+        bool force_base_page = false;
+
+        StandbyReadMetaInfo* standby_read_meta_info = &extreme_rto::g_redoWorker->standby_read_meta_info;
+        if (blockhead->xl_rmid == RM_SEGPAGE_ID) {
+            Assert(IsSegmentFileNode(old_buf_tag.rnode));
+            extreme_rto::RedoItemTag redo_item_tag;
+            INIT_REDO_ITEM_TAG(redo_item_tag, old_buf_tag.rnode, old_buf_tag.forkNum, old_buf_tag.blockNum);
+            uint32 batch_id = extreme_rto::GetSlotId(old_buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num());
+            uint32 worker_id = extreme_rto::GetWorkerId(&redo_item_tag, extreme_rto::get_page_redo_worker_num_per_manager());
+            standby_read_meta_info = &extreme_rto::g_dispatcher->pageLines[batch_id].redoThd[worker_id]->standby_read_meta_info;
+            uint8 xl_info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
+            force_base_page = is_seg_page && (xl_info == XLOG_SEG_SEGMENT_EXTEND);
+        }
+        
         if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+            extreme_rto_standby_read::insert_lsn_to_block_info_for_opt(
+                standby_read_meta_info,
+                buf_tag,
+                bufferinfo->pageinfo.page,
+                blockhead->start_ptr,
+                force_base_page);
+        } else {
             if (blockhead->is_conflict_type && need_restore_new_page_version(redoblocktate)) {
-                extreme_rto_standby_read::insert_lsn_to_block_info_for_opt(
-                    &extreme_rto::g_redoWorker->standby_read_meta_info,
+                extreme_rto_standby_read::insert_lsn_to_block_info(
+                    standby_read_meta_info,
                     buf_tag,
                     bufferinfo->pageinfo.page,
                     blockhead->start_ptr);
             }
-        } else {
-            extreme_rto_standby_read::insert_lsn_to_block_info(&extreme_rto::g_redoWorker->standby_read_meta_info,
-                buf_tag,
-                bufferinfo->pageinfo.page,
-                blockhead->start_ptr);
         }
     }
 

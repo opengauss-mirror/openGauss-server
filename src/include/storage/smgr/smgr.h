@@ -143,14 +143,7 @@ enum SMGR_READ_STATUS {
 
 inline bool is_standby_read_seg_relnode(const RelFileNode &rnode)
 {
-    return (rnode.bucketNode >= MIN_EXRTO_STANDBY_READ_BUCKETID &&
-            rnode.bucketNode <= MAX_EXRTO_STANDBY_READ_BUCKETID);
-}
-
-inline bool is_segment_logical_relnode(const RelFileNode &rnode)
-{
-    const int extent_8192 = 5;
-    return (IsSegmentFileNode(rnode) && rnode.bucketNode > extent_8192);
+    return (rnode.bucketNode == EXRTO_SEGMENT_STANDBY_READ_BUCKETID);
 }
 
 /*

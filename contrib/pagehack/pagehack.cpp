@@ -839,9 +839,9 @@ typedef enum HackingType {
     HACKING_UNDO_RECORD,
     HACKING_UNDO_FIX,
     HACKING_SEGMENT,
-    NUM_HACKINGTYPE,
     HACKING_LSN_INFO_META,
     HACKING_BLOCK_INFO_META,
+    NUM_HACKINGTYPE,
 } HackingType;
 
 static HackingType hackingtype = HACKING_HEAP;

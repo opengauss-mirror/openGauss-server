@@ -7228,7 +7228,7 @@ void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay
             if (!is_old_delay_ddl && RecoveryInProgress() && IS_EXRTO_READ) {
                 RelFileNode block_meta_file = relFileNode;
                 if (IsSegmentFileNode(block_meta_file)) {
-                    block_meta_file.bucketNode -= EXRTO_STANDBY_READ_BUCKET_OFFSET;
+                    block_meta_file.bucketNode = EXRTO_SEGMENT_STANDBY_READ_BUCKETID;
                 } else {
                     block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
                 }

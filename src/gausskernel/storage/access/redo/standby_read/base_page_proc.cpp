@@ -64,8 +64,11 @@ Buffer buffer_read_base_page(BasePagePosition position, ReadBufferMode mode)
 void generate_base_page(const Page src_page, BasePagePosition base_page_pos)
 {
     Buffer dest_buf = buffer_read_base_page(base_page_pos, RBM_ZERO_AND_LOCK);
-
+#ifdef ENABLE_UT
+    Page dest_page = get_page_from_buffer(dest_buf);
+#else
     Page dest_page = BufferGetPage(dest_buf);
+#endif
     errno_t rc = memcpy_s(dest_page, BLCKSZ, src_page, BLCKSZ);
     securec_check(rc, "\0", "\0");
     MarkBufferDirty(dest_buf);

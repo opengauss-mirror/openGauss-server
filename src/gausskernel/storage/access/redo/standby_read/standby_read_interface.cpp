@@ -64,7 +64,7 @@ void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node,
         read_node.opt = EXRTO_READ_STANDBY_END_LSN_OPT;
     }
     if (IsSegmentFileNode(orig_node)) {
-        read_node.bucketNode = orig_node.bucketNode - EXRTO_STANDBY_READ_BUCKET_OFFSET;
+        read_node.bucketNode = EXRTO_SEGMENT_STANDBY_READ_BUCKETID;
     } else {
         read_node.bucketNode = EXRTO_READ_SPECIAL_LSN;
     }
@@ -133,10 +133,10 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
     return BufferDescriptorGetBuffer(buf_desc);
 }
 
-Buffer get_newest_seg_page_for_read(SegSpace *spc, const RelFileNode& rnode, ForkNumber forknum,
-                                    BlockNumber blocknum, ReadBufferMode mode, XLogRecPtr read_lsn)
+Buffer get_newest_seg_page_for_read(
+    SegSpace *spc, const BufferTag &buf_tag, ReadBufferMode mode, XLogRecPtr read_lsn)
 {
-    Buffer newest_seg_buf = ReadBufferFastNormal(spc, rnode, forknum, blocknum, mode);
+    Buffer newest_seg_buf = ReadBufferFastNormal(spc, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum, mode);
     if (BufferIsInvalid(newest_seg_buf)) {
         return InvalidBuffer;
     }
@@ -148,12 +148,6 @@ Buffer get_newest_seg_page_for_read(SegSpace *spc, const RelFileNode& rnode, For
         UnlockReleaseBuffer(newest_seg_buf);
         return InvalidBuffer;
     }
-
-    BufferTag buf_tag = {
-        .rnode = rnode,
-        .forkNum = forknum,
-        .blockNum = blocknum,
-    };
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     bool hit = false;
@@ -221,9 +215,12 @@ Buffer get_newest_page_for_read_new(
 }
 
 Buffer standby_read_seg_buffer(
-    SegSpace *spc, const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
+    SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
     Assert(IsSegmentPhysicalRelNode(rnode));
+    if (rnode.relNode == EXTENT_1) {
+        rnode.spcNode = DEFAULTTABLESPACE_OID;
+    }
     XLogRecPtr read_lsn = MAX_XLOG_REC_PTR;
 
     if (u_sess->utils_cxt.CurrentSnapshot != NULL && XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
@@ -232,7 +229,13 @@ Buffer standby_read_seg_buffer(
         read_lsn = t_thrd.proc->exrto_read_lsn;
     }
 
-    Buffer read_buf = get_newest_seg_page_for_read(spc, rnode, forkNum, blockNum, mode, read_lsn);
+    BufferTag buf_tag = {
+        .rnode = rnode,
+        .forkNum = forkNum,
+        .blockNum = blockNum,
+    };
+
+    Buffer read_buf = get_newest_seg_page_for_read(spc, buf_tag, mode, read_lsn);
     if (read_buf != InvalidBuffer) {
         // newest page's lsn smaller than read lsn
         return read_buf;
@@ -241,11 +244,6 @@ Buffer standby_read_seg_buffer(
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     // read lsn info
     StandbyReadLsnInfoArray *lsn_info = &t_thrd.exrto_recycle_cxt.lsn_info;
-    BufferTag buf_tag = {
-        .rnode = rnode,
-        .forkNum = forkNum,
-        .blockNum = blockNum,
-    };
     buffer_in_progress_pop();
     bool result = extreme_rto_standby_read::get_page_lsn_info(buf_tag, buf_tag, NULL, read_lsn, lsn_info);
     if (!result) {
@@ -336,9 +334,11 @@ Buffer standby_read_buf(
         .blockNum = block_num,
     };
     BufferTag buf_tag = old_buf_tag;
-    if (is_segment_logical_relnode(old_buf_tag.rnode)) {
-        SegPageLocation loc = seg_get_physical_location(old_buf_tag.rnode, old_buf_tag.forkNum,
-                                                        old_buf_tag.blockNum, false);
+    if (IsSegmentLogicalRelNode(old_buf_tag.rnode)) {
+        SegPageLocation loc = seg_get_physical_location(old_buf_tag.rnode,
+                                                        old_buf_tag.forkNum,
+                                                        old_buf_tag.blockNum,
+                                                        false);
         buf_tag.rnode.relNode = EXTENT_SIZE_TO_TYPE(loc.extent_size);
         buf_tag.blockNum = loc.blocknum;
     }
@@ -474,7 +474,7 @@ bool check_need_drop_buffer(StandbyReadMetaInfo *meta_info, const BufferTag tag)
         uint64 total_block_num =
             get_total_block_num(type, tag.rnode.relNode, tag.blockNum);
         uint64 recycle_pos = ((type == BASE_PAGE) ? meta_info->base_page_recyle_position
-                                                    : meta_info->lsn_table_recycle_position);
+                                                  : meta_info->lsn_table_recycle_position);
         return (total_block_num < (recycle_pos / BLCKSZ));
     }
 

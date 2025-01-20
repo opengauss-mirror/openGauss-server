@@ -103,14 +103,19 @@ bool check_if_need_force_recycle()
 {
     uint32 worker_nums = g_dispatcher->allWorkersCnt;
     PageRedoWorker** workers = g_dispatcher->allWorkers;
-    int64 total_base_page_size = 0;
-    int64 total_lsn_info_size = 0;
+    uint64 total_base_page_size = 0;
+    uint64 total_lsn_info_size = 0;
     double ratio = g_instance.attr.attr_storage.standby_force_recycle_ratio;
 
     // if standby_force_recyle_ratio is 0, the system does not recyle file.
-    if (ratio == 0) {
+    if (ratio == 0 || worker_nums == 0) {
         return false;
     }
+
+    BasePagePosition min_base_page_recyle_position = extreme_rto_standby_read::LSN_INFO_LIST_HEAD;
+    BasePagePosition min_lsn_info_recyle_position = extreme_rto_standby_read::LSN_INFO_LIST_HEAD;
+    BasePagePosition last_base_page_position = pg_atomic_read_u64(&extreme_rto::g_dispatcher->next_base_page);
+    BasePagePosition last_lsn_info_position = pg_atomic_read_u64(&extreme_rto::g_dispatcher->next_lsn_info_page);
 
     for (uint32 i = 0; i < worker_nums; ++i) {
         PageRedoWorker* page_redo_worker = workers[i];
@@ -118,8 +123,15 @@ bool check_if_need_force_recycle()
         if (page_redo_worker->role != REDO_PAGE_WORKER || (page_redo_worker->isUndoSpaceWorker)) {
             continue;
         }
-        total_base_page_size += (meta_info.base_page_next_position - meta_info.base_page_recyle_position);
-        total_lsn_info_size += (meta_info.lsn_table_next_position - meta_info.lsn_table_recycle_position);
+        min_base_page_recyle_position = rtl::min(min_base_page_recyle_position, meta_info.base_page_recyle_position);
+        min_lsn_info_recyle_position = rtl::min(min_lsn_info_recyle_position, meta_info.lsn_table_recycle_position);
+    }
+
+    if (last_base_page_position > min_base_page_recyle_position) {
+        total_base_page_size = last_base_page_position - min_base_page_recyle_position;
+    }
+    if (last_lsn_info_position > min_lsn_info_recyle_position) {
+        total_lsn_info_size = last_lsn_info_position - min_lsn_info_recyle_position;
     }
 
     /* the unit of max_standby_base_page_size and max_standby_lsn_info_size is KB */
