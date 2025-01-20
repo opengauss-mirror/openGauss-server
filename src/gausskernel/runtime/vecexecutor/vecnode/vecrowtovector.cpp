@@ -86,10 +86,10 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
                     break;
                 case -1: {
                     if (attr->atttypid == NUMERICOID) {
-                        ScalarVector* pVector = &pBatch->m_arr[i];
                         Datum v = PointerGetDatum(slot->tts_values[i]);
                         /* if numeric cloumn, try to convert numeric to big integer */
-                        pVector->m_vals[j] = try_direct_convert_numeric_normal_to_fast(v, pVector);
+                        v = try_direct_convert_numeric_normal_to_fast(v);
+                        pBatch->m_arr[i].AddVar(v, j);
                     }
                     else {
                         Datum v = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[i]));
