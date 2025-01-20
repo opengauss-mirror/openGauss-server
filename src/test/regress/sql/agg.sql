@@ -270,6 +270,36 @@ CORR_S(value1, value2,'ONE_SIDED_SIG_POS') AS S4,
 CORR_S(value1, value2,'ONE_SIDED_SIG_NEG') AS S5,
 CORR_S(value1, value2,'TWO_SIDED_SIG') AS S6 FROM test_data2;
 
+CREATE TABLE test_data3 (
+value1 DOUBLE PRECISION,
+value2 DOUBLE PRECISION,
+value3 DOUBLE PRECISION,
+value4 DOUBLE PRECISION
+);
+
+INSERT INTO test_data3 (value1, value2, value3, value4) VALUES (1.0, 2.0,5.0,4.0);
+INSERT INTO test_data3 (value1, value2, value3, value4) VALUES (5.0, 2.0, 5.0,4.0);
+INSERT INTO test_data3 (value1, value2, value3, value4) VALUES (1.0, 6.0, 5.0,4.0);
+INSERT INTO test_data3 (value1, value2, value3, value4) VALUES (2.0, 8.0, 1.0,4.0);
+INSERT INTO test_data3 (value1, value2, value3, value4) VALUES (13.0, 4.0, 4.0,4.0);
+
+SELECT
+CORR_K(value1, value2) AS corr_value1_value2,
+CORR_K(value1, value3) AS corr_value1_value3,
+CORR_K(value1, value4) AS corr_value1_value4,
+CORR_K(value2, value3) AS corr_value2_value3,
+CORR_K(value2, value4) AS corr_value2_value4,
+CORR_K(value3, value4) AS corr_value3_value4
+FROM test_data3;
+SELECT
+CORR_S(value1, value2) AS corr_value1_value2,
+CORR_S(value1, value3) AS corr_value1_value3,
+CORR_S(value1, value4) AS corr_value1_value4,
+CORR_S(value2, value3) AS corr_value2_value3,
+CORR_S(value2, value4) AS corr_value2_value4,
+CORR_S(value3, value4) AS corr_value3_value4
+FROM test_data3;
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
@@ -279,5 +309,6 @@ drop table EMP;
 drop table test_data;
 drop table test_data1;
 drop table test_data2;
+drop table test_data3;
 drop table t1;
 drop schema aggregate CASCADE;
