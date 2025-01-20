@@ -131,6 +131,9 @@ Datum initcap(PG_FUNCTION_ARGS)
 
 Datum nls_initcap(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
     text* in_string = PG_GETARG_TEXT_PP(0);
     if (!PG_ARGISNULL(1)) {
         ereport(NOTICE,
