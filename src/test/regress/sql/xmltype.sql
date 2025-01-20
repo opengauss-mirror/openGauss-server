@@ -193,7 +193,7 @@ update test_xmltype set data=appendchildxml(data,'/资料/设备',XMLType('<生�
 --查看是否追加成功
 select getStringVal( extract(data,'/资料')) as data from  test_xmltype;
 drop table test_xmltype;
--- 其他兼容性测试
+-- 其他兼容性测试，PG模式
 create database db_postgres dbcompatibility = 'PG';
 \c db_postgres
 create table test_xmltype(
@@ -229,3 +229,44 @@ select existsnode(x.data,'/collection/record/datafield[@tag="209"]/subfield[@cod
 drop table test_xmltype;
 \c regression
 drop database db_postgres;
+-- 其他兼容性测试，C模式
+DROP DATABASE IF EXISTS test_1087929sql;
+CREATE DATABASE test_1087929sql DBCOMPATIBILITY 'C';
+\c test_1087929sql
+show sql_compatibility;
+drop table IF EXISTS test_xmltype_1087929;
+create table test_xmltype_1087929(
+ID int,
+name varchar2(259),
+data xmltype
+);
+Insert INTO test_xmltype_1087929
+VALUES (1,'test xml doc','<?xml version="1.0" encoding="UTF-8" ?>
+<collection xmlns="">
+<record>
+<leader>-----nam0-22-----^^^450-</leader>
+<datafield tag="200" ind1="1" ind2=" ">
+<subfield code="a">抗震救灾</subfield>
+<subfield code="f">奥运会</subfield>
+</datafield>
+<datafield tag="209" ind1=" " ind2=" ">
+<subfield code="a">经济学</subfield>
+<subfield code="b">计算机</subfield>
+<subfield code="c">10001</subfield>
+<subfield code="d">2005-07-09</subfield>
+</datafield>
+<datafield tag="610" ind1="0" ind2=" ">
+<subfield code="a">计算机</subfield>
+<subfield code="a">笔记本</subfield>
+</datafield>
+</record>
+</collection>') ;
+--使用xmltype类型函数
+select extract(x.data,'/collection/record/datafield/subfield') xmlseq from test_xmltype_1087929 x;
+select XMLSequence(extract(x.data,'/collection/record/datafield/subfield')) xmlseq from test_xmltype_1087929 x;
+select extractvalue(x.data,'/collection/record/leader') as A from test_xmltype_1087929 x;
+select getStringVal(extract(x.data,'/collection/record/datafield/subfield')) a from test_xmltype_1087929 x;
+select existsnode(x.data,'/collection/record/datafield[@tag="209"]/subfield[@code="a"]') as a from test_xmltype_1087929 x;
+drop table test_xmltype_1087929;
+\c regression
+drop database test_1087929sql;
