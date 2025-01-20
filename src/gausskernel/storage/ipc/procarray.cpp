@@ -579,41 +579,45 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     *xid = pgxact->xid;
     *nsubxids = pgxact->nxids;
 
-    /* Clear xid from ProcXactHashTable. We can ignore BootstrapTransactionId */
-    if (TransactionIdIsNormal(*xid)) {
-        ProcXactHashTableRemove(*xid);
-    }
-
     pgxact->handle = InvalidTransactionHandle;
     pgxact->xid = InvalidTransactionId;
     pgxact->next_xid = InvalidTransactionId;
-    proc->lxid = InvalidLocalTransactionId;
     pgxact->xmin = InvalidTransactionId;
+
+    pgxact->csn_min = InvalidCommitSeqNo;
+    pgxact->csn_dr = InvalidCommitSeqNo;
+    /* must be cleared with xin/xmin. */
+    pgxact->vacuumFlags &= ~PROC_VACUUM_STATE_MASK;
+    pgxact->delayChkpt = false; /* be sure this is cleared in abort */
+    /* Clear the subtransaction-XID cache too while holding the lock. */
+    pgxact->nxids = 0;
+    ProcArrayClearAutovacuum(pgxact);
+
+    proc->lxid = InvalidTransactionId;
     proc->snapXmax = InvalidTransactionId;
     proc->snapCSN = InvalidCommitSeqNo;
     proc->exrto_read_lsn = 0;
     proc->exrto_min = 0;
     proc->exrto_gen_snap_time = 0;
-    pgxact->csn_min = InvalidCommitSeqNo;
-    pgxact->csn_dr = InvalidCommitSeqNo;
-    /* must be cleared with xid/xmin: */
-    pgxact->vacuumFlags &= ~PROC_VACUUM_STATE_MASK;
-    ProcArrayClearAutovacuum(pgxact);
-    pgxact->delayChkpt = false; /* be sure this is cleared in abort */
-    proc->recoveryConflictPending = false;
 
-    /* Clear the subtransaction-XID cache too while holding the lock */
-    pgxact->nxids = 0;
+    proc->recoveryConflictPending = false;
+    /* Clear commit csn after csn update */
+    proc->commitCSN = InvalidCommitSeqNo;
+    ResetProcXidCache(proc, true);
 
     /* Also advance global latestCompletedXid while holding the lock */
     if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, latestXid))
         t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid = latestXid;
 
-    /* Clear commit csn after csn update */
-    proc->commitCSN = 0;
+    /* Clear xid from ProcXactHashTable, we can ignore BOOTSTRAP_XACT_ID */
+    if (TransactionIdIsNormal(*xid)) {
+        ProcXactHashTableRemove(*xid);
+    }
+    /*
+     * make sure other variables are updated before need_to_sync_xid is updated,
+     * for the correctness of ProcArrayTransactionIsInProgess()
+     */
     pgxact->needToSyncXid = 0;
-
-    ResetProcXidCache(proc, true);
 }
 
 static inline void ProcInsertIntoGroup(PGPROC* proc, uint32* nextidx) {

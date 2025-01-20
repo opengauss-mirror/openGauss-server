@@ -327,6 +327,7 @@ void BootStrapProcessMain(int argc, char* argv[])
             proc_exit(1);
         }
         InitializeNumLwLockPartitions();
+        InitializeNumSlruBuffers();
     }
     g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
     CreateLocalSysDBCache();

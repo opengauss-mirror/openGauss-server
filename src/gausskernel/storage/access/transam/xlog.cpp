@@ -2771,17 +2771,6 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             instr_time endTime;
             PgStat_Counter elapsedTime;
 
-            /* Need to seek in the file? */
-            if (t_thrd.xlog_cxt.openLogOff != startoffset) {
-                if (lseek(t_thrd.xlog_cxt.openLogFile, (off_t)startoffset, SEEK_SET) < 0) {
-                    ereport(PANIC, (errcode_for_file_access(),
-                                    errmsg("could not seek in log file %s to offset %u: %s",
-                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo),
-                                           startoffset, TRANSLATE_ERRNO)));
-                }
-                t_thrd.xlog_cxt.openLogOff = startoffset;
-            }
-
             /* OK to write the page(s) */
             char *from = t_thrd.shemem_ptr_cxt.XLogCtl->pages + startidx * (Size)XLOG_BLCKSZ;
             Size nbytes = npages * (Size)XLOG_BLCKSZ;
@@ -2796,7 +2785,7 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
 
             pgstat_report_waitevent(WAIT_EVENT_WAL_WRITE);
             INSTR_TIME_SET_CURRENT(startTime);
-            actualBytes = write(t_thrd.xlog_cxt.openLogFile, from, nbytes);
+            actualBytes = pwrite(t_thrd.xlog_cxt.openLogFile, from, nbytes, startoffset);
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
             /* when track_activities and enable_instr_track_wait are on,

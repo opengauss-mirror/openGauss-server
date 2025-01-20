@@ -18,8 +18,6 @@
 #include "access/xlog.h"
 
 #define CSNBufHashPartition(hashcode) ((hashcode) % NUM_CSNLOG_PARTITIONS)
-#define CSNBufMappingPartitionLock(hashcode) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCSNBufMappingLock + CSNBufHashPartition(hashcode)].lock)
-#define CSNBufMappingPartitionLockByIndex(i) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCSNBufMappingLock + i].lock)
 
 #define CSNLOGDIR (g_instance.datadir_cxt.csnlogDir)
 

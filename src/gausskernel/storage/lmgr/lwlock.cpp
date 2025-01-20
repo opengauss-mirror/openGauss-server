@@ -73,6 +73,7 @@
 #include "access/csnlog.h"
 #include "access/multixact.h"
 #include "access/subtrans.h"
+#include "access/slru.h"
 #include "access/tableam.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "commands/async.h"
@@ -216,7 +217,11 @@ static const char *BuiltinTrancheNames[] = {
     "IMCSHashLock",
     "IMCSDescLock",
 #endif
-    "cbmWaitTaskLock"
+    "cbmWaitTaskLock",
+    "ClogSlruBankLock",
+    "CsnlogSlruBankLock",
+    "MultixactOffsetSlruBankLock",
+    "MultixactMemberSlruBankLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -415,15 +420,19 @@ int NumLWLocks(void)
 
     /* csnlog.c needs one per CLOG buffer */
     numLocks += NUM_CSNLOG_PARTITIONS * CSNLOGShmemBuffers();
+    Assert((CSNLOGShmemBuffers() % SLRU_BANK_SIZE) == 0);
+    numLocks += NUM_CSNLOG_PARTITIONS * (int)CSNLOGShmemBuffers() / SLRU_BANK_SIZE;
 
     /* clog.c needs one per CLOG buffer */
     numLocks += NUM_CLOG_PARTITIONS * CLOGShmemBuffers();
+    Assert((CLOGShmemBuffers() % SLRU_BANK_SIZE) == 0);
+    numLocks += NUM_CLOG_PARTITIONS * (int)CLOGShmemBuffers() / SLRU_BANK_SIZE;
 
     /* multixact.c needs two SLRU areas */
     if (ENABLE_DSS) {
         numLocks += DSS_MAX_MXACTOFFSET + DSS_MAX_MXACTMEMBER;
     } else {
-        numLocks += NUM_MXACTOFFSET_BUFFERS + NUM_MXACTMEMBER_BUFFERS;
+        numLocks += MULTIXACT_OFFSET_BUFFERS + MULTIXACT_MEMBER_BUFFERS;
     }
 
     /* async.c needs one per Async buffer */
@@ -473,6 +482,14 @@ int NumLWLocks(void)
 
     /* for scanning xlog track hash table */
     numLocks += NUM_SCANNING_XLOG_TRACK_PARTITIONS;
+
+    if (ENABLE_DSS) {
+        numLocks += DSS_MAX_MXACTOFFSET / SLRU_BANK_SIZE +
+                    DSS_MAX_MXACTMEMBER / SLRU_BANK_SIZE;
+    } else {
+        numLocks += MULTIXACT_OFFSET_BUFFERS / SLRU_BANK_SIZE +
+                    MULTIXACT_MEMBER_BUFFERS / SLRU_BANK_SIZE;
+    }
 
     /*
      * Add any requested by loadable modules; for backwards-compatibility
@@ -606,14 +623,6 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_CACHE_BUFFER_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_CACHE_SLOT_MAPPING, id);
-    }
-
-    for (id = 0; id < NUM_CSNLOG_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_CSN_BUFMAPPING, id);
-    }
-
-    for (id = 0; id < NUM_CLOG_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_CLOG_BUFMAPPING, id);
     }
 
     for (id = 0; id < NUM_UNIQUE_SQL_PARTITIONS; id++, lock++) {

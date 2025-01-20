@@ -131,6 +131,24 @@ struct PGPROC {
     LocalTransactionId lxid; /* local id of top-level transaction currently
                               * being executed by this proc, if running;
                               * else InvalidLocalTransactionId */
+    TransactionId snapXmax;     /* maximal running XID as it was when we were
+                                 * getting our snapshot. */
+    CommitSeqNo snapCSN;    /* csn as it was when we were getting our snapshot. */
+    /* commit sequence number send down */
+    CommitSeqNo commitCSN;
+
+    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
+    XLogRecPtr exrto_min; /* calculate recycle lsn for read on standby in extreme rto */
+    TimestampTz exrto_gen_snap_time;
+    /*
+     * While in hot standby mode, shows that a conflict signal has been sent
+     * for the current transaction. Set/cleared while holding ProcArrayLock,
+     * though not required. Accessed without lock, if needed.
+     */
+    bool recoveryConflictPending;
+    LWLock* subxidsLock;
+    struct XidCache subxids; /* cache for subtransaction XIDs */
+
     ThreadId pid;            /* Backend's process ID; 0 if prepared xact */
     /*
      * session id in mySessionMemoryEntry
@@ -154,13 +172,6 @@ struct PGPROC {
 
     /* Backend or session working version number. */
     uint32 workingVersionNum;
-
-    /*
-     * While in hot standby mode, shows that a conflict signal has been sent
-     * for the current transaction. Set/cleared while holding ProcArrayLock,
-     * though not required. Accessed without lock, if needed.
-     */
-    bool recoveryConflictPending;
 
     /* Info about LWLock the process is currently waiting for, if any. */
     bool lwWaiting;        /* true if waiting for an LW lock */
@@ -237,16 +248,6 @@ struct PGPROC {
     volatile TransactionId replicationSlotXminGroup;
     volatile TransactionId replicationSlotCatalogXminGroup;
 
-    TransactionId snapXmax;     /* maximal running XID as it was when we were
-                             * getting our snapshot. */
-    CommitSeqNo snapCSN;    /* csn as it was when we were getting our snapshot. */
-
-    /* commit sequence number send down */
-    CommitSeqNo commitCSN;
-
-    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
-    TimestampTz exrto_gen_snap_time;
-
     /* Support for group transaction status update. */
     bool clogGroupMember;                   /* true, if member of clog group */
     pg_atomic_uint32 clogGroupNext;         /* next clog group member */
@@ -275,11 +276,7 @@ struct PGPROC {
     uint64 snap_refcnt_bitmap;
 #endif
 
-    XLogRecPtr exrto_min; /* calculate recycle lsn for read on standby in extreme rto */
-
     bool exrto_reload_cache;
-    LWLock* subxidsLock;
-    struct XidCache subxids; /* cache for subtransaction XIDs */
 
     volatile GtmHostIndex my_gtmhost;
     GtmHostIndex suggested_gtmhost;
@@ -408,8 +405,6 @@ typedef struct PROC_HDR {
     pg_atomic_uint32 procArrayGroupFirst;
     /* First pgproc waiting for group snapshot getting */
     pg_atomic_uint32 snapshotGroupFirst;
-    /* First pgproc waiting for group transaction status update */
-    pg_atomic_uint32 clogGroupFirst;
     /* WALWriter process's latch */
     Latch* walwriterLatch;
     /* WALWriterAuxiliary process's latch */

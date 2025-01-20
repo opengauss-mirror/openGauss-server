@@ -294,7 +294,6 @@ void InitProcGlobal(void)
     g_instance.proc_base->BarrierPreParseLatch = NULL;
     pg_atomic_init_u32(&g_instance.proc_base->procArrayGroupFirst, INVALID_PGPROCNO);
     pg_atomic_init_u32(&g_instance.proc_base->snapshotGroupFirst, INVALID_PGPROCNO);
-    pg_atomic_init_u32(&g_instance.proc_base->clogGroupFirst, INVALID_PGPROCNO);
 
     /*
      * Create and initialize all the PGPROC structures we'll need.  There are

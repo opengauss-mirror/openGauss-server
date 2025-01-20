@@ -292,8 +292,9 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
     xact_cxt->cachedFetchXidStatus = 0;
     xact_cxt->cachedCommitLSN = 0;
 
-    /* init var in multixact.cpp */
-    xact_cxt->MXactCache = NULL;
+    /* init multixact cache */
+    xact_cxt->MXactCache = DLIST_STATIC_INIT(xact_cxt->MXactCache);
+    xact_cxt->MXactCacheMembers = 0;
     xact_cxt->MXactContext = NULL;
 
     /* init var in twophase.cpp */

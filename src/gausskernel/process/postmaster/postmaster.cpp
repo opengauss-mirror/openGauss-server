@@ -2279,6 +2279,7 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     InitializeNumLwLockPartitions();
+    InitializeNumSlruBuffers();
 
     if (dss_device_init(g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
         g_instance.attr.attr_storage.dss_attr.ss_enable_dss) !=  DSS_SUCCESS) {

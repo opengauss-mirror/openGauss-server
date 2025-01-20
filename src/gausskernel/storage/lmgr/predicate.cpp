@@ -644,6 +644,7 @@ static void OldSerXidInit(void)
     SimpleLruInit(t_thrd.shemem_ptr_cxt.OldSerXidSlruCtl,
                   GetBuiltInTrancheName(LWTRANCHE_OLDSERXID_SLRU_CTL),
                   LWTRANCHE_OLDSERXID_SLRU_CTL,
+                  0,
                   NUM_OLDSERXID_BUFFERS,
                   0,
                   OldSerXidLock,

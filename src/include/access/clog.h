@@ -43,10 +43,6 @@
 /* CLog lwlock partition*/
 #define CBufHashPartition(hashcode) \
     ((hashcode) % NUM_CLOG_PARTITIONS)
-#define CBufMappingPartitionLock(hashcode) \
-    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCBufMappingLock + CBufHashPartition(hashcode)].lock)
-#define CBufMappingPartitionLockByIndex(i) \
-    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCBufMappingLock + i].lock)
 
 /*
  * Possible transaction statuses --- note that all-zeroes is the initial
