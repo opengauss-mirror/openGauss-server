@@ -257,6 +257,8 @@ typedef struct knl_instance_attr_storage {
     int num_slru_buffers[SLRU_BUFFER_KIND];
     char* num_slru_buffers_str;
     char* lmemfabric_client_path;
+
+    int parallel_recovery_dispatch_algorithm;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */
