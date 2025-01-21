@@ -2764,6 +2764,11 @@ found_branch:
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
+                    /* when in failover worker thread should exit */
+                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                        SSUnPinBuffer(bufHdr);
+                        ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+                    }
                     pg_usleep(5000L);
                     continue;
                 }
@@ -2772,6 +2777,11 @@ found_branch:
                 if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
+                    }
+                    /* when in failover worker thread should exit */
+                    if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                        SSUnPinBuffer(bufHdr);
+                        ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
                     }
                     continue;
                 }
