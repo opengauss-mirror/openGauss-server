@@ -47,6 +47,52 @@ typedef struct _DispatchFix {
     XLogRecPtr lastCheckLsn;
 }DispatchFix;
 
+typedef struct WalSampleVal {
+    uint32 totalCnt;
+    uint32 lastTotalCnt;
+} WalSampleVal;
+
+typedef struct WalSampleStats {
+    RelFileNode rnode;
+    WalSampleVal walSampleVal;
+} WalSampleStats;
+
+typedef struct Rnode2WorkerEntry {
+    RelFileNode rnode;
+    uint32 workerId;
+    uint32 count;
+} Rnode2WorkerEntry;
+
+typedef struct RnodeInfo {
+    RelFileNode rnode;
+    uint32 inc;
+    bool isAssigned;
+    uint32 preWorkerId;
+} RnodeInfo;
+
+typedef struct WalRebalanceVar {
+    HTAB* wal_recovery_sample_hashtbl;
+    HTAB* wal_recovery_dispatch_hashtbl;
+    slock_t dispatch_dyhash_lock;
+    RnodeInfo* rnode_sample_list;
+
+    uint32 begin_worker_idx;
+    bool first_init_reassigned_worker;
+    XLogRecPtr last_lsn;
+    uint32 wal_sample_loop;
+
+    uint32 re_assigned_times_step1;
+    uint32 re_assigned_times_step2;
+} WalRebalanceVar;
+
+typedef struct DispatchStat {
+    char* worker_name;
+    ThreadId pid;
+    uint32 entry_num;
+    float4 percent;
+    char* detail;
+} DispatchStat;
+
 typedef struct LogDispatcher {
     MemoryContext oldCtx;
     PageRedoWorker** pageWorkers; /* Array of page redo workers. */
@@ -77,6 +123,8 @@ typedef struct LogDispatcher {
     RedoTimeCost *startupTimeCost;
     DispatchFix dispatchFix;
     bool full_sync_dispatch;
+
+    WalRebalanceVar rbVar;  /* used by algorithm of dispatching wal to redo workers*/
 } LogDispatcher;
 
 extern LogDispatcher* g_dispatcher;
@@ -143,6 +191,7 @@ extern void CopyDataFromOldReader(XLogReaderState *newReaderState, XLogReaderSta
 bool TxnQueueIsEmpty(TxnRedoWorker* worker);
 void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
 bool in_full_sync_dispatch(void);
+void get_dispatch_stat_detail(DispatchStat **dispatch_stat, uint32 *realNum);
 }
 
 #endif
