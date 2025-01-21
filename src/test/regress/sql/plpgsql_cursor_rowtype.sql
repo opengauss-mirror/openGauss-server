@@ -2273,6 +2273,28 @@ BEGIN
 END;
 /
 
+drop table if exists t_CurRowtype_Def_Case0006_1;
+create table t_CurRowtype_Def_Case0006_1(col1 int ,col2 varchar(10));
+insert into t_CurRowtype_Def_Case0006_1 values(1,'one');
+insert into t_CurRowtype_Def_Case0006_1 values(2,'two');
+insert into t_CurRowtype_Def_Case0006_1 values(3,'three');
+
+create or replace package pac_CurRowtype_Def_Case0006_1
+as 
+  cursor cur_1 is select * from t_CurRowtype_Def_Case0006_1 where col1=1;
+  source cur_1%rowtype;
+end pac_CurRowtype_Def_Case0006_1;
+/
+
+begin
+    pac_CurRowtype_Def_Case0006_1.source.col1 := 6;    
+    pac_CurRowtype_Def_Case0006_1.source.col2 := 'six'; 
+    raise notice '% , %', pac_CurRowtype_Def_Case0006_1.source.col1,pac_CurRowtype_Def_Case0006_1.source.col2;
+end;
+/
+drop package pac_CurRowtype_Def_Case0006_1;
+drop table if exists t_CurRowtype_Def_Case0006_1;
+
 -- PROC: normale
 create or replace PROCEDURE p1(b int) is
 DECLARE

@@ -1120,7 +1120,8 @@ bool copy_parent_func_exec_param(PLpgSQL_function* func, PLpgSQL_execstate *esta
                     } else if (func->datums[i]->dtype == PLPGSQL_DTYPE_ROW || func->datums[i]->dtype == PLPGSQL_DTYPE_RECORD) {
                         ((PLpgSQL_row*)prt_est->datums[j])->datum_cxt = cxt;
 
-                    } else if (func->datums[i]->dtype == PLPGSQL_DTYPE_REC){
+                    } else if (func->datums[i]->dtype == PLPGSQL_DTYPE_REC ||
+                               func->datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
                         ((PLpgSQL_rec*)prt_est->datums[j])->datum_cxt = cxt;
                     }
 
