@@ -151,6 +151,7 @@ static void assign_memory_detail_tracking(const char* newval, void* extra);
 static const char* show_memory_detail_tracking(void);
 static const char* show_enable_memory_limit(void);
 static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource source);
+static bool check_max_borrow_memory(int* newval, void** extra, GucSource source);
 static bool check_uncontrolled_memory_context(char** newval, void** extra, GucSource source);
 static void assign_uncontrolled_memory_context(const char* newval, void* extra);
 static const char* show_uncontrolled_memory_context(void);
@@ -426,6 +427,20 @@ static void InitMemoryConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"borrow_work_mem",
+            PGC_USERSET,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum borrow memory to be used for query workspaces."),
+            NULL,
+            GUC_UNIT_KB},
+            &u_sess->attr.attr_memory.borrow_work_mem,
+            0,
+            0,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
         {{"max_borrow_memory",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -437,7 +452,7 @@ static void InitMemoryConfigureNamesInt()
             0,
             0,
             INT_MAX,
-            NULL,
+            check_max_borrow_memory,
             NULL,
             NULL},
 
@@ -766,6 +781,15 @@ static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource so
         return false;
     }
     return true;
+}
+
+static bool check_max_borrow_memory(int* newval, void** extra, GucSource source)
+{
+    constexpr int minRackAllocSizeKb = MIN_RACK_ALLOC_SIZE / 1024;
+    if (*newval % minRackAllocSizeKb == 0) {
+        return true;
+    }
+    return false;
 }
 
 /** start dealing with uncontrolled_memory_context GUC parameter **/

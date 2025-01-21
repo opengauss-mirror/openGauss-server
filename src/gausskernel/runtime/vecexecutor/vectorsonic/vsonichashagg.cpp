@@ -417,7 +417,7 @@ SonicHashAgg::SonicHashAgg(VecAggState* runtime, int arrSize) : SonicHash(arrSiz
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
         m_memControl.totalMem);
 
     AddControlMemoryContext(runtime->ss.ps.instrument, m_memControl.hashContext);
@@ -585,6 +585,7 @@ void SonicHashAgg::initMemoryControl()
 {
     VecAgg* vec_agg = (VecAgg*)(m_runtime->ss.ps.plan);
     m_memControl.totalMem = SET_NODEMEM(vec_agg->plan.operatorMemKB[0], vec_agg->plan.dop) * 1024L;
+    m_memControl.totalMem += GetAvailRackMemory(vec_agg->plan.dop) * 1024L;
 
     /* set initial availMem which is passed from optimizer */
     m_memControl.availMem = 0;
@@ -1628,6 +1629,10 @@ void SonicHashAgg::judgeMemoryOverflow(
     bool need_spill = false;
     calcHashContextSize(m_memControl.hashContext, &used_size, &free_size);
     bool sys_busy = gs_sysmemory_busy(used_size * dop, false);
+    bool rackBusy = RackMemoryBusy(used_size * dop);
+    int64 rackAvail = GetAvailRackMemory(dop) * 1024L;
+    int64 localTotalMemory = SET_NODEMEM(u_sess->attr.attr_memory.work_mem, dop) * 1024L;
+    u_sess->local_memory_exhaust = used_size > localTotalMemory;
 
     /*
      * Since if we already have one atom, we could put at least INIT_DATUM_ARRAY_SIZE
@@ -1642,10 +1647,10 @@ void SonicHashAgg::judgeMemoryOverflow(
     }
 
     /* Record spill info or try to spread memory */
-    if (need_spill || sys_busy) {
+    if (need_spill || sys_busy || (u_sess->local_memory_exhaust && rackBusy)) {
         if (m_memControl.spillToDisk == false) {
             AllocSetContext* set = (AllocSetContext*)(m_memControl.hashContext);
-            if (sys_busy) {
+            if (sys_busy || (u_sess->local_memory_exhaust && rackBusy)) {
                 MEMCTL_LOG(LOG,
                     "%s(%d) early spilled, workmem: %luKB, usedmem: %ldKB, "
                     "sonic hash context freeSpace: %ldKB.",

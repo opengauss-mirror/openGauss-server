@@ -88,6 +88,7 @@ HashAggRunner::HashAggRunner(VecAggState* runtime) : BaseAggRunner(runtime, true
     m_spill_times = 0;
 
     m_totalMem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop) * 1024L;
+    m_totalMem += GetAvailRackMemory(node->plan.dop) * 1024L;
     ereport(DEBUG2,
         (errmodule(MOD_VEC_EXECUTOR),
             errmsg("[VecHashAgg(%d)]: operator memory "
@@ -119,7 +120,7 @@ HashAggRunner::HashAggRunner(VecAggState* runtime) : BaseAggRunner(runtime, true
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STACK_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STACK_CONTEXT,
         m_totalMem);
 
     m_tupleCount = m_colWidth = 0;
@@ -197,7 +198,7 @@ bool HashAggRunner::ResetNecessary(VecAggState* node)
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STACK_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STACK_CONTEXT,
         m_totalMem);
 
     m_hashSize = Min(2 * aggnode->numGroups, m_totalMem / m_cellSize);
@@ -253,7 +254,8 @@ void HashAggRunner::AllocHashSlot(VectorBatch* batch, int i)
             JudgeMemoryOverflow("VecHashAgg",
                 m_runtime->ss.ps.plan->plan_node_id,
                 SET_DOP(m_runtime->ss.ps.plan->dop),
-                m_runtime->ss.ps.instrument);
+                m_runtime->ss.ps.instrument,
+                true);
         } break;
         case HASH_IN_DISK: {
             /* spill to disk first time */
@@ -607,7 +609,7 @@ hashSource* HashAggRunner::GetHashSource()
                     ALLOCSET_DEFAULT_MINSIZE,
                     ALLOCSET_DEFAULT_INITSIZE,
                     ALLOCSET_DEFAULT_MAXSIZE,
-                    STACK_CONTEXT,
+                    EnableBorrowWorkMemory() ? RACK_CONTEXT : STACK_CONTEXT,
                     m_totalMem);
 
                 m_hashSize = Min(2 * m_filesource->m_rownum[file_idx], m_availmems / m_cellSize);

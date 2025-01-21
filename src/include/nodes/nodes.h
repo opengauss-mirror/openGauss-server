@@ -402,10 +402,12 @@ typedef enum NodeTag {
      */
     T_MemoryContext = 600,
     T_AllocSetContext,
+    T_RackAllocSetContext,
     T_OptAllocSetContext,
     T_AsanSetContext,
     T_StackAllocSetContext,
     T_SharedAllocSetContext,
+    T_RackSharedAllocSetContext,
     T_MemalignAllocSetContext,
     T_MemalignSharedAllocSetContext,
 

@@ -240,6 +240,7 @@ THR_LOCAL int comm_ackchk_time;
 THR_LOCAL GucContext currentGucContext;
 
 const char* sync_guc_variable_namelist[] = {"work_mem",
+    "borrow_work_mem",
     "query_mem",
     "ustore_attr",
     "ssl_renegotiation_limit",

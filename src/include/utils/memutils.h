@@ -27,7 +27,12 @@ enum MemoryContextType {
     SHARED_CONTEXT,    // shared context used by different threads
     MEMALIGN_CONTEXT,  // the context only used to allocate the aligned memory
     MEMALIGN_SHRCTX,   // the shared context only used to allocate the aligned memory
+    RACK_CONTEXT,      // borrow memory context
 };
+
+extern bool EnableBorrowWorkMemory();
+extern bool RackMemoryBusy(int64 used);
+extern Size GetAvailRackMemory(int dop);
 
 /*
  * MaxAllocSize

@@ -334,7 +334,8 @@ static void CalculateHashContextSize(MemoryContext ctx, int64* mem_size, int64* 
     }
 }
 
-void hashBasedOperator::JudgeMemoryOverflow(char* op_name, int plan_id, int dop, Instrumentation* instrument)
+void hashBasedOperator::JudgeMemoryOverflow(char* op_name, int plan_id, int dop, Instrumentation* instrument,
+                                            bool isRack)
 {
 
     m_rows++;
@@ -342,11 +343,18 @@ void hashBasedOperator::JudgeMemoryOverflow(char* op_name, int plan_id, int dop,
     int64 free_size = 0;
     CalculateHashContextSize(m_hashContext, &used_size, &free_size);
     bool sys_busy = gs_sysmemory_busy(used_size * dop, false);
+    bool rackBusy = true;
+    if (isRack) {
+        rackBusy = RackMemoryBusy(used_size * dop);
+        int64 rackAvail = GetAvailRackMemory(dop) * 1024L;
+        int64 localTotalMemory = SET_NODEMEM(u_sess->attr.attr_memory.work_mem, dop) * 1024L;
+        u_sess->local_memory_exhaust = used_size > localTotalMemory;
+    }
     AllocSetContext* set = (AllocSetContext*)m_hashContext;
 
-    if (used_size > m_totalMem || sys_busy) {
+    if (used_size > m_totalMem || sys_busy || (isRack && u_sess->local_memory_exhaust && rackBusy)) {
         if (m_spillToDisk == false) {
-            if (sys_busy) {
+            if (sys_busy || (isRack && u_sess->local_memory_exhaust && rackBusy)) {
                 m_sysBusy = true;
                 m_totalMem = used_size;
                 set->maxSpaceSize = used_size;

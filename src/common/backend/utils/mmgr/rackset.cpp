@@ -1,68 +1,31 @@
 /* -------------------------------------------------------------------------
  *
- * aset.c
- *	  Allocation set definitions.
+ * rackset.c
+ *	  Allocation rack memory set definitions.
  *
- * AllocSet is our standard implementation of the abstract MemoryContext
+ * AllocSet is our rackset implementation of the abstract MemoryContext
  * type.
  *
- *
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
- * Portions Copyright (c) 1994, Regents of the University of California
+ * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * Mulan Permissive Software License，Version 2
+ * Mulan Permissive Software License，Version 2 (Mulan PSL v2)
  *
  * IDENTIFICATION
- *	  src/backend/utils/mmgr/aset.c
- *
- * NOTE:
- *	This is a new (Feb. 05, 1999) implementation of the allocation set
- *	routines. AllocSet...() does not use OrderedSet...() any more.
- *	Instead it manages allocations in a block pool by itself, combining
- *	many small allocations in a few bigger blocks. AllocSetFree() normally
- *	doesn't free() memory really. It just add's the free'd area to some
- *	list for later reuse by AllocSetAlloc(). All memory blocks are free()'d
- *	at once on AllocSetReset(), which happens when the memory context gets
- *	destroyed.
- *				Jan Wieck
- *
- *	Performance improvement from Tom Lane, 8/99: for extremely large request
- *	sizes, we do want to be able to give the memory back to free() as soon
- *	as it is pfree()'d.  Otherwise we risk tying up a lot of memory in
- *	freelist entries that might never be usable.  This is specially needed
- *	when the caller is repeatedly repalloc()'ing a block bigger and bigger;
- *	the previous instances of the block were guaranteed to be wasted until
- *	AllocSetReset() under the old way.
- *
- *	Further improvement 12/00: as the code stood, request sizes in the
- *	midrange between "small" and "large" were handled very inefficiently,
- *	because any sufficiently large free chunk would be used to satisfy a
- *	request, even if it was much larger than necessary.  This led to more
- *	and more wasted space in allocated chunks over time.  To fix, get rid
- *	of the midrange behavior: we now handle only "small" power-of-2-size
- *	chunks as chunks.  Anything "large" is passed off to malloc().	Change
- *	the number of freelists to change the small/large boundary.
- *
- *
- *	About CLOBBER_FREED_MEMORY:
- *
- *	If this symbol is defined, all freed memory is overwritten with 0x7F's.
- *	This is useful for catching places that reference already-freed memory.
- *
- *	About MEMORY_CONTEXT_CHECKING:
- *
- *	Since we usually round request sizes up to the next power of 2, there
- *	is often some unused space immediately after a requested data area.
- *	Thus, if someone makes the common error of writing past what they've
- *	requested, the problem is likely to go unnoticed ... until the day when
- *	there *isn't* any wasted space, perhaps because of different memory
- *	alignment on a new platform, or some other effect.	To catch this sort
- *	of problem, the MEMORY_CONTEXT_CHECKING option stores 0x7E just beyond
- *	the requested space whenever the request is less than the actual chunk
- *	size, and verifies that the byte is undamaged when the chunk is freed.
+ *	  src/backend/utils/mmgr/rackset.cpp
  *
  * -------------------------------------------------------------------------
  */
 
 #include <sys/mman.h>
+#include <ctime>
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -79,6 +42,9 @@
 #include "utils/memprot.h"
 #include "utils/memtrack.h"
 #include "storage/procarray.h"
+
+#define MAX_RACK_MEMORY_CHUNK_SIZE MIN_RACK_ALLOC_SIZE
+#define MAX_RACK_MEMORY_ALLOC_SIZE (MAX_RACK_MEMORY_CHUNK_SIZE - sizeof(RackPrefix))
 
 /* Define this to detail debug alloc information .  HAVE_ALLOCINFO */
 
@@ -110,9 +76,6 @@
 
 #define ALLOC_MINBITS 3 /* smallest chunk size is 8 bytes */
 #define ALLOCSET_NUM_FREELISTS 11
-#define ALLOC_CHUNK_LIMIT (1 << (ALLOCSET_NUM_FREELISTS - 1 + ALLOC_MINBITS))
-/* Size of largest chunk that we use a fixed size for */
-#define ALLOC_CHUNK_FRACTION 4
 /* We allow chunks to be at most 1/4 of maxBlockSize (less overhead) */
 
 /* --------------------
@@ -140,12 +103,6 @@ typedef struct AllocMagicData {
     uint32 posnum;
 } AllocMagicData;
 #endif
-
-/*
- * AllocPointerIsValid
- *		True iff pointer is valid allocation pointer.
- */
-#define AllocPointerIsValid(pointer) PointerIsValid(pointer)
 
 /*
  * AllocSetIsValid
@@ -177,6 +134,121 @@ typedef struct AllocMagicData {
 #define CHECK_CONTEXT_OWNER(context) ((void)0)
 #endif
 
+constexpr int RACKALLOCSET_NUM_FREELISTS = 26;
+constexpr float RACKMEM_LIMIT_DENOMINATOR = 2000;
+constexpr float RACKMEM_LIMIT_BASE_VALUE = 200;
+
+void check_pointer_valid(AllocBlock block, bool is_shared, MemoryContext context, AllocChunk chunk);
+
+struct RackAllocSetContext : AllocSetContext {
+    AllocChunk extern_freelist[RACKALLOCSET_NUM_FREELISTS - ALLOCSET_NUM_FREELISTS];
+    MemoryContext local_context;
+};
+
+using RackAllocSet = RackAllocSetContext*;
+
+struct RackPrefix {
+    Size size;
+};
+
+pg_atomic_uint64 rackUsedSize = 0;
+
+bool EnableBorrowWorkMemory()
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_inited &&
+           g_instance.attr.attr_memory.enable_borrow_memory &&
+           u_sess->attr.attr_memory.borrow_work_mem > 0 &&
+           g_instance.attr.attr_memory.avail_borrow_mem > 0;
+}
+
+Size GetAvailRackMemory(int dop)
+{
+    if (!EnableBorrowWorkMemory()) {
+        return 0;
+    }
+    if (dop <= 0) {
+        dop = 1;
+    }
+    return TYPEALIGN_DOWN(MAX_RACK_MEMORY_ALLOC_SIZE / 1024L, u_sess->attr.attr_memory.borrow_work_mem / dop);
+}
+
+bool RackMemoryBusy(int64 used)
+{
+    if (!EnableBorrowWorkMemory()) {
+        return true;
+    }
+
+    uint64 totalUsed = pg_atomic_read_u64(&rackUsedSize);
+    int64 percent = (totalUsed / 1024 * 100) / g_instance.attr.attr_memory.avail_borrow_mem;
+    uint64 nodeUsed = used >> BITS_IN_KB;
+
+    if (percent > HIGH_PROCMEM_MARK) {
+        return true;
+    }
+
+    if (percent >= LOW_PROCMEM_MARK) {
+        if (nodeUsed > (double)g_instance.attr.attr_memory.avail_borrow_mem / RACKMEM_LIMIT_DENOMINATOR *
+                ((HIGH_PROCMEM_MARK - percent) * (HIGH_PROCMEM_MARK - percent) + RACKMEM_LIMIT_BASE_VALUE)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static inline void* RackMallocConverter(Size size)
+{
+    size += sizeof(RackPrefix);
+    size = TYPEALIGN(MAX_RACK_MEMORY_CHUNK_SIZE, size);
+    Assert(size % MAX_RACK_MEMORY_CHUNK_SIZE == 0);
+    pg_atomic_add_fetch_u64(&rackUsedSize, size);
+
+    RackPrefix* ptr;
+    if (u_sess->attr.attr_common.log_min_messages <= DEBUG1) {
+        clock_t start;
+        clock_t finish;
+        start = clock();
+        ptr = (RackPrefix*)RackMemMalloc(size, RackMemPerfLevel::L0, 0);
+        finish = clock();
+        double timeused = static_cast<double>(finish - start) / CLOCKS_PER_SEC;
+        ereport(LOG, (errmsg("RackMallocConverter: RackMemMalloc used %fs to alloc memory from remote", timeused)));
+    } else {
+        ptr = (RackPrefix*)RackMemMalloc(size, RackMemPerfLevel::L0, 0);
+    }
+
+    if (!ptr) {
+        pg_atomic_sub_fetch_u64(&rackUsedSize, size);
+        ereport(LOG, (errmsg("RackMallocConverter: try alloc from rack failed")));
+        return nullptr;
+    }
+    ptr->size = size;
+    return reinterpret_cast<void*>(ptr + 1);
+}
+
+static inline void RackFreeConverter(void* ptr)
+{
+    Assert(ptr);
+    RackPrefix* prefix = (RackPrefix*)(ptr - sizeof(RackPrefix));
+    Size size = prefix->size;
+    RackMemFree((void*)prefix);
+
+    pg_atomic_sub_fetch_u64(&rackUsedSize, size);
+}
+
+static inline void* RackReallocConverter(void* ptr, Size ptrsize, Size newSize)
+{
+    void* newptr = RackMallocConverter(newSize);
+    errno_t rc = memcpy_s(newptr, newSize, ptr, newSize > ptrsize ? ptrsize : newSize);
+    securec_check_ss(rc, "", "");
+    if (newSize > ptrsize) {
+        rc = memset_s(newptr + newSize, newSize - ptrsize, 0, newSize - ptrsize);
+        securec_check_ss(rc, "", "");
+    }
+    RackFreeConverter(ptr);
+
+    return newptr;
+}
+
 /* ----------
  * AllocSetFreeIndex -
  *
@@ -190,41 +262,14 @@ static inline int AllocSetFreeIndex(Size size)
     int idx;
 
     if (size > (1 << ALLOC_MINBITS)) {
-		/*----------
-		 * At this point we must compute ceil(log2(size >> ALLOC_MINBITS)).
-		 * This is the same as
-		 *		pg_leftmost_one_pos32((size - 1) >> ALLOC_MINBITS) + 1
-		 * or equivalently
-		 *		pg_leftmost_one_pos32(size - 1) - ALLOC_MINBITS + 1
-		 *
-		 * However, rather than just calling that function, we duplicate the
-		 * logic here, allowing an additional optimization.  It's reasonable
-		 * to assume that ALLOC_CHUNK_LIMIT fits in 16 bits, so we can unroll
-		 * the byte-at-a-time loop in pg_leftmost_one_pos32 and just handle
-		 * the last two bytes.
-		 *
-		 * Yes, this function is enough of a hot-spot to make it worth this
-		 * much trouble.
-		 *----------
-		 */
-#ifdef HAVE__BUILTIN_CLZ
-		idx = 31 - __builtin_clz((uint32) size - 1) - ALLOC_MINBITS + 1;
-#else
-		uint32		t,
-					tsize;
-
-		/* Statically assert that we only have a 16-bit input value. */
-		StaticAssertStmt(ALLOC_CHUNK_LIMIT < (1 << 16),
-						 "ALLOC_CHUNK_LIMIT must be less than 64kB");
-
-		tsize = size - 1;
-		t = tsize >> 8;
-		idx = t ? pg_leftmost_one_pos[t] + 8 : pg_leftmost_one_pos[tsize];
-		idx -= ALLOC_MINBITS - 1;
-#endif
-        Assert(idx < ALLOCSET_NUM_FREELISTS);
-    } else
+        /*----------
+         * At this point we must compute ceil(log2(size >> ALLOC_MINBITS)).
+         *----------
+         */
+        return pg_leftmost_one_pos32((size - 1) >> ALLOC_MINBITS) + 1;
+    } else {
         idx = 0;
+    }
 
     return idx;
 }
@@ -249,199 +294,22 @@ static bool sentinel_ok(const void* base, Size offset)
 
 #endif
 
-#ifdef RANDOMIZE_ALLOCATED_MEMORY
-
-/*
- * Fill a just-allocated piece of memory with "random" data.  It's not really
- * very random, just a repeating sequence with a length that's prime.  What
- * we mainly want out of it is to have a good probability that two palloc's
- * of the same number of bytes start out containing different data.
- */
-static void randomize_mem(char* ptr, size_t size)
-{
-    static int save_ctr = 1;
-    int ctr;
-
-    ctr = save_ctr;
-    while (size-- > 0) {
-        *ptr++ = ctr;
-        if (++ctr > 251)
-            ctr = 1;
-    }
-    save_ctr = ctr;
-}
-#endif /* RANDOMIZE_ALLOCATED_MEMORY */
-
-/* built-in white list of memory context. see more @ GenericMemoryAllocator::AllocSetContextCreate() */
-const char* built_in_white_list[] = {"ThreadTopMemoryContext",
-    "Postmaster",
-    "CommunnicatorGlobalMemoryContext",
-    "SELF MEMORY CONTEXT",
-    "SRF multi-call context",
-    "INSERT TEMP MEM CNXT",
-    "CStore PARTITIONED TEMP INSERT",
-    "CSTORE BULKLOAD_ROWS",
-    "ADIO CU CACHE CNXT",
-    "global_stats_context",  //~
-    "CacheMemoryContext",
-    "PortalHeapMemory",
-    "Statistics snapshot",
-    "PgStatCollectThdStatus",
-    "gs_signal",
-    NULL};
-#define COUNT_ARRAY_SIZE(array) (sizeof((array)) / sizeof(*(array)))
-
-/* Compare two strings similar to strcmp().
- * But our function can compare two strings by wildcards(*).
- * eg.
- * execute strcmp_by_wildcards("abc*","abcdefg"),and return value is 0;
- * execute strcmp_by_wildcards("abc","abcdefg") ,and return value is not 0.
- * NOTE:
- * There is only one '*'(wildcards character) in the string,and must be end of this string.
- */
-static int strcmp_by_wildcards(const char* str1, const char* str2)
-{
-    size_t len = strlen(str1);
-
-    if (0 == strcmp(str1, str2))
-        return 0;
-
-    if (('*' != str1[len - 1]) || (strlen(str2) <= len))
-        return -1;
-
-    if (0 == strncmp(str1, str2, len - 1)) {
-        const char* p = str2 + len - 1;
-        while (*p && ((*p >= '0' && *p <= '9') || (*p == '_')))
-            p++;
-
-        if (*p) {
-            return -1;
-        }
-
-        return 0;
-    }
-
-    return -1;
-}
-
-/* set the white list value */
-void MemoryContextControlSet(AllocSet context, const char* name)
-{
-    bool isInWhiteList = false;
-
-    if (u_sess == NULL)
-        return;
-
-    for (memory_context_list* iter = u_sess->utils_cxt.memory_context_limited_white_list;
-        iter && iter->value && ENABLE_MEMORY_CONTEXT_CONTROL;
-        iter = iter->next) {
-        if (!strcmp_by_wildcards(iter->value, name)) {
-            context->maxSpaceSize = 0xffffffff;
-            isInWhiteList = true;
-            break;
-        }
-    }
-
-    if (!isInWhiteList) {
-        for (const char** p = built_in_white_list; *p != NULL; p++) {
-            if (!strcmp_by_wildcards(*p, name)) {
-                context->maxSpaceSize = 0xffffffff;
-                break;
-            }
-        }
-    }
-
-    Assert(context->maxSpaceSize >= 0);
-}
-
-/*
- * Public routines
- */
-//
-// AllocSetContextCreate
-//		Create a new AllocSet context.
-//      parameter:
-//		@maxSize: Determine if memory allocation(eg. palloc function) is out of threshold.
-//				  This parameter is the threshold.
-//
-MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* name, _in_ Size minContextSize,
-    _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ MemoryContextType contextType, _in_ Size maxSize,
-    _in_ bool isSession)
-{
-    switch (contextType) {
-#ifndef ENABLE_MEMORY_CHECK
-        case STANDARD_CONTEXT: {
-            if (g_instance.attr.attr_memory.disable_memory_stats) {
-                return opt_AllocSetContextCreate(parent, name, minContextSize, initBlockSize, maxBlockSize);
-            } else {
-                return GenericMemoryAllocator::AllocSetContextCreate(
-                    parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
-            }
-        }
-        case SHARED_CONTEXT:
-            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
-            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_OPERATE_FAILED),
-                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
-                            name, parent->name)));
-            }
-
-            return GenericMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
-#else
-        case STANDARD_CONTEXT:
-            return AsanMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
-        case SHARED_CONTEXT:
-            /* The following situation is forbidden, parent context is not shared, while current context is shared. */
-            if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_OPERATE_FAILED),
-                        errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
-                            name, parent->name)));
-            }
-
-            return AsanMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
-#endif
-        case RACK_CONTEXT:
-            return RackMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
-        case STACK_CONTEXT:
-            return StackMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
-
-        case MEMALIGN_CONTEXT:
-            return AlignMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
-        case MEMALIGN_SHRCTX:
-            return AlignMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
-        default:
-            ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized context type")));
-            break;
-    }
-
-    return NULL;
-}
-
 /*
  * AllocSetMethodDefinition
  *      Define the method functions based on the templated value
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void GenericMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method)
+void RackMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method)
 {
-    method->alloc = &GenericMemoryAllocator::AllocSetAlloc<enable_memoryprotect, is_shared, is_tracked>;
-    method->free_p = &GenericMemoryAllocator::AllocSetFree<enable_memoryprotect, is_shared, is_tracked>;
-    method->realloc = &GenericMemoryAllocator::AllocSetRealloc<enable_memoryprotect, is_shared, is_tracked>;
+    method->alloc = &RackMemoryAllocator::AllocSetAlloc<enable_memoryprotect, is_shared, is_tracked>;
+    method->free_p = &RackMemoryAllocator::AllocSetFree<enable_memoryprotect, is_shared, is_tracked>;
+    method->realloc = &RackMemoryAllocator::AllocSetRealloc<enable_memoryprotect, is_shared, is_tracked>;
     method->init = &GenericMemoryAllocator::AllocSetInit;
-    method->reset = &GenericMemoryAllocator::AllocSetReset<enable_memoryprotect, is_shared, is_tracked>;
-    method->delete_context = &GenericMemoryAllocator::AllocSetDelete<enable_memoryprotect, is_shared, is_tracked>;
+    method->reset = &RackMemoryAllocator::AllocSetReset<enable_memoryprotect, is_shared, is_tracked>;
+    method->delete_context = &RackMemoryAllocator::AllocSetDelete<enable_memoryprotect, is_shared, is_tracked>;
     method->get_chunk_space = &GenericMemoryAllocator::AllocSetGetChunkSpace;
     method->is_empty = &GenericMemoryAllocator::AllocSetIsEmpty;
-    method->stats = &GenericMemoryAllocator::AllocSetStats;
+    method->stats = &RackMemoryAllocator::AllocSetStats;
 #ifdef MEMORY_CONTEXT_CHECKING
     method->check = &GenericMemoryAllocator::AllocSetCheck;
 #endif
@@ -453,7 +321,7 @@ void GenericMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* meth
  *
  * Notes: unsupprot to track the memory usage of shared context
  */
-void GenericMemoryAllocator::AllocSetContextSetMethods(unsigned long value, MemoryContextMethods* method)
+void RackMemoryAllocator::AllocSetContextSetMethods(unsigned long value, MemoryContextMethods* method)
 {
     bool isProt = (value & IS_PROTECT) ? true : false;
     bool isShared = (value & IS_SHARED) ? true : false;
@@ -490,14 +358,17 @@ void GenericMemoryAllocator::AllocSetContextSetMethods(unsigned long value, Memo
  * initBlockSize: initial allocation block size
  * maxBlockSize: maximum allocation block size
  */
-MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent, const char* name, Size minContextSize,
+MemoryContext RackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, const char* name, Size minContextSize,
     Size initBlockSize, Size maxBlockSize, Size maxSize, bool isShared, bool isSession)
 {
-    AllocSet context;
-    NodeTag type = isShared ? T_SharedAllocSetContext : T_AllocSetContext;
+    RackAllocSet context;
+    NodeTag type = isShared ? T_RackSharedAllocSetContext : T_RackAllocSetContext;
     bool isTracked = false;
     unsigned long value = isShared ? IS_SHARED : 0;
     MemoryProtectFuncDef* func = NULL;
+    Size localInitBlock = initBlockSize;
+    Size localMaxBlock = maxBlockSize;
+    Size localMax = maxSize;
 
     if (isShared)
         func = &SharedFunctions;
@@ -514,14 +385,15 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
         value |= IS_PROTECT;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */
-    if (func == &GenericFunctions && parent && (MEMORY_TRACKING_MODE > MEMORY_TRACKING_PEAKMEMORY) && t_thrd.mem_cxt.mem_track_mem_cxt &&
-        (t_thrd.utils_cxt.ExecutorMemoryTrack == NULL || ((AllocSet)parent)->track)) {
+    if (func == &GenericFunctions && parent && (MEMORY_TRACKING_MODE > MEMORY_TRACKING_PEAKMEMORY) &&
+        t_thrd.mem_cxt.mem_track_mem_cxt &&
+        (t_thrd.utils_cxt.ExecutorMemoryTrack == NULL || ((RackAllocSet)parent)->track)) {
         isTracked = true;
         value |= IS_TRACKED;
     }
 
     /* Do the type-independent part of context creation */
-    context = (AllocSet)MemoryContextCreate(type, sizeof(AllocSetContext), parent, name, __FILE__, __LINE__);
+    context = (RackAllocSet)MemoryContextCreate(type, sizeof(RackAllocSetContext), parent, name, __FILE__, __LINE__);
 
     if (isShared && maxSize == DEFAULT_MEMORY_CONTEXT_MAX_SIZE) {
         // default maxSize of shared memory context.
@@ -531,13 +403,6 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
         // these three types run following scope:
         context->maxSpaceSize = maxSize + SELF_GENRIC_MEMCTX_LIMITATION;
     }
-    /*
-     * If MemoryContext's name is in white list(GUC parameter,see @memory_context_limited_white_list),
-     * then set maxSize as infinite,that is unlimited.
-     */
-#ifdef MEMORY_CONTEXT_CHECKING
-    MemoryContextControlSet(context, name);
-#endif
 
     /* assign the method function with specified templated to the context */
     AllocSetContextSetMethods(value, ((MemoryContext)context)->methods);
@@ -548,8 +413,8 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
      * We somewhat arbitrarily enforce a minimum 1K block size.
      */
     initBlockSize = MAXALIGN(initBlockSize);
-    if (initBlockSize < 1024)
-        initBlockSize = 1024;
+    if (initBlockSize < MAX_RACK_MEMORY_ALLOC_SIZE)
+        initBlockSize = MAX_RACK_MEMORY_ALLOC_SIZE;
     maxBlockSize = MAXALIGN(maxBlockSize);
     if (maxBlockSize < initBlockSize)
         maxBlockSize = initBlockSize;
@@ -579,10 +444,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
      * and actually-allocated sizes of any chunk must be on the same side of
      * the limit, else we get confused about whether the chunk is "big".
      */
-    context->allocChunkLimit = ALLOC_CHUNK_LIMIT;
-    while ((Size)(context->allocChunkLimit + ALLOC_CHUNKHDRSZ) >
-           (Size)((maxBlockSize - ALLOC_BLOCKHDRSZ) / ALLOC_CHUNK_FRACTION))
-        context->allocChunkLimit >>= 1;
+    context->allocChunkLimit = 1 << (AllocSetFreeIndex(MAX_RACK_MEMORY_ALLOC_SIZE) - 1);
 
     /*
      * Grab always-allocated space, if requested
@@ -591,11 +453,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
         Size blksize = MAXALIGN(minContextSize);
         AllocBlock block;
 
-        if (GS_MP_INITED)
-            block = (AllocBlock)(*func->malloc)(blksize, (value & IS_PROTECT) == 1 ? true : false);
-        else
-            gs_malloc(blksize, block, AllocBlock);
-
+        block = (AllocBlock)RackMallocConverter(blksize);
         if (block == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
@@ -629,27 +487,14 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
     if (isShared)
         (void)pthread_rwlock_init(&(context->header.lock), NULL);
 
-    return (MemoryContext)context;
-}
+    context->local_context = ::AllocSetContextCreate(
+        (MemoryContext)context,
+        "rack context local",
+        localInitBlock,
+        localMaxBlock,
+        localMax);
 
-/*
- * AllocSetInit
- *		Context-type-specific initialization routine.
- *
- * This is called by MemoryContextCreate() after setting up the
- * generic MemoryContext fields and before linking the new context
- * into the context tree.  We must do whatever is needed to make the
- * new context minimally valid for deletion.  We must *not* risk
- * failure --- thus, for example, allocating more memory is not cool.
- * (AllocSetContextCreate can allocate memory when it gets control
- * back, however.)
- */
-void GenericMemoryAllocator::AllocSetInit(MemoryContext context)
-{
-    /*
-     * Since MemoryContextCreate already zeroed the context node, we don't
-     * have to do anything here: it's already OK.
-     */
+    return (MemoryContext)context;
 }
 
 /*
@@ -664,11 +509,12 @@ void GenericMemoryAllocator::AllocSetInit(MemoryContext context)
  * allocations, which is typical behavior for per-tuple contexts.
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
+void RackMemoryAllocator::AllocSetReset(MemoryContext context)
 {
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     AllocBlock block;
     MemoryProtectFuncDef* func = NULL;
+    MemoryContextReset(set->local_context);
 
     AssertArg(AllocSetIsValid(set));
 
@@ -685,11 +531,12 @@ void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check for corruption and leaks before freeing */
-    AllocSetCheck(context);
+    GenericMemoryAllocator::AllocSetCheck(context);
 #endif
 
     /* Clear chunk freelists */
     MemSetAligned(set->freelist, 0, sizeof(set->freelist));
+    MemSetAligned(set->extern_freelist, 0, sizeof(set->extern_freelist));
 
     block = set->blocks;
 
@@ -711,11 +558,7 @@ void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
             if (is_tracked)
                 MemoryTrackingFreeInfo(context, tempSize);
 
-            /* Normal case, release the block */
-            if (GS_MP_INITED)
-                (*func->free)(block, tempSize);
-            else
-                gs_free(block, tempSize);
+            RackFreeConverter(block);
         }
         block = next;
     }
@@ -746,9 +589,9 @@ void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
  * But note we are not responsible for deleting the context node itself.
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
+void RackMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     AssertArg(AllocSetIsValid(set));
 
     AllocBlock block = set->blocks;
@@ -771,11 +614,12 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check for corruption and leaks before freeing */
-    AllocSetCheck(context);
+    GenericMemoryAllocator::AllocSetCheck(context);
 #endif
 
     /* Make it look empty, just in case... */
     MemSetAligned(set->freelist, 0, sizeof(set->freelist));
+    MemSetAligned(set->extern_freelist, 0, sizeof(set->extern_freelist));
     set->blocks = NULL;
     set->keeper = NULL;
 
@@ -786,10 +630,7 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (GS_MP_INITED)
-            (*func->free)(block, tempSize);
-        else
-            gs_free(block, tempSize);
+        RackFreeConverter(block);
         block = next;
     }
 
@@ -808,11 +649,11 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
  *		to the set.
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
+void* RackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
 {
     Assert(file != NULL);
     Assert(line != 0);
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     AllocBlock block;
     AllocChunk chunk;
 #ifndef ENABLE_MEMORY_CHECK
@@ -830,6 +671,18 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
     if (gs_memory_enjection() && 0 != strcmp(context->name, "ErrorContext"))
         return NULL;
 #endif
+
+    /* if local memory not exhaust, will try alloc memory from local context */
+    if (!u_sess->local_memory_exhaust) {
+#ifndef MEMORY_CONTEXT_CHECKING
+        void* res = set->local_context->alloc_methods->alloc_from_context(set->local_context, size, file, line);
+#else
+        void* res = set->local_context->alloc_methods->alloc_from_context_debug(set->local_context, size, file, line);
+#endif
+        if (res) {
+            return res;
+        }
+    }
 
     /*
      * If this is a shared context, make it thread safe by acquiring
@@ -857,11 +710,7 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
         chunk_size = MAXALIGN(size);
         blksize = chunk_size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ;
 
-        if (GS_MP_INITED) {
-            block = (AllocBlock)(*func->malloc)(blksize, enable_memoryprotect);
-        } else {
-            gs_malloc(blksize, block, AllocBlock);
-        }
+        block = (AllocBlock)RackMallocConverter(blksize);
         if (block == NULL) {
             if (is_shared)
                 MemoryContextUnlock(context);
@@ -940,13 +789,21 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
      * of the alloc set and return its data address.
      */
     fidx = AllocSetFreeIndex(size);
-    chunk = set->freelist[fidx];
+    if (fidx < ALLOCSET_NUM_FREELISTS) {
+        chunk = set->freelist[fidx];
+    } else {
+        chunk = set->extern_freelist[fidx - ALLOCSET_NUM_FREELISTS];
+    }
     if (chunk != NULL) {
         Assert(chunk->size >= size);
         Assert(chunk->aset != set);
         Assert((int)fidx == AllocSetFreeIndex(chunk->size));
 
-        set->freelist[fidx] = (AllocChunk)chunk->aset;
+        if (fidx < ALLOCSET_NUM_FREELISTS) {
+            set->freelist[fidx] = (AllocChunk)chunk->aset;
+        } else {
+            set->extern_freelist[fidx - ALLOCSET_NUM_FREELISTS] = (AllocChunk)chunk->aset;
+        }
 
         chunk->aset = (void*)set;
 
@@ -1038,8 +895,13 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
                 chunk->requested_size = 0; /* mark it free */
                 chunk->prenum = 0;
 #endif
-                chunk->aset = (void*)set->freelist[a_fidx];
-                set->freelist[a_fidx] = chunk;
+                if (a_fidx < ALLOCSET_NUM_FREELISTS) {
+                    chunk->aset = (void*)set->freelist[a_fidx];
+                    set->freelist[a_fidx] = chunk;
+                } else {
+                    chunk->aset = (void*)set->extern_freelist[a_fidx - ALLOCSET_NUM_FREELISTS];
+                    set->extern_freelist[a_fidx - ALLOCSET_NUM_FREELISTS] = chunk;
+                }
             }
 
             /* Mark that we need to create a new block */
@@ -1051,8 +913,6 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
      * Time to create a new regular (multi-chunk) block?
      */
     if (block == NULL) {
-        Size required_size;
-
         /*
          * The first such block has size initBlockSize, and we double the
          * space in each succeeding block, but not more than maxBlockSize.
@@ -1062,19 +922,7 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
         if (set->nextBlockSize > set->maxBlockSize)
             set->nextBlockSize = set->maxBlockSize;
 
-        /*
-         * If initBlockSize is less than ALLOC_CHUNK_LIMIT, we could need more
-         * space... but try to keep it a power of 2.
-         */
-        required_size = chunk_size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ;
-        while (blksize < required_size)
-            blksize <<= 1;
-
-        /* Try to allocate it */
-        if (GS_MP_INITED)
-            block = (AllocBlock)(*func->malloc)(blksize, enable_memoryprotect);
-        else
-            gs_malloc(blksize, block, AllocBlock);
+        block = (AllocBlock)RackMallocConverter(blksize);
         if (block == NULL) {
             if (is_shared)
                 MemoryContextUnlock(context);
@@ -1160,35 +1008,14 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
 #endif
 }
 
-void check_pointer_valid(AllocBlock block, bool is_shared,
-    MemoryContext context, AllocChunk chunk)
-{
-    AllocSet set = (AllocSet)context;
-
-    if (block->aset != set) {
-        if (is_shared)
-            MemoryContextUnlock(context);
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-            errmsg("The block was freed before this time.")));
-    }
-    
-    if (block->freeptr != block->endptr ||
-        block->freeptr != ((char*)block) + (chunk->size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ)) {
-        if (is_shared)
-            MemoryContextUnlock(context);
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-            errmsg("The memory use was overflow.")));
-    }
-}
-
 /*
  * AllocSetFree
  *		Frees allocated memory; memory is removed from the set.
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
+void RackMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
 {
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size tempSize = 0;
     MemoryProtectFuncDef* func = NULL;
@@ -1261,16 +1088,16 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (GS_MP_INITED)
-            (*func->free)(block, tempSize);
-        else
-            gs_free(block, tempSize);
+        RackFreeConverter(block);
 #ifndef ENABLE_MEMORY_CHECK
     } else {
         /* Normal case, put the chunk into appropriate freelist */
         int fidx = AllocSetFreeIndex(chunk->size);
-
-        chunk->aset = (void*)set->freelist[fidx];
+        if (fidx < ALLOCSET_NUM_FREELISTS) {
+            chunk->aset = (void*)set->freelist[fidx];
+        } else {
+            chunk->aset = (void*)set->extern_freelist[fidx - ALLOCSET_NUM_FREELISTS];
+        }
         set->freeSpace += chunk->size + ALLOC_CHUNKHDRSZ;
 
 #ifdef MEMORY_CONTEXT_TRACK
@@ -1287,7 +1114,11 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         magic->size = 0;
         magic->posnum = 0;
 #endif
-        set->freelist[fidx] = chunk;
+        if (fidx < ALLOCSET_NUM_FREELISTS) {
+            set->freelist[fidx] = chunk;
+        } else {
+            set->extern_freelist[fidx - ALLOCSET_NUM_FREELISTS] = chunk;
+        }
         Assert(chunk->aset != set);
     }
 #endif
@@ -1302,10 +1133,10 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
  *		into the new memory, and the old memory is freed.
  */
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
-void* GenericMemoryAllocator::AllocSetRealloc(
+void* RackMemoryAllocator::AllocSetRealloc(
     MemoryContext context, void* pointer, Size align, Size size, const char* file, int line)
 {
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size oldsize = chunk->size;
     MemoryProtectFuncDef* func = NULL;
@@ -1413,11 +1244,7 @@ void* GenericMemoryAllocator::AllocSetRealloc(
         oldBlock = block;
         oldsize = block->allocSize;
 
-        if (GS_MP_INITED)
-            block = (AllocBlock)(*func->realloc)(oldBlock, oldBlock->allocSize, blksize, enable_memoryprotect);
-        else
-            gs_realloc(oldBlock, oldBlock->allocSize, block, blksize, AllocBlock);
-
+        block = (AllocBlock)RackReallocConverter(oldBlock, oldsize, blksize);
         if (block == NULL) {
             if (is_shared)
                 MemoryContextUnlock(context);
@@ -1524,49 +1351,12 @@ void* GenericMemoryAllocator::AllocSetRealloc(
 }
 
 /*
- * AllocSetGetChunkSpace
- *		Given a currently-allocated chunk, determine the total space
- *		it occupies (including all memory-allocation overhead).
- */
-Size GenericMemoryAllocator::AllocSetGetChunkSpace(MemoryContext context, void* pointer)
-{
-    AllocChunk chunk = AllocPointerGetChunk(pointer);
-
-    return chunk->size + ALLOC_CHUNKHDRSZ;
-}
-
-/*
- * AllocSetIsEmpty
- *		Is an allocset empty of any allocated space?
- */
-bool GenericMemoryAllocator::AllocSetIsEmpty(MemoryContext context)
-{
-    bool ret = false;
-
-    if (MemoryContextIsShared(context))
-        MemoryContextLock(context);
-    /*
-     * For now, we say "empty" only if the context is new or just reset. We
-     * could examine the freelists to determine if all space has been freed,
-     * but it's not really worth the trouble for present uses of this
-     * functionality.
-     */
-    if (context->isReset)
-        ret = true;
-
-    if (MemoryContextIsShared(context))
-        MemoryContextUnlock(context);
-
-    return ret;
-}
-
-/*
  * AllocSetStats
  *		Displays stats about memory consumption of an allocset.
  */
-void GenericMemoryAllocator::AllocSetStats(MemoryContext context, int level)
+void RackMemoryAllocator::AllocSetStats(MemoryContext context, int level)
 {
-    AllocSet set = (AllocSet)context;
+    RackAllocSet set = (RackAllocSet)context;
     long nblocks = 0;
     long nchunks = 0;
     long totalspace = 0;
@@ -1587,6 +1377,12 @@ void GenericMemoryAllocator::AllocSetStats(MemoryContext context, int level)
             freespace += chunk->size + ALLOC_CHUNKHDRSZ;
         }
     }
+    for (fidx = 0; fidx < RACKALLOCSET_NUM_FREELISTS - ALLOCSET_NUM_FREELISTS; fidx++) {
+        for (chunk = set->extern_freelist[fidx]; chunk != NULL; chunk = (AllocChunk)chunk->aset) {
+            nchunks++;
+            freespace += chunk->size + ALLOC_CHUNKHDRSZ;
+        }
+    }
 
     for (i = 0; i < level; i++)
         fprintf(stderr, "  ");
@@ -1603,238 +1399,4 @@ void GenericMemoryAllocator::AllocSetStats(MemoryContext context, int level)
 
 #ifdef MEMORY_CONTEXT_CHECKING
 
-void AllocSetCheckPointer(void* pointer)
-{
-    AllocChunkData* chunk = (AllocChunkData*)(((char*)(pointer)) - ALLOC_CHUNKHDRSZ);
-
-    /* For opt memory context, we use sentinel instead of magic number to protect memory overflow. */
-    if (!IsOptAllocSetContext(chunk->aset)) {
-        AllocMagicData* magic =
-            (AllocMagicData*)(((char*)chunk) + ALLOC_CHUNKHDRSZ + MAXALIGN(chunk->requested_size) - ALLOC_MAGICHDRSZ);
-
-        Assert(magic->aset == chunk->aset && magic->size == chunk->size && magic->posnum == PosmagicNum);
-    }
-}
-
-/*
- * AllocSetCheck
- *		Walk through chunks and check consistency of memory.
- *
- * NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
- * find yourself in an infinite loop when trouble occurs, because this
- * routine will be entered again when elog cleanup tries to release memory!
- */
-void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
-{
-#ifndef ENABLE_MEMORY_CHECK
-    AllocSet set = (AllocSet)context;
-    char* name = set->header.name;
-    AllocBlock prevblock;
-    AllocBlock block;
-
-    for (prevblock = NULL, block = set->blocks; block != NULL; prevblock = block, block = block->next) {
-        char* bpoz = ((char*)block) + ALLOC_BLOCKHDRSZ;
-        long blk_used = block->freeptr - bpoz;
-        long blk_data = 0;
-        long nchunks = 0;
-
-        /*
-         * Empty block - empty can be keeper-block only
-         */
-        if (!blk_used) {
-            if (set->keeper != block) {
-                Assert(0);
-                ereport(WARNING, (errmsg("problem in alloc set %s: empty block", name)));
-            }
-        }
-
-        /*
-         * Check block header fields
-         */
-        if (block->aset != set || block->prev != prevblock || block->freeptr < bpoz || block->freeptr > block->endptr) {
-            ereport(WARNING, (errmsg("problem in alloc set %s: corrupt header in block", name)));
-        }
-
-        /*
-         * Chunk walker
-         */
-        while (bpoz < block->freeptr) {
-            AllocChunk chunk = (AllocChunk)bpoz;
-            Size chsize, dsize;
-
-            chsize = chunk->size;          /* aligned chunk size */
-            dsize = chunk->requested_size; /* real data */
-
-            /*
-             * Check chunk size
-             */
-            if (dsize > chsize) {
-                Assert(0);
-                ereport(WARNING,
-                    (errmsg("problem in alloc set %s: req size > alloc size",
-                        name)));
-            }
-            if (chsize < (1 << ALLOC_MINBITS)) {
-                Assert(0);
-                ereport(WARNING,
-                    (errmsg("problem in alloc set %s: bad size %lu",
-                        name,
-                        (unsigned long)chsize)));
-            }
-
-            /* single-chunk block? */
-            if (chsize > set->allocChunkLimit && (long)(chsize + ALLOC_CHUNKHDRSZ) != blk_used) {
-                Assert(0);
-                ereport(
-                    WARNING, (errmsg("problem in alloc set %s: bad single-chunk in block", name)));
-            }
-
-            /*
-             * If chunk is allocated, check for correct aset pointer. (If it's
-             * free, the aset is the freelist pointer, which we can't check as
-             * easily...)
-             */
-            if (dsize > 0 && chunk->aset != (void*)set) {
-                Assert(0);
-                ereport(WARNING,
-                    (errmsg("problem in alloc set %s: bogus aset link", name)));
-            }
-
-            /*
-             * Check for overwrite of "unallocated" space in chunk
-             */
-            if (dsize > 0 && dsize < chsize && dsize != (Size)MAXALIGN(dsize) &&
-                !sentinel_ok(chunk, ALLOC_CHUNKHDRSZ + dsize - ALLOC_MAGICHDRSZ)) {
-                Assert(0);
-                ereport(WARNING,
-                    (errmsg("problem in alloc set %s: detected write past chunk end", name)));
-            }
-
-            blk_data += chsize;
-            nchunks++;
-
-            bpoz += ALLOC_CHUNKHDRSZ + chsize;
-        }
-
-        if ((blk_data + (nchunks * ALLOC_CHUNKHDRSZ)) != (unsigned long)blk_used) {
-            Assert(0);
-            ereport(WARNING, (errmsg("problem in alloc set %s: found inconsistent memory block", name)));
-        }
-    }
-#endif
-}
-
-/*
- * chunk walker
- */
-static void dumpAllocChunk(AllocBlock blk, StringInfoData* memoryBuf)
-{
-    char* name = blk->aset->header.name;
-    char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
-    while (bpoz < blk->freeptr) {
-        AllocChunk chunk = (AllocChunk)bpoz;
-        Size chsize = chunk->size;
-        Size dsize = chunk->requested_size;
-
-        // the chunk is free, so skip it
-        if (0 == chunk->requested_size) {
-            bpoz += ALLOC_CHUNKHDRSZ + chsize;
-            continue;
-        }
-
-        // check chunk size
-        if (dsize > chsize) {
-            ereport(LOG,
-                (errmsg("dump_memory: ERROR in chunk: req size > alloc size for "
-                        "chunk in block of context %s",
-                    name)));
-            ereport(LOG, (errmsg("dump_memory: don't dump all chunks after invalid chunk in this block!")));
-            return;
-        }
-
-        appendStringInfo(memoryBuf,
-            "%s:%d, %lu, %lu\n",
-            chunk->file,
-            chunk->line,
-            (unsigned long)chunk->size,
-            (unsigned long)chunk->requested_size);
-
-        bpoz += ALLOC_CHUNKHDRSZ + chsize;
-    }
-}
-
-void dumpAllocBlock(AllocSet set, StringInfoData* memoryBuf)
-{
-    for (AllocBlock blk = set->blocks; blk != NULL; blk = blk->next) {
-        char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
-        long blk_used = blk->freeptr - bpoz;
-
-        // empty block - empty can be keeper-block only (from AllocSetCheck())
-        if (!blk_used)
-            continue;
-
-        // there are chunks in block
-        dumpAllocChunk(blk, memoryBuf);
-    }
-
-    return;
-}
-
 #endif /* MEMORY_CONTEXT_CHECKING */
-
-#ifdef MEMORY_CONTEXT_TRACK
-/*
- * chunk walker
- */
-static void GetAllocChunkInfo(AllocSet set, AllocBlock blk, StringInfoDataHuge* memoryBuf)
-{
-    char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
-    while (bpoz < blk->freeptr) {
-        AllocChunk chunk = (AllocChunk)bpoz;
-        Size chsize = chunk->size;
-
-        /* the chunk is free, so skip it */
-        if (chunk->aset != set) {
-            bpoz += ALLOC_CHUNKHDRSZ + chsize;
-            continue;
-        }
-
-        if (memoryBuf != NULL) {
-            appendStringInfoHuge(memoryBuf, "%s:%d, %lu\n", chunk->file, chunk->line, chunk->size);
-        }
-
-        bpoz += ALLOC_CHUNKHDRSZ + chsize;
-    }
-}
-
-void GetAllocBlockInfo(AllocSet set, StringInfoDataHuge* memoryBuf)
-{
-    for (AllocBlock blk = set->blocks; blk != NULL; blk = blk->next) {
-        char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
-        long blk_used = blk->freeptr - bpoz;
-
-        /* empty block - empty can be keeper-block only (from AllocSetCheck()) */
-        if (!blk_used)
-            continue;
-
-        /* there are chunks in block */
-        GetAllocChunkInfo(set, blk, memoryBuf);
-    }
-
-    return;
-}
-
-#endif
-/*
- * alloc_trunk_size
- *	Given a width, calculate how many bytes are actually allocated
- *
- * Parameters:
- *	@in width: input width
- *
- * Returns: actually allocated mem bytes
- */
-int alloc_trunk_size(int width)
-{
-    return Max((int)sizeof(Datum), (1 << (unsigned int)my_log2((width) + ALLOC_MAGICHDRSZ))) + ALLOC_CHUNKHDRSZ;
-}

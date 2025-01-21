@@ -3215,7 +3215,7 @@ typedef struct knl_session_context {
 #ifdef ENABLE_HTAP
     knl_u_imcstore_context imcstore_ctx;
 #endif
-
+    bool local_memory_exhaust;
 } knl_session_context;
 
 enum stp_xact_err_type {

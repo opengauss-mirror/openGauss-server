@@ -226,7 +226,11 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
 
     /*
      * create state structure
-     */
+    */
+    if (node->plan.operatorMemKB[0] == 0) {
+        node->plan.operatorMemKB[0] = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
+    }
+    node->plan.operatorMemKB[0] += GetAvailRackMemory(node->plan.dop);
     SortState* sortstate = makeNode(SortState);
     sortstate->ss.ps.plan = (Plan*)node;
     sortstate->ss.ps.state = estate;

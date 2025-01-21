@@ -584,7 +584,8 @@ static bool AutoSpreadMem(Tuplesortstate* state, double* growRatio)
     int64 usedMem = state->allowedMem - state->availMem;
 
     /* For concurrent case, we don't allow sort to spread a lot */
-    if (!gs_sysmemory_busy(usedMem * state->dop, true) && state->maxMem > state->allowedMem &&
+    if (!gs_sysmemory_busy(usedMem * state->dop, true) &&
+        !RackMemoryBusy(usedMem * state->dop) && state->maxMem > state->allowedMem &&
         (state->spreadNum < 2 || g_instance.wlm_cxt->stat_manager.comp_count == 1)) {
         if (state->availMem < 0) {
             state->allowedMem -= state->availMem;
@@ -817,7 +818,7 @@ static Tuplesortstate* tuplesort_begin_common(int64 workMem, bool randomAccess, 
                                          ALLOCSET_DEFAULT_MINSIZE,
                                          ALLOCSET_DEFAULT_INITSIZE,
                                          ALLOCSET_DEFAULT_MAXSIZE,
-                                         STANDARD_CONTEXT,
+                                         EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
                                          workMem * 1024L);
 
     /*
@@ -1422,10 +1423,14 @@ static bool grow_memtuples(Tuplesortstate* state)
      * palloc would be treating both old and new arrays as separate chunks.
      * But we'll check LACKMEM explicitly below just in case.)
      */
+    int64 rackAvail = GetAvailRackMemory(state->dop) * 1024L;
+    u_sess->local_memory_exhaust = state->availMem < rackAvail;
+
     if (state->availMem < (long)((newmemtupsize - memtupsize) * sizeof(SortTuple)))
         needAutoSpread = true;
 
-    if (gs_sysmemory_busy(memNowUsed * state->dop, true)) {
+    if (gs_sysmemory_busy(memNowUsed * state->dop, true) ||
+        (u_sess->local_memory_exhaust && RackMemoryBusy(memNowUsed * state->dop))) {
         MEMCTL_LOG(LOG,
             "Sort(%d) early spilled, workmem: %ldKB, availmem: %ldKB",
             state->planId,

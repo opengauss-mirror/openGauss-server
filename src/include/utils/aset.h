@@ -123,6 +123,33 @@ private:
     static void AllocSetMethodDefinition(MemoryContextMethods* method);
 };
 
+class RackMemoryAllocator {
+public:
+    static MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* name,
+        _in_ Size minContextSize, _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ Size maxSize,
+        _in_ bool isShared, _in_ bool isSession);
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void* AllocSetAlloc(_in_ MemoryContext context, _in_ Size align, _in_ Size size, const char* file, int line);
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void AllocSetFree(_in_ MemoryContext context, _in_ void* pointer);
+
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void* AllocSetRealloc(
+        _in_ MemoryContext context, _in_ void* pointer, _in_ Size align, _in_ Size size, const char* file, int line);
+
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void AllocSetReset(_in_ MemoryContext context);
+
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void AllocSetDelete(_in_ MemoryContext context);
+
+    static void AllocSetStats(_in_ MemoryContext context, _in_ int level);
+private:
+    static void AllocSetContextSetMethods(_in_ unsigned long value, MemoryContextMethods* method);
+    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    static void AllocSetMethodDefinition(MemoryContextMethods* method);
+};
+
 class AlignMemoryAllocator {
 public:
     static MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* name,

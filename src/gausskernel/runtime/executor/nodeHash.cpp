@@ -228,6 +228,10 @@ HashState* ExecInitHash(Hash* node, EState* estate, int eflags)
     /*
      * create state structure
      */
+    if (node->plan.operatorMemKB[0] == 0) {
+        node->plan.operatorMemKB[0] = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
+    }
+    node->plan.operatorMemKB[0] += GetAvailRackMemory(node->plan.dop);
     hashstate = makeNode(HashState);
     hashstate->ps.plan = (Plan*)node;
     hashstate->ps.state = estate;
@@ -441,7 +445,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
         local_work_mem * 1024L);
 
     hashtable->batchCxt = AllocSetContextCreate(hashtable->hashCxt,
@@ -449,7 +453,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
         local_work_mem * 1024L);
 
     /* Allocate data that will live for the life of the hashjoin */
@@ -1283,11 +1287,14 @@ void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 h
             hashtable->spacePeak = hashtable->spaceUsed;
         }
         bool sysBusy = gs_sysmemory_busy(hashtable->spaceUsed * dop, false);
+        bool rackBusy = RackMemoryBusy(hashtable->spaceUsed * dop);
+        int64 rackAvail = GetAvailRackMemory(dop) * 1024L;
+        u_sess->local_memory_exhaust = hashtable->spaceAllowed - hashtable->spaceUsed < rackAvail;
         if (hashtable->spaceUsed + int64(hashtable->nbuckets_optimal * sizeof(HashJoinTuple)) >
                 hashtable->spaceAllowed ||
-            sysBusy) {
+            sysBusy || (u_sess->local_memory_exhaust && rackBusy)) {
             AllocSetContext *set = (AllocSetContext *)(hashtable->hashCxt);
-            if (sysBusy) {
+            if (sysBusy || (u_sess->local_memory_exhaust && rackBusy)) {
                 hashtable->causedBySysRes = true;
                 hashtable->spaceAllowed = hashtable->spaceUsed;
                 set->maxSpaceSize = hashtable->spaceUsed;
