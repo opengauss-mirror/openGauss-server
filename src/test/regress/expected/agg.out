@@ -517,6 +517,31 @@ FROM test_data3;
  -.0789473684210526 |  -.458831467741123 |                    |  -.688247201611685 |                    |                   
 (1 row)
 
+CREATE TABLE sales_data (
+price DECIMAL(10, 2),
+quantity_sold INT
+);
+DECLARE
+i NUMBER := 1;
+BEGIN
+FOR i IN 1..10000 LOOP
+INSERT INTO sales_data (price, quantity_sold) VALUES (i, i);
+END LOOP;
+COMMIT;
+END;
+/
+SELECT CORR_S(price, quantity_sold) FROM sales_data;
+ corr_s 
+--------
+      1
+(1 row)
+
+SELECT CORR_K(price, quantity_sold) FROM sales_data;
+ corr_k 
+--------
+      1
+(1 row)
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
@@ -527,6 +552,7 @@ drop table test_data;
 drop table test_data1;
 drop table test_data2;
 drop table test_data3;
+DROP TABLE sales_data;
 drop table t1;
 drop schema aggregate CASCADE;
 NOTICE:  drop cascades to 3 other objects
