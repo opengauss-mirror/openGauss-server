@@ -207,6 +207,7 @@ static const char *BuiltinTrancheNames[] = {
     "ReplicationOriginLock",
     "AuditIndextblLock",
     "PCABufferContentLock",
+    "PCAAllocatedChunkUsagesLock",
     "XlogTrackPartLock",
     "SSTxnStatusCachePartLock",
     "SSSnapshotXminCachePartLock",

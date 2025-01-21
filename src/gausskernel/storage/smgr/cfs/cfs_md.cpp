@@ -3,6 +3,8 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "postgres.h"
+#include "knl/knl_variable.h"
 #include "storage/cfs/cfs.h"
 #include "storage/cfs/cfs_converter.h"
 #include "storage/cfs/cfs_md.h"
@@ -16,6 +18,69 @@
 
 #define CFS_PCA_AND_ASSIST_BUFFER_SIZE (2 * CFS_EXTENT_SIZE * BLCKSZ)
 #define CFS_WRITE_RETRY_TIMES 8
+
+
+/** extend chunks for blocks
+ @param[in/out] cfsExtentHeader     pca page header.
+ @param[in/out] location            extent loacation information.
+ @param[in]     needChunks          the number of chunks needed for a block.
+                                    (chunk can be preallocated for a compressPreallocChunks number).
+ @param[in]     actualUse           the number chunks actual used for a block.
+ @param[in/out] freeChunkLock       the lock that control allocated_chunk_usages bitmap.
+ @return return bool indicate that the extentheader is changed or not. */
+static bool ExtendChunksOfBlock(CfsExtentHeader *cfsExtentHeader, ExtentLocation *location, uint8 needChunks,
+                                uint8 actualUse, LWLock *freeChunkLock);
+
+/** return bool indicate that the extentheader is changed.
+ @param[in/out] cfsExtentHeader     pca page header.
+ @param[in/out] cfsExtentAddress    chunk information for a block.
+ @param[in]     needChunks          the number of chunks needed for a block.
+                                    (chunk can be preallocated for a compressPreallocChunks number).
+ @param[in]     actualUse           the number chunks actual used for a block.
+ @param[in/out] freeChunkLock       the lock that control allocated_chunk_usages bitmap.
+ @return return bool indicate that the extentheader is changed or not. */
+static bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
+                                    uint8 needChunks, uint8 actualUse, LWLock *freeChunkLock);
+
+/** write file for compress
+ @param[in]     fd        file dsecriptor.
+ @param[in/out] buf       page buffer.
+ @param[in]     size      the size of file that need to be writen.
+ @param[in]     offset    offset of the data that start to wirte. */
+static void CfsWriteFile(int fd, const void *buf, int size, int64 offset);
+
+/** write compress block for repair file
+ @param[in]     option            compress information.
+ @param[in/out] buf               page buffer.
+ @param[in/out] compressed_buf    compressed page buffer.
+ @param[in/out] cfsExtentAddress  chunk information for a block.
+ @param[in/out] cfsExtentHeader   pca page header. */
+static void WriteRepairFile_Compress_Block(RelFileCompressOption option, char *buf, char *compressed_buf,
+                                           CfsExtentAddress *cfsExtentAddress, CfsExtentHeader *cfsExtentHeader);
+
+/** prunch hole for the extent
+ @param[in/out] location      extent loacation information.
+ @param[in/out] assistPca     pca page header. */
+static void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assistPca);
+
+/** try to recyle one extent, make it alosely arranged in order.
+ @param[in]     reln           relation information.
+ @param[in]     forknum        file type for relation.
+ @param[in/out] oldLocation    extent loacation information. */
+static void CfsRecycleOneExtent(SMgrRelation reln, ForkNumber forknum, ExtentLocation *oldLocation);
+
+/** recycle chunk in all extents
+ @param[in/out] location      extent loacation information.
+ @param[in]     assistfd      assist file dsecriptor.
+ @param[in/out] alignbuf      src page buffer.
+ @param[in/out] ctrl          page ctrl to store pca page. */
+static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf, pca_page_ctrl_t *ctrl);
+
+/** sort out chunk in order
+ @param[in/out] location      extent loacation information.
+ @param[in/out] srcExtPca     pca page header.
+ @param[in/out] alignbuf      src page buffer. */
+static void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca, char *alignbuf);
 
 CfsLocationConvert cfsLocationConverts[2] = {
     StorageConvert,
@@ -219,26 +284,254 @@ void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, B
     }
 }
 
-// return bool indicate that the extentheader is changed
-static inline bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
-                                           uint8 needChunks, uint8 actualUse)
+/** find chunks adjacent to the current chunk that can be reused
+ @param[in/out] freeChunkMap  bitmap that recoreds chunk allocation usage.
+ @param[in]     targetLength  target continuously reusable chunks needed.
+ @param[in]     frontPos      first chunk location for the given block.
+ @param[in]     rearPos       last chunk location for the given block.
+ @param[in]     maxPos        end position to to find reusable chunks.
+ @return if find reusable chunk, return start position, else return INVALID_CHUNK_NUM. */
+int CfsFindAdjacentEmptyChunkNo(uint8* freeChunkMap, int targetLength, int frontPos, int rearPos, int maxPos)
+{
+    int frontCount = 0;
+    int rearCount = 0;
+    /* chunk start from 1 */
+    for (int i = frontPos - 1; i > 0 && i >= frontPos - targetLength; i--) {
+        /* 1: use, 0: unuse */
+        if (!CFS_BITMAP_GET(freeChunkMap, i)) {
+            frontCount++;
+        } else {
+            break;
+        }
+    }
+
+    for (int j = rearPos + 1; j <= maxPos && j <= rearPos + targetLength - frontCount; j++) {
+        if (!CFS_BITMAP_GET(freeChunkMap, j)) {
+            rearCount++;
+        } else {
+            break;
+        }
+    }
+
+    if (frontCount + rearCount >= targetLength) {
+        if (frontCount > 0) {
+            return frontPos - frontCount;
+        }
+        return frontPos;
+    }
+    return INVALID_CHUNK_NUM;
+}
+
+/** find chunks that can be reused from head position
+ @param[in/out] freeChunkMap    bitmap that recoreds chunk allocation usage.
+ @param[in]     firstCheckPos   start position to find reusable chunks.
+ @param[in]     maxPos          end position to to find reusable chunks.
+ @param[in]     targetLength    target continuously reusable chunks needed.
+ @return if find reusable chunk, return start position, else return INVALID_CHUNK_NUM.  */
+int CfsFindEmptyChunkNo(uint8* freeChunkMap, int firstCheckPos, int maxPos, int targetLength)
+{
+    int sequenceLength = 0;
+    for (int i = firstCheckPos; i <= maxPos; i++) {
+        if (!CFS_BITMAP_GET(freeChunkMap, i)) {
+            sequenceLength++;
+            if (sequenceLength == targetLength) {
+                Assert(i - targetLength + 1 > 0);
+                Assert(i - targetLength + 1 <= maxPos);
+                return i - targetLength + 1;
+            }
+        } else {
+            sequenceLength = 0;
+        }
+    }
+    return INVALID_CHUNK_NUM;
+}
+
+/** allocate chunks for block and update
+ @param[in/out] cfsExtentAddress  chunk information for a block.
+ @param[in]     chunkno           first chunk that start to be allocated.
+ @param[in]     needChunks        number of chunks need to be allocated.
+ @param[in/out] freeChunkMap      bitmap that recoreds chunk allocation usage. */
+static inline void CfsAllocateChunks(CfsExtentAddress *cfsExtentAddress, uint32 chunkno,
+                                     uint8 needChunks, uint8* freeChunkMap)
+{
+    for (int i = 0; i < needChunks; ++i, ++chunkno) {
+        Assert(!CFS_BITMAP_GET(freeChunkMap, chunkno));
+        CFS_BITMAP_SET(freeChunkMap, chunkno);
+        cfsExtentAddress->chunknos[i] = (uint16)chunkno;
+    }
+}
+
+/** try to allocate new delta chunks from the un-allocated area
+ @param[in/out] cfsExtentHeader       pca page header.
+ @param[in/out] cfsExtentAddress      chunk information for a block.
+ @param[in]     blockAllocateChunks   number of allocated chunks of the block.
+ @param[in]     needChunks            number of chunks need to be allocated.
+ @param[in/out] freeChunkLock         the lock that control allocated_chunk_usages bitmap.
+ @return return true indicates allocated successfully. */
+bool ExtendDeltaChunksAtTail(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
+                             uint8 blockAllocateChunks, uint8 needChunks, uint8* freeChunkMap)
+{
+    uint32 chunkno = INVALID_CHUNK_NUM;
+    Assert((uint32)cfsExtentHeader->allocated_chunks <=
+           (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+    chunkno = cfsExtentAddress->chunknos[0];
+    if (chunkno != INVALID_CHUNK_NUM) {
+        CfsAllocateChunks(cfsExtentAddress, chunkno, needChunks, freeChunkMap);
+        Assert(chunkno <= (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentHeader->n_fragment_chunks -= blockAllocateChunks;
+        Assert(cfsExtentHeader->n_fragment_chunks <=
+               (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentAddress->allocated_chunks = needChunks;
+        return true;
+    }
+    return false;
+}
+
+/** if not find adjacent empty chunk, try to find from first position
+ @param[in/out] cfsExtentHeader       pca page header.
+ @param[in/out] cfsExtentAddress      chunk information for a block.
+ @param[in]     blockAllocateChunks   number of allocated chunks of the block.
+ @param[in]     needChunks            number of chunks needed to be allocated.
+ @param[in]     allocateNumber        number of new chunks needed to be allocated.
+ @param[in/out] freeChunkLock         the lock that control allocated_chunk_usages bitmap.
+ @return return true indicates allocated successfully. */
+bool ReuseAdjacentChunks(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
+                         uint8 blockAllocateChunks, uint8 needChunks,
+                         int32 allocateNumber, uint8* freeChunkMap)
+{
+    uint32 chunkno = INVALID_CHUNK_NUM;
+    chunkno = CfsFindAdjacentEmptyChunkNo(freeChunkMap, allocateNumber, cfsExtentAddress->chunknos[0],
+                                          cfsExtentAddress->chunknos[blockAllocateChunks - 1],
+                                          cfsExtentHeader->allocated_chunks);
+    if (chunkno != INVALID_CHUNK_NUM) {
+        CfsAllocateChunks(cfsExtentAddress, chunkno, needChunks, freeChunkMap);
+        Assert(chunkno <= (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentHeader->n_fragment_chunks -= needChunks;
+        Assert(cfsExtentHeader->n_fragment_chunks <=
+               (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentAddress->allocated_chunks = needChunks;
+        return true;
+    }
+    return false;
+}
+
+/** if not find adjacent empty chunk, try to find from the first position
+ @param[in/out] cfsExtentHeader   pca page header.
+ @param[in/out] cfsExtentAddress  chunk information for a block.
+ @param[in]     needChunks        number of chunks needed to be allocated.
+ @param[in]     allocateNumber    numebr of new chunks needed to be allocated.
+ @param[in/out] freeChunkLock     the lock that control allocated_chunk_usages bitmap.
+ @return return true indicates allocated successfully. */
+bool ReuseChunksFromHead(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
+                         uint8 needChunks, int32 allocateNumber, uint8* freeChunkMap)
+{
+    uint32 chunkno = INVALID_CHUNK_NUM;
+    chunkno = CfsFindEmptyChunkNo(freeChunkMap, CHUNK_START_NUM, cfsExtentHeader->allocated_chunks, needChunks);
+    if (chunkno != INVALID_CHUNK_NUM) {
+        CfsAllocateChunks(cfsExtentAddress, chunkno, needChunks, freeChunkMap);
+        Assert(chunkno <= (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentHeader->n_fragment_chunks -= needChunks;
+        Assert(cfsExtentHeader->n_fragment_chunks <=
+               (uint32)(BLCKSZ / cfsExtentHeader-> chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+        cfsExtentAddress->allocated_chunks = needChunks;
+        return true;
+    }
+    return false;
+}
+
+/** cannot find empty reuse chunk and its not the last chunk, allocate new chunks for the block
+ @param[in/out] cfsExtentHeader    pca page header.
+ @param[in/out] cfsExtentAddress   chunk information for a block.
+ @param[in]     needChunks         number of chunks needed to be allocated.
+ @param[in]     allocateNumber     numebr of new chunks needed to be allocated.
+ @param[in/out] freeChunkLock      the lock that control allocated_chunk_usages bitmap.
+ @return return true indicates allocated successfully. */
+bool ExtendNewChunksAtTail(CfsExtentHeader *cfsExtentHeader, CfsExtentAddress *cfsExtentAddress,
+                           uint8 needChunks, int32 allocateNumber, uint8* freeChunkMap)
+{
+    uint32 chunkno = INVALID_CHUNK_NUM;
+    chunkno = (pc_chunk_number_t)pg_atomic_fetch_add_u32(&cfsExtentHeader->allocated_chunks,
+                                                         (uint32)needChunks) + 1;
+    CfsAllocateChunks(cfsExtentAddress, chunkno, needChunks, freeChunkMap);
+    Assert(chunkno <= (uint32)(BLCKSZ / cfsExtentHeader->chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
+    cfsExtentAddress->allocated_chunks = needChunks;
+    return true;
+}
+
+static bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader,
+                                    CfsExtentAddress *cfsExtentAddress,
+                                    uint8 needChunks, uint8 actualUse, LWLock *freeChunkLock)
 {
     bool res = false;
-    if (cfsExtentAddress->allocated_chunks < needChunks) {
-        /* since chunks is to be allocated, it means the order may break down
-            the ext will be dealt with in chunk recycling
-            recycleInOrder means whether the ext is in order or not
-         */
-        cfsExtentHeader->recycleInOrder = 0;
-        auto allocateNumber = needChunks - cfsExtentAddress->allocated_chunks;
-        uint32 chunkno = (pc_chunk_number_t)pg_atomic_fetch_add_u32(&cfsExtentHeader->allocated_chunks,
-                                                                    (uint32)allocateNumber) + 1;
-        for (int i = cfsExtentAddress->allocated_chunks; i < needChunks; ++i, ++chunkno) {
-            cfsExtentAddress->chunknos[i] = (uint16)chunkno;
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+        if (freeChunkLock != NULL) {
+            (void)LWLockAcquire(freeChunkLock, LW_EXCLUSIVE);
         }
-        cfsExtentAddress->allocated_chunks = needChunks;
-        res = true;
+        int32 allocateNumber = needChunks - cfsExtentAddress->allocated_chunks;
+        if (allocateNumber > 0) {
+            cfsExtentHeader->recycleInOrder = 0;
+            uint8 blockAllocateChunks = cfsExtentAddress->allocated_chunks;
+            uint32 rearchunk = INVALID_CHUNK_NUM;
+            if (blockAllocateChunks > 0) {
+                rearchunk = (uint32)cfsExtentAddress->chunknos[blockAllocateChunks - 1];
+            }
+
+            uint8* freeChunkMap = cfsExtentHeader->allocated_chunk_usages;
+            /* clean up the current chunks */
+            for (int i = 0; i < blockAllocateChunks; i++) {
+                Assert(CFS_BITMAP_GET(freeChunkMap, cfsExtentAddress->chunknos[i]));
+                CFS_BITMAP_CLEAR(freeChunkMap, cfsExtentAddress->chunknos[i]);
+            }
+            cfsExtentHeader->n_fragment_chunks += blockAllocateChunks;
+            cfsExtentAddress->allocated_chunks = 0;
+            /* situation 1: try to allocate new delta chunks from the un-allocated area */
+            if (blockAllocateChunks > 0 &&
+                pg_atomic_compare_exchange_u32(&cfsExtentHeader->allocated_chunks,
+                &rearchunk, cfsExtentHeader->allocated_chunks + allocateNumber)) {
+                res = ExtendDeltaChunksAtTail(cfsExtentHeader, cfsExtentAddress, blockAllocateChunks,
+                                              needChunks, freeChunkMap);
+            }
+
+            /* situation 2: if fail to allocate new chunks, try to reuse fragment to assemble a new continuous chunks */
+            if (!res && blockAllocateChunks > 0) {
+                res = ReuseAdjacentChunks(cfsExtentHeader, cfsExtentAddress, blockAllocateChunks,
+                                          needChunks, allocateNumber, freeChunkMap);
+            }
+
+            /* situation 3: if not find adjacent empty chunk, try to find from the first position */
+            if (!res && cfsExtentHeader->n_fragment_chunks >= needChunks) {
+                res = ReuseChunksFromHead(cfsExtentHeader, cfsExtentAddress, needChunks,
+                                          allocateNumber, freeChunkMap);
+            }
+
+            /* situation 4: cannot find empty reuse chunk and its not the last chunk, allocate new chunks for the block */
+            if (!res) {
+                res = ExtendNewChunksAtTail(cfsExtentHeader, cfsExtentAddress, needChunks,
+                                            allocateNumber, freeChunkMap);
+            }
+        }
+
+        if (freeChunkLock != NULL) {
+            LWLockRelease(freeChunkLock);
+        }
+    } else {
+        if (cfsExtentAddress->allocated_chunks < needChunks) {
+            /* since chunks is to be allocated, it means the order may break down
+                the ext will be dealt with in chunk recycling
+                recycleInOrder means whether the ext is in order or not
+            */
+            cfsExtentHeader->recycleInOrder = 0;
+            auto allocateNumber = needChunks - cfsExtentAddress->allocated_chunks;
+            uint32 chunkno = (pc_chunk_number_t)pg_atomic_fetch_add_u32(&cfsExtentHeader->allocated_chunks,
+                                                                        (uint32)allocateNumber) + 1;
+            for (int i = cfsExtentAddress->allocated_chunks; i < needChunks; ++i, ++chunkno) {
+                cfsExtentAddress->chunknos[i] = (uint16)chunkno;
+            }
+            cfsExtentAddress->allocated_chunks = needChunks;
+            res = true;
+        }
     }
+
     if (cfsExtentAddress->nchunks != actualUse) {
         cfsExtentAddress->nchunks = actualUse;
         res = true;
@@ -251,15 +544,40 @@ static inline bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader, Cfs
     return res;
 }
 
-static inline bool ExtendChunksOfBlock(CfsExtentHeader *cfsExtentHeader, ExtentLocation *location, uint8 needChunks,
-                                       uint8 actualUse)
+static bool ExtendChunksOfBlock(CfsExtentHeader *cfsExtentHeader, ExtentLocation *location, uint8 needChunks,
+                                uint8 actualUse, LWLock *freeChunkLock)
 {
     auto cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)location->extentOffset);
-    return ExtendChunksOfBlockCore(cfsExtentHeader, cfsExtentAddress, needChunks, actualUse);
+    return ExtendChunksOfBlockCore(cfsExtentHeader, cfsExtentAddress, needChunks, actualUse, freeChunkLock);
+}
+
+/** chunk recycle threshold: 1/4 of chunks is empty
+ @param[in] cfsExtentHeader pca page header.
+ @return threshold for doing extent recycle. */
+static inline uint16 RecycleChunkThreshold(CfsExtentHeader *cfsExtentHeader)
+{
+    return (CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ) / cfsExtentHeader->chunk_size / 4;
+}
+
+/** maximun number of chunks for doing recycle.
+ @param[in] cfsExtentHeader pca page header.
+ @return maximun number of chunks for doing recycle. */
+static inline uint32 MaxChunkNumForRecycle(CfsExtentHeader *cfsExtentHeader)
+{
+    /* reserve one page for recycle threshold, to avoid the entire extent is uncompressed. */
+    return (CFS_LOGIC_BLOCKS_PER_EXTENT - 1)* BLCKSZ / cfsExtentHeader->chunk_size;
+}
+
+/** the number of chunks for per block.
+ @param[in] cfsExtentHeader pca page header.
+ @return the number of chunks for per block. */
+static inline uint32 SingleBlockChunkNumForRecycle(CfsExtentHeader *cfsExtentHeader)
+{
+    return BLCKSZ / cfsExtentHeader->chunk_size;
 }
 
 size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer,
-                    bool sipSync, CFS_STORAGE_TYPE type)
+                    bool sipSync, bool isExtend, CFS_STORAGE_TYPE type)
 {
     /* quick return if page is extend page */
     if (PageIsNew(buffer)) {
@@ -293,7 +611,8 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
 
     /* set address */
     uint8 need_chunks = option.compressPreallocChunks > nchunks ? (uint8)option.compressPreallocChunks : (uint8)nchunks;
-    bool changed = ExtendChunksOfBlock(cfsExtentHeader, &location, need_chunks, nchunks);
+    bool changed = ExtendChunksOfBlock(cfsExtentHeader, &location, need_chunks, nchunks,
+                                       ctrl->allocated_chunk_usages_lock);
 
     /* write chunks of compressed page */
     off_t extentStartOffset = location.extentStart * BLCKSZ;
@@ -334,12 +653,33 @@ size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBloc
         }
     }
 
+    /* keep nblocks up-to-date in cfsextendextent situation */
+    if (isExtend) {
+        auto limit_n_blocks = location.extentOffset + 1;
+        auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+        while (limit_n_blocks > autal_n_blocks &&
+               (!pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &autal_n_blocks, limit_n_blocks)));
+        Assert (cfsExtentHeader->nblocks > location.extentOffset);
+    }
+
     /* free compressed buffer */
     if (compressedBuffer != NULL && compressedBuffer != buffer) {
         pfree(compressedBuffer);
     }
 
-    pca_buf_free_page(ctrl, location, changed);
+    pca_buf_free_page(ctrl, location, changed || isExtend);
+
+    /* try recyle extent */
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+        if (cfsExtentHeader->n_fragment_chunks > RecycleChunkThreshold(cfsExtentHeader) ||
+            (cfsExtentHeader->allocated_chunks >= MaxChunkNumForRecycle(cfsExtentHeader) &&
+            cfsExtentHeader->n_fragment_chunks >= SingleBlockChunkNumForRecycle(cfsExtentHeader))) {
+            CfsRecycleOneExtent(reln, forknum, &location);
+            ereport(LOG, (errmsg("Complete a recycle operation, relNode: %u, extentNumebr: %d",
+                                 location.relFileNode.relNode, location.extentNumber)));
+        }
+    }
+
     return BLCKSZ;
 }
 
@@ -371,7 +711,7 @@ void CfsExtendExtent(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlo
         InitExtentHeader(location);
         FileAllocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
     }
-    (void)CfsWritePage(reln, forknum, logicBlockNumber, buffer, true, type);
+    (void)CfsWritePage(reln, forknum, logicBlockNumber, buffer, true, true, type);
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -380,9 +720,11 @@ void CfsExtendExtent(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlo
     }
     CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
 
-    if (pg_atomic_read_u32(&cfsExtentHeader->nblocks) < location.extentOffset + 1) {
-        pg_atomic_write_u32(&cfsExtentHeader->nblocks, location.extentOffset + 1);
-    }
+    auto limit_n_blocks = location.extentOffset + 1;
+    auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+    while (limit_n_blocks > autal_n_blocks &&
+           (!pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &autal_n_blocks, limit_n_blocks)));
+    Assert (cfsExtentHeader->nblocks > location.extentOffset);
 
     pca_buf_free_page(ctrl, location, true);
 }
@@ -602,8 +944,8 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
 }
 
 /* only memory operation */
-void WriteRepairFile_Compress_Block(RelFileCompressOption option, char *buf, char *compressed_buf,
-    CfsExtentAddress *cfsExtentAddress, CfsExtentHeader *cfsExtentHeader)
+static void WriteRepairFile_Compress_Block(RelFileCompressOption option, char *buf, char *compressed_buf,
+                                           CfsExtentAddress *cfsExtentAddress, CfsExtentHeader *cfsExtentHeader)
 {
     errno_t rc = 0;
     uint16 chunkSize = cfsExtentHeader->chunk_size;
@@ -614,7 +956,7 @@ void WriteRepairFile_Compress_Block(RelFileCompressOption option, char *buf, cha
 
     /* set address */
     uint8 need_chunks = option.compressPreallocChunks > nchunks ? (uint8)option.compressPreallocChunks : (uint8)nchunks;
-    (void)ExtendChunksOfBlockCore(cfsExtentHeader, cfsExtentAddress, need_chunks, nchunks);
+    (void)ExtendChunksOfBlockCore(cfsExtentHeader, cfsExtentAddress, need_chunks, nchunks, NULL);
 
     /* copy compressed data into dst */
     char *dst = compressed_buf + (long)(cfsExtentAddress->chunknos[0] - 1) * chunkSize;
@@ -825,7 +1167,7 @@ void CfsReadFile(int fd, void *buf, int size, int64 offset)
 }
 
 /* fd is not vfd, it is real fd */
-void CfsWriteFile(int fd, const void *buf, int size, int64 offset)
+static void CfsWriteFile(int fd, const void *buf, int size, int64 offset)
 {
     int write_size = 0;
     uint32 try_times = 0;
@@ -995,7 +1337,7 @@ ExtentLocation FormExtLocation(SMgrRelation sRel, BlockNumber logicBlockNumber)
     };
 }
 
-void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca, char *alignbuf)
+static void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca, char *alignbuf)
 {
     char *srcBuf = alignbuf; // src buf includes 128 pages
     char *assistBuf = alignbuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ; // assist includes 129 page;
@@ -1044,7 +1386,7 @@ void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca,
     assistPca->recycleInOrder = 1; // set flag, showing the ext is in order.
 }
 
-void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assistPca)
+static void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assistPca)
 {
     uint32 chunksum = assistPca->allocated_chunks;
 
@@ -1060,7 +1402,8 @@ void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assistPca)
 }
 
 /* recycle chunk in ext */
-void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf)
+static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf,
+                                 pca_page_ctrl_t *ctrl)
 {
     char *srcBuf = alignbuf; // src buf includes 128 pages
     char *assistBuf = srcBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ; // assist includes 129 page;
@@ -1071,9 +1414,6 @@ void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf)
     location.extentStart = (extInfo->extentNumber % CFS_EXTENT_COUNT_PER_FILE) * CFS_EXTENT_SIZE;
     location.headerNum = location.extentStart + CFS_LOGIC_BLOCKS_PER_EXTENT;
 
-    /* lock pca */
-    // protect ext from reading and writing
-    pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
@@ -1109,9 +1449,67 @@ void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf)
     CfsExtentHeader *assistPca = (CfsExtentHeader *)(void *)(assistBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ);
     CfsPunchHole(location, assistPca);
 
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+        /* lock free chunk bitmap */
+        (void)LWLockAcquire(ctrl->allocated_chunk_usages_lock, LW_EXCLUSIVE);
+        CfsExtentAddress *extAddr = NULL;
+
+        rc = memset_s(ctrl->pca_page->allocated_chunk_usages, ALLOCATE_CHUNK_USAGE_LEN,
+                      0, ALLOCATE_CHUNK_USAGE_LEN);
+        securec_check(rc, "\0", "\0");
+
+        /* recount n_fragment_chunks */
+        uint16 usedChunkCount = 0;
+        for (uint16 i = 0; i < ctrl->pca_page->nblocks; i++) {
+            extAddr = GetExtentAddress(ctrl->pca_page, i);
+            for (int j = 0; j < extAddr->allocated_chunks; j++) {
+                CFS_BITMAP_SET(ctrl->pca_page->allocated_chunk_usages, extAddr->chunknos[j]);
+                usedChunkCount++;
+            }
+        }
+        ctrl->pca_page->n_fragment_chunks = ctrl->pca_page->allocated_chunks - usedChunkCount;
+        LWLockRelease(ctrl->allocated_chunk_usages_lock);
+    }
+
     /* free pca buffer */
     PCA_SET_NO_READ(ctrl);
     pca_buf_free_page(ctrl, location, false);
+}
+
+static void CfsRecycleOneExtent(SMgrRelation reln, ForkNumber forknum, ExtentLocation *oldLocation)
+{
+    ExtentLocation location = FormExtLocation(reln, 0);
+    char filePath[MAXPGPATH];
+
+    /* lock pca, protect ext from reading and writing */
+    pca_page_ctrl_t *ctrl = pca_buf_read_page(*oldLocation, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
+    errno_t rc = snprintf_s(filePath, MAXPGPATH, MAXPGPATH - 1,
+        "global/pg_dw_ext_chunk/%u_%u_assist_tmp", reln->smgr_rnode.node.relNode, oldLocation->extentNumber);
+    securec_check_ss(rc, "\0", "\0");
+
+    int assistfd = CfsCreateFile(filePath);
+
+    /* alloc buffer for pca and assist pca */
+    char *unaligned_buf = (char *) palloc(CFS_PCA_AND_ASSIST_BUFFER_SIZE + BLCKSZ);
+    char *aligned_buf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+    /* assist info is stored in last added page */
+    char *assistInfobuf = aligned_buf + CFS_PCA_AND_ASSIST_BUFFER_SIZE - BLCKSZ;
+
+    rc = memset_s(aligned_buf, CFS_PCA_AND_ASSIST_BUFFER_SIZE, 0, CFS_PCA_AND_ASSIST_BUFFER_SIZE);
+    securec_check(rc, "\0", "\0");
+
+    CfsExtInfo *extInfo = (CfsExtInfo *)(void *)assistInfobuf;
+    extInfo->forknum = forknum;
+    extInfo->rnode = reln->smgr_rnode.node;
+
+    location.fd = oldLocation->fd;
+    /* recyle blocks at the extent granularity (128 pcd) */
+    extInfo->extentNumber = oldLocation->extentNumber;
+    CfsRecycleChunkInExt(location, assistfd, aligned_buf, ctrl);
+    fsync(location.fd);
+    pfree(unaligned_buf);
+    (void)close(assistfd);
+    CfsRemoveFile(filePath);
 }
 
 /**********************************************************************************************************
@@ -1167,7 +1565,9 @@ void CfsRecycleChunkProc(SMgrRelation reln, ForkNumber forknum)
         location.fd = mdfd->mdfd_vfd;
         for (uint32 i = 0; i * CFS_LOGIC_BLOCKS_PER_EXTENT < nBlocks; i++) {
             extInfo->extentNumber = extIdx;
-            CfsRecycleChunkInExt(location, assistfd, aligned_buf);
+            /* lock pca, protect ext from reading and writing */
+            pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
+            CfsRecycleChunkInExt(location, assistfd, aligned_buf, ctrl);
             extIdx++;
         }
 

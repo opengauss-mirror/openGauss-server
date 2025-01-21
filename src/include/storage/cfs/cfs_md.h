@@ -7,7 +7,7 @@
 
 /* cfs interface */
 extern void CfsWriteBack(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks, CFS_STORAGE_TYPE type);
-extern size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer, bool skipSync, CFS_STORAGE_TYPE type);
+extern size_t CfsWritePage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer, bool skipSync, bool isExtend, CFS_STORAGE_TYPE type);
 void CfsExtendExtent(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer, CFS_STORAGE_TYPE type);
 extern BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo, off_t len);
 extern int CfsReadPage(SMgrRelation reln, ForkNumber forknum, BlockNumber logicBlockNumber, char *buffer, CFS_STORAGE_TYPE type);

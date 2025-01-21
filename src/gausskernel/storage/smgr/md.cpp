@@ -1451,7 +1451,7 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
     bool compressed = IS_COMPRESSED_MAINFORK(reln, forknum);
     if (compressed) {
-        nbytes = (int)CfsWritePage(reln, forknum, blocknum, buffer, skipFsync, COMMON_STORAGE);
+        nbytes = (int)CfsWritePage(reln, forknum, blocknum, buffer, skipFsync, false, COMMON_STORAGE);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
