@@ -1164,24 +1164,10 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     if (!UHeapDiskTupNoNulls(tup)) {
         /*
          * there's a null somewhere in the tuple
-         *
-         * check to see if any preceding bits are null...
+         * null columns have different hoff with non-null columns,
+         * not reuse the offset when have null columns.
          */
-        int byte = attnum >> ATTNUM_BMP_SHIFT;
-        int finalbit = attnum & 0x07;
-
-        /* check for nulls "before" final bit of last byte */
-        if ((~bp[byte]) & ((1 << finalbit) - 1))
-            slow = true;
-        else {
-            /* check for nulls in any "earlier" bytes */
-            for (int i = 0; i < byte; i++) {
-                if (bp[i] != 0xFF) {
-                    slow = true;
-                    break;
-                }
-            }
-        }
+        slow = true;
     }
 
     if (!slow) {
@@ -1225,10 +1211,12 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
             att[0].attcacheoff = off - hoff;
         }
         
-
         /* we might have set some offsets in the slow path previously */
-        while (j < natts && att[j].attcacheoff > 0)
+        while (j < natts && att[j].attcacheoff > 0) {
+            Assert(att[j].attbyval || (!att[j].attbyval && ((uint32)(att[j].attcacheoff) ==
+                att_align_nominal((uint32)(att[j].attcacheoff + hoff), att[j].attalign) - hoff)));
             j++;
+        }
 
         off = att[j - 1].attcacheoff + att[j - 1].attlen + hoff;
 
@@ -1281,7 +1269,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
                 attrLen = VARSIZE_ANY(tp + off);
             } else if (!att[i].attbyval) {
                 off = att_align_nominal(off, att[i].attalign);
-            } else if (usecache) {
+            } else if (usecache && UHeapDiskTupNoNulls(tup)) {
                 att[i].attcacheoff = off - hoff;
             }
 
