@@ -212,6 +212,8 @@ struct PageRedoWorker {
     XLogRecPtr nextPrunePtr;
     bool inRealtimeBuild;
     uint32 currentHtabBlockNum;
+    XLogRecPtr lastQueueTopReadRecPtr;
+    XLogRecPtr lastQueueTopEndRecPtr;
 };
 
 
@@ -283,6 +285,8 @@ void OndemandProcPauseStatus();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
 void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState = false);
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);
+void SetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr);
+void GetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 
 }  // namespace ondemand_extreme_rto
 #endif
