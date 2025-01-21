@@ -114,4 +114,42 @@ drop table if exists normal_test.t_bool_value;
 create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = no);
 drop table if exists normal_test.t_bool_value;
 
+-- zlib algorithm
+-- default compress_level
+create table normal_test.t_zlib1 (id int, c1 text) with (compresstype=4,compress_chunk_size=512);
+\d+ normal_test.t_zlib1
+INSERT INTO normal_test.t_zlib1 SELECT id, id::text FROM generate_series(1,1000) id;
+select count(*) from normal_test.t_zlib1;
+select count(*) from normal_test.t_zlib1 where id < 100;
+-- error compress_level
+create table normal_test.t_zlib_error (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=32);
+create table normal_test.t_zlib_error (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=-80);
+-- success compress_level
+create table normal_test.t_zlib2 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=15);
+create table normal_test.t_zlib3 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=0);
+create table normal_test.t_zlib4 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=-8);
+INSERT INTO normal_test.t_zlib2 SELECT id, id::text FROM generate_series(1,1000) id;
+INSERT INTO normal_test.t_zlib3 SELECT id, id::text FROM generate_series(1,500) id;
+INSERT INTO normal_test.t_zlib4 SELECT id, id::text FROM generate_series(1,500) id;
+select count(*) from normal_test.t_zlib2;
+select count(*) from normal_test.t_zlib3;
+select count(*) from normal_test.t_zlib4;
+checkpoint;
+vacuum full normal_test.t_zlib1;
+vacuum full normal_test.t_zlib2;
+vacuum full normal_test.t_zlib3;
+vacuum full normal_test.t_zlib4;
+select count(*) from normal_test.t_zlib1;
+select count(*) from normal_test.t_zlib1 where id < 100;
+select count(*) from normal_test.t_zlib2;
+select count(*) from normal_test.t_zlib3;
+select count(*) from normal_test.t_zlib4;
+
+-- normal index with zlib algorithm
+create index on normal_test.t_zlib1(id) WITH (compresstype=4,compress_chunk_size=1024,compress_level=0);
+alter index normal_test.t_zlib1_id_idx set (compresstype=1); --failed
+alter index normal_test.t_zlib1_id_idx set (compress_chunk_size=2048); --failed
+alter index normal_test.t_zlib1_id_idx set (compress_prealloc_chunks=2); --success
+alter index normal_test.t_zlib1_id_idx set (compress_level=2); --success
+
 drop schema normal_test cascade;

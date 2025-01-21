@@ -342,8 +342,13 @@ typedef enum RedisRelAction {
 
 /* PageCompressOpts->compressType values */
 typedef enum CompressTypeOption {
-    COMPRESS_TYPE_NONE = 0, COMPRESS_TYPE_PGLZ = 1, COMPRESS_TYPE_ZSTD = 2, COMPRESS_TYPE_PGZSTD = 3
+    COMPRESS_TYPE_NONE = 0,
+    COMPRESS_TYPE_PGLZ = 1,
+    COMPRESS_TYPE_ZSTD = 2,
+    COMPRESS_TYPE_PGZSTD = 3,
+    COMPRESS_TYPE_ZLIB = 4
 } CompressTypeOption;
+
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
     int fillfactor;          /* page fill factor in percent (0..100) */

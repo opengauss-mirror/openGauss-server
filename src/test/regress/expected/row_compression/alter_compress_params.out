@@ -31,13 +31,13 @@ CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5 (i
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_5 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5 SET (compresstype = 5); -- fail
 ERROR:  value 5 out of bounds for option "compresstype"
-DETAIL:  Valid values are between "0" and "2".
+DETAIL:  Valid values are between "0" and "4".
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype__1 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype__1 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype__1 SET (compresstype = -1); -- fail
 ERROR:  value -1 out of bounds for option "compresstype"
-DETAIL:  Valid values are between "0" and "2".
+DETAIL:  Valid values are between "0" and "4".
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype__1;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_2_cl_32 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_2_cl_32 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -98,8 +98,7 @@ DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_
 CREATE TABLE alter_compress_params_schema.uncompress_to_compresstype_3 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_to_compresstype_3 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_to_compresstype_3 SET (compresstype = 3); -- fail
-ERROR:  value 3 out of bounds for option "compresstype"
-DETAIL:  Valid values are between "0" and "2".
+ERROR:  row-compression feature current not support algorithm is PGZSTD.
 DROP TABLE alter_compress_params_schema.uncompress_to_compresstype_3;
 -- set compressed options of column table
 CREATE TABLE alter_compress_params_schema.alter_column_table_compressed_options (id int, value varchar) WITH (ORIENTATION = column);
