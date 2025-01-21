@@ -12,6 +12,7 @@
 #define PAGE_COMPRESSION_H
 
 #include <sys/mman.h>
+#include <sstream>
 
 #include "c.h"
 #include "storage/buf/bufpage.h"
@@ -185,6 +186,16 @@ struct RelFileCompressOption {
         compressLevel : g_cmpBitStruct[CMP_LEVEL_INDEX].bitLen,          /* compress level */
         compressAlgorithm : g_cmpBitStruct[CMP_ALGORITHM_INDEX].bitLen,  /* compress algorithm */
         compressChunkSize : g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].bitLen; /* chunk size of compressed data */
+
+    std::string toString() const
+    {
+        std::ostringstream oss;
+        oss << "RelFileCompressOption: byteConvert: " << byteConvert << ", compressPreallocChunks: "
+            << compressPreallocChunks << ", compressLevelSymbol: " << compressLevelSymbol << ", compressLevel: "
+            << compressLevel << ", compressAlgorithm: " << compressAlgorithm << ", compressChunkSize: "
+            << compressChunkSize << ".";
+        return oss.str();
+    }
 };
 
 inline void TransCompressOptions(const RelFileNode& node, RelFileCompressOption* opt)

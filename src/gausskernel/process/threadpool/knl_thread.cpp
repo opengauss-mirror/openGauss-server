@@ -1736,6 +1736,8 @@ static void knl_t_page_compression_init(knl_t_page_compression_context* page_com
 {
     page_compression_cxt->zstd_cctx = NULL;
     page_compression_cxt->zstd_dctx = NULL;
+    page_compression_cxt->compressNanoSeconds = 0;
+    page_compression_cxt->compressPageCnt = 0;
 }
 
 static void knl_t_sql_patch_init(knl_t_sql_patch_context* sql_patch_cxt)

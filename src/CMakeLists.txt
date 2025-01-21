@@ -38,6 +38,8 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
+add_definitions(-DZSTD_STATIC_LINKING_ONLY)
+
 add_subdirectory(bin)
 add_subdirectory(common)
 add_subdirectory(lib)
