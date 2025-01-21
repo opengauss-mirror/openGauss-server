@@ -412,6 +412,10 @@ void PopulateImcs(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
 
     PG_TRY();
     {
+        if (g_instance.attr.attr_memory.enable_borrow_memory) {
+            IMCSDesc *imcsDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(rel));
+            u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
+        }
         while ((tuple = tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
             null[relTupleDesc->natts] = false;
@@ -530,6 +534,10 @@ void ParallelPopulateImcsMain(const BgWorkerContext *bwc)
     IMCStoreInsert imcstoreInsert(rel, shared->imcsTupleDesc, shared->imcsAttsNum);
     PG_TRY();
     {
+        if (g_instance.attr.attr_memory.enable_borrow_memory) {
+            IMCSDesc *imcsDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(rel));
+            u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
+        }
         while ((tuple = tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
             null[relTupleDesc->natts] = false;

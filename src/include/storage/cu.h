@@ -32,6 +32,7 @@
 #include "utils/datum.h"
 #include "storage/lock/lwlock.h"
 #ifdef ENABLE_HTAP
+#include "access/htap/borrow_mem_pool.h"
 #include "access/htap/imcstore_delta.h"
 
 #define ROW_GROUP_INIT_NUMS (1024)
@@ -237,6 +238,8 @@ struct IMCSDesc {
     uint32 maxRowGroupCapacity;
     bool isPartition;
     Oid parentOid;
+    BorrowMemPool* borrowMemPool;
+
     IMCSDesc();
     ~IMCSDesc();
 
@@ -410,6 +413,7 @@ public:
 #ifdef ENABLE_HTAP
     void PackNumericCUForFlushToDisk();
     void UnpackNumericCUFromDisk(int rowCount, uint32 magic, int cuSize);
+    void FreeBorrowCUMem();
 #endif
 
     // Compress data

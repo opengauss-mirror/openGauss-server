@@ -153,6 +153,10 @@ typedef struct CacheDesc {
     slock_t m_slot_hdr_lock;
 
     CacheFlags m_flag;
+
+#ifdef ENABLE_HTAP
+    bool m_isBorrow{false};
+#endif
 } CacheDesc;
 
 int CacheMgrNumLocks(int64 cache_size, uint32 each_block_size);
@@ -227,6 +231,13 @@ public:
     }
     void CopyCacheBlockTag(CacheSlotId_t slotId, CacheTag* outTag);
 
+#ifdef ENABLE_HTAP
+    bool IsBorrowSlotId(CacheSlotId_t slotId);
+    void ResetBorrowSlot(CacheSlotId_t slotId);
+    void ReleaseBorrowMem(int size);
+    int64 GetCurrBorrowMemSize();
+#endif
+
     char* m_CacheSlots;
     /* only true when ImcuCacheMgr init */
     bool isImcs = false;
@@ -242,6 +253,7 @@ private:
     CacheSlotId_t GetFreeCacheBlock(int size);
 #ifdef ENABLE_HTAP
     void EvictCacheCUIntoDisk(CacheSlotId_t slotId);
+    bool ReserveBorrowMem(int size);
 #endif
 
     /* memory operate */
@@ -279,6 +291,11 @@ private:
 
     int64 m_cstoreMaxSize;
     int64 m_cstoreCurrentSize;
+#ifdef ENABLE_HTAP
+    int64 m_borrowMaxSize;
+    int64 m_borrowCurrSize;
+    slock_t m_borrowSizeLock;
+#endif
 
     int m_freeListHead;
     int m_freeListTail;

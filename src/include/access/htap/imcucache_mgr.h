@@ -81,7 +81,9 @@ public: // static
     static IMCUDataCacheMgr* GetInstance(void);
     static void NewSingletonInstance(void);
     static void ResetInstance();
+    static void BaseCacheCU(CU* srcCU, CU* slotCU);
     static void CacheCU(CU* srcCU, CU* slotCU);
+    static bool CacheBorrowMemCU(CU* srcCU, CU* slotCU, CUDesc* cuDescPtr);
 
 public:
     void SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int colId, CU* cuPtr, CUDesc* cuDescPtr);
@@ -98,6 +100,12 @@ public:
     void ClearImcsMem(Oid relOid, RelFileNode* relNode);
     void UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus);
     bool HasInitialImcsTable();
+
+    bool IsBorrowSlotId(CacheSlotId_t slotId);
+    void ResetBorrowSlot(CacheSlotId_t slotId);
+    void ReleaseBorrowMemSize(int size);
+    int64 GetCurrBorrowMemSize();
+    void FreeAllBorrowMemPool();
 
     HTAB* m_imcs_hash;
     LWLock *m_imcs_lock;

@@ -505,6 +505,9 @@ void IMCStoreVacuumWorkerMain(void)
         MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
         PG_TRY();
         {
+            if (g_instance.attr.attr_memory.enable_borrow_memory && imcsDesc->borrowMemPool != NULL) {
+                u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
+            }
             IMCStoreVacuum(rel, imcsDesc, target.rowGroupId);
         }
         PG_CATCH();

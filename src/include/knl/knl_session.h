@@ -45,6 +45,9 @@
 
 #include <signal.h>
 
+#ifdef ENABLE_HTAP
+#include "access/htap/borrow_mem_pool.h"
+#endif
 #include "access/ustore/undo/knl_uundotype.h"
 #include "access/skey.h"
 #include "c.h"
@@ -3048,6 +3051,7 @@ typedef struct knl_u_datavec_context {
 #ifdef ENABLE_HTAP
 typedef struct knl_u_imcstore_context {
     List* pinnedRowGroups;
+    BorrowMemPool* pinnedBorrowMemPool;
 } knl_u_imcstore_context;
 #endif
 

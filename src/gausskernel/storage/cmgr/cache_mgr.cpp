@@ -30,6 +30,7 @@
 #include "storage/ipc.h"
 #include "miscadmin.h"
 #ifdef ENABLE_HTAP
+#include "access/htap/borrow_mem_pool.h"
 #include "access/htap/imcucache_mgr.h"
 #include "access/htap/imcustorage.h"
 #include "storage/smgr/relfilenode.h"
@@ -129,7 +130,22 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
 
     m_cstoreCurrentSize = 0;
     m_cstoreMaxSize = cache_size;
-
+#ifdef ENABLE_HTAP
+    if (isImcs && g_instance.attr.attr_memory.enable_borrow_memory) {
+        int64 borrowMemAvail = g_instance.attr.attr_memory.max_borrow_memory * 1024L;
+        double p = (int)(g_instance.attr.attr_memory.htap_borrow_mem_percent) / 100.0;
+        m_borrowMaxSize = (int64)(cache_size * p);
+        if (m_borrowMaxSize <= borrowMemAvail) {
+            m_cstoreMaxSize = cache_size - m_borrowMaxSize;
+        } else {
+            ereport(WARNING, (errmsg("HTAP borrow memory is now unavailable, m_borrowMaxSize(%lld) is "
+                "greater than max_borrow_memory(%lld)", m_borrowMaxSize, borrowMemAvail)));
+            m_borrowMaxSize = 0;
+        }
+    }
+    m_borrowCurrSize = 0;
+    SpinLockInit(&m_borrowSizeLock);
+#endif
     total_slots = isImcs ? (cache_size / each_block_size) * MaxHeapAttributeNumber
                          : Min(cache_size / each_block_size, MAX_CACHE_SLOT_COUNT);
 
@@ -223,6 +239,11 @@ void CacheMgr::Destroy(void)
     /* free spin lock resource */
     SpinLockFree(&m_memsize_lock);
     SpinLockFree(&m_freeList_lock);
+#ifdef ENABLE_HTAP
+    if (g_instance.attr.attr_memory.enable_borrow_memory) {
+        SpinLockFree(&m_borrowSizeLock);
+    }
+#endif
 
     pfree_ext(m_CacheSlots);
     pfree_ext(m_CacheDesc);
@@ -385,7 +406,16 @@ void CacheMgr::InvalidateCacheBlock(CacheTag *cacheTag)
 
         /* free this block cache and update its size  before unpin this slot id */
         FreeCacheBlockMem(slotId);
+#ifdef ENABLE_HTAP
+        if (m_CacheDesc[slotId].m_isBorrow) {
+            ResetBorrowSlot(slotId);
+            ReleaseBorrowMem(blockSize);
+        } else {
+            ReleaseCacheMem(blockSize);
+        }
+#else
         ReleaseCacheMem(blockSize);
+#endif
         UnPinCacheBlock(slotId);
 
         /* put it into free list */
@@ -445,6 +475,15 @@ CacheSlotId_t CacheMgr::EvictCacheBlock(int size, int retryNum)
         if (m_csweep++ >= m_CaccheSlotMax) {
             m_csweep = 0;
         }
+#ifdef ENABLE_HTAP
+        if (m_CacheDesc[slotId].m_isBorrow) {
+            m_csweep = slotId + 1;
+            if (m_csweep >= m_CaccheSlotMax) {
+                m_csweep = 0;
+            }
+            continue;
+        }
+#endif
         ereport(DEBUG2,
                 (errmodule(MOD_CACHE),
                  errmsg("try evict cache block, solt(%d), flag(%hhu), refcount(%u), usage_count(%hu), ring_count(%hu)",
@@ -559,6 +598,54 @@ void CacheMgr::EvictCacheCUIntoDisk(CacheSlotId_t slotId)
     pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInDisk, (uint64)cuDesc->cu_size);
     pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInDisk, 1);
 }
+
+bool CacheMgr::IsBorrowSlotId(CacheSlotId_t slotId)
+{
+    return m_CacheDesc[slotId].m_isBorrow;
+}
+
+void CacheMgr::ResetBorrowSlot(CacheSlotId_t slotId)
+{
+    LockCacheDescHeader(slotId);
+    m_CacheDesc[slotId].m_isBorrow = false;
+    m_CacheDesc[slotId].m_datablock_size = 0;
+    UnLockCacheDescHeader(slotId);
+}
+
+bool CacheMgr::ReserveBorrowMem(int size)
+{
+    if (g_instance.attr.attr_memory.enable_borrow_memory &&
+        g_instance.matrix_mem_cxt.matrix_mem_inited &&
+        u_sess->imcstore_ctx.pinnedBorrowMemPool != NULL &&
+        u_sess->imcstore_ctx.pinnedBorrowMemPool->CanBorrow()) {
+        SpinLockAcquire(&m_borrowSizeLock);
+        if ((m_borrowCurrSize + size) <= m_borrowMaxSize) {
+            m_borrowCurrSize += size;
+            SpinLockRelease(&m_borrowSizeLock);
+            return true;
+        }
+        SpinLockRelease(&m_borrowSizeLock);
+    }
+    return false;
+}
+
+void CacheMgr::ReleaseBorrowMem(int size)
+{
+    SpinLockAcquire(&m_borrowSizeLock);
+    Assert(m_borrowCurrSize >= size);
+    m_borrowCurrSize -= size;
+    SpinLockRelease(&m_borrowSizeLock);
+}
+
+int64 CacheMgr::GetCurrBorrowMemSize()
+{
+    int64 borrowMemSize = 0;
+    SpinLockAcquire(&m_borrowSizeLock);
+    borrowMemSize = m_borrowCurrSize;
+    SpinLockRelease(&m_borrowSizeLock);
+
+    return borrowMemSize;
+}
 #endif
 
 /*
@@ -577,7 +664,12 @@ RETRY_FIND_FREESPACE:
 
     retryNum++;
     /* If there is memory available, and slots on the free list, just return one from there */
+#ifdef ENABLE_HTAP
+    bool isBorrowMem = false;
+    if (ReserveCacheMem(size) || (isBorrowMem = ReserveBorrowMem(size))) {
+#else
     if (ReserveCacheMem(size)) {
+#endif
         if ((slotId = GetFreeListCache()) != CACHE_BLOCK_INVALID_IDX) {
             LockSweep();
             if (slotId > m_CaccheSlotMax) {
@@ -587,6 +679,9 @@ RETRY_FIND_FREESPACE:
 
             LockCacheDescHeader(slotId);
             m_CacheDesc[slotId].m_flag = CACHE_BLOCK_NEW;  // is !Valid
+#ifdef ENABLE_HTAP
+            m_CacheDesc[slotId].m_isBorrow = isBorrowMem;
+#endif
 
             PinCacheBlock_Locked(slotId);  // Released header lock
 
@@ -594,6 +689,10 @@ RETRY_FIND_FREESPACE:
              * Returning from here means we have reserved the memory and
              * a new free slot */
             return slotId;
+#ifdef ENABLE_HTAP
+        } else if (isBorrowMem) {
+            ReleaseBorrowMem(size);
+#endif
         } else {
             /* We release the memory now, and get it back again later  once we evict a buffer */
             ReleaseCacheMem(size);
@@ -641,6 +740,13 @@ void CacheMgr::FreeCacheBlockMem(CacheSlotId_t slot)
          * be set to 0 after the slot is released. at least memory of
          * min(sizeof(CU), sizeof(OrcDataValue)) size must be cleanned up. */
         CU *cu = (CU *)(&m_CacheSlots[slot * m_slot_length]);
+#ifdef ENABLE_HTAP
+        if (m_CacheDesc[slot].m_isBorrow) {
+            cu->FreeBorrowCUMem();
+            cu->Reset();
+            return;
+        }
+#endif
         cu->FreeMem<true>();
         cu->Reset();
     } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_OBS_DATA) {
