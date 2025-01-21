@@ -29,6 +29,10 @@
  *
  * -------------------------------------------------------------------------
  */
+
+/* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
+/*$$include "scan-tsql-prologue-top.l.h"*/
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -132,6 +136,16 @@ static bool is_trans_stmt(const char *haystack, int haystack_len);
 extern int	core_yyget_column(yyscan_t yyscanner);
 extern void core_yyset_column(int column_no, yyscan_t yyscanner);
 
+/* Some extensions, e.g., shark,
+ * may include original PG lexer in addition to their own lexer.
+ * This macro allows to add additional logics only at the beginning of PG lexer.
+ * So you can undef the macro in your own lexer-related extension
+ * to exclude the PG-specific logic.
+ */
+#define PG_YYLEX
+
+/* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
+/*$$include "scan-tsql-prologue.l.h"*/
 %}
 
 %option reentrant
@@ -414,7 +428,25 @@ other			.
  *  Also whitespace (comment) must appear before operator.
  */
 
+/* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
+/*$$include "scan-tsql-decl.l"*/
+
 %%
+%{
+#ifdef PG_YYLEX
+	if (u_sess->hook_cxt.coreYYlexHook)
+	{
+		/* This allows other extensions such as pg_stat_statements
+		 * call TSQL-specific yylex function seamlessly even
+		 * when they just call PG's core_yylex(...).
+		 */
+		return ((coreYYlexFunc)u_sess->hook_cxt.coreYYlexHook)(yylval_param, yylloc_param, yyscanner);
+	}
+#endif
+%}
+
+ /* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
+ /*$$include "scan-tsql-rule.l"*/
 
 {whitespace_only}	{
 					/* ignore */
@@ -1314,6 +1346,8 @@ other			.
 #undef yyleng
 #define yyleng  (((struct yyguts_t *) yyscanner)->yyleng_r)
 
+/* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
+/*$$include "scan-tsql-epilogue.l.cpp"*/
 
 /*
  * scanner_errposition

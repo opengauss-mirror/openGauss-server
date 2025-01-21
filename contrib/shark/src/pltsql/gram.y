@@ -14,7 +14,7 @@
  */
 
 #include "utils/plpgsql_domain.h"
-#include "utils/plpgsql.h"
+#include "pltsql.h"
 
 #include "access/transam.h"
 #include "access/xact.h"
@@ -237,7 +237,7 @@ static void SetErrorState();
 static bool oid_is_function(Oid funcid, bool* isSystemObj);
 static void AddNamespaceIfNeed(int dno, char* ident);
 static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_IdentifierLookup);
-bool plpgsql_is_token_keyword(int tok);
+bool pltsql_is_token_keyword(int tok);
 static void check_bulk_into_type(PLpgSQL_row* row);
 static void check_table_index(PLpgSQL_datum* datum, char* funcName);
 static PLpgSQL_type* build_type_from_record_var(int dno, int location, bool for_proc = false);
@@ -254,7 +254,7 @@ static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, ch
 static void plpgsql_build_package_refcursor_type(const char* typname);
 static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
 static Oid plpgsql_build_function_package_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
-int plpgsql_yylex_single(void);
+int pltsql_yylex_single(void);
 static void get_datum_tok_type(PLpgSQL_datum* target, int* tok_flag);
 static bool copy_table_var_indents(char* tableName, char* idents, int tablevar_namelen);
 static int push_back_token_stack(DList* tokenstack);
@@ -453,6 +453,8 @@ static void HandleBlockLevel();
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
+%token          DIALECT_TSQL
+
 /*
  * Other tokens recognized by plpgsql's lexer interface layer (pl_scanner.c).
  */
@@ -644,9 +646,9 @@ static void HandleBlockLevel();
 
 %%
 
-pl_body         : pl_package_spec
-                | pl_function
-                | pl_package_init
+pl_body         : DIALECT_TSQL pl_package_spec
+                | DIALECT_TSQL pl_function
+                | DIALECT_TSQL pl_package_init
                 ;
 pl_package_spec : K_PACKAGE { SetErrorState(); } decl_sect K_END
                     {
@@ -2570,7 +2572,7 @@ decl_cursor_query :
                     {
                         int tok;
                         tok = yylex();
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
 
                         /* check cursor syntax, cursor query only accept select query */
                         {
@@ -2950,7 +2952,7 @@ decl_rec_defval	:
 
                         $$ = read_sql_expression2(',', ')', ")", &tok);
 
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                     }
                 ;
 
@@ -3763,10 +3765,10 @@ opt_expr_until_when	:
 
                         if (tok != K_WHEN)
                         {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             expr = read_sql_expression(K_WHEN, "WHEN");
                         }
-                        plpgsql_push_back_token(K_WHEN);
+                        pltsql_push_back_token(K_WHEN);
                         $$ = expr;
                     }
                 ;
@@ -4309,7 +4311,7 @@ for_control		: for_variable K_IN
                                                K_REVERSE, "reverse"))
                                 reverse = true;
                             else
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
 
                             /*
                              * Read tokens until we see either a ".."
@@ -4561,7 +4563,7 @@ forall_control         :for_variable K_IN
                                                         NULL,
                                                         &tok);
 
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
 
                             if (';' == tok) {
                                 const char* message = "FORALL must follow DML statement.";
@@ -4690,7 +4692,7 @@ for_variable	: T_DATUM
                             $$.dno = $1.dno;
                             /* check for comma-separated list */
                             tok = yylex();
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             if (tok == ',')
                                 $$.row = read_into_scalar_list($$.name,
                                                                $$.scalar,
@@ -4726,7 +4728,7 @@ for_variable	: T_DATUM
                             $$.dno = $1.dno;
                             /* check for comma-separated list */
                             tok = yylex();
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             if (tok == ',')
                                 $$.row = read_into_scalar_list($$.name,
                                                                $$.scalar,
@@ -4765,7 +4767,7 @@ for_variable	: T_DATUM
                             $$.dno = $1.dno;
                             /* check for comma-separated list */
                             tok = yylex();
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             if (tok == ',')
                                 $$.row = read_into_scalar_list($$.name,
                                                                $$.scalar,
@@ -4784,7 +4786,7 @@ for_variable	: T_DATUM
                         $$.row = NULL;
                         /* check for comma-separated list */
                         tok = yylex();
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         if (tok == ',')
                             word_is_not_variable(&($1), @1);
                     }
@@ -4934,7 +4936,7 @@ stmt_return		: K_RETURN
                         }
                         else
                         {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = make_return_stmt(@1);
                         }
                     }
@@ -5061,7 +5063,7 @@ stmt_raise		: K_RAISE
                                 newp->hasExceptionInit = row->hasExceptionInit;
                                 newp->condname = pstrdup(plpgsql_get_sqlstate(row->customErrorCode));
                                 newp->message = pstrdup(ds.data);
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 expr = read_sql_construct(';', 0, 0, ";",
                                                           "SELECT ", true, true, true, NULL, &tok);
 
@@ -5339,7 +5341,7 @@ stmt_execsql			: K_ALTER
                         int tok = -1;
 
                         tok = yylex();
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         $$ = make_execsql_stmt(K_SELECT, @1);
                     }
                 
@@ -5348,7 +5350,7 @@ stmt_execsql			: K_ALTER
                         int			tok = -1;
 
                         tok = yylex();
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         $$ = make_execsql_stmt(K_UPDATE, @1);
                     }
                 | K_DELETE		/* DML:delete */
@@ -5356,7 +5358,7 @@ stmt_execsql			: K_ALTER
                         int			tok = -1;
 
 			tok = yylex();
-			plpgsql_push_back_token(tok);
+			pltsql_push_back_token(tok);
 			$$ = make_execsql_stmt(K_DELETE, @1);
 		    }
 		| K_WITH
@@ -5371,13 +5373,13 @@ stmt_execsql			: K_ALTER
             {
                 if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
                 {
-                    if(plpgsql_is_token_match2(T_CWORD,'(')
-                       || plpgsql_is_token_match2(T_CWORD,';')
-                       || plpgsql_is_token_match(T_WORD))
+                    if(pltsql_is_token_match2(T_CWORD,'(')
+                       || pltsql_is_token_match2(T_CWORD,';')
+                       || pltsql_is_token_match(T_WORD))
                     {
                         $$ = NULL;
                     }
-                    else if(plpgsql_is_token_match2(K_CALL,'(') || plpgsql_is_token_match2(K_CALL,';'))
+                    else if(pltsql_is_token_match2(K_CALL,'(') || pltsql_is_token_match2(K_CALL,';'))
                     {
                         int    tok = yylex();
                         char*  funcname = yylval.word.ident;
@@ -5388,11 +5390,11 @@ stmt_execsql			: K_ALTER
                         }
                         else
                         {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = make_execsql_stmt(K_CALL, @1);
                         }
                     }
-                    else if(plpgsql_is_token_match('(') || plpgsql_is_token_match(';'))
+                    else if(pltsql_is_token_match('(') || pltsql_is_token_match(';'))
                     {
                         char*  funcname = (char*) $1;
                         PLpgSQL_stmt *stmt = funcname_is_call(funcname, @1);
@@ -5410,19 +5412,19 @@ stmt_execsql			: K_ALTER
                         int    tok = yylex();
                         if(yylval.str != NULL && is_unreserved_keyword_func(yylval.str))
                         {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = NULL;
                         }
                         else
                         {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = make_execsql_stmt(K_CALL, @1);
                         }
                     }
                 }
                 else
                 {
-                    if(plpgsql_is_token_match('(') || plpgsql_is_token_match(';'))
+                    if(pltsql_is_token_match('(') || pltsql_is_token_match(';'))
                     {
                         char*  funcname = (char*) $1;
                         PLpgSQL_stmt *stmt = funcname_is_call(funcname, @1);
@@ -5448,8 +5450,8 @@ stmt_execsql			: K_ALTER
                 bool FuncNoarg = false;
 
                 if (0 == strcasecmp($1.ident, "DBMS_LOB")
-                && (plpgsql_is_token_match2('.', K_OPEN)
-                || plpgsql_is_token_match2('.', K_CLOSE)))
+                && (pltsql_is_token_match2('.', K_OPEN)
+                || pltsql_is_token_match2('.', K_CLOSE)))
                     $$ = parse_lob_open_close(@1);
                 else
                 {
@@ -5464,7 +5466,7 @@ stmt_execsql			: K_ALTER
                         FuncNoarg = true;
                     }
 
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     if(isCallFunc)
                     {
                         if (FuncNoarg)
@@ -5506,7 +5508,7 @@ stmt_execsql			: K_ALTER
                     FuncNoarg = true;
                 }
 
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 if(isCallFunc)
                 {
                     if (FuncNoarg)
@@ -5518,7 +5520,7 @@ stmt_execsql			: K_ALTER
                          PLpgSQL_stmt *stmt = make_callfunc_stmt($1, @1, false, false);
                          if (stmt == NULL)
                          {
-                             plpgsql_push_back_token(tok);
+                             pltsql_push_back_token(tok);
                              $$ = NULL;
                              yyerror("syntax error");
                          }
@@ -5538,7 +5540,7 @@ stmt_execsql			: K_ALTER
                 }
                 else
                 {
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     $$ = NULL;
                     yyerror("syntax error");
                 }
@@ -5587,7 +5589,7 @@ stmt_execsql			: K_ALTER
                     isCallFunc = is_function(name, false, false);
                     FuncNoarg = true;
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 if (isCallFunc) {
                     if (FuncNoarg) {
                         $$ = make_callfunc_stmt_no_arg(name, @1);
@@ -5704,12 +5706,12 @@ stmt_execsql			: K_ALTER
                                 appendStringInfo(&sqlBuf, " 1)");
                                 $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                             } else {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             }
                         } else if (tok1 != ICONST && tok1 != T_WORD && tok1 != SCONST && tok1 != T_DATUM) {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = NULL;
                             yyerror("syntax error");
                         } else {
@@ -5726,13 +5728,13 @@ stmt_execsql			: K_ALTER
                             }
                             int tok2 = yylex();
                             if (tok2 != ')') {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             } else {
                                 int tok3 = yylex();
                                 if (tok3 != ';') {
-                                    plpgsql_push_back_token(tok);
+                                    pltsql_push_back_token(tok);
                                     $$ = NULL;
                                     yyerror("syntax error");
                                 } else {
@@ -5741,7 +5743,7 @@ stmt_execsql			: K_ALTER
                             }
                         }
                     } else {
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         $$ = NULL;
                         yyerror("syntax error");
                     }
@@ -5772,12 +5774,12 @@ stmt_execsql			: K_ALTER
                                 appendStringInfo(&sqlBuf, " 1)");
                                 $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                             } else {
-                                plpgsql_push_back_token(tok2);
+                                pltsql_push_back_token(tok2);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             }
                         } else if (tok1 != ICONST && tok1 != T_WORD && tok1 != SCONST && tok1 != T_DATUM) {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = NULL;
                             yyerror("syntax error");
                         } else {
@@ -5794,13 +5796,13 @@ stmt_execsql			: K_ALTER
                             }
                             int tok2 = yylex();
                             if (tok2 != ')') {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             } else {
                                 int tok3 = yylex();
                                 if (tok3 != ';') {
-                                    plpgsql_push_back_token(tok);
+                                    pltsql_push_back_token(tok);
                                     $$ = NULL;
                                     yyerror("syntax error");
                                 } else {
@@ -5809,7 +5811,7 @@ stmt_execsql			: K_ALTER
                             }
                         }
                     } else {
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         $$ = NULL;
                         yyerror("syntax error");
                     }
@@ -5857,12 +5859,12 @@ stmt_execsql			: K_ALTER
                                 
                                 $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                             } else {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             }
                         } else if (tok1 != ICONST && tok1 != T_WORD && tok1 != SCONST && tok1 != T_DATUM && tok1 != '-') {
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             $$ = NULL;
                             yyerror("syntax error");
                         } else {
@@ -5978,13 +5980,13 @@ stmt_execsql			: K_ALTER
                             
                             int tok2 = yylex();
                             if (tok2 != ')') {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             } else {
                                 int tok3 = yylex();
                                 if (tok3 != ';') {
-                                    plpgsql_push_back_token(tok);
+                                    pltsql_push_back_token(tok);
                                     $$ = NULL;
                                     yyerror("syntax error");
                                 } else {
@@ -5993,7 +5995,7 @@ stmt_execsql			: K_ALTER
                             }
                         }
                     } else {
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         $$ = NULL;
                         yyerror("syntax error");
                     }
@@ -6011,7 +6013,7 @@ stmt_dynexecute : K_EXECUTE
 
                         if((endtoken = yylex()) != K_IMMEDIATE)
                         {
-                            plpgsql_push_back_token(endtoken);
+                            pltsql_push_back_token(endtoken);
                         }
 
                         expr = read_sql_construct(K_INTO, K_USING, ';',
@@ -6140,7 +6142,7 @@ stmt_open		: K_OPEN cursor_variable
                             }
                             else
                             {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 
                                 if (tok == K_SELECT || tok == K_WITH)
                                 {
@@ -6161,7 +6163,7 @@ stmt_open		: K_OPEN cursor_variable
                                         if(NULL == newp->params)
                                             yyerror("syntax error");					  	
 
-                                        endtoken = plpgsql_yylex();
+                                        endtoken = pltsql_yylex();
                                     }
 
                                     if(';' != endtoken )
@@ -6686,8 +6688,8 @@ expr_until_semi :
                         if (!enable_out_param_override() && u_sess->parser_cxt.isPerform) {
                             u_sess->parser_cxt.isPerform = false;
                         }
-                        if (plpgsql_is_token_match2(T_WORD, '(') || 
-                            plpgsql_is_token_match2(T_CWORD,'('))
+                        if (pltsql_is_token_match2(T_WORD, '(') || 
+                            pltsql_is_token_match2(T_CWORD,'('))
                         {
                             tok = yylex();
                             if (T_WORD == tok) {
@@ -6708,7 +6710,7 @@ expr_until_semi :
                                         (errcode(ERRCODE_SYNTAX_ERROR),
                                         errmsg("perform not support expression when open guc proc_outparam_override")));
                             u_sess->plsql_cxt.have_error = true;
-                        } else if (plpgsql_is_token_match2(T_OBJECT_TYPE_VAR_METHOD,'(')) {
+                        } else if (pltsql_is_token_match2(T_OBJECT_TYPE_VAR_METHOD,'(')) {
                             PLpgSQL_row *row = NULL;
                             HeapTuple typtuple = NULL;
                             Form_pg_type typeform = NULL;
@@ -6761,13 +6763,13 @@ expr_until_semi :
                         else
                         {
                             if (name != NULL) {
-                                plpgsql_push_back_token(tok);
+                                pltsql_push_back_token(tok);
                                 name = NULL;
                             }
 
-                            if (!plpgsql_is_token_match2(T_CWORD,'('))
+                            if (!pltsql_is_token_match2(T_CWORD,'('))
                             {
-                                if (plpgsql_is_token_match(T_CWORD)) {
+                                if (pltsql_is_token_match(T_CWORD)) {
                                     List* wholeName = yylval.cword.idents;
                                     plpgsql_pkg_add_unknown_var_to_namespace(wholeName);
                                 }
@@ -7160,7 +7162,7 @@ yylex_outparam(char** fieldnames,
             int varno = yylval.wdatum.dno;
             TokenData* temptokendata = build_token_data(*token);
             int temtoken = yylex();
-            plpgsql_push_back_token(temtoken);
+            pltsql_push_back_token(temtoken);
             yylloc = temptokendata->lloc;
             yylval = temptokendata->lval;
             u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = temptokendata->leng;
@@ -7231,7 +7233,7 @@ yylex_outparam(char** fieldnames,
             int varno = yylval.wdatum.dno;
             TokenData* temptokendata = build_token_data(*token);
             int temtoken = yylex();
-            plpgsql_push_back_token(temtoken);
+            pltsql_push_back_token(temtoken);
             yylloc = temptokendata->lloc;
             yylval = temptokendata->lval;
             u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = temptokendata->leng;
@@ -7298,7 +7300,7 @@ static int read_assignlist(bool is_push_back, int* token)
     for (;;) {
         int temtoken = yylex();
         if ('(' != temtoken && '[' != temtoken && '.' != temtoken) {
-            plpgsql_push_back_token(temtoken);
+            pltsql_push_back_token(temtoken);
             break;
         }
         
@@ -7316,7 +7318,7 @@ static int read_assignlist(bool is_push_back, int* token)
             expr = read_sql_construct6(']', 0, 0, 0, 0, 0, "]", "SELECT ",
                 true, true, true, NULL, NULL, tokenstack, true);
         } else {
-            int attrtoken = plpgsql_yylex_single();
+            int attrtoken = pltsql_yylex_single();
             attrname = get_attrname(attrtoken);
             if (tokenstack != NULL) {
                 TokenData* temptokendata1 = build_token_data(attrtoken);
@@ -7394,7 +7396,7 @@ static int push_back_token_stack(DList* tokenstack)
     } else {
         DListCell* dlc = NULL;
         for (dlc = dlist_tail_cell(tokenstack); dlc != NULL; dlc = lprev(dlc)) {
-            /* plpgsql_push_back_token function only push yylloc and yylval,
+            /* pltsql_push_back_token function only push yylloc and yylval,
              * so assign the token value to them.
              */
             TokenData* n = (TokenData*)lfirst(dlc);
@@ -7402,7 +7404,7 @@ static int push_back_token_stack(DList* tokenstack)
             yylloc = n->lloc;
             yylval = n->lval;
             u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = n->leng;
-            plpgsql_push_back_token(tok);
+            pltsql_push_back_token(tok);
         }
         dlist_free(tokenstack, true);
     }
@@ -7690,7 +7692,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             if ((tok = yylex()) == ')')
                 noargs = TRUE;
         }
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
     }
 
     if (isCallFunc && is_function_with_plpgsql_language_and_outparam(clist->oid)) {
@@ -7744,8 +7746,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                  * if so, p_argnames must be searched to match the defined
                  * argument name.
                  */
-                if (plpgsql_is_token_match2(T_DATUM, PARA_EQUALS)
-                    || plpgsql_is_token_match2(T_WORD, PARA_EQUALS))
+                if (pltsql_is_token_match2(T_DATUM, PARA_EQUALS)
+                    || pltsql_is_token_match2(T_WORD, PARA_EQUALS))
                 {
                     int varno = -1;
                     /*For objtype.member methods, explicit add a self parameter*/
@@ -7762,7 +7764,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         if ((tok = yylex()) == ')') {
                             break;
                         }
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         j = 1;
                     }
                     tok = yylex();
@@ -7770,7 +7772,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         appendStringInfoString(&argname, NameOfDatum(&yylval.wdatum));
                     else
                         appendStringInfoString(&argname, yylval.word.ident);
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     /*
                      * search the p_argnames to match the right argname with current arg,
                      * so the real postion of current arg can be determined 
@@ -7802,7 +7804,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                         if (T_DATUM == tok || T_VARRAY_VAR == tok 
                                             || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)
                                         {
-                                            plpgsql_push_back_token(tok);
+                                            pltsql_push_back_token(tok);
                                             (void)read_sql_expression2(',', ')', ",|)", &tok);
                                         }
                                         else
@@ -7829,7 +7831,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                             || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)
                                     {
                                         nfields++;
-                                        plpgsql_push_back_token(tok);
+                                        pltsql_push_back_token(tok);
                                         /* don't need inparam add ',' */
                                         yylex_inparam(&func_inparas, NULL, &tok, &tableof_func_dno, &tableof_var_dno);
                                         check_tableofindex_args(tableof_var_dno, p_argtypes[j]);
@@ -7881,7 +7883,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             i++;
                             break;
                         }
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         continue;
                     }
                     tok = yylex();
@@ -7891,7 +7893,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         case 'i':
                             if (T_PLACEHOLDER == tok)
                                 placeholders++;
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                             check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
                             break;
@@ -7904,7 +7906,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             {
                                 if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok || T_PLACEHOLDER == tok)
                                 {
-                                    plpgsql_push_back_token(tok);
+                                    pltsql_push_back_token(tok);
                                     (void)read_sql_expression2(',', ')', ",|)", &tok);
                                 }
                                 else
@@ -7923,10 +7925,10 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                 outParamInvalid = true;
                             }
 
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             yylex_outparam(fieldnames, varnos, pos_inner, &row, &rec, &tok, &varno, true);
                             processFunctionRecordOutParam(varno, clist->oid, &out_param_dno);
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                             check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
                             break;
@@ -7938,7 +7940,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                                && (T_DATUM == tok || T_VARRAY_VAR == tok 
                                                       || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)))
                                 {
-                                    plpgsql_push_back_token(tok);
+                                    pltsql_push_back_token(tok);
                                     yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                                 }
                                 else
@@ -7948,7 +7950,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
 
                             if (T_PLACEHOLDER == tok)
                                 placeholders++;
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             yylex_outparam(fieldnames, varnos, pos_inner, &row, &rec, &tok, &varno, true);
                             processFunctionRecordOutParam(varno, clist->oid, &out_param_dno);
                             if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok) {
@@ -7957,7 +7959,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                 outParamInvalid = true;
                             }
                             
-                            plpgsql_push_back_token(tok);
+                            pltsql_push_back_token(tok);
                             
                             yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                             check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
@@ -8015,13 +8017,13 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         i++;
                         break;
                     }
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     continue;
                 }
                 tok = yylex();
                 if (T_PLACEHOLDER == tok)
                     placeholders++;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
         
                 yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
         
@@ -8056,12 +8058,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 if ((tok = yylex()) == ')') {
                     break;
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 continue;
             }
             /* for named arguemnt */
-            if (plpgsql_is_token_match2(T_DATUM, PARA_EQUALS)
-                || plpgsql_is_token_match2(T_WORD, PARA_EQUALS))
+            if (pltsql_is_token_match2(T_DATUM, PARA_EQUALS)
+                || pltsql_is_token_match2(T_WORD, PARA_EQUALS))
             {
                 tok = yylex();
                 if (nparams)
@@ -8086,7 +8088,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         out_param_dno = yylval.wdatum.dno;
                     }
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 expr = read_sql_construct(',', ')', 0, ",|)", "", true, false, false, NULL, &tok);
                 appendStringInfoString(&func_inparas, expr->query);
                 pfree_ext(expr->query);
@@ -8104,7 +8106,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                         out_param_dno = yylval.wdatum.dno;
                     }
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                 namedarg[nfields] = false;
                 namedargnamses[nfields] = NULL;
@@ -8141,7 +8143,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         else
         {
             /* there may be other thing after the function invoke, just append it */
-            plpgsql_push_back_token(tok);
+            pltsql_push_back_token(tok);
             expr = read_sql_construct(';', 0, 0, ";", "", true, false, true, NULL, &tok);
             appendStringInfoString(&func_inparas, expr->query);
             pfree_ext(expr->query);
@@ -8937,7 +8939,7 @@ static bool construct_array_start(StringInfo ds, ArrayParseContext *context, PLp
     /* Save array token for datatype casts */
     context->list_datatype = lcons(var_type, context->list_datatype);
     *tok = yylex(); /* always yylex to parentheses */
-    plpgsql_push_back_token(*tok);
+    pltsql_push_back_token(*tok);
     /* varray constructor */
     if (*tok == '(') {
         appendStringInfoString(ds, "ARRAY");
@@ -9069,7 +9071,7 @@ static bool construct_word(StringInfo ds, ArrayParseContext *context, int *tok, 
     name = yylval.word.ident;
     int curloc = yylloc;
     *tok = yylex();
-    plpgsql_push_back_token(*tok);
+    pltsql_push_back_token(*tok);
     return construct_object_type(ds, context, makeTypeName(name), tok, parenlevel, curloc, loc);
 }
 
@@ -9119,13 +9121,13 @@ static bool construct_cword(StringInfo ds, ArrayParseContext *context, int *tok,
         /* This originally was a fall through to default branch */
         *tok = yylex();
         int curloc = yylloc;
-        plpgsql_push_back_token(*tok);
+        pltsql_push_back_token(*tok);
         plpgsql_append_source_text(ds, loc, curloc);
         return true;
     }
     int curloc = yylloc;
     *tok = yylex();
-    plpgsql_push_back_token(*tok);
+    pltsql_push_back_token(*tok);
     bool result;
     CreatePlsqlType oldCreatePlsqlType = u_sess->plsql_cxt.createPlsqlType;
     PG_TRY();
@@ -9402,7 +9404,7 @@ read_sql_construct6(int until,
                     is_have_tableof_index_var = true;
                 }
                 curloc = yylloc;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 if (list_length(idents) >= 3) {
                     plpgsql_cast_reference_list(idents, &ds, false);
                     ds_changed = true;
@@ -9437,7 +9439,7 @@ read_sql_construct6(int until,
                 } else {
                     appendStringInfo(&ds, ") ");
                     ds_changed = true;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                 }
                 break;
             }
@@ -9465,7 +9467,7 @@ read_sql_construct6(int until,
                 } else {
                     appendStringInfo(&ds, ") ");
                     ds_changed = true;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                 }
                 break;
             }
@@ -9491,7 +9493,7 @@ read_sql_construct6(int until,
                 } else {
                     appendStringInfo(&ds, ") ");
                     ds_changed = true;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                 }
                 break;
             }
@@ -9516,7 +9518,7 @@ read_sql_construct6(int until,
                     ds_changed = true;
                     tokenstack = push_token_stack(tok, tokenstack);
                 } else {
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     yyerror("syntax error");
                 }
                 break;
@@ -9542,7 +9544,7 @@ read_sql_construct6(int until,
                     ds_changed = true;
                     tokenstack = push_token_stack(tok, tokenstack);
                 } else {
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     yyerror("syntax error");
                 }
                 break;
@@ -9568,7 +9570,7 @@ read_sql_construct6(int until,
                     ds_changed = true;
                     tokenstack = push_token_stack(tok, tokenstack);
                 } else {
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     yyerror("syntax error");
                 }
                 break;
@@ -9604,7 +9606,7 @@ read_sql_construct6(int until,
                      */
                     if (IS_ARRAY_STATE(context.list_array_state, ARRAY_ACCESS)) {
                         tok = yylex();
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         if (tok == '(' || tok == '[') { /* array(1)(1) */
                             push_array_parse_stack(&context, parenlevel, -1);
                             break;
@@ -9646,7 +9648,7 @@ read_sql_construct6(int until,
                     /* in the case of '()' or '[]', we need to append NULL */
                     prev_tok = tok;
                     tok = yylex();
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     if ((prev_tok == '(' && tok == ')') || (prev_tok == '[' && tok == ']')) {
                         if (IS_ARRAY_STATE(context.list_array_state, ARRAY_ACCESS)) {
                             yyerror("empty index");
@@ -9682,7 +9684,7 @@ read_sql_construct6(int until,
                 break;
             case '.':
                 tok = yylex();
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 curloc = yylloc;
                 if (context.array_is_nested && tok != T_WORD && tok != T_CWORD) {
                     context.list_array_state = list_delete_first(context.list_array_state);
@@ -9731,7 +9733,7 @@ read_sql_construct6(int until,
                 }
 
                 curloc = yylloc;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 if (list_length(idents) >= 3) {
                     plpgsql_cast_reference_list(idents, &ds, false);
                     ds_changed = true;
@@ -9784,7 +9786,7 @@ read_sql_construct6(int until,
                         }
                     }
                     curloc = yylloc;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     if (PkgVarNeedCast(idents)) {
                         plpgsql_cast_reference_list(idents, &ds, true);
                     } else {
@@ -9798,7 +9800,7 @@ read_sql_construct6(int until,
                         push_array_parse_stack(&context, parenlevel, ARRAY_ACCESS);
                     }
                     curloc = yylloc;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     if (PkgVarNeedCast(idents)) {
                         plpgsql_cast_reference_list(idents, &ds, true);
                     } else {
@@ -9809,7 +9811,7 @@ read_sql_construct6(int until,
                 } else {
                     tok = yylex();
                     curloc = yylloc;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
 
                     if (PkgVarNeedCast(idents)) {
                         plpgsql_cast_reference_list(idents, &ds, true);
@@ -9925,7 +9927,7 @@ read_sql_construct6(int until,
                     } else {
                         tok = yylex();
                         curloc = yylloc;
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                         plpgsql_append_source_text(&ds, loc, curloc);
                         ds_changed = true;
                         break;
@@ -10007,13 +10009,13 @@ read_sql_construct6(int until,
                             parenlevel--;
                         } else { /* method with parameters*/
                             appendStringInfo(&ds, ",");
-                            plpgsql_push_back_token(tok1);
+                            pltsql_push_back_token(tok1);
                         }
                     } else {
                         /*var.method*/
                         appendStringInfo(&ds, ")");
                         parenlevel--;
-                        plpgsql_push_back_token(tok);
+                        pltsql_push_back_token(tok);
                     }
                 }
                 break;
@@ -10030,7 +10032,7 @@ read_sql_construct6(int until,
                 }
 
                 curloc = yylloc;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 if (tok == T_VARRAY_VAR && pushed_bulk_exception()) {
                     plpgsql_append_source_text(&ds, loc, curloc - 4);
                 } else {
@@ -10042,7 +10044,7 @@ read_sql_construct6(int until,
 
         /* peek one token */
         tok = yylex();
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
 
         /* we are expecting an element, but a seperator/end of array is found, need coerce */
         if ((tok == ',' || tok == ')') && IS_ARRAY_STATE(context.list_array_state, ARRAY_ELEMENT)) {
@@ -10494,7 +10496,7 @@ static char* get_init_proc(int tok)
 static char * get_attrname(int tok)
 {
     if (tok == YYEMPTY || tok == '.') {
-        tok = plpgsql_yylex_single();
+        tok = pltsql_yylex_single();
     }
     plpgsql_location_to_lineno(yylloc);
     switch (tok) {
@@ -10522,7 +10524,7 @@ static char * get_attrname(int tok)
 	    return yylval.word.ident;
 	    break;
     default:
-        if (plpgsql_is_token_keyword(tok)) {
+        if (pltsql_is_token_keyword(tok)) {
             return pstrdup(yylval.keyword);
         } else {
             yyerror("missing or illegal attribute name");
@@ -10557,7 +10559,7 @@ read_datatype(int tok)
      * If we have a simple or composite identifier, check for %TYPE
      * and %ROWTYPE constructs.
      */
-    bool iskeyword = plpgsql_is_token_keyword(tok);
+    bool iskeyword = pltsql_is_token_keyword(tok);
     if (tok == T_WORD || tok == T_VARRAY_VAR || tok == T_TABLE_VAR || iskeyword)
     {
         char   *dtname;
@@ -10759,7 +10761,7 @@ read_datatype(int tok)
                 errmsg("missing data type declaration"),
                 parser_errposition(yylloc)));
         if (tok == ';') {
-            plpgsql_push_back_token(tok);
+            pltsql_push_back_token(tok);
         }
     } else {
         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
@@ -10767,7 +10769,7 @@ read_datatype(int tok)
 
         pfree_ext(ds.data);
 
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
     }
     
     return result;
@@ -10932,8 +10934,8 @@ make_execsql_stmt(int firsttoken, int location)
                 {
                     int  count = 0;
                     label_begin =  true;
-                    plpgsql_push_back_token(tok1);
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok1);
+                    pltsql_push_back_token(tok);
                     plpgsql_append_source_text(&lb, location, lb_end);
 
                     for(int i = lb.len-1; i > 0; i--)
@@ -11013,7 +11015,7 @@ make_execsql_stmt(int firsttoken, int location)
             {
                 int  count = 0;
                 label_begin =  true;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 plpgsql_append_source_text(&lb, location, lb_end);
 
                 for(int i = lb.len-1; i > 0; i--)
@@ -11104,10 +11106,10 @@ make_execsql_stmt(int firsttoken, int location)
             List  *dtname = yylval.cword.idents;
             tok = yylex();
             if (tok == '(') {
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 continue;
             }
-            plpgsql_push_back_token(tok);
+            pltsql_push_back_token(tok);
             plpgsql_pkg_add_unknown_var_to_namespace(dtname);
             continue;
         }
@@ -11138,7 +11140,7 @@ make_execsql_stmt(int firsttoken, int location)
                 } else {
                     prev_values = true;
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 continue;
             }
         }
@@ -11198,7 +11200,7 @@ make_execsql_stmt(int firsttoken, int location)
                 tok = yylex();
                 if (tok == '(' || tok == '[')
                     array_begin = true;
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 break;
             case T_TABLE_VAR:
                 curloc = yylloc;    /* always save current location before yylex() */
@@ -11208,7 +11210,7 @@ make_execsql_stmt(int firsttoken, int location)
                 else if (tok == '[') 
                     yyerror("syntax error");
 
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
                 break;
             case ']':
             case ')':
@@ -11219,7 +11221,7 @@ make_execsql_stmt(int firsttoken, int location)
                     if (tok == '(' || tok == '[' || tok == '.') {
                         array_begin = true; /* N-D array access */
                     }
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
 
                     /* stack pop */
                     list_bracket = list_delete_first(list_bracket);
@@ -11249,7 +11251,7 @@ make_execsql_stmt(int firsttoken, int location)
                     if (tok != '(' && tok != '[') {
                         array_begin = false;
                     }
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                 }
                 break;
             case '.':
@@ -11259,7 +11261,7 @@ make_execsql_stmt(int firsttoken, int location)
                     if (tok != T_WORD && tok != T_CWORD) {
                         array_begin = false;
                     }
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                 }
                 break;
             default:
@@ -11539,7 +11541,7 @@ read_fetch_direction(void)
     else if (tok == T_DATUM || tok == T_PACKAGE_VARIABLE)
     {
         /* Assume there's no direction clause and tok is a cursor name */
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
         fetch->has_direction = false;
         check_FROM = false;
     }
@@ -11553,7 +11555,7 @@ read_fetch_direction(void)
          * Perhaps this can be improved someday, but it's hardly worth a
          * lot of work.
          */
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
         fetch->expr = read_sql_expression2(K_FROM, K_IN,
                                            "FROM or IN",
                                            NULL);
@@ -11601,7 +11603,7 @@ complete_direction(PLpgSQL_stmt_fetch *fetch,  bool *check_FROM)
         return;
     }
 
-    plpgsql_push_back_token(tok);
+    pltsql_push_back_token(tok);
     fetch->expr = read_sql_expression2(K_FROM, K_IN,
                                        "FROM or IN",
                                        NULL);
@@ -11655,7 +11657,7 @@ make_return_stmt(int location)
         newp->retvarno = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->out_param_varno;
     else
     {
-        plpgsql_push_back_token(token);
+        pltsql_push_back_token(token);
         if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_rettype == VOIDOID)
         {
             if (yylex() != ';') {
@@ -11829,7 +11831,7 @@ make_return_query_stmt(int location)
     if ((tok = yylex()) != K_EXECUTE)
     {
         /* ordinary static query */
-        plpgsql_push_back_token(tok);
+        pltsql_push_back_token(tok);
         newp->query = read_sql_stmt("");
     }
     else
@@ -12412,7 +12414,7 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
                              errmsg("syntax error, expected \",\""),
                              parser_errposition(yylloc)));
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
             }
             else if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_REC||
                      yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_CURSORROW)
@@ -12437,7 +12439,7 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
                              errmsg("syntax error, expected \",\""),
                              parser_errposition(yylloc)));
                 }
-                plpgsql_push_back_token(tok);
+                pltsql_push_back_token(tok);
             }
             else
             {
@@ -12493,7 +12495,7 @@ read_using_target(List  **in_expr, PLpgSQL_row **out_row)
                 case T_DATUM:
                     tempvar = pstrdup(NameOfDatum(&(yylval.wdatum)));
                     tempdno = yylval.wdatum.dno;
-                    plpgsql_push_back_token(tok);
+                    pltsql_push_back_token(tok);
                     tempexpr  =read_sql_construct(',',';',',',", or ;","SELECT ",true,true,true,NULL,&tok);
                     tempexpr->isouttype = true;
                     *in_expr=lappend((*in_expr), tempexpr);
@@ -12528,7 +12530,7 @@ read_using_target(List  **in_expr, PLpgSQL_row **out_row)
         else
         {
             PLpgSQL_expr * expr = NULL;
-            plpgsql_push_back_token(tok);
+            pltsql_push_back_token(tok);
             expr  = read_sql_construct(',',';',',',", or ;","SELECT ",true,true,true,NULL,&tok);
             *in_expr=lappend((*in_expr), expr);
 
@@ -12542,7 +12544,7 @@ read_using_target(List  **in_expr, PLpgSQL_row **out_row)
     * We read an extra, non-comma token from yylex(), so push it
     * back onto the input stream
     */
-    plpgsql_push_back_token(tok);
+    pltsql_push_back_token(tok);
 
     if(out_nfields)
     {
@@ -12633,7 +12635,7 @@ read_into_scalar_list(char *initial_name,
      * We read an extra, non-comma token from yylex(), so push it
      * back onto the input stream
      */
-    plpgsql_push_back_token(tok);
+    pltsql_push_back_token(tok);
 
     row = (PLpgSQL_row *)palloc0(sizeof(PLpgSQL_row));
     row->dtype = PLPGSQL_DTYPE_ROW;
@@ -12872,7 +12874,7 @@ read_into_array_table_scalar_list(char *initial_name,
      * We read an extra, non-comma token from yylex(), so push it
      * back onto the input stream
      */
-    plpgsql_push_back_token(tok);
+    pltsql_push_back_token(tok);
 
     row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
     row->dtype = PLPGSQL_DTYPE_ROW;
@@ -12946,7 +12948,7 @@ read_into_placeholder_scalar_list(char *initial_name,
      * We read an extra, non-comma token from yylex(), so push it
      * back onto the input stream
      */
-    plpgsql_push_back_token(tok);
+    pltsql_push_back_token(tok);
 
     row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
     row->dtype = PLPGSQL_DTYPE_ROW;
@@ -15546,7 +15548,7 @@ funcname_is_call(const char* name, int location)
     PLpgSQL_stmt *stmt = NULL;
     bool isCallFunc = false;
     bool FuncNoarg = false;
-    if(plpgsql_is_token_match(';'))
+    if(pltsql_is_token_match(';'))
     {
         FuncNoarg = true;
     }

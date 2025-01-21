@@ -2892,6 +2892,11 @@ void PostgresInitializer::InitExtensionVariable()
     const char* dolphin = "dolphin";
     u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists(dolphin);
     u_sess->attr.attr_sql.whale = CheckIfExtensionExists(whale);
+
+    if (DB_IS_CMPT(D_FORMAT) && CheckIfExtensionExists("shark") && g_instance.raw_parser_hook[DB_CMPT_D] == NULL) {
+        ereport(ERROR, (errmsg("Please add \"shark\" into parameter \"shared_preload_libraries\" and restart, "
+                               "because database you connect had created extension \"shark\" before")));
+    }
 #endif
 
 }

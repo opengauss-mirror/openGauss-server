@@ -2274,4 +2274,6 @@ extern char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref = true);
 
 extern void raise_application_error_context_callback(void* arg);
 
+typedef PLpgSQL_function* (*plsql_compile)(FunctionCallInfo fcinfo, bool forValidator, bool isRecompile);
+
 #endif /* PLPGSQL_H */

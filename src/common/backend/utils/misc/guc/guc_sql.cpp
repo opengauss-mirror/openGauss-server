@@ -265,6 +265,7 @@ static const struct config_enum_entry adapt_database[] = {
     {g_dbCompatArray[DB_CMPT_C].name, C_FORMAT, false},
     {g_dbCompatArray[DB_CMPT_B].name, B_FORMAT, false},
     {g_dbCompatArray[DB_CMPT_PG].name, PG_FORMAT, false},
+    {g_dbCompatArray[DB_CMPT_D].name, D_FORMAT, false},
     {NULL, 0, false}
 };
 

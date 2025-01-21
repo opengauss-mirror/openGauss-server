@@ -50,4 +50,6 @@ extern bool CheckExtensionSqlValid(char *queryString);
 
 extern void RepallocSessionVarsArrayIfNecessary();
 extern bool CheckIfExtensionExists(const char* extname);
+extern bool IsFileExisted(const char *filename);
+extern void ExecuteFunctionIfExisted(const char *filename, char *funcname);
 #endif /* EXTENSION_H */

@@ -6414,7 +6414,8 @@ ProcessUtilitySlow(Node *parse_tree,
                 break;
 
             case T_CreatePLangStmt:
-                if (!IsInitdb && strncmp(((CreatePLangStmt*)parse_tree)->plname, "plpython", strlen("plpython")) != 0)
+                if (!IsInitdb && strncmp(((CreatePLangStmt*)parse_tree)->plname, "plpython", strlen("plpython")) != 0 &&
+                    strncmp(((CreatePLangStmt*)parse_tree)->plname, "pltsql", strlen("pltsql")) != 0)
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("new language is not yet supported.")));
                 address = CreateProceduralLanguage((CreatePLangStmt*)parse_tree);
 #ifdef PGXC
