@@ -1619,6 +1619,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_datavec_init(&sess_cxt->datavec_ctx);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
+    sess_cxt->local_memory_exhaust = false;
 }
 
 static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_mem_cxt)

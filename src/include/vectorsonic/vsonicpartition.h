@@ -66,7 +66,7 @@ public:
     size_t m_size;
 
 public:
-    SonicHashPartition(const char* cxtname, uint16 cols, int64 workMem);
+    SonicHashPartition(const char* cxtname, uint16 cols, int64 workMem, bool useRack = false);
     ~SonicHashPartition(){};
 
     virtual void freeResources()

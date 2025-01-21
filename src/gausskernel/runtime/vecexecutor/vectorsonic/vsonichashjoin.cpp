@@ -125,7 +125,7 @@ SonicHashJoin::SonicHashJoin(int size, VecHashJoinState* node)
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
         m_memControl.totalMem);
 
     /* init hash functions */
@@ -247,6 +247,7 @@ void SonicHashJoin::initMemoryControl()
     VecHashJoin* node = (VecHashJoin*)m_runtime->js.ps.plan;
 
     m_memControl.totalMem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop) * 1024L;
+    m_memControl.totalMem += GetAvailRackMemory(((Plan*)node)->dop) * 1024L;
     if (((Plan*)node)->operatorMaxMem > 0) {
         m_memControl.maxMem = SET_NODEMEM(((Plan*)node)->operatorMaxMem, ((Plan*)node)->dop) * 1024L;
     }
@@ -2236,6 +2237,12 @@ void SonicHashJoin::judgeMemoryOverflow(uint64 hash_head_size)
     estimate_mem = allocate_mem + hash_mem;
 
     m_memControl.sysBusy = gs_sysmemory_busy(estimate_mem * SET_DOP(m_runtime->js.ps.plan->dop), true);
+
+    bool rackBusy = RackMemoryBusy(estimate_mem * SET_DOP(m_runtime->js.ps.plan->dop));
+    int64 rackAvail = GetAvailRackMemory(SET_DOP(m_runtime->js.ps.plan->dop)) * 1024L;
+    uint64 localTotalMemory = SET_NODEMEM(u_sess->attr.attr_memory.work_mem, m_runtime->js.ps.plan->dop) * 1024L;
+    u_sess->local_memory_exhaust = estimate_mem > localTotalMemory;
+    m_memControl.sysBusy = m_memControl.sysBusy || (u_sess->local_memory_exhaust && rackBusy);
 
     if (m_memControl.sysBusy) {
         /* If system is busy, spill data to disk. */

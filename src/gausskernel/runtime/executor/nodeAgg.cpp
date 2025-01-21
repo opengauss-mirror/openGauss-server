@@ -2471,7 +2471,7 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
             ALLOCSET_DEFAULT_MAXSIZE,
-            STANDARD_CONTEXT,
+            EnableBorrowWorkMemory() ? RACK_CONTEXT : STANDARD_CONTEXT,
             workMem * 1024L);
     }
 
@@ -3050,8 +3050,11 @@ FORCE_INLINE void agg_spill_to_disk(AggWriteFileControl* TempFileControl, TupleH
         /* compute totalSize of AggContext and TupleHashTable */
         int64 usedSize = totalSize + TempFileControl->inmemoryRownum * hashtable->entrysize;
         bool sysBusy = gs_sysmemory_busy(usedSize * dop, false);
+        bool rackBusy = RackMemoryBusy(usedSize * dop);
+        int64 rackAvail = GetAvailRackMemory(dop) * 1024L;
+        u_sess->local_memory_exhaust = usedSize >= TempFileControl->totalMem;
         /* next slot will be inserted into temp file when that useful memory more than total memory */
-        if (usedSize >= TempFileControl->totalMem || sysBusy) {
+        if (usedSize >= TempFileControl->totalMem || sysBusy || (u_sess->local_memory_exhaust && rackBusy)) {
             bool memSpread = false;
 
             if (sysBusy) {

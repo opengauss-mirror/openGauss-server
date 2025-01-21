@@ -238,7 +238,8 @@ extern MemoryProtectFuncDef SharedFunctions;
     ((context) != NULL &&                                                                                             \
         (IsA((context), AllocSetContext) || IsA((context), AsanSetContext) || IsA((context), StackAllocSetContext) || \
             IsA((context), SharedAllocSetContext) || IsA((context), MemalignAllocSetContext) ||                       \
-            IsA((context), MemalignSharedAllocSetContext) || IsA((context), OptAllocSetContext)))
+            IsA((context), MemalignSharedAllocSetContext) || IsA((context), OptAllocSetContext) ||                   \
+            IsA((context), RackAllocSetContext) || IsA((context), RackSharedAllocSetContext)))
 
 #define AllocSetContextUsedSpace(aset) ((aset)->totalSpace - (aset)->freeSpace)
 

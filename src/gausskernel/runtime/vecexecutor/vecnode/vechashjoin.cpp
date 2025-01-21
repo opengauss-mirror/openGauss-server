@@ -377,7 +377,8 @@ HashJoinTbl::HashJoinTbl(VecHashJoinState* runtime_context)
     initMemoryControl();
 
     m_hashContext = AllocSetContextCreate(CurrentMemoryContext, "HashContext", ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, STACK_CONTEXT, m_totalMem);
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE,
+        EnableBorrowWorkMemory() ? RACK_CONTEXT : STACK_CONTEXT, m_totalMem);
 
     m_tmpContext = AllocSetContextCreate(CurrentMemoryContext, "TmpHashContext", ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
@@ -600,6 +601,7 @@ void HashJoinTbl::initMemoryControl()
     node = (VecHashJoin*)m_runtime->js.ps.plan;
 
     m_totalMem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop) * 1024L;
+    m_totalMem += GetAvailRackMemory(((Plan*)node)->dop) * 1024L;
 
     elog(DEBUG1, "HashJoinTbl[%d]:operator Memory uses: %dKB", ((Plan*)node)->plan_node_id, (int)(m_totalMem / 1024L));
 
@@ -1006,9 +1008,12 @@ bool HashJoinTbl::HasEnoughMem(int rows)
     /* Add hash cell size used by a batch in advance */
     used_size += rows * m_cellSize;
     bool sys_busy = gs_sysmemory_busy(used_size * SET_DOP(m_runtime->js.ps.plan->dop), true);
+    bool rackBusy = RackMemoryBusy(used_size * SET_DOP(m_runtime->js.ps.plan->dop));
+    int64 rackAvail = GetAvailRackMemory(SET_DOP(m_runtime->js.ps.plan->dop)) * 1024L;
+    u_sess->local_memory_exhaust = m_totalMem - used_size < rackAvail;
 
-    if (used_size > m_totalMem || sys_busy) {
-        if (sys_busy) {
+    if (used_size > m_totalMem || sys_busy || (u_sess->local_memory_exhaust && rackBusy)) {
+        if (sys_busy || (u_sess->local_memory_exhaust && rackBusy)) {
             m_totalMem = used_size;
             hash_set->maxSpaceSize = used_size;
             MEMCTL_LOG(LOG,

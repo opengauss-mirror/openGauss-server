@@ -443,7 +443,8 @@ public:
     void ReplaceEqfunc();
 
     // judge memory over flow.
-    void JudgeMemoryOverflow(char* opname, int planid, int dop, Instrumentation* instrument = NULL);
+    void JudgeMemoryOverflow(char* opname, int planid, int dop, Instrumentation* instrument = NULL,
+                             bool isRack = false);
 
     /* judge memory allow table expnd */
     bool JudgeMemoryAllowExpand();

@@ -35,7 +35,7 @@
 #include "vectorsonic/vsonicfixlen.h"
 #include <algorithm>
 
-SonicHashPartition::SonicHashPartition(const char* cxtname, uint16 cols, int64 workMem) : m_cols(cols)
+SonicHashPartition::SonicHashPartition(const char* cxtname, uint16 cols, int64 workMem, bool useRack) : m_cols(cols)
 {
     m_rows = 0;
     m_size = 0;
@@ -46,14 +46,14 @@ SonicHashPartition::SonicHashPartition(const char* cxtname, uint16 cols, int64 w
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
+        useRack ? RACK_CONTEXT : STANDARD_CONTEXT,
         workMem);
 
     m_status = partitionStatusInitial;
 }
 
 SonicHashMemPartition::SonicHashMemPartition(const char* cxtname, bool hasHash, TupleDesc tupleDesc, int64 workMem)
-    : SonicHashPartition(cxtname, tupleDesc->natts, workMem)
+    : SonicHashPartition(cxtname, tupleDesc->natts, workMem, EnableBorrowWorkMemory())
 {
     MemoryContext old_ctx = MemoryContextSwitchTo(m_context);
     m_data = (SonicDatumArray**)palloc0(sizeof(SonicDatumArray*) * m_cols);
