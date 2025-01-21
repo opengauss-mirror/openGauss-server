@@ -1897,6 +1897,9 @@ void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts
 
     /* not primary node && not partitioned */
     if (t_thrd.postmaster_cxt.HaShmData->current_mode != PRIMARY_MODE && !RelationIsPartitioned(rel)) {
+        if (g_instance.attr.attr_memory.enable_borrow_memory) {
+            borrowMemPool = New(CurrentMemoryContext) BorrowMemPool(relOid);
+        }
         uint32 totalBlks = RelationGetNumberOfBlocks(rel);
         uint32 rowGroupNums = ImcsCeil(totalBlks, MAX_IMCS_PAGES_ONE_CU);
         imcuDescContext = AllocSetContextCreate(CurrentMemoryContext,
@@ -1915,6 +1918,7 @@ void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts
         curMaxRowGroupId = 0;
         maxRowGroupCapacity = 0;
         rowGroups = NULL;
+        borrowMemPool = NULL;
     }
 }
 
@@ -2032,6 +2036,7 @@ IMCSDesc::IMCSDesc()
     pg_atomic_init_u64(&cuNumsInMem, 0);
     pg_atomic_init_u64(&cuSizeInMem, 0);
     pg_atomic_init_u64(&cuNumsInDisk, 0);
+    borrowMemPool = NULL;
 }
 
 IMCSDesc::~IMCSDesc()
@@ -2051,6 +2056,9 @@ IMCSDesc::~IMCSDesc()
     if (imcuDescContext != NULL) {
         MemoryContextDelete(imcuDescContext);
         imcuDescContext = NULL;
+    }
+    if (borrowMemPool != NULL) {
+        DELETE_EX(borrowMemPool);
     }
 }
 
@@ -2233,4 +2241,18 @@ void CU::UnpackNumericCUFromDisk(int rowCount, uint32 magic, int cuSize)
     m_numericIntLike = true;
 }
 
+void CU::FreeBorrowCUMem()
+{
+    if (m_srcBuf != NULL && imcsDesc != NULL && imcsDesc->borrowMemPool != NULL) {
+        imcsDesc->borrowMemPool->DeAllocate(m_srcBuf);
+        m_srcBuf = NULL;
+        m_srcBufSize = 0;
+    }
+
+    if (m_offset != NULL) {
+        CStoreMemAlloc::Pfree(m_offset, !m_inCUCache);
+        m_offset = NULL;
+        m_offsetSize = 0;
+    }
+}
 #endif

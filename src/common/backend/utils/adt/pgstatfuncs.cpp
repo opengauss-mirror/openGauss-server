@@ -10132,7 +10132,7 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
 }
 
 #ifdef ENABLE_HTAP
-#define MEMORY_TYPES_CNT 26
+#define MEMORY_TYPES_CNT 27
 #else
 #define MEMORY_TYPES_CNT 24
 #endif
@@ -10163,6 +10163,7 @@ const char* MemoryTypeName[] = {"max_process_memory",
 #ifdef ENABLE_HTAP
     "imcstore_max_memory",
     "imcstore_used_memory",
+    "imcstore_borrowed_memory",
 #endif
     };
 
@@ -10297,6 +10298,7 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
 #ifdef ENABLE_HTAP
         mem_size[24] = (int)(g_instance.attr.attr_memory.max_imcs_cache >> BITS_IN_KB);
         mem_size[25] = IMCU_CACHE->GetCurrentMemSize() >> BITS_IN_MB;
+        mem_size[26] = IMCU_CACHE->GetCurrBorrowMemSize() >> BITS_IN_MB;
 #endif
     }
 

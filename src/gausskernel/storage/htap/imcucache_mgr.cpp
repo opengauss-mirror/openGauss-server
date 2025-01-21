@@ -31,6 +31,7 @@
 #include "utils/builtins.h"
 #include "storage/cu.h"
 #include "replication/syncrep.h"
+#include "access/htap/borrow_mem_pool.h"
 #include "access/htap/imcs_ctlg.h"
 #include "access/htap/imcucache_mgr.h"
 
@@ -227,15 +228,11 @@ void IMCUDataCacheMgr::NewSingletonInstance(void)
     MemoryContextSwitchTo(oldcontext);
 }
 
-void IMCUDataCacheMgr::CacheCU(CU* srcCU, CU* slotCU)
+void IMCUDataCacheMgr::BaseCacheCU(CU* srcCU, CU* slotCU)
 {
-    slotCU->m_srcBuf = srcCU->m_srcBuf;
-    slotCU->m_nulls = srcCU->m_nulls;
-    slotCU->m_srcData = srcCU->m_srcData;
-    srcCU->m_compressedBuf = srcCU->m_compressedBuf;
-    slotCU->m_offset = srcCU->m_offset;
-    slotCU->m_tmpinfo = srcCU->m_tmpinfo;
-    slotCU->m_compressedLoadBuf = srcCU->m_compressedLoadBuf;
+    slotCU->m_compressedBuf = NULL;
+    slotCU->m_tmpinfo = NULL;
+    slotCU->m_compressedLoadBuf = NULL;
     slotCU->m_head_padding_size = srcCU->m_head_padding_size;
     slotCU->m_offsetSize = srcCU->m_offsetSize;
     slotCU->m_srcBufSize = srcCU->m_srcBufSize;
@@ -256,6 +253,41 @@ void IMCUDataCacheMgr::CacheCU(CU* srcCU, CU* slotCU)
     slotCU->m_inCUCache = true;
     slotCU->m_numericIntLike = srcCU->m_numericIntLike;
 }
+ 
+void IMCUDataCacheMgr::CacheCU(CU* srcCU, CU* slotCU)
+{
+    slotCU->m_srcBuf = srcCU->m_srcBuf;
+    slotCU->m_nulls = srcCU->m_nulls;
+    slotCU->m_srcData = srcCU->m_srcData;
+    slotCU->m_offset = srcCU->m_offset;
+    BaseCacheCU(srcCU, slotCU);
+}
+ 
+bool IMCUDataCacheMgr::CacheBorrowMemCU(CU* srcCU, CU* slotCU, CUDesc* cuDescPtr)
+{
+    errno_t rc = EOK;
+    BaseCacheCU(srcCU, slotCU);
+
+    if (srcCU->m_srcBuf != NULL) {
+        char *buf = (char *)(u_sess->imcstore_ctx.pinnedBorrowMemPool->Allocate(srcCU->m_srcBufSize));
+        if (buf == nullptr) {
+            return false;
+        }
+        rc = memcpy_s(buf, srcCU->m_srcBufSize, srcCU->m_srcBuf, srcCU->m_srcBufSize);
+        securec_check(rc, "\0", "\0");
+        slotCU->m_srcBuf = buf;
+        slotCU->m_srcData = buf + srcCU->m_bpNullRawSize;
+        if (srcCU->m_bpNullRawSize != 0) {
+            slotCU->m_nulls = (unsigned char*)slotCU->m_srcBuf;
+        }
+        if (!slotCU->HasNullValue()) {
+            slotCU->FormValuesOffset<false>(cuDescPtr->row_count);
+        } else {
+            slotCU->FormValuesOffset<true>(cuDescPtr->row_count);
+        }
+    }
+    return true;
+}
 
 void IMCUDataCacheMgr::SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int colId, CU* cuPtr, CUDesc* cuDescPtr)
 {
@@ -266,11 +298,25 @@ void IMCUDataCacheMgr::SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int col
         cuPtr->FreeSrcBuf();
         return;
     }
-    bool hasFound = false;
     DataSlotTag slotTag = InitCUSlotTag(rnode, colId, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
+
+RETRY_RESERVE_DATABLOCK:
+    bool hasFound = false;
     CacheSlotId_t slotId = ReserveDataBlock(&slotTag, cuDescPtr->cu_size, hasFound);
     CU* slotCU = GetCUBuf(slotId);
-    CacheCU(cuPtr, slotCU);
+    if (IsBorrowSlotId(slotId)) {
+        if (CacheBorrowMemCU(cuPtr, slotCU, cuDescPtr)) {
+            cuPtr->Destroy();
+        } else {
+            ReleaseBorrowMemSize(cuDescPtr->cu_size);
+            ResetBorrowSlot(slotId);
+            UnPinDataBlock(slotId);
+            goto RETRY_RESERVE_DATABLOCK;
+        }
+    } else {
+        CacheCU(cuPtr, slotCU);
+    }
+
     slotCU->imcsDesc = imcsDesc;
     UnPinDataBlock(slotId);
     DataBlockCompleteIO(slotId);
@@ -395,6 +441,10 @@ void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
             /* drop rowgroup\cu\cudesc, no need to drop RowGroups for primary node */
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
             Assert(relNode);
+            if (g_instance.attr.attr_memory.enable_borrow_memory && imcsDesc->borrowMemPool != NULL) {
+                imcsDesc->borrowMemPool->Destroy();
+                imcsDesc->borrowMemPool = NULL;
+            }
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
             MemoryContextDelete(imcsDesc->imcuDescContext);
@@ -489,6 +539,10 @@ bool IMCUDataCacheMgr::HasInitialImcsTable()
 
 void IMCUDataCacheMgr::ResetInstance()
 {
+    if (g_instance.attr.attr_memory.enable_borrow_memory) {
+        m_data_cache->FreeAllBorrowMemPool();
+    }
+
     if (m_data_cache != NULL) {
         HeapMemResetHash(m_data_cache->m_imcs_hash, "IMCSDesc Lookup Table");
         m_data_cache->m_cache_mgr->FreeImcstoreCache();
@@ -496,4 +550,38 @@ void IMCUDataCacheMgr::ResetInstance()
 
     CreateIMCUDirAndClearCUFiles();
     ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
+}
+
+bool IMCUDataCacheMgr::IsBorrowSlotId(CacheSlotId_t slotId)
+{
+    return m_cache_mgr->IsBorrowSlotId(slotId);
+}
+
+void IMCUDataCacheMgr::ResetBorrowSlot(CacheSlotId_t slotId)
+{
+    m_cache_mgr->ResetBorrowSlot(slotId);
+}
+
+void IMCUDataCacheMgr::ReleaseBorrowMemSize(int size)
+{
+    m_cache_mgr->ReleaseBorrowMem(size);
+}
+
+int64 IMCUDataCacheMgr::GetCurrBorrowMemSize()
+{
+    return m_cache_mgr->GetCurrBorrowMemSize();
+}
+
+void IMCUDataCacheMgr::FreeAllBorrowMemPool()
+{
+    HASH_SEQ_STATUS hashSeq;
+    IMCSDesc *imcsDesc = NULL;
+
+    hash_seq_init(&hashSeq, m_imcs_hash);
+    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
+        if (imcsDesc->borrowMemPool != NULL && !imcsDesc->isPartition) {
+            imcsDesc->borrowMemPool->Destroy();
+            imcsDesc->borrowMemPool = NULL;
+        }
+    }
 }

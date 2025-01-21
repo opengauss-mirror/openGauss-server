@@ -35,6 +35,6 @@ endif
 
 override CPPFLAGS += -I${top_builddir}/contrib/ndpplugin
 
-OBJS = imcucache_mgr.o imcstore_insert.o imcs_ctlg.o imcustorage.o imcstore_am.o imcstore_vacuum.o imcstore_delta.o
+OBJS = imcucache_mgr.o imcstore_insert.o imcs_ctlg.o imcustorage.o imcstore_am.o imcstore_vacuum.o imcstore_delta.o borrow_mem_pool.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
