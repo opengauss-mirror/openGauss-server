@@ -2,6 +2,18 @@ create database pl_test_funcion DBCOMPATIBILITY 'pg';
 \c pl_test_funcion;
 create schema distribute_function;
 set current_schema = distribute_function;
+select nls_initcap('');
+ nls_initcap 
+-------------
+ 
+(1 row)
+
+select nls_initcap(NULL);
+ nls_initcap 
+-------------
+ 
+(1 row)
+
 select nls_initcap('hello word');
  nls_initcap 
 -------------
