@@ -3541,13 +3541,13 @@ static void JPWalkArrayStep(JsonPathItem* path, text* topJson, text* json,
 
         foreach (idxCell, as->indexes) {
             int index = lfirst_int(idxCell);
-            result = get_worker(json, NULL, index, NULL, NULL, -1, true);
+            result = get_worker(json, NULL, index, NULL, NULL, -1, false);
             JsonPathWalker(path->next, topJson, result, pwalker, context);
         }
     } else {
         int length = DatumGetInt32(DirectFunctionCall1(json_array_length, PointerGetDatum(json)));
         for (int i = 0; i < length; i++) {
-            result = get_worker(json, NULL, i, NULL, NULL, -1, true);
+            result = get_worker(json, NULL, i, NULL, NULL, -1, false);
             JsonPathWalker(path->next, topJson, result, pwalker, context);
         }
     }
@@ -3563,7 +3563,7 @@ static void JPWalkObjectStep(JsonPathItem* path, text* topJson, text* json,
         return;
 
     if (os->fieldName != NULL) {
-        result = get_worker(json, os->fieldName, -1, NULL, NULL, -1, true);
+        result = get_worker(json, os->fieldName, -1, NULL, NULL, -1, false);
         JsonPathWalker(path->next, topJson, result, pwalker, context);
     } else {
         List* valList = GetObjectValues(json);
@@ -3730,7 +3730,7 @@ static void CollectValsFromJson(text* json, JsonStringArray* vals)
             int length = DatumGetInt32(DirectFunctionCall1(json_array_length, PointerGetDatum(json)));
             text* result;
             for (int i = 0; i < length; i++) {
-                result = get_worker(json, NULL, i, NULL, NULL, -1, true);
+                result = get_worker(json, NULL, i, NULL, NULL, -1, false);
                 CollectValsFromJson(result, vals);
             }
             break;

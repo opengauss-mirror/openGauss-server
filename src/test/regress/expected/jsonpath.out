@@ -462,6 +462,29 @@ SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"st
                         , NULL, 'data');
 ERROR:  the json path expression is not of text type
 CONTEXT:  referenced column: json_textcontains
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$','Marty');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$.zebra.name','Marty');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                         '$.family.address.street','300');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
 DROP SCHEMA test_jsonpath CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table t
