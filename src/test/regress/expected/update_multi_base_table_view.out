@@ -263,6 +263,22 @@ DELETE FROM v_empdept_crossjoin_update;
 ERROR:  cannot determine an exact row for the view to update or delete
 DELETE FROM v_empdept_fulljoin_update;
 ERROR:  cannot determine an exact row for the view to update or delete
+insert into sys_dummy ((select * from sys_dummy) union (select * from sys_dummy));
+ERROR:  cannot insert into view "sys_dummy"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+insert into  sys_dummy ((select * from sys_dummy) union select * from sys_dummy);
+ERROR:  cannot insert into view "sys_dummy"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+insert into sys_dummy (select * from sys_dummy union (select * from sys_dummy));
+ERROR:  cannot insert into view "sys_dummy"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+insert into sys_dummy (select * from sys_dummy union select * from sys_dummy);
+ERROR:  cannot insert into view "sys_dummy"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
 DROP SCHEMA IF EXISTS update_multi_base_table_view CASCADE;
 NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table dept
