@@ -1846,15 +1846,14 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
     }
 
     if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
-        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr) &&
-        !IsSegmentFileNode(bufferinfo->blockinfo.rnode)) {
+        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
         if (unlikely(bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM)) {
             ereport(PANIC, (errmsg("forknum is illegal: %d", bufferinfo->blockinfo.forknum)));
         }
         BufferTag old_buf_tag;
         INIT_BUFFERTAG(old_buf_tag, bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
         BufferTag buf_tag = old_buf_tag;
-
+        
         bool is_seg_page = IsSegmentLogicalRelNode(bufferinfo->blockinfo.rnode);
         if (is_seg_page) {
             buf_tag.rnode.relNode = blockhead->pblk.relNode;
@@ -1873,8 +1872,7 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
             uint8 xl_info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
             force_base_page = is_seg_page && (xl_info == XLOG_SEG_SEGMENT_EXTEND);
         }
-        
-        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+        if (IS_EXRTO_READ_OPT) {
             extreme_rto_standby_read::insert_lsn_to_block_info_for_opt(
                 standby_read_meta_info,
                 buf_tag,
@@ -2105,11 +2103,11 @@ bool redo_target_seg_state(const BufferTag &new_buf_tag, XLogRecParseState *stat
                 }
                 next_state = (XLogRecParseState*)next_state->nextrecord;
             }
-            XLogBlockParseStateRelease(state);
+            XLogBlockParseStateRelease(child_state_list);
             break;
         }
         case XLOG_SEG_NEW_PAGE: {
-            buf_info->lsn = state->blockparse.blockhead.end_ptr;
+            buf_info->lsn = XLogBlockHeadGetLSN(&state->blockparse.blockhead);
             BufferTag *buf_tag = (BufferTag*)state->blockparse.extra_rec.blocksegnewpageinfo.mainData;
             if (!RelFileNodeEquals(new_buf_tag.rnode, buf_tag->rnode) ||
                 new_buf_tag.forkNum != buf_tag->forkNum ||
@@ -2180,9 +2178,6 @@ void redo_target_page(const BufferTag &old_buf_tag, const BufferTag &new_buf_tag
             ereport(ERROR, (errmsg("redo_target_page: internal error, xlog in lsn %X/%X doesn't contain target block.",
                                    (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
         }
-        buf_info.lsn = state_iter->blockparse.blockhead.end_ptr;
-        buf_info.blockinfo.pblk = state_iter->blockparse.blockhead.pblk;
-        wal_block_redo_for_extreme_rto_read(state_iter, &buf_info);
         XLogBlockParseStateRelease(state);
     }
 

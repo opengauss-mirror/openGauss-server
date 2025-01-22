@@ -119,7 +119,7 @@ inline bool is_index_only_disabled_in_astore()
 {
     return (RecoveryInProgress() &&
             (IsParallelRedo() ||
-            (IsExtremeRedo() && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)));
+            (IsExtremeRedo() && IS_EXRTO_READ_OPT)));
 }
 
 uint32 GetRedoWorkerCount();

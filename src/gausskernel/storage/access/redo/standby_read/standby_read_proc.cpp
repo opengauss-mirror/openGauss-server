@@ -104,7 +104,7 @@ RETRY_GET:
     }
 
     /* In exrto_standby_read_opt mode, getting a snapshot needs to wait for the cleanup-info xlog to be processed. */
-    if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+    if (IS_EXRTO_READ_OPT) {
         LWLockAcquire(ProcArrayLock, LW_SHARED);
         bool condition =
             (exrto_snapshot->xmin <=

@@ -1285,7 +1285,7 @@ void BtreeRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             BtreeXlogNewrootBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case XLOG_BTREE_REUSE_PAGE:
-            if (!(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
+            if (!(IS_EXRTO_STANDBY_READ && IS_EXRTO_READ_OPT)) {
                 ereport(PANIC, (errmsg("btree_redo_block: unknown op code %u", info)));
             }
             break;

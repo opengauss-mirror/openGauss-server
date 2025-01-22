@@ -1575,7 +1575,7 @@ void UBTreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdata
             UBTreeXlogPrunePageBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case XLOG_UBTREE_REUSE_PAGE:
-            if (!(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
+            if (!(IS_EXRTO_STANDBY_READ && IS_EXRTO_READ_OPT)) {
                 ereport(PANIC, (errmsg("UBTreeRedoDataBlock: unknown op code %u", info)));
             }
             break;

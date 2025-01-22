@@ -250,7 +250,7 @@ Buffer standby_read_seg_buffer(
         ereport(
             ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
-             (errmsg("standby_read_buf couldnot found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
+             (errmsg("standby_read_seg_buffer could not found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
                      "gen_snaptime:%ld thread_read_lsn:%08X/%08X",
                      buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
                      buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
@@ -298,7 +298,7 @@ Buffer standby_read_seg_buffer(
 Buffer standby_read_buf(
     Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode, BufferAccessStrategy strategy)
 {
-    if (!g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+    if (!IS_EXRTO_READ_OPT) {
         return extreme_rto_standby_read::standby_read_buf_new(reln, fork_num, block_num, mode, strategy);
     }
     /* Open it at the smgr level */
@@ -348,10 +348,10 @@ Buffer standby_read_buf(
         ereport(
             ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
-             (errmsg("standby_read_buf couldnot found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
+             (errmsg("standby_read_buf could not found buf %u/%u/%u %d %u read lsn %08X/%08X current_time: %ld "
                      "gen_snaptime:%ld thread_read_lsn:%08X/%08X",
-                     old_buf_tag.rnode.spcNode, old_buf_tag.rnode.dbNode, old_buf_tag.rnode.relNode, old_buf_tag.forkNum,
-                     old_buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
+                     buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                     buf_tag.blockNum, (uint32)(read_lsn >> XID_THIRTY_TWO), (uint32)read_lsn, GetCurrentTimestamp(),
                      g_instance.comm_cxt.predo_cxt.exrto_snapshot->gen_snap_time,
                      (uint32)(t_thrd.proc->exrto_read_lsn >> XID_THIRTY_TWO), (uint32)t_thrd.proc->exrto_read_lsn))));
         return InvalidBuffer;
