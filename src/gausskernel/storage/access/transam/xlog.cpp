@@ -13760,8 +13760,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
         }
     }
 
-    if (RecoveryInProgress() && IS_EXRTO_READ && !dummyStandbyMode &&
-        !g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+    if (RecoveryInProgress() && IS_EXRTO_READ && !dummyStandbyMode && IS_EXRTO_READ_OPT) {
         XLogRecPtr recycle_recptr = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn);
         XLogSegNo recyle_segno;
         XLByteToSeg(recycle_recptr, recyle_segno);

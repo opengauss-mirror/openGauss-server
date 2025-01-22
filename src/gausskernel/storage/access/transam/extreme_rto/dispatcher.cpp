@@ -1359,7 +1359,7 @@ static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, Tim
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
     if (info == XLOG_BTREE_REUSE_PAGE &&
-        !(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
+        !(IS_EXRTO_STANDBY_READ && IS_EXRTO_READ_OPT)) {
         DispatchTxnRecord(record, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs);
@@ -1372,7 +1372,7 @@ static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, Ti
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
     if (info == XLOG_UBTREE_REUSE_PAGE &&
-        !(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
+        !(IS_EXRTO_STANDBY_READ && IS_EXRTO_READ_OPT)) {
         DispatchTxnRecord(record, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs);

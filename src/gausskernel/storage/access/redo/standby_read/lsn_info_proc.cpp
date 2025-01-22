@@ -25,6 +25,7 @@
 #include "access/extreme_rto/batch_redo.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/page_redo.h"
+#include "access/multi_redo_api.h"
 #include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "access/extreme_rto/standby_read/lsn_info_double_list.h"
 #include "access/extreme_rto/standby_read/lsn_info_meta.h"
@@ -545,7 +546,7 @@ void recycle_one_lsn_info_list(const StandbyReadMetaInfo *meta_info, LsnInfoPosi
  
         /* retain a page version with page lsn less than recycle lsn */
         XLogRecPtr next_base_page_lsn = base_page_info->next_base_page_lsn;
-        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+        if (IS_EXRTO_READ_OPT) {
             XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
             if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
                 UnlockReleaseBuffer(buffer);
@@ -664,7 +665,7 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
         XLogRecPtr next_base_page_lsn = base_page_info->next_base_page_lsn;
         *base_page_position = base_page_info->base_page_position;
 
-        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+        if (IS_EXRTO_READ_OPT) {
             XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
             if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
                 update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn);
