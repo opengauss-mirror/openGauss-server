@@ -181,6 +181,19 @@ SELECT name FROM t WHERE JSON_EXISTS(name, 'NULL');
 ERROR:  syntax error in json path expression
 SELECT name FROM t WHERE JSON_EXISTS(name, NULL);
 ERROR:  the json path expression is not of text type
+drop table if exists t_JsonExists_Case0009;
+NOTICE:  table "t_jsonexists_case0009" does not exist, skipping
+CREATE TABLE t_JsonExists_Case0009( col1 VARCHAR2 (2000));
+INSERT INTO t_JsonExists_Case0009 VALUES (null);
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ');
+ERROR:  syntax error in json path expression
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' FALSE on ERROR);
+ERROR:  syntax error in json path expression
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' TRUE on ERROR);
+ERROR:  syntax error in json path expression
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' ERROR on ERROR);
+ERROR:  syntax error in json path expression
+drop table t_JsonExists_Case0009;
 -- json_exists
 SELECT name FROM t WHERE JSON_EXISTS(name, '$[0].first');
                                     name                                     

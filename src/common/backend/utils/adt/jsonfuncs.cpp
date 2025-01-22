@@ -3625,17 +3625,15 @@ Datum json_path_exists(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("the json path expression is not of text type")));
 
-    int argnum = 2;
-
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(argnum))
-        PG_RETURN_NULL();
-
-    text* json = PG_GETARG_TEXT_P(0);
     const char* pathStr = text_to_cstring(PG_GETARG_TEXT_P(1));
-    OnErrorType onError = (OnErrorType)PG_GETARG_INT32(2);
     int len = strlen(pathStr);
     JsonPathItem* path = ParseJsonPath(pathStr, len);
 
+    int argnum = 2;
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(argnum))
+        PG_RETURN_NULL();
+    text* json = PG_GETARG_TEXT_P(0);
+    OnErrorType onError = (OnErrorType)PG_GETARG_INT32(2);
     JsonExistsPathContext context;
     if (!IsJsonText(json))
     switch (onError) {
