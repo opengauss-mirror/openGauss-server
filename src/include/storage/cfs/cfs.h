@@ -11,6 +11,13 @@
 #include "storage/buf/block.h"
 #include "storage/smgr/relfilenode.h"
 #include "datatype/timestamp.h"
+#include "storage/cfs/cfs_converter.h"
+
+/* 1024 means the smallest chunk size.
+ * therefore, one block can be divided into up to 8 chunks (Maximum case)
+ * >> 3 used for CFS_BITMAP_BYTE_IX to generate bitmap
+ */
+static constexpr size_t ALLOCATE_CHUNK_USAGE_LEN = CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / 1024) >> 3;
 
 struct CfsExtentAddress {
     uint32 checksum;
@@ -32,6 +39,8 @@ struct CfsExtentHeader {
     uint8 algorithm : 7;                           /* compress algorithm, 1=pglz, 2=lz4 */
     uint8 recycleInOrder : 1;                      /* show if pca is recycled */
     uint8 recv;                                    /* for aligin */
+    uint16 n_fragment_chunks;                      /* unused chunk count */
+    uint8 allocated_chunk_usages[ALLOCATE_CHUNK_USAGE_LEN];    /* bitmap that recoreds chunk allocation usage */
     CfsExtentAddress cfsExtentAddress[FLEXIBLE_ARRAY_MEMBER];
 };
 

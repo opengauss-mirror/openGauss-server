@@ -32,25 +32,33 @@ typedef struct st_pca_page_ctrl
 typedef struct __attribute__((aligned(128))) st_pca_page_ctrl
 #endif
 {
-    uint32 ctrl_id;        // Specifies the CTRL ID, which is also the subscript of the CTRL array. The subscript starts from 1. 0 is an invalid value
-    ctrl_state_e state;    // On that chain or free. This is controlled by the chain lock.
-    volatile uint32 lru_prev, lru_next;  // Chains before and after. This is controlled by the chain lock.
-
-    volatile uint32 bck_prev, bck_next, bck_id;  // bck_id indicates the bucket to which a user belongs. This is controlled by the lock of the bucket.
-    /* The popularity increases by a bit each time a normal access is accessed, decreases by a bit each time a recycle traverse is traversed,
-       until it reaches the freezing point. This value can be fuzzy. Concurrency control is not required.
-    */
+    /** Specifies the CTRL ID, which is also the subscript of the CTRL array.
+     * The subscript starts from 1. 0 is an invalid value */
+    uint32 ctrl_id;
+    /** On that chain or free. This is controlled by the chain lock. */
+    ctrl_state_e state;
+    /** Chains before and after. This is controlled by the chain lock. */
+    volatile uint32 lru_prev, lru_next;
+    /** bck_id indicates the bucket to which a user belongs. This is controlled by the lock of the bucket. */
+    volatile uint32 bck_prev, bck_next, bck_id;
+    /** The popularity increases by a bit each time a normal access is accessed,
+     * decreases by a bit each time a recycle traverse is traversed,
+     * until it reaches the freezing point. This value can be fuzzy. Concurrency control is not required. */
     pg_atomic_uint32 touch_nr;
-    /* Access count, that's accurate. Add ctrl lock + +, release lock --, this ++ must be preceded by lock, -- must be preceded by lock release. */
+    /** Access count, that's accurate. Add ctrl lock + +, release lock --, this ++ must be preceded by lock,
+     *-- must be preceded by lock release. */
     pg_atomic_uint32 ref_num;
-
-    /* The preceding variables are not controlled by the content_lock lock. The preceding variables are not modified by the CTRL lock holder. */
-
-    LWLock *content_lock;       // This command is used to control the concurrency of the actual content on the PCA page.
+    /** The preceding variables are not controlled by the content_lock lock.
+     * The preceding variables are not modified by the CTRL lock holder.
+     * This command is used to control the concurrency of the actual content on the PCA page. */
+    LWLock *content_lock;
     ctrl_load_status_e load_status;
-
-    CfsBufferKey pca_key;       // for real pageid on disk
-    CfsExtentHeader *pca_page;  // Authentic PCA Page
+    /** for real pageid on disk */
+    CfsBufferKey pca_key;
+    /** Authentic PCA Page */
+    CfsExtentHeader *pca_page;
+    /** control the concurrency of the allocated_chunk_usages bitmap on PCA page. */
+    LWLock *allocated_chunk_usages_lock;
 } pca_page_ctrl_t;
 
 /*====================================*/

@@ -21,6 +21,14 @@ constexpr int CFS_LOGIC_BLOCKS_PER_FILE = CFS_LOGIC_BLOCKS_PER_EXTENT * CFS_EXTE
 
 #define CFS_MAX_LOGIC_CHRUNKS_NUMBER(chrunk_size)  (CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / chrunk_size))
 
+#define CFS_BITMAP_BYTE_IX(x) (static_cast<uint32_t>(x) >> 3)
+#define CFS_BITMAP_GETLEN(x) (CFS_BITMAP_BYTE_IX(x) + 1)
+#define CFS_BITMAP_SET(b, x) ((b)[CFS_BITMAP_BYTE_IX(x)] |= (1U << ((x) & 0x07)))
+#define CFS_BITMAP_CLEAR(b, x) ((b)[CFS_BITMAP_BYTE_IX(x)] &= ~(1U << ((x) & 0x07)))
+#define CFS_BITMAP_GET(b, x) ((b)[CFS_BITMAP_BYTE_IX(x)] & (1U << ((x) & 0x07)))
+
+#define CHUNK_START_NUM 1
+#define INVALID_CHUNK_NUM 0
 
 struct ExtentLocation {
     int fd;

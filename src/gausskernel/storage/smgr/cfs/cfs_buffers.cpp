@@ -4,6 +4,7 @@
 * -------------------------------------------------------------------------
 */
 #include "storage/cfs/cfs_buffers.h"
+#include "storage/cfs/cfs_converter.h"
 #include "storage/cfs/cfs_tools.h"
 #include "storage/smgr/fd.h"
 #include "storage/smgr/relfilenode.h"
@@ -320,6 +321,29 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
         return;
     }
 
+    /* construct the allocated_chunks bitmap in memory */
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+        /* lock the allocated_chunks bitmap */
+        (void)LWLockAcquire(item->allocated_chunk_usages_lock, LW_EXCLUSIVE);
+        CfsExtentAddress *extAddr = NULL;
+
+        rc = memset_s(item->pca_page->allocated_chunk_usages, ALLOCATE_CHUNK_USAGE_LEN,
+                      0, ALLOCATE_CHUNK_USAGE_LEN);
+        securec_check(rc, "\0", "\0");
+
+        uint16 usedChunkCount = 0;
+        for (uint16 i = 0; i < item->pca_page->nblocks; i++) {
+            extAddr = GetExtentAddress(item->pca_page, i);
+            for (int j = 0; j < extAddr->allocated_chunks; j++) {
+                Assert(!CFS_BITMAP_GET(item->pca_page->allocated_chunk_usages, extAddr->chunknos[j]));
+                CFS_BITMAP_SET(item->pca_page->allocated_chunk_usages, extAddr->chunknos[j]);
+                usedChunkCount++;
+            }
+        }
+        item->pca_page->n_fragment_chunks = item->pca_page->allocated_chunks - usedChunkCount;
+        LWLockRelease(item->allocated_chunk_usages_lock);
+    }
+
     item->load_status = CTRL_PAGE_IS_LOADED;
     return;
 }
@@ -430,8 +454,8 @@ uint32 pca_lock_count()
     Size buffer_size = pca_buffer_size();
     uint32 ctrl_count = (uint32)((buffer_size - sizeof(pca_page_buff_ctx_t)) /
         (sizeof(pca_page_ctrl_t) + BLCKSZ + 3 * sizeof(pca_hash_bucket_t)));
-
-    return (PCA_LRU_LIST_NUM + ctrl_count + ctrl_count * CB_CUSTOM_VALUE_THREE1);
+    /* two locks per ctrl (pca_content_lock & allocated_chunk_usages_lock) */
+    return (PCA_LRU_LIST_NUM + 2 * ctrl_count + ctrl_count * CB_CUSTOM_VALUE_THREE1);
 }
 
 void pca_buf_init_ctx()
@@ -483,7 +507,10 @@ void pca_buf_init_ctx()
         ctrl->ctrl_id = i;
         ctrl->pca_page = (CfsExtentHeader *)(void *)(g_pca_buf_ctx->page_buf + (Size)((Size)(i - 1) * BLCKSZ));
         ctrl->content_lock = LWLockAssign((int)LWTRANCHE_PCA_BUFFER_CONTENT);
+        ctrl->allocated_chunk_usages_lock = LWLockAssign((int)LWTRANCHE_PCA_ALLOCATED_CHUNK_USAGES_LOCK);
         LWLockInitialize(ctrl->content_lock, (int)LWTRANCHE_PCA_BUFFER_CONTENT);
+        /* init free chunk lock */
+        LWLockInitialize(ctrl->allocated_chunk_usages_lock, (int)LWTRANCHE_PCA_ALLOCATED_CHUNK_USAGES_LOCK);
         // add to free list
         pca_lru_push_nolock(&g_pca_buf_ctx->free_lru[ctrl->ctrl_id % PCA_PART_LIST_NUM], ctrl, CTRL_STATE_FREE);
     }
