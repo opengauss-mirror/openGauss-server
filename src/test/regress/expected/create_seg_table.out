@@ -39,7 +39,6 @@ create table tab_segment_off5(a int) with(segment=n);
 ERROR:  Only support segment storage type while parameter enable_segment is ON.
 create table tab_segment_on(a int) with(segment=on);
 create table tab_segment_compress(a int) with(compresstype=2,compress_chunk_size=512,compress_level=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compresstype can not be used in segment table.
 \d+ tab_segment;
                      Table "public.tab_segment"

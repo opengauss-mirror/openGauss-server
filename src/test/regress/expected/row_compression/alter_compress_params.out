@@ -4,31 +4,26 @@ CREATE SCHEMA alter_compress_params_schema;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_cl_30 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_cl_30 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_cl_30 SET (compress_level = 30); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_cl_30;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_ccs_512 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512 SET (compress_chunk_size = 512); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512_cpc_7 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_ccs_512_cpc_7 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512_cpc_7 SET (compress_chunk_size = 512, compress_prealloc_chunks = 7); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_ccs_512_cpc_7;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_cbc_1 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1 SET (compress_byte_convert = true); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1_cdc_1 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_cbc_1_cdc_1 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1_cdc_1 SET (compress_byte_convert = true, compress_diff_convert = true); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1_cdc_1;
 -- the new compression parameters is out of the value range
@@ -71,7 +66,6 @@ DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_1023 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_1023 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_1023 SET (compresstype = 1, compress_chunk_size = 1023); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  invalid compress_chunk_size 1023, must be one of 512, 1024, 2048 or 4096
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_1023;
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_512_cpc_8 (id int, value varchar);
@@ -99,7 +93,6 @@ DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_cbc_
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 SET (compresstype = 1, compress_chunk_size = 4096, compress_prealloc_chunks = 2); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  invalid compress_prealloc_chunks 2, must be less than 2 for uncompress_astore_to_compresstype_1_ccs_4096_cpc_2
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2;
 CREATE TABLE alter_compress_params_schema.uncompress_to_compresstype_3 (id int, value varchar);
@@ -112,7 +105,6 @@ DROP TABLE alter_compress_params_schema.uncompress_to_compresstype_3;
 CREATE TABLE alter_compress_params_schema.alter_column_table_compressed_options (id int, value varchar) WITH (ORIENTATION = column);
 INSERT INTO alter_compress_params_schema.alter_column_table_compressed_options SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.alter_column_table_compressed_options SET (compresstype = 1); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  Un-support feature
 DETAIL:  Option "compresstype" doesn't allow ALTER
 DROP TABLE alter_compress_params_schema.alter_column_table_compressed_options;
@@ -120,7 +112,6 @@ DROP TABLE alter_compress_params_schema.alter_column_table_compressed_options;
 CREATE TABLE alter_compress_params_schema.alter_segment_table_compressed_options (id int, value varchar) WITH (segment = on);
 INSERT INTO alter_compress_params_schema.alter_segment_table_compressed_options SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.alter_segment_table_compressed_options SET (compresstype = 1); -- fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  Un-support feature
 DETAIL:  Option "compresstype" doesn't allow ALTER
 DROP TABLE alter_compress_params_schema.alter_segment_table_compressed_options;
@@ -128,19 +119,15 @@ DROP TABLE alter_compress_params_schema.alter_segment_table_compressed_options;
 CREATE TABLE alter_compress_params_schema.segment_table (id int, c1 text) WITH( segment=on);
 CREATE INDEX alter_compress_params_schema.uncompressed_index_test ON alter_compress_params_schema.segment_table(c1);
 ALTER INDEX alter_compress_params_schema.uncompressed_index_test SET (compresstype = 1); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  Un-support feature
 DETAIL:  Option "compresstype" doesn't allow ALTER
 DROP INDEX alter_compress_params_schema.uncompressed_index_test;
 DROP TABLE alter_compress_params_schema.segment_table;
 CREATE TABLE alter_compress_params_schema.row_table (id int, c1 text);
 CREATE INDEX alter_compress_params_schema.compressed_index_test ON alter_compress_params_schema.row_table(c1) WITH (compresstype = 1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ALTER INDEX alter_compress_params_schema.compressed_index_test SET (compresstype = 2, compress_level = 15); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compresstype OPTION is not supported
 ALTER INDEX alter_compress_params_schema.compressed_index_test SET (compresstype = 0); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compresstype OPTION is not supported
 DROP INDEX alter_compress_params_schema.compressed_index_test;
 DROP TABLE alter_compress_params_schema.row_table;
@@ -151,7 +138,6 @@ ERROR:  permission denied: "pg_class" is a system catalog
 CREATE TABLE alter_compress_params_schema.uncompressed_table_compresstype_1 (id int, c1 text);
 INSERT INTO alter_compress_params_schema.uncompressed_table_compresstype_1 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.uncompressed_table_compresstype_1 SET (compresstype = 1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.uncompressed_table_compresstype_1
 Table "alter_compress_params_schema.uncompressed_table_compresstype_1"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -193,7 +179,6 @@ DROP TABLE alter_compress_params_schema.uncompressed_table_compresstype_1;
 CREATE TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 (id int, c1 text);
 INSERT INTO alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 SET (compresstype = 2, compress_level = 30);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30
 Table "alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -235,7 +220,6 @@ DROP TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30;
 CREATE TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 (id int, c1 text);
 INSERT INTO alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 SET (compresstype = 2, compress_level = 30, compress_chunk_size = 2048, compress_prealloc_chunks = 3);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3
 Table "alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -277,7 +261,6 @@ DROP TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_20
 CREATE TABLE alter_compress_params_schema.uncompressed_table_all_options (id int, c1 text);
 INSERT INTO alter_compress_params_schema.uncompressed_table_all_options SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.uncompressed_table_all_options SET (compresstype = 2, compress_level = 30, compress_chunk_size = 512, compress_prealloc_chunks = 6, compress_byte_convert = true, compress_diff_convert=true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.uncompressed_table_all_options
  Table "alter_compress_params_schema.uncompressed_table_all_options"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -337,7 +320,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_partitioned_compresstype_1
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_compresstype_1 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_compresstype_1 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.uncompressed_partitioned_compresstype_1 SET (compresstype = 1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_partitioned_compresstype_1_season1';
                      relname                     |                   reloptions                    
 -------------------------------------------------+-------------------------------------------------
@@ -403,7 +385,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_partitioned_cl_10_ccs_2048
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_cl_10_ccs_2048_cpc_3 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_cl_10_ccs_2048_cpc_3 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.uncompressed_partitioned_cl_10_ccs_2048_cpc_3 SET (compresstype  = 2, compress_level = 30, compress_chunk_size = 2048, compress_prealloc_chunks = 3);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_partitioned_cl_10_ccs_2048_cpc_3_season1';
                         relname                        |                                                      reloptions                                                       
 -------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------
@@ -469,7 +450,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_partitioned_all_options SE
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_all_options SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.uncompressed_partitioned_all_options SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.uncompressed_partitioned_all_options SET (compresstype = 2, compress_level = 30, compress_chunk_size = 512,  compress_prealloc_chunks = 7, compress_byte_convert = true, compress_diff_convert = true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_partitioned_all_options_season1';
                    relname                    |                                                                                 reloptions                                                                                 
 ----------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -540,7 +520,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_compresstyp
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_compresstype_1 values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_compresstype_1 values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.uncompressed_subpartitioned_compresstype_1 SET (compresstype = 1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_subpartitioned_compresstype_1_201901_a';
                        relname                       |                   reloptions                    
 -----------------------------------------------------+-------------------------------------------------
@@ -609,7 +588,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_cl_10_ccs_2
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_cl_10_ccs_2048_cpc_3 values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_cl_10_ccs_2048_cpc_3 values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.uncompressed_subpartitioned_cl_10_ccs_2048_cpc_3 SET (compresstype = 2, compress_level = 10, compress_chunk_size = 2048, compress_prealloc_chunks = 3);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_subpartitioned_cl_10_ccs_2048_cpc_3_201901_a';
                           relname                          |                                                      reloptions                                                       
 -----------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------
@@ -678,7 +656,6 @@ INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_all_options
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_all_options values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.uncompressed_subpartitioned_all_options values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.uncompressed_subpartitioned_all_options SET (compresstype = 2, compress_level = 30, compress_chunk_size = 512,  compress_prealloc_chunks = 7, compress_byte_convert = true, compress_diff_convert = true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'uncompressed_subpartitioned_all_options_201901_a';
                      relname                      |                                                                                 reloptions                                                                                 
 --------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -737,10 +714,8 @@ begin
 end;
 $BODY$;
 CREATE TABLE alter_compress_params_schema.compressed_table_compresstype_2_cl_30 (id int, c1 text) with (compresstype  = 1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.compressed_table_compresstype_2_cl_30 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.compressed_table_compresstype_2_cl_30 SET (compresstype = 2, compress_level = 30);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.compressed_table_compresstype_2_cl_30
 Table "alter_compress_params_schema.compressed_table_compresstype_2_cl_30"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -780,10 +755,8 @@ SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compres
 
 DROP TABLE alter_compress_params_schema.compressed_table_compresstype_2_cl_30;
 CREATE TABLE alter_compress_params_schema.all_options_table_compresstype_1_cpc_1 (id int, c1 text) with (compresstype = 2, compress_level = 30, compress_chunk_size = 512,  compress_prealloc_chunks = 7, compress_byte_convert = true, compress_diff_convert = true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_table_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.all_options_table_compresstype_1_cpc_1 SET (compresstype = 1, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 1, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.all_options_table_compresstype_1_cpc_1
 Table "alter_compress_params_schema.all_options_table_compresstype_1_cpc_1"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -850,13 +823,11 @@ PARTITION BY RANGE(sales_date)
     PARTITION compressed_partitioned_compresstype_2_cl_30_ccs_512_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
     PARTITION compressed_partitioned_compresstype_2_cl_30_ccs_512_season4 VALUES LESS THAN(MAXVALUE)
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session1 item', '2021-02-01 00:00:00', 1000, '711';
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session2 item', '2021-05-01 00:00:00', 1000, '722';
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.compressed_partitioned_compresstype_2_cl_30_ccs_512 SET (compresstype  = 2, compress_level = 30, compress_chunk_size = 512);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'compressed_partitioned_compresstype_2_cl_30_ccs_512_season1';
                            relname                           |                                 reloptions                                 
@@ -931,13 +902,11 @@ PARTITION BY RANGE(sales_date)
     PARTITION all_options_partitioned_compresstype_1_cpc_1_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
     PARTITION all_options_partitioned_compresstype_1_cpc_1_season4 VALUES LESS THAN(MAXVALUE)
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session1 item', '2021-02-01 00:00:00', 1000, '711';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session2 item', '2021-05-01 00:00:00', 1000, '722';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.all_options_partitioned_compresstype_1_cpc_1 SET (compresstype = 1, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 1, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'all_options_partitioned_compresstype_1_cpc_1_season1';
                        relname                        |                                                                          reloptions                                                                           
@@ -1004,13 +973,11 @@ PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
     SUBPARTITION all_options_subpartitioned_compresstype_1_cpc_1_201902_b VALUES ( '2' )
   )
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201902', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201902', '2',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1 SET (compresstype = 1, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 1, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CHECKPOINT;
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_compresstype_1_cpc_1_201901_a';
                          relname                          |                                                                          reloptions                                                                           
@@ -1070,10 +1037,8 @@ SELECT count(*) FROM compress_statistic_info(compress_func_findpath('alter_compr
 DROP TABLE alter_compress_params_schema.all_options_subpartitioned_compresstype_1_cpc_1;
 -- set compressed table to uncompressed table
 CREATE TABLE alter_compress_params_schema.all_options_table_uncompressed (id int, c1 text) with (compresstype = 2, compress_level = 30, compress_chunk_size = 512,  compress_prealloc_chunks = 7, compress_byte_convert = true, compress_diff_convert = true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_table_uncompressed SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
 ALTER TABLE alter_compress_params_schema.all_options_table_uncompressed SET (compresstype = 0, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 0, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ alter_compress_params_schema.all_options_table_uncompressed
  Table "alter_compress_params_schema.all_options_table_uncompressed"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -1120,13 +1085,11 @@ PARTITION BY RANGE(sales_date)
     PARTITION all_options_partitioned_uncompressed_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
     PARTITION all_options_partitioned_uncompressed_season4 VALUES LESS THAN(MAXVALUE)
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_partitioned_uncompressed SELECT generate_series(1, 10), 'session1 item', '2021-02-01 00:00:00', 1000, '711';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_uncompressed SELECT generate_series(1, 10), 'session2 item', '2021-05-01 00:00:00', 1000, '722';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_uncompressed SELECT generate_series(1, 10), 'session3 item', '2021-08-01 00:00:00', 1000, '733';
 INSERT INTO alter_compress_params_schema.all_options_partitioned_uncompressed SELECT generate_series(1, 10), 'session4 item', '2021-11-01 00:00:00', 1000, '744';
 ALTER TABLE alter_compress_params_schema.all_options_partitioned_uncompressed SET (compresstype = 0, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 0, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'all_options_partitioned_uncompressed_season1';
                    relname                    |                                                                          reloptions                                                                           
 ----------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1192,13 +1155,11 @@ PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
     SUBPARTITION all_options_subpartitioned_uncompressed_201902_b VALUES ( '2' )
   )
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_uncompressed values ('201902', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_uncompressed values ('201902', '2',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_uncompressed values ('201903', '1',  generate_series(1, 10));
 INSERT INTO alter_compress_params_schema.all_options_subpartitioned_uncompressed values ('201903', '2',  generate_series(1, 10));
 ALTER TABLE alter_compress_params_schema.all_options_subpartitioned_uncompressed SET (compresstype = 0, compress_level = 0, compress_chunk_size = 4096, compress_prealloc_chunks = 0, compress_byte_convert = false, compress_diff_convert = false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 select relname, reloptions from pg_partition where relname = 'all_options_subpartitioned_uncompressed_201901_a';
                      relname                      |                                                                          reloptions                                                                           
 --------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------

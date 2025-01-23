@@ -1,6 +1,5 @@
 create schema normal_test;
 CREATE TABLE normal_test.tbl_pc(id int, c1 text) WITH(compresstype=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ normal_test.tbl_pc
                       Table "normal_test.tbl_pc"
  Column |  Type   | Modifiers | Storage  | Stats target | Description 
@@ -39,17 +38,12 @@ select count(*) from normal_test.tbl_pc where id < 100;
 
 -- normal index
 create index on normal_test.tbl_pc(id) WITH (compresstype=2,compress_chunk_size=1024);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter index normal_test.tbl_pc_id_idx set (compresstype=1); --failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compresstype OPTION is not supported
 alter index normal_test.tbl_pc_id_idx set (compress_chunk_size=2048); --failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compress_chunk_size OPTION is not supported
 alter index normal_test.tbl_pc_id_idx set (compress_prealloc_chunks=2); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter index normal_test.tbl_pc_id_idx set (compress_level=2); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 set enable_seqscan = off;
 set enable_bitmapscan = off;
 select count(*) from normal_test.tbl_pc;
@@ -69,7 +63,6 @@ CREATE TABLE normal_test.tbl_partition(id int) WITH(compresstype=2,compress_chun
     partition p6 values less than(60000),
     partition p7 values less than(70000)
 );
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 insert into normal_test.tbl_partition select generate_series(1,65000);
 select count(*) from normal_test.tbl_partition;
  count 
@@ -101,7 +94,6 @@ select relname, reloptions from pg_partition where parentid in (Select relfileno
 (9 rows)
 
 create table normal_test.exchange_table(id int) WITH(compresstype=2,compress_chunk_size=1024);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ALTER TABLE normal_test.tbl_partition EXCHANGE PARTITION FOR(2500) WITH TABLE normal_test.exchange_table;
 NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from normal_test.tbl_partition;
@@ -129,7 +121,6 @@ select relname, reloptions from pg_partition where parentid in (Select relfileno
 (10 rows)
 
 create index on normal_test.tbl_partition(id) local WITH (compresstype=2,compress_chunk_size=1024);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ normal_test.tbl_partition
                   Table "normal_test.tbl_partition"
  Column |  Type   | Modifiers | Storage | Stats target | Description 
@@ -158,29 +149,21 @@ select relname, reloptions from pg_partition where parentid in (Select relfileno
 
 -- unsupport
 alter index normal_test.tbl_partition_id_idx set (compresstype=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compresstype OPTION is not supported
 alter index normal_test.tbl_partition_id_idx set (compress_chunk_size=2048);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compress_chunk_size OPTION is not supported
 alter index normal_test.tbl_partition_id_idx set (compress_prealloc_chunks=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change partition compress_prealloc_chunks OPTION is not supported
 create index rolcompress_index on normal_test.tbl_pc(id) with (compress_chunk_size=4096);
 ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 create table rolcompress_table_001(a int) with (compresstype=2, compress_prealloc_chunks=3);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  invalid compress_prealloc_chunks 3, must be less than 2 for rolcompress_table_001
 -- support
 alter table normal_test.tbl_pc set (compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 -- create table like test
 create table normal_test.including_all(id int) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table normal_test.including_all_new(like normal_test.including_all including all); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table normal_test.including_all_new2(like normal_test.including_all including reloptions); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ normal_test.including_all_new
                 Table "normal_test.including_all_new"
  Column |  Type   | Modifiers | Storage | Stats target | Description 
@@ -198,44 +181,31 @@ Has OIDs: no
 Options: orientation=row, compresstype=2
 
 create table normal_test.segment_off(id int) with (compresstype=2,segment=off); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 --compress_diff_convert布尔值：
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=t);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='t');
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='f');
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=yes);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='no');
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='1');
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 --compress_byte_convert布尔值:
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=t,compress_diff_convert=true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert='t',compress_diff_convert=true);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=f,compress_diff_convert=false);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=yes,compress_diff_convert=TRUE);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=NO,compress_diff_convert=OFF);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert='1',compress_diff_convert=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 drop table if exists normal_test.tb1;
 --segment参数：
 create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = on);

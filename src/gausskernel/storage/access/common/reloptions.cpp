@@ -3110,19 +3110,6 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
 
 void CheckCompressOption(TableCreateSupport *tableCreateSupport)
 {
-    if (tableCreateSupport->compressType) {
-        if (g_instance.attr.attr_common.support_extended_features) {
-            ereport(WARNING,
-                    (errmsg("The compressed relation you are using is an unofficial supported extended feature."))
-            );
-        } else {
-            ereport(ERROR,
-                   (errmsg("The compressed relation you are trying to create "
-                           "is an unofficial supported extended feature."),
-                    errhint("Turn on GUC 'support_extended_features' to enable it."))
-            );
-        }
-    }
 #ifdef ENABLE_FINANCE_MODE
     if (HasCompressOption(tableCreateSupport)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),

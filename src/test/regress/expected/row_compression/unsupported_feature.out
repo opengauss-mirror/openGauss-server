@@ -1,26 +1,21 @@
 create schema unsupported_feature;
 -- unspport compressType: 4
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=4, compress_chunk_size=1024);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  value 4 out of bounds for option "compresstype"
 DETAIL:  Valid values are between "0" and "2".
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  invalid compress_chunk_size 2000, must be one of 512, 1024, 2048 or 4096 for compressed_table_1024
 -- unspport compress_prealloc_chunks: -1
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=-1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  value -1 out of bounds for option "compress_prealloc_chunks"
 DETAIL:  Valid values are between "0" and "7".
 -- unspport compress_prealloc_chunks: 8
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=8);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  value 8 out of bounds for option "compress_prealloc_chunks"
 DETAIL:  Valid values are between "0" and "7".
 -- unspport compress_level: 128
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_level=128);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  value 128 out of bounds for option "compress_level"
 DETAIL:  Valid values are between "-31" and "31".
 -- compresstype cant be used with column table
@@ -45,7 +40,6 @@ CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compress_lev
 ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 -- unspport exchange
 CREATE TABLE unsupported_feature.exchange_table(id int) WITH(compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CREATE TABLE unsupported_feature.alter_table(id int) partition by range(id)
 (
     partition p0 values less than(5000),
@@ -61,7 +55,6 @@ ALTER TABLE unsupported_feature.alter_table EXCHANGE PARTITION FOR(2500) WITH TA
 ERROR:  tables in ALTER TABLE EXCHANGE PARTITION must have the same type of compress
 -- unspport alter compress_chunk_size
 create TABLE unsupported_feature.alter_table_option(id int) WITH(compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 \d+ unsupported_feature.alter_table_option
            Table "unsupported_feature.alter_table_option"
  Column |  Type   | Modifiers | Storage | Stats target | Description 
@@ -71,48 +64,33 @@ Has OIDs: no
 Options: orientation=row, compresstype=2
 
 ALTER TABLE unsupported_feature.alter_table_option SET(compresstype=0); -- success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ALTER TABLE unsupported_feature.alter_table_option SET(compress_chunk_size=2048); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0
 ALTER TABLE unsupported_feature.alter_table_option SET(compresstype=2, compress_level=2, compress_prealloc_chunks=0); -- success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 -- alter compress_byte_convert\compress_diff_convert
 create table unsupported_feature.rolcompress_table_001(a int) with (compresstype=2, compress_diff_convert=true); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_diff_convert should be used with compress_byte_convert.
 create table unsupported_feature.t_rowcompress_0007(cid int, name varchar2) with (compresstype=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.t_rowcompress_0007 set (compress_diff_convert=true); --fail
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_diff_convert should be used with compress_byte_convert.
 alter table unsupported_feature.t_rowcompress_0007 set (compress_byte_convert=true, compress_diff_convert=true); --success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.t_rowcompress_0007 set (compress_level=31); --failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level should be used with ZSTD algorithm.
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level should be used with ZSTD algorithm.
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CREATE TABLE unsupported_feature.index_test(id int, c1 text);
 -- segment
 CREATE TABLE unsupported_feature.segment_table(id int, c1 text) WITH(compresstype=2, segment=on);  --failed
 ERROR:  compresstype can not be used in segment table, column table, view, unlogged table or temp table.
 CREATE INDEX on unsupported_feature.index_test(c1) WITH(compresstype=2, segment=on); --failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  Can not use compress option in segment storage.
 -- set compress_diff_convert
 create table unsupported_feature.compress_byte_test(id int) with (compresstype=2, compress_byte_convert=false, compress_diff_convert = true); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_diff_convert should be used with compress_byte_convert.
 create table unsupported_feature.test(id int) with (compresstype=2); -- success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.test set(Compresstype=1); -- success
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.test set(Compress_level=3); -- failed
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  compress_level should be used with ZSTD algorithm.
 create table lm_rcp_4 (c1 int,c2 varchar2,c3 number,c4 money,c5 CHAR(20),c6 CLOB,c7 blob,c8 DATE,c9 BOOLEAN,c10 TIMESTAMP,c11 point,columns12 cidr) with(Compresstype=2,Compress_chunk_size=512)
     partition by list(c1) subpartition by range(c3)(
@@ -120,16 +98,12 @@ create table lm_rcp_4 (c1 int,c2 varchar2,c3 number,c4 money,c5 CHAR(20),c6 CLOB
     partition ts2 values(6,7,8,9,10),
     partition ts3 values(11,12,13,14,15)(subpartition ts31 values less than(5000),subpartition ts32 values less than(10000),subpartition ts33 values less than(MAXVALUE)),
     partition ts4 values(default));
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create unique index indexg_lm_rcp_4 on lm_rcp_4(c1 NULLS first,c2,c3) global
 with(FILLFACTOR=80,Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 --s3.
 alter index indexg_lm_rcp_4 rename to indexg_lm_rcp_4_newname;
 --s4.修改压缩类型
 alter index indexg_lm_rcp_4_newname set(Compresstype=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 ERROR:  change compresstype OPTION is not supported
 --s5.修改Compress_level
 alter index indexg_lm_rcp_4_newname set(Compress_level=3);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
