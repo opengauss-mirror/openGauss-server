@@ -3204,6 +3204,8 @@ typedef struct knl_t_page_compression_context {
     knl_thread_role thrd_role;
     void *zstd_cctx;    /* ctx for compression */
     void *zstd_dctx;    /* ctx for decompression */
+    uint64_t compressNanoSeconds;
+    uint64_t compressPageCnt;
 }knl_t_page_compression_context;
 
 typedef struct knl_t_sql_patch_context {

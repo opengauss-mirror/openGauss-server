@@ -110,3 +110,44 @@ uint1 ConvertChunkSize(uint32 compressedChunkSize, bool *success)
     return chunkSize;
 }
 
+#ifndef FRONTEND
+
+void CompressTimerStart(std::chrono::high_resolution_clock::time_point &compressStart)
+{
+    compressStart = std::chrono::high_resolution_clock::now();
+}
+
+void CompressTimerEnd(std::chrono::high_resolution_clock::time_point compressStart,
+                      RelFileCompressOption option)
+{
+    auto compressEnd = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<long long, std::nano> compress_time =
+        std::chrono::duration_cast<std::chrono::duration<long long, std::nano>>(
+            compressEnd - compressStart);
+    t_thrd.page_compression_cxt.compressPageCnt++;
+    t_thrd.page_compression_cxt.compressNanoSeconds += compress_time.count();
+
+    if (t_thrd.page_compression_cxt.compressPageCnt % COMPRESS_PAGE_COUNT_THRESHOLD == 0) {
+        ereport(LOG, (errmsg(
+            "Compress status: compress page count %lu, avg compression time %lu nano seconds. %s",
+            t_thrd.page_compression_cxt.compressPageCnt,
+            t_thrd.page_compression_cxt.compressNanoSeconds /
+            t_thrd.page_compression_cxt.compressPageCnt,
+            option.toString().c_str())));
+    }
+}
+
+const ZSTD_parameters g_zstd_params = {
+    {14,         // windowLog, largest match distance, default 14.
+     14,         // chainLog, fully searched segment, default 14.
+     7,          // hashLog, dispatch table, default 15.
+     1,          // searchLog, nb of searches, default 1.
+     7,          // minMatch, match length searched, default 5.
+     0,          // targetLength, acceptable match size for optimal parser, default 0.
+     ZSTD_fast}, // strategy, see ZSTD_strategy definition, default ZSTD_fast.
+    {0,          // contentSizeFlag, 1:content size will be in frame header, default 0.
+     0,          // checksumFlag, 1:generate a 32-bits checksum, default 0.
+     0}          // noDictIDFlag, 1:no dictID will be saved into frame header, default 0.
+};
+
+#endif

@@ -826,6 +826,7 @@ CXXFLAGS += -Wl,-z,relro,-z,now
 CXXFLAGS += -Wl,-z,noexecstack
 CXXFLAGS += -std=c++14
 override CXXFLAGS += $(PTHREAD_CFLAGS)
+override CPPFLAGS += -DZSTD_STATIC_LINKING_ONLY
 CXXFLAGS_VECTOR = @CXXFLAGS_VECTOR@
 # Kind-of compilers
 

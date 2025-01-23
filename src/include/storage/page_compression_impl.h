@@ -34,6 +34,7 @@
 #include "access/ustore/knl_upage.h"
 
 #include <zstd.h>
+#include <chrono>
 
 #define DEFAULT_ZSTD_COMPRESSION_LEVEL (1)
 #define MIN_ZSTD_COMPRESSION_LEVEL ZSTD_minCLevel()
@@ -66,7 +67,6 @@ typedef struct UHeapPageCompressData {
 #define GET_UPAGE_ITEMID_BY_IDX(buf, offset, i) ((RowPtr *)(((char *)buf) + offset + i * sizeof(RowPtr)))  // for upage only
 
 THR_LOCAL char aux_abuf[BLCKSZ];
-THR_LOCAL char src_copy[BLCKSZ];
 
 /**
  * return data of page
@@ -1300,6 +1300,30 @@ inline size_t GetSizeOfCprsHeadData(uint8 pagetype)
     }
 }
 
+#ifndef FRONTEND
+
+constexpr int COMPRESS_PAGE_COUNT_THRESHOLD = 100000;
+
+/**
+ * Record start time of compression into compressStart.
+ * @param[out]  compressStart start time recorded by CompressTimerStart.
+ */
+void CompressTimerStart(std::chrono::high_resolution_clock::time_point &compressStart);
+
+/**
+ * End timer, record the compression cost into thread local variables, and write logs if
+ * reaches COMPRESS_PAGE_COUNT_THRESHOLD in current thread.
+ * @param[in]  compressStart start time recorded by CompressTimerStart.
+ * @param[in]  option  RelFileCompressOption of the relation.
+ */
+void CompressTimerEnd(std::chrono::high_resolution_clock::time_point compressStart,
+                      RelFileCompressOption option);
+
+/** The compress function get some of parameters from ZSTD_parameters instead of ZSTD_CCtx. */
+extern const ZSTD_parameters g_zstd_params;
+
+#endif
+
 /**
  * CompressPage() -- Compress one page.
  *
@@ -1314,12 +1338,16 @@ inline size_t GetSizeOfCprsHeadData(uint8 pagetype)
 template <uint8 pagetype>
 int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option)
 {
+#ifndef FRONTEND
+    std::chrono::high_resolution_clock::time_point compressStart;
+    CompressTimerStart(compressStart);
+#endif
     int compressed_size;
     int8 level = option.compressLevelSymbol ? option.compressLevel : -option.compressLevel;
     size_t sizeOfHeaderData = GetSizeOfHeadData(pagetype);
-    //char* src_copy = NULL;
     bool real_ByteConvert = false;
     errno_t rc;
+    THR_LOCAL char src_copy[BLCKSZ];
 
     if (option.byteConvert) {
         rc = memcpy_s(src_copy, BLCKSZ, src, BLCKSZ);
@@ -1327,19 +1355,15 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
         CompressPagePrepareConvert(src_copy, option.diffConvert, &real_ByteConvert, pagetype); /* preprocess convert src */
     }
 
+    const char *compress_src = real_ByteConvert ? src_copy : src;
     char* data = GetPageCompressedData(dst, pagetype);
     PageHeaderData *page = (PageHeaderData *)src;
     bool heapPageData = page->pd_special == BLCKSZ;
     switch (option.compressAlgorithm) {
         case COMPRESS_ALGORITHM_PGLZ: {
-            bool success;
-            if (real_ByteConvert) {
-                success = pglz_compress(src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
-                    heapPageData ? PGLZ_strategy_default : PGLZ_strategy_always);
-            } else {
-                success = pglz_compress(src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
-                    heapPageData ? PGLZ_strategy_default : PGLZ_strategy_always);
-            }
+            bool success = pglz_compress(compress_src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData,
+                                         (PGLZ_Header *)data, heapPageData ? PGLZ_strategy_default :
+                                         PGLZ_strategy_always);
             compressed_size = success ? VARSIZE(data) : BLCKSZ;
             compressed_size = compressed_size < BLCKSZ ? compressed_size : BLCKSZ;
             break;
@@ -1349,37 +1373,22 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
                 level = DEFAULT_ZSTD_COMPRESSION_LEVEL;
             }
 #ifndef FRONTEND
-            if (t_thrd.page_compression_cxt.zstd_cctx == NULL) {
-                if (real_ByteConvert) {
-                    compressed_size =
-                        ZSTD_compress(data, dst_size, src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, level);
-                } else {
-                    compressed_size =
-                        ZSTD_compress(data, dst_size, src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, level);
-                }
+            bool zstd_with_ctx = t_thrd.page_compression_cxt.zstd_cctx != NULL;
+            if (!zstd_with_ctx) {
+                compressed_size =
+                    ZSTD_compress(data, dst_size, compress_src + sizeOfHeaderData,
+                                  BLCKSZ - sizeOfHeaderData, level);
             } else {
-                if (real_ByteConvert) {
-                    compressed_size =
-                        ZSTD_compressCCtx((ZSTD_CCtx *)t_thrd.page_compression_cxt.zstd_cctx,
-                        data, dst_size, src_copy + sizeOfHeaderData,
-                        BLCKSZ - sizeOfHeaderData, level);
-                } else {
-                    compressed_size =
-                        ZSTD_compressCCtx((ZSTD_CCtx *)t_thrd.page_compression_cxt.zstd_cctx,
-                        data, dst_size, src + sizeOfHeaderData,
-                        BLCKSZ - sizeOfHeaderData, level);
-                }
+                compressed_size =
+                    ZSTD_compress_advanced((ZSTD_CCtx *)t_thrd.page_compression_cxt.zstd_cctx,
+                                           data, dst_size, compress_src + sizeOfHeaderData,
+                                           BLCKSZ - sizeOfHeaderData, NULL, 0, g_zstd_params);
             }
 #else
-            if (real_ByteConvert) {
-                compressed_size =
-                    ZSTD_compress(data, dst_size, src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, level);
-            } else {
-                compressed_size =
-                    ZSTD_compress(data, dst_size, src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, level);
-            }
+            compressed_size =
+                ZSTD_compress(data, dst_size, compress_src + sizeOfHeaderData,
+                              BLCKSZ - sizeOfHeaderData, level);
 #endif
-
             if (ZSTD_isError(compressed_size)) {
                 return -1;
             }
@@ -1421,7 +1430,9 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
         pcdptr->diff_convert = option.diffConvert;
         pcdptr->algorithm = option.compressAlgorithm;
     }
-
+#ifndef FRONTEND
+    CompressTimerEnd(compressStart, option);
+#endif
     return GetSizeOfCprsHeadData(pagetype) + compressed_size;
 }
 
