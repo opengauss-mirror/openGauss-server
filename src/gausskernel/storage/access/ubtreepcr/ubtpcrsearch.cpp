@@ -324,7 +324,7 @@ OffsetNumber UBTreePCRBinarySearch(Relation rel, BTScanInsert key, Page page)
     opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
 
     low = P_FIRSTDATAKEY(opaque);
-    high = UBTreePcrPageGetMaxOffsetNumber(page);
+    high = UBTreePCRPageGetMaxOffsetNumber(page);
     /*
      * If there are no keys on the page, return the first available slot. Note
      * this covers two cases: the page is really empty (no keys), or it
@@ -1181,7 +1181,7 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
         (!showAnyTupleMode || ItemIdHasStorage(iid))) {
         /* return immediately if there are more tuples on the page */
         if (ScanDirectionIsForward(dir)) {
-            if (offnum < UBTreePcrPageGetMaxOffsetNumber(page)) {
+            if (offnum < UBTreePCRPageGetMaxOffsetNumber(page)) {
                 return NULL;
             }
         } else {
@@ -1212,7 +1212,7 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
             tupleVisible = showAnyTupleMode;
         } else {
             UBTreeTD td = UBTreePCRGetTD(page, trx->tdSlot);
-            if (TDIsCommited(td) || TDIsFrozen(td)) {
+            if (UBTreePCRTDIsCommited(td) || UBTreePCRTDIsFrozen(td)) {
                 tupleVisible = showAnyTupleMode;
             }
         }
@@ -1407,7 +1407,7 @@ recheck_td:
     TransactionId xid = td->xactid;
 
     /* td is frozen */
-    if (TDIsFrozen(td)) {
+    if (UBTreePCRTDIsFrozen(td)) {
         return !tupleDeleted;
     }
 
@@ -1458,7 +1458,7 @@ recheck_td:
     bool looped = false;
 
 loop:
-    csn = TDHasCsn(td) ? td->csn : TransactionIdGetCommitSeqNo(xid, false, true, false, scan->xs_snapshot);
+    csn = UBTreePCRTDHasCsn(td) ? td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, scan->xs_snapshot);
     if (COMMITSEQNO_IS_COMMITTED(csn)) {
         xidVisible = csn < snapshot->snapshotcsn;
     } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
@@ -1550,7 +1550,7 @@ static bool checkVisibilityInSnapshotDirty(IndexScanDesc scan, Page page, Offset
     TransactionId xid = td->xactid;
 
     /* td is frozen */
-    if (TDIsFrozen(td)) {
+    if (UBTreePCRTDIsFrozen(td)) {
         return !tupleDeleted;
     }
 
@@ -1594,7 +1594,7 @@ static bool checkVisibilityInSnapshotAnyOrToast(IndexScanDesc scan, Page page, O
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
     
     /* td is frozen */
-    if (TDIsFrozen(td)) {
+    if (UBTreePCRTDIsFrozen(td)) {
         return !tupleDeleted;
     }
 
@@ -1642,7 +1642,7 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
     page = BufferGetPage(so->currPos.buf);
     opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     minoff = P_FIRSTDATAKEY(opaque);
-    maxoff = UBTreePcrPageGetMaxOffsetNumber(page);
+    maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
 
     /*
      * we must save the page's right-link while scanning it; this tells us
@@ -1901,7 +1901,7 @@ static void GetItupXminXmax(IndexScanDesc scan, Page page, IndexTuple itup, Offs
     }
     
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
-    if (TDIsFrozen(td) || (TDIsCommited(td) && TransactionIdPrecedes(opaque->last_commit_xid, globalRecycleXid))) { // todo 确认后半部分判断复用的逻辑对不对
+    if (UBTreePCRTDIsFrozen(td) || (UBTreePCRTDIsCommited(td) && TransactionIdPrecedes(opaque->last_commit_xid, globalRecycleXid))) { // todo 确认后半部分判断复用的逻辑对不对
         transInfo->xmin = FrozenTransactionId;
         transInfo->xmax = deleted ? FrozenTransactionId : InvalidTransactionId;
         return;
@@ -1912,7 +1912,7 @@ static void GetItupXminXmax(IndexScanDesc scan, Page page, IndexTuple itup, Offs
     UndoRecPtr blkprev = RollbackToTuple(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
 
     if (tdXid == InvalidTransactionId) {
-        tdXid = TDIsCommited(td) ? tdXid : td->xactid;
+        tdXid = UBTreePCRTDIsCommited(td) ? tdXid : td->xactid;
         if (deleted) {
             transInfo->xmin = FrozenTransactionId;
             transInfo->xmax = tdXid;
@@ -2113,7 +2113,7 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
                 PredicateLockPage(rel, BufferGetBlockNumber(so->currPos.buf), scan->xs_snapshot);
                 /* see if there are any matches on this page */
                 /* note that this will clear moreLeft if we can stop */
-                if (UBTreePCRReadPage(scan, dir, UBTreePcrPageGetMaxOffsetNumber(page)))
+                if (UBTreePCRReadPage(scan, dir, UBTreePCRPageGetMaxOffsetNumber(page)))
                     break;
             } else {
                 if (so->scanMode == PCR_SCAN_MODE) {
@@ -2187,7 +2187,7 @@ Buffer UBTreePCRGetEndPoint(Relation rel, uint32 level, bool rightmost)
 
         /* Descend to leftmost or rightmost child page */
         if (rightmost) {
-            offnum = UBTreePcrPageGetMaxOffsetNumber(page);
+            offnum = UBTreePCRPageGetMaxOffsetNumber(page);
         }
         else {
             offnum = P_FIRSTDATAKEY(opaque);
@@ -2248,7 +2248,7 @@ static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir)
     } else if (ScanDirectionIsBackward(dir)) {
         Assert(P_RIGHTMOST(opaque));
 
-        start = UBTreePcrPageGetMaxOffsetNumber(page);
+        start = UBTreePCRPageGetMaxOffsetNumber(page);
     } else {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("invalid scan direction: %d", (int)dir)));
         start = 0; /* keep compiler quiet */
@@ -2378,11 +2378,11 @@ int TDCompare(Datum a, Datum b, void *arg)
     UBTreeTD tdA = (UBTreeTD)UBTreePCRGetTD(crPage, DatumGetUInt8(a));
     UBTreeTD tdB = (UBTreeTD)UBTreePCRGetTD(crPage, DatumGetUInt8(b));
 
-    Assert(TDHasCsn(tdA) && TDHasCsn(tdB));
+    Assert(UBTreePCRTDHasCsn(tdA) && UBTreePCRTDHasCsn(tdB));
 
-    if (tdA->csn > tdB->csn) {
+    if (tdA->combine.csn > tdB->combine.csn) {
         return 1;
-    } else if (tdA->csn == tdB->csn) {
+    } else if (tdA->combine.csn == tdB->combine.csn) {
         return 0;
     } else {
         return -1;
@@ -2435,12 +2435,12 @@ loop:
             (TransactionIdPrecedes(xid, globalFrozenXid) && TransactionIdPrecedes(xid, snapshot->xmin))) {
             continue;
         }
-        csn = TDHasCsn(td) ? td->csn : TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+        csn = UBTreePCRTDHasCsn(td) ? td->combine.csn : TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
         if (COMMITSEQNO_IS_COMMITTED(csn)) {
-            if (!TDHasCsn(td) && csn != COMMITSEQNO_FROZEN) {
+            if (!UBTreePCRTDHasCsn(td) && csn != COMMITSEQNO_FROZEN) {
                 fillCsnOnBasePage = true;
-                td->csn = csn;
-                TDSetStatus(td, TD_CSN);
+                td->combine.csn = csn;
+                UBTreePCRTDSetStatus(td, TD_CSN);
             }
             if (csn < snapshot->snapshotcsn || snapshot->satisfies == SNAPSHOT_NOW) {
                 /* xid is visible */
@@ -2487,11 +2487,11 @@ loop:
         for (uint8 tdid = 0; tdid < UBTreePageGetTDSlotCount(basePage); tdid++) {
             td = UBTreePCRGetTD(basePage, tdid);
             cr_td = UBTreePCRGetTD(crPage, tdid);
-            if (TDHasCsn(td) || !TDHasCsn(cr_td) || td->xactid != cr_td->xactid) {
+            if (UBTreePCRTDHasCsn(td) || !UBTreePCRTDHasCsn(cr_td) || td->xactid != cr_td->xactid) {
                 continue;
             }
-            td->csn = cr_td->csn;
-            TDSetStatus(td, TD_CSN);
+            td->combine.csn = cr_td->combine.csn;
+            UBTreePCRTDSetStatus(td, TD_CSN);
         }
         LockBuffer(baseBuffer, BUFFER_LOCK_UNLOCK);
     }
@@ -2519,13 +2519,13 @@ loop:
     while (!binaryheap_empty(maxHeap)) {
         tdid = DatumGetUInt8(binaryheap_first(maxHeap));
         td = UBTreePCRGetTD(crPage, tdid);
-        Assert(TDHasCsn(td));
-        CommitSeqNo csn = td->csn;
+        Assert(UBTreePCRTDHasCsn(td));
+        CommitSeqNo csn = td->combine.csn;
         if (csn < snapshot->snapshotcsn) {
             break;
         }
         RollbackCRPage(scan, crPage, tdid, InvalidCommandId, firstTupleCopy);
-        Assert(!TDHasCsn(td));
+        Assert(!UBTreePCRTDHasCsn(td));
         rollbackCount++;
         if (rollbackCount % CR_ROLLBACL_COUNT_THRESHOLD == 0) {
             CHECK_FOR_INTERRUPTS();
@@ -2543,8 +2543,8 @@ loop:
                 // error
             }
         }
-        td->csn = csn;
-        TDSetStatus(td, TD_CSN);
+        td->combine.csn = csn;
+        UBTreePCRTDSetStatus(td, TD_CSN);
         binaryheap_replace_first(maxHeap, UInt8GetDatum(tdid));
     }
     pfree_ext(firstTupleCopy);

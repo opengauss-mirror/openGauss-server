@@ -124,7 +124,6 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
             break;
         }
             
-
         /*
          * Fetch multiple undo record in bulk.
          * This will return a URecVector which contains an array of UndoRecords.
@@ -136,7 +135,6 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
                     fullXid, toUrecptr, fromUrecptr)));
             break;
         }
-           
 
         if (isTopTxn && !IS_VALID_UNDO_REC_PTR(urecPtr)) {
             containsFullChain = true;
@@ -214,7 +212,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
 
         DELETE_EX(uheapUrecvec);
         DELETE_EX(ubtreeUrecvec);
-        DELETE_EX(urecvec);
+        // DELETE_EX(urecvec);
     } while (true);
     
     return true;

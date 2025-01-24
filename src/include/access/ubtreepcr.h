@@ -44,6 +44,9 @@ typedef enum {
 #define UBTreeFrozenTDSlotId  0
 #define UBTreeInvalidTDSlotId 255
 
+#define UBTreeTDSlotIsNormal(slot) \
+    (UBTreeFrozenTDSlotId < slot && slot < UBTreeInvalidTDSlotId)
+
 #define UBTREE_TD_SLOT_INCREMENT_SIZE        2
 #define UBTREE_TD_THRESHOLD_FOR_PAGE_SWITCH  32
 #define UBTREE_DEFAULT_TD_COUNT              4
@@ -61,7 +64,6 @@ typedef enum {
 
 const int CR_ROLLBACL_COUNT_THRESHOLD = 10;
 
-
 /*
  * UBtreeIndexType
  *    Transaction directory for ubtree pcr page
@@ -74,20 +76,29 @@ typedef struct {
         struct {
             CommandId cid;
             uint32 aligned;
-        };
-    };
+        } ctid;
+    } combine;
     UndoRecPtr undoRecPtr;
     uint8 tdStatus;
+
+    void setInfo(TransactionId xact, UndoRecPtr urecPtr)
+    {
+        xactid = xact;
+        undoRecPtr = urecPtr;
+        combine.csn = InvalidCommitSeqNo;
+        tdStatus &= ~(TD_FROZEN | TD_COMMITED | TD_CSN);
+        tdStatus |= TD_ACTIVE;
+    }
 } UBTreeTDData;
 typedef UBTreeTDData* UBTreeTD;
 
-#define TDIsFrozen(td) ((td)->tdStatus & TD_FROZEN)
-#define TDIsCommited(td) ((td)->tdStatus & TD_COMMITED)
-#define TDIsActive(td) ((td)->tdStatus & TD_ACTIVE)
-#define TDIsDelete(td) ((td)->tdStatus & TD_DELETE)
-#define TDHasCsn(td) ((td)->tdStatus & TD_CSN)
-#define TDSetStatus(td, status) ((td)->tdStatus |= status)
-#define TDClearStatus(td, status) ((td)->tdStatus &= ~status)
+#define UBTreePCRTDIsFrozen(td) ((td)->tdStatus & TD_FROZEN)
+#define UBTreePCRTDIsCommited(td) ((td)->tdStatus & TD_COMMITED)
+#define UBTreePCRTDIsActive(td) ((td)->tdStatus & TD_ACTIVE)
+#define UBTreePCRTDIsDelete(td) ((td)->tdStatus & TD_DELETE)
+#define UBTreePCRTDHasCsn(td) ((td)->tdStatus & TD_CSN)
+#define UBTreePCRTDSetStatus(td, status) ((td)->tdStatus |= status)
+#define UBTreePCRTDClearStatus(td, status) ((td)->tdStatus &= ~status)
 #define UBTreePCRTDIdIsNormal(td_id) ((unsigned)td_id != UBTreeFrozenTDSlotId && (unsigned)td_id != UBTreeInvalidTDSlotId)
 
 /*
@@ -109,7 +120,13 @@ typedef IndexTupleTrxData* IndexTupleTrx;
 #define IsUBTreePCRIndexTupleTrxInvalid(trx) \
     (((IndexTupleTrx)(trx))->slotIsInvalid == 1)
 
+#define UBTreePCRClearIndexTupleTrxInvalid(trx) \
+    (((IndexTupleTrx)(trx))->slotIsInvalid = 0)
+    
 #define UBTreePCRSetIndexTupleDeleted(trx) \
+    (((IndexTupleTrx)(trx))->isDeleted = 1)
+
+#define UBTreePCRClearIndexTupleDeleted(trx) \
     (((IndexTupleTrx)(trx))->isDeleted = 1)
 
 #define UBTreePCRSetIndexTupleTrxSlot(trx, slot) \
@@ -133,7 +150,6 @@ typedef UBTreeUndoInfoData* UBTreeUndoInfo;
 * UBtreeIndexIsPCR
 *   True means ubtree is pcr
 */
-
 #define UBTreeTDSize \
     (offsetof(UBTreeTDData, undoRecPtr) + sizeof(UndoRecPtr) + sizeof(uint8))
 
@@ -150,21 +166,24 @@ typedef UBTreeUndoInfoData* UBTreeUndoInfo;
     (UBTreePageGetTDSlotCount(page) * sizeof(UBTreeTDData))
 
 #define UBTreePCRGetTD(page, tdid) \
-    ((UBTreeTD)((char *)(page) + SizeOfPageHeaderData + (UBTreeTDSize * (tdid - 1))))
+    ((UBTreeTD)((char *)(page) + SizeOfPageHeaderData + (sizeof(UBTreeTDData) * (tdid - 1))))
 
 #define UBTreePCRGetRowPtrOffset(page) \
     (SizeOfPageHeaderData + SizeOfUBTreeTDData(page))
 
-#define UBTreePCRGetRowPtr(page, offset) \      
+#define UBTreePCRGetRowPtr(page, offset) \    
     ((ItemId)((char*)(page) + UBTreePCRGetRowPtrOffset(page) + sizeof(ItemIdData) * (offset - 1)))
 
-#define UBTreePCRGetIndexTuple(page, offset) \  
+#define UBTreePCRGetIndexTuple(page, offset) \
     ((IndexTuple)((char*)(page) + (UBTreePCRGetRowPtr(page, offset))->lp_off))
+
+#define UBTreePCRGetIndexTupleByItemId(page, iid) \
+    ((IndexTuple)((char*)(page) + ((ItemId)iid)->lp_off))
 
 #define UBTreePCRGetIndexTupleTrx(itup) \
     ((IndexTupleTrx)(((char *)itup) + IndexTupleSize(itup)))
 
-#define UBTreePcrPageGetMaxOffsetNumber(page) \
+#define UBTreePCRPageGetMaxOffsetNumber(page) \
     ((((PageHeader)page)->pd_lower - UBTreePCRGetRowPtrOffset(page)) / sizeof(ItemIdData))
 
 #define UBTreePCRMaxItemSize(page) \
@@ -175,7 +194,10 @@ typedef UBTreeUndoInfoData* UBTreeUndoInfo;
                             3 * sizeof(UBTreeTDData)) - \
                    MAXALIGN(sizeof(UBTPCRPageOpaqueData))) / 3)
 
-
+#define UBTreeHasIncluding(rel) \
+    (RelationIsGlobalIndex(rel) ? \
+     (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel) + 1) : \
+     (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel)))
 /*
  * UBTPCRPageGetMaxOffsetNumber
  * Returns the maximum offset number used by the given page.
@@ -198,9 +220,6 @@ inline OffsetNumber UBTPCRPageGetMaxOffsetNumber(char *upage)
     return maxoff;
 }
 
-
-
-
 /*
  * prototypes for functions in ubtpcrsort.cpp
  */
@@ -208,7 +227,7 @@ extern void UBTreePCRLeafBuild(BTSpool *btspool, BTSpool *btspool2);
 extern void UBTreePCRBuildAdd(BTWriteState* wstate, BTPageState* state, IndexTuple itup, bool hasxid);
 extern void UBTreePCRUpperShutDown(BTWriteState* wstate, BTPageState* state);
 extern BTPageState* UBTreePCRPageState(BTWriteState* wstate, uint32 level);
-
+extern OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber offsetNumber, bool overwrite);
 
 /*
  * prototypes for functions in ubtpcrpage.cpp
@@ -235,6 +254,10 @@ extern UndoRecPtr UBTreePCRPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid r
  */
 extern void RollbackCRPage(IndexScanDesc scan, Page crPage, uint8 tdid,
     CommandId cid = InvalidCommandId, IndexTuple itup = NULL);
+extern UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
+    UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
+    UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
+    OffsetNumber offset, Buffer buf, bool selfInsert, UBTreeUndoInfo undoinfo, IndexTuple itup);
 
 /*
  * prototypes for functions in ubtpcrsearch.cpp
@@ -312,19 +335,29 @@ extern void UBTreePCRBuildCallback(Relation index, HeapTuple htup, Datum *values
     void *state);
 
 /*
- * prototypes for functions in ubtpcrtd.cpp
- */
-extern int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, UBTreeTD oldTd, TransactionId *minXid);
-extern void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry);
-
-/*
 * Inline functions of ubtree pcr page
 */
 
 extern void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum);
+extern Buffer UBTreePCRGetNewPage(Relation rel, UBTRecycleQueueAddress* addr);
+
+
+/*
+* prototypes for functions in ubtreetd.cpp
+*/
+extern uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, 
+    UBTreeTD oldTd, TransactionId *minXid);
+extern void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry);
+
+
 /*
 * Inline functions of ubtree page
 */
 bool UBTreeIndexIsPCRType(Relation rel);
+
+extern int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
+extern bool UBTreePCRIsKeyEqual(Relation idxrel, IndexTuple itup, BTScanInsert itupKey);
+
 
 #endif /* UBTREE_PCR_H */

@@ -175,7 +175,7 @@ static OffsetNumber SearchTupleOffnum(Relation rel, Page page, IndexTuple itup, 
     return InvalidOffsetNumber;
 }
 
-static bool UBTreeIsKeyEqual(Relation idxrel, IndexTuple itup, BTScanInsert itupKey)
+bool UBTreePCRIsKeyEqual(Relation idxrel, IndexTuple itup, BTScanInsert itupKey)
 {
     TupleDesc itupdesc = RelationGetDescr(idxrel);
     ScanKey scankey = itupKey->scankeys;
@@ -223,14 +223,14 @@ static bool IndexTupleBelongToRightPage(Relation rel, Page page, IndexTuple itup
         return cmpResult > 0;
     }
 
-    OffsetNumber curOffset = UBTreePcrPageGetMaxOffsetNumber(page);
+    OffsetNumber curOffset = UBTreePCRPageGetMaxOffsetNumber(page);
 
     while (curOffset > P_HIKEY) {
         IndexTuple curTuple = UBTreePCRGetIndexTuple(page, curOffset);
         if (!ItemPointerEquals(&curTuple->t_tid, &itup->t_tid)) {
             return true;
         }
-        if (!UBTreeIsKeyEqual(rel, curTuple, itupKey)) {
+        if (!UBTreePCRIsKeyEqual(rel, curTuple, itupKey)) {
             return true;
         }
         if (RelationIsGlobalIndex(rel)) {
@@ -253,7 +253,7 @@ static bool CheckTupleBelongToThisPage(Relation rel, Page page, IndexTuple itup,
     int result = 0;
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     if (!P_LEFTMOST(opaque)) {
-        OffsetNumber max = UBTreePcrPageGetMaxOffsetNumber(page);
+        OffsetNumber max = UBTreePCRPageGetMaxOffsetNumber(page);
         if (max < P_FIRSTDATAKEY(opaque)) {
             return false;
         }
@@ -285,15 +285,15 @@ static void ExecuteRollback(Relation rel, BlockNumber blkno, Page page, OffsetNu
     if (urec->Utype() == UNDO_UBT_INSERT) {
         /* mark tuple deleted */
         UBTreePCRSetIndexTupleDeleted(trx);
-        TDSetStatus(curTD, TD_DELETE);
+        UBTreePCRTDSetStatus(curTD, TD_DELETE);
         if (prevTDid == UBTreeFrozenTDSlotId) {
             ItemIdMarkDead(iid);
         } else {
             Assert(prevTDid != UBTreeInvalidTDSlotId);
             UBTreeTD td = UBTreePCRGetTD(page, prevTDid);
-            if (TDIsCommited(td)) {
+            if (UBTreePCRTDIsCommited(td)) {
                 UBTreePCRSetIndexTupleTrxInvalid(trx);
-            } else if (TDIsFrozen(td)) {
+            } else if (UBTreePCRTDIsFrozen(td)) {
                 ItemIdMarkDead(iid);
             } else {
                 TransactionId prevXid = urec->OldXactId();
@@ -312,9 +312,9 @@ static void ExecuteRollback(Relation rel, BlockNumber blkno, Page page, OffsetNu
         } else {
             Assert(prevTDid != UBTreeInvalidTDSlotId);
             UBTreeTD td = UBTreePCRGetTD(page, prevTDid);
-            if (TDIsCommited(td)) {
+            if (UBTreePCRTDIsCommited(td)) {
                 UBTreePCRSetIndexTupleTrxInvalid(trx);
-            } else if (TDIsFrozen(td)) {
+            } else if (UBTreePCRTDIsFrozen(td)) {
                 IndexItemIdSetFrozen(iid);
             } else {
                 TransactionId prevXid = urec->OldXactId();
@@ -431,9 +431,9 @@ void RollbackCRPage(IndexScanDesc scan, Page page, uint8 tdid, CommandId cid, In
     td->xactid = xid;
     td->undoRecPtr = urecptr;
     if (!TransactionIdIsValid(xid)) {
-        TDSetStatus(td, TD_FROZEN);
+        UBTreePCRTDSetStatus(td, TD_FROZEN);
     }
-    TDClearStatus(td, TD_CSN);
+    UBTreePCRTDClearStatus(td, TD_CSN);
     DELETE_EX(urec);
 }
 
@@ -447,11 +447,11 @@ static void SetTDInfo(Relation rel, Page page, int tdid, TransactionId xid, Undo
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
 
     if (!TransactionIdIsValid(xid)) {
-        TDSetStatus(td, TD_FROZEN);
+        UBTreePCRTDSetStatus(td, TD_FROZEN);
     } else if (xid != td->xactid) {
-        TDSetStatus(td, TD_COMMITED);
+        UBTreePCRTDSetStatus(td, TD_COMMITED);
     }
-    TDClearStatus(td, TD_ACTIVE);
+    UBTreePCRTDClearStatus(td, TD_ACTIVE);
     td->undoRecPtr = urecptr;
     td->xactid = xid;
 }

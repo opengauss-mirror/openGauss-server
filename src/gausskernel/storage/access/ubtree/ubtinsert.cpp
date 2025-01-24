@@ -48,7 +48,6 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
 static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
     Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key);
 static bool UBTreePageAddTuple(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off, bool isnew);
-static bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
 static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool isRollbackIndex);
 static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
 
@@ -754,7 +753,7 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                  * in real comparison, but only for ordering/finding items on
                  * pages. - vadim 03/24/97
                  */
-                if (!UBTreeIsEqual(rel, page, offset, itup_key->keysz, itup_key->scankeys))
+                if (!UBTreeIsEqual<UBTPageOpaqueInternal>(rel, page, offset, itup_key->keysz, itup_key->scankeys))
                     break; /* we're past all the equal tuples */
 
                 /* okay, we gotta fetch the heap tuple ... */
@@ -2017,7 +2016,7 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                  * in real comparison, but only for ordering/finding items on
                  * pages. - vadim 03/24/97
                  */
-                if (!UBTreeIsEqual(rel, page, offset, itup_key->keysz, itup_key->scankeys))
+                if (!UBTreeIsEqual<UBTPageOpaqueInternal>(rel, page, offset, itup_key->keysz, itup_key->scankeys))
                     /* we've traversed all the equal tuples, but we haven't found itup */
                     return InvalidOffsetNumber;
 
@@ -2144,51 +2143,6 @@ static bool UBTreePageAddTuple(Page page, Size itemsize, IndexTuple itup, Offset
         ItemIdSetNormal(iid, ((PageHeader)page)->pd_upper, itemsize);
     }
 
-    return true;
-}
-
-/*
- * UBTreeIsEqual() -- used in _bt_doinsert in check for duplicates.
- *
- * This is very similar to _bt_compare, except for NULL and negative infinity
- * handling. Rule is simple: NOT_NULL not equal NULL, NULL equal NULL.
- */
-static bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey)
-{
-    TupleDesc itupdesc = RelationGetDescr(idxrel);
-    IndexTuple itup;
-    int i;
-
-    /* Better be comparing to a leaf item */
-    Assert(P_ISLEAF((UBTPageOpaqueInternal)PageGetSpecialPointer(page)));
-    Assert(offnum >= P_FIRSTDATAKEY((UBTPageOpaqueInternal) PageGetSpecialPointer(page)));
-
-    itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
-    /*
-     * Index tuple shouldn't be truncated.	Despite we technically could
-     * compare truncated tuple as well, this function should be only called
-     * for regular non-truncated leaf tuples and P_HIKEY tuple on
-     * rightmost leaf page.
-     */
-    for (i = 1; i <= keysz; i++, scankey++) {
-        AttrNumber attno = scankey->sk_attno;
-        Assert(attno == i);
-        bool datumIsNull = false;
-        bool skeyIsNull = ((scankey->sk_flags & SK_ISNULL) ? true : false);
-        Datum datum = index_getattr(itup, attno, itupdesc, &datumIsNull);
-
-        if (datumIsNull && skeyIsNull)
-            continue; /* NULL equal NULL */
-        if (datumIsNull != skeyIsNull)
-            return false; /* NOT_NULL not equal NULL */
-
-        if (DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
-                                            scankey->sk_collation, datum, scankey->sk_argument)) != 0) {
-            return false;
-        }
-    }
-
-    /* if we get here, the keys are equal */
     return true;
 }
 

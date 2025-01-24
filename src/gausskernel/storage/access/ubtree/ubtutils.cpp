@@ -1038,3 +1038,54 @@ void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Pa
                     "Consider a function index of an MD5 hash of the value, "
                     "or use full text indexing.")));
 }
+
+/*
+ * UBTreeIsEqual() -- used in _bt_doinsert in check for duplicates.
+ *
+ * This is very similar to _bt_compare, except for NULL and negative infinity
+ * handling. Rule is simple: NOT_NULL not equal NULL, NULL equal NULL.
+ */
+template bool UBTreeIsEqual<UBTPageOpaqueInternal>(Relation idxrel, Page page, 
+    OffsetNumber offnum, int keysz, ScanKey scankey);
+template bool UBTreeIsEqual<UBTPCRPageOpaque>(Relation idxrel, Page page, 
+    OffsetNumber offnum, int keysz, ScanKey scankey);
+
+template<typename Opaque>
+bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey)
+{
+    TupleDesc itupdesc = RelationGetDescr(idxrel);
+    IndexTuple itup;
+    int i;
+
+    /* Better be comparing to a leaf item */
+    Assert(P_ISLEAF((Opaque)PageGetSpecialPointer(page)));
+    Assert(offnum >= P_FIRSTDATAKEY((Opaque) PageGetSpecialPointer(page)));
+
+    itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
+    /*
+     * Index tuple shouldn't be truncated.	Despite we technically could
+     * compare truncated tuple as well, this function should be only called
+     * for regular non-truncated leaf tuples and P_HIKEY tuple on
+     * rightmost leaf page.
+     */
+    for (i = 1; i <= keysz; i++, scankey++) {
+        AttrNumber attno = scankey->sk_attno;
+        Assert(attno == i);
+        bool datumIsNull = false;
+        bool skeyIsNull = ((scankey->sk_flags & SK_ISNULL) ? true : false);
+        Datum datum = index_getattr(itup, attno, itupdesc, &datumIsNull);
+
+        if (datumIsNull && skeyIsNull)
+            continue; /* NULL equal NULL */
+        if (datumIsNull != skeyIsNull)
+            return false; /* NOT_NULL not equal NULL */
+
+        if (DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
+                                            scankey->sk_collation, datum, scankey->sk_argument)) != 0) {
+            return false;
+        }
+    }
+
+    /* if we get here, the keys are equal */
+    return true;
+}

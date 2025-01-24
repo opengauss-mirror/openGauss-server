@@ -57,6 +57,8 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
 static void UBTreeVacuumPage(BTVacState *vstate, OidRBTree* invisibleParts, BlockNumber blkno, BlockNumber origBlkno);
 
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
+bool UBTreeIndexIsPCRType(Relation rel);
+
 /*
  *	btbuild() -- build a new btree index.
  */
@@ -173,7 +175,11 @@ Datum ubtbuildempty(PG_FUNCTION_ARGS)
     /* Ensure rd_smgr is open (could have been closed by relcache flush!) */
     RelationOpenSmgr(index);
 
-    UBTreeInitMetaPage(metapage, P_NONE, 0);
+    if (!UBTreeIndexIsPCRType(index)) {
+        UBTreeInitMetaPage(metapage, P_NONE, 0);
+    } else {
+        UBTreePCRInitMetaPage(metapage, P_NONE, 0);
+    }
 
     /*
      * Write the page and log it.  It might seem that an immediate sync
@@ -262,11 +268,17 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
     itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
     itup->t_tid = *htCtid;
 
-    /* reserve space for xmin/xmax */
-    Size newsize = IndexTupleSize(itup) + sizeof(ShortTransactionId) * 2;
-    IndexTupleSetSize(itup, newsize);
-
-    result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
+    if (!UBTreeIndexIsPCRType(rel)) { 
+        /* reserve space for xmin/xmax */
+        Size newsize = IndexTupleSize(itup) + sizeof(ShortTransactionId) * 2;
+        IndexTupleSetSize(itup, newsize);
+        result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
+    } else {
+        /* reserve space for xmin/xmax */
+        Size newsize = IndexTupleSize(itup) + sizeof(IndexTupleTrxData);
+        IndexTupleSetSize(itup, newsize);
+        result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel);
+    }
 
     pfree(itup);
 

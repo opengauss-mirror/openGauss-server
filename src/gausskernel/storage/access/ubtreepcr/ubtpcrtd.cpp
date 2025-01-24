@@ -56,7 +56,7 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
     Page page = BufferGetPage(buf);
 
     /* clear the slot info from tuples */
-    OffsetNumber maxoff = UBTreePcrPageGetMaxOffsetNumber(page);
+    OffsetNumber maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
     uint8 map[UBTREE_MAX_TD_COUNT + 1] = { 0 };
 
     for (int i = 0;i < nSlots;i ++) {
@@ -146,7 +146,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
 
     if (nFrozenSlots > 0) {
         TransactionId latestfxid = InvalidTransactionId;
-        int slotNo;
+        uint8 slotNo;
 
         START_CRIT_SECTION();
 
@@ -154,7 +154,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
         UBTreeFreezeOrInvalidIndexTuples(buf, nFrozenSlots, frozenSlots, true);
 
         /* Initialize the frozen slots. */
-        for (int i = 0; i < nFrozenSlots; i++) {
+        for (uint8 i = 0; i < nFrozenSlots; i++) {
             UBTreeTD thisTrans;
 
             slotNo = frozenSlots[i];
@@ -216,14 +216,13 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
 
     // 先处理abort事务，在处理complate事务，这里可以调一下反过来会怎么样
     if (nAbortedXactSlots > 0) {
-        for (int i = 0;i < nAbortedXactSlots; i ++) {
+        for (uint8 i = 0;i < nAbortedXactSlots; i ++) {
             // TODO: 待实现回滚
             ExecuteUndoActionsForUBTreePage(relation, buf, abortedXactSlots[nAbortedXactSlots]);
         }
         return abortedXactSlots[nAbortedXactSlots - 1];  // 这里直接return会跳过下面freeze动作，可能会影响整体性能。
     } else if (nCompletedXactSlots > 0) {
-        int i;
-        int slotNo;
+        uint8 slotNo;
 
         START_CRIT_SECTION();
 
@@ -236,7 +235,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          * accessible by traversing slot's undo chain even though the slots
          * are reused.
          */
-        for (i = 0; i < nCompletedXactSlots; i++) {
+        for (uint8 i = 0; i < nCompletedXactSlots; i++) {
             slotNo = completedXactSlots[i];
             UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo + 1);
             thisTrans->xactid = InvalidTransactionId;
@@ -362,8 +361,34 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
     return numExtended;
 }
 
+void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry)
+{
+    if (UBTreeTDSlotIsNormal(*slotNo) && !IsUBTreePCRTDReused(trx)) {
+        Page page = BufferGetPage(buf);
+        UBTreeTD td = UBTreePCRGetTD(page, *slotNo);
+        TransactionId xid = td->xactid;
+        if (TransactionIdIsValid(xid) && !UBTreePCRTDIsFrozen(td) && UBTreePCRTDIsCommited(td)) {
+            if (TransactionIdIsCurrentTransactionId(xid)) {
+                return;
+            }
+            if (TransactionIdIsInProgress(xid, NULL, false, true, true)) {
+                _bt_relbuf(rel, buf);
+                XactLockTableWait(xid);
+                *needRetry = true;
+                return;
+            }
+
+            if (!TransactionIdDidCommit(xid)) {
+                ExecuteUndoActionsForUBTreePage(rel, buf, *slotNo);
+            }
+            // TODO: 连调时候看一下回滚完成trx里的slot是否可能变化
+            *slotNo = trx->tdSlot;
+        }
+    }
+}
+
 /*
- * UBtreePageReserveTransactionSlot 
+ * UBTreePageReserveTransactionSlot 
  *
  * Reserve the transaction slot in ubtree page.
  *
@@ -379,14 +404,14 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
  * transaction, we set slotReused as true, false otherwise.
  * 
  */
-int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, 
+uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, 
     UBTreeTD oldTd, TransactionId *minXid)
 {
     Page page = BufferGetPage(buf);
-    int latestFreeTDSlot = UBTreeInvalidTDSlotId;
-    int slotNo;
-    int nExtended;
-    int tdCount = UBTreePageGetTDSlotCount(page);
+    uint8 latestFreeTDSlot = UBTreeInvalidTDSlotId;
+    uint8 slotNo;
+    uint8 nExtended;
+    uint8 tdCount = UBTreePageGetTDSlotCount(page);
 
     TransactionId currMinXid = MaxTransactionId;
 
@@ -468,35 +493,4 @@ int UBtreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionI
         RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
     /* no transaction slot available */
     return UBTreeInvalidTDSlotId;
-}
-
-void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry)
-{
-    if (UBTreePCRTDIdIsNormal(*slotNo) && !IsUBTreePCRIndexTupleTrxInvalid(trx)) {
-        Page page = BufferGetPage(buf);
-        UBTreeTD thisTrans = UBTreePCRGetTD(page, *slotNo);
-        TransactionId xid = thisTrans->xactid;
-
-        if (TransactionIdIsValid(xid) && !TDIsFrozen(thisTrans) && !TDIsCommited(thisTrans)) {    
-            if (TransactionIdIsCurrentTransactionId(xid)) {     
-                return;
-            }
-
-            if (TransactionIdIsInProgress(xid, NULL, false, true, true)) {
-                _bt_relbuf(rel, buf);
-                XactLockTableWait(xid);
-                *needRetry = true;
-                return;
-            }
-
-            if (!TransactionIdDidCommit(xid)) {
-                /* previous xid is abort, slove it first */
-                // UBTrePCRTransactionRollbackOnPage(rel, buf, *slotNo);        //TODO      
-                ereport(DEBUG5, (errmsg("PCR handle previous td to rollbalk, relfilenode is : %u",
-        rel->rd_node.relNode)));
-            }
-            /* recheck the previous TD, we may rolled back some txn */      
-            *slotNo = trx->tdSlot;
-        }
-    }
 }

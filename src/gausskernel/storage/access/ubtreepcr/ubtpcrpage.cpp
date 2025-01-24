@@ -26,6 +26,8 @@
 
 #include "access/ubtreepcr.h"
 #include "access/multi_redo_api.h"
+#include "access/hio.h"
+#include "storage/lmgr.h"
 
 
 /*
@@ -208,7 +210,7 @@ Buffer UBTreePCRGetRoot(Relation rel, int access)
          *            before we release the Exclusive lock.
          */
         UBTRecycleQueueAddress addr;
-        rootbuf = UBTreeGetNewPage(rel, &addr);
+        rootbuf = UBTreePCRGetNewPage(rel, &addr);
         rootblkno = BufferGetBlockNumber(rootbuf);
         rootpage = BufferGetPage(rootbuf);
         rootopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(rootpage);
@@ -231,29 +233,29 @@ Buffer UBTreePCRGetRoot(Relation rel, int access)
         /* XLOG stuff */
         // TODO
         if (RelationNeedsWAL(rel)) {
-            xl_btree_newroot xlrec;
-            xl_btree_metadata_old md;
-            XLogRecPtr recptr;
+            // xl_btree_newroot xlrec;
+            // xl_btree_metadata_old md;
+            // XLogRecPtr recptr;
 
-            XLogBeginInsert();
-            XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
-            XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
+            // XLogBeginInsert();
+            // XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
+            // XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
 
-            md.root = rootblkno;
-            md.level = 0;
-            md.fastroot = rootblkno;
-            md.fastlevel = 0;
+            // md.root = rootblkno;
+            // md.level = 0;
+            // md.fastroot = rootblkno;
+            // md.fastlevel = 0;
 
-            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
+            // XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
 
-            xlrec.rootblk = rootblkno;
-            xlrec.level = 0;
-            XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
+            // xlrec.rootblk = rootblkno;
+            // xlrec.level = 0;
+            // XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
 
-            recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_NEWROOT);
+            // recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_NEWROOT);
 
-            PageSetLSN(rootpage, recptr);
-            PageSetLSN(metapg, recptr);
+            // PageSetLSN(rootpage, recptr);
+            // PageSetLSN(metapg, recptr);
         }
 
         END_CRIT_SECTION();
@@ -321,7 +323,23 @@ Buffer UBTreePCRGetRoot(Relation rel, int access)
 
 bool UBTreePCRPageRecyclable(Page page)
 {
-    return false;
+    /*
+     * It's possible to find an all-zeroes page in an index --- for example, a
+     * backend might successfully extend the relation one page and then crash
+     * before it is able to make a WAL entry for adding the page. If we find a
+     * zeroed page then reclaim it.
+     */
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    if (PageIsNew(page)) {
+        return true;
+    }
+
+    /*
+     * Otherwise, recycle if deleted and too old to have any processes
+     * interested in it.
+     */
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    return P_ISDELETED(opaque) && TransactionIdPrecedes(((UBTPCRPageOpaque)opaque)->last_delete_xid, oldestXmin);
 }
 
 void UBTreePCRPageDel(Relation rel, Buffer buf, OffsetNumber offset, bool isRollbackIndex, int tdslot, 
@@ -348,7 +366,7 @@ void UBTreePCRPageDel(Relation rel, Buffer buf, OffsetNumber offset, bool isRoll
     UBTreeTD thisTrans = UBTreePCRGetTD(page, tdslot);
     thisTrans->xactid = fxid;
     thisTrans->undoRecPtr = urecPtr;
-    thisTrans->csn = InvalidCommitSeqNo;
+    thisTrans->combine.csn = InvalidCommitSeqNo;
     thisTrans->tdStatus &= ~(TD_COMMITED | TD_FROZEN | TD_CSN);
     thisTrans->tdStatus |= TD_ACTIVE;
     thisTrans->tdStatus |= TD_DELETE;
@@ -383,19 +401,19 @@ void UBTreePCRPageDel(Relation rel, Buffer buf, OffsetNumber offset, bool isRoll
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-        xl_ubtree_mark_delete xlrec;
-        XLogRecPtr recptr;
+        // xl_ubtree_mark_delete xlrec;
+        // XLogRecPtr recptr;
 
-        xlrec.xid = xid;
-        xlrec.offset = offset;
+        // xlrec.xid = xid;
+        // xlrec.offset = offset;
 
-        XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, SizeOfUBTreeMarkDelete);
-        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+        // XLogBeginInsert();
+        // XLogRegisterData((char*)&xlrec, SizeOfUBTreeMarkDelete);
+        // XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
-        recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_MARK_DELETE);
+        // recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_MARK_DELETE);
 
-        PageSetLSN(page, recptr);
+        // PageSetLSN(page, recptr);
     }
     undo::FinishUndoMeta(persistence);
     END_CRIT_SECTION();
@@ -447,7 +465,7 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
                         errmsg("corrupted page pointers: lower = %u, upper = %u, special = %u", phdr->pd_lower,
                                phdr->pd_upper, phdr->pd_special)));
 
-    nline = UBTreePcrPageGetMaxOffsetNumber(page);
+    nline = UBTreePCRPageGetMaxOffsetNumber(page);
     if ((int)offnum <= 0 || (int)offnum > nline)
         ereport(ERROR, (errcode(ERRCODE_INVALID_ROW_COUNT_IN_RESULT_OFFSET_CLAUSE),
                         errmsg("invalid index offnum: %u", offnum)));
@@ -519,6 +537,7 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
     }
 }
 
+
 /*
  * Check if index tuple have appropriate number of attributes.
  */
@@ -538,7 +557,7 @@ bool UBTreePCRCheckNatts(const Relation index, bool heapkeyspace, Page page, Off
         return true;
     }
 
-    Assert(offnum >= FirstOffsetNumber && offnum <= UBTreePcrPageGetMaxOffsetNumber(page));
+    Assert(offnum >= FirstOffsetNumber && offnum <= UBTreePCRPageGetMaxOffsetNumber(page));
 
     itup = (IndexTuple) UBTreePCRGetIndexTuple(page, offnum);
 
@@ -603,7 +622,7 @@ void VerifyPCRIndexHikeyAndOpaque(Relation rel, Page page, BlockNumber blkno)
     }
 
     /* compare last key and HIKEY */
-    OffsetNumber lastPos = UBTreePcrPageGetMaxOffsetNumber(page);
+    OffsetNumber lastPos = UBTreePCRPageGetMaxOffsetNumber(page);
     /* note that the first data key of internal pages has no value */
     if (!P_RIGHTMOST(opaque) && (P_ISLEAF(opaque) ? (lastPos > P_HIKEY) : (lastPos > P_FIRSTKEY))) {
         IndexTuple lastTuple = (IndexTuple)UBTreePCRGetIndexTuple(page, lastPos);
@@ -637,7 +656,7 @@ void VerifyUBTreePCRTD(Relation rel, Page page, BlockNumber blkno)
     }
 
     /* compare last key and HIKEY */
-    OffsetNumber lastPos = UBTreePcrPageGetMaxOffsetNumber(page);
+    OffsetNumber lastPos = UBTreePCRPageGetMaxOffsetNumber(page);
     /* note that the first data key of internal pages has no value */
     if (!P_RIGHTMOST(opaque) && (P_ISLEAF(opaque) ? (lastPos > P_HIKEY) : (lastPos > P_FIRSTKEY))) {
         IndexTuple lastTuple = (IndexTuple)UBTreePCRGetIndexTuple(page, lastPos);
@@ -656,4 +675,205 @@ void VerifyUBTreePCRTD(Relation rel, Page page, BlockNumber blkno)
         }
         pfree(itupKey);
     }
+}
+
+void UBTreePCRRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start)
+{
+    if (stats) {
+        TimestampTz cost = GetCurrentTimestamp() - start;
+        switch (type) {
+            case GET_PAGE:
+                stats->getAvailablePageTime += cost;
+                stats->getAvailablePageCount++;
+                stats->getAvailablePageTimeMax = Max(stats->getAvailablePageTimeMax, cost);
+                break;
+            case ADD_BLOCKS:
+                stats->addExtraBlocksTime += cost;
+                stats->addExtraBlocksCount++;
+                stats->addExtraBlocksTimeMax = Max(stats->addExtraBlocksTimeMax, cost);
+                break;
+            case EXTEND_ONE:
+                stats->extendOneTime += cost;
+                stats->extendOneCount++;
+                stats->extendOneTimeMax = Max(stats->extendOneTimeMax, cost);
+                break;
+            case URQ_GET_PAGE:
+                stats->getOnUrqPageTime += cost;
+                stats->getOnUrqPageCount++;
+                stats->getOnUrqPageTimeMax = Max(stats->getOnUrqPageTimeMax, cost);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+/*
+ * Log the reuse of a page from the recycle queue.
+ */
+static void UBTreePCRLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid)
+{
+    xl_btree_reuse_page xlrec;
+
+    // if (!RelationNeedsWAL(rel))
+    //     return;
+
+    // /*
+    //  * Note that we don't register the buffer with the record, because this
+    //  * operation doesn't modify the page. This record only exists to provide a
+    //  * conflict point for Hot Standby.
+    //  *
+    //  * XLOG stuff
+    //  */
+    // RelFileNodeRelCopy(xlrec.node, rel->rd_node);
+
+    // xlrec.block = blkno;
+    // xlrec.latestRemovedXid = latestRemovedXid;
+
+    // XLogBeginInsert();
+    // XLogRegisterData((char *)&xlrec, SizeOfBtreeReusePage);
+
+    // (void)XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_REUSE_PAGE, rel->rd_node.bucketNode);
+}
+
+static void UBTreePCRLogAndFreeNewPageStats(UBTreeGetNewPageStats* stats)
+{
+    if (stats) {
+        ereport(LOG, (errmodule(MOD_UBTREE), (errmsg(
+            "UBTreeGetNewPageStats: rnode=[%u, %u, %u], getAvailablePage[total, count, max]=[%ld, %u, %ld], "
+            "addExtraBlocks[total, count, max]=[%ld, %u, %ld], extendOne[total, count, max]=[%ld, %u, %ld], "
+            "getOnUrqPage[total, count, max]=[%ld, %u, %ld],"
+            "urqItemsCount:%u; restartCount first:%u, checkNonTrackedPagesCount:%u;",
+            stats->spcnode, stats->dbnode, stats->relnode,
+            stats->getAvailablePageTime, stats->getAvailablePageCount, stats->getAvailablePageTimeMax,
+            stats->addExtraBlocksTime, stats->addExtraBlocksCount, stats->addExtraBlocksTimeMax,
+            stats->extendOneTime, stats->extendOneCount, stats->extendOneTimeMax,
+            stats->getOnUrqPageTime, stats->getOnUrqPageCount, stats->getOnUrqPageTimeMax,
+            stats->urqItemsCount, stats->restartCount, stats->checkNonTrackedPagesCount))));
+        pfree(stats);
+    }
+}
+
+
+/*
+ *	UBTreePCRGetNewPage() -- Allocate a new page.
+ *
+ *		This routine will allocate a new page from Recycle Queue or extend the
+ *		relation.
+ *
+ *		We will try to found a free page from the freed fork of Recycle Queue, and
+ *		extend the relation when there is no free page in Recycle Queue.
+ *
+ *		addr is a output parameter, it will be set to a valid value if the page
+ *		is found from Recycle Queue. This output tells where is the corresponding
+ *		page in the Recycle Queue, and we need to call UBTreeRecordUsedPage()
+ *		with this addr when the returned page is used correctly.
+ */
+Buffer UBTreePCRGetNewPage(Relation rel, UBTRecycleQueueAddress* addr)
+{
+    WHITEBOX_TEST_STUB("UBTreePCRGetNewPage-begin", WhiteboxDefaultErrorEmit);
+    TimestampTz startTime = 0;
+    UBTreeGetNewPageStats* stats = NULL;
+    if (module_logging_is_on(MOD_UBTREE)) {
+        stats = (UBTreeGetNewPageStats*)palloc0(sizeof(UBTreeGetNewPageStats));
+        stats->spcnode = rel->rd_node.spcNode;
+        stats->dbnode = rel->rd_node.dbNode;
+        stats->relnode = rel->rd_node.relNode;
+    }
+restart:
+    if (stats) {
+        stats->restartCount++;
+        startTime = GetCurrentTimestamp(); 
+    }
+    Buffer buf = UBTreePCRGetAvailablePage(rel, RECYCLE_FREED_FORK, addr, stats);
+    UBTreePCRRecordGetNewPageCost(stats, GET_PAGE, startTime);
+    if (buf == InvalidBuffer) {
+        /*
+         * No free page left, need to extend the relation
+         *
+         * Extend the relation by one page.
+         *
+         * We have to use a lock to ensure no one else is extending the rel at
+         * the same time, else we will both try to initialize the same new
+         * page.  We can skip locking for new or temp relations, however,
+         * since no one else could be accessing them.
+         */
+        bool needLock = !RELATION_IS_LOCAL(rel);
+        if (needLock) {
+            if (!ConditionalLockRelationForExtension(rel, ExclusiveLock)) {
+                /* couldn't get the lock immediately; wait for it. */
+                LockRelationForExtension(rel, ExclusiveLock);
+                if (stats) {
+                    startTime = GetCurrentTimestamp();
+                }
+                /* check again, relation may extended by other backends */
+                buf = UBTreePCRGetAvailablePage(rel, RECYCLE_FREED_FORK, addr, stats);
+                UBTreePCRRecordGetNewPageCost(stats, GET_PAGE, startTime);
+                if (buf != InvalidBuffer) {
+                    UnlockRelationForExtension(rel, ExclusiveLock);
+                    goto out;
+                }
+                if (stats) {
+                    startTime = GetCurrentTimestamp();
+                }
+                /* Time to bulk-extend. */
+                RelationAddExtraBlocks(rel, NULL);
+                UBTreePCRRecordGetNewPageCost(stats, ADD_BLOCKS, startTime);
+                WHITEBOX_TEST_STUB("UBTreePCRGetNewPage-bulk-extend", WhiteboxDefaultErrorEmit);
+            }
+        }
+        if (stats) {
+            startTime = GetCurrentTimestamp();
+        }
+        /* extend by one page */
+        buf = ReadBuffer(rel, P_NEW);
+        UBTreePCRRecordGetNewPageCost(stats, EXTEND_ONE, startTime);
+        WHITEBOX_TEST_STUB("UBTreePCRGetNewPage-extend", WhiteboxDefaultErrorEmit);
+        if (!ConditionalLockBuffer(buf)) {
+            /* lock failed. To avoid dead lock, we need to retry */
+            if (needLock) {
+                UnlockRelationForExtension(rel, ExclusiveLock);
+            }
+            ReleaseBuffer(buf);
+            goto restart;
+        }
+        /*
+         * Release the file-extension lock; it's now OK for someone else to
+         * extend the relation some more.
+         */
+        if (needLock)
+            UnlockRelationForExtension(rel, ExclusiveLock);
+
+        /* we have successfully extended the space, get the new page and write lock */
+        addr->queueBuf = InvalidBuffer; /* not allocated from recycle */
+    }
+out:
+    /* buffer is valid, exclusive lock already acquired */
+    Assert(BufferIsValid(buf));
+
+    Page page = BufferGetPage(buf);
+    if (!UBTreePCRPageRecyclable(page)) {
+        /* oops, failure due to concurrency, retry. */
+        UnlockReleaseBuffer(buf);
+        if (BufferIsValid(addr->queueBuf)) {
+            ReleaseBuffer(addr->queueBuf);
+            addr->queueBuf = InvalidBuffer;
+        }
+        goto restart;
+    }
+
+    if (addr->queueBuf != InvalidBuffer) {
+        /*
+         * If we are generating WAL for Hot Standby then create a
+         * WAL record that will allow us to conflict with queries
+         * running on standby.
+         */
+        if (XLogStandbyInfoActive() && RelationNeedsWAL(rel)) {
+            UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+            UBTreePCRLogReusePage(rel, BufferGetBlockNumber(buf), opaque->last_delete_xid);
+        }
+    }
+    UBTreePCRPageInit(page, BufferGetPageSize(buf));
+    UBTreePCRLogAndFreeNewPageStats(stats);
+    return buf;
 }

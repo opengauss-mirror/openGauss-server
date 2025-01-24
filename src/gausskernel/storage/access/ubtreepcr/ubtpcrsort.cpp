@@ -875,7 +875,6 @@ void UBTreePCRUpperShutDown(BTWriteState* wstate, BTPageState* state)
     ADIO_END();
     UBTreePCRInitMetaPage(metapage, rootblkno, rootlevel);
     UBTreePCRBlWritePage(wstate, metapage, BTREE_METAPAGE);
-
 }
 
 /*
