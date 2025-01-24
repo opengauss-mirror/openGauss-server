@@ -2598,7 +2598,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
      * head may be re-used, i.e., the relfilenode may be reused. Thus the
      * smgrnblocks interface can not be used on standby. Just skip this check.
      */
-    } else if (RecoveryInProgress()) {
+    } else if (RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
 
         /* Update cached blocks */
@@ -2607,7 +2607,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         }
 
         if ((blockNum >= totalBlkNum || totalBlkNum == InvalidBlockNumber) &&
-            !t_thrd.xlog_cxt.inRedoExtendSegment && mode != RBM_ZERO_ON_ERROR) {
+            !t_thrd.xlog_cxt.inRedoExtendSegment) {
             return InvalidBuffer;
         }
     }
