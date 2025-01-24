@@ -708,7 +708,8 @@ CLogXidStatus CLogGetStatus(TransactionId xid, XLogRecPtr *lsn)
 Size CLOGShmemBuffers(void)
 {
     return Min(MAX_SLRU_PARTITION_SIZE, Max(SLRU_BANK_SIZE,
-        g_instance.attr.attr_storage.NBuffers / SLRU_PARTITION_SIZE_RATE)) &~ SLRU_BANK_SIZE;
+        g_instance.attr.attr_storage.NBuffers / SLRU_PARTITION_SIZE_RATE))
+        / SLRU_BANK_SIZE * SLRU_BANK_SIZE;
 }
 
 /*
