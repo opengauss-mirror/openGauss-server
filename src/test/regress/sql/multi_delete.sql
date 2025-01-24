@@ -161,7 +161,7 @@ drop table if exists t_c_mutil_t1;
 drop table if exists t_c_mutil_t2;
 create table t_c_mutil_t1(col1 int, col2 int) with(ORIENTATION=column);
 create table t_c_mutil_t2(col1 int, col2 int) with(ORIENTATION=column);
-delete from t_c_mutil_t1 a,t_c_mutil_t2 b  where a.col2=b.col2 --error;
+delete from t_c_mutil_t1 a, t_c_mutil_t2 b where a.col2=b.col2; -- Error
 -- subpartition
 drop table if exists t_p_mutil_t1;
 drop table if exists t_p_mutil_t2;

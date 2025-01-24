@@ -36,31 +36,43 @@
 #include "frontend_parser/gram.hpp"
 #endif /* FRONTEND_PARSER */
 
-/* When dealing with DECLARE foo CURSOR case, we must look ahead 2 token after DECLARE to meet CURSOR */
-#define MAX_LOOKAHEAD_NUM 2
+/**
+ * When dealing with some grammar, we must take more than one token lookahead.
+ */
+#define MAX_LOOKAHEAD_LEN 3
 
-/*
- * The YY_EXTRA data that a flex scanner allows us to pass around.	Private
+/**
+ * States for the look ahead token.
+ */
+struct base_yy_lookahead {
+    int token;
+    core_YYSTYPE yylval;
+    YYLTYPE yylloc;
+    YYLTYPE yyleng;
+    YYLTYPE prev_hold_char_loc;
+    char prev_hold_char;
+};
+
+/**
+ * The `YY_EXTRA` data that a flex scanner allows us to pass around. Private
  * state needed for raw parsing/lexing goes here.
  */
 typedef struct base_yy_extra_type {
-    /*
+    /**
      * Fields used by the core scanner.
      */
     core_yy_extra_type core_yy_extra;
 
-    /*
+    /**
      * State variables for base_yylex().
      */
-    int lookahead_num;                                /* lookahead num. Currently can be:0,1,2 */
-    int lookahead_token[MAX_LOOKAHEAD_NUM];           /* token lookahead type */
-    core_YYSTYPE lookahead_yylval[MAX_LOOKAHEAD_NUM]; /* yylval for lookahead token */
-    YYLTYPE lookahead_yylloc[MAX_LOOKAHEAD_NUM];      /* yylloc for lookahead token */
+    int lookahead_len; /* Length of `lookaheads`. Max to `MAX_LOOKAHEAD_LEN` */
+    base_yy_lookahead lookaheads[MAX_LOOKAHEAD_LEN];
 
-    /*
+    /**
      * State variables that belong to the grammar.
      */
-    List* parsetree; /* final parse result is delivered here */
+    List* parsetree; /* Final parse result is delivered here */
 } base_yy_extra_type;
 
 #ifdef FRONTEND_PARSER
@@ -74,9 +86,9 @@ typedef struct fe_base_yy_extra_type {
      * State variables for base_yylex().
      */
     int lookahead_num;                                /* lookahead num. Currently can be:0,1,2 */
-    int lookahead_token[MAX_LOOKAHEAD_NUM];           /* token lookahead type */
-    core_YYSTYPE lookahead_yylval[MAX_LOOKAHEAD_NUM]; /* yylval for lookahead token */
-    YYLTYPE lookahead_yylloc[MAX_LOOKAHEAD_NUM];      /* yylloc for lookahead token */
+    int lookahead_token[MAX_LOOKAHEAD_LEN];           /* token lookahead type */
+    core_YYSTYPE lookahead_yylval[MAX_LOOKAHEAD_LEN]; /* yylval for lookahead token */
+    YYLTYPE lookahead_yylloc[MAX_LOOKAHEAD_LEN];      /* yylloc for lookahead token */
 
     /*
      * State variables that belong to the grammar.

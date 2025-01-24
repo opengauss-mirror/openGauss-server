@@ -103,7 +103,7 @@ partition p3 values less than(maxvalue)
 insert into test_cstore_tablespace03 values(generate_series(1,10000),generate_series(1,10000)||'python GaussUpgrade.py -t full-upgrade -l ./new.log');
 -- 5.3.1 Add Column Quickly, so rewrite is false and lock is 8. And Assert() fails.
 alter table test_cstore_tablespace03 move partition p1 tablespace hw_cstore_tablespace_4, add column c_char2 char(5);
-ERROR:  syntax error at or near "add column"
+ERROR:  syntax error at or near "add"
 LINE 1: ...e partition p1 tablespace hw_cstore_tablespace_4, add column...
                                                              ^
 -- check data right

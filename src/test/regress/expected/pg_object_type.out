@@ -3324,7 +3324,7 @@ LINE 2: overriding member function display_details(a int) return var...
         ^
 --3.调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3428,7 +3428,7 @@ LINE 2: overriding member procedure display_details(a int)  is
         ^
 --3.调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3526,7 +3526,7 @@ end;
 /
 --3.调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3565,7 +3565,7 @@ end;
 /
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3619,7 +3619,7 @@ QUERY:   DECLARE begin
 end
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3674,7 +3674,7 @@ QUERY:   DECLARE begin
 end
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3723,7 +3723,7 @@ end;
 /
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3771,7 +3771,7 @@ end;
 /
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3825,7 +3825,7 @@ QUERY:   DECLARE begin
 end
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3880,7 +3880,7 @@ QUERY:   DECLARE begin
 end
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -3935,7 +3935,7 @@ QUERY:   DECLARE begin
 end
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE
@@ -4007,7 +4007,7 @@ DETAIL:  drop cascades to type test.addresstype
 drop cascades to function test.addresstype(character varying,character varying,character varying)
 --调用
 set serveroutput on;
-ERROR:  syntax error at or near "on;"
+ERROR:  syntax error at or near "on"
 LINE 1: set serveroutput on;
                          ^
 DECLARE

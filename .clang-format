@@ -4,7 +4,7 @@ Language: Cpp
 SortIncludes: false
 AccessModifierOffset: -4
 DerivePointerAlignment: false
-PointerAlignment: Right
+PointerAlignment: Left
 ConstructorInitializerIndentWidth: 4
 AlignEscapedNewlinesLeft: true
 AlignTrailingComments: true

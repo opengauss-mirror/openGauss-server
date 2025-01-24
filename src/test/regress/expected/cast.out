@@ -560,7 +560,7 @@ SELECT CAST(200 AS NUMBER DEFAULT 0 ON CONVERSION ERROR);
 (1 row)
 
 SELECT CAST(TO_DATE('22-Oct-1997', 'DD-Mon-YYYY') AS TIMESTAMP WITH LOCAL TIME ZONE) ;
-ERROR:  syntax error at or near "WITH LOCAL"
+ERROR:  syntax error at or near "WITH"
 LINE 1: ...O_DATE('22-Oct-1997', 'DD-Mon-YYYY') AS TIMESTAMP WITH LOCAL...
                                                              ^
 SELECT product_id, CAST(ad_sourcetext AS VARCHAR2(30)) text  FROM print_media   ORDER BY product_id;
@@ -3453,7 +3453,7 @@ SELECT cast ('.123000' as timestamp  DEFAULT '' ON CONVERSION ERROR,'DD-MM-RR HH
 
 --什么都不输
 SELECT cast ('.123000'  as timestamp DEFAULT ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF');
-ERROR:  syntax error at or near "ON CONVERSION ERROR"
+ERROR:  syntax error at or near "ON"
 LINE 1: SELECT cast ('.123000'  as timestamp DEFAULT ON CONVERSION E...
                                                      ^
 --特殊日期检验

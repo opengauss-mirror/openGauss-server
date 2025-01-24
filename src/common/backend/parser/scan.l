@@ -465,6 +465,7 @@ other			.
 					{	
 						addlit(yytext, yyleng, yyscanner);
 						yylval->str = litbufdup(yyscanner);
+						yyleng = yyextra->literallen;
 						yyextra->is_hint_str = false;
 						return COMMENTSTRING;
 					}
@@ -614,6 +615,7 @@ other			.
 									   yyextra->literallen,
 									   false);
 					yylval->str = litbufdup(yyscanner);
+					yyleng = yyextra->literallen + 2;
 					yyextra->is_hint_str = false;
 					return SCONST;
 				}
@@ -622,6 +624,7 @@ other			.
 					yyless(1);
 					BEGIN(INITIAL);
 					yylval->str = litbuf_udeescape('\\', yyscanner);
+					yyleng = yyextra->literallen + 3 + yyleng;
 					yyextra->is_hint_str = false;
 					set_is_delimiter_name(yytext,yyscanner);
 					return SCONST;
@@ -629,6 +632,7 @@ other			.
 <xus>{xusstop2} {
 					BEGIN(INITIAL);
 					yylval->str = litbuf_udeescape(yytext[yyleng-2], yyscanner);
+					yyleng = yyextra->literallen + 3 + yyleng;
 					yyextra->is_hint_str = false;
 					return SCONST;
 		}
@@ -787,6 +791,7 @@ other			.
 						truncate_identifier(ident, yyextra->literallen, yyextra->warnOnTruncateIdent);
 					set_is_delimiter_name(ident,yyscanner);
 					yylval->str = ident;
+					yyleng = yyextra->literallen + 2;
 					yyextra->ident_quoted = true;
 					yyextra->is_hint_str = false;
 					return IDENT;
@@ -805,6 +810,7 @@ other			.
 					yylval->str = ident;
 					/* throw back all but the quote */
 					yyless(1);
+					yyleng = yyextra->literallen + 3 + yyleng;
 					yyextra->ident_quoted = false;
 					yyextra->is_hint_str = false;
 					return IDENT;
@@ -821,6 +827,7 @@ other			.
 					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
+					yyleng = yyextra->literallen + 3 + yyleng;
 					yyextra->ident_quoted = false;
 					yyextra->is_hint_str = false;
 					return IDENT;
@@ -2100,4 +2107,9 @@ void addErrorList(const char* message, int lines)
     erritem->line = lines;
     u_sess->plsql_cxt.errorList = lappend(u_sess->plsql_cxt.errorList, erritem);
     MemoryContextSwitchTo(oldcxt);
+}
+
+int pg_yyget_leng(core_yyscan_t yyscanner)
+{
+    return ((struct yyguts_t *) yyscanner)->yyleng_r;
 }
