@@ -19845,18 +19845,6 @@ bool static transformCompressedOptions(Relation rel, bytea* relOption, List* def
         return false;
     }
 
-    if (g_instance.attr.attr_common.support_extended_features) {
-        ereport(WARNING,
-               (errmsg("The compressed relation you are using is an unofficial supported extended feature."))
-	);
-    } else {
-        ereport(ERROR,
-               (errmsg("The compressed relation you are trying to create or alter "
-                       "is an unofficial supported extended feature."),
-                errhint("Turn on GUC 'support_extended_features' to enable it."))
-        );
-    }
-
     /* If the relkind doesn't support compressed options, check if delist contains compressed options.
      * If does, throw exception. 
      */

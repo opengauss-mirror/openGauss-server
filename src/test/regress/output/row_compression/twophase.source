@@ -1,18 +1,12 @@
 begin;
 create table test_abort1(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table test_abort2(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table test_abort3(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 prepare transaction 'the first prepare transaction';
 rollback prepared 'the first prepare transaction';
 create table test_commit1(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table test_commit2(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table test_commit3(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 begin;
 drop table test_commit1;
 drop table test_commit2;
@@ -29,24 +23,16 @@ INSERT 0 1
 start transaction;
 create table "compress_2PC".normal(a text,b integer);
 create table "compress_2PC".compress1(a text,b integer) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress2(a text,b integer) with (compresstype=2,compress_chunk_size=2048,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress3(a text,b integer) with (compresstype=2,compress_chunk_size=1024,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress4(a text,b integer) with (compresstype=2,compress_chunk_size=512,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 rollback;
 -- drop commit
 create table "compress_2PC".normal(id int);
 create table "compress_2PC".compress1(id int) with (compresstype=2);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress2(id int) with (compresstype=2,compress_chunk_size=2048,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress3(id int) with (compresstype=2,compress_chunk_size=1024,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".compress4(id int) with (compresstype=2,compress_chunk_size=512,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 start transaction;
 drop table "compress_2PC".normal;
 drop table "compress_2PC".compress1;
@@ -57,18 +43,13 @@ commit;
 -- 2pc create rollback
 begin;
 create table "compress_2PC".test_abort2(b integer) with (compresstype=2,compress_chunk_size=2048,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 prepare transaction 'the first prepare transaction';
 rollback prepared 'the first prepare transaction';
 --2pc drop rollback
 create table "compress_2PC".test_commit1(a text,b integer) with (compresstype=2,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".test_commit2(a text,b integer) with (compresstype=2,compress_chunk_size=2048,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".test_commit3(a text,b integer) with (compresstype=2,compress_chunk_size=1024,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".test_commit4(a text,b integer) with (compresstype=2,compress_chunk_size=512,compress_prealloc_chunks=1);
-WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 create table "compress_2PC".test_commit5(a text,b integer);
 begin;
 drop table "compress_2PC".test_commit1;
