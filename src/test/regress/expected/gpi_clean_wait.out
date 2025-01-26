@@ -493,11 +493,8 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
  local_index_gpi_more_invalid_a_b    | f
 (5 rows)
 
-reset enable_seqscan；
+reset enable_seqscan;
 drop table test_gpi_more_invalid;
-ERROR:  syntax error at or near "drop table"
-LINE 2: drop table test_gpi_more_invalid;
-        ^
 drop table if exists interval_normal_date;
 NOTICE:  table "interval_normal_date" does not exist, skipping
 CREATE TABLE interval_normal_date (logdate date not null, b int, c int)
@@ -565,10 +562,11 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partiti
 create index global_index_interval_partition_table_vacuum_a on interval_partition_table_vacuum(c1) global;
 \parallel on
 insert into interval_partition_table_vacuum values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('1990-01-01', 'YYYY-MM-DD'),TO_DATE('2020-12-01', 'YYYY-MM-DD'),'1 day'));
-vacuum 	interval_partition_table_vacuum;
+vacuum interval_partition_table_vacuum;
 vacuum interval_partition_table_vacuum;
 vacuum analyze interval_partition_table_vacuum;
 \parallel off
+set enable_seqscan = off;
 set enable_bitmapscan = off;
 explain (costs off) select count(*) from interval_partition_table_vacuum where c1 = 1;
                                                   QUERY PLAN                                                   
@@ -600,8 +598,8 @@ select count(*) from pg_partition a, pg_class b where a.parentid = b.oid and b.r
      0
 (1 row)
 
+reset enable_seqscan;
 reset enable_bitmapscan;
 -- clean table
 drop table interval_partition_table_vacuum;
 drop table interval_normal_date;
-drop table test_gpi_more_invalid;

@@ -106,7 +106,7 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     yyscanner = scanner_init(str, &yyextra.core_yy_extra, &ScanKeywords, ScanKeywordTokens);
 
     /* base_yylex() only needs this much initialization */
-    yyextra.lookahead_num = 0;
+    yyextra.lookahead_len = 0;
 
     /* initialize the bison parser */
     parser_init(&yyextra);
@@ -135,73 +135,91 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     return yyextra.parsetree;
 }
 
-#define GET_NEXT_TOKEN_WITHOUT_YY()                                                      \
-    do {                                                                                 \
-        if (yyextra->lookahead_num != 0) {                                               \
-            next_token = yyextra->lookahead_token[yyextra->lookahead_num - 1];           \
-            lvalp->core_yystype = yyextra->lookahead_yylval[yyextra->lookahead_num - 1]; \
-            *llocp = yyextra->lookahead_yylloc[yyextra->lookahead_num - 1];              \
-            yyextra->lookahead_num--;                                                    \
-        } else {                                                                         \
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);           \
-        }                                                                                \
+#define GET_NEXT_TOKEN_WITHOUT_YY()                                             \
+    do {                                                                        \
+        if (lookahead_len) {                                                   \
+            base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];   \
+            next_token = lookahead.token;                                      \
+            next_yyleng = lookahead.yyleng;                                    \
+            lvalp->core_yystype = lookahead.yylval;                            \
+            *llocp = lookahead.yylloc;                                         \
+            scanbuf[lookahead.prev_hold_char_loc] = lookahead.prev_hold_char; \
+            scanbuf[lookahead.yylloc + lookahead.yyleng] = '\0';              \
+            lookahead_len--;                                                   \
+        } else {                                                                \
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);  \
+            next_yyleng = pg_yyget_leng(yyscanner);                             \
+        }                                                                       \
     } while (0)
 
-#define GET_NEXT_TOKEN()                                                                 \
-    do {                                                                                 \
-        cur_yylval = lvalp->core_yystype;                                                \
-        cur_yylloc = *llocp;                                                             \
-        GET_NEXT_TOKEN_WITHOUT_YY();                                                     \
+#define GET_NEXT_TOKEN()                                                                                 \
+    do {                                                                                                 \
+        cur_yylval = lvalp->core_yystype;                                                                \
+        cur_yylloc = *llocp;                                                                             \
+        cur_yyleng = lookahead_len ? lookaheads[lookahead_len - 1].yyleng : pg_yyget_leng(yyscanner); \
+        GET_NEXT_TOKEN_WITHOUT_YY();                                                                     \
     } while (0)
 
-#define SET_LOOKAHEAD_TOKEN()                               \
-    do {                                                    \
-        yyextra->lookahead_token[0] = next_token;           \
-        yyextra->lookahead_yylval[0] = lvalp->core_yystype; \
-        yyextra->lookahead_yylloc[0] = *llocp;              \
-        yyextra->lookahead_num = 1;                         \
+#define SET_LOOKAHEAD_TOKEN()                                         \
+    do {                                                              \
+        lookahead_len = 1;                                  \
+        base_yy_lookahead& lookahead = lookaheads[0];     \
+        lookahead.token = next_token;                                \
+        lookahead.yylval = lvalp->core_yystype;                      \
+        lookahead.yylloc = *llocp;                                   \
+        lookahead.yyleng = next_yyleng;                              \
+        lookahead.prev_hold_char_loc = cur_yylloc + cur_yyleng;      \
+        lookahead.prev_hold_char = scanbuf[cur_yylloc + cur_yyleng]; \
     } while (0)
 
-
-#define PARSE_CURSOR_PARENTHESES_AS_EXPR()                   \
-    do {                                                     \
-        cur_token = CURSOR_EXPR;                             \
-        yyextra->lookahead_token[0] = next_token_2;          \
-        yyextra->lookahead_yylval[0] = lvalp->core_yystype;  \
-        yyextra->lookahead_yylloc[0] = *llocp;               \
-        yyextra->lookahead_num = 1;                          \
-        lvalp->core_yystype = core_yystype_2;                \
-        *llocp = cur_yylloc_2;                               \
+#define PARSE_CURSOR_PARENTHESES_AS_EXPR()                                     \
+    do {                                                                       \
+        cur_token = CURSOR_EXPR;                                               \
+        lookaheads[0].token = next_token_2;                                   \
+        lookaheads[0].yylval = lvalp->core_yystype;                           \
+        lookaheads[0].yylloc = *llocp;                                        \
+        lookaheads[0].yyleng = next_yyleng_2;                                 \
+        lookaheads[0].prev_hold_char_loc = cur_yylloc_2 + next_yyleng_1;      \
+        lookaheads[0].prev_hold_char = scanbuf[cur_yylloc_2 + next_yyleng_1]; \
+        lookahead_len = 1;                                                    \
+        lvalp->core_yystype = core_yystype_2;                                  \
+        *llocp = cur_yylloc_2;                                                 \
     } while (0)
 
-
-#define SET_LOOKAHEAD_2_TOKEN()               \
-    do {                                                     \
-        yyextra->lookahead_token[1] = next_token_1;          \
-        yyextra->lookahead_yylval[1] = core_yystype_2;       \
-        yyextra->lookahead_yylloc[1] = cur_yylloc_2;         \
-        yyextra->lookahead_token[0] = next_token_2;          \
-        yyextra->lookahead_yylval[0] = lvalp->core_yystype;  \
-        yyextra->lookahead_yylloc[0] = *llocp;               \
-        yyextra->lookahead_num = 2;                          \
-        lvalp->core_yystype = core_yystype_1;                \
-        *llocp = cur_yylloc_1;                               \
+#define SET_LOOKAHEAD_2_TOKEN()                                                \
+    do {                                                                       \
+        lookaheads[1].token = next_token_1;                                   \
+        lookaheads[1].yylval = core_yystype_2;                                \
+        lookaheads[1].yylloc = cur_yylloc_2;                                  \
+        lookaheads[1].yyleng = next_yyleng_1;                                 \
+        lookaheads[1].prev_hold_char_loc = cur_yylloc_1 + cur_yyleng_1;       \
+        lookaheads[1].prev_hold_char = scanbuf[cur_yylloc_1 + cur_yyleng_1];  \
+        lookaheads[0].token = next_token_2;                                   \
+        lookaheads[0].yylval = lvalp->core_yystype;                           \
+        lookaheads[0].yylloc = *llocp;                                        \
+        lookaheads[0].yyleng = next_yyleng_2;                                 \
+        lookaheads[0].prev_hold_char_loc = cur_yylloc_2 + next_yyleng_1;      \
+        lookaheads[0].prev_hold_char = scanbuf[cur_yylloc_2 + next_yyleng_1]; \
+        lookahead_len = 2;                                                    \
+        lvalp->core_yystype = core_yystype_1;                                  \
+        *llocp = cur_yylloc_1;                                                 \
+        scanbuf[cur_yylloc_1 + cur_yyleng_1] = '\0';                           \
     } while (0)
 
-#define SET_LOOKAHEAD_3_TOKEN()               \
-    do {                                      \
-        yyextra->lookahead_token[2] = next_token_2; \
-        yyextra->lookahead_yylval[2] = core_yystype_3; \
-        yyextra->lookahead_yylloc[2] = cur_yylloc_3;  \
-        yyextra->lookahead_token[1] = next_token_1;  \
-        yyextra->lookahead_yylval[1] = core_yystype_2; \
-        yyextra->lookahead_yylloc[1] = cur_yylloc_2;  \
-        yyextra->lookahead_token[0] = next_token_3;  \
-        yyextra->lookahead_yylval[0] = lvalp->core_yystype; \
-        yyextra->lookahead_yylloc[0] = *llocp;       \
-        yyextra->lookahead_num = 3;                 \
-        lvalp->core_yystype = core_yystype_1;       \
-        *llocp = cur_yylloc_1;                      \
+#define SET_LOOKAHEAD_3_TOKEN()                      \
+    do {                                             \
+        lookaheads[2].token = next_token_2;         \
+        lookaheads[2].yylval = core_yystype_3;      \
+        lookaheads[2].yylloc = cur_yylloc_3;        \
+        lookaheads[1].token = next_token_1;         \
+        lookaheads[1].yylval = core_yystype_2;      \
+        lookaheads[1].yylloc = cur_yylloc_2;        \
+        lookaheads[0].token = next_token_3;         \
+        lookaheads[0].yylval = lvalp->core_yystype; \
+        lookaheads[0].yylloc = *llocp;              \
+        lookahead_len = 3;                  \
+        lvalp->core_yystype = core_yystype_1;        \
+        *llocp = cur_yylloc_1;                       \
     } while (0)
 /*
  * Intermediate filter between parser and core lexer (core_yylex in scan.l).
@@ -223,33 +241,43 @@ List* raw_parser(const char* str, List** query_string_locationlist)
 int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
 {
     base_yy_extra_type* yyextra = pg_yyget_extra(yyscanner);
+    char* scanbuf = yyextra->core_yy_extra.scanbuf;
+    base_yy_lookahead* lookaheads = yyextra->lookaheads;
+    int& lookahead_len = yyextra->lookahead_len;
     int cur_token;
+    YYLTYPE cur_yyleng = 0;
     int next_token;
+    YYLTYPE next_yyleng;
     core_YYSTYPE cur_yylval;
-    YYLTYPE cur_yylloc;
+    YYLTYPE cur_yylloc = 0;
     int next_token_1 = 0;
+    YYLTYPE next_yyleng_1 = 0;
     core_YYSTYPE core_yystype_1;
     YYLTYPE cur_yylloc_1 = 0;
+    YYLTYPE cur_yyleng_1 = 0;
     int next_token_2 = 0;
+    YYLTYPE next_yyleng_2 = 0;
     core_YYSTYPE core_yystype_2;
     YYLTYPE cur_yylloc_2 = 0;
     int next_token_3 = 0;
     core_YYSTYPE core_yystype_3;
     YYLTYPE cur_yylloc_3 = 0;
 
-
     /* Get next token --- we might already have it */
-    if (yyextra->lookahead_num != 0) {
-        cur_token = yyextra->lookahead_token[yyextra->lookahead_num - 1];
-        lvalp->core_yystype = yyextra->lookahead_yylval[yyextra->lookahead_num - 1];
-        *llocp = yyextra->lookahead_yylloc[yyextra->lookahead_num - 1];
-        yyextra->lookahead_num--;
+    if (lookahead_len != 0) {
+        base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];
+        cur_token = lookahead.token;
+        lvalp->core_yystype = lookahead.yylval;
+        *llocp = lookahead.yylloc;
+        scanbuf[lookahead.prev_hold_char_loc] = lookahead.prev_hold_char;
+        scanbuf[lookahead.yylloc + lookahead.yyleng] = '\0';
+        lookahead_len--;
     } else {
         cur_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
     }
 
     if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT
-        && yyextra->lookahead_num == 0
+        && lookahead_len == 0
         && !IsInitdb
         && !u_sess->attr.attr_common.IsInplaceUpgrade) {
         bool is_last_colon;
@@ -276,7 +304,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
         yyextra->core_yy_extra.is_delimiter_name = false;
         yyextra->core_yy_extra.is_last_colon = is_last_colon;
     }
-    
+
     /* Do we need to look ahead for a possible multiword token? */
     switch (cur_token) {
         case NULLS_P:
@@ -297,6 +325,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -334,6 +363,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -354,6 +384,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -374,6 +405,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -396,6 +428,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -417,6 +450,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -438,6 +472,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -455,6 +490,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -477,6 +513,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -501,6 +538,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -521,6 +559,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -540,6 +579,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -547,24 +587,30 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             /*
              * DECLARE foo CUROSR must be looked ahead, and if determined as a DECLARE_CURSOR, we should set the yylaval
              * and yylloc back, letting the parser read the cursor name correctly.
-             * here we may still have token in lookahead_token, so use GET_NEXT_TOKEN to get
+             * here we may still have token in lookaheads, so use GET_NEXT_TOKEN to get
              */
             GET_NEXT_TOKEN();
             /* get first token after DECLARE. We don't care what it is */
-            yyextra->lookahead_token[1] = next_token;
-            yyextra->lookahead_yylval[1] = lvalp->core_yystype;
-            yyextra->lookahead_yylloc[1] = *llocp;
+            lookaheads[1].token = next_token;
+            lookaheads[1].yylval = lvalp->core_yystype;
+            lookaheads[1].yylloc = *llocp;
+            lookaheads[1].yyleng = next_yyleng;
+            lookaheads[1].prev_hold_char_loc = cur_yylloc + cur_yyleng;
+            lookaheads[1].prev_hold_char = scanbuf[cur_yylloc + cur_yyleng];
 
             /* 
              * get the second token after DECLARE. If it is cursor grammar, we are sure that this is a cursr stmt
-             * in fact we don't have any lookahead_token here for sure, cause MAX_LOOKAHEAD_NUM is 2.
-             * but maybe someday MAX_LOOKAHEAD_NUM increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
+             * in fact we don't have any token in lookaheads here for sure, cause MAX_LOOKAHEAD_LEN is 2.
+             * but maybe someday MAX_LOOKAHEAD_LEN increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
              */
             GET_NEXT_TOKEN_WITHOUT_YY();
-            yyextra->lookahead_token[0] = next_token;
-            yyextra->lookahead_yylval[0] = lvalp->core_yystype;
-            yyextra->lookahead_yylloc[0] = *llocp;
-            yyextra->lookahead_num = 2;
+            lookaheads[0].token = next_token;
+            lookaheads[0].yylval = lvalp->core_yystype;
+            lookaheads[0].yylloc = *llocp;
+            lookaheads[0].yyleng = next_yyleng;
+            lookaheads[0].prev_hold_char_loc = lookaheads[1].yylloc + lookaheads[1].yyleng;
+            lookaheads[0].prev_hold_char = scanbuf[lookaheads[1].yylloc + lookaheads[1].yyleng];
+            lookahead_len = 2;
 
             switch (next_token) {
                 case CURSOR:
@@ -576,11 +622,13 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token  because we should read cursor name correctly. */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
                 default:
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -603,6 +651,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -622,6 +671,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -641,27 +691,35 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
         case ON:
-            /* here we may still have token in lookahead_token, so use GET_NEXT_TOKEN to get */
+            /* here we may still have token in lookaheads, so use GET_NEXT_TOKEN to get */
             GET_NEXT_TOKEN();
             /* get first token after ON (Normal UPDATE). We don't care what it is */
-            yyextra->lookahead_token[1] = next_token;
-            yyextra->lookahead_yylval[1] = lvalp->core_yystype;
-            yyextra->lookahead_yylloc[1] = *llocp;
+            lookaheads[1].token = next_token;
+            lookaheads[1].yylval = lvalp->core_yystype;
+            lookaheads[1].yylloc = *llocp;
+            lookaheads[1].yyleng = next_yyleng;
+            lookaheads[1].prev_hold_char_loc = cur_yylloc + cur_yyleng;
+            lookaheads[1].prev_hold_char = scanbuf[cur_yylloc + cur_yyleng];
 
             /*
              * get the second token after ON.
-             * in fact we don't have any lookahead_token here for sure, cause MAX_LOOKAHEAD_NUM is 2.
-             * but maybe someday MAX_LOOKAHEAD_NUM increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
+             * in fact we don't have any token in lookaheads here for sure, cause MAX_LOOKAHEAD_LEN is 2.
+             * but maybe someday MAX_LOOKAHEAD_LEN increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
              */
             GET_NEXT_TOKEN_WITHOUT_YY();
-            yyextra->lookahead_token[0] = next_token;
-            yyextra->lookahead_yylval[0] = lvalp->core_yystype;
-            yyextra->lookahead_yylloc[0] = *llocp;
-            yyextra->lookahead_num = 2;
+            lookaheads[0].token = next_token;
+            lookaheads[0].yylval = lvalp->core_yystype;
+            lookaheads[0].yylloc = *llocp;
+            lookaheads[0].yyleng = next_yyleng;
+            lookaheads[0].prev_hold_char_loc = lookaheads[1].yylloc + lookaheads[1].yyleng;
+            lookaheads[0].prev_hold_char = scanbuf[lookaheads[1].yylloc + lookaheads[1].yyleng];
+            lookahead_len = 2;
+
             switch (next_token) {
                 case CURRENT_TIMESTAMP:
                 case CURRENT_TIME:
@@ -671,11 +729,13 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     cur_token = ON_UPDATE_TIME;
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
                 default:
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -695,6 +755,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -717,6 +778,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -739,6 +801,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -759,6 +822,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -766,18 +830,22 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             GET_NEXT_TOKEN();
             core_yystype_1 = cur_yylval;  // the value of cursor
             cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
+            cur_yyleng_1 = cur_yyleng;    // the yyleng of cursor
             next_token_1 = next_token;    // the token after curosr
+            next_yyleng_1 = next_yyleng;  // the yylneg after curosr
             if (next_token_1 != '(') {
                 /* save the lookahead token for next time */
                 SET_LOOKAHEAD_TOKEN();
                 /* and back up the output info to cur_token */
                 lvalp->core_yystype = cur_yylval;
                 *llocp = cur_yylloc;
+                scanbuf[cur_yylloc + cur_yyleng] = '\0';
             } else {
                 GET_NEXT_TOKEN();
                 core_yystype_2 = cur_yylval;   // the value after cursor
-                cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
-                next_token_2 = next_token;   // the token after after curosr
+                cur_yylloc_2 = cur_yylloc;     // the lloc after cursor
+                next_token_2 = next_token;     // the token after after curosr
+                next_yyleng_2 = next_yyleng;   // the yyleng after after curosr
 
                 if (next_token_1 == '(' && (is_select_stmt_definitely(next_token))) {
                     PARSE_CURSOR_PARENTHESES_AS_EXPR();
@@ -797,18 +865,22 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             GET_NEXT_TOKEN();
             core_yystype_1 = cur_yylval;  // the value of cursor
             cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
+            cur_yyleng_1 = cur_yyleng;    // the yyleng of cursor
             next_token_1 = next_token;    // the token after curosr
+            next_yyleng_1 = next_yyleng;  // the yyleng after curosr
             if (next_token_1 != IDENT) {
                 /* save the lookahead token for next time */
                 SET_LOOKAHEAD_TOKEN();
                 /* and back up the output info to cur_token */
                 lvalp->core_yystype = cur_yylval;
                 *llocp = cur_yylloc;
+                scanbuf[cur_yylloc + cur_yyleng] = '\0';
             } else {
                 GET_NEXT_TOKEN();
                 core_yystype_2 = cur_yylval;   // the value after cursor
-                cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
-                next_token_2 = next_token;   // the token after after curosr
+                cur_yylloc_2 = cur_yylloc;     // the lloc after cursor
+                next_token_2 = next_token;     // the token after after curosr
+                next_yyleng_2 = next_yyleng;   // the yyleng after after curosr
                 if (next_token_1 == IDENT && next_token == '(') {
                     cur_token = LATERAL_EXPR;
                 }
@@ -831,6 +903,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -850,6 +923,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -866,6 +940,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -881,6 +956,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -896,6 +972,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -904,7 +981,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             GET_NEXT_TOKEN();
             core_yystype_1 = cur_yylval;
             cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
             next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
 
             switch (next_token) {
                 case ON:
@@ -912,6 +991,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     core_yystype_2 = cur_yylval;
                     cur_yylloc_2 = cur_yylloc;
                     next_token_2 = next_token;
+                    next_yyleng_2 = next_yyleng;
 
                     switch (next_token) {
                         case ERROR_P:
@@ -928,6 +1008,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -935,7 +1016,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             GET_NEXT_TOKEN();
             core_yystype_1 = cur_yylval;
             cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
             next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
 
             switch (next_token) {
                 case ON:
@@ -943,6 +1026,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     core_yystype_2 = cur_yylval;
                     cur_yylloc_2 = cur_yylloc;
                     next_token_2 = next_token;
+                    next_yyleng_2 = next_yyleng;
 
                     switch (next_token) {
                         case ERROR_P:
@@ -959,6 +1043,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;
@@ -966,7 +1051,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             GET_NEXT_TOKEN();
             core_yystype_1 = cur_yylval;
             cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
             next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
 
             switch (next_token) {
                 case ON:
@@ -974,6 +1061,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     core_yystype_2 = cur_yylval;
                     cur_yylloc_2 = cur_yylloc;
                     next_token_2 = next_token;
+                    next_yyleng_2 = next_yyleng;
 
                     switch (next_token) {
                         case ERROR_P:
@@ -990,6 +1078,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     /* and back up the output info to cur_token */
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
                     break;
             }
             break;

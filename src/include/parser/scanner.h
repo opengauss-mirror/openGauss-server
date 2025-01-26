@@ -162,6 +162,7 @@ extern int core_yylex(core_YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscann
 extern int scanner_errposition(int location, core_yyscan_t yyscanner);
 extern void scanner_yyerror(const char* message, core_yyscan_t yyscanner);
 extern void addErrorList(const char* message, int lines);
+extern int pg_yyget_leng(core_yyscan_t yyscanner);
 
 typedef int (*coreYYlexFunc)(core_YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner);
 

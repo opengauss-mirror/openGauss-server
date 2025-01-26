@@ -312,7 +312,7 @@ create incremental materialized view v4 as select * from defer_t1 with data;
 create materialized view v5 as select * from defer_t1 with no data;
 create materialized view v6 as select * from defer_t1 with data;
 create materialized view v7 build deferred as select * from defer_t1 with no data; -- 语法不支持
-ERROR:  syntax error at or near "with no"
+ERROR:  syntax error at or near "with"
 LINE 1: ... view v7 build deferred as select * from defer_t1 with no da...
                                                              ^
 select * from v3; -- 无数据
