@@ -16,7 +16,7 @@
 #include "knl/knl_variable.h"
 
 #include <math.h>
-#include <limits.h>
+#include <limits>
 #include <float.h>
 #include <ctype.h>
 
@@ -4932,11 +4932,12 @@ double pg_hypot(double x, double y)
     double yx;
 
     /* Handle INF and NaN properly */
-    if (isinf(x) || isinf(y))
-        return get_float8_infinity();
+    if (std::isinf(x) || std::isinf(y)) {
+        return std::numeric_limits<double>::infinity();
+    }
 
     if (isnan(x) || isnan(y))
-        return get_float8_nan();
+        return std::numeric_limits<double>::quiet_NaN();
 
     /* Else, drop any minus signs */
     x = fabs(x);

@@ -264,16 +264,6 @@ char* output_text_to_cstring(const text* t)
     return result;
 }
 
-char* output_int32_to_cstring(int32 value, int* len)
-{
-    return pg_ltoa2(value, len);
-}
-
-char* output_int64_to_cstring(int64 value, int* len)
-{
-    return pg_lltoa2(value, len);
-}
-
 /*
  * text_to_cstring_buffer
  *

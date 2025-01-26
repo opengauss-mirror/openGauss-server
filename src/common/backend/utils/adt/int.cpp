@@ -290,7 +290,7 @@ Datum int2vectoreq(PG_FUNCTION_ARGS)
  *****************************************************************************/
 
 /*
- *		int4in			- converts "num" to int4
+ * Converts "num" to int4
  */
 Datum int4in(PG_FUNCTION_ARGS)
 {
@@ -300,12 +300,12 @@ Datum int4in(PG_FUNCTION_ARGS)
 }
 
 /*
- *		int4out			- converts int4 to "num"
+ * Converts int4 to "num"
  */
 Datum int4out(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
-    char* result = (char*)palloc(12); /* sign, 10 digits, '\0' */
+    char* result = (char*)palloc(MAX_INT32_LEN + 1);
 
     pg_ltoa(arg1, result);
     PG_RETURN_CSTRING(result);

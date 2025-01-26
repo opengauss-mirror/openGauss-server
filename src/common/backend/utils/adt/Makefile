@@ -39,7 +39,8 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	tsquery_op.o tsquery_rewrite.o tsquery_util.o tsrank.o \
 	tsvector.o tsvector_op.o tsvector_parser.o \
 	txid.o uuid.o windowfuncs.o xml.o extended_statistics.o clientlogic_bytea.o clientlogicsettings.o \
-	median_aggs.o expr_distinct.o nlssort.o memory_func.o first_last_agg.o encrypt_decrypt.o expandeddatum.o
+	median_aggs.o expr_distinct.o nlssort.o memory_func.o first_last_agg.o encrypt_decrypt.o expandeddatum.o \
+	f2s.o d2s.o
 
 like.o: like.cpp like_match.cpp
 

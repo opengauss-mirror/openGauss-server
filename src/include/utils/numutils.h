@@ -16,6 +16,7 @@
  * -------------------------------------------------------------------------
  *
  * numutils.h
+ *    Declarations for operations on integer types.
  *
  * IDENTIFICATION
  *    src/include/utils/numutils.h
@@ -28,27 +29,16 @@
 
 #include "postgres.h"
 
-extern int32 pg_atoi(char* s, int size, int c, bool can_ignore);
-extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
-extern int32 pg_strtoint32(const char* s, bool can_ignore);
-extern void pg_itoa(int16 i, char* a);
-extern void pg_ltoa(int32 l, char* a);
-extern char* pg_ltoa2(int32 l, int* len);
-extern void pg_ctoa(uint8 i, char* a);
-extern void pg_lltoa(int64 ll, char* a);
-extern char* pg_lltoa2(int64 ll, int* len);
-extern void pg_i128toa(int128 value, char* a, int length);
+#include "builtins.h"
 
-extern char *pg_ultostr(char *str, uint32 value);
-extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
-inline char *pg_ultostr_zeropad_width_2(char *str, uint32 value);
-inline char *pg_ultostr_zeropad_min_width_4(char *str, uint32 value);
+inline char* pg_ultostr_zeropad_width_2(char* str, uint32 value);
+inline char* pg_ultostr_zeropad_min_width_4(char* str, uint32 value);
 
 /*
  * A table of all two-digit numbers. This is used to speed up decimal digit
  * generation by copying pairs of digits into the final output.
  */
-static constexpr char DIGIT_TABLE[] =
+constexpr char DIGIT_TABLE[] =
     "00" "01" "02" "03" "04" "05" "06" "07" "08" "09"
     "10" "11" "12" "13" "14" "15" "16" "17" "18" "19"
     "20" "21" "22" "23" "24" "25" "26" "27" "28" "29"
@@ -60,7 +50,7 @@ static constexpr char DIGIT_TABLE[] =
     "80" "81" "82" "83" "84" "85" "86" "87" "88" "89"
     "90" "91" "92" "93" "94" "95" "96" "97" "98" "99";
 
-inline char *pg_ultostr_zeropad_width_2(char *str, uint32 value)
+inline char* pg_ultostr_zeropad_width_2(char* str, uint32 value)
 {
     Assert(value < 100);
 
@@ -69,9 +59,9 @@ inline char *pg_ultostr_zeropad_width_2(char *str, uint32 value)
     return str + 2;
 }
 
-inline char *pg_ultostr_zeropad_min_width_4(char *str, uint32 value)
+inline char* pg_ultostr_zeropad_min_width_4(char* str, uint32 value)
 {
-    if(likely(value < 10000)) {
+    if (likely(value < 10000)) {
         str = pg_ultostr_zeropad_width_2(str, value / 100);
         str = pg_ultostr_zeropad_width_2(str, value % 100);
         return str;

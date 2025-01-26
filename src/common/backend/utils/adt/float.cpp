@@ -13,18 +13,21 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/float.h"
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include <float.h>
-#include <math.h>
-#include <limits.h>
+#include <cmath>
+#include <cctype>
+#include <limits>
 
 #include "catalog/pg_type.h"
 #include "common/int.h"
 #include "libpq/pqformat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/shortest_dec.h"
 #include "optimizer/pgxcship.h"
 #include "miscadmin.h"
 
@@ -41,10 +44,6 @@ static const uint32 nan[2] = {0xffffffff, 0x7fffffff};
 
 #define NAN (*(const double*)nan)
 #endif
-
-/* not sure what the following should be, but better to make it over-sufficient */
-#define MAXFLOATWIDTH 64
-#define MAXDOUBLEWIDTH 128
 
 /*
  * check to see if a float4/8 val has underflowed or overflowed
@@ -113,13 +112,13 @@ double float8in_internal(char* str, char** endptr_p, bool* hasError)
         int save_errno = errno;
 
         if (pg_strncasecmp(str, "NaN", nanLen) == 0) {
-            val = get_float8_nan();
+            val = std::numeric_limits<double>::quiet_NaN();
             endptr = str + 3;
         } else if (pg_strncasecmp(str, "Infinity", infinityLen) == 0) {
-            val = get_float8_infinity();
+            val = std::numeric_limits<double>::infinity();
             endptr = str + 8;
         } else if (pg_strncasecmp(str, "-Infinity", minusInfinityLen) == 0) {
-            val = -get_float8_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = str + 9;
         } else if (save_errno == ERANGE) {
             if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL) {
@@ -156,87 +155,12 @@ double float8in_internal(char* str, char** endptr_p, bool* hasError)
     return val;
 }
 
-
-double get_float8_infinity(void)
-{
-#ifdef INFINITY
-    /* C99 standard way */
-    return (double)INFINITY;
-#else
-
-    /*
-     * On some platforms, HUGE_VAL is an infinity, elsewhere it's just the
-     * largest normal double.  We assume forcing an overflow will get us a
-     * true infinity.
-     */
-    return (double)(HUGE_VAL * HUGE_VAL);
-#endif
-}
-
-float get_float4_infinity(void)
-{
-#ifdef INFINITY
-    /* C99 standard way */
-    return (float)INFINITY;
-#else
-
-    /*
-     * On some platforms, HUGE_VAL is an infinity, elsewhere it's just the
-     * largest normal double.  We assume forcing an overflow will get us a
-     * true infinity.
-     */
-    return (float)(HUGE_VAL * HUGE_VAL);
-#endif
-}
-
-double get_float8_nan(void)
-{
-    /* (double) NAN doesn't work on some NetBSD/MIPS releases */
-#if defined(NAN) && !(defined(__NetBSD__) && defined(__mips__))
-    /* C99 standard way */
-    return (double)NAN;
-#else
-    /* Assume we can get a NAN via zero divide */
-    return (double)(0.0 / 0.0);
-#endif
-}
-
-float get_float4_nan(void)
-{
-#ifdef NAN
-    /* C99 standard way */
-    return (float)NAN;
-#else
-    /* Assume we can get a NAN via zero divide */
-    return (float)(0.0 / 0.0);
-#endif
-}
-
 /*
- * Returns -1 if 'val' represents negative infinity, 1 if 'val'
- * represents (positive) infinity, and 0 otherwise. On some platforms,
- * this is equivalent to the isinf() macro, but not everywhere: C99
- * does not specify that isinf() needs to distinguish between positive
- * and negative infinity.
- */
-int is_infinite(double val)
-{
-    int inf = isinf(val);
-
-    if (inf == 0)
-        return 0;
-    else if (val > 0)
-        return 1;
-    else
-        return -1;
-}
-
-/*
- *		float4in		- converts "num" to float
- *						  restricted syntax:
- *						  {<sp>} [+|-] {digit} [.{digit}] [<exp>]
- *						  where <sp> is a space, digit is 0-9,
- *						  <exp> is "e" or "E" followed by an integer.
+ * Converts "num" to float
+ * restricted syntax:
+ * {<sp>} [+|-] {digit} [.{digit}] [<exp>]
+ * where <sp> is a space, digit is 0-9,
+ * <exp> is "e" or "E" followed by an integer.
  */
 Datum float4in(PG_FUNCTION_ARGS)
 {
@@ -269,8 +193,9 @@ Datum float4in(PG_FUNCTION_ARGS)
     }
 
     /* skip leading whitespace */
-    while (*num != '\0' && isspace((unsigned char)*num))
+    while (std::isspace(static_cast<unsigned char>(*num))) {
         num++;
+    }
 
     errno = 0;
     val = strtod(num, &endptr);
@@ -290,13 +215,13 @@ Datum float4in(PG_FUNCTION_ARGS)
          * anyway...)  Therefore, we check for these inputs ourselves.
          */
         if (pg_strncasecmp(num, "NaN", 3) == 0) {
-            val = get_float4_nan();
+            val = std::numeric_limits<double>::quiet_NaN();
             endptr = num + 3;
         } else if (pg_strncasecmp(num, "Infinity", 8) == 0) {
-            val = get_float4_infinity();
+            val = std::numeric_limits<double>::infinity();
             endptr = num + 8;
         } else if (pg_strncasecmp(num, "-Infinity", 9) == 0) {
-            val = -get_float4_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 9;
         } else if (save_errno == ERANGE) {
             /*
@@ -338,21 +263,22 @@ Datum float4in(PG_FUNCTION_ARGS)
      */
     if (isinf(val)) {
         if (pg_strncasecmp(num, "Infinity", 8) == 0) {
-            val = get_float4_infinity();
+            val = std::numeric_limits<double>::infinity();
             endptr = num + 8;
         } else if (pg_strncasecmp(num, "-Infinity", 9) == 0) {
-            val = -get_float4_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 9;
         } else if (pg_strncasecmp(num, "-inf", 4) == 0) {
-            val = -get_float4_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 4;
         }
     }
 #endif /* HAVE_BUGGY_IRIX_STRTOD */
 
     /* skip trailing whitespace */
-    while (*endptr != '\0' && isspace((unsigned char)*endptr))
+    while (std::isspace(static_cast<unsigned char>(*endptr))) {
         endptr++;
+    }
 
     /* if there is any junk left at the end of the string, bail out. if can_ignore == true, discard junk and continue */
     if (*endptr != '\0' && !fcinfo->can_ignore)
@@ -365,11 +291,11 @@ Datum float4in(PG_FUNCTION_ARGS)
      * it's a legal float4
      */
     if (fcinfo->can_ignore) {
-        if (isinf((float4)val) && !isinf(val)) {
+        if (std::isinf(static_cast<float>(val)) && !std::isinf(val)) {
             ereport(WARNING, (errmsg("value out of range: overflow")));
-            PG_RETURN_FLOAT4(val < 0 ? -FLT_MAX : FLT_MAX);
+            PG_RETURN_FLOAT4(val < 0 ? -std::numeric_limits<float>::max() : std::numeric_limits<float>::max());
         }
-        if (((float4)val) == 0.0 && val != 0) {
+        if (static_cast<float>(val) == 0.0 && val != 0) {
             ereport(WARNING, (errmsg("value out of range: underflow")));
             PG_RETURN_FLOAT4(0);
         }
@@ -378,77 +304,25 @@ Datum float4in(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                      errmsg("invalid input syntax for type real: \"%s\". truncated automatically", orig_num)));
         }
-        PG_RETURN_FLOAT4((float4)val);
+        PG_RETURN_FLOAT4(static_cast<float>(val));
     }
-    CHECKFLOATVAL((float4)val, isinf(val), val == 0);
+    CHECKFLOATVAL(static_cast<float>(val), std::isinf(val), val == 0);
 
-    PG_RETURN_FLOAT4((float4)val);
+    PG_RETURN_FLOAT4(static_cast<float>(val));
 }
 
 /*
- *		float4out		- converts a float4 number to a string
- *						  using a standard output format
+ * Converts a float4 number to a string
+ * using a standard output format
  */
 Datum float4out(PG_FUNCTION_ARGS)
 {
     float4 num = PG_GETARG_FLOAT4(0);
     char* ascii = (char*)palloc(MAXFLOATWIDTH + 1);
-    errno_t rc = EOK;
 
-    if (isnan(num)) {
-        rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "NaN");
-        securec_check_ss(rc, "\0", "\0");
-        PG_RETURN_CSTRING(ascii);
-    }
+    pg_ftoa<MAXFLOATWIDTH + 1>(num, ascii);
 
-    switch (is_infinite(num)) {
-        case 1:
-            rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "Infinity");
-            securec_check_ss(rc, "\0", "\0");
-            break;
-        case -1:
-            rc = strcpy_s(ascii, MAXFLOATWIDTH + 1, "-Infinity");
-            securec_check_ss(rc, "\0", "\0");
-            break;
-        default: {
-            int ndig = FLT_DIG + u_sess->attr.attr_common.extra_float_digits;
-
-            if (ndig < 1)
-                ndig = 1;
-
-            rc = snprintf_s(ascii, MAXFLOATWIDTH + 1, MAXFLOATWIDTH, "%.*g", ndig, num);
-            securec_check_ss(rc, "\0", "\0");
-        } break;
-    }
-    if (DISPLAY_LEADING_ZERO) {
-        PG_RETURN_CSTRING(ascii);
-    }
-
-    if (!((num > 0 && num < 1) || (num > -1 && num < 0))) {
-        PG_RETURN_CSTRING(ascii);
-    }
-    // Delete 0 before decimal.
-    // For Example: convert 0.123 to .123, or -0.123 to -.123
-    else {
-        char* final_ascii = (char*)palloc0(MAXFLOATWIDTH + 1);
-        char* ascii_copy = ascii;
-
-        if ('-' == *ascii_copy) {
-            *final_ascii = *ascii_copy++;
-        }
-
-        // Skip 0 before decimal
-        if ('0' == *ascii_copy) {
-            ascii_copy++;
-        }
-
-        rc = strncat_s(final_ascii, MAXFLOATWIDTH + 1, ascii_copy, strlen(ascii_copy));
-        securec_check(rc, "\0", "\0");
-
-        pfree_ext(ascii);
-
-        PG_RETURN_CSTRING(final_ascii);
-    }
+    PG_RETURN_CSTRING(ascii);
 }
 
 /*
@@ -533,13 +407,13 @@ Datum float8in(PG_FUNCTION_ARGS)
          * anyway...)  Therefore, we check for these inputs ourselves.
          */
         if (pg_strncasecmp(num, "NaN", 3) == 0) {
-            val = get_float8_nan();
+            val = std::numeric_limits<double>::quiet_NaN();
             endptr = num + 3;
         } else if (pg_strncasecmp(num, "Infinity", 8) == 0) {
-            val = get_float8_infinity();
+            val = std::numeric_limits<double>::infinity();
             endptr = num + 8;
         } else if (pg_strncasecmp(num, "-Infinity", 9) == 0) {
-            val = -get_float8_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 9;
         } else if (save_errno == ERANGE) {
             /*
@@ -581,13 +455,13 @@ Datum float8in(PG_FUNCTION_ARGS)
      */
     if (isinf(val)) {
         if (pg_strncasecmp(num, "Infinity", 8) == 0) {
-            val = get_float8_infinity();
+            val = std::numeric_limits<double>::infinity();
             endptr = num + 8;
         } else if (pg_strncasecmp(num, "-Infinity", 9) == 0) {
-            val = -get_float8_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 9;
         } else if (pg_strncasecmp(num, "-inf", 4) == 0) {
-            val = -get_float8_infinity();
+            val = -std::numeric_limits<double>::infinity();
             endptr = num + 4;
         }
     }
@@ -616,68 +490,17 @@ Datum float8in(PG_FUNCTION_ARGS)
 }
 
 /*
- *		float8out		- converts float8 number to a string
- *						  using a standard output format
+ * Converts float8 number to a string
+ * using a standard output format
  */
 Datum float8out(PG_FUNCTION_ARGS)
 {
-    float8 num = PG_GETARG_FLOAT8(0);
+    double num = PG_GETARG_FLOAT8(0);
     char* ascii = (char*)palloc(MAXDOUBLEWIDTH + 1);
-    errno_t rc = EOK;
 
-    if (isnan(num)) {
-        rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
-        securec_check(rc, "\0", "\0");
-        PG_RETURN_CSTRING(ascii);
-    }
-    switch (is_infinite(num)) {
-        case 1:
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
-            securec_check(rc, "\0", "\0");
-            break;
-        case -1:
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
-            securec_check(rc, "\0", "\0");
-            break;
-        default: {
-            int ndig = DBL_DIG + u_sess->attr.attr_common.extra_float_digits;
+    pg_dtoa<MAXDOUBLEWIDTH + 1>(num, ascii);
 
-            if (ndig < 1)
-                ndig = 1;
-
-            rc = snprintf_s(ascii, MAXDOUBLEWIDTH + 1, MAXDOUBLEWIDTH, "%.*g", ndig, num);
-            securec_check_ss(rc, "\0", "\0");
-        } break;
-    }
-    if (DISPLAY_LEADING_ZERO) {
-        PG_RETURN_CSTRING(ascii);
-    }
-
-    if (!((num > 0 && num < 1) || (num > -1 && num < 0))) {
-        PG_RETURN_CSTRING(ascii);
-    }
-    // Delete 0 before decimal.
-    // For Example: convert 0.123 to .123, or -0.123 to -.123
-    else {
-        char* final_ascii = (char*)palloc0(MAXFLOATWIDTH + 1);
-        char* ascii_copy = ascii;
-
-        if ('-' == *ascii_copy) {
-            *final_ascii = *ascii_copy++;
-        }
-
-        /* Skip 0 before decimal */
-        if ('0' == *ascii_copy) {
-            ascii_copy++;
-        }
-
-        rc = strncat_s(final_ascii, MAXFLOATWIDTH + 1, ascii_copy, strlen(ascii_copy));
-        securec_check(rc, "\0", "\0");
-
-        pfree_ext(ascii);
-
-        PG_RETURN_CSTRING(final_ascii);
-    }
+    PG_RETURN_CSTRING(ascii);
 }
 
 /*
@@ -1560,14 +1383,14 @@ Datum dpow(PG_FUNCTION_ARGS)
     if (errno == EDOM && isnan(result)) {
         if ((fabs(arg1) > 1 && arg2 >= 0) || (fabs(arg1) < 1 && arg2 < 0)) {
             /* The sign of Inf is not significant in this case. */
-            result = get_float8_infinity();
+            result = std::numeric_limits<double>::infinity();
         } else if (fabs(arg1) != 1) {
             result = 0;
         } else {
             result = 1;
         }
     } else if (errno == ERANGE && result != 0 && !isinf(result)) {
-        result = get_float8_infinity();
+        result = std::numeric_limits<double>::infinity();
     }
     CHECKFLOATVAL(result, isinf(arg1) || isinf(arg2), arg1 == 0);
     PG_RETURN_FLOAT8(result);
@@ -1584,7 +1407,7 @@ Datum dexp(PG_FUNCTION_ARGS)
     errno = 0;
     result = exp(arg1);
     if (errno == ERANGE && result != 0 && !isinf(result))
-        result = get_float8_infinity();
+        result = std::numeric_limits<double>::infinity();
 
     CHECKFLOATVAL(result, isinf(arg1), false);
     PG_RETURN_FLOAT8(result);
@@ -1713,15 +1536,15 @@ Datum datan2(PG_FUNCTION_ARGS)
 }
 
 /*
- *		dcos			- returns the cosine of arg1 (radians)
+ * Returns the cosine of arg1 (radians)
  */
 Datum dcos(PG_FUNCTION_ARGS)
 {
-    float8 arg1 = PG_GETARG_FLOAT8(0);
-    float8 result;
+    double arg1 = PG_GETARG_FLOAT8(0);
+    double result;
 
     if (isnan(arg1)) {
-        PG_RETURN_FLOAT8(get_float8_nan());
+        PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
     }
 
     errno = 0;
@@ -1735,15 +1558,15 @@ Datum dcos(PG_FUNCTION_ARGS)
 }
 
 /*
- *		dcot			- returns the cotangent of arg1 (radians)
+ * Returns the cotangent of arg1 (radians)
  */
 Datum dcot(PG_FUNCTION_ARGS)
 {
-    float8 arg1 = PG_GETARG_FLOAT8(0);
-    float8 result;
+    double arg1 = PG_GETARG_FLOAT8(0);
+    double result;
 
     if (isnan(arg1)) {
-        PG_RETURN_FLOAT8(get_float8_nan());
+        PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
     }
     errno = 0;
     result = tan(arg1);
@@ -1757,15 +1580,15 @@ Datum dcot(PG_FUNCTION_ARGS)
 }
 
 /*
- *		dsin			- returns the sine of arg1 (radians)
+ * Returns the sine of arg1 (radians)
  */
 Datum dsin(PG_FUNCTION_ARGS)
 {
-    float8 arg1 = PG_GETARG_FLOAT8(0);
-    float8 result;
+    double arg1 = PG_GETARG_FLOAT8(0);
+    double result;
 
     if (isnan(arg1)) {
-        PG_RETURN_FLOAT8(get_float8_nan());
+        PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
     }
 
     errno = 0;
@@ -1778,15 +1601,15 @@ Datum dsin(PG_FUNCTION_ARGS)
 }
 
 /*
- *		dtan			- returns the tangent of arg1 (radians)
+ * Returns the tangent of arg1 (radians)
  */
 Datum dtan(PG_FUNCTION_ARGS)
 {
-    float8 arg1 = PG_GETARG_FLOAT8(0);
-    float8 result;
+    double arg1 = PG_GETARG_FLOAT8(0);
+    double result;
 
     if (isnan(arg1)) {
-        PG_RETURN_FLOAT8(get_float8_nan());
+        PG_RETURN_FLOAT8(std::numeric_limits<double>::quiet_NaN());
     }
 
     errno = 0;
@@ -1821,16 +1644,16 @@ Datum dpi(PG_FUNCTION_ARGS)
 }
 
 /*
- *		radians		- returns radians converted from degrees
+ * Returns radians converted from degrees
  */
 Datum radians(PG_FUNCTION_ARGS)
 {
-    float8 arg1 = PG_GETARG_FLOAT8(0);
-    float8 result;
+    double arg1 = PG_GETARG_FLOAT8(0);
+    double result;
 
     result = arg1 * (M_PI / 180.0);
 
-    CHECKFLOATVAL(result, isinf(arg1), arg1 == 0);
+    CHECKFLOATVAL(result, std::isinf(arg1), arg1 == 0);
     PG_RETURN_FLOAT8(result);
 }
 

@@ -23,7 +23,6 @@
 #include "nodes/pg_list.h"
 #include "parser/scanner.h"
 #include "parser/scansup.h"
-#include "datatypes.h"
 #include "nodes/primnodes.h"
 #include "nodes/value.h"
 #include "catalog/pg_attribute.h"

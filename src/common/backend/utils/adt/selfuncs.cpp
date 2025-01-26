@@ -101,6 +101,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <limits>
 
 #include "access/gin.h"
 #include "access/relscan.h"

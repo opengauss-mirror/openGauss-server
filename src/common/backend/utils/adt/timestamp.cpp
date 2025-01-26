@@ -18,7 +18,6 @@
 #include "knl/knl_variable.h"
 
 #include <math.h>
-#include <float.h>
 #include <limits.h>
 #include <sys/time.h>
 

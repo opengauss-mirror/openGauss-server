@@ -16,6 +16,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <limits>
+
 #include "access/gist_private.h"
 #include "access/relscan.h"
 #include "miscadmin.h"
@@ -69,7 +71,7 @@ static bool gistindex_keytest(IndexScanDesc scan, IndexTuple tuple, Page page, O
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("invalid GiST tuple found on leaf page")));
         }
         for (i = 0; i < scan->numberOfOrderBys; i++) {
-            so->distances[i] = -get_float8_infinity();
+            so->distances[i] = -std::numeric_limits<double>::infinity();
         }
         return true;
     }
@@ -147,7 +149,7 @@ static bool gistindex_keytest(IndexScanDesc scan, IndexTuple tuple, Page page, O
 
         if ((key->sk_flags & SK_ISNULL) || isNull) {
             /* Assume distance computes as null and sorts to the end */
-            *distance_p = get_float8_infinity();
+            *distance_p = std::numeric_limits<double>::infinity();
         } else {
             Datum dist;
             GISTENTRY de;

@@ -16,7 +16,6 @@
 #define _PGFDW_INTERNAL_INTERFACE_H_
 
 #include "c.h"
-#include "datatypes.h"
 #include "nodes/bitmapset.h"
 #include "nodes/relation.h"
 #include "nodes/nodes.h"

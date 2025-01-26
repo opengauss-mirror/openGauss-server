@@ -24,7 +24,6 @@
 #ifndef PROCESSOR_UTILS_H
 #define PROCESSOR_UTILS_H
 
-#include "datatypes.h"
 #include "libpq-int.h"
 
 struct List;
