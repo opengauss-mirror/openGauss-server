@@ -495,6 +495,9 @@ const int GetCustomParserId()
         case PG_FORMAT:
             id = DB_CMPT_PG;
             break;
+        case D_FORMAT:
+            id = DB_CMPT_D;
+            break;
         default:
             ereport(WARNING, (errmsg("Unknown sql compatibility: %d", u_sess->attr.attr_sql.sql_compatibility)));
             return -1;

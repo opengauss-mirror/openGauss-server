@@ -98,7 +98,7 @@ const int MAX_AUDIT_NUM = 48;
 #define INVAIL_CBM_THREAD_NUM 99
 
 #ifndef ENABLE_MULTIPLE_NODES
-const int DB_CMPT_MAX = 4;
+const int DB_CMPT_MAX = 5;
 #endif
 
 enum knl_virtual_role {

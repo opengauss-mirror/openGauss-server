@@ -67,7 +67,8 @@ SUBDIRS = \
 		gms_i18n      \
 		gms_debug     \
 		gms_raw       \
-		gms_match
+		gms_match     \
+		shark
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo

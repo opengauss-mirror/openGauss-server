@@ -106,6 +106,8 @@
 ./share/postgresql/extension/gms_raw.control
 ./share/postgresql/extension/gms_match--1.0.sql
 ./share/postgresql/extension/gms_match.control
+./share/postgresql/extension/shark--1.0.sql
+./share/postgresql/extension/shark.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -792,6 +794,7 @@
 ./lib/postgresql/gms_debug.so
 ./lib/postgresql/gms_raw.so
 ./lib/postgresql/gms_match.so
+./lib/postgresql/shark.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so

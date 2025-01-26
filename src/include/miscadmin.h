@@ -313,6 +313,7 @@ typedef struct {
 #define DB_CMPT_B 1
 #define DB_CMPT_C 2
 #define DB_CMPT_PG 3
+#define DB_CMPT_D 4
 
 extern bool checkCompArgs(const char *cmptFmt);
 

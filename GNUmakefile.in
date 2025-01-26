@@ -126,6 +126,7 @@ install:
 	@if test -d contrib/gms_lob; then $(MAKE) -C contrib/gms_lob $@; fi
 	@if test -d contrib/gms_sql; then $(MAKE) -C contrib/gms_sql $@; fi
 	@if test -d contrib/gms_debug; then $(MAKE) -C contrib/gms_debug $@; fi
+	@if test -d contrib/shark; then $(MAKE) -C contrib/shark $@; fi
 	+@echo "openGauss installation complete."
 endif
 endif

@@ -453,6 +453,8 @@ static void HandleBlockLevel();
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
+%token          DIALECT_TSQL
+
 /*
  * Other tokens recognized by plpgsql's lexer interface layer (pl_scanner.c).
  */

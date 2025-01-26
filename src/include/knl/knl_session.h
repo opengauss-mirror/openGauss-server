@@ -2997,6 +2997,7 @@ typedef struct knl_u_hook_context {
     void *modifyTypeForPartitionKeyHook;
     void *deparseCollectedCommandHook;
     void *enableProcedureExecutementHook;
+    void *plsqlCompileHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

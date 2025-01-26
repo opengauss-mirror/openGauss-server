@@ -1043,7 +1043,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
     if (parser_hook == NULL) {
         parser_hook = raw_parser;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-        if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
+        if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin || DB_IS_CMPT(D_FORMAT)) {
             int id = GetCustomParserId();
             if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
                 parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
@@ -12567,7 +12567,8 @@ bool checkCompArgs(const char *compFormat)
     if (pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_A].name, sizeof(g_dbCompatArray[DB_CMPT_A].name)) != 0 &&
         pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_B].name, sizeof(g_dbCompatArray[DB_CMPT_B].name)) != 0 &&
         pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_C].name, sizeof(g_dbCompatArray[DB_CMPT_C].name)) != 0 &&
-        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_PG].name, sizeof(g_dbCompatArray[DB_CMPT_PG].name)) != 0) {
+        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_PG].name, sizeof(g_dbCompatArray[DB_CMPT_PG].name)) != 0 &&
+        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_D].name, sizeof(g_dbCompatArray[DB_CMPT_D].name)) != 0) {
         return false;
     }
     return true;

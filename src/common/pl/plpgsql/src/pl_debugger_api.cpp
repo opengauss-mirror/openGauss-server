@@ -1271,7 +1271,11 @@ static List* collect_breakable_line_oid(Oid funcOid)
     int save_compile_status = u_sess->plsql_cxt.compile_status;
     PG_TRY();
     {
-        func = plpgsql_compile(&fake_fcinfo, true);
+        if (u_sess->hook_cxt.plsqlCompileHook) {
+            func = ((plsql_compile)u_sess->hook_cxt.plsqlCompileHook)(&fake_fcinfo, true, false);
+        } else {
+            func = plpgsql_compile(&fake_fcinfo, true);
+        }
     }
     PG_CATCH();
     {

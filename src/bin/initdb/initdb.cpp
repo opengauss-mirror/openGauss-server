@@ -229,7 +229,8 @@ DB_CompatibilityAttr g_dbCompatArray[] = {
     {DB_CMPT_A, "A"},
     {DB_CMPT_B, "B"},
     {DB_CMPT_C, "C"},
-    {DB_CMPT_PG, "PG"}
+    {DB_CMPT_PG, "PG"},
+    {DB_CMPT_D, "D"}
 };
 #endif
 

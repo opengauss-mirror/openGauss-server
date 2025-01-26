@@ -38,6 +38,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_debug
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_raw
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_match
+    ${CMAKE_CURRENT_SOURCE_DIR}/shark
 )
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
@@ -94,3 +95,4 @@ endif()
 add_subdirectory(gms_profiler)
 add_subdirectory(gms_lob)
 add_subdirectory(gms_i18n)
+add_subdirectory(shark)

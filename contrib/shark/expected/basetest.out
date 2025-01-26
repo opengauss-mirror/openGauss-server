@@ -1,0 +1,44 @@
+create database test_a dbcompatibility 'A';
+\c test_a
+create extension shark;
+ERROR:  extension "shark" is only supported in D type database
+\c contrib_regression
+create schema basetest;
+set search_path = 'basetest';
+select N'abc';
+ nvarchar2 
+-----------
+ abc
+(1 row)
+
+create table t1 (a int);
+create columnstore index t1_idx1 on t1(a);
+NOTICE:  The COLUMNSTORE option is currently ignored
+CREATE OR REPLACE FUNCTION test RETURNS INT AS
+$$
+declare
+a int;
+BEGIN
+a := 2;
+RETURN a;
+END;
+$$
+LANGUAGE 'pltsql';
+create procedure p1
+is
+begin
+null;
+end;
+/
+select l.lanname from pg_language l join pg_proc p on l.oid = p.prolang and p.proname in ('test', 'p1');
+ lanname 
+---------
+ pltsql
+ pltsql
+(2 rows)
+
+drop schema basetest cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to function test()
+drop cascades to function p1()

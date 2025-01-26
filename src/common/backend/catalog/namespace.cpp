@@ -157,6 +157,9 @@
  * Note: all data pointed to by these List variables is in t_thrd.top_mem_cxt.
  */
 
+/* Catalog schema that TSQL uses */
+char* SYS_NAMESPACE_NAME = "sys";
+
 /* Local functions */
 static void InitTempTableNamespace(void);
 static void RemoveTempRelations(Oid tempNamespaceId);
@@ -3989,7 +3992,9 @@ OverrideSearchPath* GetOverrideSearchPath(MemoryContext context)
         if (linitial_oid(schemas) == u_sess->catalog_cxt.myTempNamespace)
             result->addTemp = true;
         else {
-            if (linitial_oid(schemas) != PG_CATALOG_NAMESPACE) {
+            /* sys comes before pg_catalog when D-fortmat db create extensoin "shark" */
+            if (linitial_oid(schemas) != PG_CATALOG_NAMESPACE && (!DB_IS_CMPT(D_FORMAT) ||
+                linitial_oid(schemas) != get_namespace_oid(SYS_NAMESPACE_NAME, true))) {
                 ValidateNamespace(linitial_oid(schemas));
             }
             result->addCatalog = true;
@@ -4041,6 +4046,15 @@ bool OverrideSearchPathMatchesCurrent(OverrideSearchPath* path)
     }
     /* If path->addCatalog, next item should be pg_catalog. */
     if (path->addCatalog) {
+        if (DB_IS_CMPT(D_FORMAT)) {
+            Oid sys_oid = get_namespace_oid(SYS_NAMESPACE_NAME, true);
+            if (OidIsValid(sys_oid) && lc && lfirst_oid(lc) == sys_oid) {
+                lc = lnext(lc);
+            } else if (OidIsValid(sys_oid)) {
+                return false;
+            }
+        }
+
         if (lc != NULL && lfirst_oid(lc) == PG_CATALOG_NAMESPACE)
             lc = lnext(lc);
         else
@@ -4627,6 +4641,13 @@ void recomputeNamespacePath(StringInfo error_info)
      * stored procedures.
      */
     oidlist = lcons_oid(PG_CATALOG_NAMESPACE, oidlist);
+
+    if (DB_IS_CMPT(D_FORMAT)) {
+        Oid sys_oid = get_namespace_oid(SYS_NAMESPACE_NAME, true);
+        if (OidIsValid(sys_oid) && !list_member_oid(oidlist, sys_oid)) {
+            oidlist = lcons_oid(sys_oid, oidlist);
+        }
+    }
 
     if (OidIsValid(u_sess->catalog_cxt.myTempNamespace))
         oidlist = lcons_oid(u_sess->catalog_cxt.myTempNamespace, oidlist);
