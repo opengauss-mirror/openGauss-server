@@ -542,7 +542,7 @@ function prepare_sql() {
   if ! echo "SET search_path = 'pg_catalog';SET local client_min_messages = NOTICE;SET local log_min_messages = NOTICE;" >> "$tempfile"; then
     die "Write $tempfile failed" ${err_upgrade_pre}
   fi
-  if ! echo "SET statement_timeout = 36000;"  >> "$tempfile"; then
+  if ! echo "SET statement_timeout = 600000;"  >> "$tempfile"; then
     die "Write $tempfile failed" ${err_upgrade_pre}
   fi
 
