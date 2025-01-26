@@ -12479,9 +12479,11 @@ void CreateCheckPoint(int flags)
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoff_xid)) {
                 cutoff_xid = globalXmin;
             }
-            TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-            if (TransactionIdIsNormal(globalRecycleXid) && TransactionIdPrecedes(globalRecycleXid, cutoff_xid)) {
-                cutoff_xid = globalRecycleXid;
+            if (g_instance.attr.attr_storage.enable_ustore) {
+                TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+                if (TransactionIdIsNormal(globalRecycleXid) && TransactionIdPrecedes(globalRecycleXid, cutoff_xid)) {
+                    cutoff_xid = globalRecycleXid;
+                }
             }
             TruncateCSNLOG(cutoff_xid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
@@ -13285,9 +13287,11 @@ bool CreateRestartPoint(int flags)
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoffXid)) {
                 cutoffXid = globalXmin;
             }
-            TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-            if (TransactionIdIsNormal(globalRecycleXid) && TransactionIdPrecedes(globalRecycleXid, cutoffXid)) {
-                cutoffXid = globalRecycleXid;
+            if (g_instance.attr.attr_storage.enable_ustore) {
+                TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+                if (TransactionIdIsNormal(globalRecycleXid) && TransactionIdPrecedes(globalRecycleXid, cutoffXid)) {
+                    cutoffXid = globalRecycleXid;
+                }
             }
             TruncateCSNLOG(cutoffXid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
