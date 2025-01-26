@@ -4957,12 +4957,14 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
 static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatData* vardata)
 {
     RangeTblEntry* rte = root->simple_rte_array[var->varno];
+    RelOptInfo* relInfo = root->simple_rel_array[var->varno];
 
     Assert(IsA(rte, RangeTblEntry));
 
     if (rte->rtekind == RTE_RELATION) {
-        char stakind = STARELKIND_CLASS;
-        Oid starelid = rte->relid;
+        char stakind;
+        Oid starelid;
+        GetStaRelkindAndOid(rte, relInfo, &stakind, &starelid);
 
         /*
          * get parent table's statistic for each partition if have no statistic, because
@@ -7026,15 +7028,7 @@ void btcostestimate_internal(PlannerInfo *root, IndexPath *path, double loop_cou
         char stakind = STARELKIND_CLASS;
         Oid staoid = relid;
 
-        if (OidIsValid(rte->partitionOid)) {
-            Assert(rte->ispartrel);
-            if (rte->isContainPartition) {
-                staoid = rte->partitionOid;
-            } else if (rte->isContainSubPartition) {
-                staoid = rte->subpartitionOid;
-            }
-            stakind = STARELKIND_PARTITION;
-        }
+        GetStaRelkindAndOid(rte, index->rel, &stakind, &staoid);
 
         if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             vardata.statsTuple = get_gtt_att_statistic(rte->relid, colnum);

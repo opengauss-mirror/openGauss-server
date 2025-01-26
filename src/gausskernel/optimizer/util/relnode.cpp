@@ -328,7 +328,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
                 rel->partflag = PARTITION_ANCESOR;
             }
             /* Table --- retrieve statistics from the system catalogs */
-            get_relation_info(root, rte->relid, rte->inh, rel);
+            get_relation_info(root, rte, rel);
             break;
         case RTE_SUBQUERY:
         case RTE_FUNCTION:

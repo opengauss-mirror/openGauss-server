@@ -102,4 +102,6 @@ static inline PartitionMap* GetPartitionMap(PruningContext *context)
 extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq,
     int partitionno);
 void MergePartitionListsForPruning(RangeTblEntry* rte, Relation rel, PruningResult* pruningRes);
+extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr);
+extern List* PartitionPseudoPredicate(PlannerInfo* root, RelOptInfo *rel, RangeTblEntry* rte);
 #endif /* PRUNING_H_ */

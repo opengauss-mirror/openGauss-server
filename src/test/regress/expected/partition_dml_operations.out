@@ -1490,10 +1490,10 @@ PARTITION idx_range_list_part4 (SUBPARTITION idx_range_list_subpart41, SUBPARTIT
 EXPLAIN DELETE FROM range_list PARTITION(p_201901, p_201902) WHERE user_no=1 and sales_amt=1;
                                                    QUERY PLAN                                                   
 ----------------------------------------------------------------------------------------------------------------
- Delete on range_list  (cost=0.00..15.03 rows=1 width=10)
-   ->  Partition Iterator  (cost=0.00..15.03 rows=1 width=10)
+ Delete on range_list  (cost=0.00..59.02 rows=1 width=10)
+   ->  Partition Iterator  (cost=0.00..59.02 rows=1 width=10)
          Iterations: 2, Sub Iterations: 6
-         ->  Partitioned Index Scan using idx_range_list_part on range_list  (cost=0.00..15.03 rows=1 width=10)
+         ->  Partitioned Index Scan using idx_range_list_part on range_list  (cost=0.00..59.02 rows=1 width=10)
                Index Cond: (sales_amt = 1)
                Filter: ((user_no)::bigint = 1)
                Selected Partitions:  1..2
@@ -1503,10 +1503,10 @@ EXPLAIN DELETE FROM range_list PARTITION(p_201901, p_201902) WHERE user_no=1 and
 EXPLAIN DELETE FROM range_list T PARTITION(p_201904_a, p_201904_B) WHERE user_no=1 and sales_amt=11;
                                                     QUERY PLAN                                                    
 ------------------------------------------------------------------------------------------------------------------
- Delete on range_list t  (cost=0.00..15.03 rows=1 width=10)
-   ->  Partition Iterator  (cost=0.00..15.03 rows=1 width=10)
+ Delete on range_list t  (cost=0.00..27.03 rows=1 width=10)
+   ->  Partition Iterator  (cost=0.00..27.03 rows=1 width=10)
          Iterations: 1, Sub Iterations: 2
-         ->  Partitioned Index Scan using idx_range_list_part on range_list t  (cost=0.00..15.03 rows=1 width=10)
+         ->  Partitioned Index Scan using idx_range_list_part on range_list t  (cost=0.00..27.03 rows=1 width=10)
                Index Cond: (sales_amt = 11)
                Filter: ((user_no)::bigint = 1)
                Selected Partitions:  4
@@ -1514,12 +1514,12 @@ EXPLAIN DELETE FROM range_list T PARTITION(p_201904_a, p_201904_B) WHERE user_no
 (8 rows)
 
 EXPLAIN DELETE FROM range_list AS T PARTITION(p_201904_A, p_201901_B, p_201902_A, p_201902, p_201903, p_201903_B) WHERE user_no=1 and sales_amt in (10,11,12);
-                                                    QUERY PLAN                                                    
-------------------------------------------------------------------------------------------------------------------
- Delete on range_list t  (cost=0.00..41.06 rows=1 width=10)
-   ->  Partition Iterator  (cost=0.00..41.06 rows=1 width=10)
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Delete on range_list t  (cost=0.00..133.06 rows=1 width=10)
+   ->  Partition Iterator  (cost=0.00..133.06 rows=1 width=10)
          Iterations: 4, Sub Iterations: 8
-         ->  Partitioned Index Scan using idx_range_list_part on range_list t  (cost=0.00..41.06 rows=1 width=10)
+         ->  Partitioned Index Scan using idx_range_list_part on range_list t  (cost=0.00..133.06 rows=1 width=10)
                Index Cond: (sales_amt = ANY ('{10,11,12}'::integer[]))
                Filter: ((user_no)::bigint = 1)
                Selected Partitions:  1..4
@@ -2511,12 +2511,12 @@ explain delete from t_multi_parts_order as t partition(p1) where col=1 order by 
 (7 rows)
 
 explain delete from t_multi_parts_order subpartition(subp_max_1) where col=1 order by col limit 10;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=0.00..25.33 rows=10 width=14)
-   ->  Partition Iterator  (cost=0.00..27.86 rows=11 width=14)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order  (cost=0.00..27.86 rows=1 width=14)
+   ->  Partition Iterator  (cost=0.00..27.86 rows=1 width=14)
          Iterations: 1, Sub Iterations: 1
-         ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..27.86 rows=11 width=14)
+         ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..27.86 rows=1 width=14)
                Filter: (col = 1)
                Selected Partitions:  2
                Selected Subpartitions:  2:1
@@ -2572,12 +2572,12 @@ explain delete from t_multi_parts_order where col1=1 order by col1 limit 10;
 (7 rows)
 
 explain delete from t_multi_parts_order partition(p1) as t where col1=1 order by col1 limit 10;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order t  (cost=0.00..28.97 rows=10 width=14)
-   ->  Partition Iterator  (cost=0.00..31.86 rows=11 width=14)
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order t  (cost=0.00..31.86 rows=4 width=14)
+   ->  Partition Iterator  (cost=0.00..31.86 rows=4 width=14)
          Iterations: 1, Sub Iterations: 4
-         ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..31.86 rows=11 width=14)
+         ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..31.86 rows=4 width=14)
                Filter: (col1 = 1)
                Selected Partitions:  1
                Selected Subpartitions:  ALL
@@ -2596,12 +2596,12 @@ explain delete from t_multi_parts_order as t partition(p1) where col1=1 order by
 (7 rows)
 
 explain delete from t_multi_parts_order subpartition(subp_max_1) where col1=1 order by col1 limit 10;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=0.00..25.33 rows=10 width=14)
-   ->  Partition Iterator  (cost=0.00..27.86 rows=11 width=14)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order  (cost=0.00..27.86 rows=4 width=14)
+   ->  Partition Iterator  (cost=0.00..27.86 rows=4 width=14)
          Iterations: 1, Sub Iterations: 1
-         ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..27.86 rows=11 width=14)
+         ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..27.86 rows=4 width=14)
                Filter: (col1 = 1)
                Selected Partitions:  2
                Selected Subpartitions:  2:1
@@ -2658,14 +2658,14 @@ explain delete from t_multi_parts_order order by col,col1 limit 10;
 (8 rows)
 
 explain delete from t_multi_parts_order partition(p1) as t order by col,col1 limit 10;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order t  (cost=72.93..72.95 rows=10 width=18)
-   ->  Sort  (cost=72.93..78.30 rows=2149 width=18)
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order t  (cost=41.96..41.99 rows=10 width=18)
+   ->  Sort  (cost=41.96..43.75 rows=716 width=18)
          Sort Key: col, col1
-         ->  Partition Iterator  (cost=0.00..26.49 rows=2149 width=18)
+         ->  Partition Iterator  (cost=0.00..26.49 rows=716 width=18)
                Iterations: 1, Sub Iterations: 4
-               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=2149 width=18)
+               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=716 width=18)
                      Selected Partitions:  1
                      Selected Subpartitions:  ALL
 (8 rows)
@@ -2684,14 +2684,14 @@ explain delete from t_multi_parts_order as t partition(p1) order by col,col1 lim
 (8 rows)
 
 explain delete from t_multi_parts_order subpartition(subp_max_1) order by col,col1 limit 10;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=68.93..68.95 rows=10 width=18)
-   ->  Sort  (cost=68.93..74.30 rows=2149 width=18)
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order  (cost=22.53..22.54 rows=4 width=18)
+   ->  Sort  (cost=22.53..22.54 rows=4 width=18)
          Sort Key: col, col1
-         ->  Partition Iterator  (cost=0.00..22.49 rows=2149 width=18)
+         ->  Partition Iterator  (cost=0.00..22.49 rows=4 width=18)
                Iterations: 1, Sub Iterations: 1
-               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=2149 width=18)
+               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=4 width=18)
                      Selected Partitions:  2
                      Selected Subpartitions:  2:1
 (8 rows)
@@ -2749,14 +2749,14 @@ explain delete from t_multi_parts_order order by col limit 10;
 (8 rows)
 
 explain delete from t_multi_parts_order partition(p1) as t order by col limit 10;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order t  (cost=72.93..72.95 rows=10 width=14)
-   ->  Sort  (cost=72.93..78.30 rows=2149 width=14)
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order t  (cost=41.96..41.99 rows=10 width=14)
+   ->  Sort  (cost=41.96..43.75 rows=716 width=14)
          Sort Key: col
-         ->  Partition Iterator  (cost=0.00..26.49 rows=2149 width=14)
+         ->  Partition Iterator  (cost=0.00..26.49 rows=716 width=14)
                Iterations: 1, Sub Iterations: 4
-               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=2149 width=14)
+               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=716 width=14)
                      Selected Partitions:  1
                      Selected Subpartitions:  ALL
 (8 rows)
@@ -2775,14 +2775,14 @@ explain delete from t_multi_parts_order as t partition(p1) order by col limit 10
 (8 rows)
 
 explain delete from t_multi_parts_order subpartition(subp_max_1) order by col limit 10;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=68.93..68.95 rows=10 width=14)
-   ->  Sort  (cost=68.93..74.30 rows=2149 width=14)
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order  (cost=22.53..22.54 rows=4 width=14)
+   ->  Sort  (cost=22.53..22.54 rows=4 width=14)
          Sort Key: col
-         ->  Partition Iterator  (cost=0.00..22.49 rows=2149 width=14)
+         ->  Partition Iterator  (cost=0.00..22.49 rows=4 width=14)
                Iterations: 1, Sub Iterations: 1
-               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=2149 width=14)
+               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=4 width=14)
                      Selected Partitions:  2
                      Selected Subpartitions:  2:1
 (8 rows)
@@ -2840,14 +2840,14 @@ explain delete from t_multi_parts_order order by col1 limit 10;
 (8 rows)
 
 explain delete from t_multi_parts_order partition(p1) as t order by col1 limit 10;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order t  (cost=72.93..72.95 rows=10 width=14)
-   ->  Sort  (cost=72.93..78.30 rows=2149 width=14)
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order t  (cost=41.96..41.99 rows=10 width=14)
+   ->  Sort  (cost=41.96..43.75 rows=716 width=14)
          Sort Key: col1
-         ->  Partition Iterator  (cost=0.00..26.49 rows=2149 width=14)
+         ->  Partition Iterator  (cost=0.00..26.49 rows=716 width=14)
                Iterations: 1, Sub Iterations: 4
-               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=2149 width=14)
+               ->  Partitioned Seq Scan on t_multi_parts_order t  (cost=0.00..26.49 rows=716 width=14)
                      Selected Partitions:  1
                      Selected Subpartitions:  ALL
 (8 rows)
@@ -2866,14 +2866,14 @@ explain delete from t_multi_parts_order as t partition(p1) order by col1 limit 1
 (8 rows)
 
 explain delete from t_multi_parts_order subpartition(subp_max_1) order by col1 limit 10;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=68.93..68.95 rows=10 width=14)
-   ->  Sort  (cost=68.93..74.30 rows=2149 width=14)
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on t_multi_parts_order  (cost=22.53..22.54 rows=4 width=14)
+   ->  Sort  (cost=22.53..22.54 rows=4 width=14)
          Sort Key: col1
-         ->  Partition Iterator  (cost=0.00..22.49 rows=2149 width=14)
+         ->  Partition Iterator  (cost=0.00..22.49 rows=4 width=14)
                Iterations: 1, Sub Iterations: 1
-               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=2149 width=14)
+               ->  Partitioned Seq Scan on t_multi_parts_order  (cost=0.00..22.49 rows=4 width=14)
                      Selected Partitions:  2
                      Selected Subpartitions:  2:1
 (8 rows)

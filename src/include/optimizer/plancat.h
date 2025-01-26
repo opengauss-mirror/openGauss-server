@@ -24,10 +24,10 @@ extern THR_LOCAL PGDLLIMPORT get_relation_info_hook_type get_relation_info_hook;
 
 extern List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation);
 
-extern void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, RelOptInfo* rel);
+extern void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel);
 
 extern void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, double* tuples, double* allvisfrac,
-    List** sampledPartitionIds);
+    List** sampledPartitionIds, int* totalPartitions);
 
 extern int32 get_relation_data_width(Oid relid, Oid partitionid, int32* attr_widths, bool vectorized = false);
 

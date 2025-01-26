@@ -365,6 +365,9 @@ test: vec_window_001
 test: vec_numeric_sop_1 vec_numeric_sop_2 vec_numeric_sop_3 vec_numeric_sop_4 vec_numeric_sop_5
 #test: vec_window_end
 
+#test analyze partition
+test: partition_level_stats hw_partition_to_predicates
+
 test: vec_unique_pre vec_bitmap_prepare
 test: vec_unique vec_setop_001 vec_setop_002 vec_setop_003 vec_setop_004 hw_vec_int4 hw_vec_int8 hw_vec_float4 hw_vec_float8
 #test: vec_setop_005

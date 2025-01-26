@@ -674,6 +674,13 @@ typedef enum RelOptKind { RELOPT_BASEREL, RELOPT_JOINREL, RELOPT_OTHER_MEMBER_RE
 
 typedef enum PartitionFlag { PARTITION_NONE, PARTITION_REQURIED, PARTITION_ANCESOR } PartitionFlag;
 
+typedef enum StatisticFlag {
+    UNKOWN_LEVEL_STATISTIC = 0,
+    TABLE_LEVEL_STATISTIC,
+    PARTITION_LEVEL_STATISTIC,
+    SUBPARTITION_LEVEL_STATISTIC
+} StatisticFlag;
+
 /*
  * Is the given relation a simple relation i.e a base or "other" member
  * relation?
@@ -807,6 +814,7 @@ typedef struct RelOptInfo {
     double tuples;       /* global size estimates derived from pg_class */
     double multiple;     /* how many dn skewed and biased be influenced by distinct. */
     double allvisfrac;
+    StatisticFlag statisticFlag;
 
     struct PruningResult* pruning_result; /* pruning result for partitioned table with
                                     baserestrictinfo,it is meaningless unless it

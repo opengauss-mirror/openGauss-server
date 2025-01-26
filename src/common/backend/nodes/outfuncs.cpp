@@ -3762,6 +3762,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_FLOAT_FIELD(tuples, "%.0f");
     WRITE_FLOAT_FIELD(multiple, "%.0f");
     WRITE_FLOAT_FIELD(allvisfrac, "%.6f");
+    if (t_thrd.proc->workingVersionNum >= ANALYZE_PARTITION_VERSION_NUMBER) {
+        WRITE_ENUM_FIELD(statisticFlag, StatisticFlag);
+    }
     WRITE_NODE_FIELD(pruning_result);
     WRITE_INT_FIELD(partItrs);
     WRITE_NODE_FIELD(subplan);

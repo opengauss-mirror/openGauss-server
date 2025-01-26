@@ -2509,7 +2509,7 @@ Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExt
     return getRangePartitionOid(partitionmap, &value, NULL, true);
 }
 
-static Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
+Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
 {
     Assert(upBoundary->consttype == TIMESTAMPOID || upBoundary->consttype == TIMESTAMPTZOID ||
            upBoundary->consttype == DATEOID);

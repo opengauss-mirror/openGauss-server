@@ -7177,6 +7177,7 @@ Plan* create_direct_scan(PlannerInfo* root, List* tlist, RangeTblEntry* realResu
     dummyRel->pages = rel->pages;
     dummyRel->tuples = rel->tuples;
     dummyRel->multiple = rel->multiple;
+    dummyRel->statisticFlag = rel->statisticFlag;
     dummyRel->reltablespace = rel->reltablespace;
     dummyRel->baserestrictcost.per_tuple = rel->baserestrictcost.per_tuple;
     dummyRel->baserestrictcost.startup = rel->baserestrictcost.startup;

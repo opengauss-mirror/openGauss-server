@@ -22116,6 +22116,22 @@ AnalyzeStmt:
 					$$ = (Node *)n;
 				}
 			/*
+			 * @analyse subpartition
+			 */
+			| analyze_keyword opt_verbose qualified_name opt_name_list SUBPARTITION '('name')'
+				{
+					VacuumStmt *n = makeNode(VacuumStmt);
+					n->options = VACOPT_ANALYZE;
+					if ($2)
+						n->options |= VACOPT_VERBOSE;
+					n->freeze_min_age = -1;
+					n->freeze_table_age = -1;
+					n->relation = $3;
+					n->va_cols = $4;
+					$3->subpartitionname = $7;
+					$$ = (Node *)n;
+				}
+			/*
 			 * @hdfs Support command "analyze [verbose] foreign tables"
 			 */
 			| analyze_keyword opt_verbose FOREIGN TABLES

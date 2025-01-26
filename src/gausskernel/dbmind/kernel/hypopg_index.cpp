@@ -1341,7 +1341,13 @@ static void hypo_estimate_index_simple(hypoIndex *entry, BlockNumber *pages, dou
     rel->attr_needed = (Relids *)palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(Relids));
     rel->attr_widths = (int32 *)palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(int32));
 
-    estimate_rel_size(relation, rel->attr_widths - rel->min_attr, &rel->pages, &rel->tuples, &rel->allvisfrac, NULL);
+    estimate_rel_size(relation,
+                      rel->attr_widths - rel->min_attr,
+                      &rel->pages,
+                      &rel->tuples,
+                      &rel->allvisfrac,
+                      NULL,
+                      NULL);
 
     /* Close the relation and release the lock now */
     heap_close(relation, AccessShareLock);

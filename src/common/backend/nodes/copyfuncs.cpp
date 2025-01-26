@@ -7732,6 +7732,9 @@ static RelOptInfo *_copyRelOptInfo(const RelOptInfo *from)
     COPY_SCALAR_FIELD(pages);
     COPY_SCALAR_FIELD(tuples);
     COPY_SCALAR_FIELD(allvisfrac);
+    if (t_thrd.proc->workingVersionNum >= ANALYZE_PARTITION_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(statisticFlag);
+    }
     COPY_NODE_FIELD(baserestrictinfo);
     COPY_SCALAR_FIELD(baserestrictcost);
 

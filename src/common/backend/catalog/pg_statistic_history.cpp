@@ -78,6 +78,39 @@ TimestampTz GetRecentAnalyzeTime(TimestampTz asOfTime, Oid relid, char statype)
     return result;
 }
 
+static void GetNamespaceIdAndTabId(Oid relid, char relkind, Oid* namespaceid, Oid* tabId)
+{
+    if (relkind == STARELKIND_CLASS) {
+        *namespaceid = GetNamespaceIdbyRelId(relid);
+        *tabId = relid;
+    } else {
+        HeapTuple partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(relid));
+        if (!HeapTupleIsValid(partTuple)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("Relation with OID %u does not exist", relid)));
+        }
+        Form_pg_partition part = (Form_pg_partition)GETSTRUCT(partTuple);
+        if (part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+            /* If partition table is subpartition, we need find grandparentid */
+            HeapTuple subpartTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part->parentid));
+            if (!HeapTupleIsValid(subpartTuple)) {
+                ReleaseSysCache(partTuple);
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("Partition table with OID %u does not exist", part->parentid)));
+            }
+            Form_pg_partition subpart = (Form_pg_partition)GETSTRUCT(subpartTuple);
+            *tabId = subpart->parentid;
+            *namespaceid = GetNamespaceIdbyRelId(subpart->parentid);
+            ReleaseSysCache(subpartTuple);
+            ReleaseSysCache(partTuple);
+            return;
+        }
+        *tabId = part->parentid;
+        *namespaceid = GetNamespaceIdbyRelId(part->parentid);
+        ReleaseSysCache(partTuple);
+    }
+}
+
 /*
  * InsertColumnStatisticHistory --- insert cloumn statistic info pg_statistic_history
  */
@@ -94,12 +127,17 @@ void InsertColumnStatisticHistory(Oid relid, char relkind, bool inh, VacAttrStat
     TimestampTz currentAnalyzeTime = t_thrd.vacuum_cxt.vacuumAnalyzeTime;
     Datum values[Natts_pg_statistic_history] = {0};
     bool nulls[Natts_pg_statistic_history] = {false};
-    Oid namespaceid = GetNamespaceIdbyRelId(relid);
-    TimestampTz lastAnalyzetime = GetRecentAnalyzeTime(0, relid, STATYPE_COLUMN);
+    Oid namespaceid = InvalidOid;
+    Oid tabId = InvalidOid;
+
+    GetNamespaceIdAndTabId(relid, relkind, &namespaceid, &tabId);
+    TimestampTz lastAnalyzetime = GetRecentAnalyzeTime(0, tabId, STATYPE_COLUMN);
 
     AttrNumber attnum = stats->attrs[0]->attnum;
     values[Anum_pg_statistic_history_namespaceid - 1] = ObjectIdGetDatum(namespaceid);
-    values[Anum_pg_statistic_history_starelid - 1] = ObjectIdGetDatum(relid);
+    values[Anum_pg_statistic_history_starelid - 1] = ObjectIdGetDatum(tabId);
+    values[Anum_pg_statistic_history_partid - 1] =
+        (relkind == STARELKIND_PARTITION ? ObjectIdGetDatum(relid) : InvalidOid);
     values[Anum_pg_statistic_history_statype - 1] = ObjectIdGetDatum(STATYPE_COLUMN);
     if (lastAnalyzetime == 0) {
         nulls[Anum_pg_statistic_history_last_analyzetime - 1] = true;
@@ -189,11 +227,13 @@ void ImportColumnStatisticHistory(HeapTuple tuple, TupleDesc tupdesc, Oid namesp
     Datum values[Natts_pg_statistic_history] = {0};
     bool nulls[Natts_pg_statistic_history] = {false};
     bool isNull = true;
-
-    TimestampTz lastAnalyzetime = GetRecentAnalyzeTime(currentAnalyzetime, relid, STATYPE_COLUMN);
+    Oid tabId = InvalidOid;
+    Oid tmp = InvalidOid;
+    GetNamespaceIdAndTabId(relid, relkind, &tmp, &tabId);
+    TimestampTz lastAnalyzetime = GetRecentAnalyzeTime(currentAnalyzetime, tabId, STATYPE_COLUMN);
 
     values[Anum_pg_statistic_history_namespaceid - 1] = ObjectIdGetDatum(namespaceid);
-    values[Anum_pg_statistic_history_starelid - 1] = ObjectIdGetDatum(relid);
+    values[Anum_pg_statistic_history_starelid - 1] = ObjectIdGetDatum(tabId);
     values[Anum_pg_statistic_history_statype - 1] = CharGetDatum(STATYPE_COLUMN);
     values[Anum_pg_statistic_history_last_analyzetime - 1] = TimestampTzGetDatum(lastAnalyzetime);
     nulls[Anum_pg_statistic_history_last_analyzetime - 1] = lastAnalyzetime == 0 ? true : false;

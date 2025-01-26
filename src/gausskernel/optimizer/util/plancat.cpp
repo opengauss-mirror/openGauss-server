@@ -187,7 +187,7 @@ int GetTotalPartitionNumber(Relation relation)
 }
 
 static void acquireSamplesForSubPartitionedRelation(Relation relation, LOCKMODE lmode, RelPageType *samplePages,
-    List **sampledPartitionOids)
+    List **sampledPartitionOids, int* totalPartitions)
 {
     Assert(RelationIsSubPartitioned(relation));
 
@@ -269,13 +269,14 @@ static void acquireSamplesForSubPartitionedRelation(Relation relation, LOCKMODE 
 
     *samplePages = ComputeTheTotalPages(relation, nonzeroSubPartitionNumber, notAvailSubPartitionNumber,
         totalSubPartitionNumber, partPages);
+    *totalPartitions = totalSubPartitionNumber;
 }
 
 static void acquireSamplesForPartitionedRelation(
-    Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids)
+    Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids, int* totalPartitions)
 {
     if (RelationIsSubPartitioned(relation)) {
-        acquireSamplesForSubPartitionedRelation(relation, lmode, samplePages, sampledPartitionOids);
+        acquireSamplesForSubPartitionedRelation(relation, lmode, samplePages, sampledPartitionOids, totalPartitions);
         return;
     }
 
@@ -326,6 +327,7 @@ static void acquireSamplesForPartitionedRelation(
 
             *samplePages = ComputeTheTotalPages(relation, nonzeroPartitionNumber, notAvailPartitionCnt,
                                                 totalPartitionNumber, partPages);
+            *totalPartitions = totalPartitionNumber;
 
             if (nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER &&
                 *samplePages < relation->rd_rel->relpages / ESTIMATE_PARTPAGES_THRESHOLD) {
@@ -338,10 +340,36 @@ static void acquireSamplesForPartitionedRelation(
     }
 }
 
-static RelPageType EstimatePartitionIndexPages(Relation relation, Relation indexRelation, List *sampledPartitionIds)
+/*
+* Estimate the index pages of a single index partition
+* relation: is the partitioned table
+* indexRelation is the table-level index relation of a partitioned table
+* sampledPartitionIds is the list of partition Oids
+* partOid: if single-partition statistic is requested, partOid may be either
+    level-1 or level-2 partition; otherwise InvalidOid
+* partitionNum: is the total number of partitions.
+*/
+static RelPageType EstimatePartitionIndexPages(Relation relation, Relation indexRelation, List *sampledPartitionIds,
+    Oid partOid, int partitionNum)
 {
+    if (OidIsValid(partOid)) {
+        Assert(RelationIsPartitioned(relation));
+        RelPageType indexPages = 0;
+        Oid partIndexOid = getPartitionIndexOid(indexRelation->rd_id, partOid);
+        if (OidIsValid(partIndexOid)
+            && ConditionalLockPartition(indexRelation->rd_id, partIndexOid, AccessShareLock, PARTITION_LOCK)) {
+            Partition partIndex = partitionOpen(indexRelation, partIndexOid, NoLock);
+            indexPages = PartitionGetNumberOfBlocks(indexRelation, partIndex);
+            partitionClose(indexRelation, partIndex, AccessShareLock);
+        } else {
+            indexPages = indexRelation->rd_rel->relpages;
+        }
+
+        return indexPages;
+    }
+
     /* normal partitioned index, including crossbucket index */
-    if (sampledPartitionIds == NIL) {
+    if (sampledPartitionIds == NIL) {   
         return indexRelation->rd_rel->relpages;
     }
 
@@ -349,7 +377,6 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
     BlockNumber indexPages = 0;
     BlockNumber partIndexPages = 0;
     BlockNumber indexrelPartPages = 0; /* analyzed pages, stored in pg_partition->relpages */
-    int partitionNum = getNumberOfPartitions(relation);
     int samplePartitions = 0;
     foreach (cell, sampledPartitionIds) {
         Oid partOid = lfirst_oid(cell);
@@ -368,7 +395,7 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
     if (samplePartitions == 0) {
         return indexRelation->rd_rel->relpages;
     }
-
+    Assert(partitionNum >= samplePartitions);
     indexPages = partIndexPages * (partitionNum / samplePartitions);
 
     if (!RelationIsSubPartitioned(relation)) {
@@ -383,6 +410,84 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
     }
 
     return indexPages;
+}
+
+static inline bool PartitionStatisticExists(Oid partOid, bool inh)
+{
+    /*
+     * Poke pg_statistic to find out if partition level statistic exists.
+     * We can't rely on relpages in pg_partition because lazy vacuum can fill it
+     */
+    return SearchSysCacheExists4(STATRELKINDATTINH,
+                                 ObjectIdGetDatum(partOid),
+                                 CharGetDatum(STARELKIND_PARTITION),
+                                 Int16GetDatum(1),
+                                 BoolGetDatum(inh));
+}
+
+/*
+ * The caller has verified that subpartition statistic exists.
+ *
+ * This function tries to use partition statistic and call estimate_rel_size(),
+ * but it may fail if can't lock the partition/subpartition.
+ *
+ * If succeed, rel->statisticFlag is set to SUBPARTITION_LEVEL_STATISTIC.
+ */
+static void TryUseSubpartitionStatistic(Relation relation, Oid partOid, Oid subpartOid, RelOptInfo* rel,
+                                        List** sampledPartitionIds, int* totalPartitions)
+{
+    if (!ConditionalLockPartition(relation->rd_id, subpartOid, AccessShareLock, PARTITION_LOCK)) {
+        return;
+    }
+
+    Partition partition = partitionOpen(relation, partOid, NoLock);
+    Relation fakeRel1 = partitionGetRelation(relation, partition);
+    if (!ConditionalLockPartition(fakeRel1->rd_id, subpartOid, AccessShareLock, PARTITION_LOCK)) {
+        releaseDummyRelation(&fakeRel1);
+        partitionClose(relation, partition, AccessShareLock);
+        return;
+    }
+    
+    rel->statisticFlag = SUBPARTITION_LEVEL_STATISTIC;
+    Partition subpartition = partitionOpen(fakeRel1, subpartOid, NoLock);
+    Relation fakeRel2 = partitionGetRelation(fakeRel1, subpartition);
+    estimate_rel_size(fakeRel2, rel->attr_widths - rel->min_attr,
+        &rel->pages, &rel->tuples, &rel->allvisfrac, sampledPartitionIds, totalPartitions);
+    releaseDummyRelation(&fakeRel2);
+    partitionClose(fakeRel1, subpartition, AccessShareLock);
+
+    releaseDummyRelation(&fakeRel1);
+    partitionClose(relation, partition, AccessShareLock);
+}
+
+/*
+ * The caller has verified that partition statistic exists.
+ *
+ * This function tries to use partition statistic and call estimate_rel_size(),
+ * but it may fail if can't lock the partition.
+ *
+ * If succeed, rel->statisticFlag is set to PARTITION_LEVEL_STATISTIC.
+ */
+static void TryUsePartitionStatistic(Relation relation, Oid partOid, RelOptInfo* rel,
+                                     List** sampledPartitionIds, int* totalPartitions)
+{
+    if (!ConditionalLockPartition(relation->rd_id, partOid, AccessShareLock, PARTITION_LOCK)) {
+        return;
+    }
+
+    Partition partition = partitionOpen(relation, partOid, NoLock);
+    Relation fakeRel = partitionGetRelation(relation, partition);
+    if (!ConditionalLockPartition(fakeRel->rd_id, partOid, AccessShareLock, PARTITION_LOCK)) {
+        releaseDummyRelation(&fakeRel);
+        partitionClose(relation, partition, AccessShareLock);
+        return;
+    }
+
+    rel->statisticFlag = PARTITION_LEVEL_STATISTIC;
+    estimate_rel_size(fakeRel, rel->attr_widths - rel->min_attr,
+        &rel->pages, &rel->tuples, &rel->allvisfrac, sampledPartitionIds, totalPartitions);
+    releaseDummyRelation(&fakeRel);
+    partitionClose(relation, partition, AccessShareLock);
 }
 
 /*
@@ -408,12 +513,17 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
  * tree, and so the parent rel's physical size and index information isn't
  * important for it.
  */
-void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, RelOptInfo* rel)
+void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
 {
+    Oid relationObjectId = rte->relid;
+    bool inhparent = rte->inh;
     Index varno = rel->relid;
     bool hasindex = false;
     List* indexinfos = NIL;
     List* sampledPartitionIds = NIL;
+    int totalPartitions = 0;
+    /* track whether we should request partition-level local index statistics */
+    Oid partOid = InvalidOid;
 
     /*
      * We need not lock the relation since it was already locked, either by
@@ -440,13 +550,57 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
      * must leave it zero for now to avoid bollixing the total_table_pages
      * calculation.
      */
-    if (!inhparent)
-        estimate_rel_size(relation,
-            rel->attr_widths - rel->min_attr,
-            &rel->pages,
-            &rel->tuples,
-            &rel->allvisfrac,
-            &sampledPartitionIds);
+    if (!inhparent) {
+        /* Assume we will get table level statistic until proven otherwise */
+        rel->statisticFlag = TABLE_LEVEL_STATISTIC;
+
+        /*
+         * For partition, we should use partition-level statistic first, and use table-level statistic
+         * if not collected. For subpartition, we should use subpartition-level statistic first, if not
+         * collected, check if partition statistic exists to determine whether using partition-level or
+         * table-level statistic.
+         */
+        const bool queryPartition = (rte->isContainPartition && OidIsValid(rte->partitionOid));
+        const bool querySubPartition = (rte->isContainSubPartition && OidIsValid(rte->subpartitionOid));
+        if (querySubPartition && PartitionStatisticExists(rte->partitionOid, inhparent)) {
+            partOid = rte->subpartitionOid;
+            TryUseSubpartitionStatistic(relation,
+                                        rte->partitionOid,
+                                        rte->subpartitionOid,
+                                        rel,
+                                        &sampledPartitionIds,
+                                        &totalPartitions);
+        }
+
+        if (SUBPARTITION_LEVEL_STATISTIC != rel->statisticFlag
+            && (queryPartition || querySubPartition)
+            && PartitionStatisticExists(rte->partitionOid, inhparent)) {
+            if (RelationIsSubPartitioned(relation)) {
+                /*
+                 * For subpartitioned tables, there are no level-1 index partition;
+                 * there are only level-2 index partitions, whose parent is the
+                 * index relation. Therefore, we can't request partition level
+                 * index statistics.
+                 */
+                partOid = InvalidOid;
+            } else {
+                partOid = rte->partitionOid;
+            }
+            TryUsePartitionStatistic(relation, rte->partitionOid, rel, &sampledPartitionIds, &totalPartitions);
+        }
+
+        /* Get table level statistic if we didn't get partition level statistic */
+        if (TABLE_LEVEL_STATISTIC == rel->statisticFlag) {
+            partOid = InvalidOid;
+            estimate_rel_size(relation,
+                rel->attr_widths - rel->min_attr,
+                &rel->pages,
+                &rel->tuples,
+                &rel->allvisfrac,
+                &sampledPartitionIds,
+                &totalPartitions);
+        }
+    }
 
     /*
      * Make list of indexes.  Ignore indexes on system catalogs if told to.
@@ -462,6 +616,10 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
         LOCKMODE lmode;
 
         List* indexoidlist = RelationGetIndexList(relation);
+
+        Assert(!OidIsValid(partOid)
+            || PARTITION_LEVEL_STATISTIC == rel->statisticFlag
+            || SUBPARTITION_LEVEL_STATISTIC == rel->statisticFlag);
 
         /*
          * For each index, we get the same type of lock that the executor will
@@ -697,7 +855,8 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                             /* global partitioned index */
                             info->pages = RelationGetNumberOfBlocks(indexRelation);
                         } else {
-                            info->pages = EstimatePartitionIndexPages(relation, indexRelation, sampledPartitionIds);
+                            info->pages = EstimatePartitionIndexPages(relation, indexRelation, sampledPartitionIds,
+                                                                      partOid, totalPartitions);
                         }
                     }
 #ifdef ENABLE_MULTIPLE_NODES
@@ -707,7 +866,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             } else {
                 double allvisfrac; /* dummy */
 
-                estimate_rel_size(indexRelation, NULL, &info->pages, &info->tuples, &allvisfrac, NULL);
+                estimate_rel_size(indexRelation, NULL, &info->pages, &info->tuples, &allvisfrac, NULL, NULL);
                 if (info->tuples > rel->tuples)
                     info->tuples = rel->tuples;
             }
@@ -772,7 +931,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
  * the attribute widths for estimation purposes.
  */
 void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, double* tuples, double* allvisfrac,
-    List** sampledPartitionIds)
+    List** sampledPartitionIds, int* totalPartitions)
 {
     RelPageType curpages = 0;
     RelPageType relpages;
@@ -853,8 +1012,13 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
             if ((RelationIsPartitioned(rel) || RelationIsSubPartitioned(rel)) && !RelationIsColStore(rel) &&
                 !RelationIsGlobalIndex(rel)) {
                 curpages = rel->rd_rel->relpages;
+                int totalPart = 0;
                 if (curpages == 0) {
-                    acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages, sampledPartitionIds);
+                    acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages,
+                                                         sampledPartitionIds, &totalPart);
+                    if (NULL != totalPartitions) {
+                        *totalPartitions = totalPart;
+                    }
                 }
             } else if (RelationIsValuePartitioned(rel)) {
                 /*

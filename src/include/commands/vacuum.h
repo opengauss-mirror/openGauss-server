@@ -160,12 +160,25 @@ typedef enum VacuumFlags {
     VACFLG_SUB_PARTITION = 1 << 4,        /* table partition */
     VACFLG_SUB_PARTITION_BTREE = 1 << 5,  /* no use, btree index on table partition */
     VACFLG_TOAST = 1 << 6,                /* no use*/
-    VACFLG_TOAST_BTREE = 1 << 7           /* no use*/
+    VACFLG_TOAST_BTREE = 1 << 7,          /* no use*/
+    VACFLG_SUB_PARENT = 1 << 8            /* level-1 partiton of a 2-level partiton table.
+                                           * Note that VACFLG_SUB_PARTITION is also set
+                                           */
 } VacuumFlags;
 
 typedef struct vacuum_object {
-    Oid tab_oid;    /* object id for a table, index or a partition */
-    Oid parent_oid; /* parent object id if it's a partition */
+    /*
+     * we use following three oid to conver all conditions.
+     * 1. tab_oid is the target OID to collect statistic. It can either be
+     *      subpartition, partition, or table.
+     * 2. partend_oid is the parent OID of tab_oid, if target_oid is a
+     *      partition or subpartition.
+     * 3. grandparent_oid is the grant parent of the tab_oid, if tab_oid is
+     *      a subpartition.
+     */
+    Oid tab_oid;
+    Oid parent_oid;
+    Oid grandparent_oid;
 
     /*
      * we ues following flag to skip some check
@@ -266,6 +279,8 @@ typedef struct {
 #define vacuumMainPartition(flag) (((flag)&VACFLG_MAIN_PARTITION) == VACFLG_MAIN_PARTITION)
 
 #define vacuumPartition(flag) (((flag)&VACFLG_SUB_PARTITION) == VACFLG_SUB_PARTITION)
+
+#define vacuumSubParent(flag) (((flag)&VACFLG_SUB_PARENT) == VACFLG_SUB_PARENT)
 
 /* We need estimate total rows on datanode only sample rate is -1. */
 #define NEED_EST_TOTAL_ROWS_DN(vacstmt) \
@@ -422,7 +437,8 @@ extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for
 
 /* in commands/vacuum.c */
 extern void vacuum(VacuumStmt* vacstmt, Oid relid, bool do_toast, BufferAccessStrategy bstrategy, bool isTopLevel);
-extern void vac_open_indexes(Relation relation, LOCKMODE lockmode, int* nindexes, Relation** Irel);
+extern void vac_open_indexes(Relation relation, LOCKMODE lockmode, int* nindexes, Relation** Irel,
+                             bool analyzePartition = false);
 extern void vac_close_indexes(int nindexes, Relation* Irel, LOCKMODE lockmode);
 extern double vac_estimate_reltuples(
     Relation relation, BlockNumber total_pages, BlockNumber scanned_pages, double scanned_tuples);
@@ -439,7 +455,8 @@ extern bool bypass_lazy_vacuum_index(const LVRelStats *vacrelstats, const bool a
 extern void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy);
 
 /* in commands/analyze.c */
-extern void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy);
+extern void analyze_rel(Oid relid, Oid grandparentOid, Oid parentOid, Oid tabOid,
+                        VacuumStmt* vacstmt, BufferAccessStrategy bstrategy);
 extern char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type,
     AnalyzeMode analyzemode = ANALYZENORMAL, bool inh = false, VacuumStmt* vacstmt = NULL,
     AnalyzeSampleTableSpecInfo* spec = NULL);

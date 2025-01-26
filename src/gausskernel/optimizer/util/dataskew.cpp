@@ -758,6 +758,7 @@ List* SkewInfo::getMultiColumnStatistics()
     RangeTblEntry* rte = NULL;
     Var* var = NULL;
     char starelkind;
+    Oid relid = InvalidOid;
     int numstats;
 
     var = (Var*)linitial(m_skewKeys);
@@ -772,7 +773,7 @@ List* SkewInfo::getMultiColumnStatistics()
         return NIL;
 
     /* Get multi colum statistic info. */
-    starelkind = OidIsValid(rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
+    GetStaRelkindAndOid(rte, rel, &starelkind, &relid);
     multistats = es_get_multi_column_stats(rte->relid, starelkind, rte->inh, &numstats);
 
     return multistats;

@@ -274,8 +274,9 @@ static bool analyze_index_sample_rows(MemoryContext speccontext, Relation rel, V
     AnlIndexData* indexdata, int64* num_sample_rows, HeapTuple** samplerows);
 static void compute_histgram_final(int* slot_idx, HistgramInfo* hist_list, VacAttrStats* stats);
 static void compute_histgram_internal(AnalyzeResultMultiColAsArraySpecInfo* spec);
-static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy,
-    AnalyzeMode analyzemode = ANALYZENORMAL);
+static void analyze_rel_internal(Relation onerel, Oid grandparentOid, Oid parentOid, Oid tabOid,
+                                 VacuumStmt* vacstmt, BufferAccessStrategy bstrategy,
+                                 AnalyzeMode analyzemode = ANALYZENORMAL);
 static void analyze_tmptbl_debug_dn(AnalyzeTempTblDebugStage type, AnalyzeMode analyzemode, List* tmpSampleTblNameList,
     Oid* sampleTableOid, Relation* tmpRelation, HeapTuple tuple, TupleConversionMap* tupmap);
 static TupleConversionMap* check_tmptbl_tupledesc(Relation onerel, TupleDesc temptbl_desc);
@@ -308,12 +309,12 @@ Relation analyze_get_relation(Oid relid, VacuumStmt* vacstmt)
      * matter if we ever try to accumulate stats on dead tuples.) If the rel
      * has been dropped since we last saw it, we don't need to process it.
      */
-    if ((vacuumRelation(vacstmt->flags) || vacuumMainPartition(vacstmt->flags)) &&
-        !(vacstmt->options & VACOPT_NOWAIT)) {
+    bool isTableOrPartition = vacuumRelation(vacstmt->flags) || vacuumMainPartition(vacstmt->flags)
+                            || vacuumPartition(vacstmt->flags);
+    if (isTableOrPartition && !(vacstmt->options & VACOPT_NOWAIT)) {
         onerel = try_relation_open(relid, lockmode);
         GetLock = true;
-    } else if ((vacuumRelation(vacstmt->flags) || vacuumMainPartition(vacstmt->flags)) &&
-               ConditionalLockRelationOid(relid, lockmode)) {
+    } else if (isTableOrPartition && ConditionalLockRelationOid(relid, lockmode)) {
         onerel = try_relation_open(relid, NoLock);
         GetLock = true;
     }
@@ -339,7 +340,8 @@ Relation analyze_get_relation(Oid relid, VacuumStmt* vacstmt)
  *
  * Returns: void
  */
-void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
+void analyze_rel(Oid relid, Oid grandparentOid, Oid parentOid, Oid tabOid,
+                 VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
 {
     /*
      * try open the relation, we will skip the relation if try open failed.
@@ -365,7 +367,7 @@ void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
      */
     if (onerel) {
         /* do analyze for normal table. */
-        analyze_rel_internal(onerel, vacstmt, bstrategy, ANALYZENORMAL);
+        analyze_rel_internal(onerel, grandparentOid, parentOid, tabOid, vacstmt, bstrategy, ANALYZENORMAL);
 
         /* 
          * Reset attcacheoff values in the tupleDesc of the relation 
@@ -443,12 +445,17 @@ BlockNumber GetSubPartitionNumberOfBlocks(Relation rel, Partition part, LOCKMODE
  *
  * Parameters:
  *	@in onerel: relation for analyze
+ *  @in grandparentOid, parentOid, tabOid is object for analyze
+ *          (1) if tabOid is subpartition, both grangparentOid and parentOid are valid
+ *          (2) if tabOid is level-1 partition, grandparentOid is InvalidOid, and
+ *              parentOid is valid
+ *          (3) if tabOid is table, both grandparentOid and parentOid is InvalidOid
  *	@in vacstmt: the statment for analyze or vacuum command
  *	@in bstrategy: buffer access strategy objects
  *	@in analyzemode - identify which type the table, dfs table or delta table
  */
-static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy,
-    AnalyzeMode analyzemode)
+static void analyze_rel_internal(Relation onerel, Oid grandparentOid, Oid parentOid, Oid tabOid,
+                                 VacuumStmt* vacstmt, BufferAccessStrategy bstrategy, AnalyzeMode analyzemode)
 {
     AcquireSampleRowsFunc acquirefunc = NULL;
     int elevel;
@@ -539,18 +546,35 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
         /* Regular table, so we'll use the regular row acquisition function */
         /* Also get regular table's size */
         if (RelationIsPartitioned(onerel)) {
-            Partition part = NULL;
-            ListCell* partCell = NULL;
+            if (OidIsValid(grandparentOid)) {
+                Partition part = partitionOpen(onerel, parentOid, lockmode);
+                Relation partRel = partitionGetRelation(onerel, part);
+                Partition subpart = partitionOpen(partRel, tabOid, lockmode);
+                relpages = PartitionGetNumberOfBlocks(partRel, subpart);
+                vacstmt->parentpart = part;
+                vacstmt->onepartrel = partRel;
+                vacstmt->onepart = subpart;
+                vacstmt->issubpartition = true;
+            } else {
+                Partition part = NULL;
+                ListCell* partCell = NULL;
 
-            partList = relationGetPartitionList(onerel, lockmode);
-
-            foreach (partCell, partList) {
-                part = (Partition)lfirst(partCell);
-
-                if (RelationIsSubPartitioned(onerel)) {
-                    relpages += GetSubPartitionNumberOfBlocks(onerel, part, lockmode);
+                if (vacuumPartition(vacstmt->flags)) {
+                    Oid partOid = tabOid;
+                    part = partitionOpen(onerel, partOid, lockmode);
+                    partList = list_make1(part);
                 } else {
-                    relpages += PartitionGetNumberOfBlocks(onerel, part);
+                    partList = relationGetPartitionList(onerel, lockmode);
+                }
+
+                foreach (partCell, partList) {
+                    part = (Partition)lfirst(partCell);
+
+                    if (RelationIsSubPartitioned(onerel)) {
+                        relpages += GetSubPartitionNumberOfBlocks(onerel, part, lockmode);
+                    } else {
+                        relpages += PartitionGetNumberOfBlocks(onerel, part);
+                    }
                 }
             }
         } else {
@@ -641,6 +665,11 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
      */
     if (RelationIsPartitioned(onerel)) {
         releasePartitionList(onerel, &partList, NoLock);
+        if (OidIsValid(grandparentOid)) {
+            partitionClose(vacstmt->onepartrel, vacstmt->onepart, NoLock);
+            releaseDummyRelation(&vacstmt->onepartrel);
+            partitionClose(onerel, vacstmt->parentpart, NoLock);
+        }
     }
 
     relation_close(onerel, NoLock);
@@ -1330,8 +1359,15 @@ static VacAttrStats** get_vacattrstats_by_vacstmt(Relation onerel, VacuumStmt* v
      * doing a recursive scan, we don't want to touch the parent's indexes at
      * all.
      */
-    if (!inh && !NEED_EST_TOTAL_ROWS_DN(vacstmt)) {
-        vac_open_indexes(onerel, AccessShareLock, nindexes, Irel);
+    if (!inh && !NEED_EST_TOTAL_ROWS_DN(vacstmt)
+        /*
+         * we can't collect index stats for commands: analyze subparented-table partition (p1)
+         * 1. obviously, we can't analyze global index since we are going to analyze a level-1 partition
+         * 2. for local index, unlike table partition, there is no concept of level-1 index-partition
+         *    so we won't be able to update pg_partition/pg_statistic tables
+         */
+        && (!vacuumPartition(vacstmt->flags) || vacstmt->issubpartition || !RelationIsPartitioned(onerel))) {
+        vac_open_indexes(onerel, AccessShareLock, nindexes, Irel, vacuumPartition(vacstmt->flags));
     } else {
         *Irel = NULL;
         *nindexes = 0;
@@ -4113,6 +4149,10 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
                     partList = list_concat(partList, partbuckets);
                 }
             }
+            if (vacstmt->issubpartition) {
+                List* partbuckets = relationGetBucketRelList(vacstmt->onepartrel, vacstmt->onepart);
+                partList = list_concat(partList, partbuckets);
+            }
         } else {
             /*
              * for non-range parition table, only need to
@@ -4122,14 +4162,20 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
         }
     } else {
         foreach (partCell, vacstmt->partList) {
+            Assert(!vacstmt->issubpartition);
 
             part = (Partition)lfirst(partCell);
             partRel = partitionGetRelation(onerel, part);
             PartitionGePartRelationList(onerel, partRel, &partList);
         }
+        if (vacstmt->issubpartition) {
+            Assert(NIL == vacstmt->partList);
+            partList = lappend(partList, partitionGetRelation(vacstmt->onepartrel, vacstmt->onepart));
+        }
     }
     /*
      * Count the blocks in all the partitions.  The result could overflow
+
      * BlockNumber, so we use double arithmetic.
      */
     partBlocks = (double*)palloc(list_length(partList) * sizeof(double));
@@ -6013,6 +6059,12 @@ static BlockNumber GetOneRelNBlocks(
             nblocks += PartitionGetNumberOfBlocks(Irel, indexPart);
             partitionClose(Irel, indexPart, AccessShareLock);
         }
+        if (vacstmt->issubpartition) {
+            partIndexOid = getPartitionIndexOid(indexOid, PartitionGetPartid(vacstmt->onepart));
+            indexPart = partitionOpen(Irel, partIndexOid, AccessShareLock);
+            nblocks = PartitionGetNumberOfBlocks(Irel, indexPart);
+            partitionClose(Irel, indexPart, AccessShareLock);
+        }
     } else {
         nblocks = RelationGetNumberOfBlocks(Irel);
     }
@@ -6103,14 +6155,22 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
                 mapCont += visibilitymap_count(onerel, part);
                 releaseDummyRelation(&partRel);
             }
+            if (vacstmt->issubpartition) {
+                mapCont += visibilitymap_count(onerel, vacstmt->onepart);
+            }
         } else {
             mapCont = visibilitymap_count(onerel, NULL);
         }
 
-        Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-        vac_update_relstats(onerel, classRel, updrelpages, totalrows, mapCont,
-            hasindex, InvalidTransactionId, InvalidMultiXactId);
-        heap_close(classRel, RowExclusiveLock);
+        if (!vacuumPartition(vacstmt->flags)) {
+            Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+            vac_update_relstats(onerel, classRel, updrelpages, totalrows, mapCont,
+                hasindex, InvalidTransactionId, InvalidMultiXactId);
+            heap_close(classRel, RowExclusiveLock);
+        } else {
+            Partition part = (Partition)((vacstmt->issubpartition) ? vacstmt->onepart : linitial(vacstmt->partList));
+            vac_update_partstats(part, updrelpages, totalrows, mapCont, InvalidTransactionId, InvalidMultiXactId);
+        }
     }
 
     /* Estimate table expansion factor */
@@ -6132,6 +6192,14 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
      * VACUUM.
      */
     if (!((unsigned int)vacstmt->options & VACOPT_VACUUM) || ((unsigned int)vacstmt->options & VACOPT_ANALYZE)) {
+        Partition part = NULL;
+        if (vacuumPartition(vacstmt->flags)) {
+            if (vacstmt->issubpartition) {
+                part = vacstmt->onepart;
+            } else {
+                part = (Partition)linitial(vacstmt->partList);
+            }
+        }
         for (int ind = 0; ind < nindexes; ind++) {
             AnlIndexData* thisdata = &indexdata[ind];
             double totalindexrows;
@@ -6148,10 +6216,18 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
             if (IS_PGXC_COORDINATOR && ((unsigned int)vacstmt->options & VACOPT_ANALYZE) &&
                 (0 != vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts)) {
                 nblocks = estimate_index_blocks(Irel[ind], totalindexrows, table_factor);
-                Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-                vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0,
-                    false, BootstrapTransactionId, InvalidMultiXactId);
-                heap_close(classRel, RowExclusiveLock);
+                if (part) {
+                    Oid partIndexOid = getPartitionIndexOid(RelationGetRelid(Irel[ind]), PartitionGetPartid(part));
+                    Partition partIndex = partitionOpen(Irel[ind], partIndexOid, AccessShareLock);
+                    vac_update_partstats(partIndex, nblocks, totalindexrows, 0,
+                                         BootstrapTransactionId, InvalidMultiXactId);
+                    partitionClose(Irel[ind], partIndex, AccessShareLock);
+                } else {
+                    Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+                    vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false,
+                                        BootstrapTransactionId, InvalidMultiXactId);
+                    heap_close(classRel, RowExclusiveLock);
+                }
                 continue;
             }
 
@@ -6161,10 +6237,18 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
 
             nblocks = GetOneRelNBlocks(onerel, Irel[ind], vacstmt, totalindexrows);
 
-            Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-            vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0,
-                false, InvalidTransactionId, InvalidMultiXactId);
-            heap_close(classRel, RowExclusiveLock);
+            if (part) {
+                Oid partIndexOid = getPartitionIndexOid(RelationGetRelid(Irel[ind]), PartitionGetPartid(part));
+                Partition partIndex = partitionOpen(Irel[ind], partIndexOid, AccessShareLock);
+                vac_update_partstats(partIndex, nblocks, totalindexrows, 0,
+                                     BootstrapTransactionId, InvalidMultiXactId);
+                partitionClose(Irel[ind], partIndex, AccessShareLock);
+            } else {
+                Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+                vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false,
+                                    BootstrapTransactionId, InvalidMultiXactId);
+                heap_close(classRel, RowExclusiveLock);
+            }
         }
     }
 }
@@ -6353,12 +6437,27 @@ static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr
      * previous statistics for the target columns.	(If there are stats in
      * pg_statistic for columns we didn't process, we leave them alone.)
      */
-    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats,
-                    RelationGetRelPersistence(onerel));
+    char kind = STARELKIND_CLASS;
+    Oid targetTabOid = RelationGetRelid(onerel);
+    Partition part = NULL;
+    if (vacuumPartition(vacstmt->flags)) {
+        kind = STARELKIND_PARTITION;
+        if (vacstmt->issubpartition) {
+            part = vacstmt->onepart;
+        } else {
+            part = (Partition)linitial(vacstmt->partList);
+        }
+        targetTabOid = PartitionGetPartid(part);
+    }
+    update_attstats(targetTabOid, kind, inh, attr_cnt, vacattrstats, RelationGetRelPersistence(onerel));
     for (i = 0; i < nindexes; i++) {
         AnlIndexData* thisdata = &indexdata[i];
 
-        update_attstats(RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats,
+        Oid indexOid = RelationGetRelid(Irel[i]);
+        if (NULL != part) {
+            indexOid = getPartitionIndexOid(RelationGetRelid(Irel[i]), PartitionGetPartid(part));
+        }
+        update_attstats(indexOid, kind, false, thisdata->attr_cnt, thisdata->vacattrstats,
                         RelationGetRelPersistence(Irel[i]));
     }
 
@@ -6493,7 +6592,19 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
      * previous statistics for the target columns.	(If there are stats in
      * pg_statistic for columns we didn't process, we leave them alone.)
      */
-    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats,
+    char kind = STARELKIND_CLASS;
+    Oid targetTabOid = RelationGetRelid(onerel);
+    Partition part = NULL;
+    if (vacuumPartition(vacstmt->flags)) {
+        kind = STARELKIND_PARTITION;
+        if (vacstmt->issubpartition) {
+            part = vacstmt->onepart;
+        } else {
+            part = (Partition)linitial(vacstmt->partList);
+        }
+        targetTabOid = PartitionGetPartid(part);
+    }
+    update_attstats(targetTabOid, kind, inh, attr_cnt, vacattrstats,
                     RelationGetRelPersistence(onerel));
 
     /*
@@ -6508,8 +6619,12 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
         for (i = 0; i < nindexes; i++) {
             AnlIndexData* thisdata = &indexdata[i];
 
-            update_attstats(
-                RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats,
+            Oid indexOid = RelationGetRelid(Irel[i]);
+            if (NULL != part) {
+                indexOid = getPartitionIndexOid(RelationGetRelid(Irel[i]), PartitionGetPartid(part));
+            }
+
+            update_attstats(indexOid, kind, false, thisdata->attr_cnt, thisdata->vacattrstats,
                 RelationGetRelPersistence(Irel[i]));
         }
     }
