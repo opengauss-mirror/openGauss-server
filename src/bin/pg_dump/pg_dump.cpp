@@ -201,7 +201,8 @@ const char *g_progressDetails[] = {
     "reading publications",
     "reading publication membership",
     "reading subscriptions",
-    "reading event triggers"
+    "reading event triggers",
+    "reading user-defined access methods"
 };
 int g_totalSteps = sizeof(g_progressDetails) / sizeof(g_progressDetails[0]);
 static volatile bool g_progressFlagScan = false;
