@@ -176,17 +176,52 @@ void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *n
     }
 }
 
-void BuildCtidScanBitmap(
-    unsigned char* deltaMask, RowGroup* rowgroup, int ctidCol, RelFileNodeOld* rdNode, uint32 cuid, uint32 &maskMax)
+void BuildCtidScanBitmap(unsigned char* deltaMask, RowGroup* rowgroup, IMCSDesc* imcsDesc, Relation rel, uint32 cuid,
+    uint32 &maskMax)
 {
+    int ctidCol = imcsDesc->imcsNatts;
     CUDesc* cuDescPtr = rowgroup->m_cuDescs[ctidCol];
-    if (!cuDescPtr) return;
+    if (!rowgroup->m_actived || !cuDescPtr) return;
 
-    bool hasFound = false;
-    DataSlotTag slotTag = IMCU_CACHE->InitCUSlotTag(rdNode, ctidCol, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
-    CacheSlotId_t slotId = IMCU_CACHE->ReserveDataBlock(&slotTag, cuDescPtr->cu_size, hasFound);
-    if (!hasFound) return;
+    /* search in memory */
+    bool hasFound = true;
+    DataSlotTag slotTag = IMCU_CACHE->InitCUSlotTag((RelFileNodeOld*)&rel->rd_node, ctidCol, cuDescPtr->cu_id,
+                                                    cuDescPtr->cu_pointer);
+    CacheSlotId_t slotId = IMCU_CACHE->FindDataBlock(&slotTag, true);
+    if (!IsValidCacheSlotID(slotId)) {
+        hasFound = false;
+        slotId = IMCU_CACHE->ReserveDataBlock(&slotTag, cuDescPtr->cu_size, hasFound);
+    }
+    if (!IsValidCacheSlotID(slotId)) return;
     CU* ctidCU = IMCU_CACHE->GetCUBuf(slotId);
+    ctidCU->m_inCUCache = true;
+    ctidCU->SetAttInfo(sizeof(ImcstoreCtid), -1, TIDOID);
+    if (!hasFound) {
+        /* load from disk */
+        CFileNode cFileNode(rel->rd_node, ctidCol, MAIN_FORKNUM);
+        IMCUStorage imcuStorage(cFileNode);
+        imcuStorage.LoadCU(ctidCU, cuDescPtr->cu_id, cuDescPtr->cu_size);
+        ctidCU->imcsDesc = imcsDesc;
+        ctidCU->SetCUSize(cuDescPtr->cu_size);
+        pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDescPtr->cu_size);
+        pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInMem, 1);
+        pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInDisk, (uint64)cuDescPtr->cu_size);
+        pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInDisk, 1);
+        IMCU_CACHE->DataBlockCompleteIO(slotId);
+    } else {
+        if (IMCU_CACHE->DataBlockWaitIO(slotId)) {
+            IMCU_CACHE->UnPinDataBlock(slotId);
+            return;
+        }
+    }
+
+    if (ctidCU->m_cache_compressed) {
+        CUUncompressedRetCode retCode = IMCU_CACHE->StartUncompressCU(cuDescPtr, slotId, -1, false, ALIGNOF_CUSIZE);
+        if (retCode != CU_OK) {
+            IMCU_CACHE->UnPinDataBlock(slotId);
+            return;
+        }
+    }
 
     /* build current ctid map */
     for (int i = 0; i < cuDescPtr->row_count; ++i) {
@@ -263,7 +298,7 @@ void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
     pthread_rwlock_rdlock(&rowgroup->m_mutex);
 
     uint32 maskMax = 0;
-    BuildCtidScanBitmap(deltaMask, rowgroup, imcsDesc->imcsNatts, (RelFileNodeOld*)&rel->rd_node, cuid, maskMax);
+    BuildCtidScanBitmap(deltaMask, rowgroup, imcsDesc, rel, cuid, maskMax);
     UpdateBitmapByDelta(deltaMask, rowgroup, frozen, cuid, maskMax);
     pthread_rwlock_unlock(&rowgroup->m_mutex);
 

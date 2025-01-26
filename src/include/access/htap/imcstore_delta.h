@@ -96,8 +96,11 @@ extern void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context);
 extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
 extern void IMCStoreVacuumWorkerMain(void);
 
-extern void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);
-extern void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);
+extern bool IMCStoreHookPreLock(Oid relid, ItemPointer ctid);
+extern void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId,
+                               bool locked = false);
+extern void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId,
+                               bool locked = false);
 extern void IMCStoreUpdateHook(
     Oid relid, ItemPointer ctid, ItemPointer newCtid, TransactionId xid = InvalidTransactionId);
 
