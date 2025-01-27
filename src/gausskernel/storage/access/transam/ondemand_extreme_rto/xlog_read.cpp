@@ -35,7 +35,7 @@
 #include "storage/file/fio_device.h"
 
 namespace ondemand_extreme_rto {
-static bool DoEarlyExit()
+bool DoEarlyExit()
 {
     if (g_dispatcher == NULL) {
         return false;
@@ -715,13 +715,39 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
 
             if (retry <= 3) {
                 continue;
-            } else {
-                if (t_thrd.xlog_cxt.readFile >= 0) {
-                    close(t_thrd.xlog_cxt.readFile);
-                    t_thrd.xlog_cxt.readFile = -1;
-                }
-                return NULL;
             }
+
+            if (t_thrd.xlog_cxt.readFile >= 0) {
+                close(t_thrd.xlog_cxt.readFile);
+                t_thrd.xlog_cxt.readFile = -1;
+            }
+
+            /*
+             * If archive recovery was requested, but we were still doing
+             * crash recovery, switch to archive recovery and retry using the
+             * offline archive. We have now replayed all the valid WAL in
+             * pg_xlog, so we are presumably now consistent.
+             *
+             * We require that there's at least some valid WAL present in
+             * pg_xlog, however (!fetch_ckpt). We could recover using the WAL
+             * from the archive, even if pg_xlog is completely empty, but we'd
+             * have no idea how far we'd have to replay to reach consistency.
+             * So err on the safe side and give up.
+             */
+            if (!t_thrd.xlog_cxt.InArchiveRecovery && t_thrd.xlog_cxt.ArchiveRecoveryRequested) {
+                t_thrd.xlog_cxt.InArchiveRecovery = true;
+                /* construct a minrecoverypoint, update LSN */
+                UpdateMinrecoveryInAchive();
+                /*
+                 * Before we retry, reset lastSourceFailed and currentSource
+                 * so that we will check the archive next.
+                 */
+                t_thrd.xlog_cxt.failedSources = 0;
+                retry = 0;
+                continue;
+            }
+
+            return NULL;
         }
     }
 }

@@ -100,6 +100,9 @@ static void initFileDataPathStruct(datadir_t *dataDir)
     securec_check_ss_c(rc, "", "");
 
     // sub-file path
+    rc = snprintf_s(dataDir->archiveDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/archive_status", dataDir->pg_data);
+    securec_check_ss_c(rc, "", "");
+
     rc = snprintf_s(dataDir->controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_control", dataDir->pg_data);
     securec_check_ss_c(rc, "", "");
 
@@ -163,6 +166,9 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", dataDir->dss_log);
+    securec_check_ss_c(rc, "", "");
+
+    rc = snprintf_s(dataDir->archiveDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/archive_status", dataDir->dss_log);
     securec_check_ss_c(rc, "", "");
 
     rc = snprintf_s(dataDir->snapshotsDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_snapshots", dataDir->dss_data);

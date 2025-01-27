@@ -1349,18 +1349,6 @@ do_gucset(const char *action_type, const char *data_dir)
             return FAILURE;
         }
 
-        if (strncmp(ss_enable_dss, "on", strlen("on")) == 0 &&
-            ((strncmp(config_param[i], "archive_mode", strlen("archive_mode")) == 0 &&
-            strncmp(config_value[i], "on", strlen("on")) == 0) ||
-            (strncmp(config_param[i], "archive_command", strlen("archive_command")) == 0 &&
-            config_value[i] != NULL))) {
-            release_file_lock(&filelock);
-            freefile(opt_lines);
-            GS_FREE(tmpAZStr);
-            write_stderr(_("%s: Not support archive function while DMS and DSS enabled\n"), progname);
-            return FAILURE;
-        }
-
         // only when the parameter is synchronous_standby_names, this branch can be reached.
         if (g_need_changed && 0 == strncmp(config_param[i], "synchronous_standby_names",
                                            strlen(config_param[i]) > strlen("synchronous_standby_names") ? strlen(config_param[i]) : strlen("synchronous_standby_names"))) {

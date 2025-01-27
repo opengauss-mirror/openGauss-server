@@ -41,6 +41,8 @@
 
 #define T_SS_XLOGDIR \
     (g_enable_dss ? g_datadir.xlogDir : "pg_xlog")
+#define T_ARCHIVEDIR \
+    (g_enable_dss ? g_datadir.archiveDir : "pg_xlog/archive_status")
 #define T_DEFTBSDIR \
     (g_enable_dss ? g_datadir.baseDir : "base")
 #define T_GLOTBSDIR \
@@ -108,6 +110,7 @@ typedef struct st_datadir_t {
     char twophaseDir[MAXPGPATH];
     char multixactDir[MAXPGPATH];
     char xlogDir[MAXPGPATH];
+    char archiveDir[MAXPGPATH];
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
     char controlInfoPath[MAXPGPATH];

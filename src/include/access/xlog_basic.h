@@ -100,7 +100,7 @@
  */
 #define SS_XLOGDIR (g_instance.datadir_cxt.xlogDir)
 #define XLOGDIR "pg_xlog"
-#define ARCHIVEDIR "pg_xlog/archive_status"
+#define ARCHIVEDIR (g_instance.datadir_cxt.archiveDir)
 #define XLOG_CONTROL_FILE (g_instance.datadir_cxt.controlPath)
 #define XLOG_CONTROL_FILE_BAK (g_instance.datadir_cxt.controlBakPath)
 #define MAX_PAGE_FLUSH_LSN_FILE           "global/max_page_flush_lsn"
