@@ -116,6 +116,7 @@ explain (verbose, costs off) select city from test_byte_partition where city > '
 drop table test_byte_partition;
 
 set enable_seqscan=off;
+set enable_heap_prefetch=on;
 drop table if exists test_char_index;
 create table test_char_index (id int, city char (10 char));
 create unique index test_char_index_btree on test_char_index using btree(city);
@@ -127,4 +128,5 @@ select * from test_char_index where city > 'beijing' limit 2;
 select * from test_char_index limit 3;
 select * from test_char_index where city > 'beijing';
 drop table test_char_index;
+set enable_heap_prefetch=off;
 set enable_seqscan=on;

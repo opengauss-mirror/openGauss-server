@@ -10369,21 +10369,17 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
                         errhint("retry this operation after other DDL operation finished.")));
     }
 
-    /* Prefetch whole page for batch search ordered index. */
-    if (prev_buf != scan->xs_cbuf) {
+    /* Prefetch page header to quickly locate heap buffer by index. */
+    if (u_sess->attr.attr_storage.enable_heap_prefetch && prev_buf != scan->xs_cbuf) {
         register char *dp = (char *)BufferGetPage(scan->xs_cbuf);
-        register char *end = dp + BLCKSZ;
-        while (dp < end) {
-            prefetch(dp, 0, 3);
-            prefetch(dp + 64, 0, 3);
-            prefetch(dp + 128, 0, 3);
-            prefetch(dp + 192, 0, 3);
-            prefetch(dp + 256, 0, 3);
-            prefetch(dp + 320, 0, 3);
-            prefetch(dp + 384, 0, 3);
-            prefetch(dp + 448, 0, 3);
-            dp += 512;
-        }
+        prefetch(dp, 0, 0);
+        prefetch(dp + 64, 0, 0);
+        prefetch(dp + 128, 0, 0);
+        prefetch(dp + 192, 0, 0);
+        prefetch(dp + 256, 0, 0);
+        prefetch(dp + 320, 0, 0);
+        prefetch(dp + 384, 0, 0);
+        prefetch(dp + 448, 0, 0);
     }
 
     /* Obtain share-lock on the buffer so we can examine visibility */
