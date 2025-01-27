@@ -16,6 +16,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <limits>
+
 #include "commands/prepare.h"
 #include "executor/exec/execStream.h"
 #include "parser/parse_relation.h"
@@ -55,8 +57,6 @@
 #define SCANMETHOD_INPUT_THRESHOLD 10000
 
 static char* OperatorName(const Plan* plan);
-
-extern double get_float8_infinity(void);
 
 extern bool check_relation_analyzed(Oid relid);
 
@@ -859,7 +859,7 @@ List* PlanAnalyzerOperator(QueryDesc* querydesc, PlanState* planstate)
         int dn_index = 0;
         double dn_tuples = 0.0;
         double dnFiltereds = 0.0;
-        double min_dn_tuples = get_float8_infinity();
+        double min_dn_tuples = std::numeric_limits<double>::infinity();
         double max_dn_tuples = 0.0;
         double total_tuples = 0.0;
         double totalFiltereds = 0.0;

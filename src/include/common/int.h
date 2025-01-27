@@ -87,6 +87,23 @@ static inline bool pg_mul_s16_overflow(int16 a, int16 b, int16* result)
 }
 
 /*
+ * If `(int16)a` overflows, return true, otherwise store the result of `(int16)a` into
+ * `*result`. The content of `*result` is implementation defined in case of
+ * overflow.
+ */
+static inline bool pg_neg_u16_overflow(uint16 a, int16* result)
+{
+    /* check the negative equivalent will fit without overflowing */
+    if (a > (uint16)(-(PG_INT16_MIN + 1)) + 1) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+
+    *result = -((int16)a);
+    return false;
+}
+
+/*
  * If a + b overflows, return true, otherwise store the result of a + b into
  * *result. The content of *result is implementation defined in case of
  * overflow.
@@ -147,6 +164,23 @@ static inline bool pg_mul_s32_overflow(int32 a, int32 b, int32* result)
     *result = (int32)res;
     return false;
 #endif
+}
+
+/*
+ * If `(int32)a` overflows, return true, otherwise store the result of `(int32)a` into
+ * `*result`. The content of `*result` is implementation defined in case of
+ * overflow.
+ */
+static inline bool pg_neg_u32_overflow(uint32 a, int32* result)
+{
+    /* check the negative equivalent will fit without overflowing */
+    if (a > (uint32)(-(PG_INT32_MIN + 1)) + 1) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+
+    *result = -((int32)a);
+    return false;
 }
 
 /*
@@ -273,6 +307,23 @@ static inline bool pg_mul_s64_overflow(int64 a, int64 b, int64* result)
     *result = a * b;
     return false;
 #endif
+}
+
+/*
+ * If `(int64)a` overflows, return true, otherwise store the result of `(int64)a` into
+ * `*result`. The content of `*result` is implementation defined in case of
+ * overflow.
+ */
+static inline bool pg_neg_u64_overflow(uint64 a, int64* result)
+{
+    /* check the negative equivalent will fit without overflowing */
+    if (a > (uint64)(-(PG_INT64_MIN + 1)) + 1) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+
+    *result = -((int64)a);
+    return false;
 }
 
 static inline bool check_sqrroot_overflow(int128 a, int128 b)

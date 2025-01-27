@@ -30,6 +30,7 @@
 #include "utils/date.h"
 #include "utils/datetime.h"
 #include "utils/memutils.h"
+#include "utils/numutils.h"
 #include "utils/tzparser.h"
 #include "parser/scansup.h"
 
@@ -447,7 +448,7 @@ static char* AppendSeconds(char* cp, int sec, fsec_t fsec, int precision, bool f
     if (fsec != 0)
     {
         int32 value = Abs(fsec);
-        char *end = &cp[precision + 1];
+        char* end = &cp[precision + 1];
         bool gotnonzero = false;
 
         *cp++ = '.';
@@ -3419,7 +3420,7 @@ void EncodeDateOnly(struct pg_tm* tm, int style, char* str)
             /* compatible with ISO date formats */
             str = pg_ultostr_zeropad_min_width_4(str, (tm->tm_year > 0) ? tm->tm_year : -(tm->tm_year - 1));
             *str++ = '-';
-            str = pg_ultostr_zeropad_min_width_4(str, tm->tm_mon);
+            str = pg_ultostr_zeropad_width_2(str, tm->tm_mon);
             *str++ = '-';
             str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             break;

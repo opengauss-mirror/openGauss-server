@@ -37,6 +37,7 @@
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
+#include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"

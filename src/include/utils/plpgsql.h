@@ -40,6 +40,7 @@
 #define _(x) dgettext(TEXTDOMAIN, x)
 
 #define TABLEOFINDEXBUCKETNUM 128
+#define MAX_INT32_LEN 11
 
 /*
  * Compile status mark

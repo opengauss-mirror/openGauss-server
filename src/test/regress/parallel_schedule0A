@@ -457,3 +457,5 @@ test: alter_table_modify_ltt alter_table_modify_gtt
 test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
 
 #test: with
+
+test: extra_float_digits

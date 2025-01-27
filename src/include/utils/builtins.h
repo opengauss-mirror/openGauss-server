@@ -455,7 +455,19 @@ extern Datum current_schemas(PG_FUNCTION_ARGS);
 extern Datum pseudo_current_user(PG_FUNCTION_ARGS);
 extern uint64 pg_strtouint64(const char* str, char** endptr, int base);
 
-#include "utils/numutils.h"
+/* numutils.c */
+extern int32 pg_atoi(char* s, int size, int c, bool can_ignore = false);
+extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
+extern int32 pg_strtoint32(const char* s, bool can_ignore = false);
+extern void pg_ctoa(uint8 c, char* a);
+extern void pg_itoa(int16 i, char* a);
+extern void pg_ltoa(int32 l, char* a);
+extern void pg_ltoa(int32 l, char* a, int* len);
+extern void pg_lltoa(int64 ll, char* a);
+extern void pg_lltoa(int64 ll, char* a, int* len);
+extern void pg_i128toa(int128 value, char* a, int length);
+extern char* pg_ultostr(char* str, uint32 value);
+extern char* pg_ultostr_zeropad(char* str, uint32 value, int min_width);
 
 /*
  *		Per-opclass comparison functions for new btrees.  These are
@@ -497,13 +509,6 @@ extern Datum btfloat4sortsupport(PG_FUNCTION_ARGS);
 extern Datum btfloat8sortsupport(PG_FUNCTION_ARGS);
 extern Datum btoidsortsupport(PG_FUNCTION_ARGS);
 extern Datum btnamesortsupport(PG_FUNCTION_ARGS);
-
-extern double get_float8_infinity(void);
-extern float get_float4_infinity(void);
-extern double get_float8_nan(void);
-extern float get_float4_nan(void);
-extern int is_infinite(double val);
-extern double float8in_internal(char* str, char** s, bool* hasError);
 
 extern Datum float4in(PG_FUNCTION_ARGS);
 extern Datum float4out(PG_FUNCTION_ARGS);
@@ -995,9 +1000,6 @@ extern bytea *cstring_to_bytea_with_len(const char *s, int len);
 extern BpChar* cstring_to_bpchar_with_len(const char* s, int len);
 extern char* text_to_cstring(const text* t);
 extern char* output_text_to_cstring(const text* t);
-extern char* output_int32_to_cstring(int32 value, int* len);
-extern char* output_int64_to_cstring(int64 value, int* len);
-extern char* output_int128_to_cstring(int128 value);
 extern char* output_date_out(int32 date);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
@@ -1740,10 +1742,10 @@ extern Datum tdigest_in(PG_FUNCTION_ARGS);
 extern Datum db4ai_predict_by(PG_FUNCTION_ARGS);
 extern Datum db4ai_explain_model(PG_FUNCTION_ARGS);
 extern Datum gs_index_advise(PG_FUNCTION_ARGS);
-extern Datum hypopg_create_index(PG_FUNCTION_ARGS);                             
-extern Datum hypopg_display_index(PG_FUNCTION_ARGS);                            
-extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);                               
-extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);                            
+extern Datum hypopg_create_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_display_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);
 extern Datum hypopg_reset_index(PG_FUNCTION_ARGS);
 
 /* MOT */
@@ -1845,5 +1847,6 @@ extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 
 /* float.cpp */
 extern int float8_cmp_internal(float8 a, float8 b);
+extern double float8in_internal(char* str, char** s, bool* hasError);
 
 #endif /* BUILTINS_H */

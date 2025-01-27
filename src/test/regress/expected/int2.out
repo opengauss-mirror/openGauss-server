@@ -12,8 +12,18 @@ LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('34.5');
 CONTEXT:  referenced column: f1
 -- largest and smallest values
 INSERT INTO INT2_TBL(f1) VALUES ('32767');
-INSERT INTO INT2_TBL(f1) VALUES ('-32767');
+INSERT INTO INT2_TBL(f1) VALUES ('-32768');
 -- bad input values -- should give errors
+INSERT INTO INT2_TBL(f1) VALUES ('32768');
+ERROR:  value "32768" is out of range for type smallint
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('32768');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('-32769');
+ERROR:  value "-32769" is out of range for type smallint
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('-32769');
+                                         ^
+CONTEXT:  referenced column: f1
 INSERT INTO INT2_TBL(f1) VALUES ('100000');
 ERROR:  value "100000" is out of range for type smallint
 LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('100000');
@@ -54,7 +64,7 @@ CONTEXT:  referenced column: f1
 SELECT '' AS five, * FROM INT2_TBL ORDER BY f1;
  five |   f1   
 ------+--------
-      | -32767
+      | -32768
       |  -1234
       |      0
       |   1234
@@ -65,7 +75,7 @@ SELECT '' AS five, * FROM INT2_TBL ORDER BY f1;
 SELECT '' AS four, i.* FROM INT2_TBL i WHERE i.f1 <> int2 '0' ORDER BY f1;
  four |   f1   
 ------+--------
-      | -32767
+      | -32768
       |  -1234
       |   1234
       |  32767
@@ -74,7 +84,7 @@ SELECT '' AS four, i.* FROM INT2_TBL i WHERE i.f1 <> int2 '0' ORDER BY f1;
 SELECT '' AS four, i.* FROM INT2_TBL i WHERE i.f1 <> int4 '0' ORDER BY f1;
  four |   f1   
 ------+--------
-      | -32767
+      | -32768
       |  -1234
       |   1234
       |  32767
@@ -95,21 +105,21 @@ SELECT '' AS one, i.* FROM INT2_TBL i WHERE i.f1 = int4 '0' ORDER BY f1;
 SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 < int2 '0' ORDER BY f1;
  two |   f1   
 -----+--------
-     | -32767
+     | -32768
      |  -1234
 (2 rows)
 
 SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 < int4 '0' ORDER BY f1;
  two |   f1   
 -----+--------
-     | -32767
+     | -32768
      |  -1234
 (2 rows)
 
 SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 <= int2 '0' ORDER BY f1;
  three |   f1   
 -------+--------
-       | -32767
+       | -32768
        |  -1234
        |      0
 (3 rows)
@@ -117,7 +127,7 @@ SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 <= int2 '0' ORDER BY f1;
 SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 <= int4 '0' ORDER BY f1;
  three |   f1   
 -------+--------
-       | -32767
+       | -32768
        |  -1234
        |      0
 (3 rows)
@@ -161,29 +171,24 @@ SELECT '' AS one, i.* FROM INT2_TBL i WHERE (i.f1 % int2 '2') = int2 '1' ORDER B
 
 -- any evens 
 SELECT '' AS three, i.* FROM INT2_TBL i WHERE (i.f1 % int4 '2') = int2 '0' ORDER BY f1;
- three |  f1   
--------+-------
-       | -1234
-       |     0
-       |  1234
-(3 rows)
+ three |   f1   
+-------+--------
+       | -32768
+       |  -1234
+       |      0
+       |   1234
+(4 rows)
 
 SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
 ERROR:  smallint out of range
 CONTEXT:  referenced column: x
 SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i
 WHERE abs(f1) < 16384 ORDER BY f1;
- five |  f1   |   x   
-------+-------+-------
-      | -1234 | -2468
-      |     0 |     0
-      |  1234 |  2468
-(3 rows)
-
+ERROR:  smallint out of range
 SELECT '' AS five, i.f1, i.f1 * int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
  five |   f1   |   x    
 ------+--------+--------
-      | -32767 | -65534
+      | -32768 | -65536
       |  -1234 |  -2468
       |      0 |      0
       |   1234 |   2468
@@ -198,7 +203,7 @@ SELECT '' AS five, i.f1, i.f1 + int2 '2' AS x FROM INT2_TBL i
 WHERE f1 < 32766 ORDER BY f1;
  five |   f1   |   x    
 ------+--------+--------
-      | -32767 | -32765
+      | -32768 | -32766
       |  -1234 |  -1232
       |      0 |      2
       |   1234 |   1236
@@ -207,7 +212,7 @@ WHERE f1 < 32766 ORDER BY f1;
 SELECT '' AS five, i.f1, i.f1 + int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
  five |   f1   |   x    
 ------+--------+--------
-      | -32767 | -32765
+      | -32768 | -32766
       |  -1234 |  -1232
       |      0 |      2
       |   1234 |   1236
@@ -231,7 +236,7 @@ WHERE f1 > -32767 ORDER BY f1;
 SELECT '' AS five, i.f1, i.f1 - int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
  five |   f1   |   x    
 ------+--------+--------
-      | -32767 | -32769
+      | -32768 | -32770
       |  -1234 |  -1236
       |      0 |     -2
       |   1234 |   1232
@@ -240,25 +245,25 @@ SELECT '' AS five, i.f1, i.f1 - int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
 (6 rows)
 
 SELECT '' AS five, i.f1, i.f1 / int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
- five |   f1   |    x     
-------+--------+----------
-      | -32767 | -16383.5
-      |  -1234 |     -617
-      |      0 |        0
-      |   1234 |      617
-      |  32767 |  16383.5
-      |        |         
+ five |   f1   |    x    
+------+--------+---------
+      | -32768 |  -16384
+      |  -1234 |    -617
+      |      0 |       0
+      |   1234 |     617
+      |  32767 | 16383.5
+      |        |        
 (6 rows)
 
 SELECT '' AS five, i.f1, i.f1 / int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
- five |   f1   |    x     
-------+--------+----------
-      | -32767 | -16383.5
-      |  -1234 |     -617
-      |      0 |        0
-      |   1234 |      617
-      |  32767 |  16383.5
-      |        |         
+ five |   f1   |    x    
+------+--------+---------
+      | -32768 |  -16384
+      |  -1234 |    -617
+      |      0 |       0
+      |   1234 |     617
+      |  32767 | 16383.5
+      |        |        
 (6 rows)
 
 -- divide zero

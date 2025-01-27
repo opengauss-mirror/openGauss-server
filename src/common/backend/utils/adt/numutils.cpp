@@ -13,13 +13,15 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/numutils.h"
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "port/pg_bitutils.h"
 
 #include <math.h>
-#include <limits.h>
-#include <ctype.h>
+#include <limits>
+#include <cctype>
 
 #include "common/int.h"
 #include "utils/builtins.h"
@@ -190,19 +192,15 @@ int32 pg_atoi(char* s, int size, int c, bool can_ignore)
  *
  * Allows any number of leading or trailing whitespace characters. Will throw
  * ereport() upon bad input format or overflow.
- *
- * NB: Accumulate input as a negative number, to deal with two's complement
- * representation of the most negative number, which can't be represented as a
- * positive number.
  */
 int16 pg_strtoint16(const char* s, bool can_ignore)
 {
     const char* ptr = s;
-    int16 tmp = 0;
+    uint16 tmp = 0;
     bool neg = false;
 
     /* skip leading spaces */
-    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+    while (std::isspace(static_cast<unsigned char>(*ptr))) {
         ptr++;
     }
 
@@ -210,41 +208,59 @@ int16 pg_strtoint16(const char* s, bool can_ignore)
     if (*ptr == '-') {
         ptr++;
         neg = true;
-    } else if (*ptr == '+')
+    } else if (*ptr == '+') {
         ptr++;
+    }
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
+        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT)) {
             goto invalid_syntax;
-        if (DB_IS_CMPT(B_FORMAT))
-            return tmp;
+        }
+        if (DB_IS_CMPT(B_FORMAT)) {
+            return 0;
+        }
     }
 
     /* process digits */
-    while (*ptr && isdigit((unsigned char)*ptr)) {
-        int8 digit = (*ptr++ - '0');
+    for (;;) {
+        uint8 digit = *ptr - '0';
 
-        if (unlikely(pg_mul_s16_overflow(tmp, 10, &tmp)) || unlikely(pg_sub_s16_overflow(tmp, digit, &tmp)))
+        if (digit >= 10) {
+            break;
+        }
+
+        ptr++;
+
+        if (unlikely(tmp > -(PG_INT16_MIN / 10))) {
             goto out_of_range;
+        }
+
+        tmp = tmp * 10 + digit;
     }
 
     /* allow trailing whitespace, but not other trailing chars */
-    while (*ptr != '\0' && isspace((unsigned char)*ptr)) {
+    while (std::isspace(static_cast<unsigned char>(*ptr))) {
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
         goto invalid_syntax;
-
-    if (!neg) {
-        /* could fail if input is most negative number */
-        if (unlikely(tmp == PG_INT16_MIN))
-            goto out_of_range;
-        tmp = -tmp;
     }
 
-    return tmp;
+    if (neg) {
+        int16 result;
+        if (unlikely(pg_neg_u16_overflow(tmp, &result))) {
+            goto out_of_range;
+        }
+        return result;
+    }
+
+    if (unlikely(tmp > PG_INT16_MAX)) {
+        goto out_of_range;
+    }
+
+    return (int16)tmp;
 
 out_of_range:
     if (!can_ignore) {
@@ -266,19 +282,15 @@ invalid_syntax:
  *
  * Allows any number of leading or trailing whitespace characters. Will throw
  * ereport() upon bad input format or overflow.
- *
- * NB: Accumulate input as a negative number, to deal with two's complement
- * representation of the most negative number, which can't be represented as a
- * positive number.
  */
 int32 pg_strtoint32(const char* s, bool can_ignore)
 {
     const char* ptr = s;
-    int32 tmp = 0;
+    uint32 tmp = 0;
     bool neg = false;
 
     /* skip leading spaces */
-    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+    while (isspace(static_cast<unsigned char>(*ptr))) {
         ptr++;
     }
 
@@ -286,41 +298,58 @@ int32 pg_strtoint32(const char* s, bool can_ignore)
     if (*ptr == '-') {
         ptr++;
         neg = true;
-    } else if (*ptr == '+')
+    } else if (*ptr == '+') {
         ptr++;
+    }
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
+        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT)) {
             goto invalid_syntax;
-        else if (DB_IS_CMPT(B_FORMAT))
-            return tmp;
+        } else if (DB_IS_CMPT(B_FORMAT)) {
+            return 0;
+        }
     }
 
     /* process digits */
-    while (*ptr && isdigit((unsigned char)*ptr)) {
-        int8 digit = (*ptr++ - '0');
+    for (;;) {
+        uint8 digit = *ptr - '0';
 
-        if (unlikely(pg_mul_s32_overflow(tmp, 10, &tmp)) || unlikely(pg_sub_s32_overflow(tmp, digit, &tmp)))
+        if (digit >= 10) {
+            break;
+        }
+
+        ptr++;
+
+        if (unlikely(tmp > -(PG_INT32_MIN / 10))) {
             goto out_of_range;
+        }
+
+        tmp = tmp * 10 + digit;
     }
 
     /* allow trailing whitespace, but not other trailing chars */
-    while (*ptr != '\0' && isspace((unsigned char)*ptr)) {
+    while (isspace(static_cast<unsigned char>(*ptr))) {
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+    if (unlikely(*ptr != '\0') && !DB_IS_CMPT(B_FORMAT)) {
         goto invalid_syntax;
-
-    if (!neg) {
-        /* could fail if input is most negative number */
-        if (unlikely(tmp == PG_INT32_MIN))
-            goto out_of_range;
-        tmp = -tmp;
     }
 
-    return tmp;
+    if (neg) {
+        int32 result;
+        if (unlikely(pg_neg_u32_overflow(tmp, &result))) {
+            goto out_of_range;
+        }
+        return result;
+    }
+
+    if (unlikely(tmp > PG_INT32_MAX)) {
+        goto out_of_range;
+    }
+
+    return (int32)tmp;
 
 out_of_range:
     if (!can_ignore) {
@@ -338,19 +367,21 @@ invalid_syntax:
     return 0;
 }
 
-// pg_ctoa: converts a unsigned 8-bit integer to its string representation
-//
-// Caller must ensure that 'a' points to enough memory to hold the result
-// (at least 5 bytes, counting a leading sign and trailing NUL).
-//
-// It doesn't seem worth implementing this separately.
-void pg_ctoa(uint8 i, char* a)
+/*
+ * Converts a unsigned 8-bit integer to its string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result
+ * (at least 5 bytes, counting a leading sign and trailing NUL).
+ *
+ * It doesn't seem worth implementing this separately.
+ */
+void pg_ctoa(uint8 c, char* a)
 {
-    pg_ltoa((int32)i, a);
+    pg_ltoa((int32)c, a);
 }
 
 /*
- * pg_itoa: converts a signed 16-bit integer to its string representation
+ * Converts a signed 16-bit integer to its string representation
  *
  * Caller must ensure that 'a' points to enough memory to hold the result
  * (at least 7 bytes, counting a leading sign and trailing NUL).
@@ -363,86 +394,34 @@ void pg_itoa(int16 i, char* a)
 }
 
 /*
- * pg_ltoa: converts a signed 32-bit integer to its string representation
+ * Converts an unsigned 32-bit integer to its string representation,
+ * not NUL-terminated, and returns the length of that string representation
  *
- * Caller must ensure that 'a' points to enough memory to hold the result
- * (at least 12 bytes, counting a leading sign and trailing NUL).
+ * Caller must ensure that 'a' points to enough memory to hold the result (at
+ * least 10 bytes)
  */
-void pg_ltoa(int32 value, char* a)
+static inline int pg_ultoa_n(uint32 value, char* a)
 {
-    char* start = a;
-    bool neg = false;
-    errno_t ss_rc;
-
-    if (a == NULL)
-        return;
-
-    /*
-     * Avoid problems with the most negative integer not being representable
-     * as a positive integer.
-     */
-    if (value == (-2147483647 - 1)) {
-        const int a_len = 12;
-        ss_rc = memcpy_s(a, a_len, "-2147483648", a_len);
-        securec_check(ss_rc, "\0", "\0");
-        return;
-    } else if (value < 0) {
-        value = -value;
-        neg = true;
-    }
-
-    /* Compute the result string backwards. */
-    do {
-        int32 remainder;
-        int32 oldval = value;
-
-        value /= 10;
-        remainder = oldval - value * 10;
-        *a++ = '0' + remainder;
-    } while (value != 0);
-
-    if (neg)
-        *a++ = '-';
-
-    /* Add trailing NUL byte, and back up 'a' to the last character. */
-    *a-- = '\0';
-
-    /* Reverse string. */
-    while (start < a) {
-        char swap = *start;
-
-        *start++ = *a;
-        *a-- = swap;
-    }
-}
-
-char *pg_ltoa2(int32 value, int *len)
-{
-    u_sess->utils_cxt.int4output_buffer[0] = '\0';
-    char *a = u_sess->utils_cxt.int4output_buffer;
-    int olength = 0, i = 0;
-
-    if (value < 0) {
-        value = 0 - value;
-        a[olength++] = '-';
-    }
+    int i = 0;
 
     /* Degenerate case */
     if (value == 0) {
         *a = '0';
-        *len = 1;
-        return u_sess->utils_cxt.int4output_buffer;
+        return 1;
     }
 
-    olength = decimalLength32(value);
+    int olength = decimalLength32(value);
 
-    /* Compute the result string. */
+    /*
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * better performance.
+     */
     while (value >= 10000) {
         const uint32 c = value - 10000 * (value / 10000);
         const uint32 c0 = (c % 100) << 1;
         const uint32 c1 = (c / 100) << 1;
 
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         value /= 10000;
 
@@ -453,7 +432,7 @@ char *pg_ltoa2(int32 value, int *len)
     if (value >= 100) {
         const uint32 c = (value % 100) << 1;
 
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         value /= 100;
 
@@ -463,107 +442,89 @@ char *pg_ltoa2(int32 value, int *len)
     if (value >= 10) {
         const uint32 c = value << 1;
 
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         memcpy(pos - 2, DIGIT_TABLE + c, 2);
     } else {
         *a = (char)('0' + value);
     }
 
-    *len = olength;
-    a[olength] = '\0';
-
-    return u_sess->utils_cxt.int4output_buffer;
+    return olength;
 }
 
 /*
- * pg_lltoa: convert a signed 64-bit integer to its string representation
+ * Converts a signed 32-bit integer to its string representation,
+ * not NUL-terminated, and returns the length of that string representation
  *
- * Caller must ensure that 'a' points to enough memory to hold the result
- * (at least MAXINT8LEN+1 bytes, counting a leading sign and trailing NUL).
+ * Caller must ensure that 'a' points to enough memory to hold the result (at
+ * least 11 bytes)
  */
-void pg_lltoa(int64 value, char* a)
+static inline int pg_ltoa_n(int32 value, char* a)
 {
-    char* start = a;
-    bool neg = false;
-
-    if (a == NULL) {
-        return;
-    }
-
-    /*
-     * Avoid problems with the most negative integer not being representable
-     * as a positive integer.
-     */
-    if (value == (-INT64CONST(0x7FFFFFFFFFFFFFFF) - 1)) {
-        const int a_len = 21;
-        errno_t ss_rc = memcpy_s(a, a_len, "-9223372036854775808", a_len);
-        securec_check(ss_rc, "\0", "\0");
-        return;
-    } else if (value < 0) {
-        value = -value;
-        neg = true;
-    }
-
-    /* Compute the result string backwards. */
-    do {
-        int64 remainder;
-        int64 oldval = value;
-
-        value /= 10;
-        remainder = oldval - value * 10;
-        *a++ = '0' + remainder;
-    } while (value != 0);
-
-    if (neg) {
-        *a++ = '-';
-    }
-
-    /* Add trailing NUL byte, and back up 'a' to the last character. */
-    *a-- = '\0';
-
-    /* Reverse string. */
-    while (start < a) {
-        char swap = *start;
-
-        *start++ = *a;
-        *a-- = swap;
-    }
-}
-
-char *pg_lltoa2(int64 value, int *len)
-{
-    u_sess->utils_cxt.int8output_buffer[0] = '\0';
-    char *a = u_sess->utils_cxt.int8output_buffer;
-    int olength = 0, i = 0;
+    uint32 uvalue = (uint32)value;
+    int len = 0;
 
     if (value < 0) {
-        value = 0 - value;
-        a[olength++] = '-';
+        uvalue = (uint32)0 - uvalue;
+        a[len++] = '-';
     }
+
+    len += pg_ultoa_n(uvalue, a + len);
+
+    return len;
+}
+
+/*
+ * Converts a signed 32-bit integer to its string representation
+ *
+ * @param a The buffer to output conversion result. Caller must ensure
+ * that `a` points to enough memory to hold the result (at least 12
+ * bytes, counting a leading sign and trailing NUL).
+ */
+void pg_ltoa(int32 value, char* a)
+{
+    int len = pg_ltoa_n(value, a);
+    a[len] = '\0';
+}
+
+void pg_ltoa(int32 value, char* a, int* len)
+{
+    *len = pg_ltoa_n(value, a);
+    a[*len] = '\0';
+}
+
+/*
+ * Get the decimal representation, not NUL-terminated, and return the length of
+ * same. Caller must ensure that a points to at least MAXINT8LEN bytes.
+ */
+static inline int pg_ulltoa_n(uint64 value, char* a)
+{
+    int i = 0;
 
     /* Degenerate case */
     if (value == 0) {
         *a = '0';
-        *len = 1;
-        return u_sess->utils_cxt.int8output_buffer;
+        return 1;
     }
 
-    olength = decimalLength64(value);
+    int olength = decimalLength64(value);
 
-    /* Compute the result string. */
+    /*
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * better performance.
+     */
     while (value >= 100000000) {
         const uint64 q = value / 100000000;
-        uint32 value2 = (uint32)(value - 100000000 * q);
+        uint32 value3 = (uint32)(value - 100000000 * q);
 
-        const uint32 c = value2 % 10000;
-        const uint32 d = value2 / 10000;
+        const uint32 c = value3 % 10000;
+        const uint32 d = value3 / 10000;
         const uint32 c0 = (c % 100) << 1;
         const uint32 c1 = (c / 100) << 1;
         const uint32 d0 = (d % 100) << 1;
         const uint32 d1 = (d / 100) << 1;
 
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         value = q;
 
@@ -582,7 +543,7 @@ char *pg_lltoa2(int64 value, int *len)
         const uint32 c0 = (c % 100) << 1;
         const uint32 c1 = (c / 100) << 1;
 
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         value2 /= 10000;
 
@@ -592,7 +553,7 @@ char *pg_lltoa2(int64 value, int *len)
     }
     if (value2 >= 100) {
         const uint32 c = (value2 % 100) << 1;
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         value2 /= 100;
 
@@ -601,16 +562,51 @@ char *pg_lltoa2(int64 value, int *len)
     }
     if (value2 >= 10) {
         const uint32 c = value2 << 1;
-        char *pos = a + olength - i;
+        char* pos = a + olength - i;
 
         memcpy(pos - 2, DIGIT_TABLE + c, 2);
-    } else
+    } else {
         *a = (char)('0' + value2);
+    }
 
-    *len = olength;
-    a[olength] = '\0';
+    return olength;
+}
 
-    return u_sess->utils_cxt.int8output_buffer;
+/*
+ * Get the decimal representation, not NUL-terminated, and return the length of
+ * same.  Caller must ensure that a points to at least MAXINT8LEN bytes.
+ */
+static inline int pg_lltoa_n(int64 value, char* a)
+{
+    uint64 uvalue = value;
+    int len = 0;
+
+    if (value < 0) {
+        uvalue = (uint64)0 - uvalue;
+        a[len++] = '-';
+    }
+
+    len += pg_ulltoa_n(uvalue, a + len);
+
+    return len;
+}
+
+/*
+ * Convert a signed 64-bit integer to its string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result
+ * (at least MAXINT8LEN+1 bytes, counting a leading sign and trailing NUL).
+ */
+void pg_lltoa(int64 value, char* a)
+{
+    int len = pg_lltoa_n(value, a);
+    a[len] = '\0';
+}
+
+void pg_lltoa(int64 value, char* a, int* len)
+{
+    *len = pg_lltoa_n(value, a);
+    a[*len] = '\0';
 }
 
 /*
@@ -668,66 +664,6 @@ void pg_i128toa(int128 value, char* a, int length)
 }
 
 /*
- * pg_ultoa_n: converts an unsigned 32-bit integer to its string representation,
- * not NUL-terminated, and returns the length of that string representation
- *
- * Caller must ensure that 'a' points to enough memory to hold the result (at
- * least 10 bytes)
- */
-int pg_ultoa_n(uint32 value, char *a)
-{
-    int olength, i = 0;
-
-    /* Degenerate case */
-    if (value == 0) {
-        *a = '0';
-        return 1;
-    }
-
-    olength = decimalLength32(value);
-
-    /* Compute the result string. */
-    while (value >= 10000) {
-        const uint32 c = value - 10000 * (value / 10000);
-        const uint32 c0 = (c % 100) << 1;
-        const uint32 c1 = (c / 100) << 1;
-
-        char *pos = a + olength - i;
-
-        value /= 10000;
-
-        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c0, 2);
-        securec_check(rc, "\0", "\0");
-        rc = memcpy_sp(pos - 4, 2, DIGIT_TABLE + c1, 2);
-        securec_check(rc, "\0", "\0");
-        i += 4;
-    }
-    if (value >= 100) {
-        const uint32 c = (value % 100) << 1;
-
-        char *pos = a + olength - i;
-
-        value /= 100;
-
-        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
-        securec_check(rc, "\0", "\0");
-        i += 2;
-    }
-    if (value >= 10) {
-        const uint32 c = value << 1;
-
-        char *pos = a + olength - i;
-
-        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
-        securec_check(rc, "\0", "\0");
-    } else {
-        *a = (char)('0' + value);
-    }
-
-    return olength;
-}
-
-/*
  * pg_ultostr
  *		Converts 'value' into a decimal string representation stored at 'str'.
  *
@@ -745,36 +681,37 @@ int pg_ultoa_n(uint32 value, char *a)
  * Note: Caller must ensure that 'str' points to enough memory to hold the
  * result.
  */
-char *
-pg_ultostr(char *str, uint32 value)
+char* pg_ultostr(char* str, uint32 value)
 {
-	int			len = pg_ultoa_n(value, str);
+    int len = pg_ultoa_n(value, str);
 
-	return str + len;
+    return str + len;
 }
 
-// Converts 'value' into a decimal string representation stored at 'str'.
-// 'min_width' specifies the minimum width of the result; any extra space
-// is filled up by prefixing the number with zeros.
-//
-// Returns the ending address of the string result (the last character written
-// plus 1).  Note that no NUL terminator is written.
-//
-// The intended use-case for this function is to build strings that contain
-// multiple individual numbers, for example:
-//
-// ```cpp
-// str = pg_ultostr_zeropad(str, hours, 2);
-// *str++ = ':';
-// str = pg_ultostr_zeropad(str, mins, 2);
-// *str++ = ':';
-// str = pg_ultostr_zeropad(str, secs, 2);
-// *str = '\0';
-// ```
-//
-// Note: Caller must ensure that 'str' points to enough memory to hold the
-// result
-char *pg_ultostr_zeropad(char *str, uint32 value, int min_width)
+/*
+ * Converts 'value' into a decimal string representation stored at 'str'.
+ * 'min_width' specifies the minimum width of the result; any extra space
+ * is filled up by prefixing the number with zeros.
+ *
+ * Returns the ending address of the string result (the last character written
+ * plus 1).  Note that no NUL terminator is written.
+ *
+ * The intended use-case for this function is to build strings that contain
+ * multiple individual numbers, for example:
+ *
+ * ```cpp
+ * str = pg_ultostr_zeropad(str, hours, 2);
+ * *str++ = ':';
+ * str = pg_ultostr_zeropad(str, mins, 2);
+ * *str++ = ':';
+ * str = pg_ultostr_zeropad(str, secs, 2);
+ * *str = '\0';
+ * ```
+ *
+ * Note: Caller must ensure that 'str' points to enough memory to hold the
+ * result
+ */
+char* pg_ultostr_zeropad(char* str, uint32 value, int min_width)
 {
     int len;
     errno_t rc = EOK;
@@ -782,8 +719,9 @@ char *pg_ultostr_zeropad(char *str, uint32 value, int min_width)
     Assert(min_width > 0);
 
     len = pg_ultoa_n(value, str);
-    if (len >= min_width)
+    if (len >= min_width) {
         return str + len;
+    }
 
     rc = memmove_s(str + min_width - len, len, str, len);
     securec_check(rc, "\0", "\0");

@@ -18,7 +18,9 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include <math.h>
+
+#include <cmath>
+#include <limits>
 
 #include "access/gist.h"
 #include "access/skey.h"
@@ -76,8 +78,8 @@ static double size_box(const BOX *box)
     * and a non-NaN is infinite.  Note the previous check eliminated the
     * possibility that the low fields are NaNs.
     */
-   if (isnan(box->high.x) || isnan(box->high.y)) {
-       return get_float8_infinity();
+    if (std::isnan(box->high.x) || std::isnan(box->high.y)) {
+        return std::numeric_limits<double>::infinity();
     }
    return (box->high.x - box->low.x) * (box->high.y - box->low.y);
 }

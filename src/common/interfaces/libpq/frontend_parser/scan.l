@@ -34,7 +34,6 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <string>
-#include "datatypes.h"
 #include "nodes/pg_list.h"
 #include "nodes/feparser_memutils.h"
 
@@ -42,7 +41,6 @@
 #include "parser/scansup.h"
 
 #include "mb/pg_wchar.h"
-#include "datatypes.h"
 #include "nodes/primnodes.h"
 #include "nodes/value.h"
 #include "catalog/pg_attribute.h"

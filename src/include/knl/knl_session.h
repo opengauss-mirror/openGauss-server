@@ -671,7 +671,8 @@ typedef struct knl_u_utils_context {
     /* printtup output buffer instead of functioncall */
     char* int4output_buffer;
     char* int8output_buffer;
-    char* int16output_buffer;
+    char* float4output_buffer;
+    char* float8output_buffer;
     char* varcharoutput_buffer;
     char* numericoutput_buffer;
     char* dateoutput_buffer;
