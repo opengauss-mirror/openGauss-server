@@ -1942,8 +1942,13 @@ void SendRecoveryEndMarkToWorkersAndWaitForReach(int code)
         PageRedoPipeline *pl = g_dispatcher->pageLines;
 
         /* Read finish, need to check if can go to Phase two */
-        XLogRecPtr lastReadEndPtr = g_dispatcher->readLine.readPageThd->lastReplayedEndRecPtr;
+        XLogRecPtr lastReplayedEndPtr = g_dispatcher->readLine.readPageThd->lastReplayedEndRecPtr;
 
+        /* Align lsn for pageredo threads in ondemand extreme rto if we do early exit */
+        if (unlikely(DoEarlyExit())) {
+            lastReplayedEndPtr = t_thrd.xlog_cxt.EndRecPtr;
+            StartupSendLsnForwarder(lastReplayedEndPtr);
+        }
         /* Wait for trxn finished replay and redo hash table complete */
         while (true) {
             XLogRecPtr trxnCompletePtr = GetCompletedRecPtr(g_dispatcher->trxnLine.redoThd);
@@ -1959,8 +1964,8 @@ void SendRecoveryEndMarkToWorkersAndWaitForReach(int code)
                 }
             }
             ereport(DEBUG1, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
-                        lastReadEndPtr, trxnCompletePtr, pageMngrCompletePtr)));
-            if (XLByteEQ(trxnCompletePtr, lastReadEndPtr) && XLByteEQ(pageMngrCompletePtr, lastReadEndPtr)) {
+                                    lastReplayedEndPtr, trxnCompletePtr, pageMngrCompletePtr)));
+            if (XLByteEQ(trxnCompletePtr, lastReplayedEndPtr) && XLByteEQ(pageMngrCompletePtr, lastReplayedEndPtr)) {
                 break;
             }
 

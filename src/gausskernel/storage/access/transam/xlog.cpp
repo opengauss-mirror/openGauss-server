@@ -187,6 +187,7 @@
 #define CASCADE_STANDBY_SIGNAL_FILE "cascade_standby"
 #define XLOG_SWITCH_HISTORY_FILE "switch.history"
 #define MAX_PATH_LEN 1024
+#define MAX_BACKUP_LEN 1024
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
 
@@ -2337,7 +2338,7 @@ static bool XLogArchiveIsBusy(const char *xlog)
      * implies it has already been archived, and explains why we can't see a
      * status file for it.
      */
-    errorno = snprintf_s(archiveStatusPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
+    errorno = snprintf_s(archiveStatusPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlog);
     securec_check_ss(errorno, "", "");
 
     if (stat(archiveStatusPath, &stat_buf) != 0 && errno == ENOENT) {
@@ -4620,10 +4621,10 @@ static int XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli, int source, 
 
         return fd;
     }
-    
+
     if (!FILE_POSSIBLY_DELETED(errno) || !notfoundOk) { /* unexpected failure? */
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
+            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
     }
     return -1;
 }
@@ -4678,8 +4679,11 @@ int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources)
     securec_check_ss(errorno, "", "");
 
     errno = ENOENT;
-    ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
-                                                      XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
+    if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
+            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
+    }
+
     return -1;
 }
 
@@ -4724,7 +4728,7 @@ static void KeepFileRestoredFromArchive(const char *path, const char *xlogfname)
     struct stat statbuf;
     errno_t errorno = EOK;
 
-    errorno = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlogfname);
+    errorno = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlogfname);
     securec_check_ss(errorno, "", "");
 
     if (stat(xlogfpath, &statbuf) == 0) {
@@ -4838,7 +4842,7 @@ static bool RestoreArchivedFile(char *path, const char *xlogfname, const char *r
      * copy-from-archive filename is always the same, ensuring that we don't
      * run out of disk space on long recoveries.
      */
-    errorno = snprintf_s(xlogpath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", recovername);
+    errorno = snprintf_s(xlogpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, recovername);
     securec_check_ss(errorno, "", "");
     /*
      * Make sure there is no existing file named recovername.
@@ -5029,7 +5033,7 @@ not_available:
      * In many recovery scenarios we expect this to fail also, but if so that
      * just means we've reached the end of WAL.
      */
-    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlogfname);
+    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlogfname);
     securec_check_ss(errorno, "", "");
 
     return false;
@@ -5451,27 +5455,22 @@ static void RemoveXlogFile(const char *segname, XLogRecPtr endptr)
  */
 static void ValidateXLOGDirectoryStructure(void)
 {
-    char path[MAXPGPATH];
     struct stat stat_buf;
-    errno_t errorno = EOK;
 
     /* Check for pg_xlog; if it doesn't exist, error out */
     if (stat(SS_XLOGDIR, &stat_buf) != 0 || !S_ISDIR(stat_buf.st_mode))
         ereport(FATAL, (errmsg("required WAL directory \"%s\" does not exist", SS_XLOGDIR)));
 
     /* Check for archive_status */
-    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/archive_status");
-    securec_check_ss(errorno, "", "");
-
-    if (stat(path, &stat_buf) == 0) {
+    if (stat(ARCHIVEDIR, &stat_buf) == 0) {
         /* Check for weird cases where it exists but isn't a directory */
         if (!S_ISDIR(stat_buf.st_mode)) {
-            ereport(FATAL, (errmsg("required WAL directory \"%s\" does not exist", path)));
+            ereport(FATAL, (errmsg("required WAL directory \"%s\" does not exist", ARCHIVEDIR)));
         }
     } else {
-        ereport(LOG, (errmsg("creating missing WAL directory \"%s\"", path)));
-        if (mkdir(path, S_IRWXU) < 0) {
-            ereport(FATAL, (errmsg("could not create missing directory \"%s\": %s", path, TRANSLATE_ERRNO)));
+        ereport(LOG, (errmsg("creating missing WAL directory \"%s\"", ARCHIVEDIR)));
+        if (mkdir(ARCHIVEDIR, S_IRWXU) < 0) {
+            ereport(FATAL, (errmsg("could not create missing directory \"%s\": %s", ARCHIVEDIR, TRANSLATE_ERRNO)));
         }
     }
 }
@@ -5488,10 +5487,11 @@ static void CleanupBackupHistory(void)
     char path[MAXPGPATH];
     errno_t errorno = EOK;
 
-    xldir = AllocateDir(XLOGDIR);
+    xldir = AllocateDir(SS_XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
+                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s",
+                    SS_XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL) {
@@ -5499,7 +5499,7 @@ static void CleanupBackupHistory(void)
             strcmp(xlde->d_name + strlen(xlde->d_name) - strlen(".backup"), ".backup") == 0) {
             if (XLogArchiveCheckDone(xlde->d_name)) {
                 ereport(DEBUG2, (errmsg("removing transaction log backup history file \"%s\"", xlde->d_name)));
-                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlde->d_name);
+                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlde->d_name);
                 securec_check_ss(errorno, "", "");
 
                 unlink(path);
@@ -5707,7 +5707,14 @@ void UpdateMinrecoveryInAchive()
 {
     volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
     XLogRecPtr newMinRecoveryPoint;
-    extreme_rto::PushToWorkerLsn(true);
+    /*
+     * we only push g_GlobalLsnForwarder once in ondemand extreme rto,
+     * and we already do that in OnDemandSendRecoveryEndMarkToWorkersAndWaitForReach,
+     * so skit it.
+     */
+    if (IsDefaultExtremeRtoMode()) {
+        extreme_rto::PushToWorkerLsn(true);
+    }
     /* initialize minRecoveryPoint to this record */
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_ARCHIVE_RECOVERY;
@@ -5759,7 +5766,7 @@ List *readTimeLineHistory(TimeLineID targetTLI)
         securec_check_ss(errorno, "", "");
         fromArchive = RestoreArchivedFile(path, histfname, "RECOVERYHISTORY", 0);
     } else {
-        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X.history", targetTLI);
+        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X.history", SS_XLOGDIR, targetTLI);
         securec_check_ss(errorno, "", "");
     }
 
@@ -5857,7 +5864,7 @@ static bool existsTimeLineHistory(TimeLineID probeTLI)
         securec_check_ss(errorno, "", "");
         RestoreArchivedFile(path, histfname, "RECOVERYHISTORY", 0);
     } else {
-        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X.history", probeTLI);
+        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X.history", SS_XLOGDIR, probeTLI);
         securec_check_ss(errorno, "", "");
     }
 
@@ -7407,12 +7414,12 @@ static void exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endLogSegNo)
         char path[MAXPGPATH];
         char tmppath[MAXPGPATH];
 
-        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", endTLI,
+        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, endTLI,
                              (uint32)((endLogSegNo) / XLogSegmentsPerXLogId),
                              (uint32)((endLogSegNo) % XLogSegmentsPerXLogId));
         securec_check_ss(errorno, "", "");
 
-        errorno = snprintf_s(tmppath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/xlogtemp.%lu", gs_thread_self());
+        errorno = snprintf_s(tmppath, MAXPGPATH, MAXPGPATH - 1, "%s/xlogtemp.%lu", SS_XLOGDIR, gs_thread_self());
         securec_check_ss(errorno, "\0", "\0");
 
         XLogFileCopy(path, tmppath);
@@ -7443,12 +7450,12 @@ static void exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endLogSegNo)
     XLogArchiveCleanup(xlogpath);
 
     // Since there might be a partial WAL segment named RECOVERYXLOG, get rid of it.
-    errorno = snprintf_s(recoveryPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/RECOVERYXLOG");
+    errorno = snprintf_s(recoveryPath, MAXPGPATH, MAXPGPATH - 1, "%s/RECOVERYXLOG", SS_XLOGDIR);
     securec_check_ss(errorno, "", "");
     unlink(recoveryPath); /* ignore any error */
 
     /* Get rid of any remaining recovered timeline-history file, too */
-    errorno = snprintf_s(recoveryPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/RECOVERYHISTORY");
+    errorno = snprintf_s(recoveryPath, MAXPGPATH, MAXPGPATH - 1, "%s/RECOVERYHISTORY", SS_XLOGDIR);
     securec_check_ss(errorno, "", "");
     unlink(recoveryPath); /* ignore any error */
 
@@ -7493,10 +7500,11 @@ static void RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 
     XLByteToPrevSeg(switchpoint, endLogSegNo);
 
-    xldir = AllocateDir(XLOGDIR);
+    xldir = AllocateDir(SS_XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
+                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s",
+                    SS_XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     // Construct a filename of the last segment to be kept.
@@ -7570,8 +7578,7 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
     char XLogFilePath[MAX_PATH_LEN] = {0};
     errno_t rc = EOK;
 
-    rc = snprintf_s(XLogFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/pg_xlog/%s", t_thrd.proc_cxt.DataDir,
-                    xlogFileName);
+    rc = snprintf_s(XLogFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", SS_XLOGDIR, xlogFileName);
     securec_check_ss(rc, "", "");
 
     if (xlogOff > 0) {
@@ -7616,11 +7623,11 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
     DIR *xldir = NULL;
     struct dirent *xlde = NULL;
 
-    xldir = AllocateDir(XLOGDIR);
+    xldir = AllocateDir(SS_XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
             (errcode_for_file_access(), 
-                errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
+                errmsg("could not open transaction log directory \"%s\": %s", SS_XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL) {
@@ -7630,7 +7637,7 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
         }
 
         if (strcmp(xlde->d_name, xlogFileName) > 0 || (xlogOff == 0 && strcmp(xlde->d_name, xlogFileName) == 0)) {
-            rc = snprintf_s(XLogFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, XLOGDIR "/%s", xlde->d_name);
+            rc = snprintf_s(XLogFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", SS_XLOGDIR, xlde->d_name);
             securec_check_ss(rc, "", "");
             rc = unlink(XLogFilePath);
             if (rc != 0) {
@@ -8488,12 +8495,8 @@ void ResourceManagerStop(void)
             errorno = memcpy_s((_oldXlogReader)->readBuf, XLOG_BLCKSZ, (_xlogreader)->readBuf, \
                                (_oldXlogReader)->readLen);                                     \
             securec_check(errorno, "", "");                                                    \
-            if (ENABLE_DSS && ENABLE_DMS && (_xlogreader)->preReadBuf != NULL) {               \
-                (_oldXlogReader)->preReadStartPtr = (_xlogreader)->preReadStartPtr;            \
-                errorno = memcpy_s((_oldXlogReader)->preReadBuf, XLogPreReadSize,              \
-                    (_xlogreader)->preReadBuf, XLogPreReadSize);                               \
-                securec_check(errorno, "", "");                                                \
-            }                                                                                  \
+            (_oldXlogReader)->preReadStartPtr = InvalidXLogRecPtr;                             \
+            (_oldXlogReader)->preReadBuf = NULL;                                               \
             ResetDecoder(_oldXlogReader);                                                      \
             (_xlogreader) = (_oldXlogReader);                                                  \
         }                                                                                      \
@@ -11195,9 +11198,10 @@ void SetSwitchHistoryFile(XLogRecPtr switchLsn, XLogRecPtr catchLsn, uint32 term
     info.latestCompletedXid = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
     info.invaildPageCnt = t_thrd.xlog_cxt.invaildPageCnt;
     info.imcompleteActionCnt = t_thrd.xlog_cxt.imcompleteActionCnt;
-    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%s", termId, XLOG_SWITCH_HISTORY_FILE);
+    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%s", SS_XLOGDIR, termId, XLOG_SWITCH_HISTORY_FILE);
     securec_check_ss(errorno, "", "");
-    errorno = snprintf_s(tmpPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%s.temp", termId, XLOG_SWITCH_HISTORY_FILE);
+    errorno = snprintf_s(tmpPath, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%s.temp",
+        SS_XLOGDIR,termId, XLOG_SWITCH_HISTORY_FILE);
     securec_check_ss(errorno, "", "");
 
     ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -13498,11 +13502,11 @@ static void search_archive_keeper(XlogKeeper *xlogkeeper)
         return;
     
 
-    xldir = AllocateDir(XLOGDIR "/archive_status");
+    xldir = AllocateDir(ARCHIVEDIR);
     if (xldir == NULL) {
         ereport(ERROR,
                 (errcode_for_file_access(),
-                errmsg("could not open transaction log directory \"%s\"/archive_status: %m", XLOGDIR)));
+                errmsg("could not open transaction log directory \"%s\": %m", ARCHIVEDIR)));
     }
     /*
      * .ready is marking wal files need to be archive and .done are ones finished archive.
@@ -15114,6 +15118,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
     XLogRecPtr stoppoint;
     pg_time_t stamp_time;
     char strfbuf[128];
+    char backupbuf[MAX_BACKUP_LEN] = {0};
     char histfilepath[MAXPGPATH];
     char startxlogfilename[MAXFNAMELEN];
     char stopxlogfilename[MAXFNAMELEN];
@@ -15385,7 +15390,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
      * Write the backup history file
      */
     XLByteToSeg(startpoint, _logSegNo);
-    errorno = snprintf_s(histfilepath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X.%08X.backup",
+    errorno = snprintf_s(histfilepath, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X.%08X.backup", SS_XLOGDIR,
                          t_thrd.xlog_cxt.ThisTimeLineID, (uint32)((_logSegNo) / XLogSegmentsPerXLogId),
                          (uint32)((_logSegNo) % XLogSegmentsPerXLogId), (uint32)(startpoint % XLogSegSize));
     securec_check_ss(errorno, "", "");
@@ -15394,12 +15399,17 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
     if (fp == NULL) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", histfilepath, TRANSLATE_ERRNO)));
     }
-    fprintf(fp, "START WAL LOCATION: %X/%X (file %s)\n", (uint32)(startpoint >> 32), (uint32)startpoint,
-            startxlogfilename);
-    fprintf(fp, "STOP WAL LOCATION: %X/%X (file %s)\n", (uint32)(stoppoint >> 32), (uint32)stoppoint, stopxlogfilename);
-    /* transfer remaining lines from label to history file */
-    fprintf(fp, "%s", remaining);
-    fprintf(fp, "STOP TIME: %s\n", strfbuf);
+    errorno = snprintf_s(backupbuf, MAX_BACKUP_LEN, MAX_BACKUP_LEN - 1,
+                    "START WAL LOCATION: %X/%X (file %s)\n"
+                    "STOP WAL LOCATION: %X/%X (file %s)\n"
+                    "%s"
+                    "STOP TIME: %s\n",
+                    (uint32)(startpoint >> 32), (uint32)startpoint, startxlogfilename,
+                    (uint32)(stoppoint >> 32), (uint32)stoppoint, stopxlogfilename,
+                    remaining,
+                    strfbuf);
+    securec_check_ss(errorno, "", "");
+    fwrite(backupbuf, MAX_BACKUP_LEN, 1, fp);
     if (fflush(fp) || ferror(fp) || FreeFile(fp)) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %s", histfilepath, TRANSLATE_ERRNO)));
     }
@@ -19893,7 +19903,7 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
             sources |= XLOG_FROM_ARCHIVE;
         }
 
-        t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
+        t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
 
         if (t_thrd.xlog_cxt.readFile < 0) {
             return -1;
@@ -19913,10 +19923,11 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
     if (xlogreader->preReadBuf == NULL) {
-        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
+        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
+                                    t_thrd.xlog_cxt.readOff);
     } else {
-        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen,
-                                                    t_thrd.xlog_cxt.readFile);
+        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf,
+                                                 t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readFile);
     }
 
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
@@ -19949,6 +19960,7 @@ next_record_is_invalid:
     t_thrd.xlog_cxt.readFile = -1;
     t_thrd.xlog_cxt.readLen = 0;
     t_thrd.xlog_cxt.readSource = 0;
+    t_thrd.xlog_cxt.recoveryTriggered = true;
 
     return -1;
 }
@@ -20224,9 +20236,9 @@ retry:
 
 needread:
     if (t_thrd.xlog_cxt.readFile < 0) {
-        t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
+        t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
         if (t_thrd.xlog_cxt.readFile < 0) {
-            ereport(LOG, (errmsg("%s open failed, change xlog file.", xlog_path)));
+            ereport(LOG, (errmsg("%s open failed, change xlog file.", SS_XLOGDIR)));
             goto next_record_is_invalid;
         }
     }
@@ -20239,7 +20251,7 @@ needread:
     }
 
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
-        ereport(LOG, (errmsg("%s read failed, change xlog file.", xlog_path)));
+        ereport(LOG, (errmsg("%s read failed, change xlog file.", SS_XLOGDIR)));
         goto next_record_is_invalid;
     }
 
@@ -20278,7 +20290,7 @@ triggered:
 }
 
 static int SSStreamReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-                    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)                   
+                    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path)
 {
     /* Load reader private data */
     XLogPageReadPrivate *readprivate = (XLogPageReadPrivate*)xlogreader->private_data;
@@ -20396,8 +20408,8 @@ retry:
                          * isn't changed.
                          */
                         if (t_thrd.xlog_cxt.readFile < 0) {
-                            t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode,
-                                                                            XLOG_FROM_STREAM, xlog_path);
+                            t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode,
+                                                                            XLOG_FROM_STREAM);
                             Assert(t_thrd.xlog_cxt.readFile >= 0);
                         } else {
                             t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
@@ -20551,8 +20563,7 @@ retry:
                     }
                     /* Don't try to read from a source that just failed */
                     sources &= ~t_thrd.xlog_cxt.failedSources;
-                    t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode,
-                                                                    sources, xlog_path);
+                    t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
                     if (t_thrd.xlog_cxt.readFile >= 0) {
                         break;
                     }
@@ -20618,7 +20629,7 @@ retry:
                     sources |= XLOG_FROM_ARCHIVE;
                 }
 
-                t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
+                t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
                 if (t_thrd.xlog_cxt.readFile < 0) {
                     return -1;
                 }
@@ -20641,7 +20652,7 @@ retry:
 
     actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
     if (actualBytes != XLOG_BLCKSZ) {
-        ereport(LOG, (errmsg("%s read failed", xlog_path)));
+        ereport(LOG, (errmsg("%s read failed", SS_XLOGDIR)));
         goto next_record_is_invalid;
     }
 
@@ -20680,11 +20691,11 @@ int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int re
 {
     int read_len;
     if (SS_DORADO_CLUSTER) {
-        read_len = SSDoradoReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, SS_XLOGDIR);
+        read_len = SSDoradoReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, xlog_path);
     } else if (SS_STREAM_MAIN_STANDBY_NODE) {
-        read_len = SSStreamReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, SS_XLOGDIR);
+        read_len = SSStreamReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, xlog_path);
     } else {
-        read_len = SSReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, SS_XLOGDIR);
+        read_len = SSReadXLog(xlogreader, targetPagePtr, reqLen, targetRecPtr, readBuf, readTLI, xlog_path);
     }
     return read_len;
 }

@@ -398,19 +398,19 @@ static char *archive_replication_get_xlog_prefix(XLogRecPtr recptr, bool onlyPat
                 return NULL;
             }
             rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s",
-                keyCN, XLOGDIR, xlogfname);
+                keyCN, SS_XLOGDIR, xlogfname);
             securec_check_ss_c(rc, "", "");
         } else if (noNeedKeyCN) {
             rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s",
-                g_instance.attr.attr_common.PGXCNodeName, XLOGDIR, xlogfname);
+                g_instance.attr.attr_common.PGXCNodeName, SS_XLOGDIR, xlogfname);
             securec_check_ss_c(rc, "", "");
         } else {
             rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s",
-                g_instance.attr.attr_common.PGXCNodeName, XLOGDIR, xlogfname);
+                g_instance.attr.attr_common.PGXCNodeName, SS_XLOGDIR, xlogfname);
             securec_check_ss_c(rc, "", "");
         }
     } else {
-        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlogfname);
+        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlogfname);
         securec_check_ss_c(rc, "", "");
     }
     pfree_ext(keyCN);
@@ -487,10 +487,10 @@ static char *archive_replication_get_last_xlog_slice(XLogRecPtr startPtr, bool o
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE), errmsg("There is no hadr_key_cn")));
             return NULL;
         }
-        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", keyCN, XLOGDIR);
+        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", keyCN, SS_XLOGDIR);
         securec_check_ss_c(rc, "", "");
     } else {
-        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s", XLOGDIR);
+        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s", SS_XLOGDIR);
         securec_check_ss_c(rc, "", "");
     }
 
@@ -653,7 +653,7 @@ int ArchiveReplicationAchiver(const ArchiveXlogMessage *xlogInfo)
     }
     XLogFileName(xlogfname, MAXFNAMELEN, DEFAULT_TIMELINE_ID, xlogSegno);
 
-    rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/" XLOGDIR "/%s", t_thrd.proc_cxt.DataDir, xlogfname);
+    rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlogfname);
     securec_check_ss(rc, "\0", "\0");
 
     canonicalize_path(xlogfpath);
@@ -783,7 +783,7 @@ void update_archive_start_end_location_file(XLogRecPtr endPtr, long endTime)
     }
     if (IS_PGXC_COORDINATOR) {
         rc = snprintf_s(xlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
-            g_instance.attr.attr_common.PGXCNodeName, XLOGDIR);
+            g_instance.attr.attr_common.PGXCNodeName, SS_XLOGDIR);
         securec_check_ss(rc, "\0", "\0");
         rc = snprintf_s(preFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s",
             obs_archive_slot->archive_config.archive_prefix, g_instance.attr.attr_common.PGXCNodeName, XLOGDIR);
@@ -792,7 +792,7 @@ void update_archive_start_end_location_file(XLogRecPtr endPtr, long endTime)
             g_instance.attr.attr_common.PGXCNodeName, OBS_ARCHIVE_STATUS_FILE);
         securec_check_ss(rc, "\0", "\0");
     } else {
-        rc = snprintf_s(xlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s", XLOGDIR);
+        rc = snprintf_s(xlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s", SS_XLOGDIR);
         securec_check_ss(rc, "\0", "\0");
         rc = snprintf_s(preFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
             obs_archive_slot->archive_config.archive_prefix, XLOGDIR);
@@ -916,10 +916,10 @@ int archive_replication_cleanup(XLogRecPtr recptr, ArchiveConfig *archive_config
         }
         if (IS_PGXC_COORDINATOR) {
             rc = snprintf_s(obsXlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s",
-                g_instance.attr.attr_common.PGXCNodeName, XLOGDIR, key);
+                g_instance.attr.attr_common.PGXCNodeName, SS_XLOGDIR, key);
             securec_check_ss_c(rc, "", "");
         } else {
-            rc = snprintf_s(obsXlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", XLOGDIR, key);
+            rc = snprintf_s(obsXlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, key);
             securec_check_ss_c(rc, "", "");
         }
         if (reverse) {

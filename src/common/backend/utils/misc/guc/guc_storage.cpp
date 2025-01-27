@@ -159,6 +159,7 @@
 #include "ddes/dms/ss_dms.h"
 #include "ddes/dms/ss_transaction.h"
 #include "storage/dss/dss_log.h"
+#include "storage/file/fio_device.h"
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 
@@ -278,6 +279,7 @@ static void assign_logical_decode_options_default(const char* newval, void* extr
 static bool check_uwal_devices_path(char** newval, void** extra, GucSource source);
 static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
 static void assign_recovery_parallelism(int newval, void* extra);
+static bool check_xLog_archive_dest(char** newval, void** extra, GucSource source);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -4576,7 +4578,7 @@ static void InitStorageConfigureNamesString()
             NULL},
             &u_sess->attr.attr_storage.XLogArchiveDest,
             "",
-            NULL,
+            check_xLog_archive_dest,
             NULL,
             NULL},
 
@@ -7507,3 +7509,14 @@ static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource 
     return true;
 }
 #endif
+
+static bool check_xLog_archive_dest(char** newval, void** extra, GucSource source)
+{
+    if (is_dss_file(*newval)) {
+        GUC_check_errdetail("Do not allow set archive log path to a shared storage path. "
+            "The first character of archive_dest is illegal.");
+        return false;
+    }
+
+    return true;
+}

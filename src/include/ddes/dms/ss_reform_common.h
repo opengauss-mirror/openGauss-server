@@ -131,7 +131,6 @@ XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private
 void SSUpdateReformerCtrl();
 void SSReadReformerCtrl();
 void SSClearSegCache();
-int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
 void SSStandbySetLibpqswConninfo();
 void SSDisasterRefreshMode();
 void SSDisasterUpdateHAmode();
