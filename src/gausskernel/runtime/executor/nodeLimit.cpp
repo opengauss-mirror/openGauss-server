@@ -102,6 +102,9 @@ static TupleTableSlot* ExecLimit(PlanState* state) /* return: a tuple or NULL */
              * Fetch rows from subplan until we reach position > offset.
              */
             for (;;) {
+                if (nodeTag(outer_plan) == T_AnnIndexScanState) {
+                    ((AnnIndexScanState*)outer_plan)->count = node->count;
+                }
                 slot = ExecProcNode(outer_plan);
                 if (TupIsNull(slot)) {
                     /*
