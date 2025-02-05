@@ -3178,6 +3178,11 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
     pstate1->p_sourcetext = pstrdup(pstate->p_sourcetext);
 
     transformFromClause(pstate1, stmt->fromClause);
+
+    if (!pstate1->p_rtable) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in from clause error")));
+    }
+    
     initStringInfo(&from_clause_sql);
     RangeTblEntry *rte = (RangeTblEntry *)linitial(pstate1->p_rtable);
     if (RTE_RELATION == rte->rtekind)
