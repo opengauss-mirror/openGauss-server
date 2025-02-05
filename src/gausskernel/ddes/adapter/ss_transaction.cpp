@@ -40,6 +40,7 @@
 static inline void txnstatusNetworkStats(uint64 timeDiff);
 static inline void txnstatusHashStats(uint64 timeDiff);
 
+#define SYNC_TRY_COUNT 3
 #define TxnStatusCalcStats(startTime, endTime, timeDiff, isHash) \
  do {                                                            \
     (void)INSTR_TIME_SET_CURRENT(endTime);                       \
@@ -1285,6 +1286,54 @@ int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len)
         if (rtBuildCtrl->prevBuildPtr != InvalidXLogRecPtr) {
             SSRealtimebuildLogCtrl(srcId);
         }
+    }
+    return DMS_SUCCESS;
+}
+
+/* broadcast to standby node synchronization GUC */
+void SSBroadcastSyncGUC()
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret;
+    int count = 0;
+    SSBroadcastSyncGUCst syncGUC;
+    syncGUC.type = BCAST_CONFIG_SYNC;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&syncGUC,
+        .len = sizeof(SSBroadcastSyncGUCst),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+
+    do {
+        count++;
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+        if (ret == DMS_SUCCESS) {
+            break;
+        }
+        pg_usleep(USECS_PER_SEC);
+    } while (ret != DMS_SUCCESS && count <= SYNC_TRY_COUNT);
+    if (ret == DMS_SUCCESS) {
+        ereport(LOG, (errmsg("notify standby node synchronization GUC success")));
+    }
+}
+
+int SSUpdateLocalConfFile(char* data, uint32 len)
+{
+    if (SS_PRIMARY_MODE) {
+        return DMS_SUCCESS;
+    }
+
+    /* notify postmaster load the shared config file */
+    if (gs_signal_send(PostmasterPid, SIGHUP) != 0) {
+        ereport(WARNING, (errmsg("send SIGHUP to PM failed")));
+        return DMS_ERROR;
     }
     return DMS_SUCCESS;
 }

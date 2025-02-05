@@ -3469,6 +3469,10 @@ typedef struct knl_t_dms_auxiliary_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_dms_auxiliary_context;
 
+typedef struct knl_t_sync_auxiliary_context {
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_sync_auxiliary_context;
+
 /*
  * in_progress_list is a stack of ongoing RelationBuildDesc() calls.  CREATE
  * INDEX CONCURRENTLY makes catalog changes under ShareUpdateExclusiveLock.
@@ -3649,6 +3653,7 @@ typedef struct knl_thrd_context {
     knl_t_spq_context spq_ctx;
 #endif
     knl_t_dms_auxiliary_context dms_aux_cxt;
+    knl_t_sync_auxiliary_context sync_auxiliary_cxt;
     knl_t_invalidation_message_context inval_msg_cxt;
 } knl_thrd_context;
 
