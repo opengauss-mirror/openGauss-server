@@ -218,9 +218,6 @@ Buffer standby_read_seg_buffer(
     SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
     Assert(IsSegmentPhysicalRelNode(rnode));
-    if (rnode.relNode == EXTENT_1) {
-        rnode.spcNode = DEFAULTTABLESPACE_OID;
-    }
     XLogRecPtr read_lsn = MAX_XLOG_REC_PTR;
 
     if (u_sess->utils_cxt.CurrentSnapshot != NULL && XLogRecPtrIsValid(u_sess->utils_cxt.CurrentSnapshot->read_lsn)) {
