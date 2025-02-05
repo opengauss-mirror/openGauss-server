@@ -310,8 +310,6 @@ DROP TABLE base_table CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to view master_view2
 drop cascades to view dependent_view4
-drop cascades to view master_view3
-drop cascades to view dependent_view5
 drop cascades to view master_view1
 drop cascades to view dependent_view3
 drop cascades to view second_dependent_view3
@@ -319,6 +317,8 @@ drop cascades to view dependent_view1
 drop cascades to view second_dependent_view1
 drop cascades to view dependent_view2
 drop cascades to view second_dependent_view2
+drop cascades to view master_view3
+drop cascades to view dependent_view5
 -- test2：物化视图
 DROP TABLE IF EXISTS base_table;
 NOTICE:  table "base_table" does not exist, skipping

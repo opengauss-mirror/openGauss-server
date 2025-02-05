@@ -1726,6 +1726,50 @@ char get_func_prokind(const Oid funcid)
     return result;
 }
 
+/*
+ * get_func_full_name
+ *   returns the full name (schema.pkg.func or schema.func) of the function
+ *   with the given funcid
+ *
+ * Note: returns a palloc'd copy of the string, or NULL if no such function.
+ */
+char* get_func_full_name(Oid funcid)
+{
+    HeapTuple tp;
+    char* result = NULL;
+    bool isNull = false;
+    tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (HeapTupleIsValid(tp)) {
+        Form_pg_proc functup = (Form_pg_proc)GETSTRUCT(tp);
+        char* schemaName = get_namespace_name(functup->pronamespace);
+        char* proName = NameStr(functup->proname);
+
+        Oid pkgOid = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_packageid, &isNull);
+        char* packageName = NULL;
+        error_t rc = 0;
+        size_t len = 0;
+        if (OidIsValid(pkgOid)) {
+            packageName = GetPackageName(pkgOid);
+
+            /* literal quantity 3 indicates the length of two dots and '\0' */
+            len = strlen(schemaName) + strlen(packageName) + strlen(proName) + 3;
+            result = (char*)palloc0(len);
+            rc = snprintf_s(result, len, len - 1, "%s.%s.%s", schemaName, packageName, proName);
+        } else {
+            /* literal quantity 2 indicates the length of one dot and '\0' */
+            len = strlen(schemaName) + strlen(proName) + 2;
+            result = (char*)palloc0(len);
+            rc = snprintf_s(result, len, len - 1, "%s.%s", schemaName, proName);
+        }
+        securec_check_ss(rc, "", "");
+
+        ReleaseSysCache(tp);
+        return result;
+    } else {
+        return NULL;
+    }
+}
+
 /*				---------- RELATION CACHE ----------					 */
 
 /*
@@ -5379,7 +5423,7 @@ static inline bool CompareRetType(Oid inputOid, Oid outputOid)
     return true;
 }
 
-Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
+Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr, bool noPkg)
 {
     CatCList* catlist = NULL;
     int i;
@@ -5440,6 +5484,15 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
                 continue;
             }
 	    }
+
+        if (noPkg) {
+            /* if noPkg is true, consider only procs not in package */
+            bool isnull = true;
+            bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isnull);
+            if (!isnull && ispackage) {
+                continue;
+            }
+        }
 
         if (expr != NULL && IsA(expr, FuncExpr) && procform->pronargs != list_length(((FuncExpr*)expr)->args)
             && procform->pronargs != list_length(((FuncExpr*)expr)->args) + procform->pronargdefaults

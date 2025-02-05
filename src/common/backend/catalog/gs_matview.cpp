@@ -760,7 +760,7 @@ Oid FindRoleid(Oid relid)
 /*
  * acquire locks of matview's tables
  */
-void acquire_mativew_tables_lock(Query *query, bool incremental)
+void acquire_mativew_tables_lock(Query *query, bool incremental, bool allowMiss)
 {
     Relation rel;
     ListCell *lc = NULL;
@@ -770,8 +770,14 @@ void acquire_mativew_tables_lock(Query *query, bool incremental)
     relids = pull_up_rels_recursive((Node *)query);
     foreach (lc, relids) {
         Oid relid = (Oid)lfirst_oid(lc);
-        rel = heap_open(relid, lockmode);
-        heap_close(rel, NoLock);
+        /*
+         * There is a situation that matview's tables does not exist, because we
+         * support deleting them without deleting matview.
+         */
+        if (!allowMiss || SearchSysCacheExists1(RELOID, ObjectIdGetDatum(relid))) {
+            rel = heap_open(relid, lockmode);
+            heap_close(rel, NoLock);
+        }
     }
 
     return;

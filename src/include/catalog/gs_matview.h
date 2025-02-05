@@ -87,7 +87,7 @@ extern Oid MatviewRelationGetBaseid(Oid relOid, MvRelationType matviewRelationTy
 extern Query *get_matview_query(Relation matviewRel);
 extern bool CheckPermissionForBasetable(const RangeTblEntry *rte);
 extern void CheckRefreshMatview(Relation matviewRel, bool isIncremental);
-extern void acquire_mativew_tables_lock(Query *query, bool incremental);
+extern void acquire_mativew_tables_lock(Query *query, bool incremental, bool allowMiss = false);
 extern bool CheckMatviewQuals(Query *query);
 extern Oid FindRoleid(Oid relid);
 

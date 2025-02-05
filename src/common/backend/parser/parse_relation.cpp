@@ -23,6 +23,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_auth_history.h"
 #include "catalog/pg_type.h"
+#include "catalog/gs_package.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -1133,16 +1134,130 @@ static bool CheckRTable(Query *query, Oid rel_oid, Oid rewrite_oid)
     return true;
 }
 
-typedef struct change_relid_in_rtable_context {
+/*
+ * try to get new function oid by pg_depend's depsrc, replace the old ones
+ * in FuncExpr and update pg_depend.
+ */
+bool CheckFuncExpr(FuncExpr* funcExpr, Oid rewrite_oid)
+{
+    /* directly return if function exists, we don't need to do anything */
+    if (function_exists(funcExpr->funcid)) {
+        return true;
+    }
+
+    Oid newFuncid = InvalidOid;
+    HeapTuple dependTup = NULL;
+    Datum values[Natts_pg_depend] = { 0 };
+    bool nulls[Natts_pg_depend] = { 0 };
+    bool replaces[Natts_pg_depend] = { 0 };
+    HeapTuple new_dep_tuple = NULL;
+    Relation dependRel = heap_open(DependRelationId, RowExclusiveLock);
+    const int keyNum = 2;
+    ScanKeyData key[keyNum];
+    SysScanDesc scan = NULL;
+
+    /* get full name of function from depsrc */
+    ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(RewriteRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rewrite_oid));
+
+    scan = systable_beginscan(dependRel, DependDependerIndexId, true, NULL, keyNum, key);
+    while (HeapTupleIsValid(dependTup = systable_getnext(scan))) {
+        Form_pg_depend dep_form = (Form_pg_depend)GETSTRUCT(dependTup);
+        if (dep_form->refobjid == funcExpr->funcid) {
+            break;
+        }
+    }
+
+    bool isnull = false;
+    Datum depsrc = heap_getattr(dependTup, Anum_pg_depend_depsrc, RelationGetDescr(dependRel), &isnull);
+    if (isnull) {
+        systable_endscan(scan);
+        heap_close(dependRel, RowExclusiveLock);
+        return false;
+    }
+
+    List* namelist = stringToQualifiedNameList(TextDatumGetCString(depsrc));
+
+    char* schemaname = NULL;
+    char* pkgname = NULL;
+    char* funcname = NULL;
+    DeconstructQualifiedName(namelist, &schemaname, &funcname, &pkgname);
+
+    Oid schemaOid = get_namespace_oid(schemaname, true);
+    if (!OidIsValid(schemaOid)) {
+        goto checkFail;
+    }
+
+    if (pkgname != NULL) {
+        /* search function in package */
+        Oid pkgOid = PackageNameGetOid(pkgname, schemaOid);
+        if (!OidIsValid(pkgOid)) {
+            goto checkFail;
+        }
+        List* pkgFuncOids = GetFunctionOidsByPackageOid(pkgOid);
+        ListCell* lc = NULL;
+        foreach (lc, pkgFuncOids) {
+            char* pkgFuncName = get_func_name(lfirst_oid(lc));
+            if (pkgFuncName != NULL && strcmp(pkgFuncName, funcname) == 0) {
+                newFuncid = lfirst_oid(lc);
+                pfree(pkgFuncName);
+                break;
+            }
+            pfree_ext(pkgFuncName);
+        }
+    } else {
+        newFuncid = get_func_oid(funcname, schemaOid, NULL, true);
+    }
+
+    if (!OidIsValid(newFuncid)) {
+        goto checkFail;
+    }
+
+    /* update pg_depend */
+    values[Anum_pg_depend_refobjid - 1] = ObjectIdGetDatum(newFuncid);
+    replaces[Anum_pg_depend_refobjid - 1] = true;
+
+    new_dep_tuple = heap_modify_tuple(dependTup, RelationGetDescr(dependRel), values, nulls, replaces);
+    simple_heap_update(dependRel, &new_dep_tuple->t_self, new_dep_tuple);
+    CatalogUpdateIndexes(dependRel, new_dep_tuple);
+    CommandCounterIncrement();
+
+    heap_freetuple_ext(new_dep_tuple);
+
+    systable_endscan(scan);
+    heap_close(dependRel, RowExclusiveLock);
+    list_free_ext(namelist);
+
+    funcExpr->funcid = newFuncid;
+
+    return true;
+
+checkFail:
+    systable_endscan(scan);
+    heap_close(dependRel, RowExclusiveLock);
+    list_free_ext(namelist);
+    return false;
+}
+
+typedef struct change_relid_and_funcid_context {
     Oid rel_oid;
     Oid rewrite_oid;
     bool allExist;
-} change_relid_in_rtable_context;
+} change_relid_and_funcid_context;
 
-bool change_relid_in_rtable_walker(Node* node, change_relid_in_rtable_context* context)
+bool change_relid_and_funcid_walker(Node* node, change_relid_and_funcid_context* context)
 {
     if (node == NULL) {
         return false;
+    }
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* funcExpr = (FuncExpr*)node;
+
+        if (!CheckFuncExpr(funcExpr, context->rewrite_oid)) {
+            context->allExist = false;
+            return false;
+        }
     }
     if (IsA(node, Query)) {
         Query* qry = (Query*)node;
@@ -1153,9 +1268,9 @@ bool change_relid_in_rtable_walker(Node* node, change_relid_in_rtable_context* c
             return true;
         }
 
-        return query_tree_walker(qry, (bool (*)())change_relid_in_rtable_walker, context, 0);
+        return query_tree_walker(qry, (bool (*)())change_relid_and_funcid_walker, context, 0);
     }
-    return expression_tree_walker(node, (bool (*)())change_relid_in_rtable_walker, (void*)context);
+    return expression_tree_walker(node, (bool (*)())change_relid_and_funcid_walker, (void*)context);
 }
 
 /*
@@ -1164,12 +1279,12 @@ bool change_relid_in_rtable_walker(Node* node, change_relid_in_rtable_context* c
  */
 static bool CheckViewRelation(Oid rel_oid, Oid rewrite_oid, Query* query)
 {
-    change_relid_in_rtable_context context;
+    change_relid_and_funcid_context context;
     context.rel_oid = rel_oid;
     context.rewrite_oid = rewrite_oid;
     context.allExist = true;
 
-    change_relid_in_rtable_walker((Node*)query, &context);
+    change_relid_and_funcid_walker((Node*)query, &context);
 
     return context.allExist;
 }
@@ -1329,7 +1444,6 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
      * 3.2 find all columns of parent views and tables which this view depends on directly,
      * and check their validity recursively.
      */
-    List *query_str = NIL;
     ScanKeyData key_dep[keyNum];
     SysScanDesc scan_dep = NULL;
     HeapTuple tup_dep = NULL;
@@ -1423,17 +1537,11 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
      * 3.4 update pg_attribute for column type of view maybe changed
      * and pg_rewrite for ev_action
      */
-    UpdateAttrAndRewriteForView(view_oid, rw_objid, originEvAction, query, &query_str);
+    UpdateAttrAndRewriteForView(view_oid, rw_objid, originEvAction, query);
     /* 4. mark the current view valid */
     if (!circularDependency) {
         SetPgObjectValid(view_oid, objType, true);
     }
-    /* create or replace view */
-    if (!circularDependency && query_str != NIL) {
-        ReplaceViewQueryFirstAfter(query_str);
-        CommandCounterIncrement();
-    }
-    list_free_ext(query_str);
     if (objType == OBJECT_TYPE_MATVIEW) {
         HeapTuple tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
         Form_pg_class relform = (Form_pg_class)GETSTRUCT(tup);

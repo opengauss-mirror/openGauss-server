@@ -52,6 +52,9 @@ CATALOG(pg_depend,2608) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
      * field.  See DependencyType in catalog/dependency.h.
      */
     char        deptype;        /* see codes in dependency.h */
+#ifdef CATALOG_VARLEN
+    text        depsrc;     /* full name of function */
+#endif
 } FormData_pg_depend;
 
 /* ----------------
@@ -65,7 +68,7 @@ typedef FormData_pg_depend *Form_pg_depend;
  *        compiler constants for pg_depend
  * ----------------
  */
-#define Natts_pg_depend                7
+#define Natts_pg_depend                8
 #define Anum_pg_depend_classid         1
 #define Anum_pg_depend_objid           2
 #define Anum_pg_depend_objsubid        3
@@ -73,6 +76,7 @@ typedef FormData_pg_depend *Form_pg_depend;
 #define Anum_pg_depend_refobjid        5
 #define Anum_pg_depend_refobjsubid     6
 #define Anum_pg_depend_deptype         7
+#define Anum_pg_depend_depsrc          8
 
 
 /*

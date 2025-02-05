@@ -229,8 +229,18 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
          * view columns to perform rollback. Since these columns should have
          * not been visible to users, we just skip the safety check.
          */
-        if (!u_sess->attr.attr_common.IsInplaceUpgrade)
-            checkViewTupleDesc(descriptor, rel->rd_att);
+        if (!u_sess->attr.attr_common.IsInplaceUpgrade) {
+            PG_TRY();
+            {
+                checkViewTupleDesc(descriptor, rel->rd_att);
+            }
+            PG_CATCH();
+            {
+                relation_close(rel, NoLock);
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
+        }
 
         /* 
          * set definer by AlterTameCmd
@@ -477,7 +487,7 @@ static void DefineViewRules(Oid viewOid, Query* viewParse, bool replace)
  * except for run-time permission checking.
  * ---------------------------------------------------------------
  */
-static Query* UpdateRangeTableOfViewParse(Oid viewOid, Query* viewParse)
+Query* UpdateRangeTableOfViewParse(Oid viewOid, Query* viewParse)
 {
     Relation viewRel;
     List* new_rt = NIL;

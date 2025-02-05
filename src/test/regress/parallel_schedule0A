@@ -36,7 +36,7 @@ test: workload_manager
 test: spm_adaptive_gplan
 test: smp smp_cursor parallel_enable_function
 test: alter_hw_package dependent_view1
-test: hw_grant_package gsc_func gsc_db
+test: hw_grant_package gsc_func gsc_db dependent_view2
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views dependent_view
 

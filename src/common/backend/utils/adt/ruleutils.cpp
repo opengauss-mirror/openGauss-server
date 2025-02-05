@@ -337,7 +337,8 @@ static void printSubscripts(ArrayRef* aref, deparse_context* context);
 static char* get_relation_name(Oid relid, bool isNeedError = true);
 static char* generate_relation_name(Oid relid, List* namespaces, bool isNeedError = true);
 static char* generate_function_name(
-    Oid funcid, int nargs, List* argnames, Oid* argtypes, bool was_variadic, bool* use_variadic_p);
+    Oid funcid, int nargs, List* argnames, Oid* argtypes, bool was_variadic, bool* use_variadic_p,
+    bool searchDepend = false);
 static char* generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 static text* string_to_text(char* str);
 static Oid SearchSysTable(const char* query);
@@ -5945,7 +5946,9 @@ static void make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
 #endif /* PGXC */
                 ,
                 false,
-                false);
+                false,
+                false,
+                !GetPgObjectValid(ev_class, RelationGetRelkind(ev_relation)));
             if (prettyFlags)
                 appendStringInfo(buf, ";\n");
             else
@@ -5973,7 +5976,9 @@ static void make_ruledef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
 #endif /* PGXC */
             ,
             false,
-            false);
+            false,
+            false,
+            !GetPgObjectValid(ev_class, RelationGetRelkind(ev_relation)));
         appendStringInfo(buf, ";");
     }
     heap_close(ev_relation, AccessShareLock);
@@ -11075,7 +11080,8 @@ static void get_func_expr(FuncExpr* expr, deparse_context* context, bool showimp
     }
 
     appendStringInfo(
-        buf, "%s(", generate_function_name(funcoid, nargs, argnames, argtypes, expr->funcvariadic, &use_variadic));
+        buf, "%s(", generate_function_name(funcoid, nargs, argnames, argtypes, expr->funcvariadic, &use_variadic,
+        context->skip_lock));
     nargs = 0;
     foreach (l, expr->args) {
         if (nargs++ > 0)
@@ -12863,6 +12869,43 @@ static char* generate_relation_name(Oid relid, List* namespaces, bool isNeedErro
     return result;
 }
 
+static char* get_function_name_from_depend(Oid funcOid)
+{
+    HeapTuple dependTup = NULL;
+    Relation dependRel = heap_open(DependRelationId, RowExclusiveLock);
+    const int keyNum = 2;
+    ScanKeyData key[keyNum];
+    bool isnull = true;
+    Datum depsrc;
+    char* funcName = NULL;
+
+    SysScanDesc scan = NULL;
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(funcOid));
+
+    scan = systable_beginscan(dependRel, DependReferenceIndexId, true, NULL, keyNum, key);
+    while (HeapTupleIsValid(dependTup = systable_getnext(scan))) {
+        depsrc = heap_getattr(dependTup, Anum_pg_depend_depsrc, RelationGetDescr(dependRel), &isnull);
+        if (!isnull) {
+            break;
+        }
+    }
+
+    if (isnull) {
+        systable_endscan(scan);
+        heap_close(dependRel, RowExclusiveLock);
+        return NULL;
+    }
+
+    funcName = TextDatumGetCString(depsrc);
+
+    systable_endscan(scan);
+    heap_close(dependRel, RowExclusiveLock);
+
+    return funcName;
+}
+
 /*
  * generate_function_name
  *		Compute the name to display for a function specified by OID,
@@ -12873,7 +12916,7 @@ static char* generate_relation_name(Oid relid, List* namespaces, bool isNeedErro
  * also pass back an indication of whether the function is variadic.
  */
 static char* generate_function_name(
-    Oid funcid, int nargs, List* argnames, Oid* argtypes, bool was_variadic, bool* use_variadic_p)
+    Oid funcid, int nargs, List* argnames, Oid* argtypes, bool was_variadic, bool* use_variadic_p, bool searchDepend)
 {
     HeapTuple proctup;
     Form_pg_proc procform;
@@ -12893,8 +12936,15 @@ static char* generate_function_name(
     Oid pkgOid = InvalidOid;
     bool isnull = true;
     proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
-    if (!HeapTupleIsValid(proctup))
+    if (!HeapTupleIsValid(proctup)) {
+        if (searchDepend) {
+            result = get_function_name_from_depend(funcid);
+            if (result != NULL) {
+                return result;
+            }
+        }
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
+    }
     procform = (Form_pg_proc)GETSTRUCT(proctup);
     proname = NameStr(procform->proname);
     bool ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isnull);

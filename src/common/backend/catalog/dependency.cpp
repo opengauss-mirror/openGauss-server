@@ -189,7 +189,8 @@ static void ReleaseDeletionLock(const ObjectAddress* object);
 static bool find_expr_references_walker(Node* node, find_expr_references_context* context);
 static void eliminate_duplicate_dependencies(ObjectAddresses* addrs);
 static int object_address_comparator(const void* a, const void* b);
-static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, ObjectAddresses* addrs);
+static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, ObjectAddresses* addrs,
+    char* depsrc = NULL);
 static void add_exact_object_address_extra(
     const ObjectAddress* object, const ObjectAddressExtra* extra, ObjectAddresses* addrs);
 static bool object_address_present_add_flags(const ObjectAddress* object, int flags, ObjectAddresses* addrs);
@@ -925,6 +926,28 @@ static bool shouldDeletePgTypeEntry(Oid typeOid, Oid viewOid)
     return true;
 }
 
+static bool shouldKeepDependView(DropBehavior behavior, const ObjectAddress* origObject)
+{
+    /*
+     * return true if drop package, no need to consider behavior, because
+     * behavior of dropping package is CASCADE defaultly.
+     */
+    if (origObject != NULL && getObjectClass(origObject) == OCLASS_PACKAGE) {
+        return true;
+    }
+
+    if (behavior != DROP_RESTRICT) {
+        return false;
+    }
+
+    if (origObject == NULL || getObjectClass(origObject) == OCLASS_CLASS ||
+        getObjectClass(origObject) == OCLASS_PROC) {
+        return true;
+    }
+
+    return false;
+}
+
 /*
  * reportDependentObjects - report about dependencies, and fail if RESTRICT
  *
@@ -976,7 +999,7 @@ void reportDependentObjects(
      * In restrict mode, we check targetObjects, remove object entries related to views from targetObjects,
      * and ensure that no errors are reported due to deleting table fields that have view references.
      */
-    if (behavior == DROP_RESTRICT && (origObject == NULL || getObjectClass(origObject) == OCLASS_CLASS)) {
+    if (shouldKeepDependView(behavior, origObject)) {
         ObjectAddresses* newTargetObjects = new_object_addresses();
         const ObjectAddress* originalObj = NULL;
         Oid viewOid = InvalidOid;
@@ -1012,6 +1035,16 @@ void reportDependentObjects(
         }
         targetObjects->numrefs = newTargetObjects->numrefs;
         free_object_addresses(newTargetObjects);
+
+        /*
+         * Views upgraded from an old version, if it depends on a function,
+         * its depsrc of pg_depend would be null. We should fill up depsrc
+         * when drop this function, so that it can be restore after function
+         * rebuilt.
+         */
+        if (origObject != NULL && getObjectClass(origObject) == OCLASS_PROC) {
+            fillDepsrcIfNeeded(origObject);
+        }
     }
 
     /*
@@ -1666,7 +1699,7 @@ void AcquireDeletionLock(const ObjectAddress* object, int flags)
             if (matview->rd_rules != NULL &&
                 matview->rd_rules->numLocks == 1) {
                 Query *query = get_matview_query(matview);
-                acquire_mativew_tables_lock(query, false);
+                acquire_mativew_tables_lock(query, false, true);
             }
             heap_close(matview, AccessShareLock);
         }
@@ -1940,7 +1973,7 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
     } else if (IsA(node, FuncExpr)) {
         FuncExpr* funcexpr = (FuncExpr*)node;
 
-        add_object_address(OCLASS_PROC, funcexpr->funcid, 0, context->addrs);
+        add_object_address(OCLASS_PROC, funcexpr->funcid, 0, context->addrs, get_func_full_name(funcexpr->funcid));
 
         /*
          * Function may be referenced from one synonym,
@@ -2277,7 +2310,8 @@ ObjectAddresses* new_object_addresses(const int maxRefs)
  * It is convenient to specify the class by ObjectClass rather than directly
  * by catalog OID.
  */
-static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, ObjectAddresses* addrs)
+static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, ObjectAddresses* addrs,
+    char* depsrc)
 {
     ObjectAddress* item = NULL;
 
@@ -2293,6 +2327,7 @@ static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, Ob
     item->objectId = objectId;
     item->objectSubId = subId;
     item->rbDropMode = RB_DROP_MODE_INVALID;
+    item->depsrc = depsrc;
     addrs->numrefs++;
 }
 

@@ -111,13 +111,14 @@ CREATE OR REPLACE VIEW depend_v1 AS select depend_p1('aa');
 select * from depend_v1;
 select definition from pg_views where viewname='depend_v1';
 
--- failed, can't change var2's type
+-- success, change var2's type, but view would not change its column type, and becomes invalid.
 CREATE OR REPLACE procedure depend_p1(var1 int,var2 out int)
 as
 begin
 var2:=var1+1;
 END;
 /
+select valid = true from pg_class join pg_object on oid = object_oid where relname = 'depend_v1';
 
 --success, change var1's type only, but it will failed when select depend_v1
 CREATE OR REPLACE procedure depend_p1(var1 int,var2 out varchar)
