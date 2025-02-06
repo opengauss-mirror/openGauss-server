@@ -2,7 +2,7 @@
 #define OPENGAUSS_CFS_BUFFERS_H
 
 #include "storage/cfs/cfs.h"
-#include "storage/smgr/storage_converter.h"
+#include "storage/smgr/cfs_addressing.h"
 #include "storage/cfs/cfs_repair.h"
 
 struct CfsBufferKey {

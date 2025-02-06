@@ -144,7 +144,7 @@ void UnlockSegmentHeadPartition(Oid spcNode, Oid dbNode, BlockNumber head)
     ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), LEVEL0_PAGE_EXTENT_SIZE, 0), MAIN_FORKNUM, (blockno), RBM_NORMAL)
 
 #define ReadSegmentBuffer_RBM_ZERO(spc, blockno)                                                                       \
-        ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), SEGMENT_HEAD_EXTENT_SIZE, 0), MAIN_FORKNUM, (blockno), RBM_ZERO)
+    ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), SEGMENT_HEAD_EXTENT_SIZE, 0), MAIN_FORKNUM, (blockno), RBM_ZERO)
 
 #define ReadLevel0Buffer_RBM_ZERO(spc, blockno)                                                                        \
     ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), LEVEL0_PAGE_EXTENT_SIZE, 0), MAIN_FORKNUM, (blockno), RBM_ZERO)
@@ -154,8 +154,8 @@ void UnlockSegmentHeadPartition(Oid spcNode, Oid dbNode, BlockNumber head)
  * input: logic_id
  * output: extent_id, offset, extent_size
  */
-inline static void seg_logic_page_id_to_extent_id(BlockNumber logic_id, uint32 *extent_id, uint32 *offset,
-    ExtentSize *extent_size)
+inline static void SegLogicPageIdToExtentId(BlockNumber logic_id, uint32 *extent_id, uint32 *offset,
+                                            ExtentSize *extent_size)
 {
     if (logic_id < EXT_SIZE_8_TOTAL_PAGES) {
         *extent_size = EXT_SIZE_8;
@@ -178,14 +178,14 @@ inline static void seg_logic_page_id_to_extent_id(BlockNumber logic_id, uint32 *
         *offset = logic_id % EXT_SIZE_8192;
     }
 }
-/** get segment id and offset by logic block id, this interface should be called in compress segment storage only.
- * @param[in]     logic_id      The logic block id in relation.
- * @param[in/out] extent_id     Segement extent id which this block belongs to.
- * @param[in/out] offset        Offset in this segment extent.
- * @param[in/out] extent_size   Extent size of this segment extent.
- */
-inline static void seg_get_extent_id_by_logic_blkno_in_cfs(BlockNumber logic_blkno, uint32 *extent_id, uint32 *offset,
-    ExtentSize *extent_size)
+/** get segment id and offset by logic block id, this interface should be called in compress segment
+storage only.
+ @param[in]     logic_id      The logic block id in relation.
+ @param[in/out] extent_id     Segement extent id which this block belongs to.
+ @param[in/out] offset        Offset in this segment extent.
+ @param[in/out] extent_size   Extent size of this segment extent. */
+inline static void SegGetExtentIdByLogicBlknoInCfs(BlockNumber logic_blkno, uint32 *extent_id,
+                                                   uint32 *offset, ExtentSize *extent_size)
 {
     if (logic_blkno < CFS_EXT_SIZE_8_TOTAL_PAGES) {
         *extent_size = EXT_SIZE_8;
@@ -211,10 +211,9 @@ inline static void seg_get_extent_id_by_logic_blkno_in_cfs(BlockNumber logic_blk
 }
 
 /** convert physical block number to logic block number.
- * @param[in]     physical_blkno     physical block number.
- * @return  the logic block number.
- */
-BlockNumber seg_physical_to_logic_blkno(BlockNumber physical_blkno)
+ @param[in]     physical_blkno     physical block number.
+ @return  the logic block number. */
+BlockNumber SegPhysicalToLogicBlkno(BlockNumber physical_blkno)
 {
     BlockNumber logic_blkno = InvalidBlockNumber;
     BlockNumber offset_in_cfs_extent = InvalidBlockNumber;
@@ -225,7 +224,9 @@ BlockNumber seg_physical_to_logic_blkno(BlockNumber physical_blkno)
         physical_blkno -= CFS_EXT_SIZE_8_TOTAL_PAGES;
         extent_no = physical_blkno / CFS_EXTENT_SIZE;
         offset_in_cfs_extent = physical_blkno % CFS_EXTENT_SIZE;
-        logic_blkno = CFS_EXT_SIZE_8_TOTAL_PAGES + extent_no * CFS_LOGIC_BLOCKS_PER_EXTENT + offset_in_cfs_extent;
+        logic_blkno =
+            CFS_EXT_SIZE_8_TOTAL_PAGES + extent_no * CFS_LOGIC_BLOCKS_PER_EXTENT +
+            offset_in_cfs_extent;
     }
     Assert(logic_blkno != InvalidBlockNumber);
     return logic_blkno;
@@ -417,14 +418,13 @@ BlockNumber seg_extent_location(SegSpace *spc, SegmentHead *seg_head, int extent
 }
 
 /** Usually we can get extent start block number and block offset by seg_extent_location,  but if its a compressed
- * segement extent, we need to do a conversion to get the accurate physical block number which scope will include pca.
- * @param[in]     reln       SMgrRelation.
- * @param[in]     fork_num   Fork number.
- * @param[in]     logic_blkno   Logical block number in segement extent.
- * @param[in]     extent_start   Extent start page.
- * @param[in]     offset   Offset in this segement extent.
- * @return  the physical block number in compressed segment.
- */
+ segement extent, we need to do a conversion to get the accurate physical block number which scope will include pca.
+ @param[in]     reln       SMgrRelation.
+ @param[in]     fork_num   Fork number.
+ @param[in]     logic_blkno   Logical block number in segement extent.
+ @param[in]     extent_start   Extent start page.
+ @param[in]     offset   Offset in this segement extent.
+ @return  the physical block number in compressed segment. */
 BlockNumber seg_blkno_convert(SMgrRelation reln, ForkNumber forknum,
                               BlockNumber logic_blkno, BlockNumber extent_start,
                               uint32 offset)
@@ -458,9 +458,9 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
 
     /* only pages belong to extent_size larger than EXT_SIZE_8 will be compressed.  */
     if (IS_COMPRESSED_MAINFORK(reln, forknum) && logic_id >= CFS_EXT_SIZE_8_TOTAL_PAGES) {
-        seg_get_extent_id_by_logic_blkno_in_cfs(logic_id, &extent_id, &offset, &extent_size);
+        SegGetExtentIdByLogicBlknoInCfs(logic_id, &extent_id, &offset, &extent_size);
     } else {
-        seg_logic_page_id_to_extent_id(logic_id, &extent_id, &offset, &extent_size);
+        SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
     }
 
     BlockNumber extent_start = seg_extent_location(reln->seg_space, seg_head, extent_id);
@@ -1457,20 +1457,19 @@ struct ExtendStat {
 };
 
 
-/** Although segement page use head->nblocks to represent block usage quantity, we have to update pca page,
- * otherwise we will get a wrong page count from pca.
- * @param[in]     reln        SmgrRelation.
- * @param[in]     forknum     Fork number, should always be MAIN_FORKNUM.
- * @param[in]     blocknum    Physical blocknum.
- * @param[in]     seg_head    Segment header of this relation.
- */
-void seg_update_pca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head)
+/** Although segement page use head->nblocks to represent block usage quantity, we have to update
+ pca page, otherwise we will get a wrong page count from pca.
+ @param[in]     reln        SmgrRelation.
+ @param[in]     forknum     Fork number, should always be MAIN_FORKNUM.
+ @param[in]     blocknum    Physical blocknum.
+ @param[in]     seg_head    Segment header of this relation. */
+void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head)
 {
     Assert(forknum == MAIN_FORKNUM);
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, forknum, blocknum);
-    RelFileNode relNode = EXTENT_GROUP_RNODE(reln->seg_space, loc.extent_size, reln->smgr_rnode.node.opt);
-
-    if (!seg_compress_allowed(relNode, forknum, loc.blocknum, loc.extent_size)) {
+    RelFileNode relNode =
+        EXTENT_GROUP_RNODE(reln->seg_space, loc.extent_size, reln->smgr_rnode.node.opt);
+    if (!SegCompressAllowed(relNode, forknum, loc.blocknum, loc.extent_size)) {
         ereport(LOG, (errmsg("[sgement compress] don't need update pca for this block.")));
         return;
     }
@@ -1479,10 +1478,11 @@ void seg_update_pca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     int fd = df_get_fd(seg->segfile, loc.blocknum);
     RelFileNode fake_node = EXTENT_GROUP_RNODE(reln->seg_space, (ExtentSize)seg->extent_size,
                                                reln->smgr_rnode.node.opt);
-    ExtentLocation location = g_location_convert[SEG_STORAGE](reln, reln->smgr_rnode.node, fd,
-                                                              loc.extent_size, forknum, loc.blocknum);
-    cfs_extend_for_seg(reln->smgr_rnode.node, fd, seg->extent_size,
-                       forknum, loc.blocknum, nullptr, SEG_STORAGE, location);
+    ExtentLocation location =
+        g_location_convert[SEG_STORAGE](reln, reln->smgr_rnode.node, fd,
+                                        loc.extent_size, forknum, loc.blocknum);
+    CfsExtendForSeg(reln->smgr_rnode.node, fd, seg->extent_size,
+                    forknum, loc.blocknum, nullptr, location);
     return;
 }
 
@@ -1502,25 +1502,20 @@ void seg_extend_internal(SMgrRelation reln, ForkNumber forknum, BlockNumber bloc
      * thread calling smgrextend due to LockRelationForExtension
      */
     bool compress = IS_COMPRESSED_MAINFORK(reln, forknum);
-    uint32 total_blocks = compress ? seg_physical_to_logic_blkno(head->total_blocks) : head->total_blocks;
+    uint32 total_blocks = compress ? SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
     while (total_blocks <= blocknum) {
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-        total_blocks = compress ? seg_physical_to_logic_blkno(head->total_blocks) : head->total_blocks;
-
+        total_blocks = compress ? SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         if (total_blocks <= blocknum) {
             seg_extend_segment(reln->seg_space, forknum, buffer, reln->seg_desc[forknum]->head_blocknum);
             uint32 blocks_after_extends = compress ?
-                seg_physical_to_logic_blkno(head->total_blocks) : head->total_blocks;
-            ereport(LOG, (errmsg("[sgement compress]extend block for relfilenode:%d, target blocknum:%d,"
-                                 "total_blocks before extend: %d, total_blocks after extend: %d, forknum:%d",
-                                 reln->seg_desc[forknum]->head_blocknum, blocknum, total_blocks,
-                                 blocks_after_extends, forknum)));
+                SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         }
-        total_blocks = compress ? seg_physical_to_logic_blkno(head->total_blocks) : head->total_blocks;
+        total_blocks = compress ? SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
     if (compress) {
-        seg_update_pca(reln, forknum, blocknum, head);
+        SegUpdatePca(reln, forknum, blocknum, head);
     }
 
     SegReleaseBuffer(buffer);
@@ -1589,7 +1584,8 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
             (errmodule(MOD_SEGMENT_PAGE),
              errmsg("seg_extend relfilenode %u, relnode: %u, segment %u extend, old nblocks %u, "
                     "total_blocks %u, target %u", rnode.relNode, EXTENT_SIZE_TO_TYPE(loc.extent_size),
-                    reln->seg_desc[forknum]->head_blocknum, seg_head->nblocks, seg_head->total_blocks, blocknum)));
+                    reln->seg_desc[forknum]->head_blocknum, seg_head->nblocks,
+                    seg_head->total_blocks, blocknum)));
 
     /* Add physical location for XLog */
     buf_desc->extra->seg_fileno = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
@@ -1737,7 +1733,8 @@ void seg_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cons
     SegReleaseBuffer(seg_buffer);
 }
 
-void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks, RelFileNode rNode)
+void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                   RelFileNode rNode)
 {
     LOG_SMGR_API(reln->smgr_rnode, forknum, InvalidBlockNumber, "seg_writeback");
 
@@ -1776,7 +1773,8 @@ void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, 
                 nflush = ext_size;
             }
 
-            spc_writeback(reln->seg_space, EXTENT_GROUP_RNODE(reln->seg_space, loc1.extent_size, rNode.opt),
+            spc_writeback(reln->seg_space,
+                          EXTENT_GROUP_RNODE(reln->seg_space, loc1.extent_size, rNode.opt),
                           forknum, curr_ext_start, nflush);
             nblocks -= nflush;
 
@@ -2028,7 +2026,8 @@ bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const
     }
 
     if (ret && fsm_pblk != NULL) {
-        SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, forknum, fsm_pblk->block);
+        SegPageLocation loc =
+            seg_logic_to_physic_mapping(reln, seg_head, forknum, fsm_pblk->block);
         fsm_pblk->relNode = (uint8)EXTENT_SIZE_TO_TYPE(loc.extent_size);
         fsm_pblk->block = loc.blocknum;
         fsm_pblk->lsn = seg_head->lsn;
@@ -2100,7 +2099,7 @@ bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, ui
         }
         RelFileNode logic_node = get_segment_logic_rnode(spc, iptr.owner, seg->forknum);
         uint32 extent_id = SPC_INVRSPTR_GET_SPECIAL_DATA(iptr);
-        *blockNum = extent_id_to_logic_blocknum(extent_id) + offset_blocks;
+        *blockNum = ExtentIdToLogicBlockNum(extent_id) + offset_blocks;
         *relNode = logic_node.relNode;
         return true;
     }
@@ -2116,7 +2115,7 @@ BlockNumber seg_direct_read_get_range(BlockNumber logic_id)
     uint32 offset;
     ExtentSize extent_size;
 
-    seg_logic_page_id_to_extent_id(logic_id, &extent_id, &offset, &extent_size);
+    SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
     return extent_size - offset;
 }
 
@@ -2161,7 +2160,9 @@ void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum
     SegmentCheck(loc.blocknum != InvalidBlockNumber);
 
     SegSpace *spc = reln->seg_space;
-    int egid = EXTENT_TYPE_TO_GROUPID(EXTENT_GROUP_RNODE(spc, loc.extent_size, reln->smgr_rnode.node.opt).relNode);
+    int egid =
+        EXTENT_TYPE_TO_GROUPID(EXTENT_GROUP_RNODE(spc, loc.extent_size,
+                                                  reln->smgr_rnode.node.opt).relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
     *locBlock = loc.blocknum;
     df_direct_pread_block(seg->segfile, buffer, loc.blocknum, blocknums);

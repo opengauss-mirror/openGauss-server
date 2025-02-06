@@ -26,7 +26,7 @@
 
 #include "storage/smgr/segment_internal.h"
 
-#include "storage/smgr/storage_converter.h"
+#include "storage/smgr/cfs_addressing.h"
 #include "storage/cfs/cfs_md.h"
 
 /* smgr API functions */
@@ -41,7 +41,7 @@ void seg_prefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 void seg_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
 void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
-    RelFileNode relNode);
+                   RelFileNode relNode);
 BlockNumber seg_nblocks(SMgrRelation reln, ForkNumber forknum);
 BlockNumber seg_totalblocks(SMgrRelation reln, ForkNumber forknum);
 void seg_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);

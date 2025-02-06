@@ -72,7 +72,6 @@
 #define FAIL_RETRY_MAX_NUM 5
 #define REGR_MCR_SIZE_1MB 1048576
 #define REGR_MCR_SIZE_1GB 1073741824
-#define REPAIR_BLOCK_STAT_NATTS 6
 
 extern void DoGlobalVerifyMppTable(VacuumStmt* stmt, const char* queryString, bool sentToRemote);
 extern void DoGlobalVerifyDatabase(VacuumStmt* stmt, const char* queryString, bool sentToRemote);

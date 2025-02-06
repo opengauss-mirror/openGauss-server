@@ -2076,8 +2076,8 @@ void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
             // buffer descriptor contains the physical location
             Assert(buf_desc->extra->seg_fileno <= EXTENT_TYPES && buf_desc->extra->seg_fileno > EXTENT_INVALID);
             buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
-            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
             buf_tag->blockNum = buf_desc->extra->seg_blockno;
+            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
         } else if (SS_BEFORE_RECOVERY) {
             buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
             buf_tag->blockNum = buf_desc->extra->seg_blockno;

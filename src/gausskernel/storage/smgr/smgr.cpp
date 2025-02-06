@@ -56,7 +56,7 @@ typedef struct f_smgr {
     void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
     void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
-        RelFileNode relNode);
+                           RelFileNode relNode);
     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
     void (*smgr_truncate)(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
     void (*smgr_immedsync)(SMgrRelation reln, ForkNumber forknum);

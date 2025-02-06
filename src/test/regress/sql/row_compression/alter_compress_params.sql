@@ -162,6 +162,47 @@ SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_comp
 SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.uncompressed_table_all_options', 0);
 DROP TABLE alter_compress_params_schema.uncompressed_table_all_options;
 
+-- set uncompressed segment table to compressed segment table
+CREATE TABLE alter_compress_params_schema.uncompressed_table_compresstype_1 (id int, c1 text) with (segment=on);
+INSERT INTO alter_compress_params_schema.uncompressed_table_compresstype_1 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
+ALTER TABLE alter_compress_params_schema.uncompressed_table_compresstype_1 SET (compresstype = 1, segment=on);
+\d+ alter_compress_params_schema.uncompressed_table_compresstype_1
+CHECKPOINT;
+SELECT * FROM alter_compress_params_schema.uncompressed_table_compresstype_1;
+SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_compress_params_schema.uncompressed_table_compresstype_1', 0);
+SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.uncompressed_table_compresstype_1', 0);
+DROP TABLE alter_compress_params_schema.uncompressed_table_compresstype_1;
+
+CREATE TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 (id int, c1 text) with (segment=on);
+INSERT INTO alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
+ALTER TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30 SET (compresstype = 2, compress_level = 30, segment=on);
+\d+ alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30
+CHECKPOINT;
+SELECT * FROM alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30;
+SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30', 0);
+SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30', 0);
+DROP TABLE alter_compress_params_schema.uncompressed_table_compresstype_2_cl_30;
+
+CREATE TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 (id int, c1 text) with (segment=on);
+INSERT INTO alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
+ALTER TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3 SET (compresstype = 2, compress_level = 30, compress_chunk_size = 2048, compress_prealloc_chunks = 3, segment=on);
+\d+ alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3
+CHECKPOINT;
+SELECT * FROM alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3;
+SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3', 0);
+SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3', 0);
+DROP TABLE alter_compress_params_schema.uncompressed_compresstype_2_cl_30_ccs_2048_cpc_3;
+
+CREATE TABLE alter_compress_params_schema.uncompressed_table_all_options (id int, c1 text) with (segment=on);
+INSERT INTO alter_compress_params_schema.uncompressed_table_all_options SELECT generate_series(1, 10), 'fsfsfsfsfsfsfsfsfsfsfsfssfsf';
+ALTER TABLE alter_compress_params_schema.uncompressed_table_all_options SET (compresstype = 2, compress_level = 30, compress_chunk_size = 512, compress_prealloc_chunks = 6, compress_byte_convert = true, compress_diff_convert=true, segment=on);
+\d+ alter_compress_params_schema.uncompressed_table_all_options
+CHECKPOINT;
+SELECT * FROM alter_compress_params_schema.uncompressed_table_all_options;
+SELECT chunk_size, algorithm FROM pg_catalog.compress_address_header('alter_compress_params_schema.uncompressed_table_all_options', 0);
+SELECT nchunks, chunknos FROM pg_catalog.compress_address_details('alter_compress_params_schema.uncompressed_table_all_options', 0);
+DROP TABLE alter_compress_params_schema.uncompressed_table_all_options;
+
 -- set uncompressed partitioned table to compressed table
 CREATE TABLE alter_compress_params_schema.uncompressed_partitioned_compresstype_1
 (

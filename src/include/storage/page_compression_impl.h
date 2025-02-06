@@ -1263,8 +1263,6 @@ int CompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption
             return TemplateCompressPage<PG_HEAP_PAGE_LAYOUT_VERSION>(src, dst, dst_size, option);
         case PG_COMM_PAGE_LAYOUT_VERSION:
             return TemplateCompressPage<PG_COMM_PAGE_LAYOUT_VERSION>(src, dst, dst_size, option);
-        case PG_SEGMENT_PAGE_LAYOUT_VERSION:
-            return TemplateCompressPage<PG_SEGMENT_PAGE_LAYOUT_VERSION>(src, dst, dst_size, option);
         default :
             break;
     }
@@ -1283,8 +1281,6 @@ int DecompressPage(const char* src, char* dst)
             return TemplateDecompressPage<PG_HEAP_PAGE_LAYOUT_VERSION>(src, dst);
         case PG_COMM_PAGE_LAYOUT_VERSION:
             return TemplateDecompressPage<PG_COMM_PAGE_LAYOUT_VERSION>(src, dst);
-        case PG_SEGMENT_PAGE_LAYOUT_VERSION:
-            return TemplateDecompressPage<PG_SEGMENT_PAGE_LAYOUT_VERSION>(src, dst);
         default :
             break;
     }

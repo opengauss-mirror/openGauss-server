@@ -2020,19 +2020,6 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
     pg_flush_data(vfdcache[file].fd, offset, nbytes);
 }
 
-/**
- * Write back interface for compress segment files.
- * @param[in]     file     the file handle.
- * @param[in]     offset   the offset from file header.
- * @param[in/out] nbytes   byte counts.
- */
-void seg_write_back(File file, off_t offset, uint32 nbytes)
-{
-    Assert(file > 0);
-    pg_flush_data(file, offset, nbytes);
-    return;
-}
-
 // FilePRead
 // 		Read from a file at a given offset , using pread() for multithreading safe
 // 		NOTE: The file offset is not changed.
@@ -2170,24 +2157,63 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
     }
     return returnCode;
 }
-/** read interface for compress segment files.
- * @param[in]     file     the file handle.
- * @param[in]     offset   the offset from file header.
- * @param[in]     wait_event_info   Wait Events.
- * @return  the compressed page size in stream compress extent. return -1 in any failure
- */
-int seg_file_read(File fd, char *buf, int amount, off_t off, uint32 wait_event_info)
+
+/** read interface without VfdCache.
+ @param[in]     file     the file handle.
+ @param[in]     offset   the offset from file header.
+ @param[in]     wait_event_info   Wait Events.
+ @return  read byte size. return -1 in any failure. */
+int DirectFilePRead(File fd, char *buf, int amount, off_t off, uint32 wait_event_info)
 {
-    pgstat_report_waitevent(wait_event_info);
-    int nbytes = pread(fd, buf, amount, off);
+    int nbytes = 0;
+    int count = 0;
+    while (count < EIO_RETRY_TIMES) {
+        pgstat_report_waitevent(wait_event_info);
+        nbytes = pread(fd, buf, amount, off);
+        pgstat_report_waitevent(WAIT_EVENT_END);
+        if (nbytes < 0) {
+            /*
+            * Windows may run out of kernel buffers and return "Insufficient
+            * system resources" error.  Wait a bit and retry to solve it.
+            *
+            * It is rumored that EINTR is also possible on some Unix filesystems,
+            * in which case immediate retry is indicated.
+            */
+#ifdef WIN32
+            DWORD error = GetLastError();
+
+            switch (error) {
+                case ERROR_NO_SYSTEM_RESOURCES:
+                    pg_usleep(1000L);
+                    errno = EINTR;
+                    break;
+                default:
+                    _dosmaperr(error);
+                    break;
+            }
+#endif
+            /* OK to retry if interrupted */
+            if (errno == EINTR)
+                continue;
+            if (errno == EIO) {
+                count++;
+                ereport(WARNING,
+                        (errmsg("FilePRead: %d " INT64_FORMAT " %d \
+                                failed, then retry: Input/Output ERROR", fd, off, amount)));
+                continue;
+            }
+        }
+        /* if nbytes >= 0, read successed or we meet errors can't be fixed by retry. */
+        break;
+    }
     if (nbytes != amount) {
         ereport(ERROR,
                 (errcode(MOD_SEGMENT_PAGE),
-                        errcode_for_file_access(),
-                        errmsg("could not read expected len from file:%d, off:%ld, amount:%d", fd, off, amount),
-                        errdetail("errno: %d", errno)));
+                 errcode_for_file_access(),
+                 errmsg("could not read expected len from file:%d, off:%ld, amount:%d",
+                        fd, off, amount),
+                 errdetail("errno: %d", errno)));
     }
-    pgstat_report_waitevent(WAIT_EVENT_END);
     return nbytes;
 }
 
@@ -2305,17 +2331,49 @@ retry:
     return returnCode;
 }
 
-/** write interface for compress segment files.
- * @param[in]     file     the file handle.
- * @param[in]     offset   the offset from file header.
- * @param[in]     wait_event_info   Wait Events.
- * @param[in/out] nbytes   byte counts.
- */
-int seg_file_write(File fd, const char *buf, int amount, off_t offset, uint32 wait_event_info)
+/** write interface without VfdCache.
+ @param[in]     fd                the file handle.
+ @param[in]     buf               the buffer to write to disk.
+ @param[in]     amount            the byte amount to write.
+ @param[in]     offset            the offset from file header.
+ @param[in]     wait_event_info   Wait Events.
+ @return write byte size */
+int DirectFilePWrite(File fd, const char *buf, int amount, off_t offset, uint32 wait_event_info)
 {
-    pgstat_report_waitevent(wait_event_info);
-    int nbytes = pwrite(fd, buf, amount, offset);
-    pgstat_report_waitevent(WAIT_EVENT_END);
+    int nbytes = 0;
+    int count = 0;
+
+    while (count < EIO_RETRY_TIMES) {
+        pgstat_report_waitevent(wait_event_info);
+        nbytes = pwrite(fd, buf, amount, offset);
+        pgstat_report_waitevent(WAIT_EVENT_END);
+#ifdef WIN32
+        DWORD error = GetLastError();
+
+        switch (error) {
+            case ERROR_NO_SYSTEM_RESOURCES:
+                pg_usleep(1000L);
+                errno = EINTR;
+                break;
+            default:
+                _dosmaperr(error);
+                    break;
+            }
+#endif
+        if (nbytes < 0) {
+            /* OK to retry if interrupted */
+            if (errno == EINTR)
+                continue;
+            if (errno == EIO) {
+                count++;
+                ereport(WARNING, (errmsg("FilePWrite: %d " INT64_FORMAT " %d \
+                        failed, then retry: Input/Output ERROR", fd, offset, amount)));
+                continue;
+            }
+        }
+        /* if nbytes >= 0, read successed or we meet errors can't be fixed by retry. */
+        break;
+    }
     if (nbytes != amount) {
         ereport(ERROR,
                 (errcode(MOD_SEGMENT_PAGE),
@@ -4149,13 +4207,11 @@ void FileAllocate(File file, uint32 offset, uint32 size)
                         errmsg("fallocate failed on relation: \"%s\": ", FilePathName(file))));
     }
 }
-/** punch hole interface for compress segment files.
- * @param[in]     file     the file handle.
- * @param[in]     offset   the offset from file header.
- * @param[in]     size     the punch hole size.
- * @param[in]     wait_event_info   Wait Events.
- */
-void seg_file_allocate(File fd, uint32 offset, uint32 size)
+/** punch hole file allocate interface.
+ @param[in]     fd       the file handle.
+ @param[in]     offset   the offset from file header.
+ @param[in]     size     the punch hole size. */
+void FilePunchHoleAlloc(File fd, uint32 offset, uint32 size)
 {
     if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed fd: \"%d\"", fd)));

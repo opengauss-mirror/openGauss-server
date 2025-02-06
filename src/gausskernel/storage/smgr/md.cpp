@@ -856,7 +856,8 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 #ifdef USE_PREFETCH
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
         int fd = CfsGetFd(reln, forknum, blocknum, false, EXTENT_OPEN_FILE);
-        CfsMdPrefetch(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum, COMMON_STORAGE);
+        CfsMdPrefetch(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                      forknum, blocknum, COMMON_STORAGE);
         return;
     }
     off_t seekpos;
@@ -880,11 +881,13 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
  * This accepts a range of blocks because flushing several pages at once is
  * considerably more efficient than doing so individually.
  */
-void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks, RelFileNode relNode)
+void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                 BlockNumber nblocks, RelFileNode relNode)
 {
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
         int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, EXTENT_OPEN_FILE);
-        CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum, nblocks, COMMON_STORAGE);
+        CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
+                     nblocks, COMMON_STORAGE);
         return;
     }
     /*
@@ -1459,7 +1462,7 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     if (compressed) {
         int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, EXTENT_OPEN_FILE);
         nbytes = (int)CfsWritePage(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
-                                   forknum, blocknum, buffer, COMMON_STORAGE);
+                                   forknum, blocknum, buffer, false, COMMON_STORAGE);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -1699,7 +1702,8 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
             auto truncateOffset = (off_t)last_seg_blocks * BLCKSZ;
             if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
                 int fd = CfsGetFd(reln, forknum, nblocks, false, EXTENT_OPEN_FILE);
-                truncateOffset = CfsMdTruncate(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                truncateOffset = CfsMdTruncate(reln, reln->smgr_rnode.node, fd,
+                                               CFS_LOGIC_BLOCKS_PER_EXTENT,
                                                forknum, nblocks, COMMON_STORAGE);
             }
 

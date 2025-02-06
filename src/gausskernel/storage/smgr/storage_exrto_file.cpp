@@ -582,8 +582,8 @@ void exrto_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
     }
 }
 
-void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
-    BlockNumber nblocks, RelFileNode relNode)
+void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                     RelFileNode relNode)
 {
     ExRTOFileType type;
     uint64 total_block_num;

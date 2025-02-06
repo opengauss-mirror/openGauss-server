@@ -253,45 +253,19 @@ SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber 
 }
 
 /** Get fd for segment block.
- * @param[in]     sf        SegLogicFile.
- * @param[in]     blocknum   physical block number.
- * @return  file handler. return -1 in any failure.
- */
+ @param[in]     sf        SegLogicFile.
+ @param[in]     blocknum   physical block number.
+ @return  file handler. return -1 in any failure. */
 int df_get_fd(SegLogicFile *sf, BlockNumber blocknum)
 {
-    int fd = -1;
     int sliceno = DF_OFFSET_TO_SLICENO(((off_t)blocknum) * BLCKSZ);
     SegPhysicalFile spf = df_get_physical_file(sf, sliceno, blocknum);
     char *filename = slice_filename(sf->filename, sliceno);
     if (spf.fd < 0) {
-        fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        spf.fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
     }
     return spf.fd;
 }
-
-void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums)
-{
-    off_t offset = ((off_t)blocknum) * BLCKSZ;
-    int sliceno = DF_OFFSET_TO_SLICENO(offset);
-    off_t roffset = DF_OFFSET_TO_SLICE_OFFSET(offset);
-
-    pgstat_report_waitevent(WAIT_EVENT_DATA_FILE_READ);
-    SegPhysicalFile spf = df_get_physical_file(sf, sliceno, blocknum);
-    ssize_t nbytes = pread(spf.fd, buffer, (*blocknums) * BLCKSZ, roffset);
-    pgstat_report_waitevent(WAIT_EVENT_END);
-    if (nbytes < 0 || (size_t)nbytes > ((uint64)(*blocknums) * BLCKSZ)) {
-        ereport(ERROR,
-                (errcode(MOD_SEGMENT_PAGE),
-                 errcode_for_file_access(),
-                 errmsg("could not direct read segment block %d to block %d in file %s and read size = %zd",
-                        blocknum, blocknum + (*blocknums), sf->filename, nbytes),
-                 errdetail("errno: %d", errno)));
-    } else if ((size_t)nbytes < ((uint64)(*blocknums) * BLCKSZ)) {
-        ereport(DEBUG1, (errmsg("Direct read has been cut off from %d to %zd", *blocknums, nbytes / BLCKSZ)));
-        *blocknums = nbytes / BLCKSZ;
-    }
-}
-
 
 void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks)
 {
@@ -713,6 +687,29 @@ void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum)
                 errcode_for_file_access(),
                 errmsg("could not read segment block %d in file %s", blocknum, sf->filename),
                 errdetail("errno: %d", errno)));
+    }
+}
+
+void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums)
+{
+    off_t offset = ((off_t)blocknum) * BLCKSZ;
+    int sliceno = DF_OFFSET_TO_SLICENO(offset);
+    off_t roffset = DF_OFFSET_TO_SLICE_OFFSET(offset);
+
+    pgstat_report_waitevent(WAIT_EVENT_DATA_FILE_READ);
+    SegPhysicalFile spf = df_get_physical_file(sf, sliceno, blocknum);
+    ssize_t nbytes = pread(spf.fd, buffer, (*blocknums) * BLCKSZ, roffset);
+    pgstat_report_waitevent(WAIT_EVENT_END);
+    if (nbytes < 0 || (size_t)nbytes > ((uint64)(*blocknums) * BLCKSZ)) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                 errcode_for_file_access(),
+                 errmsg("could not direct read segment block %d to block %d in file %s and read size = %zd",
+                        blocknum, blocknum + (*blocknums), sf->filename, nbytes),
+                 errdetail("errno: %d", errno)));
+    } else if ((size_t)nbytes < ((uint64)(*blocknums) * BLCKSZ)) {
+        ereport(DEBUG1, (errmsg("Direct read has been cut off from %d to %zd", *blocknums, nbytes / BLCKSZ)));
+        *blocknums = nbytes / BLCKSZ;
     }
 }
 

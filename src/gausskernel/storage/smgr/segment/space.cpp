@@ -98,7 +98,7 @@ void spc_read_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, char
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
-    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && SegIsDataBlock(blocknum, seg->extent_size)) {
         int fd = df_get_fd(seg->segfile, blocknum);
         CfsReadPage(rel, relNode, fd, seg->extent_size, forknum, blocknum, buffer, SEG_STORAGE);
     } else {
@@ -107,22 +107,21 @@ void spc_read_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, char
     return;
 }
 
-void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, const char *buffer, BlockNumber blocknum)
+void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, const char *buffer,
+                     BlockNumber blocknum)
 {
     SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
-    ereport(LOG, (errmsg("spc_write_block, blocknum:%d, relNode:%d", blocknum, relNode.relNode)));
-
-    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && SegIsDataBlock(blocknum, seg->extent_size)) {
         int fd = df_get_fd(seg->segfile, blocknum);
-        CfsWritePage(rel, relNode, fd, seg->extent_size, forknum, blocknum, buffer, SEG_STORAGE);
+        CfsWritePage(rel, relNode, fd, seg->extent_size, forknum, blocknum, buffer, false, SEG_STORAGE);
         int sliceno = DF_OFFSET_TO_SLICENO(((off_t)blocknum) * BLCKSZ);
         seg_register_dirty_file(seg->segfile, sliceno);
     } else {
         df_pwrite_block(seg->segfile, buffer, blocknum);
-    }    
+    }
 }
 
 int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
@@ -148,15 +147,16 @@ int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum
     return ret;
 }
 
-void spc_writeback(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
+void spc_writeback(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
+                   BlockNumber nblocks)
 {
-    SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));  
+    SMgrRelation rel = smgropen(relNode, InvalidBackendId, GetColumnNum(forknum));
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
     SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
-    ereport(LOG, (errmsg("spc_writeback, blocknum:%d, nblocks:%d, forknum:%d, relNode:%d",  blocknum, nblocks, forknum, relNode.relNode)));
-    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && seg_is_data_block(blocknum, seg->extent_size)) {
+
+    if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && SegIsDataBlock(blocknum, seg->extent_size)) {
         int fd = df_get_fd(sf, blocknum);
         CfsWriteBack(rel, relNode, fd, seg->extent_size, forknum, blocknum, nblocks, SEG_STORAGE);
     } else {
@@ -563,7 +563,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
         }
 
         if (compress && ((i + 1) % CFS_EXTENT_SIZE == 0)) {
-            ereport(LOG, (errmsg("[segment page]we need not to copy pca page, logic_start_blocknum:%d, offset:%d",
+            ereport(LOG, (errmsg("[segment page]we need not to copy pca page,"
+                                 "logic_start_blocknum:%d, offset:%d",
                                  logic_start_blocknum, i)));
             continue;
         }
@@ -600,7 +601,7 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
         } else {
             BlockNumber from_block = phy_from_extent + i;
             spc_read_block(seg->space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
-                forknum, content, from_block);
+                           forknum, content, from_block);
             pagedata = content;
         }
 
@@ -627,8 +628,9 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
                 t_thrd.proc->dw_pos = pos;
                 t_thrd.proc->flush_new_dw = !flush_old_file;
                 PageSetChecksumInplace((Page)pagedata, to_block);
-                spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
-                    forknum, pagedata, to_block);
+                spc_write_block(rel->seg_space,
+                                EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
+                                                   logic_rnode.opt), forknum, pagedata, to_block);
                 if (flush_old_file) {
                     g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
                 } else {
@@ -637,8 +639,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
                 t_thrd.proc->dw_pos = -1;
             } else {
                 PageSetChecksumInplace((Page)pagedata, to_block);
-                spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
-                    forknum, pagedata, to_block);
+                spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
+                                logic_rnode.opt), forknum, pagedata, to_block);
             }
         }
         END_CRIT_SECTION();
@@ -847,10 +849,10 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
 
     /* Check is passed. Now we can do the data movement */
     if (!IS_SEG_COMPRESSED_RNODE(EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size, logic_rnode.opt),
-        seg->forknum)) {
-        logic_start = extent_id_to_logic_blocknum(extent_id);
+                                 seg->forknum)) {
+        logic_start = ExtentIdToLogicBlockNum(extent_id);
     } else {
-        logic_start = extent_id_to_logic_blocknum_in_cfs(extent_id);
+        logic_start = ExtentIdToLogicBlocknumInCfs(extent_id);
     }
 
     XLogAtomicOpStart();

@@ -93,6 +93,20 @@ typedef struct SegLogicFile {
     pthread_mutex_t filelock;
 } SegLogicFile;
 
+void df_ctrl_init(SegLogicFile *sf, RelFileNode relNode, ForkNumber forknum);
+void df_open_files(SegLogicFile *sf);
+void df_extend(SegLogicFile *sf, BlockNumber target_blocks);
+void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum);
+void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums);
+void df_pwrite_block(SegLogicFile *sf, const char *buffer, BlockNumber blocknum);
+void df_fsync(SegLogicFile *sf);
+void df_unlink(SegLogicFile *sf);
+void df_create_file(SegLogicFile *sf, bool redo);
+void df_shrink(SegLogicFile *sf, BlockNumber target);
+void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
+bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
+SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block);
+
 /*
  * Data files status in the segment space;
  */
@@ -137,11 +151,16 @@ typedef enum ExtentSize {
     EXT_SIZE_128 = 128,
     EXT_SIZE_1024 = 1024,
     EXT_SIZE_8192 = 8192,
+    /* for page compression, extents >= 1M are consisted with smaller cfs extents, witch
+    only contains 127/128 logical data pages. */
     CFS_EXT_SIZE_1 = 1,
     CFS_EXT_SIZE_8 = 8,
+    /* 1 cfs extent, so 1 page less than EXT_SIZE_128 */
     CFS_EXT_SIZE_128 = 127,
-    CFS_EXT_SIZE_1024 = 1016, // 127 * 8
-    CFS_EXT_SIZE_8192 = 8128, // 127 * 64
+    /* 8 cfs extent, so 8 page less than EXT_SIZE_1024 */
+    CFS_EXT_SIZE_1024 = 1016,
+    /* 64 cfs extent, so 64 page less than EXT_SIZE_1024 */
+    CFS_EXT_SIZE_8192 = 8128,
     INVALID_EXT_SIZE = 0
 } ExtentSize;
 
@@ -156,8 +175,8 @@ typedef enum ExtentTotalPages {
     EXT_SIZE_128_TOTAL_PAGES = 16384,
     EXT_SIZE_1024_TOTAL_PAGES = 131072,
     CFS_EXT_SIZE_8_TOTAL_PAGES = 128,
-    CFS_EXT_SIZE_128_TOTAL_PAGES = 16257, // 128 + 127 *127
-    CFS_EXT_SIZE_1024_TOTAL_PAGES = 130049, // 128 +127 *127 + 127* 8 * 112
+    CFS_EXT_SIZE_128_TOTAL_PAGES = 16257,
+    CFS_EXT_SIZE_1024_TOTAL_PAGES = 130049,
 } ExtentTotalPages;
 
 typedef enum EXTENT_TYPE {
@@ -473,6 +492,19 @@ inline static ExtentSize ExtentSizeByCount(uint32 count)
     }
 }
 
+inline static ExtentSize CfsExtentSizeByCount(uint32 count)
+{
+    if (count < EXT_SIZE_8_BOUNDARY) {
+        return CFS_EXT_SIZE_8;
+    } else if (count < EXT_SIZE_128_BOUNDARY) {
+        return CFS_EXT_SIZE_128;
+    } else if (count < EXT_SIZE_1024_BOUNDARY) {
+        return CFS_EXT_SIZE_1024;
+    } else {
+        return CFS_EXT_SIZE_8192;
+    }
+}
+
 inline static uint32 ExtentIdToLevel1Slot(uint32 extent_id)
 {
     Assert(extent_id >= BMT_HEADER_LEVEL0_SLOTS);
@@ -485,7 +517,7 @@ inline static uint32 ExtentIdToLevel0PageOffset(uint32 extent_id)
     return (extent_id - BMT_HEADER_LEVEL0_SLOTS) % BMT_LEVEL0_SLOTS;
 }
 
-inline static BlockNumber extent_id_to_logic_blocknum(uint32 extent_id)
+inline static BlockNumber ExtentIdToLogicBlockNum(uint32 extent_id)
 {
     if (extent_id < EXT_SIZE_8_BOUNDARY) {
         return extent_id * EXT_SIZE_8;
@@ -498,7 +530,7 @@ inline static BlockNumber extent_id_to_logic_blocknum(uint32 extent_id)
     }
 }
 
-inline static BlockNumber extent_id_to_logic_blocknum_in_cfs(uint32 extent_id)
+inline static BlockNumber ExtentIdToLogicBlocknumInCfs(uint32 extent_id)
 {
     if (extent_id < EXT_SIZE_8_BOUNDARY) {
         return extent_id * CFS_EXT_SIZE_8;
@@ -676,18 +708,5 @@ static const int SEGMENT_SPACE_INFO_VIEW_COL_NUM = 8;
 static const int SEGMENT_SPACE_EXTENT_USAGE_COL_NUM = 5;
 
 SegmentSpaceStat spc_storage_stat(SegSpace *spc, int group_id, ForkNumber forknum);
-void df_ctrl_init(SegLogicFile *sf, RelFileNode relNode, ForkNumber forknum);
-void df_open_files(SegLogicFile *sf);
-void df_extend(SegLogicFile *sf, BlockNumber target_blocks);
-void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum);
-void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums);
-void df_pwrite_block(SegLogicFile *sf, const char *buffer, BlockNumber blocknum);
-void df_fsync(SegLogicFile *sf);
-void df_unlink(SegLogicFile *sf);
-void df_create_file(SegLogicFile *sf, bool redo);
-void df_shrink(SegLogicFile *sf, BlockNumber target);
-void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
-bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
-SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block);
 
 #endif

@@ -493,7 +493,7 @@ void WriteUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, 
 }
 
 void WritebackUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno,
-    BlockNumber nblocks, RelFileNode relNode)
+                       BlockNumber nblocks, RelFileNode relNode)
 {
     uint32 undoFileBlocks = UNDO_FILE_BLOCK(reln->smgr_rnode.node.dbNode);
 

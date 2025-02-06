@@ -15,7 +15,7 @@
 #include "storage/smgr/smgr.h"
 #include "pgstat.h"
 #include "postmaster/cfs_shrinker.h"
-#include "storage/smgr/storage_converter.h"
+#include "storage/smgr/cfs_addressing.h"
 
 #define CFS_PCA_AND_ASSIST_BUFFER_SIZE (2 * CFS_EXTENT_SIZE * BLCKSZ)
 #define CFS_WRITE_RETRY_TIMES 8
@@ -89,13 +89,6 @@ char* CfsHeaderPagerCheckStatusList[] = {"verified success.",
 void CfsRecycleChunk(SMgrRelation reln, ForkNumber forknum);
 void CfsShrinkerShmemListPush(const RelFileNode &rnode, ForkNumber forknum, char parttype);
 
-/** Get the real file handler.
- * @param[in]     sRel        SMgrRelation.
- * @param[in]     forknum  fork number.
- * @param[in]     logicBlockNumber  logic block number.
- * @param[in] skipSync   inidicate whether to skip sync.
- * @return  the real file handler. return -1 in any failure cases.
- */
 int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync, int type)
 {
     int fd = -1;
@@ -111,25 +104,28 @@ int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber
         fd = v->mdfd_vfd;
     }
     return fd;
-} 
+}
 
 int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
                 BlockNumber logicBlockNumber, char *buffer, EXTEND_STORAGE_TYPE type)
 {
     errno_t rc;
     int nbytes;
-    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    ExtentLocation location =
+        g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     if (location.fd < 0) {
         return -1;
     }
-
+    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
+    return false), we write the original page. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
-        nbytes = seg_file_read(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
-            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
-        ereport(LOG,(errmodule(MOD_SEGMENT_PAGE), errmsg("don't compress block due to it's a slice-acrossed block,"
-            "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
-            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        nbytes = DirectFilePRead(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
+                                 (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        ereport(LOG, (errmodule(MOD_SEGMENT_PAGE),
+                      errmsg("don't compress block due to it's a slice-acrossed block,"
+                             "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+                             "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                      logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
         return nbytes;
     }
 
@@ -173,7 +169,8 @@ int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int exten
         }
         int readAmount = (int)(chunkSize * ((int)(i - (int)start) + 1));
         if (location.is_segment_page) {
-            nbytes = seg_file_read(location.fd, bufferPos, readAmount, seekPos, (uint32)WAIT_EVENT_DATA_FILE_READ);
+            nbytes = DirectFilePRead(location.fd, bufferPos, readAmount, seekPos,
+                                     (uint32)WAIT_EVENT_DATA_FILE_READ);
         } else {
             nbytes = FilePRead(location.fd, bufferPos, readAmount, seekPos, (uint32)WAIT_EVENT_DATA_FILE_READ);
         }
@@ -216,7 +213,6 @@ char *CfsCompressPage(const char *buffer, RelFileCompressOption *option, uint8 *
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("mdwrite_pc unrecognized compression algorithm %d,chunk_size:%d,level:%d,prealloc_chunk:%d",
                 (int)algorithm, (int)chunk_size, level, (int)prealloc_chunk)));
-        Assert(0);
     }
 
     char *work_buffer = (char *) palloc((unsigned long)work_buffer_size);
@@ -253,18 +249,23 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
                   BlockNumber blocknum, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
 {
     while (nblocks > 0) {
-        ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum);
+        ExtentLocation location =
+            g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum);
         if (location.fd == -1) {
             return;
         }
+        /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
+        return false), we write the original page. */
         if (location.is_segment_page && (!location.is_compress_allowed)) {
-            seg_write_back(location.fd, blocknum * BLCKSZ, BLCKSZ);
+            pg_flush_data(location.fd, blocknum * BLCKSZ, BLCKSZ);
             nblocks -= 1;
             blocknum += 1;
-            ereport(LOG, (errmodule(MOD_SEGMENT_PAGE), errmsg("don't compress block due to it's a slice-acrossed"
-                "block, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d, type:%d,"
-                "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-                blocknum, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+            ereport(LOG,
+                    (errmodule(MOD_SEGMENT_PAGE),
+                     errmsg("don't compress block due to it's a slice-acrossed"
+                            "block, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d, type:%d,"
+                            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                            blocknum, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
             continue;
         }
         unsigned int segnum_start = blocknum / CFS_LOGIC_BLOCKS_PER_FILE;
@@ -311,7 +312,7 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
                     seekPos = OffsetOfPageCompressChunk((uint16)chunkSize, (int)seekPosChunk);
                     pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
                     if (location.is_segment_page) {
-                        seg_write_back(location.fd, seekPos, (off_t)nchunks * chunkSize);
+                        pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
                     } else {
                         FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
                     }
@@ -325,7 +326,7 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
                 seekPos = (off_t) chunkSize * seekPosChunk;
                 pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
                 if (location.is_segment_page) {
-                    seg_write_back(location.fd, seekPos, (off_t)nchunks * chunkSize);
+                    pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
                 } else {
                     FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
                 }
@@ -630,18 +631,23 @@ static inline uint32 SingleBlockChunkNumForRecycle(CfsExtentHeader *cfsExtentHea
     return BLCKSZ / cfsExtentHeader->chunk_size;
 }
 
-size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
-    const char *buffer, EXTEND_STORAGE_TYPE type)
+size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size,
+                    ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer,
+                    bool isExtend, EXTEND_STORAGE_TYPE type)
 {
-    /* quick return if page is extend page */
+    /* if enable_fast_allocate is on, and the caller is rewrite_flush_page->smgrextend,
+    or page is extend page, quick return. */
     if (buffer == nullptr || PageIsNew(buffer)) {
         return BLCKSZ;
     }
     int nbytes;
-    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
-
+    ExtentLocation location =
+        g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
+    return false), we write the original page. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
-        nbytes = seg_file_write(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        nbytes = DirectFilePWrite(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
+                                  (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         ereport(LOG, (errmsg("CfsWritePage with out compress, logicBlockNumber:%u, fd:%d, extent_size:%d,"
                              "forknum:%d,type:%d, RelFileNode.relNode:%d, RelFileNode.opt:%d",
                              logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
@@ -671,8 +677,12 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     /* compress page */
     uint8 nchunks;
     char *compressedBuffer;
+    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
+    return false), we write the original page. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
-        compressedBuffer = (char *)buffer;
+        compressedBuffer = static_cast<char *>(palloc((unsigned long)BLCKSZ));
+        errno_t rc = memcpy_s(compressedBuffer, BLCKSZ, buffer, BLCKSZ);
+        securec_check(rc, "\0", "\0");
         nchunks = (uint8)(BLCKSZ / location.chunk_size);
     } else {
         compressedBuffer = CfsCompressPage(buffer, &option, &nchunks);
@@ -701,8 +711,8 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
             *((uint32 *)NULL) = 1;
         }
         if (location.is_segment_page) {
-            nbytes = seg_file_write(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
-                                    (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+            nbytes = DirectFilePWrite(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
+                                      (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         } else {
             nbytes = FilePWrite(location.fd, buffer_pos, write_amount, seekPos + extentStartOffset,
                                 (uint32)WAIT_EVENT_DATA_FILE_WRITE);
@@ -767,70 +777,62 @@ void InitExtentHeader(const ExtentLocation& location)
 
     cfsExtentHeader->algorithm = location.algorithm;
     cfsExtentHeader->chunk_size = location.chunk_size;
-
+    /* now ctrl->load_status is not set, and the disk pca page is not written, and the caller
+    may read pca before calling pca_buf_free_page, so we should pca_buf_free_page here. */
     pca_buf_free_page(ctrl, location, true);
 }
 
-void cfs_extend_for_seg(const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
-                        BlockNumber logicBlockNumber, const char *buffer,
-                        EXTEND_STORAGE_TYPE type, const ExtentLocation &location)
+void CfsExtendForSeg(const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
+                     BlockNumber logicBlockNumber, const char *buffer, const ExtentLocation &location)
 {
     if (location.fd < 0) {
         return;
     }
-    if (location.is_segment_page && (!location.is_compress_allowed)) {
-        ereport(LOG,(errmsg("[sgement compress]don't need to truncate due to it's a slice-acrossed block,"
-            "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
-            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
-        return;
-    }
     ereport(LOG,
-        (errmsg("[sgement compress]cfs_extend_for_seg:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
-            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-            logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        (errmsg("[sgement compress]CfsExtendForSeg:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
+                "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+                logicBlockNumber, fd, extent_size, forknum, SEG_STORAGE, relNode.relNode,
+                relNode.opt)));
     if (location.extentOffset == 0) {
         /* extend and fallocate */
         auto start = location.extentStart * BLCKSZ;
         InitExtentHeader(location);
         if (location.is_segment_page && location.is_compress_allowed) {
-            seg_file_allocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+            FilePunchHoleAlloc(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
         }
         ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("[sgement compress]InitExtentHeader relNode relFileNode:%d, opt:%d, headerNum: %u.", relNode.relNode, relNode.opt, location.headerNum)));
+                errmsg("[sgement compress]InitExtentHeader relNode relFileNode:%d,"
+                       " opt:%d, headerNum: %u.",
+                       relNode.relNode, relNode.opt, location.headerNum)));
     }
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("[sgement compress]Failed to load pca during extent, fd: %d, headerNum: %u.", location.fd, location.headerNum)));
+                errmsg("[sgement compress]Failed to load pca during extent, fd: %d, headerNum: %u.",
+                       location.fd, location.headerNum)));
     }
     CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
 
-    if (pg_atomic_read_u32(&cfsExtentHeader->nblocks) < location.extentOffset + 1) {
-        pg_atomic_write_u32(&cfsExtentHeader->nblocks, location.extentOffset + 1);
-    }
+    auto limit_n_blocks = location.extentOffset + 1;
+    auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+    while (limit_n_blocks > autal_n_blocks &&
+           (!pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks,
+                                            &autal_n_blocks, limit_n_blocks)));
 
     pca_buf_free_page(ctrl, location, true);
-    return;
 }
 
-void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
-    const char *buffer, EXTEND_STORAGE_TYPE type)
+void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                     BlockNumber logicBlockNumber, const char *buffer, EXTEND_STORAGE_TYPE type)
 {
-    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    ExtentLocation location =
+        g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     if (location.fd < 0) {
         return;
     }
 
-    if (location.is_segment_page && (!location.is_compress_allowed)) {
-        ereport(LOG,(errmsg("CfsExtendExtent dont need truncate, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d, RelFileNode.relNode:%d,\
-            RelFileNode.opt:%d", logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
-        return;
-    }
-    ereport(LOG, (errmsg("CfsExtendExtent:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
-                         "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-                         logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+    Assert(!location.is_segment_page && location.is_compress_allowed);
 
     if (location.extentOffset == 0) {
         /* extend and fallocate */
@@ -839,11 +841,8 @@ void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int 
         if (!location.is_segment_page) {
             FileAllocate(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
         }
-        
-        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("InitExtentHeader relNode relFileNode:%d, opt:%d, headerNum: %u.", relNode.relNode, relNode.opt, location.headerNum)));
     }
-    (void)CfsWritePage(reln, relNode, fd, extent_size, forknum, logicBlockNumber, buffer, type);
+    (void)CfsWritePage(reln, relNode, fd, extent_size, forknum, logicBlockNumber, buffer, true, type);
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -894,10 +893,11 @@ BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo,
     return result;
 }
 
-void CfsMdPrefetch(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
-                   EXTEND_STORAGE_TYPE type)
+void CfsMdPrefetch(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                   BlockNumber logicBlockNumber, EXTEND_STORAGE_TYPE type)
 {
-    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    ExtentLocation location =
+        g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     if (location.fd < 0) {
         return;
     }
@@ -927,10 +927,11 @@ void CfsMdPrefetch(SMgrRelation reln, const RelFileNode &relNode, int fd, int ex
     pca_buf_free_page(ctrl, location, false);
 }
 
-off_t CfsMdTruncate(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum, BlockNumber logicBlockNumber,
-                    EXTEND_STORAGE_TYPE type)
+off_t CfsMdTruncate(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                    BlockNumber logicBlockNumber, EXTEND_STORAGE_TYPE type)
 {
-    ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
+    ExtentLocation location =
+        g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
     /* if logicBlockNumber is the first block of extent, truncate all after blocks */
     if (logicBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT == 0) {
         return location.extentStart * BLCKSZ;  // ok
@@ -1015,7 +1016,8 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
     errno_t rc = 0;
     int fd = CfsGetFd(reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
     ExtentLocation location =
-        g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, MAIN_FORKNUM, logicBlockNumber);
+        g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE,
+                                           MAIN_FORKNUM, logicBlockNumber);
 
     /* load the pca page directly */
     CfsExtentHeader *pca_disk = (CfsExtentHeader *)palloc0(BLCKSZ);
@@ -1032,8 +1034,8 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
     /* lock the extent by LW_EXCLUSIVE */
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NO_READ);
 
-    CfsHeaderPagerCheckStatus disk_status = CheckAndRepairCompressAddress(pca_disk, location.chunk_size,
-                                                                          location.algorithm, location);
+    CfsHeaderPagerCheckStatus disk_status =
+        CheckAndRepairCompressAddress(pca_disk, location.chunk_size, location.algorithm, location);
     CfsHeaderPagerCheckStatus mem_status = CFS_HEADER_CHECK_STATUS_ERROR;
     if (ctrl->load_status == CTRL_PAGE_IS_LOADED) {
         rc = memcpy_s(pca_mem, BLCKSZ, ctrl->pca_page, BLCKSZ);
@@ -1190,8 +1192,9 @@ int WriteRepairFile_Compress_extent(SMgrRelation reln, BlockNumber logicBlockNum
         return fd;
     }
 
-    ExtentLocation location = g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd,
-        CFS_EXTENT_SIZE, MAIN_FORKNUM, logicBlockNumber);
+    ExtentLocation location =
+        g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, MAIN_FORKNUM,
+                                           logicBlockNumber);
 
     /* lock the extent by LW_EXCLUSIVE */
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NO_READ);
@@ -1373,7 +1376,8 @@ void MdRecoveryPcaPage(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
 
     int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, WRITE_BACK_OPEN_FILE);
     /* buffer init is ahead of dw, buffer can be used for reading pca */
-    ExtentLocation location = StorageConvert(reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, forknum, blocknum);
+    ExtentLocation location =
+        StorageConvert(reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, forknum, blocknum);
     // protect ext from reading and writing during pca recovery
     ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
@@ -1416,8 +1420,9 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
 
     int fd = CfsGetFd(relation, extInfo->forknum,
         extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT, false, EXTENT_OPEN_FILE);
-    ExtentLocation location = StorageConvert(relation, relation->smgr_rnode.node, fd, CFS_EXTENT_SIZE, extInfo->forknum,
-                                             extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
+    ExtentLocation location =
+        StorageConvert(relation, relation->smgr_rnode.node, fd, CFS_EXTENT_SIZE, extInfo->forknum,
+                       extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
     ctrl = pca_buf_read_page(location, LW_EXCLUSIVE, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
@@ -1439,8 +1444,8 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
 
     /* if FileWrite can be used instand of FilePWrite */
     if (location.is_segment_page) {
-        nbytes = seg_file_write(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
-                                location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        nbytes = DirectFilePWrite(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
+                                  location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     } else {
         nbytes = FilePWrite(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
                             location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
@@ -1545,7 +1550,7 @@ static void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assist
     }
 
     if (location.is_segment_page) {
-        seg_file_allocate(location.fd, start, punchSize);
+        FilePunchHoleAlloc(location.fd, start, punchSize);
     } else {
         FileAllocate(location.fd, start, punchSize);
     }
@@ -1587,11 +1592,12 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     Assert(ctrl->ref_num == 1);
     
     if (location.is_segment_page) {
-        nbytes = seg_file_write(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
-            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+        nbytes =
+            DirectFilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
+                             (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     } else {
         nbytes = FilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
-            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+                            (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     }
     
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
@@ -1740,11 +1746,14 @@ void CfsRecycleChunkProc(SMgrRelation reln, ForkNumber forknum)
 
 void CfsRecycleChunk(SMgrRelation reln, ForkNumber forknum)
 {
+    if(IsSegmentFileNode(reln->smgr_rnode.node)) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED),
+                errmsg("shrink table cmd is not supported for segment table.")));
+    }
     /* it must be compressed file at now. */
     if (reln == NULL || !IS_COMPRESSED_MAINFORK(reln, forknum)) {
         return;
     }
-
     /* return until the massion is done */
     CfsRecycleChunkProc(reln, forknum);
 }

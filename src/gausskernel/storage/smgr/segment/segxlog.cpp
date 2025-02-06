@@ -522,9 +522,13 @@ void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const cha
 
 void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
 {
-    BlockNumber logic_start = extent_id_to_logic_blocknum(xlog_data->extent_id);
-    for (int i=0; i<ExtentSizeByCount(xlog_data->extent_id); i++) {
-        BlockNumber blk = logic_start + i;
+    uint2 opt = xlog_data->logic_rnode.opt;
+    BlockNumber logicStart = opt == 0 ? ExtentIdToLogicBlockNum(xlog_data->extent_id) :
+                                        ExtentIdToLogicBlocknumInCfs(xlog_data->extent_id);
+    uint64 extentSize = opt == 0 ? ExtentSizeByCount(xlog_data->extent_id) :
+                                   CfsExtentSizeByCount(xlog_data->extent_id);
+    for (int i=0; i < extentSize; i++) {
+        BlockNumber blk = logicStart + i;
         if (blk >= xlog_data->nblocks) {
             break;
         }
@@ -612,7 +616,7 @@ static void redo_atomic_xlog(XLogReaderState *record)
             PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
             SegMarkBufferDirty(redo_buf.buf);
         }
-        
+
         for (int j = 0; j < decoded_op.operations; j++) {
             if (decoded_op.op[j] == SPCXLOG_SHRINK_SEGHEAD_UPDATE) {
                 need_flush_buffer_for_shrink = true;

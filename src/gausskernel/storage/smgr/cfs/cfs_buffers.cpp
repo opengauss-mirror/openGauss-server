@@ -287,32 +287,6 @@ static inline bool pca_is_all_zero(char *pca_page)
 
     return true;
 }
-/** If the cfs extent is accross segment slice, we do not compress this cfs extent, but we still
- * need a pca page for normal read and write, so we use this method to construct a pca page. The pca
- * page constructed by this method looks like full-allocated and full-used, there is no problem because
- * this cfs extent does not be compressed and blocks are arranged continously and sequentially.
- * @param[in/out]     item        pca buffer control item.
- * @param[in]     location   Extent location info.
- */
-void pca_buf_padding(pca_page_ctrl_t *item, const ExtentLocation& location)
-{
-    CfsExtentHeader *cfsExtentHeader = item->pca_page;
-    cfsExtentHeader->algorithm = location.algorithm;
-    cfsExtentHeader->chunk_size = location.chunk_size;
-    cfsExtentHeader->nblocks = CFS_LOGIC_BLOCKS_PER_EXTENT;
-    cfsExtentHeader->allocated_chunks = BLCKSZ / location.chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT;
-    CfsExtentAddress *cfsExtentAddress;
-    for (uint32 i = 0; i < cfsExtentHeader->nblocks; i++) {
-        cfsExtentAddress = GetExtentAddress(cfsExtentHeader, i);
-        cfsExtentAddress->nchunks = BLCKSZ / location.chunk_size;
-        cfsExtentAddress->allocated_chunks = BLCKSZ / location.chunk_size;
-        for (int j = 0; j < BLCKSZ / location.chunk_size; j++) {
-            cfsExtentAddress->chunknos[j] = i * BLCKSZ / location.chunk_size + j + 1;
-        }
-    }
-    ereport(LOG, (errmsg("[sgement compress] padding pca")));
-    return;
-}
 
 void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, CfsBufferKey *key)
 {
@@ -324,13 +298,8 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
 
     // load real page from disk by mmap
     if (location.is_segment_page) {
-        if (location.is_compress_allowed) {
-            nbytes = seg_file_read(location.fd, (char *)item->pca_page, BLCKSZ, location.get_local_header_num() * BLCKSZ);
-        } else {
-            pca_buf_padding(item, location);
-            item->load_status = CTRL_PAGE_IS_LOADED;
-            return;
-        }
+        nbytes = DirectFilePRead(location.fd, (char *)item->pca_page, BLCKSZ,
+                                 location.get_local_header_num() * BLCKSZ);
     } else {
         nbytes = FilePRead(location.fd, (char *)item->pca_page, BLCKSZ,
             location.headerNum * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_READ);
@@ -351,9 +320,12 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
     }
 
     /* if in recovey process and the pca page has been inited, we need to check it */
-    if ((CfsHeaderPagerCheckStatus)CheckAndRepairCompressAddress(item->pca_page, location.chunk_size,
-                                                                 location.algorithm, location) ==
-        CFS_HEADER_CHECK_STATUS_ERROR) {
+if ((CfsHeaderPagerCheckStatus)CheckAndRepairCompressAddress(
+        item->pca_page,
+        location.chunk_size,
+        location.algorithm,
+        location) ==
+    CFS_HEADER_CHECK_STATUS_ERROR) {
         item->load_status = CTRL_PAGE_LOADED_ERROR;
         return;
     }
@@ -385,11 +357,16 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
     return;
 }
 
-pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLockMode lockMode, PcaBufferReadMode readMode)
+pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLockMode lockMode,
+                                            PcaBufferReadMode readMode)
 {
     errno_t rc;
-    CfsBufferKey key = {{location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
-                         location.relFileNode.bucketNode}, location.headerNum};
+    CfsBufferKey key =
+    {
+        {location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
+         location.relFileNode.bucketNode},
+        location.headerNum
+    };
     uint32 hashcode = pca_hashcode(&key);
 
     pca_hash_bucket_t *bucket = PCA_GET_BUCKET_BY_HASH(g_pca_buf_ctx, hashcode);
@@ -451,21 +428,10 @@ pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLo
     return item;
 }
 
-pca_page_ctrl_t *pca_buf_read_page(const ExtentLocation& location, LWLockMode lockMode, PcaBufferReadMode readMode)
+pca_page_ctrl_t *pca_buf_read_page(const ExtentLocation& location, LWLockMode lockMode,
+                                   PcaBufferReadMode readMode)
 {
-    pca_page_ctrl_t *item = nullptr;
-    if (location.is_segment_page) {
-        if (location.is_compress_allowed) {
-            item = pca_buf_read_page_internal(location, lockMode, readMode);
-        } else {
-            item = pca_buf_read_page_internal(location, lockMode, PCA_BUF_NO_READ);
-            pca_buf_padding(item, location);
-            item->load_status = CTRL_PAGE_IS_LOADED;
-        }
-        return item;
-    }
-    item = pca_buf_read_page_internal(location, lockMode, readMode);
-    return item;
+    return pca_buf_read_page_internal(location, lockMode, readMode);
 }
 
 void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bool need_write)
@@ -474,11 +440,12 @@ void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bo
         int nbytes = BLCKSZ;
         // sync to disk
         if (location.is_segment_page && location.is_compress_allowed) {
-            nbytes = seg_file_write(location.fd, (char *)ctrl->pca_page, BLCKSZ, location.get_local_header_num() * BLCKSZ,
-                (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+            nbytes = DirectFilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ,
+                                      location.get_local_header_num() * BLCKSZ,
+                                      (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         } else {
             nbytes = FilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ, location.headerNum * BLCKSZ,
-                (uint32)WAIT_EVENT_DATA_FILE_WRITE);
+                                (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         }
         if (nbytes != BLCKSZ) {
             // get the ctrl locked before, the thread is still keep the lock, release ctrl lock and decrease the ref_num
@@ -487,10 +454,11 @@ void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bo
             LWLockRelease(ctrl->content_lock);
             if (!location.is_segment_page) {
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                    errmsg("Failed to pca_buf_free_page %s", FilePathName(location.fd))));
+                        errmsg("Failed to pca_buf_free_page %s", FilePathName(location.fd))));
             } else {
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                    errmsg("Failed to pca_buf_free_page, relfilenode: %d, file fd:%d", location.relFileNode.relNode, location.fd)));
+                        errmsg("Failed to pca_buf_free_page, relfilenode: %d, file fd:%d",
+                        location.relFileNode.relNode, location.fd)));
             }
             return;
         }
@@ -599,7 +567,6 @@ CfsHeaderPagerCheckStatus CheckHeaderOfCompressAddr(CfsExtentHeader* pcMap, uint
                                                     uint8 algorithm, const char* path)
 {
     if (pcMap->chunk_size != chunk_size || pcMap->algorithm != algorithm) {
-        Assert(0);
         if (u_sess->attr.attr_security.zero_damaged_pages) {
             ereport(WARNING,
                 (errcode(ERRCODE_DATA_CORRUPTED),
@@ -608,7 +575,6 @@ CfsHeaderPagerCheckStatus CheckHeaderOfCompressAddr(CfsExtentHeader* pcMap, uint
                         pcMap->chunk_size,
                         pcMap->algorithm,
                         path)));
-            Assert(0);
             pg_atomic_write_u32(&pcMap->nblocks, 0);
             pg_atomic_write_u32(&pcMap->allocated_chunks, 0);
             pcMap->chunk_size = chunk_size;
@@ -624,7 +590,6 @@ CfsHeaderPagerCheckStatus CheckHeaderOfCompressAddr(CfsExtentHeader* pcMap, uint
 
             pcMap->chunk_size = chunk_size;
             pcMap->algorithm = algorithm;
-            Assert(0);
             return CFS_HEADER_CHECK_STATUS_REPAIRED;
         }
     }
