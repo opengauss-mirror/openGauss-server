@@ -1243,6 +1243,14 @@ bool IsSkipDir(const char * dirName)
         if (strcmp(dirName, ".recycle") == 0) {
             return true;
         }
+
+        if (strcmp(dirName, "shared_postgresql.conf") == 0) {
+            return true;
+        }
+
+        if (strcmp(dirName, "shared_pg_hba.conf") == 0) {
+            return true;
+        }
     }
 
     return false;
