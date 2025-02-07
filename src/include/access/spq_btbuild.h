@@ -92,7 +92,7 @@ typedef struct SPQWorkerState {
     bool all_fetched; /* flag if worker has managed all tuples */
 } SPQWorkerState;
  
-Datum spqbtbuild(Relation heap, Relation index, IndexInfo *indexInfo);
+IndexBuildResult *spqbtbuild(Relation heap, Relation index, IndexInfo *indexInfo);
  
 IndexTuple spq_consume(SPQLeaderState *spqleader);
  
