@@ -227,28 +227,37 @@ TupleTableSlot* IndexScanFusion::getTupleSlot()
             if (tuple == NULL) {
                 return NULL;
             }
-            tableam_tops_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
         }
         IndexScanDesc indexScan = GetIndexScanDesc(m_scandesc);
 
-        if (indexScan->xs_recheck && EpqCheck(m_values, m_isnull)) {
-            continue;
+        if (indexScan->xs_recheck) {
+            tableam_tops_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
+            if (EpqCheck(m_values, m_isnull))
+                continue;
         }
+        (void)ExecStoreTuple(tuple, /* tuple to store */
+            m_reslot,               /* slot to store in */
+            InvalidBuffer,          /* TO DO: survey */
+            false);                 /* don't pfree this pointer */
 
         /* mapping */
-        for (int i = 0; i < m_tupDesc->natts; i++) {
-            Assert(m_attrno[i] > 0);
-            m_tmpvals[i] = m_values[m_attrno[i] - 1];
-            m_tmpisnull[i] = m_isnull[m_attrno[i] - 1];
+        if (m_maxAttrno > 0) {
+            m_reslot->tts_tupleDescriptor = RelationGetDescr(rel);
+            Datum* tmp = m_reslot->tts_values;
+            bool* tmp_isnull = m_reslot->tts_isnull;
+            m_reslot->tts_values = m_values;
+            m_reslot->tts_isnull = m_isnull;
+            tableam_tslot_getsomeattrs(m_reslot, m_maxAttrno);
+            for (int i = 0; i < m_tupDesc->natts; i++) {
+                Assert(m_attrno[i] > 0);
+                tmp[i] = m_values[m_attrno[i] - 1];
+                tmp_isnull[i] = m_isnull[m_attrno[i] - 1];
+            }
+            m_reslot->tts_values = tmp;
+            m_reslot->tts_isnull = tmp_isnull;
+            m_reslot->tts_tupleDescriptor = m_tupDesc;
+            m_reslot->tts_nvalid = m_reslot->tts_tupleDescriptor->natts;
         }
-
-        Tuple tup = tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, isUstore ? TableAmUstore : TableAmHeap);
-        Assert(tup != NULL);
-        (void)ExecStoreTuple(tup, /* tuple to store */
-            m_reslot,             /* slot to store in */
-            InvalidBuffer,        /* TO DO: survey */
-            false);               /* don't pfree this pointer */
-        tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
         return m_reslot;
     } while (1);
     return NULL;

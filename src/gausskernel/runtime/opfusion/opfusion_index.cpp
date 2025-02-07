@@ -240,6 +240,7 @@ void IndexFusion::setAttrNo()
 {
     ListCell* lc = NULL;
     int cur_resno = 1;
+    m_maxAttrno = 0;
     foreach (lc, m_targetList) {
         TargetEntry *res = (TargetEntry*)lfirst(lc);
         if (res->resjunk) {
@@ -249,6 +250,9 @@ void IndexFusion::setAttrNo()
         Var *var = (Var*)res->expr;
         m_attrno[cur_resno - 1] = var->varattno;
         cur_resno++;
+        if (m_maxAttrno < var->varattno) {
+            m_maxAttrno = var->varattno;
+        }
     }
 }
 

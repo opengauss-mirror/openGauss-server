@@ -55,6 +55,8 @@
 #include "commands/prepare.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
+#include "commands/auto_parameterization.h"
+#include "utils/elog.h"
 #ifdef PGXC
 #include "commands/trigger.h"
 #endif
@@ -2748,6 +2750,20 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         is_compl_sql = CheckElementParsetreeTag(parsetree);
         if (is_compl_sql) {
             needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_COMPL_SQL);
+        }
+
+        if(u_sess->attr.attr_sql.enable_query_parameterization && isQualifiedIuds(parsetree)) {
+            bool res = execQueryParameterization(parsetree, query_string, dest, completionTag);
+            u_sess->param_cxt.use_parame = false;  // 有个小bug
+            if(res){
+                CommandCounterIncrement();
+                if (snapshot_set != false)
+                    PopActiveSnapshot();
+                finish_xact_command();
+                EndCommand(completionTag, dest);
+                MemoryContextReset(OptimizerContext);
+                break;
+            }
         }
         /*
          * @hdfs

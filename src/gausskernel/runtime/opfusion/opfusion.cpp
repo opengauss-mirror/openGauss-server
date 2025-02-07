@@ -1132,7 +1132,7 @@ void OpFusion::setReceiver()
         ((DR_printtup *)m_local.m_receiver)->formats = m_local.m_rformats;
     }
     (*m_local.m_receiver->rStartup)(m_local.m_receiver, CMD_SELECT, m_global->m_tupDesc);
-    if (!m_global->m_is_pbe_query) {
+    if (!m_global->m_is_pbe_query || u_sess->param_cxt.use_parame) {
         StringInfoData buf = ((DR_printtup *)m_local.m_receiver)->buf;
         initStringInfo(&buf);
         SendRowDescriptionMessage(&buf, m_global->m_tupDesc, m_global->m_planstmt->planTree->targetlist,

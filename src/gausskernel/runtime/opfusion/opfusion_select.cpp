@@ -116,7 +116,6 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
         m_local.m_scan->Init(max_rows);
     }
     setReceiver();
-
     unsigned long nprocessed = 0;
     /* put selected tuple into receiver */
     TupleTableSlot* offset_reslot = NULL;
@@ -134,7 +133,7 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
         m_local.m_position++;
         nprocessed++;
         (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
-        tpslot_free_heaptuple(m_local.m_reslot);
+        //tpslot_free_heaptuple(m_local.m_reslot);
     }
     if (!ScanDirectionIsNoMovement(*(m_local.m_scan->m_direction))) {
         bool has_complete = (max_rows == 0 || nprocessed < (unsigned long)max_rows);

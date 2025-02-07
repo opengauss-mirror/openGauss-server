@@ -1016,6 +1016,17 @@ typedef struct knl_u_plancache_context {
     HTAB *generic_roots;
 } knl_u_plancache_context;
 
+typedef struct knl_u_parameterization_context {
+    CachedPlanSource* first_saved_plan;
+
+    int param_cached_plan_count;
+
+    // pthread_mutex_t param_htbl_lock;
+
+    HTAB* parameterized_queries;
+    bool use_parame;
+} knl_u_parameterization_context;
+
 typedef struct knl_u_typecache_context {
     /* The main type cache hashtable searched by lookup_type_cache */
     struct HTAB* TypeCacheHash;
@@ -2869,6 +2880,7 @@ typedef struct knl_session_context {
     knl_u_parser_context parser_cxt;
     knl_u_pgxc_context pgxc_cxt;
     knl_u_plancache_context pcache_cxt;
+    knl_u_parameterization_context param_cxt;
     knl_u_plpgsql_context plsql_cxt;
     knl_u_postgres_context postgres_cxt;
     knl_u_proc_context proc_cxt;
