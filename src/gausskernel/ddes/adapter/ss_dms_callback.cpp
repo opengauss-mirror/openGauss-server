@@ -1485,8 +1485,13 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
     dms_ctrl_info_t ctrl_info = { 0 };
     errno_t err = memcpy_s(ctrl_info.pageid, DMS_PAGEID_SIZE, &buf_desc->tag, sizeof(BufferTag));
     securec_check_c(err, "\0", "\0");
-    ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
-    ctrl_info.is_dirty = SSBufferIsDirty(buf_desc);
+    if ((buf_ctrl->state & BUF_NEED_LOAD) || !(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
+        ctrl_info.lsn = SS_MAX_UINT64;
+        ctrl_info.is_dirty = true;
+    } else {
+        ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
+        ctrl_info.is_dirty = SSBufferIsDirty(buf_desc);
+    }
     ctrl_info.is_edp = false;
     ctrl_info.lock_mode = buf_ctrl->lock_mode;
     ctrl_info.in_rcy = buf_ctrl->in_rcy;
