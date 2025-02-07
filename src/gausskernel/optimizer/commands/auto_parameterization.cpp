@@ -36,7 +36,6 @@
 #include "parser/scanner.h"
 #include "utils/int8.h"
 #include "utils/elog.h"
-#include "utils/plancache.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -59,15 +58,9 @@
 #include "access/printtup.h"
 #include "commands/auto_parameterization.h"
 
-typedef struct ParamCachedPlan {
-    char parameterized_query[MAX_PARAM_QUERY_LEN];
-    CachedPlanSource* psrc;
-} ParamCachedPlan;
-
 static inline int compLocation(const void* a, const void* b);
 static void saveParamCachedPlan(CachedPlanSource* psrc);
 static void insertIntoParameterizedHashTable(char* key, CachedPlanSource* psrc, bool* found);
-static void initParameterizedQueryHashTable();
 static void storeParamCachedPlan(char* key, CachedPlanSource* psrc);
 static ParamCachedPlan* fetchCachedPlan(char* key);
 static char* execParameterization(Node* parsetree, ParameterizationInfo* paramContext);
@@ -510,7 +503,8 @@ void storeParamCachedPlan(char* key, CachedPlanSource* psrc)
     bool found = false;
 
     if (unlikely(!u_sess->param_cxt.parameterized_queries)) {
-        initParameterizedQueryHashTable();
+         ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("hash table for parameterized query does not exist", key)));
     }
 
     insertIntoParameterizedHashTable(key, psrc, &found);
@@ -575,23 +569,6 @@ void insertIntoParameterizedHashTable(char* key, CachedPlanSource* psrc, bool* f
         entry->psrc = psrc;
     }
 
-    return;
-}
-
-void initParameterizedQueryHashTable()
-{
-    HASHCTL hash_ctl;
-    errno_t rc = EOK;
-
-    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
-    securec_check(rc, "\0", "\0");
-
-    hash_ctl.keysize = NAMEDATALEN;
-    hash_ctl.entrysize = sizeof(ParamCachedPlan);
-    hash_ctl.hcxt = u_sess->cache_mem_cxt;
-    u_sess->param_cxt.parameterized_queries = hash_create("Parameterized Queries", 32,
-                                                                &hash_ctl, HASH_ELEM | HASH_CONTEXT);
-    Assert(u_sess->param_cxt.parameterized_queries);
     return;
 }
 

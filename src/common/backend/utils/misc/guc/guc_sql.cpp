@@ -147,6 +147,7 @@
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "utils/guc_sql.h"
+#include "commands/auto_parameterization.h"
 
 #define DEFAULT_USTATS_TRACKER_NAPTIME 20
 #define DEFAULT_UMAX_PRUNE_SEARCH_LEN 10
@@ -189,6 +190,7 @@ static bool check_snapshot_separator(char** newval, void** extra, GucSource sour
 static bool check_sql_ignore_strategy(char** newval, void** extra, GucSource source);
 static void assign_sql_ignore_strategy(const char* newval, void* extra);
 static void strategy_assign_vector_targetlist(int newval, void* extra);
+static bool init_parameterized_query_hash_table(bool* newval, void** exttra, GucSource source);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -1731,7 +1733,7 @@ static void InitSqlConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_query_parameterization,
             false,
-            NULL,
+            init_parameterized_query_hash_table,
             NULL,
             NULL},
 #ifndef ENABLE_MULTIPLE_NODES
@@ -4216,4 +4218,23 @@ static void strategy_assign_vector_targetlist(int newval, void* extra)
     }
 
     return;
+}
+
+static bool init_parameterized_query_hash_table(bool* newval, void** exttra, GucSource source)
+{
+    if(*newval && u_sess->param_cxt.parameterized_queries == NULL) {
+        HASHCTL hash_ctl;
+        errno_t rc = EOK;
+
+        rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+        securec_check(rc, "\0", "\0");
+
+        hash_ctl.keysize = MAX_PARAM_QUERY_LEN;
+        hash_ctl.entrysize = sizeof(ParamCachedPlan);
+        hash_ctl.hcxt = u_sess->cache_mem_cxt;
+        u_sess->param_cxt.parameterized_queries = hash_create("Parameterized Queries", 512,
+                                                                    &hash_ctl, HASH_ELEM | HASH_CONTEXT);
+        Assert(u_sess->param_cxt.parameterized_queries);
+    }
+    return true;
 }

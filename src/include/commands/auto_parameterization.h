@@ -21,6 +21,7 @@
 #ifndef AUTO_PARAMETERIZATION_H
 #define AUTO_PARAMETERIZATION_H
 
+#include "utils/plancache.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 
@@ -46,7 +47,11 @@ typedef struct ParamState {
     int clocations_count;
 } ParamState;
 
+typedef struct ParamCachedPlan {
+    char parameterized_query[MAX_PARAM_QUERY_LEN];
+    CachedPlanSource* psrc;
+} ParamCachedPlan;
+
 bool execQueryParameterization(Node* parsetree, const char* query_string, CommandDest cmdDest, char* completionTag);
 bool isQualifiedIuds(Node* parsetree);
-
 #endif  /* OPENGAUSS_SERVER_AUTO_PARAMETERIZATION_H */

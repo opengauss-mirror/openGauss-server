@@ -68,7 +68,6 @@
 #include "storage/lock/lock.h"
 #include "utils/elog.h"
 #include "tcop/dest.h"
-#include "commands/auto_parameterization.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
