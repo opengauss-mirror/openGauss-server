@@ -254,6 +254,14 @@ function install_gaussdb()
         echo "End make install assessment" >> "$LOG_FILE" 2>&1
     fi
 
+    LIBOG_QUERY_DIR=$ROOT_DIR/src/bin/libog_query
+    if [ -d $LIBOG_QUERY_DIR ]; then
+        cd $LIBOG_QUERY_DIR
+        sh build.sh >> "$LOG_FILE" 2>&1
+	cp libog_query.so ${BUILD_DIR}/lib/postgresql/libog_query.so
+        echo "End make install libog_query" >> "$LOG_FILE" 2>&1
+    fi
+
     cd "$ROOT_DIR"
     if [ "${make_check}" = 'on' ]; then
         echo "Begin make check MPPDB..." >> "$LOG_FILE" 2>&1
