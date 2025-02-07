@@ -678,3 +678,5 @@ select year as yy, order_mode as mode, yearly_total as total from rotate_orders 
 (6 rows)
 
 drop table rotate_orders;
+SELECT a as sale1, 2 as sale2 not rotate (uuu For sale IN ("sale1", sale2, sale3, sale4)) order by sale;
+ERROR:  NOT ROTATE in from clause error

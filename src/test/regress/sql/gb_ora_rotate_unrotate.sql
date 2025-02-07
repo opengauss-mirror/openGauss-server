@@ -267,3 +267,5 @@ select year as yy, order_mode as mode, yearly_total as total from rotate_orders 
 select year as yy, yearly_total as total from rotate_orders not rotate (yearly_total for order_mode in (internet as 'online', store as 'direct'));
 select year as yy, order_mode as mode, yearly_total as total from rotate_orders not rotate include nulls (yearly_total for order_mode in (internet as 'online', store as 'direct')) where yearly_total is not null order by yy desc;
 drop table rotate_orders;
+
+SELECT a as sale1, 2 as sale2 not rotate (uuu For sale IN ("sale1", sale2, sale3, sale4)) order by sale;
