@@ -68,6 +68,7 @@
 #include "storage/lock/lock.h"
 #include "utils/elog.h"
 #include "tcop/dest.h"
+#include "commands/auto_parameterization.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
@@ -1015,6 +1016,17 @@ typedef struct knl_u_plancache_context {
     bool is_plan_exploration;
     HTAB *generic_roots;
 } knl_u_plancache_context;
+
+typedef struct knl_u_parameterization_context {
+    CachedPlanSource* first_saved_plan;
+
+    int param_cached_plan_count;
+
+    // pthread_mutex_t param_htbl_lock;
+
+    HTAB* parameterized_queries;
+    bool use_parame;
+} knl_u_parameterization_context;
 
 typedef struct knl_u_typecache_context {
     /* The main type cache hashtable searched by lookup_type_cache */
@@ -2869,6 +2881,7 @@ typedef struct knl_session_context {
     knl_u_parser_context parser_cxt;
     knl_u_pgxc_context pgxc_cxt;
     knl_u_plancache_context pcache_cxt;
+    knl_u_parameterization_context param_cxt;
     knl_u_plpgsql_context plsql_cxt;
     knl_u_postgres_context postgres_cxt;
     knl_u_proc_context proc_cxt;
