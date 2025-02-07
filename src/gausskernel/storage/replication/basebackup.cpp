@@ -1262,6 +1262,14 @@ bool IsSkipDir(const char * dirName)
             if (strlen(dirName) > dirNameLen && strcmp(dirName + dirNameLen, instance_id) != 0) 
                 return true;
         }
+
+        if (strcmp(dirName, "shared_postgresql.conf") == 0) {
+            return true;
+        }
+
+        if (strcmp(dirName, "shared_pg_hba.conf") == 0) {
+            return true;
+        }
     }
 
     return false;
