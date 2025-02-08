@@ -138,7 +138,7 @@ begin
     create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2);
 end;
 /
-NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD or ZLIB algorithm.
 -- sqlexception
 declare
     a int;
@@ -179,7 +179,7 @@ begin
     a := 1/0;
 end;
 /
-NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD or ZLIB algorithm.
 declare
     a int;
 begin

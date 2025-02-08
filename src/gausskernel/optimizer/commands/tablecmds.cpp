@@ -19748,9 +19748,10 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
                         errmsg("row-compression feature current not support algorithm is PGZSTD.")));
     }
 
-    if (newCompressOpt->compressType != COMPRESS_TYPE_ZSTD && newCompressOpt->compressLevel != 0) {
+    if ((newCompressOpt->compressType != COMPRESS_TYPE_ZSTD && newCompressOpt->compressType != COMPRESS_TYPE_ZLIB) &&
+        newCompressOpt->compressLevel != 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-            errmsg("compress_level should be used with ZSTD algorithm."))); 
+            errmsg("compress_level should be used with ZSTD or ZLIB algorithm."))); 
     }
 
     if (!newCompressOpt->compressByteConvert && newCompressOpt->compressDiffConvert) {
@@ -19809,7 +19810,7 @@ void static transfromIndexCompressedOptions(Relation rel, bytea* relOoption, Lis
                 DefElem *def = (DefElem *)lfirst(opt);
                 if (pg_strcasecmp(def->defname, "compress_level") == 0) {
                     ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                                    errmsg("compress_level should be used with ZSTD algorithm.")));
+                                    errmsg("compress_level should be used with ZSTD or ZLIB algorithm.")));
                 }
             }
         }
@@ -33433,7 +33434,6 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     }
     heap_close(rel, RowExclusiveLock);
 }
-
 
 /*
  * Brief : delete all weak passwords.

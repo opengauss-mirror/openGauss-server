@@ -224,8 +224,108 @@ create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment 
 drop table if exists normal_test.t_bool_value;
 create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = no);
 drop table if exists normal_test.t_bool_value;
+-- zlib algorithm
+-- default compress_level
+create table normal_test.t_zlib1 (id int, c1 text) with (compresstype=4,compress_chunk_size=512);
+\d+ normal_test.t_zlib1
+                     Table "normal_test.t_zlib1"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ id     | integer |           | plain    |              | 
+ c1     | text    |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compresstype=4, compress_chunk_size=512
+
+INSERT INTO normal_test.t_zlib1 SELECT id, id::text FROM generate_series(1,1000) id;
+select count(*) from normal_test.t_zlib1;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from normal_test.t_zlib1 where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+-- error compress_level
+create table normal_test.t_zlib_error (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=32);
+ERROR:  value 32 out of bounds for option "compress_level"
+DETAIL:  Valid values are between "-31" and "31".
+create table normal_test.t_zlib_error (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=-80);
+ERROR:  value -80 out of bounds for option "compress_level"
+DETAIL:  Valid values are between "-31" and "31".
+-- success compress_level
+create table normal_test.t_zlib2 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=15);
+create table normal_test.t_zlib3 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=0);
+create table normal_test.t_zlib4 (id int, c1 text) with (compresstype=4,compress_chunk_size=512,compress_level=-8);
+INSERT INTO normal_test.t_zlib2 SELECT id, id::text FROM generate_series(1,1000) id;
+INSERT INTO normal_test.t_zlib3 SELECT id, id::text FROM generate_series(1,500) id;
+INSERT INTO normal_test.t_zlib4 SELECT id, id::text FROM generate_series(1,500) id;
+select count(*) from normal_test.t_zlib2;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from normal_test.t_zlib3;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from normal_test.t_zlib4;
+ count 
+-------
+   500
+(1 row)
+
+checkpoint;
+vacuum full normal_test.t_zlib1;
+vacuum full normal_test.t_zlib2;
+vacuum full normal_test.t_zlib3;
+vacuum full normal_test.t_zlib4;
+select count(*) from normal_test.t_zlib1;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from normal_test.t_zlib1 where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+select count(*) from normal_test.t_zlib2;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from normal_test.t_zlib3;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from normal_test.t_zlib4;
+ count 
+-------
+   500
+(1 row)
+
+-- normal index with zlib algorithm
+create index on normal_test.t_zlib1(id) WITH (compresstype=4,compress_chunk_size=1024,compress_level=0);
+alter index normal_test.t_zlib1_id_idx set (compresstype=1); --failed
+ERROR:  change compresstype OPTION is not supported
+alter index normal_test.t_zlib1_id_idx set (compress_chunk_size=2048); --failed
+ERROR:  change compress_chunk_size OPTION is not supported
+alter index normal_test.t_zlib1_id_idx set (compress_prealloc_chunks=2); --success
+alter index normal_test.t_zlib1_id_idx set (compress_level=2); --success
 drop schema normal_test cascade;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table normal_test.tbl_pc
 drop cascades to table normal_test.tbl_partition
 drop cascades to table normal_test.exchange_table
@@ -233,3 +333,7 @@ drop cascades to table normal_test.including_all
 drop cascades to table normal_test.including_all_new
 drop cascades to table normal_test.including_all_new2
 drop cascades to table normal_test.segment_off
+drop cascades to table normal_test.t_zlib1
+drop cascades to table normal_test.t_zlib2
+drop cascades to table normal_test.t_zlib3
+drop cascades to table normal_test.t_zlib4

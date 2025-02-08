@@ -3145,6 +3145,9 @@ static bool parse_a_pca_page(PageCompression* pageCompression, CfsExtentHeader* 
         case static_cast<uint8>(CompressTypeOption::COMPRESS_TYPE_PGZSTD):
             fprintf(stdout, "\talgorithm: pgzstd\n");
             break;
+        case static_cast<uint8>(CompressTypeOption::COMPRESS_TYPE_ZLIB):
+            fprintf(stdout, "\talgorithm: zlib\n");
+            break;
         default:
             fprintf(stderr, "\tUnrecognized compression algorithm\n");
             return false;

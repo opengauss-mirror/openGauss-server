@@ -1,6 +1,8 @@
 create schema unsupported_feature;
--- unspport compressType: 4
-CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=4, compress_chunk_size=1024);
+-- unspport compressType: 3
+CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=3, compress_chunk_size=1024);
+-- unspport compressType: 5
+CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=5, compress_chunk_size=1024);
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
 -- unspport compress_prealloc_chunks: -1

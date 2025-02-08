@@ -58468,8 +58468,8 @@ msgstr "行压缩特性暂不支持的算法是PGZSTD。"
 #: optimizer/commands/tablecmds.cpp:18679
 #: storage/access/common/reloptions.cpp:3100
 #, c-format
-msgid "compress_level should be used with ZSTD algorithm."
-msgstr "compress_level应该与ZSTD算法一起使用."
+msgid "compress_level should be used with ZSTD or ZLIB algorithm."
+msgstr "compress_level应该与ZSTD或ZLIB算法一起使用."
 
 #: optimizer/commands/tablecmds.cpp:18625
 #: optimizer/commands/tablecmds.cpp:18671
