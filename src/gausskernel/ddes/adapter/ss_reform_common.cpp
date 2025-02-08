@@ -375,9 +375,11 @@ void SSDisasterUpdateHAmode()
         } else if (SS_DISASTER_STANDBY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
         }
-        ereport(LOG, (errmsg("[SS] SSDisasterUpdateHAmode change Ha current mode to: %d",
-            t_thrd.postmaster_cxt.HaShmData->current_mode)));
+    } else {
+        t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
     }
+    ereport(LOG, (errmsg("[SS] SSDisasterUpdateHAmode change Ha current mode to: %d",
+        t_thrd.postmaster_cxt.HaShmData->current_mode)));
 }
 
 bool SSPerformingStandbyScenario()

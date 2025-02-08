@@ -303,7 +303,6 @@ int main(int argc, char* argv[])
     int display_id;
     const int SS_NODEID = MIN_INSTANCEID;
     off_t ControlFileSize;
-    char* endstr = nullptr;
 
     static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
         {"socketpath", required_argument, NULL, 2},
