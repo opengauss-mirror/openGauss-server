@@ -61,9 +61,11 @@ typedef enum {
     A_FORMAT = 0x0001,
     B_FORMAT = 0x0002,
     C_FORMAT = 0x0004,
-    PG_FORMAT = 0x0008
+    PG_FORMAT = 0x0008,
+    D_FORMAT = 0x0010
 } DBFormatType;
 #define IS_CMPT(cmpt, flag) (((uint32)(cmpt) & (uint32)(flag)) != 0)
+#define DB_IS_CMPT(flag) IS_CMPT(u_sess->attr.attr_sql.sql_compatibility, (flag))
 
 #endif // HAVE_DATABASE_TYPE
 

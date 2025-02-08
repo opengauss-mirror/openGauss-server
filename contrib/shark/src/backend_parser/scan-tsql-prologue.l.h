@@ -22,8 +22,9 @@ const uint16 pgtsql_ScanKeywordTokens[] = {
  */
 
 #define YY_USER_INIT                            \
-	if (g_instance.raw_parser_hook[DB_CMPT_D]) \
+	if (g_instance.raw_parser_hook[DB_CMPT_D] && GetSessionContext()->dialect_sql) \
 	{                                             \
+		GetSessionContext()->dialect_sql = false; \
 		*yylloc = 0;                              \
 		return DIALECT_TSQL;                       \
 	}

@@ -14,6 +14,16 @@ select N'abc';
 create table t1 (a int);
 create columnstore index t1_idx1 on t1(a);
 NOTICE:  The COLUMNSTORE option is currently ignored
+DO $$
+BEGIN
+create columnstore index on t1 (a);
+end $$ language pltsql;
+NOTICE:  The COLUMNSTORE option is currently ignored
+LINE 3: create columnstore index on t1 (a);
+        ^
+NOTICE:  The COLUMNSTORE option is currently ignored
+CONTEXT:  SQL statement "create columnstore index on t1 (a)"
+PL/pgSQL function inline_code_block line 3 at SQL statement
 CREATE OR REPLACE FUNCTION test RETURNS INT AS
 $$
 declare

@@ -10,6 +10,11 @@ select N'abc';
 create table t1 (a int);
 create columnstore index t1_idx1 on t1(a);
 
+DO $$
+BEGIN
+create columnstore index on t1 (a);
+end $$;
+
 CREATE OR REPLACE FUNCTION test RETURNS INT AS
 $$
 declare

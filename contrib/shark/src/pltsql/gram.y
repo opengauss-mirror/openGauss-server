@@ -646,9 +646,9 @@ static void HandleBlockLevel();
 
 %%
 
-pl_body         : DIALECT_TSQL pl_package_spec
-                | DIALECT_TSQL pl_function
-                | DIALECT_TSQL pl_package_init
+pl_body         : pl_package_spec
+                | pl_function
+                | pl_package_init
                 ;
 pl_package_spec : K_PACKAGE { SetErrorState(); } decl_sect K_END
                     {
@@ -13048,7 +13048,7 @@ check_sql_expr(const char *stmt, int location, int leaderlen)
     u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
     RawParserHook parser_hook= raw_parser;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
+    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin || DB_IS_CMPT(D_FORMAT)) {
         int id = GetCustomParserId();
         if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
             parser_hook = (RawParserHook)g_instance.raw_parser_hook[id];
