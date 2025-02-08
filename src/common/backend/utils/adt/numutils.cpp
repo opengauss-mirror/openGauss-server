@@ -461,17 +461,58 @@ static inline int pg_ultoa_n(uint32 value, char* a)
  */
 static inline int pg_ltoa_n(int32 value, char* a)
 {
-    uint32 uvalue = (uint32)value;
-    int len = 0;
+    int olength = 0, i = 0;
 
     if (value < 0) {
-        uvalue = (uint32)0 - uvalue;
-        a[len++] = '-';
+        value = 0 - value;
+        a[olength++] = '-';
     }
 
-    len += pg_ultoa_n(uvalue, a + len);
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        return 1;
+    }
 
-    return len;
+    olength += decimalLength32(value);
+
+    /* Compute the result string. */
+    while (value >= 10000) {
+        const uint32 c = value - 10000 * (value / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
+    }
+    if (value >= 100) {
+        const uint32 c = (value % 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 100;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
+    }
+    if (value >= 10) {
+        const uint32 c = value << 1;
+
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else {
+        *a = (char)('0' + value);
+    }
+
+    a[olength] = '\0';
+
+    return olength;
 }
 
 /*
@@ -578,17 +619,80 @@ static inline int pg_ulltoa_n(uint64 value, char* a)
  */
 static inline int pg_lltoa_n(int64 value, char* a)
 {
-    uint64 uvalue = value;
-    int len = 0;
+    int olength = 0, i = 0;
 
     if (value < 0) {
-        uvalue = (uint64)0 - uvalue;
-        a[len++] = '-';
+        value = 0 - value;
+        a[olength++] = '-';
     }
 
-    len += pg_ulltoa_n(uvalue, a + len);
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        return 1;
+    }
 
-    return len;
+    olength += decimalLength64(value);
+
+    /* Compute the result string. */
+    while (value >= 100000000) {
+        const uint64 q = value / 100000000;
+        uint32 value2 = (uint32)(value - 100000000 * q);
+
+        const uint32 c = value2 % 10000;
+        const uint32 d = value2 / 10000;
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+        const uint32 d0 = (d % 100) << 1;
+        const uint32 d1 = (d / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value = q;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        memcpy(pos - 6, DIGIT_TABLE + d0, 2);
+        memcpy(pos - 8, DIGIT_TABLE + d1, 2);
+        i += 8;
+    }
+
+    /* Switch to 32-bit for speed */
+    uint32 value2 = (uint32)value;
+
+    if (value2 >= 10000) {
+        const uint32 c = value2 - 10000 * (value2 / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value2 /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
+    }
+    if (value2 >= 100) {
+        const uint32 c = (value2 % 100) << 1;
+        char *pos = a + olength - i;
+
+        value2 /= 100;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
+    }
+    if (value2 >= 10) {
+        const uint32 c = value2 << 1;
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else
+        *a = (char)('0' + value2);
+
+    a[olength] = '\0';
+
+    return olength;
 }
 
 /*

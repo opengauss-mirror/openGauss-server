@@ -3309,7 +3309,7 @@ _ACEOF
 
 fi
 
-if [ "$(cat /etc/system-release)" == "openEuler release 22.03 LTS" ]; then
+if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 22.03".* ]]; then
     with_openeuler_major=yes
 fi
 
