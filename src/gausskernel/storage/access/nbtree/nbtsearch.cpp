@@ -442,7 +442,7 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
      * Check tuple has correct number of attributes.
      */
 #ifndef ENABLE_DFX_OPT
-    _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
+    //_bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
 #endif
     /*
      * Force result ">" if target item is first data item on an internal page

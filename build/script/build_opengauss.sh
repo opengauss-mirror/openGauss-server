@@ -143,9 +143,9 @@ else
     declare BUILD_DIR="${ROOT_DIR}/mppdb_temp_install"
     declare CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
     if [ "$product_mode"x == "lite"x ]; then
-        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON ${extra_cmake_opt}"
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON -DENABLE_DFX_OPT=ON ${extra_cmake_opt}"
     else
-        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON -DENABLE_DFX_OPT=ON ${extra_cmake_opt}"
     fi
     echo "[cmake options] cmake options is:${CMAKE_OPT}" >> "$LOG_FILE" 2>&1
     source $SCRIPT_DIR/utils/cmake_compile.sh || exit 1

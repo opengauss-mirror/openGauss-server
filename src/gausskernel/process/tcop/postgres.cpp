@@ -2890,6 +2890,22 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         if (!u_sess->attr.attr_storage.phony_autocommit) {
             BeginTxnForAutoCommitOff();
         }
+        if (nodeTag(parsetree) == T_ExecuteStmt && u_sess->exec_cxt.isPbeFunctionCallOpt) {
+            MemoryContext tmpcontext = AllocSetContextCreate(u_sess->top_portal_cxt,
+                            "PBEBypassMemory",
+                            ALLOCSET_SMALL_MINSIZE,
+                            ALLOCSET_SMALL_INITSIZE,
+                            ALLOCSET_SMALL_MAXSIZE);
+            (void) MemoryContextSwitchTo(tmpcontext);
+            DestReceiver* destRec = CreateDestReceiver(dest);
+            ExecuteQuery((ExecuteStmt *)parsetree, NULL, query_string, NULL, destRec, completionTag);
+            finish_xact_command();
+            EndCommand(completionTag, dest);
+            MemoryContextDelete(tmpcontext);
+            MemoryContextReset(OptimizerContext);
+            break;
+        }
+
         /* SQL bypass */
         if (runOpfusionCheck && !IsRightRefState(plantree_list)) {
             (void)MemoryContextSwitchTo(oldcontext);

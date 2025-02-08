@@ -1120,7 +1120,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
     START_CRIT_SECTION();
 
     bool isLogSwitch = (rechdr->xl_rmid == RM_XLOG_ID && rechdr->xl_info == XLOG_SWITCH);
-    if (isLogSwitch || !u_sess->attr.attr_storage.enable_xlog_insert_record_group) {
+    if (isLogSwitch) {
         StartSuspendWalInsert(&currlrc);
     }
 
@@ -1350,7 +1350,7 @@ XLogRecPtr XLogInsertRecord(XLogRecData *rdata, XLogRecPtr fpw_lsn)
      */
     XLogRecord *rechdr = (XLogRecord *)rdata->data;
     bool isLogSwitch = (rechdr->xl_rmid == RM_XLOG_ID && rechdr->xl_info == XLOG_SWITCH);
-    if (isLogSwitch) {
+    if (isLogSwitch || !u_sess->attr.attr_storage.enable_xlog_insert_record_group) {
         return XLogInsertRecordSingle(rdata, fpw_lsn);
     } else {
         return XLogInsertRecordGroup(rdata, fpw_lsn);
@@ -3394,6 +3394,9 @@ bool XLogBackgroundFlush(void)
          * an entry associated with the first uncopied record found in the current loop.
          */
         if (next_entry_ptr->status == WAL_NOT_COPIED) {
+            if (g_instance.wal_cxt.lowConOpt) {
+                break;
+            }
             if (((curr_entry_ptr->endLSN - startLSN) > curAverageXlogFlushBytes) ||
                 (GetCurrentTimestamp() - stTime >= (uint64)g_instance.attr.attr_storage.wal_flush_timeout)) {
                 break;
