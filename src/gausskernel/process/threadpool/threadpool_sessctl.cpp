@@ -861,7 +861,7 @@ void ThreadPoolSessControl::CheckIdleInTransactionSessionTimeout()
                         sess->session_id, sess->attr.attr_common.IdleInTransactionSessionTimeoutCount + 1,
                         sess->attr.attr_common.IdleInTransactionSessionTimeout, sess->storage_cxt.idle_in_transaction_session_fin_time, now);
 #endif
-                sess->attr.attr_common.IdleInTransactionSessionTimeout++;
+                sess->attr.attr_common.IdleInTransactionSessionTimeoutCount++;
                 CloseClientSocket(sess, false);
             }
         }
