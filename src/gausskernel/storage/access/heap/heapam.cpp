@@ -9140,6 +9140,20 @@ static void heap_xlog_delete(XLogReaderState* record)
     if (xlrec->flags & XLH_DELETE_ALL_VISIBLE_CLEARED) {
         heap_xlog_allvisiblecleared(record, HEAP_DELETE_ORIG_BLOCK_NUM);
     }
+#ifdef ENABLE_HTAP
+    ItemPointerData ctid;
+    Oid rel = InvalidOid;
+    bool imcsLocked = false;
+    if (HAVE_HTAP_TABLES) {
+        RelFileNode target_node;
+        BlockNumber blkno;
+        XLogRecGetBlockTag(record, HEAP_DELETE_ORIG_BLOCK_NUM, &target_node, NULL, &blkno);
+        rel = target_node.relNode;
+        ItemPointerData ctid;
+        ItemPointerSet(&ctid, blkno, xlrec->offnum);
+        imcsLocked = IMCStoreHookPreLock(rel, &ctid);
+    }
+#endif
 
     if (XLogReadBufferForRedo(record, HEAP_DELETE_ORIG_BLOCK_NUM, &buffer) == BLK_NEEDS_REDO) {
         char* maindata = XLogRecGetData(record);
@@ -9148,12 +9162,8 @@ static void heap_xlog_delete(XLogReaderState* record)
 
         HeapXlogDeleteOperatorPage(&buffer, (void *)maindata, recordxid, isTupleLockUpgrade);
 #ifdef ENABLE_HTAP
-        if (HAVE_HTAP_TABLES) {
-            DecodedBkpBlock* bkpb = &record->blocks[HEAP_DELETE_ORIG_BLOCK_NUM];
-            Oid rel = bkpb->rnode.relNode;
-            ItemPointerData ctid;
-            ItemPointerSet(&ctid, buffer.blockinfo.blkno, xlrec->offnum);
-            IMCStoreDeleteHook(rel, &ctid, recordxid);
+        if (imcsLocked) {
+            IMCStoreDeleteHook(rel, &ctid, recordxid, true);
         }
 #endif
         MarkBufferDirty(buffer.buf);
@@ -9195,6 +9205,14 @@ static void heap_xlog_insert(XLogReaderState* record)
      * If we inserted the first and only tuple on the page, re-initialize
      * the page from scratch.
      */
+#ifdef ENABLE_HTAP
+    ItemPointerData ctid;
+    bool imcsLocked = false;
+    if (HAVE_HTAP_TABLES) {
+        ItemPointerSet(&ctid, blkno, xlrec->offnum);
+        imcsLocked = IMCStoreHookPreLock(target_node.relNode, &ctid);
+    }
+#endif
     if (isinit) {
         action = SSCheckInitPageXLog(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
         if (action == BLK_NEEDS_REDO) {
@@ -9215,10 +9233,8 @@ static void heap_xlog_insert(XLogReaderState* record)
             &buffer, (void*)maindata, isinit, (void*)blkdata, blkdatalen, recordxid, &freespace, tde);
 
 #ifdef ENABLE_HTAP
-    if (HAVE_HTAP_TABLES) {
-        ItemPointerData ctid;
-        ItemPointerSet(&ctid, blkno, xlrec->offnum);
-        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid);
+    if (imcsLocked) {
+        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid, true);
     }
 #endif
         MarkBufferDirty(buffer.buf);
@@ -9367,6 +9383,14 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
      * added the new tuple to the new page.
      */
 
+#ifdef ENABLE_HTAP
+    ItemPointerData ctid;
+    bool imcsLocked = false;
+    if (HAVE_HTAP_TABLES) {
+        ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
+        imcsLocked = IMCStoreHookPreLock(rnode.relNode, &ctid);
+    }
+#endif
     /* Deal with old tuple version */
     oldaction = XLogReadBufferForRedo(
         record, (oldblk == newblk) ? HEAP_UPDATE_NEW_BLOCK_NUM : HEAP_UPDATE_OLD_BLOCK_NUM, &obuffer);
@@ -9378,7 +9402,20 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         HeapXlogUpdateOperatorOldpage(&obuffer, (void *)maindata, hot_update, isinit, newblk, recordxid,
             isTupleLockUpgrade);
         MarkBufferDirty(obuffer.buf);
+#ifdef ENABLE_HTAP
+        if (imcsLocked) {
+            IMCStoreDeleteHook(rnode.relNode, &ctid, recordxid, true);
+        }
+#endif
     }
+#ifdef ENABLE_HTAP
+    ItemPointerData newCtid;
+    imcsLocked = false;
+    if (HAVE_HTAP_TABLES) {
+        ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
+        imcsLocked = IMCStoreHookPreLock(rnode.relNode, &newCtid);
+    }
+#endif
 
     /*
      * Read the page the new tuple goes into, if different from old.
@@ -9417,12 +9454,8 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
                                       &freespace, isTupleLockUpgrade, tde);
 
 #ifdef ENABLE_HTAP
-        if (HAVE_HTAP_TABLES) {
-            ItemPointerData ctid;
-            ItemPointerData newCtid;
-            ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
-            ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
-            IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, recordxid);
+        if (imcsLocked) {
+            IMCStoreInsertHook(rnode.relNode, &newCtid, recordxid, true);
         }
 #endif
 
