@@ -1174,6 +1174,21 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                             outputstr = output_date_out(DatumGetDateADT(attr));
                         }
                         break;
+                    case F_TIMESTAMP_OUT: {
+                        outputstr = u_sess->utils_cxt.timestamp_output_buffer;
+                        Timestamp timestamp = DatumGetTimestamp(attr);
+
+                        struct pg_tm tm;
+                        fsec_t fsec;
+                        if (unlikely(TIMESTAMP_NOT_FINITE(timestamp)))
+                            EncodeSpecialTimestamp(timestamp, outputstr);
+                        else if (timestamp2tm(timestamp, NULL, &tm, &fsec, NULL, NULL) == 0)
+                            EncodeDateTime(&tm, fsec, false, 0, NULL, u_sess->time_cxt.DateStyle, outputstr);
+                        else
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+                        break;
+                    }
                     default:
                         outputstr = OutputFunctionCall(&thisState->finfo, attr);
                         need_free = true;

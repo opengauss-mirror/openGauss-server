@@ -122,7 +122,7 @@ typedef struct {
 } generate_series_timestamptz_fctx;
 
 static TimeOffset time2t(const int hour, const int min, const int sec, const fsec_t fsec);
-static void EncodeSpecialTimestamp(Timestamp dt, char* str);
+void EncodeSpecialTimestamp(Timestamp dt, char* str);
 static Timestamp dt2local(Timestamp dt, int timezone);
 static void AdjustTimestampForTypmod(Timestamp* time, int32 typmod);
 static void AdjustIntervalForTypmod(Interval* interval, int32 typmod);
@@ -1486,7 +1486,7 @@ static void AdjustIntervalForTypmod(Interval* interval, int32 typmod)
 /* EncodeSpecialTimestamp()
  * Convert reserved timestamp data type to string.
  */
-static void EncodeSpecialTimestamp(Timestamp dt, char* str)
+void EncodeSpecialTimestamp(Timestamp dt, char* str)
 {
     int rc = 0;
     if (TIMESTAMP_IS_NOBEGIN(dt)) {
@@ -1766,7 +1766,12 @@ int timestamp2tm(Timestamp dt, int* tzp, struct pg_tm* tm, fsec_t* fsec, const c
         return -1;
 
     j2date((int)date, &tm->tm_year, &tm->tm_mon, &tm->tm_mday);
-    dt2time(time, &tm->tm_hour, &tm->tm_min, &tm->tm_sec, fsec);
+
+    if (likely(time == 0)) {
+        tm->tm_hour = tm->tm_min = tm->tm_sec = *fsec = 0;
+    } else {
+        dt2time(time, &tm->tm_hour, &tm->tm_min, &tm->tm_sec, fsec);
+    }
 #else
     time = dt;
     TMODULO(time, date, (double)SECS_PER_DAY);
