@@ -112,6 +112,10 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
 {
     static const relopt_parse_elt tab[] = {
         {"lists", RELOPT_TYPE_INT, offsetof(IvfflatOptions, lists)},
+        {"enable_pq", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, enablePQ)},
+        {"pq_m", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqM)},
+        {"pq_ksub", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqKsub)},
+        {"by_residual", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, byResidual)},
         {"parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)}};
 
     relopt_value *options;

@@ -821,7 +821,7 @@ Datum vector_l2_squared_distance(PG_FUNCTION_ARGS)
 }
 
 #ifdef __aarch64__
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float dis = 0.0f;
@@ -850,7 +850,7 @@ VectorInnerProduct(int dim, float *ax, float *bx)
 }
 #else
 
-VECTOR_TARGET_CLONES static float VectorInnerProduct(int dim, float *ax, float *bx)
+VECTOR_TARGET_CLONES float VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float distance = 0.0;
 
@@ -1538,6 +1538,32 @@ Datum sparsevec_to_vector(PG_FUNCTION_ARGS)
 
     PG_RETURN_POINTER(result);
 }
+
+#ifdef __aarch64__
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    const size_t nSimd = n - (n & 3);
+    const float32x4_t bfv = vdupq_n_f32(bf);
+    size_t i;
+
+    for (i = 0; i < nSimd; i += 4) {
+        const float32x4_t ai = vld1q_f32(ax + i);
+        const float32x4_t bi = vld1q_f32(bx + i);
+        const float32x4_t ci = vfmaq_f32(ai, bfv, bi);
+        vst1q_f32(cx + i, ci);
+    }
+    for (; i < n; ++i) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#else
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    for (size_t i = 0; i < n; i++) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#endif
 
 /*
  * WAL-log a range of blocks in a relation.

@@ -63,6 +63,7 @@
 #define IVFFLAT_MIN_LISTS 1
 #define IVFFLAT_MAX_LISTS 32768
 #define IVFFLAT_DEFAULT_PROBES 1
+#define IVFFLAT_DEFAULT_PQ_RESIDUAL false
 
 /* Build phases */
 /* PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE is 1 */
@@ -93,6 +94,19 @@
 #define RandomDouble() (((double)random()) / MAX_RANDOM_VALUE)
 #define RandomInt() random()
 
+#define IVF_PQMODE_ADC 1
+#define IVF_PQMODE_SDC 2
+#define IVF_PQMODE_DEFAULT IVF_PQMODE_ADC
+#define IVF_PQ_DIS_L2 1
+#define IVF_PQ_DIS_IP 2
+#define IVF_PQ_DIS_COSINE 3
+
+/* Preserved page numbers */
+#define IVF_METAPAGE_BLKNO 0
+#define IVF_HEAD_BLKNO 1                            /* first element page */
+#define IVF_PQTABLE_START_BLKNO 1                   /* pqtable start page */
+#define IVF_PQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
+
 typedef struct ListInfo {
     BlockNumber blkno;
     OffsetNumber offno;
@@ -102,6 +116,10 @@ typedef struct ListInfo {
 typedef struct IvfflatOptions {
     int32 vl_len_; /* varlena header (do not touch directly!) */
     int lists;     /* number of lists */
+    bool enablePQ;
+    int pqM;
+    int pqKsub;
+    bool byResidual;    /* whether to quantify by residual */
 } IvfflatOptions;
 
 typedef struct IvfflatSpool {
@@ -126,7 +144,11 @@ typedef struct IvfflatShared {
 
     Sharedsort *sharedsort;
     Vector *ivfcenters;
+    List *rlist;
     int workmem;
+
+    /* Memory */
+    MemoryContext tmpCtx;
 
 #ifdef IVFFLAT_KMEANS_DEBUG
     double inertia;
@@ -144,6 +166,7 @@ typedef struct IvfflatLeader {
 
 typedef struct IvfflatTypeInfo {
     int maxDimensions;
+    bool supportPQ;
     Datum (*normalize)(PG_FUNCTION_ARGS);
     Size (*itemSize)(int dimensions);
     void (*updateCenter)(Pointer v, int dimensions, const float *x);
@@ -173,7 +196,9 @@ typedef struct IvfflatBuildState {
 
     /* Variables */
     VectorArray samples;
+    VectorArray residuals;
     VectorArray centers;
+    List *rlist;
     ListInfo *listInfo;
 
 #ifdef IVFFLAT_KMEANS_DEBUG
@@ -197,6 +222,19 @@ typedef struct IvfflatBuildState {
 
     /* Parallel builds */
     IvfflatLeader *ivfleader;
+
+     /* PQ info */
+    bool enablePQ;
+    int pqM;
+    int pqKsub;
+    bool byResidual = false ;
+    char *pqTable;
+    Size pqTableSize;
+    float *pqDistanceTable;
+    uint16 pqcodeSize;
+    PQParams *params;
+    float *preComputeTable;
+    uint64 preComputeTableSize;
 } IvfflatBuildState;
 
 typedef struct IvfflatMetaPageData {
@@ -204,6 +242,17 @@ typedef struct IvfflatMetaPageData {
     uint32 version;
     uint16 dimensions;
     uint16 lists;
+
+    /* PQ info */
+    bool enablePQ;
+    bool byResidual;
+    uint16 pqM;
+    uint16 pqKsub;
+    uint16 pqcodeSize;
+    uint32 pqTableSize;
+    uint16 pqTableNblk;
+    uint64 pqPreComputeTableSize;
+    uint16 pqPreComputeTableNblk;
 } IvfflatMetaPageData;
 
 typedef IvfflatMetaPageData *IvfflatMetaPage;
@@ -272,6 +321,25 @@ void IvfflatInitPage(Buffer buf, Page page);
 void IvfflatInitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state);
 PGDLLEXPORT void IvfflatParallelBuildMain(const BgWorkerContext *bwc);
 const IvfflatTypeInfo *IvfflatGetTypeInfo(Relation index);
+
+bool IvfGetEnablePQ(Relation index);
+int IvfGetPqM(Relation index);
+int IvfGetPqKsub(Relation index);
+int IvfGetByResidual(Relation index);
+
+
+void IvfGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                              uint16 *pqPreComputeTableNblk, uint32 *pqPreComputeTableSize);
+int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
+void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize);
+void IvfFlushPQInfo(IvfflatBuildState *buildstate);
+
+int IvfComputePQTable(VectorArray samples, PQParams *params);
+int IvfComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode);
+int IvfGetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
+int IvfGetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
+                     const float *pqDistanceTable, float *pqDistance);
+
 
 Datum ivfflathandler(PG_FUNCTION_ARGS);
 Datum ivfflatbuild(PG_FUNCTION_ARGS);

@@ -163,7 +163,7 @@ bool HnswGetEnablePQ(Relation index)
         return opts->enablePQ;
     }
 
-    return HNSW_DEFAULT_ENABLE_PQ;
+    return GENERIC_DEFAULT_ENABLE_PQ;
 }
 
 /*
@@ -177,7 +177,7 @@ int HnswGetPqM(Relation index)
         return opts->pqM;
     }
 
-    return HNSW_DEFAULT_PQ_M;
+    return GENERIC_DEFAULT_PQ_M;
 }
 
 /*
@@ -191,7 +191,7 @@ int HnswGetPqKsub(Relation index)
         return opts->pqKsub;
     }
 
-    return HNSW_DEFAULT_PQ_KSUB;
+    return GENERIC_DEFAULT_PQ_KSUB;
 }
 
 /*
@@ -1593,9 +1593,9 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     UnlockReleaseBuffer(buf);
     int pqMode = HNSW_PQMODE_DEFAULT;
 
-    if (*enablePQ && !g_instance.hnswpq_inited) {
+    if (*enablePQ && !g_instance.pq_inited) {
         ereport(ERROR, (errmsg("the SQL involves operations related to HNSWPQ, "
-                               "but this instance has not currently loaded the HNSWPQ dynamic library.")));
+                               "but this instance has not currently loaded the PQ dynamic library.")));
     }
 
     if (*enablePQ) {

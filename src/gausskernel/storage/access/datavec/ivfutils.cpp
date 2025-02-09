@@ -214,6 +214,7 @@ const IvfflatTypeInfo *IvfflatGetTypeInfo(Relation index)
 
     if (procinfo == NULL) {
         static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM,
+                                                 .supportPQ = true,
                                                  .normalize = l2_normalize,
                                                  .itemSize = VectorItemSize,
                                                  .updateCenter = VectorUpdateCenter,
@@ -229,6 +230,7 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflat_halfvec_support);
 Datum ivfflat_halfvec_support(PG_FUNCTION_ARGS)
 {
     static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM * 2,
+                                             .supportPQ = false,
                                              .normalize = halfvec_l2_normalize,
                                              .itemSize = HalfvecItemSize,
                                              .updateCenter = HalfvecUpdateCenter,
@@ -241,6 +243,7 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflat_bit_support);
 Datum ivfflat_bit_support(PG_FUNCTION_ARGS)
 {
     static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM * 32,
+                                             .supportPQ = false,
                                              .normalize = NULL,
                                              .itemSize = BitItemSize,
                                              .updateCenter = BitUpdateCenter,
@@ -248,3 +251,165 @@ Datum ivfflat_bit_support(PG_FUNCTION_ARGS)
 
     PG_RETURN_POINTER(&typeInfo);
 };
+
+int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo)
+{
+    if (procinfo->fn_oid == 8431) {
+        return IVF_PQ_DIS_L2;
+    } else if (procinfo->fn_oid == 8434) {
+        if (normprocinfo == NULL) {
+            return IVF_PQ_DIS_IP;
+        } else {
+            return IVF_PQ_DIS_COSINE;
+        }
+    } else {
+        ereport(ERROR, (errmsg("current data type or distance type can't support ivfflatpq.")));
+        return -1;
+    }
+}
+
+/*
+* Get the info related to pqTable in metapage
+*/
+void IvfGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                              uint16 *pqPreComputeTableNblk, uint32 *pqPreComputeTableSize)
+{
+    Buffer buf;
+    Page page;
+    IvfflatMetaPage metap;
+
+    buf = ReadBuffer(index, IVFFLAT_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = IvfflatPageGetMeta(page);
+
+    PG_TRY();
+    {
+        if (unlikely(metap->magicNumber != IVFFLAT_MAGIC_NUMBER)) {
+            elog(ERROR, "ivfflat index is not valid");
+        }
+    }
+    PG_CATCH();
+    {
+        UnlockReleaseBuffer(buf);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (pqTableNblk != NULL) {
+        *pqTableNblk = metap->pqTableNblk;
+    }
+    if (pqTableSize != NULL) {
+        *pqTableSize = metap->pqTableSize;
+    }
+    if (pqPreComputeTableNblk != NULL) {
+        *pqPreComputeTableNblk = metap->pqPreComputeTableNblk;
+    }
+    if (pqPreComputeTableSize != NULL) {
+        *pqPreComputeTableSize = metap->pqPreComputeTableSize;
+    }
+
+    UnlockReleaseBuffer(buf);
+}
+
+/*
+ * Get whether to enable PQ
+ */
+bool IvfGetEnablePQ(Relation index)
+{
+    IvfflatOptions *opts = (IvfflatOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->enablePQ;
+    }
+
+    return GENERIC_DEFAULT_ENABLE_PQ;
+}
+
+/*
+ * Get the number of subquantizer
+ */
+int IvfGetPqM(Relation index)
+{
+    IvfflatOptions *opts = (IvfflatOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->pqM;
+    }
+
+    return GENERIC_DEFAULT_PQ_M;
+}
+
+/*
+ * Get the number of centroids for each subquantizer
+ */
+int IvfGetPqKsub(Relation index)
+{
+    IvfflatOptions *opts = (IvfflatOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->pqKsub;
+    }
+
+    return GENERIC_DEFAULT_PQ_KSUB;
+}
+
+/*
+ * Get whether to use residual
+ */
+int IvfGetByResidual(Relation index)
+{
+    IvfflatOptions *opts = (IvfflatOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->byResidual;
+    }
+
+    return IVFFLAT_DEFAULT_PQ_RESIDUAL;
+}
+
+void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)
+{
+    Buffer buf;
+    Page page;
+    uint32 curFlushSize;
+    GenericXLogState *state;
+
+    for (uint16 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ?
+                        (totalSize - i * IVF_PQTABLE_STORAGE_SIZE) : IVF_PQTABLE_STORAGE_SIZE;
+        buf = ReadBufferExtended(index, MAIN_FORKNUM, startBlkno + i, RBM_NORMAL, NULL);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+        errno_t err = memcpy_s(PageGetContents(page), curFlushSize,
+                               table + i * IVF_PQTABLE_STORAGE_SIZE, curFlushSize);
+        securec_check(err, "\0", "\0");
+        MarkBufferDirty(buf);
+        IvfflatCommitBuffer(buf, state);
+    }
+}
+
+/*
+* Flush PQ table into page during index building
+*/
+void IvfFlushPQInfo(IvfflatBuildState *buildstate)
+{
+    Relation index = buildstate->index;
+    char* pqTable = buildstate->pqTable;
+    float* preComputeTable = buildstate->preComputeTable;
+    uint16 pqTableNblk;
+    uint32 pqTableSize;
+    uint16 pqPrecomputeTableNblk;
+    uint32 pqPrecomputeTableSize;
+
+    IvfGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqPrecomputeTableNblk, &pqPrecomputeTableSize);
+
+    /* Flush pq table */
+    IvfFlushPQInfoInternal(index, pqTable, IVF_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
+    if (buildstate->byResidual && buildstate->params->funcType == IVF_PQ_DIS_L2) {
+        /* Flush pq distance table */
+        IvfFlushPQInfoInternal(index, (char*)preComputeTable,
+                               IVF_PQTABLE_START_BLKNO + pqTableNblk, pqPrecomputeTableNblk, pqPrecomputeTableSize);
+    }
+}
