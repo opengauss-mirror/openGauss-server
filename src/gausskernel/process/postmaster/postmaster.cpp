@@ -3142,12 +3142,12 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     /* init datavec hnswpq */
-    if (g_instance.attr.attr_storage.enable_hnswpq) {
-        int ret = HNSWPQInit();
+    if (g_instance.attr.attr_storage.enable_pq) {
+        int ret = PQInit();
         if (ret != 0) {
-            ereport(PANIC, (errmsg("datavec HNSWPQ init failed, ret: %d", ret)));
+            ereport(PANIC, (errmsg("datavec PQ init failed, ret: %d", ret)));
         }
-        ereport(LOG, (errmsg("datavec HNSWPQ init success.")));
+        ereport(LOG, (errmsg("datavec PQ init success.")));
     }
 
     /* init sharestorge(dorado) */
@@ -9652,7 +9652,7 @@ void ExitPostmaster(int status)
      * MUST		-- vadim 05-10-1999
      */
     DMSUninit();
-    HNSWPQUinit();
+    PQUinit();
 
     CloseGaussPidDir();
 

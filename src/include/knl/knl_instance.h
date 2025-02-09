@@ -1451,7 +1451,7 @@ typedef struct knl_instance_context {
     knl_g_listen_context listen_cxt;
     knl_g_datadir_context datadir_cxt;
     knl_g_dms_context dms_cxt;
-    bool hnswpq_inited;
+    bool pq_inited;
 #ifdef USE_SPQ
     knl_g_spq_context spq_cxt;
 #endif

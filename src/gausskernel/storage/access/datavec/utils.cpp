@@ -29,6 +29,8 @@
 #include "access/datavec/bitvec.h"
 #include "access/datavec/vector.h"
 
+pq_func_t g_pq_func = {0};
+
 Size VectorItemSize(int dimensions)
 {
     return VECTOR_SIZE(dimensions);
