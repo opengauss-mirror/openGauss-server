@@ -2122,7 +2122,7 @@ typedef struct AnnIndexScanState {
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
-    int64 count;
+    double annCount; // limitValue/selectvity
 } AnnIndexScanState;
 
 /* ----------------

@@ -25,6 +25,10 @@
 #define STREAM_COST_THRESHOLD 100000.0
 
 /*
+ * we add ann index cost, it used to with limit, cost=limit/ann_index_cost
+ */
+#define ANN_INDEX_COST 0.25
+/*
  * For columnar scan, the cpu cost is less than seq scan, so
  * we are definition that the cost of scanning one tuple is 1/10 times.
  */
