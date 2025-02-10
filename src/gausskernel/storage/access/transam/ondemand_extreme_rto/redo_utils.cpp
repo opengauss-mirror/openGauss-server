@@ -683,7 +683,7 @@ void OnDemandWaitRedoFinish()
 void OnDemandWaitRealtimeBuildShutDownInPartnerFailover()
 {
     if (g_instance.pid_cxt.StartupPID != 0) {
-        Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL && SS_STANDBY_MODE);
+        Assert(!SS_ONDEMAND_REALTIME_BUILD_DISABLED && SS_STANDBY_MODE);
         OnDemandWaitRealtimeBuildShutDown();
         ereport(LOG, (errmsg("[SS reform] Partner node shutdown real-time build when failover.")));
     }
