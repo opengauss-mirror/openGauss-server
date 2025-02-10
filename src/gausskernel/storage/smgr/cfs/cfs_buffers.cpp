@@ -302,7 +302,7 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
                                  location.get_local_header_num() * BLCKSZ);
     } else {
         nbytes = FilePRead(location.fd, (char *)item->pca_page, BLCKSZ,
-            location.headerNum * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_READ);
+                           location.headerNum * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_READ);
     }
     if (nbytes != BLCKSZ) {
         item->load_status = CTRL_PAGE_LOADED_ERROR;
@@ -320,12 +320,9 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
     }
 
     /* if in recovey process and the pca page has been inited, we need to check it */
-if ((CfsHeaderPagerCheckStatus)CheckAndRepairCompressAddress(
-        item->pca_page,
-        location.chunk_size,
-        location.algorithm,
-        location) ==
-    CFS_HEADER_CHECK_STATUS_ERROR) {
+    if ((CfsHeaderPagerCheckStatus)CheckAndRepairCompressAddress(item->pca_page, location.chunk_size,
+                                                                 location.algorithm, location) ==
+                                                                 CFS_HEADER_CHECK_STATUS_ERROR) {
         item->load_status = CTRL_PAGE_LOADED_ERROR;
         return;
     }
@@ -361,8 +358,7 @@ pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLo
                                             PcaBufferReadMode readMode)
 {
     errno_t rc;
-    CfsBufferKey key =
-    {
+    CfsBufferKey key = {
         {location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
          location.relFileNode.bucketNode},
         location.headerNum
@@ -457,10 +453,11 @@ void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bo
                         errmsg("Failed to pca_buf_free_page %s", FilePathName(location.fd))));
             } else {
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("Failed to pca_buf_free_page, relfilenode: %d, file fd:%d",
-                        location.relFileNode.relNode, location.fd)));
+                        errmsg("Failed to pca_buf_free_page, tablespace: %d, database:%d, relfilenode: %d, bucket: %d,"
+                               " opt: %d, file fd:%d",
+                               location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
+                               location.relFileNode.bucketNode, location.relFileNode.opt, location.fd)));
             }
-            return;
         }
         ctrl->load_status = CTRL_PAGE_IS_LOADED;
     }

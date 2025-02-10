@@ -527,7 +527,7 @@ void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
                                         ExtentIdToLogicBlocknumInCfs(xlog_data->extent_id);
     uint64 extentSize = opt == 0 ? ExtentSizeByCount(xlog_data->extent_id) :
                                    CfsExtentSizeByCount(xlog_data->extent_id);
-    for (int i=0; i < extentSize; i++) {
+    for (int i = 0; i < extentSize; i++) {
         BlockNumber blk = logicStart + i;
         if (blk >= xlog_data->nblocks) {
             break;

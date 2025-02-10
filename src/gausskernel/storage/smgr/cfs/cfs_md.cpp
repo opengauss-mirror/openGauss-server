@@ -20,6 +20,8 @@
 #define CFS_PCA_AND_ASSIST_BUFFER_SIZE (2 * CFS_EXTENT_SIZE * BLCKSZ)
 #define CFS_WRITE_RETRY_TIMES 8
 
+int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync, int type);
+
 /** extend chunks for blocks
  @param[in/out] cfsExtentHeader     pca page header.
  @param[in/out] location            extent loacation information.
@@ -89,23 +91,6 @@ char* CfsHeaderPagerCheckStatusList[] = {"verified success.",
 void CfsRecycleChunk(SMgrRelation reln, ForkNumber forknum);
 void CfsShrinkerShmemListPush(const RelFileNode &rnode, ForkNumber forknum, char parttype);
 
-int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync, int type)
-{
-    int fd = -1;
-    MdfdVec *v = NULL;
-    if (type == EXTENT_OPEN_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_FAIL);
-    } else if (type == WRITE_BACK_OPEN_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_RETURN_NULL);
-    } else if (type == EXTENT_CREATE_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_CREATE);
-    }
-    if (v != NULL) {
-        fd = v->mdfd_vfd;
-    }
-    return fd;
-}
-
 int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
                 BlockNumber logicBlockNumber, char *buffer, EXTEND_STORAGE_TYPE type)
 {
@@ -116,8 +101,12 @@ int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int exten
     if (location.fd < 0) {
         return -1;
     }
-    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
-    return false), we write the original page. */
+    /* if it's segment page and we don't compress the page, write the original page. Cases
+    that we do this are:
+        - It's in 1th or 2th segment logical file that we don't compress blocks by design.
+        - It's not data block.
+        - It's under a DSS storage.
+        - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
         nbytes = DirectFilePRead(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
                                  (uint32)WAIT_EVENT_DATA_FILE_WRITE);
@@ -125,7 +114,7 @@ int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int exten
                       errmsg("don't compress block due to it's a slice-acrossed block,"
                              "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
                              "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-                      logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+                             logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
         return nbytes;
     }
 
@@ -254,8 +243,12 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
         if (location.fd == -1) {
             return;
         }
-        /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
-        return false), we write the original page. */
+        /* if it's segment page and we don't compress the page, write the original page. Cases
+        that we do this are:
+            - It's in 1th or 2th segment logical file that we don't compress blocks by design.
+            - It's not data block.
+            - It's under a DSS storage.
+            - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
         if (location.is_segment_page && (!location.is_compress_allowed)) {
             pg_flush_data(location.fd, blocknum * BLCKSZ, BLCKSZ);
             nblocks -= 1;
@@ -635,16 +628,24 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
                     ForkNumber forknum, BlockNumber logicBlockNumber, const char *buffer,
                     bool isExtend, EXTEND_STORAGE_TYPE type)
 {
-    /* if enable_fast_allocate is on, and the caller is rewrite_flush_page->smgrextend,
-    or page is extend page, quick return. */
+    /* Normally, when extend page, it meats PageIsNew(buffer) here, so we quick return if page,
+    since zero pages have no need to get any chunk in pcd. And another scene is that when
+    enable_adio_function and enable_fast_allocate is on, the caller such as rewrite_flush_page may
+    want md functions to use fallocate and pass nullptr buffer down here, it also means extend a
+    new page scene, so for page compress, we have nothing to do here but return BLCKSZ. Note that
+    enable_adio_function is not allowed to be turned on now, we just considered it anyway. */
     if (buffer == nullptr || PageIsNew(buffer)) {
         return BLCKSZ;
     }
     int nbytes;
     ExtentLocation location =
         g_location_convert[type](reln, relNode, fd, extent_size, forknum, logicBlockNumber);
-    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
-    return false), we write the original page. */
+    /* if it's segment page and we don't compress the page, write the original page. Cases
+    that we do this are:
+        - It's in 1th or 2th segment logical file that we don't compress blocks by design.
+        - It's not data block.
+        - It's under a DSS storage.
+        - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
         nbytes = DirectFilePWrite(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
                                   (uint32)WAIT_EVENT_DATA_FILE_WRITE);
@@ -677,8 +678,12 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     /* compress page */
     uint8 nchunks;
     char *compressedBuffer;
-    /* if it's segment page and we don't compress the page(see conditions when SegCompressAllowed
-    return false), we write the original page. */
+    /* if it's segment page and we don't compress the page, write the original page. Cases
+    that we do this are:
+        - It's in 1th or 2th segment logical file that we don't compress blocks by design.
+        - It's not data block.
+        - It's under a DSS storage.
+        - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
         compressedBuffer = static_cast<char *>(palloc((unsigned long)BLCKSZ));
         errno_t rc = memcpy_s(compressedBuffer, BLCKSZ, buffer, BLCKSZ);
@@ -797,6 +802,12 @@ void CfsExtendForSeg(const RelFileNode& relNode, int fd, int extent_size, ForkNu
         /* extend and fallocate */
         auto start = location.extentStart * BLCKSZ;
         InitExtentHeader(location);
+        /* if it's segment page and we don't compress the page, write the original page. Cases
+        that we do this are:
+            - It's in 1th or 2th segment logical file that we don't compress blocks by design.
+            - It's not data block.
+            - It's under a DSS storage.
+            - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
         if (location.is_segment_page && location.is_compress_allowed) {
             FilePunchHoleAlloc(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
         }
@@ -1756,4 +1767,21 @@ void CfsRecycleChunk(SMgrRelation reln, ForkNumber forknum)
     }
     /* return until the massion is done */
     CfsRecycleChunkProc(reln, forknum);
+}
+
+int CfsGetFd(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync, int type)
+{
+    int fd = -1;
+    MdfdVec *v = NULL;
+    if (type == EXTENT_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_FAIL);
+    } else if (type == WRITE_BACK_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_RETURN_NULL);
+    } else if (type == EXTENT_CREATE_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_CREATE);
+    }
+    if (v != NULL) {
+        fd = v->mdfd_vfd;
+    }
+    return fd;
 }

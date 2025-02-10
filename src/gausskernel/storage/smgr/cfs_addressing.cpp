@@ -13,10 +13,10 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * storage_converter.cpp
+ * cfs_addressing.cpp
  *
  * IDENTIFICATION
- *     src/gausskernel/storage/smgr/storage_converter.cpp
+ *     src/gausskernel/storage/smgr/cfs_addressing.cpp
  *
  *-------------------------------------------------------------------------
  */

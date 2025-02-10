@@ -640,7 +640,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
             } else {
                 PageSetChecksumInplace((Page)pagedata, to_block);
                 spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
-                                logic_rnode.opt), forknum, pagedata, to_block);
+                                                                   logic_rnode.opt),
+                                forknum, pagedata, to_block);
             }
         }
         END_CRIT_SECTION();

@@ -13,10 +13,10 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * segment_converter.cpp
+ * segment_cfs_addressing.cpp
  *
  * IDENTIFICATION
- *     src/gausskernel/storage/smgr/segment/segment_converter.cpp
+ *     src/gausskernel/storage/smgr/segment/segment_cfs_addressing.cpp
  *
  *-------------------------------------------------------------------------
  */

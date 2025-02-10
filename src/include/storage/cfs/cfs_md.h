@@ -6,14 +6,6 @@
 
 #define MIN_FALLOCATE_SIZE (4096)
 
-struct CfsFileNodeInfo {
-    CfsFileNodeInfo(RelFileNode& rNode, int f, int eSize)
-        : relNode(rNode), fd(f), extent_size(eSize) {}
-    const RelFileNode& relNode;
-    int fd;
-    int extent_size;
-};
-
 /** write pages back to storage, called by mdwriteback or spc_writeback.
  @param[in]     reln             SMgrRelation.
  @param[in]     relNode          RelFileNode.

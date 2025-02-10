@@ -60,8 +60,7 @@ struct ExtentLocation {
     /* convert global header number to slice local block number, only used in segment page mode */
     BlockNumber get_local_header_num() const
     {
-        BlockNumber local_header_num;
-        local_header_num = headerNum % RELSEG_SIZE;
+        BlockNumber local_header_num = headerNum % RELSEG_SIZE;
         return local_header_num;
     }
 };

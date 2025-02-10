@@ -98,6 +98,13 @@
  *      1. drop table.
  *      2. delete a list of buckets during redistributing.
  */
+
+BlockNumber SegCfsLogicToPhysicMapping(SMgrRelation reln, ForkNumber forknum,
+                                       BlockNumber logic_blkno, BlockNumber extent_start,
+                                       uint32 offset);
+
+void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head);
+
 static void seg_update_timeline()
 {
     pg_atomic_add_fetch_u32(&g_instance.segment_cxt.segment_drop_timeline, 1);
@@ -417,32 +424,6 @@ BlockNumber seg_extent_location(SegSpace *spc, SegmentHead *seg_head, int extent
     }
 }
 
-/** Usually we can get extent start block number and block offset by seg_extent_location,  but if its a compressed
- segement extent, we need to do a conversion to get the accurate physical block number which scope will include pca.
- @param[in]     reln       SMgrRelation.
- @param[in]     fork_num   Fork number.
- @param[in]     logic_blkno   Logical block number in segement extent.
- @param[in]     extent_start   Extent start page.
- @param[in]     offset   Offset in this segement extent.
- @return  the physical block number in compressed segment. */
-BlockNumber seg_blkno_convert(SMgrRelation reln, ForkNumber forknum,
-                              BlockNumber logic_blkno, BlockNumber extent_start,
-                              uint32 offset)
-{
-    BlockNumber physical_blkno = InvalidBlockNumber;
-    /* page of uncompressed relation or logical block number in "1" segment extent  */
-    if (!IS_COMPRESSED_MAINFORK(reln, forknum) || logic_blkno < CFS_EXT_SIZE_8_TOTAL_PAGES) {
-        physical_blkno = extent_start + offset;
-        return physical_blkno;
-    }
-    /** calculate accurate physical position of the page, the physical_blkno is a global physical postion,
-     which has taken int accout pca page */
-    uint32 cfs_group_count = offset / CFS_LOGIC_BLOCKS_PER_EXTENT;
-    uint32 offset_in_cfs = offset % CFS_LOGIC_BLOCKS_PER_EXTENT;
-    physical_blkno = extent_start + cfs_group_count * CFS_EXTENT_SIZE + offset_in_cfs;
-    return physical_blkno;
-}
-
 SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_head,
                                             ForkNumber forknum, BlockNumber logic_id)
 {
@@ -464,7 +445,7 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     }
 
     BlockNumber extent_start = seg_extent_location(reln->seg_space, seg_head, extent_id);
-    blocknum = seg_blkno_convert(reln, forknum, logic_id, extent_start, offset);
+    blocknum = SegCfsLogicToPhysicMapping(reln, forknum, logic_id, extent_start, offset);
     ereport(LOG, (errmsg("[sgement compress]Convert logic id to physical blocknum,"
                          " logic_id: %d, physical_id:%d", logic_id, blocknum)));
     return {
@@ -1456,37 +1437,6 @@ struct ExtendStat {
     }
 };
 
-
-/** Although segement page use head->nblocks to represent block usage quantity, we have to update
- pca page, otherwise we will get a wrong page count from pca.
- @param[in]     reln        SmgrRelation.
- @param[in]     forknum     Fork number, should always be MAIN_FORKNUM.
- @param[in]     blocknum    Physical blocknum.
- @param[in]     seg_head    Segment header of this relation. */
-void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head)
-{
-    Assert(forknum == MAIN_FORKNUM);
-    SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, forknum, blocknum);
-    RelFileNode relNode =
-        EXTENT_GROUP_RNODE(reln->seg_space, loc.extent_size, reln->smgr_rnode.node.opt);
-    if (!SegCompressAllowed(relNode, forknum, loc.blocknum, loc.extent_size)) {
-        ereport(LOG, (errmsg("[sgement compress] don't need update pca for this block.")));
-        return;
-    }
-    int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
-    SegExtentGroup *seg = &reln->seg_space->extent_group[egid][forknum];
-    int fd = df_get_fd(seg->segfile, loc.blocknum);
-    RelFileNode fake_node = EXTENT_GROUP_RNODE(reln->seg_space, (ExtentSize)seg->extent_size,
-                                               reln->smgr_rnode.node.opt);
-    ExtentLocation location =
-        g_location_convert[SEG_STORAGE](reln, reln->smgr_rnode.node, fd,
-                                        loc.extent_size, forknum, loc.blocknum);
-    CfsExtendForSeg(reln->smgr_rnode.node, fd, seg->extent_size,
-                    forknum, loc.blocknum, nullptr, location);
-    return;
-}
-
-
 /*
  * Allocate extents to a segment until there are enough space to hold logic block number "blocknum"
  */
@@ -2174,4 +2124,59 @@ void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum
     SegmentCheck(loc.extent_size != 1);
 
     SegReleaseBuffer(seg_buffer);
+}
+
+/** Usually we can get extent start block number and block offset by seg_extent_location,  but if its a compressed
+ segement extent, we need to do a conversion to get the accurate physical block number which scope will include pca.
+ @param[in]     reln       SMgrRelation.
+ @param[in]     fork_num   Fork number.
+ @param[in]     logic_blkno   Logical block number in segement extent.
+ @param[in]     extent_start   Extent start page.
+ @param[in]     offset   Offset in this segement extent.
+ @return  the physical block number in compressed segment. */
+BlockNumber SegCfsLogicToPhysicMapping(SMgrRelation reln, ForkNumber forknum,
+                                       BlockNumber logic_blkno, BlockNumber extent_start,
+                                       uint32 offset)
+{
+    BlockNumber physical_blkno = InvalidBlockNumber;
+    /* page of uncompressed relation or logical block number in "1" segment extent  */
+    if (!IS_COMPRESSED_MAINFORK(reln, forknum) || logic_blkno < CFS_EXT_SIZE_8_TOTAL_PAGES) {
+        physical_blkno = extent_start + offset;
+        return physical_blkno;
+    }
+    /** calculate accurate physical position of the page, the physical_blkno is a global physical postion,
+     which has taken int accout pca page */
+    uint32 cfs_group_count = offset / CFS_LOGIC_BLOCKS_PER_EXTENT;
+    uint32 offset_in_cfs = offset % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    physical_blkno = extent_start + cfs_group_count * CFS_EXTENT_SIZE + offset_in_cfs;
+    return physical_blkno;
+}
+
+/** Although segement page use head->nblocks to represent block usage quantity, we have to update
+ pca page, otherwise we will get a wrong page count from pca.
+ @param[in]     reln        SmgrRelation.
+ @param[in]     forknum     Fork number, should always be MAIN_FORKNUM.
+ @param[in]     blocknum    Physical blocknum.
+ @param[in]     seg_head    Segment header of this relation. */
+void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head)
+{
+    Assert(forknum == MAIN_FORKNUM);
+    SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, forknum, blocknum);
+    RelFileNode relNode =
+        EXTENT_GROUP_RNODE(reln->seg_space, loc.extent_size, reln->smgr_rnode.node.opt);
+    if (!SegCompressAllowed(relNode, forknum, loc.blocknum, loc.extent_size)) {
+        ereport(LOG, (errmsg("[sgement compress] don't need update pca for this block.")));
+        return;
+    }
+    int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
+    SegExtentGroup *seg = &reln->seg_space->extent_group[egid][forknum];
+    int fd = df_get_fd(seg->segfile, loc.blocknum);
+    RelFileNode fake_node = EXTENT_GROUP_RNODE(reln->seg_space, (ExtentSize)seg->extent_size,
+                                               reln->smgr_rnode.node.opt);
+    ExtentLocation location =
+        g_location_convert[SEG_STORAGE](reln, reln->smgr_rnode.node, fd,
+                                        loc.extent_size, forknum, loc.blocknum);
+    CfsExtendForSeg(reln->smgr_rnode.node, fd, seg->extent_size,
+                    forknum, loc.blocknum, nullptr, location);
+    return;
 }
