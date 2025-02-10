@@ -2132,6 +2132,9 @@ void initDssPath(const char *dssdir, const char *xlogdir)
     rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", xlogdir);
     securec_check_ss(rc, "", "");
 
+    rc = snprintf_s(g_instance.datadir_cxt.archiveDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/archive_status", xlogdir);
+    securec_check_ss(rc, "", "");
+
     rc = snprintf_s(g_instance.datadir_cxt.controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", dssdir);
     securec_check_ss(rc, "", "");
 

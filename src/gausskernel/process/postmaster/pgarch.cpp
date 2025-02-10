@@ -49,6 +49,7 @@
 #include "storage/latch.h"
 #include "storage/pg_shmem.h"
 #include "storage/pmsignal.h"
+#include "storage/file/fio_device.h"
 #include "utils/guc.h"
 #include "utils/ps_status.h"
 
@@ -615,19 +616,15 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     char activitymsg[MAXFNAMELEN + 16];
     long int fileBytes = 0;
     int rc = 0;
-    char tempPath[PATH_MAX] = {0};
     char* retVal = NULL;
 
     if (xlog == NULL) {
         return false;
     }
     
-    rc = snprintf_s(tempPath, PATH_MAX, PATH_MAX - 1, XLOGDIR "/%s", xlog);
+    rc = snprintf_s(srcPath, PATH_MAX, PATH_MAX - 1, "%s/%s", SS_XLOGDIR, xlog);
     securec_check_ss(rc, "\0", "\0");
-    retVal = realpath(tempPath, srcPath);
-    if (retVal == NULL) {
-        ereport(FATAL, (errmsg_internal("realpath src %s failed:%m\n", tempPath)));
-    }
+
     retVal = realpath(u_sess->attr.attr_storage.XLogArchiveDest, destPath);
     if (retVal == NULL) {
         ereport(FATAL, (errmsg_internal("realpath dest %s failed:%m\n", u_sess->attr.attr_storage.XLogArchiveDest)));
@@ -635,7 +632,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     rc = snprintf_s(archPath, PATH_MAX, PATH_MAX - 1, "%s/%s", destPath, xlog);
     securec_check_ss(rc, "\0", "\0");
 
-    if ((fdSrc = open(srcPath, O_RDONLY)) >= 0) {                
+    if ((fdSrc = open(srcPath, O_RDONLY, S_IRUSR | S_IWUSR)) >= 0) {
         if ((fdDest = open(archPath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
             char pbuff[ARCHIVE_BUF_SIZE] = {0};
 
@@ -789,7 +786,7 @@ static bool pgarch_archiveXlog(char* xlog)
     const char* sp = NULL;
     int rc = 0;
 
-    rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
+    rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, xlog);
     securec_check_ss(rc, "\0", "\0");
 
     /* archive_dest is preferred over archive_command */
@@ -948,7 +945,7 @@ static bool pgarch_readyXlog(char* xlog, int xlog_length)
     bool found = false;
     int rc = 0;
 
-    rc = snprintf_s(XLogArchiveStatusDir, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/archive_status");
+    rc = snprintf_s(XLogArchiveStatusDir, MAXPGPATH, MAXPGPATH - 1, "%s/archive_status", SS_XLOGDIR);
     securec_check_ss(rc, "", "");
 
     rldir = AllocateDir(XLogArchiveStatusDir);

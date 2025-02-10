@@ -3642,14 +3642,6 @@ static void CheckGUCConflicts(void)
                 errmsg(
                     "WAL archival (archive_mode=on) requires wal_level \"archive\", \"hot_standby\" or \"logical\"")));
 
-    if (ENABLE_DSS) {
-        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
-            ereport(ERROR,
-                (errcode(ERRCODE_SYSTEM_ERROR),
-                    errmsg("archive functions are not supported when DMS and DSS enabled\n")));
-        }
-    }
-
     if (g_instance.attr.attr_storage.max_wal_senders > 0 && g_instance.attr.attr_storage.wal_level == WAL_LEVEL_MINIMAL)
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR),

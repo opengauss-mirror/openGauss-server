@@ -1343,6 +1343,7 @@ typedef struct knl_g_datadir_context {
     char twophaseDir[MAXPGPATH];
     char multixactDir[MAXPGPATH];
     char xlogDir[MAXPGPATH];
+    char archiveDir[MAXPGPATH];
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
     char controlInfoPath[MAXPGPATH];

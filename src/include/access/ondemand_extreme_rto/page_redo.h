@@ -258,6 +258,7 @@ void DereferenceRedoItem(void *item);
 void ReferenceRecParseState(XLogRecParseState *recordstate);
 void DereferenceRecParseState(XLogRecParseState *recordstate);
 void PushToWorkerLsn();
+void StartupSendLsnForwarder(XLogRecPtr lastReplayedEndRecPtr);
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 void SetReadBufferForExtRto(XLogReaderState *state, XLogRecPtr pageptr, int reqLen);
 void DumpExtremeRtoReadBuf();

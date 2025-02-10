@@ -48,63 +48,6 @@ typedef struct XLogPageReadPrivate {
     bool randAccess;
 } XLogPageReadPrivate;
 
-int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
-{
-    char path[MAXPGPATH];
-    ListCell *cell = NULL;
-    int fd = -1;
-    errno_t errorno = EOK;
-    
-    foreach (cell, t_thrd.xlog_cxt.expectedTLIs) {
-        TimeLineID tli = (TimeLineID)lfirst_int(cell);
-        if (tli < t_thrd.xlog_cxt.curFileTLI) {
-            break; /* don't bother looking at too-old TLIs */
-        }
-
-        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path, tli,
-                             (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-        securec_check_ss(errorno, "", "");
-        t_thrd.xlog_cxt.restoredFromArchive = false;
-
-        fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
-
-        if (fd >= 0) {
-            /* Success! */
-            t_thrd.xlog_cxt.curFileTLI = tli;
-
-            /* Track source of data in assorted state variables */
-            t_thrd.xlog_cxt.readSource = sources;
-            t_thrd.xlog_cxt.XLogReceiptSource = (int)sources;
-
-            /* In FROM_STREAM case, caller tracks receipt time, not me */
-            if (sources != XLOG_FROM_STREAM) {
-                t_thrd.xlog_cxt.XLogReceiptTime = GetCurrentTimestamp();
-            }
-
-            return fd;
-        }
-
-        if (!FILE_POSSIBLY_DELETED(errno)) { 
-            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m,"
-                    " %s", path, XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
-        }
-    }
-
-    /* Couldn't find it.  For simplicity, complain about front timeline */
-    errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path,
-                         t_thrd.xlog_cxt.recoveryTargetTLI, (uint32)((segno) / XLogSegmentsPerXLogId),
-                         (uint32)((segno) % XLogSegmentsPerXLogId));
-    securec_check_ss(errorno, "", "");
-
-    errno = ENOENT;
-    if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        ereport(emode, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m", path,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
-    }
-
-    return -1;
-}
-
 int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf,
     int readLen, int readFile)
 {

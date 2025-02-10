@@ -2701,6 +2701,16 @@ void SendLsnForwarder()
     PutRecordToReadQueue(&g_GlobalLsnForwarder.record);
 }
 
+void StartupSendLsnForwarder(XLogRecPtr lastReplayedEndRecPtr)
+{
+    // xlog page read worker is already down, so no need atomic operation
+    g_GlobalLsnForwarder.record.ReadRecPtr = lastReplayedEndRecPtr;
+    g_GlobalLsnForwarder.record.EndRecPtr = lastReplayedEndRecPtr;
+    g_GlobalLsnForwarder.record.refcount = get_real_recovery_parallelism() - XLOG_READER_NUM - PAGE_REDO_WORKER_NUM;
+    g_GlobalLsnForwarder.record.isDecode = true;
+    StartupSendFowarder(&g_GlobalLsnForwarder);
+}
+
 static inline bool ReadPageWorkerStop()
 {
     return g_dispatcher->recoveryStop;
