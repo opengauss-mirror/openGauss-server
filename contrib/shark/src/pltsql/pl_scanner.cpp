@@ -478,7 +478,7 @@ void pltsql_scanner_init(const char* str)
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /* Start up the core scanner */
     curr_compile->yyscanner =
-        pgtsql_scanner_init(str, curr_compile->core_yy, &ReservedPLKeywords, ReservedPLKeywordTokens);
+        scanner_init(str, curr_compile->core_yy, &ReservedPLKeywords, ReservedPLKeywordTokens);
     curr_compile->core_yy->isPlpgsqlKeyWord = true;
     curr_compile->core_yy->plKeywordValue = &keywordsValue;
 

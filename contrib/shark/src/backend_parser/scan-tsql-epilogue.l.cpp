@@ -10,6 +10,8 @@ pgtsql_scanner_init(const char *str,
 	Size		slen = strlen(str);
 	yyscan_t	scanner;
 
+	GetSessionContext()->dialect_sql = true;
+
 	if (yylex_init(&scanner) != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),

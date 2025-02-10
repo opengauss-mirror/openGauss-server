@@ -73,7 +73,7 @@ extern List* raw_parser(const char* query_string, List** query_string_locationli
 static inline parse_query_func GetRawParser()
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
+    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin || DB_IS_CMPT(D_FORMAT)) {
         int id = GetCustomParserId();
         if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
             return (parse_query_func)g_instance.raw_parser_hook[id];
