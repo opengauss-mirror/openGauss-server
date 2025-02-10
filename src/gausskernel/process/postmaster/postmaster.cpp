@@ -275,6 +275,7 @@
 #include "storage/dss/dss_log.h"
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_auxiliary.h"
 #include "storage/gs_uwal/gs_uwal.h"
 #include "ddes/dms/ss_sync_auxiliary.h"
@@ -5313,10 +5314,14 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                 ereport(ERROR,
                         (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
             }
-#else       
-            /* All node in SS_DISASTER_STANDBY_CLUSTER can not accept connection when hot_standby=off */
-            if (((hashmdata->current_mode == STANDBY_MODE || SS_DISASTER_STANDBY_CLUSTER)
-                 && !g_instance.attr.attr_storage.EnableHotStandby)) {
+#else
+            if (SS_DISASTER_STANDBY_CLUSTER_STANDBY_NODE) {
+                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("can not accept connection in ss disaster cluster standby node")));
+                return STATUS_ERROR;
+            }
+
+            if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
                 ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection if hot standby off")));
             }
@@ -10380,6 +10385,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
                 (errmsg("Failover between two disaster cluster start, change current run mode to primary_cluster")));
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
             SSDisasterRefreshMode();
+            /* request other standby nodes reload reform ctrl page to change cluster run mode */
+            SSRequestAllStandbyReloadReformCtrlPage();
             SSGrantDSSWritePermission();
         }
 
