@@ -71,6 +71,7 @@ extern Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, 
                           Oid propackageid, Datum* values, Datum parameterModes, Oid protypeoid, Oid profuncoid);
 bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2);
 #endif
+extern List* GetFunctionOidsByPackageOid(Oid pkgOid);
 CATALOG(gs_package,7815) BKI_BOOTSTRAP BKI_ROWTYPE_OID(9745) BKI_SCHEMA_MACRO
 {
     Oid         pkgnamespace;   /*package name space*/

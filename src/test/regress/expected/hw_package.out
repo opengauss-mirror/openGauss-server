@@ -1662,12 +1662,10 @@ CREATE OR REPLACE VIEW test.my_view AS
 SELECT t.empno, test.emp_admin6.fn_get_emp_name6 (t.empno) my_alias
 FROM test.emp_t t;
 drop package if exists test.emp_admin6;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function test.fn_get_emp_name6(numeric)
-drop cascades to view test.my_view
 drop cascades to function test.pr_raise_salary6(numeric)
 drop view if exists test.my_view;
-NOTICE:  view "my_view" does not exist, skipping
 drop table if exists test.emp_t;
 drop schema if exists test cascade;
 drop table if exists au_pkg;

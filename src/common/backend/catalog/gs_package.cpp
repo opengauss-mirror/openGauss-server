@@ -72,7 +72,6 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
 static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs);
 static void ReleaseUnusedPortalContext(List* portalContexts, bool releaseAll = false);
 static bool gspkg_is_same_pkg_spec(HeapTuple tup, const char* pkg_spec_src);
-static List* GetFunctionOidsByPackageOid(Oid pkgOid);
 static void DeleteNotExistsPkgFuncs(List* funcOids, Oid pkgOid);
 
 #define MAXSTRLEN ((1 << 11) - 1)
@@ -2045,7 +2044,7 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
     return true;
 }
 
-static List* GetFunctionOidsByPackageOid(Oid pkgOid)
+List* GetFunctionOidsByPackageOid(Oid pkgOid)
 {
     HeapTuple tup;
     List* funcOids = NIL;

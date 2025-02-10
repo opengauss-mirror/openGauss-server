@@ -21,6 +21,7 @@ extern void validateWithCheckOption(const char* value);
 extern void validateViewSecurityOption(const char* value);
 extern ObjectAddress DefineView(ViewStmt* stmt, const char* queryString, bool send_remote = true, bool isFirstNode = true);
 extern bool IsViewTemp(ViewStmt* stmt, const char* queryString);
+extern Query* UpdateRangeTableOfViewParse(Oid viewOid, Query* viewParse);
 extern void StoreViewQuery(Oid viewOid, Query *viewParse, bool replace);
 extern bool CheckMySQLFdwForWCO(Query* viewquery);
 

@@ -12884,9 +12884,8 @@ List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid)
     return evAction;
 }
 
-void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
+void UpdatePgrewriteForView(Oid rw_oid, List* evAction)
 {
-    List *new_query_str = NIL;
     ScanKeyData entry;
     ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_oid));
     Relation rewrite_rel = heap_open(RewriteRelationId, RowExclusiveLock);
@@ -12905,43 +12904,17 @@ void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
     simple_heap_update(rewrite_rel, &new_dep_tuple->t_self, new_dep_tuple);
     CatalogUpdateIndexes(rewrite_rel, new_dep_tuple);
     CommandCounterIncrement();
+    /* force relcache rebuild */
+    SetRelationRuleStatus(rewrite_form->ev_class, true, false);
+
     heap_freetuple_ext(new_dep_tuple);
     pfree_ext(actiontree);
-    /* get new_query_str from pg_rewrite */
-    if (query_str == NULL) {
-        systable_endscan(rewrite_scan);
-        heap_close(rewrite_rel, RowExclusiveLock);
-        return;
-    }
-    Query* query = (Query*)linitial(evAction);
-    StringInfoData buf;
-    initStringInfo(&buf);
-    Relation ev_relation = heap_open(rewrite_form->ev_class, AccessShareLock);
-    get_query_def(query,
-        &buf,
-        NIL,
-        RelationGetDescr(ev_relation),
-        0,
-        -1,
-        0,
-        false,
-        false,
-        NULL,
-        false,
-        false);
-    appendStringInfo(&buf, ";");
-    ViewInfoForAdd * info = static_cast<ViewInfoForAdd *>(palloc(sizeof(ViewInfoForAdd)));
-    info->ev_class = rewrite_form->ev_class;
-    info->query_string = pstrdup(buf.data);
-    heap_close(ev_relation, AccessShareLock);
-    FreeStringInfo(&buf);
-    new_query_str = lappend(new_query_str, info);
-    *query_str = new_query_str;
+
     systable_endscan(rewrite_scan);
     heap_close(rewrite_rel, RowExclusiveLock);
 }
 
-void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query, List **query_str)
+void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query)
 {
     List* evAction = NIL;
     evAction = lappend(evAction, query);
@@ -12950,7 +12923,7 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
      * so that GetRefreshedViewQuery which would scan pg_rewrite to get ev_action
      * can obtain right view_def.
      */
-    UpdatePgrewriteForView(rw_objid, evAction, NULL);
+    UpdatePgrewriteForView(rw_objid, evAction);
 
     List* newEvAction = NIL;
     PG_TRY();
@@ -12982,8 +12955,10 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
         UpdatePgAttributeForView(tle, tle2, viewid);
     }
 
+    freshed_query = UpdateRangeTableOfViewParse(viewid, freshed_query);
+
     /* update pg_rewrite with final ev_action */
-    UpdatePgrewriteForView(rw_objid, newEvAction, query_str);
+    UpdatePgrewriteForView(rw_objid, list_make1(freshed_query));
 
     list_free_deep(newEvAction);
 }
@@ -34702,7 +34677,17 @@ void RebuildDependViewForProc(Oid proc_oid)
         List* raw_parsetree_list = raw_parser(view_def);
         Node* stmt = (Node*)linitial(raw_parsetree_list);
         Assert(IsA(stmt, ViewStmt));
-        DefineView((ViewStmt*)stmt, view_def);
+
+        PG_TRY();
+        {
+            DefineView((ViewStmt*)stmt, view_def);
+        }
+        PG_CATCH();
+        {
+            /* If there is an error in rebuilding the view, ignore it and set it invalid. */
+            InvalidateDependView(view_oid, OBJECT_TYPE_VIEW);
+        }
+        PG_END_TRY();
         pfree(view_def);
         list_free(raw_parsetree_list);
     }

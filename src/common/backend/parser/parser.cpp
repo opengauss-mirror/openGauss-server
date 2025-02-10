@@ -40,7 +40,7 @@ static bool is_prefer_parse_cursor_parentheses_as_expr()
 
 static bool is_cursor_function_exist()
 {
-    return get_func_oid("cursor", InvalidOid, NULL) != InvalidOid;
+    return get_func_oid("cursor", InvalidOid, NULL, false) != InvalidOid;
 }
 
 static bool is_select_stmt_definitely(int start_token) {

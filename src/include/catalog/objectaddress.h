@@ -58,6 +58,7 @@ typedef struct ObjectAddress
     /* Used to tag Drop-Mode in recyclebin-based timecapsule. */
     TrDropMode  rbDropMode;     /* logic drop or physical drop */
     char        deptype;        /* Indicates the deptype that the object is referenced by other object. */
+    char*       depsrc;         /* full name of function */
 } ObjectAddress;
 
 #define ObjectAddressSubSet(addr, class_id, object_id, object_sub_id) \

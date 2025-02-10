@@ -212,7 +212,7 @@ extern Oid get_typeoid(Oid namespaceId, const char* typname);
 extern Oid get_enumlabeloid(Oid enumtypoid, const char* enumlabelname);
 extern Oid get_operator_oid(const char* operatorName, Oid operatorNamespace, Oid leftObjectId, Oid rightObjectId);
 extern void get_oper_name_namespace_oprs(Oid operid, char** oprname, char** nspname, Oid* oprleft, Oid* oprright);
-extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr);
+extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr, bool noPkg = false);
 extern Oid get_func_oid_ext(const char* funcname, Oid funcnamespace, Oid funcrettype, int funcnargs, Oid* funcargstype);
 extern Oid get_my_temp_schema();
 extern bool check_rel_is_partitioned(Oid relid);
@@ -222,6 +222,7 @@ extern bool is_pgxc_class_table(Oid tableoid);
 extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname, bool nsp_missing_ok = false);
 extern bool get_func_iswindow(Oid funcid);
 extern char get_func_prokind(Oid funcid);
+extern char* get_func_full_name(Oid funcid);
 extern char get_typecategory(Oid typid);
 extern Oid get_array_internal_depend_type_oid(Oid arrTypOid);
 

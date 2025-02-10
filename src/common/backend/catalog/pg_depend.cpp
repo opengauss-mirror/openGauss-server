@@ -35,6 +35,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
+#include "utils/builtins.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_ext.h"
 #include "catalog/pg_rewrite.h"
@@ -125,6 +126,13 @@ void recordMultipleDependencies(
             values[Anum_pg_depend_refobjsubid - 1] = Int32GetDatum(referenced->objectSubId);
 
             values[Anum_pg_depend_deptype - 1] = CharGetDatum((char)behavior);
+
+            if (depender->classId == RewriteRelationId && referenced->classId == ProcedureRelationId &&
+                referenced->depsrc != NULL) {
+                values[Anum_pg_depend_depsrc - 1] = CStringGetTextDatum(referenced->depsrc);
+            } else {
+                nulls[Anum_pg_depend_depsrc - 1] = true;
+            }
 
             tup = heap_form_tuple(dependDesc->rd_att, values, nulls);
 
@@ -284,6 +292,7 @@ void recordPinnedDependency(const ObjectAddress* object)
     values[Anum_pg_depend_refobjsubid - 1] = Int32GetDatum(object->objectSubId);
 
     values[Anum_pg_depend_deptype - 1] = CharGetDatum((char)DEPENDENCY_PIN);
+    nulls[Anum_pg_depend_depsrc - 1] = true;
 
     tup = heap_form_tuple(dependDesc->rd_att, values, nulls);
 
@@ -1118,4 +1127,56 @@ void DeletePgDependObject(const ObjectAddress* object, const ObjectAddress* ref_
     }
     systable_endscan(scan);
     heap_close(relation, RowExclusiveLock);
+}
+
+void fillDepsrcIfNeeded(const ObjectAddress* origObject)
+{
+    Relation depRel;
+    SysScanDesc scan;
+    const int keyNumber = 2;
+    ScanKeyData key[keyNumber];
+    HeapTuple tup;
+    Form_pg_depend depTuple = NULL;
+    bool isnull = false;
+    Datum values[Natts_pg_depend];
+    bool nulls[Natts_pg_depend] = {false};
+    bool replaces[Natts_pg_depend] = {false};
+
+    Assert(getObjectClass(origObject) == OCLASS_PROC);
+
+    char* fullName = get_func_full_name(origObject->objectId);
+    if (fullName == NULL) {
+        return;
+    }
+    values[Anum_pg_depend_depsrc -1] = CStringGetTextDatum(fullName);
+    replaces[Anum_pg_depend_depsrc -1] = true;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(origObject->classId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(origObject->objectId));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        depTuple = (Form_pg_depend)GETSTRUCT(tup);
+        Datum depsrc = heap_getattr(tup, Anum_pg_depend_depsrc, RelationGetDescr(depRel), &isnull);
+        /* skip those whose depsrc were already valid */
+        if (!isnull) {
+            continue;
+        }
+
+        HeapTuple new_tuple = heap_modify_tuple(tup, RelationGetDescr(depRel), values, nulls, replaces);
+        (void)simple_heap_update(depRel, &new_tuple->t_self, new_tuple, true);
+        CatalogUpdateIndexes(depRel, new_tuple);
+
+        heap_freetuple_ext(new_tuple);
+    }
+
+    pfree(fullName);
+    systable_endscan(scan);
+    heap_close(depRel, RowExclusiveLock);
+    CommandCounterIncrement();
 }

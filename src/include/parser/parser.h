@@ -44,7 +44,7 @@ extern char** get_next_snippet(
 
 extern void fixResTargetNameWithAlias(List* clause_list, const char* aliasname);
 extern char* EscapeQuotes(const char* src);
-extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr);
+extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr, bool noPkg);
 
 
 #endif /* PARSER_H */
