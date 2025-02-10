@@ -163,7 +163,7 @@ static CStoreIndexHeapScan* make_cstoreindex_heapscan(PlannerInfo* root, Path* b
 static CStoreIndexAnd* make_cstoreindex_and(List* ctidplans);
 static CStoreIndexOr* make_cstoreindex_or(List* ctidplans);
 static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
-    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial);
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial,double annCount);
 static TidScan* make_tidscan(List* qptlist, List* qpqual, Index scanrelid, List* tidquals);
 static FunctionScan* make_functionscan(List* qptlist, List* qpqual, Index scanrelid, Node* funcexpr, List* funccolnames,
     List* funccoltypes, List* funccoltypmods, List* funccolcollations);
@@ -2667,7 +2667,8 @@ static Scan* create_indexscan_plan(
                     indexorderbys,
                     best_path->indexscandir,
                     indexselectivity,
-                    (best_path->indexinfo->indpred != NIL));
+                    (best_path->indexinfo->indpred != NIL),
+                    best_path->annCount);
                 ((AnnIndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
             } else {
                 scan_plan = (Scan*)make_indexscan(tlist,
@@ -5982,7 +5983,7 @@ static CStoreIndexHeapScan* make_cstoreindex_heapscan(PlannerInfo* root, Path* b
 }
 
 static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
-    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial)
+    List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir, double indexselectivity, bool is_partial, double annCount)
 {
     AnnIndexScan* node = makeNode(AnnIndexScan);
     Plan* plan = &node->scan.plan;
@@ -5992,6 +5993,7 @@ static AnnIndexScan* make_annindexscan(List* qptlist, List* qpqual, Index scanre
     plan->qual = qpqual;
     plan->lefttree = NULL;
     plan->righttree = NULL;
+    node->annCount = annCount;
     node->scan.scanrelid = scanrelid;
     node->indexid = indexid;
     node->indexqual = indexqual;

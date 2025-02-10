@@ -883,6 +883,7 @@ typedef struct AnnIndexScan {
     bool is_ustore;
     double selectivity;
     bool is_partial;
+    double annCount;
 } AnnIndexScan;
 
 /* ----------------

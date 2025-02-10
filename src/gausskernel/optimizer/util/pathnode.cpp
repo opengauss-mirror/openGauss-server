@@ -2333,6 +2333,7 @@ bool is_pwj_path(Path* pwjpath)
     return ret;
 }
 
+
 /*
  * create_index_path
  *	  Creates a path node for an index scan.
@@ -2362,14 +2363,15 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     Relids required_outer, Bitmapset *upper_params, double loop_count)
 {
     IndexPath* pathnode = makeNode(IndexPath);
+    bool isAnnIndex = index->isAnnIndex;
     RelOptInfo* rel = index->rel;
     List* indexquals = NIL;
     List* indexqualcols = NIL;
 
     pathnode->is_ustore = rel->is_ustore;
-    pathnode->isAnnIndex = index->isAnnIndex;
+    pathnode->isAnnIndex = isAnnIndex;
 
-    pathnode->path.pathtype = index->isAnnIndex ? T_AnnIndexScan : (indexonly ? T_IndexOnlyScan : T_IndexScan);
+    pathnode->path.pathtype = isAnnIndex ? T_AnnIndexScan : (indexonly ? T_IndexOnlyScan : T_IndexScan);
     pathnode->path.parent = rel;
     pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);

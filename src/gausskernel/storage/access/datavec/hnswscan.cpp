@@ -211,7 +211,7 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
     if (so->first) {
         Datum value;
-        so->length = u_sess->datavec_ctx.hnsw_ef_search;
+        so->length = scan->count + u_sess->datavec_ctx.hnsw_ef_search;
         so->currentLoc = 0;
         /* Count index scan for stats */
         pgstat_count_index_scan(scan->indexRelation);

@@ -1232,6 +1232,7 @@ typedef struct IndexPath {
     List* annQualCols;
     Cost annQualTotalCost;
     Selectivity annQualSelectivity;
+    double annCount; // restore limitValue/sel
     Cost allcost; // index cost + qual cost
     bool is_ustore;
 } IndexPath;
