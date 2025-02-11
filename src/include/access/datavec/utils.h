@@ -25,7 +25,6 @@ typedef struct PQParams {
     int pqKsub;
     int funcType;
     int dim;
-    int pqMode;
     size_t subItemSize;
     char *pqTable;
 } PQParams;
