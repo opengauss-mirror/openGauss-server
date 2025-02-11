@@ -106,9 +106,6 @@
 #define RandomDouble() (((double)random()) / MAX_RANDOM_VALUE)
 #define RandomInt() random()
 
-#define IVF_PQMODE_ADC 1
-#define IVF_PQMODE_SDC 2
-#define IVF_PQMODE_DEFAULT IVF_PQMODE_ADC
 #define IVF_PQ_DIS_L2 1
 #define IVF_PQ_DIS_IP 2
 #define IVF_PQ_DIS_COSINE 3
