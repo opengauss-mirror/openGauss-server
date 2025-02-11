@@ -408,7 +408,7 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
     attrtype = attnumTypeId(rd, attrno);
     attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
     attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
-    if (DB_IS_CMPT(B_FORMAT) && OidIsValid(attrcollation)) {
+    if (DB_IS_CMPT_BD && OidIsValid(attrcollation)) {
         attrcharset = get_valid_charset_by_collation(attrcollation);
     }
 

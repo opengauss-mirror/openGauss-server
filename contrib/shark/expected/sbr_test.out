@@ -1,0 +1,245 @@
+--表名
+CREATE TABLE [my_table] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "my_table_pkey" for table "my_table"
+ALTER TABLE [my_table]
+ADD user_email VARCHAR(100);
+DROP TABLE [my_table];
+--保留关键字
+CREATE TABLE [cast] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "cast_pkey" for table "cast"
+ALTER TABLE [cast]
+ADD user_email VARCHAR(100);
+DROP TABLE [cast];
+--非保留关键字
+CREATE TABLE [CATALOG] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "catalog_pkey" for table "catalog"
+ALTER TABLE [CATALOG]
+ADD user_email VARCHAR(100);
+DROP TABLE [CATALOG];
+--函数名
+CREATE OR REPLACE FUNCTION [calculate_age](birthdate DATE)
+RETURNS INT AS $$
+BEGIN
+    RETURN EXTRACT(YEAR FROM AGE(birthdate));
+END;
+$$ LANGUAGE plpgsql;
+DROP FUNCTION [calculate_age](DATE);
+--保留关键字
+CREATE OR REPLACE FUNCTION [cast](birthdate DATE)
+RETURNS INT AS $$
+BEGIN
+    RETURN EXTRACT(YEAR FROM AGE(birthdate));
+END;
+$$ LANGUAGE plpgsql;
+DROP FUNCTION [cast](DATE);
+--非保留关键字
+CREATE OR REPLACE FUNCTION [CATALOG](birthdate DATE)
+RETURNS INT AS $$
+BEGIN
+    RETURN EXTRACT(YEAR FROM AGE(birthdate));
+END;
+$$ LANGUAGE plpgsql;
+DROP FUNCTION [CATALOG](DATE);
+--列名
+CREATE TABLE my_table (
+    user_id INT PRIMARY KEY,
+    [user_name] VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "my_table_pkey" for table "my_table"
+ALTER TABLE my_table
+ADD user_email VARCHAR(100);
+DROP TABLE my_table;
+CREATE TABLE my_table (
+    user_id INT PRIMARY KEY,
+    [cast] VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "my_table_pkey" for table "my_table"
+ALTER TABLE my_table
+ADD [CATALOG] VARCHAR(100);
+DROP TABLE my_table;
+--变量
+DO $$
+DECLARE
+    [my_variable] INT := 10;
+    [cast] TEXT := 'Hello, PostgreSQL!';
+    [CATALOG] DATE := '2024-01-01';
+BEGIN
+    RAISE NOTICE 'Variable 1: %', [my_variable];
+    RAISE NOTICE 'Variable 2: %', [cast];
+    RAISE NOTICE 'Variable 3: %', [CATALOG];
+END $$;
+NOTICE:  Variable 1: 10
+NOTICE:  Variable 2: Hello, PostgreSQL!
+NOTICE:  Variable 3: 01-01-2024
+--索引
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY,
+    UserName NVARCHAR(50),
+    Email NVARCHAR(100)
+);
+ERROR:  relation "users" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
+CREATE CLUSTERED INDEX [UserID]
+ON Users (UserID);
+NOTICE:  The CLUSTERED option is currently ignored
+CREATE CLUSTERED INDEX [cast]
+ON Users (UserID);
+NOTICE:  The CLUSTERED option is currently ignored
+CREATE CLUSTERED INDEX [CATALOG]
+ON Users (UserID);
+NOTICE:  The CLUSTERED option is currently ignored
+DROP INDEX [UserID];
+DROP INDEX [cast];
+DROP INDEX [CATALOG];
+--视图
+CREATE TABLE employees (
+    employee_id INT PRIMARY KEY,
+    name VARCHAR(100),
+    department VARCHAR(50)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+CREATE VIEW [sales_employees] AS
+SELECT employee_id, name, department
+FROM employees
+WHERE department = 'Sales';
+CREATE VIEW [cast] AS
+SELECT employee_id, name, department
+FROM employees
+WHERE department = 'Sales';
+CREATE VIEW [CATALOG] AS
+SELECT employee_id, name, department
+FROM employees
+WHERE department = 'Sales';
+-- 存储过程
+DROP TABLE IF EXISTS Employees;
+CREATE TABLE IF NOT EXISTS Employees(
+    EmployeeID SERIAL PRIMARY KEY,
+    FirstName VARCHAR(50),
+    LastName VARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+CREATE OR REPLACE FUNCTION [GetEmployeeDetails](IN employee_id INT)
+RETURNS TABLE (EmployeeID INT, FirstName VARCHAR(50), LastName VARCHAR(50)) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT EmployeeID, FirstName, LastName
+    FROM Employees
+    WHERE EmployeeID = employee_id;
+END;
+$$ LANGUAGE plpgsql;
+DROP FUNCTION [GetEmployeeDetails];
+-- 创建触发器函数
+CREATE OR REPLACE FUNCTION [trg_AfterInsert_func]()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE NOTICE 'New employee added';
+    RETURN NEW;  -- 返回 NEW 表示允许插入操作
+END;
+$$ LANGUAGE plpgsql;
+-- 创建触发器
+CREATE TRIGGER [trg_AfterInsert]
+AFTER INSERT ON Employees
+FOR EACH ROW
+EXECUTE PROCEDURE [trg_AfterInsert_func]();
+DROP TRIGGER IF EXISTS [trg_AfterInsert] ON Employees;
+-- 类型
+CREATE DOMAIN PhoneNumber AS VARCHAR(15);
+DROP TYPE [PhoneNumber];
+DROP TABLE Employees;
+--database,schema,大小写
+CREATE DATABASE [TEST_DB];
+DROP DATABASE TEST_DB;
+CREATE DATABASE [TEST_DB];
+DROP DATABASE [test_db];
+CREATE DATABASE [TEST_DB];
+DROP DATABASE [TEST_DB];
+CREATE schema [TEST_S];
+DROP schema TEST_S;
+CREATE schema [TEST_S];
+DROP schema [test_s];
+CREATE schema [TEST_S];
+DROP schema [TEST_S];
+-- 特殊符号
+CREATE TABLE [!@#] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "!@#_pkey" for table "!@#"
+DROP TABLE [!@#];
+CREATE TABLE [ ] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index " _pkey" for table " "
+DROP TABLE [ ];
+CREATE TABLE [[] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "[_pkey" for table "["
+DROP TABLE [[];
+CREATE TABLE [你好] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "你好_pkey" for table "你好"
+DROP TABLE [你好];
+CREATE TABLE ['] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+DROP TABLE ['];
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "'_pkey" for table "'"
+CREATE TABLE ["] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+DROP TABLE ["];
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index ""_pkey" for table """
+CREATE TABLE []] (
+    user_id INT PRIMARY KEY,
+    user_name VARCHAR(100)
+);
+ERROR:  zero-length delimited identifier at or near "[]"
+LINE 1: CREATE TABLE []] (
+                     ^
+DROP TABLE []]; --error
+ERROR:  zero-length delimited identifier at or near "[]"
+LINE 1: DROP TABLE []];
+                   ^
+--原有数组相关语法不支持
+SELECT '{1, 2, 3}'::int[3] AS numbers;
+ERROR:  Invalid use of identifiers.
+LINE 1: SELECT '{1, 2, 3}'::int[3] AS numbers;
+                               ^
+DETAIL:  Syntax error found near token "3"
+SELECT ARRAY[1, 2, 3] AS numbers;
+ERROR:  syntax error at or near "[1, 2, 3]"
+LINE 1: SELECT ARRAY[1, 2, 3] AS numbers;
+                    ^
+CREATE TABLE test_array (
+    id SERIAL PRIMARY KEY,
+    numbers INT[3]
+);
+ERROR:  syntax error at or near "[3]"
+LINE 3:     numbers INT[3]
+                       ^
+DO $$
+DECLARE
+    numbers INT[3] := ARRAY[1, 2, 3];
+BEGIN
+    RAISE NOTICE 'Array: %', numbers;
+END $$;
+ERROR:  invalid type name "INT[3] "
+LINE 3:     numbers INT[3] := ARRAY[1, 2, 3];
+                    ^

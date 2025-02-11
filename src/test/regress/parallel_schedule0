@@ -747,6 +747,10 @@ test: function_get_table_def
 # ----------
 test: hw_order
 
+# ----------
+# D_FORMAT DATABASE
+# ----------
+test: d_format_test/apply_test d_format_test/charset_d_format d_format_test/join_update_delete
 
 # ----------
 # Database security

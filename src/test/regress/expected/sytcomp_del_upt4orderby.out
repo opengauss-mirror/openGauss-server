@@ -81,7 +81,7 @@ explain (costs off) delete from sytc_t1 where f1 in (select f1 from sytc_t2) ord
 
 ----delete mul-table report error
 explain delete from sytc_t1, sytc_t2 where sytc_t1.f1=sytc_t2.f1 order by f1 limit 1;
-ERROR:  multi-relation delete only support in B-format database
+ERROR:  multi-relation delete only support in B-format or D-format database
 ----delete mul-table join
 explain delete from sytc_t1 using sytc_t2 where sytc_t1.f1=sytc_t2.f1 order by sytc_t1.f1 limit 1;
                                             QUERY PLAN                                             

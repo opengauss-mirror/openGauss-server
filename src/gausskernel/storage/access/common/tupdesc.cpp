@@ -1105,7 +1105,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
 
         typenameTypeIdAndMod(NULL, entry->typname, &atttypid, &atttypmod);
         attcollation = GetColumnDefCollation(NULL, entry, atttypid, rel_coll_oid);
-        if (DB_IS_CMPT(B_FORMAT)) {
+        if (DB_IS_CMPT_BD) {
             atttypid = binary_need_transform_typeid(atttypid, &attcollation);
         }
 #ifndef ENABLE_MULTIPLE_NODES

@@ -1,0 +1,40 @@
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY,
+    UserName NVARCHAR(50),
+    Email NVARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "users_pkey" for table "users"
+-- 创建聚集索引
+CREATE CLUSTERED INDEX IX_Users_UserID
+ON Users (UserID);
+NOTICE:  The CLUSTERED option is currently ignored
+DROP INDEX IX_Users_UserID;
+CREATE UNIQUE CLUSTERED INDEX IX_Users_UserID
+ON Users (UserID);
+NOTICE:  The CLUSTERED option is currently ignored
+-- 创建非聚集索引
+CREATE NONCLUSTERED INDEX IX_Users_UserName
+ON Users (UserName);
+NOTICE:  The NONCLUSTERED option is currently ignored
+DROP INDEX IX_Users_UserName;
+CREATE UNIQUE NONCLUSTERED INDEX IX_Users_UserName
+ON Users (UserName);
+NOTICE:  The NONCLUSTERED option is currently ignored
+INSERT INTO Users (UserID, UserName, Email) VALUES
+(1, 'Alice', 'alice@example.com'),
+(2, 'Bob', 'bob@example.com'),
+(3, 'Charlie', 'charlie@example.com');
+-- 使用聚集索引查询
+SELECT * FROM Users WHERE UserID = 1;
+ userid | username |       email       
+--------+----------+-------------------
+      1 | Alice    | alice@example.com
+(1 row)
+
+-- 使用非聚集索引查询
+SELECT * FROM Users WHERE UserName = 'Bob';
+ userid | username |      email      
+--------+----------+-----------------
+      2 | Bob      | bob@example.com
+(1 row)
+

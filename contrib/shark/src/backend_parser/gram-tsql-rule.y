@@ -94,28 +94,44 @@ tsql_opt_columnstore:
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("The COLUMNSTORE option is currently ignored")));
 			}
+			| /*EMPTY*/		{ $$ == NULL;}
 		;
 
-IndexStmt:
-			CREATE opt_unique tsql_opt_columnstore
-			INDEX opt_concurrently opt_index_name
-			ON qualified_name access_method_clause '(' index_params ')'
-			opt_include opt_reloptions OptPartitionElement opt_table_index_options where_clause
+tsql_opt_clustered:
+			TSQL_NONCLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The NONCLUSTERED option is currently ignored")));
+			}
+			| TSQL_CLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The CLUSTERED option is currently ignored")));
+			}
+			| /*EMPTY*/		{ $$ == NULL;}
+		;
+
+tsql_IndexStmt:
+				CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+				ON qualified_name access_method_clause '(' index_params ')'
+				opt_include opt_reloptions OptPartitionElement opt_table_index_options where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $5;
+					n->concurrent = $6;
 					n->missing_ok = false;
-					n->schemaname = $6->schemaname;
-					n->idxname = $6->relname;
-					n->relation = $8;
-					n->accessMethod = $9;
-					n->indexParams = $11;
-					n->indexIncludingParams = $13;
-					n->options = $14;
-					n->tableSpace = $15;
-					n->indexOptions = $16;
-					n->whereClause = $17;
+					n->schemaname = $7->schemaname;
+					n->idxname = $7->relname;
+					n->relation = $9;
+					n->accessMethod = $10;
+					n->indexParams = $12;
+					n->indexIncludingParams = $14;
+					n->options = $15;
+					n->tableSpace = $16;
+					n->indexOptions = $17;
+					n->whereClause = $18;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -129,7 +145,263 @@ IndexStmt:
 					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
-		;
+				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_table_index_options
+				{
+
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $6;
+					n->missing_ok = false;
+					n->schemaname = $7->schemaname;
+					n->idxname = $7->relname;
+					n->relation = $9;
+					n->accessMethod = $10;
+					n->indexParams = $12;
+					n->partClause  = $15;
+					n->indexIncludingParams = $16;
+					n->options = $17;
+					n->tableSpace = $18;
+					n->indexOptions = $19;
+					n->isPartitioned = true;
+					n->isGlobal = false;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+
+				}
+				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					GLOBAL opt_include opt_reloptions OptTableSpace opt_table_index_options
+				{
+
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $6;
+					n->missing_ok = false;
+					n->schemaname = $7->schemaname;
+					n->idxname = $7->relname;
+					n->relation = $9;
+					n->accessMethod = $10;
+					n->indexParams = $12;
+					n->partClause  = NULL;
+					n->indexIncludingParams = $15;
+					n->options = $16;
+					n->tableSpace = $17;
+					n->indexOptions = $18;
+					n->isPartitioned = true;
+					n->isGlobal = true;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+
+				}
+				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					opt_include opt_reloptions OptPartitionElement opt_index_options where_clause
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $6;
+					n->missing_ok = true;
+					n->schemaname = $10->schemaname;
+					n->idxname = $10->relname;
+					n->relation = $12;
+					n->accessMethod = $13;
+					n->indexParams = $15;
+					n->indexIncludingParams = $17;
+					n->options = $18;
+					n->tableSpace = $19;
+					n->indexOptions = $20;
+					n->whereClause = $21;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->partClause = NULL;
+					n->isPartitioned = false;
+					n->isGlobal = false;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+				}
+				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_index_options
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $6;
+					n->missing_ok = true;
+					n->schemaname = $10->schemaname;
+					n->idxname = $10->relname;
+					n->relation = $12;
+					n->accessMethod = $13;
+					n->indexParams = $15;
+					n->partClause  = $18;
+					n->indexIncludingParams = $19;
+					n->options = $20;
+					n->tableSpace = $21;
+					n->indexOptions = $22;
+					n->isPartitioned = true;
+					n->isGlobal = false;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+				}
+				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					GLOBAL opt_include opt_reloptions OptTableSpace opt_index_options
+				{
+					IndexStmt *n = makeNode(IndexStmt);
+					n->missing_ok = true;
+					n->unique = $2;
+					n->concurrent = $6;
+					n->schemaname = $10->schemaname;
+					n->idxname = $10->relname;
+					n->relation = $12;
+					n->accessMethod = $13;
+					n->indexParams = $15;
+					n->partClause  = NULL;
+					n->indexIncludingParams = $18;
+					n->options = $19;
+					n->tableSpace = $20;
+					n->indexOptions = $21;
+					n->isPartitioned = true;
+					n->isGlobal = true;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+				}
+
+InsertStmt: opt_with_clause INSERT hint_string insert_target insert_rest returning_clause
+			{
+				$5->relation = $4;
+				$5->returningList = $6;
+				$5->withClause = $1;
+				$5->isReplace = false;
+				$5->hintState = create_hintstate($3);
+				$$ = (Node *) $5;
+			}
+			| opt_with_clause INSERT hint_string insert_target insert_rest upsert_clause returning_clause
+				{
+					if ($1 != NULL) {
+						const char* message = "WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
+    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("%s", message)));
+					}
+
+					if (u_sess->attr.attr_sql.enable_upsert_to_merge
+#ifdef ENABLE_MULTIPLE_NODES					
+					    ||t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM
+#endif						
+					    ) {
+
+						if ($5 != NULL && $5->cols != NIL) {
+							ListCell *c = NULL;
+							List *cols = $5->cols;
+							foreach (c, cols) {
+								ResTarget *rt = (ResTarget *)lfirst(c);
+								if (rt->indirection != NIL) {
+									const char* message = "Try assign a composite or an array expression to column ";
+    								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+									ereport(errstate,
+										(errmodule(MOD_PARSER),
+										 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										 errmsg("Subfield name or array subscript of column \"%s\" "
+											"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
+											rt->name),
+										 errhint("%s\"%s\".", message, rt->name)));
+								}
+							}
+						}
+
+
+						MergeStmt *m = makeNode(MergeStmt);
+						m->is_insert_update = true;
+
+						/* for UPSERT, keep the INSERT statement as well */
+						$5->relation = $4;
+						$5->returningList = $7;
+						$5->isReplace = false;
+						$5->withClause = $1;
+						$5->hintState = create_hintstate($3);
+#ifdef ENABLE_MULTIPLE_NODES						
+						if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
+							UpsertClause *uc = makeNode(UpsertClause);
+							if ($6 == NULL)
+								uc->targetList = NIL;
+							else
+								uc->targetList = ((MergeWhenClause *)$6)->targetList;
+							$5->upsertClause = uc;
+						}
+#endif						
+						m->insert_stmt = (Node *)copyObject($5);
+
+						/* fill a MERGE statement*/
+						m->relation = $4;
+
+						Alias *a1 = makeAlias(($4->relname), NIL);
+						$4->alias = a1;
+
+						Alias *a2 = makeAlias("excluded", NIL);
+						RangeSubselect *r = makeNode(RangeSubselect);
+						r->alias = a2;
+						r->subquery = (Node *) ($5->selectStmt);
+						m->source_relation = (Node *) r;
+
+						MergeWhenClause *n = makeNode(MergeWhenClause);
+						n->matched = false;
+						n->commandType = CMD_INSERT;
+						n->cols = $5->cols;
+						n->values = NULL;
+
+						m->mergeWhenClauses = list_make1((Node *) n);
+						if ($6 != NULL)
+							m->mergeWhenClauses = list_concat(list_make1($6), m->mergeWhenClauses);
+
+
+						$$ = (Node *)m;
+					} else {
+						$5->relation = $4;
+						$5->returningList = $7;
+						$5->withClause = $1;
+						$5->upsertClause = (UpsertClause *)$6;
+						$5->isReplace = false;
+						$5->hintState = create_hintstate($3);   
+						$$ = (Node *) $5;
+					}
+				}
 
 tsql_CreateProcedureStmt:
 			CREATE opt_or_replace definer_user PROCEDURE func_name_opt_arg proc_args
@@ -185,6 +457,10 @@ tsql_CreateProcedureStmt:
 					$$ = (Node *)n;
 				}
 		;
+
+unreserved_keyword:
+			TSQL_CLUSTERED
+			| TSQL_NONCLUSTERED ;
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt
@@ -345,7 +621,7 @@ tsql_stmt :
 			| GrantStmt
 			| GrantRoleStmt
 			| GrantDbStmt
-			| IndexStmt
+			| tsql_IndexStmt
 			| InsertStmt
 			| ListenStmt
 			| RefreshMatViewStmt

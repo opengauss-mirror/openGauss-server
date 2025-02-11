@@ -173,6 +173,11 @@ test: dolphin_guc_config
 test: optimizing_index_scan_cstore
 test: optimizing_index_scan_ustore
 
+# ----------
+# D_FORMAT DATABASE
+# ----------
+test: d_format_test/apply_test d_format_test/charset_d_format d_format_test/join_update_delete
+
 # row_count()
 test: row_count_function
 

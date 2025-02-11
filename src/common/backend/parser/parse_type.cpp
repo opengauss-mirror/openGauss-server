@@ -832,7 +832,7 @@ Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid, Oi
     int location = -1;
     bool is_bin_type = IsBinaryType(typeOid);
 
-    if (DB_IS_CMPT(B_FORMAT)) {
+    if (DB_IS_CMPT_BD) {
         result = get_column_def_collation_b_format(coldef, typeOid, typcollation, is_bin_type, rel_coll_oid);
     } else if (coldef->collClause) {
         /* We have a raw COLLATE clause, so look up the collation */

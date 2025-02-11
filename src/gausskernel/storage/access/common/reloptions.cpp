@@ -2743,10 +2743,10 @@ void check_collate_in_options(List *user_options)
 
         if (pg_strcasecmp(def->defname, "collate") == 0) {
             Oid collate = IsA(def->arg, Integer) ? intVal(def->arg) : pg_strtoint32(strVal(def->arg));
-            if (!DB_IS_CMPT(B_FORMAT))
+            if (!DB_IS_CMPT_BD)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         (errmsg("Un-support feature"),
-                         errdetail("Forbid to set or change \"%s\" in non-B format", "collate"))));
+                         errdetail("Forbid to set or change \"%s\" in non-B and non-D format", "collate"))));
 
             if (!COLLATION_IN_B_FORMAT(collate) && collate != DEFAULT_COLLATION_OID)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

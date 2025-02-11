@@ -31,3 +31,29 @@
 						return IDENT;
 					}
 				}
+
+{xbrstart}		{
+					SET_YYLLOC();
+					BEGIN(xbr);
+					startlit();
+				}
+
+<xbr>{xbrinside}	{
+						addlit(yytext, yyleng, yyscanner);
+					}
+
+<xbr>{xbrstop}		{
+						char *ident;
+
+						BEGIN(INITIAL);
+						if (yyextra->literallen == 0)
+							yyerror("zero-length delimited identifier");
+						ident = litbufdup(yyscanner);
+						ident = downcase_truncate_identifier(ident, yyextra->literallen, true);
+						yylval->str = ident;
+						yyleng = yyextra->literallen + 2;
+						yyextra->ident_quoted = false;
+						yyextra->is_hint_str = false;
+
+						return IDENT;
+					}

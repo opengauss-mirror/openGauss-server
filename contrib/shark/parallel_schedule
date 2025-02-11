@@ -1,3 +1,4 @@
 # init must be first
 test: init
 test: basetest
+test: clustered_index insert_stmt sbr_test

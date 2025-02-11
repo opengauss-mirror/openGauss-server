@@ -2415,7 +2415,7 @@ restart:
        fcache->setArgsValid = false;
    }
 
-    if (DB_IS_CMPT(B_FORMAT)) {
+    if (DB_IS_CMPT_BD) {
         func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
         db_encoding = GetDatabaseEncoding();
     }
@@ -2903,7 +2903,7 @@ static Datum ExecMakeFunctionResultNoSets(
        }
    }
 
-   if (DB_IS_CMPT(B_FORMAT)) {
+    if (DB_IS_CMPT_BD) {
         func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
         db_encoding = GetDatabaseEncoding();
     }

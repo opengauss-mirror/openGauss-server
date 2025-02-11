@@ -689,7 +689,7 @@ NOTICE:  table "t_t_mutil_t2_flt" does not exist, skipping
 create table t_t_mutil_t1_flt(col1 int,col2 int);
 create table t_t_mutil_t2_flt(col1 int,col2 int);
 delete from t_t_mutil_t1_flt a,t_t_mutil_t2_flt b where a.col1=b.col1;
-ERROR:  multi-relation delete only support in B-format database
+ERROR:  multi-relation delete only support in B-format or D-format database
 drop table if exists t_t_mutil_t1_flt;
 drop table if exists t_t_mutil_t2_flt;
 CREATE TABLE CASE_TBL (
