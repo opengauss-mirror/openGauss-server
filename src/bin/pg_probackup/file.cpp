@@ -118,7 +118,7 @@ void fio_error(int rc, int size, char const* file, int line)
     else
     {
         char buf[PRINTF_BUF_SIZE+1];
-        
+
         int err_size = read(fio_stderr, buf, PRINTF_BUF_SIZE);
         if (err_size > 0)
         {
@@ -435,7 +435,7 @@ int fio_open(char const* path, int mode, fio_location location)
         hdr.handle = i;
         hdr.size = strlen(path) + 1;
         hdr.arg = mode;
-        
+
         fio_fdset |= 1 << i;
 
         IO_CHECK(fio_write_all(fio_stdout, &hdr, sizeof(hdr)), sizeof(hdr));
@@ -636,7 +636,7 @@ int fio_truncate(int fd, off_t size)
 /*
  * Read file from specified location.
  */
-int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression, int size)
+int fio_pread(FILE* f, void* buf, off_t offs, int size)
 {
     if (fio_is_remote_file(f))
     {
@@ -662,15 +662,11 @@ int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression, 
     else
     {
         /* For local file, opened by fopen, we should use stdio functions */
-        if (pageCompression) {
-            return (int)pageCompression->ReadCompressedBuffer((BlockNumber)(offs / BLCKSZ), (char*)buf, size, true);
-        } else {
-            int rc = fseek(f, offs, SEEK_SET);
-            if (rc < 0) {
-                return rc;
-            }
-            return fread(buf, 1, size, f);
+        int rc = fseek(f, offs, SEEK_SET);
+        if (rc < 0) {
+            return rc;
         }
+        return fread(buf, 1, size, f);
     }
 }
 
@@ -1076,7 +1072,7 @@ pg_crc32 fio_get_crc32(const char *file_path, fio_location location, bool decomp
     }
     else
     {
-#ifdef HAVE_LIBZ                        
+#ifdef HAVE_LIBZ
         if (decompress && !IsDssMode())
             return pgFileGetCRCgz(file_path, true, true);
         else
@@ -1708,7 +1704,7 @@ int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
     hdr.cop = FIO_SEND_FILE;
     hdr.size = path_len;
 
-    
+
 
     IO_CHECK(fio_write_all(fio_stdout, &hdr, sizeof(hdr)), sizeof(hdr));
     IO_CHECK(fio_write_all(fio_stdout, from_fullpath, path_len), path_len);
@@ -1969,7 +1965,7 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
                 securec_check_ss_c(nRet, "\0", "\0");
             }
 
-            /* 
+            /*
              * Check file that under pg_replslot and judge whether it
              * belonged to logical replication slots for subscriptions.
              */
@@ -2075,7 +2071,7 @@ fio_get_checksum_map(const char *fullpath, uint32 checksum_version, int n_blocks
                                                 XLogRecPtr dest_stop_lsn, BlockNumber segmentno, fio_location location)
 {
     errno_t rc = 0;
-    
+
     if (fio_is_remote(location))
     {
         fio_header hdr;
@@ -2452,9 +2448,9 @@ void fio_communicate(int in, int out)
                         hdr.arg = 0;
                     else
                         hdr.arg = errno;
-                    
+
                     close(tmp_fd);
-                }                
+                }
 
                 IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
                 break;

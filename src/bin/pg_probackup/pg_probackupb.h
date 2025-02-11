@@ -362,7 +362,7 @@ typedef struct pgSetBackupParams
                           * must be pinned.
                           */
     char   *note;
-    oss_status_t oss_status; 
+    oss_status_t oss_status;
 } pgSetBackupParams;
 
 typedef struct
