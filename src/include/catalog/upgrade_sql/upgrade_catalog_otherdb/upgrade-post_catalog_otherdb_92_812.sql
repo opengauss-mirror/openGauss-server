@@ -55,7 +55,6 @@ CREATE TYPE pg_catalog.anyset (
   CATEGORY='H',
   PREFERRED=true
   );
-COMMENT ON TYPE pg_catalog.anyset IS 'set type';
 
 --------------------------------------------------------------
 -- compare & coerce & other functions
