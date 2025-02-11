@@ -434,7 +434,7 @@ other			.
 %%
 %{
 #ifdef PG_YYLEX
-	if (u_sess->hook_cxt.coreYYlexHook)
+	if (DB_IS_CMPT(D_FORMAT) && u_sess->hook_cxt.coreYYlexHook)
 	{
 		/* This allows other extensions such as pg_stat_statements
 		 * call TSQL-specific yylex function seamlessly even
