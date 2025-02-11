@@ -810,7 +810,7 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
 }
 
 static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
-    unsigned long long seq)
+    unsigned long long seq, unsigned long long *page_lfn)
 {
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
