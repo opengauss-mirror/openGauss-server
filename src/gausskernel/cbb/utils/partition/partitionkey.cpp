@@ -801,7 +801,7 @@ int ListPartKeyCompare(PartitionKey* k1, PartitionKey* k2)
     return 0;
 }
 
-static char* ConstBondaryGetString(Const* con, bool isTimestamptz)
+char* ConstBondaryGetString(Const* con, bool isTimestamptz)
 {
     char* result;
     int16 typlen = 0;

@@ -63,6 +63,7 @@ extern void CheckValuePartitionKeyType(FormData_pg_attribute* attrs, List* pos);
 extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
+extern char* ConstBondaryGetString(Const* con, bool isTimestamptz);
 
 #endif
 

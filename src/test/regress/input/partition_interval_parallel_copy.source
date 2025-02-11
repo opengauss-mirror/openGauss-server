@@ -1,0 +1,259 @@
+-- test interval partition table auto extend by autonomous transaction
+create schema partition_interval_parallel_copy;
+set current_schema to partition_interval_parallel_copy;
+set DateStyle = 'ISO, MDY';
+-- check max_concurrent_autonomous_transactions
+show max_concurrent_autonomous_transactions;
+-- interval partition table type 1
+-- partition key timestamp
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 hour') (partition p0 values less than('2022-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- rename partition
+alter table t1 rename partition p0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- drop partition
+alter table t1 drop partition p14;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+select * from t1 order by time, hostname, usage_user;
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+
+-- partition key timestamptz
+create table t2 (time timestamptz, hostname text, usage_user float) partition by range(time) interval('1 day') (partition p0 values less than('2022-01-01'));
+\copy t2 from 'data/partition_interval_parallel_copy.data' parallel 5 WITH (delimiter',');
+select * from t2 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't2' order by p.boundaries;
+-- drop partition
+alter table t2 drop partition p0;
+-- add partition, expect error
+alter table t2 add partition p1 values less than ('2000-1-1 00:00:00');
+
+-- partition key date
+create table t3 (time date, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 values less than('2022-01-01'));
+\copy t3 from 'data/partition_interval_parallel_copy.data' parallel 6 WITH (delimiter',');
+select * from t3 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't3' order by p.boundaries;
+-- drop partition
+alter table t3 drop partition p0;
+-- add partition, expect error
+alter table t3 add partition p1 values less than ('2000-1-1 00:00:00');
+
+-- disable row movement
+create table t4 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 hour') (partition p0 values less than('2022-01-01')) disable row movement;
+\copy t4 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t4 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't4' order by p.boundaries;
+-- expect error
+update t4 set time='2022-08-09 00:00:00' where hostname = 'host_08';
+
+-- interval partition type 2
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 start ('2022-01-01') end ('2022-02-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- drop partition
+alter table t1 drop partition p14;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+select * from t1 order by time, hostname, usage_user;
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+
+-- interval partition type 3
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) (partition p0 start ('2022-01-01') end ('2023-01-01') every('1 month'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- drop partition
+alter table t1 drop partition p14;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+select * from t1 order by time, hostname, usage_user;
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+
+-- interval partition type 4
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 start ('2022-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- drop partition
+alter table t1 drop partition p14;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+select * from t1 order by time, hostname, usage_user;
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+
+-- interval partition type 5
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 end ('2024-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- rename partition
+alter table t1 rename partition p0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2024-01-01 00:00:00')
+);
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- drop partition
+alter table t1 drop partition p14;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+select * from t1 order by time, hostname, usage_user;
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+
+drop table t1;
+drop table t1_1;
+drop table t2;
+drop table t3;
+drop table t4;
+reset DateStyle;
+drop schema partition_interval_parallel_copy;

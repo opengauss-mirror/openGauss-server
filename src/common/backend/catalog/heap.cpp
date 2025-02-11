@@ -120,6 +120,7 @@
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "utils/plpgsql.h"
+#include "tcop/autonomoustransaction.h"
 
 #ifdef PGXC
 #include "catalog/pgxc_class.h"
@@ -6239,7 +6240,7 @@ void GetNewPartitionOidAndNewPartrelfileOid(List *subPartitionDefState, Oid *new
 Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace, Oid bucketOid,
     RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions, const bool *isTimestamptz,
     StorageType storage_type, LOCKMODE partLockMode, int2vector* subpartition_key, bool isSubpartition,
-    PartitionExprKeyInfo *partExprKeyInfo)
+    PartitionExprKeyInfo *partExprKeyInfo, char partStrategy)
 {
     Datum boundaryValue = (Datum)0;
     Oid newPartitionOid = InvalidOid;
@@ -6318,11 +6319,11 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
     PartitionTupleInfo partTupleInfo = PartitionTupleInfo();
     if (isSubpartition) {
-        InitSubPartitionDef(newPartition, partTableOid, PART_STRATEGY_RANGE);
+        InitSubPartitionDef(newPartition, partTableOid, partStrategy);
         partTupleInfo.partitionno = INVALID_PARTITION_NO;
         partTupleInfo.subpartitionno = newPartDef->partitionno;
     } else {
-        InitPartitionDef(newPartition, partTableOid, PART_STRATEGY_RANGE);
+        InitPartitionDef(newPartition, partTableOid, partStrategy);
         partTupleInfo.partitionno = newPartDef->partitionno;
         partTupleInfo.subpartitionno = -list_length(newPartDef->subPartitionDefState);
     }
@@ -6723,7 +6724,85 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
     return res;
 }
 
-Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
+/*
+ * calculate date type partititon boundary by insertedValue and lastBoundary. DestBoundary should match the equation:
+ * abs(destBoundary - lastBoundary) = n * interval, (n > 0)
+ */
+static Datum DateAlign2UpBoundary(Datum insertedValueDatum, Interval *intervalValue, Const *lastBoundary)
+{
+    Timestamp insertedTs;
+    Timestamp boundaryTs;
+    if (lastBoundary->consttype == DATEOID) {
+        insertedTs = date2timestamp(DatumGetDateADT(insertedValueDatum));
+        boundaryTs = date2timestamp(DatumGetDateADT(lastBoundary->constvalue));
+    } else {
+        insertedTs = DatumGetTimestamp(insertedValueDatum);
+        boundaryTs = DatumGetTimestamp(lastBoundary->constvalue);
+    }
+
+    Timestamp nearbyValue = boundaryTs;
+    Interval *diff = DatumGetIntervalP(timestamp_mi(insertedTs, boundaryTs));
+    int multiple = (int)(INTERVAL_TO_USEC(diff) / INTERVAL_TO_USEC(intervalValue));
+    pfree_ext(diff);
+    if (multiple != 0) {
+        Interval *integerInterval = DatumGetIntervalP(interval_mul(intervalValue, (float8)multiple));
+        nearbyValue = DatumGetTimestamp(timestamp_pl_interval(boundaryTs, integerInterval));
+        pfree_ext(integerInterval);
+    }
+    if (nearbyValue <= insertedTs) {
+        while (true) {
+            nearbyValue = DatumGetTimestamp(timestamp_pl_interval(nearbyValue, intervalValue));
+            if (nearbyValue > insertedTs) {
+                break;
+            }
+            CHECK_FOR_INTERRUPTS();
+        }
+    } else {
+        while (true) {
+            Timestamp res = DatumGetTimestamp(timestamp_mi_interval(nearbyValue, intervalValue));
+            if (res <= insertedTs) {
+                break;
+            }
+            nearbyValue = res;
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+
+    if (lastBoundary->consttype == DATEOID) {
+        return timestamp2date(nearbyValue);
+    } else {
+        return TimestampGetDatum(nearbyValue);
+    }
+}
+
+static Node *GetIntervalBoundaryByTuple(Relation rel, Tuple tuple)
+{
+    Assert(PartitionMapIsInterval(rel->partMap));
+
+    RangePartitionMap *partMap = (RangePartitionMap*)rel->partMap;
+    int2vector *partKeyColumn = partMap->base.partitionKey;
+    Assert(partKeyColumn->dim1 == 1);
+    Assert(partMap->base.type == PART_TYPE_INTERVAL);
+    Assert(partMap->rangeElementsNum >= 1);
+
+    Const *lastPartBoundary = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0];
+
+    bool isNull = false;
+    Datum constValue = tableam_tops_tuple_fast_getattr(tuple, partKeyColumn->values[0], rel->rd_att, &isNull);
+    
+    Datum destValue;
+    if (lastPartBoundary->consttype == DATEOID || lastPartBoundary->consttype == TIMESTAMPOID
+        || lastPartBoundary->consttype == TIMESTAMPTZOID) {
+        destValue = DateAlign2UpBoundary(constValue, partMap->intervalValue, lastPartBoundary);
+    } else {
+        ereport(ERROR, (errmsg("Interval partition key only support type date, timestamp or timestamptz")));
+    }
+
+    return (Node *)makeConst(lastPartBoundary->consttype, lastPartBoundary->consttypmod,
+        lastPartBoundary->constcollid, lastPartBoundary->constlen, destValue, isNull, lastPartBoundary->constbyval);
+}
+
+Datum GetPartBoundaryByTuple(Relation rel, Tuple tuple)
 {
     RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
     int2vector* partKeyColumn = partMap->base.partitionKey;
@@ -6750,6 +6829,94 @@ Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
         boundaryTs = DatumGetTimestamp(lastPartBoundary->constvalue);
     }
     return Timestamp2Boundarys(rel, Align2UpBoundary(value, partMap->intervalValue, boundaryTs));
+}
+
+static char *HeapGetIntervalBoundaryCstring(Relation rel, Tuple tuple)
+{
+    Node *boundary = GetIntervalBoundaryByTuple(rel, tuple);
+    bool *isTimestamptz = CheckPartkeyHasTimestampwithzone(rel);
+    char *boundaryStr = ConstBondaryGetString((Const *)boundary, *isTimestamptz);
+    StringInfo boundaries = makeStringInfo();
+    appendStringInfo(boundaries, "'%s'", boundaryStr);
+
+    char *boundariesStr = boundaries->data;
+    pfree_ext(isTimestamptz);
+    pfree_ext(boundary);
+    pfree_ext(boundaries);
+
+    return boundariesStr;
+}
+
+static char *HeapGetIntervalNextTablespace(Relation rel)
+{
+    RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
+    Oid newTbsOid = InvalidOid;
+    if (partMap->intervalTablespace != NULL) {
+        newTbsOid = ChooseIntervalTablespace(rel);
+    }
+    if (!OidIsValid(newTbsOid)) {
+        return NULL;
+    }
+
+    return get_namespace_name(newTbsOid);
+}
+
+static bool HeapAddIntervalPartitionByAutonomousSession(Relation rel, Tuple insertTuple)
+{
+    char *relname = RelationGetRelationName(rel);
+    ereport(LOG, (errmsg("add new interval partition on heap %s by autonomous session.", relname)));
+    bool result = true;
+
+    PG_TRY();
+    {
+        char *spcname = get_namespace_name(RelationGetNamespace(rel));
+        char *destname = GenIntervalPartitionName(rel);
+        char *boundary = HeapGetIntervalBoundaryCstring(rel, insertTuple);
+        char *partspcname = HeapGetIntervalNextTablespace(rel);
+        u_sess->is_partition_autonomous_query = true;
+        CreateAutonomousSession();
+
+        u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("START TRANSACTION;", NULL, 0);
+
+        ATResult res = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select txid_current();", NULL, 0);
+        int64 currentXid = DatumGetInt64(res.ResTup);
+
+        StringInfo sql = makeStringInfo();
+        // add partition
+        appendStringInfo(sql, "ALTER TABLE %s.%s ADD PARTITION %s VALUES LESS THAN (%s)", quote_identifier(spcname),
+            quote_identifier(relname), quote_identifier(destname), boundary);
+
+        // specify tablespace definition
+        if (PointerIsValid(partspcname)) {
+            appendStringInfo(sql, " TABLESPACE %s", quote_identifier(partspcname));
+        }
+        appendStringInfo(sql, ";");
+
+        appendStringInfo(sql, "COMMIT;");
+
+        u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery(sql->data, NULL, currentXid, true);
+
+        DestroyStringInfo(sql);
+        u_sess->is_partition_autonomous_query = false;
+        DestoryAutonomousSession(false);
+
+        pfree_ext(spcname);
+        pfree_ext(destname);
+        pfree_ext(boundary);
+        pfree_ext(partspcname);
+    }
+    PG_CATCH();
+    {
+        u_sess->is_partition_autonomous_query = false;
+        DestoryAutonomousSession(true);
+        result = false;
+        FlushErrorState();
+        ereport(LOG,
+            (errmsg("add new interval partition on heap %s by autonomous session failed.", relname)));
+    }
+    PG_END_TRY();
+
+    return result;
 }
 
 Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partitionno, bool isDDL)
@@ -6794,9 +6961,30 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple, int *partitionno, b
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("can't add partition bacause the relation %s has unusable local index",
-                    NameStr(rel->rd_rel->relname)),
+                    RelationGetRelationName(rel)),
                 errhint("please reindex the unusable index first.")));
     }
+
+    if (RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION
+        && HeapAddIntervalPartitionByAutonomousSession(rel, insertTuple)) {
+        UnlockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+        AcceptInvalidationMessages();
+        // routing again
+        partitionRoutingForTuple(rel, insertTuple, u_sess->catalog_cxt.route, false, true);
+        if (u_sess->catalog_cxt.route->fileExist) {
+            Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
+            newPartOid = u_sess->catalog_cxt.route->partitionId;
+            if (PointerIsValid(partitionno)) {
+                *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
+            }
+        } else {
+            ereport(ERROR, (errmsg("search failed for new added interval partition.")));
+        }
+        return newPartOid;
+    }
+
+    ereport(LOG,
+        (errmsg("add new interval partition on heap %s by current session.", RelationGetRelationName(rel))));
 
     pgPartRel = relation_open(PartitionRelationId, RowExclusiveLock);
 
