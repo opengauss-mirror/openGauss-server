@@ -819,9 +819,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     /* do not suppport to create compressed index for temp table. */
     if ((indexCreateSupport.compressType != (int)COMPRESS_TYPE_NONE) &&
         (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP ||
-         relPersistence == RELPERSISTENCE_UNLOGGED || segment)) {
+         relPersistence == RELPERSISTENCE_UNLOGGED)) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("compressed index \"%s\" is not supported for temporary table, unlogged table and segment table,"
+            errmsg("compressed index \"%s\" is not supported for temporary table and unlogged table,"
             " please use uncompressed one instead", stmt->idxname)));
     }
 
@@ -1318,16 +1318,6 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         }
     }
 
-    if (indexCreateSupport.compressType || HasCompressOption(&indexCreateSupport)) {
-        ListCell* cell = NULL;
-        foreach (cell, stmt->options) {
-            DefElem *defElem = (DefElem *)lfirst(cell);
-            if (pg_strcasecmp(defElem->defname, "segment") == 0 && ReadBoolFromDefElem(defElem)) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("Can not use compress option in segment storage.")));
-            }
-        }
-    }
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */

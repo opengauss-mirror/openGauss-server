@@ -670,7 +670,9 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     }
 
     if (unlikely((IS_COMPRESSED_MAINFORK(reln, forknum)))) {
-        CfsExtendExtent(reln, forknum, blocknum, buffer, COMMON_STORAGE);
+        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, skipFsync, EXTENSION_CREATE);
+        CfsExtendExtent(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                        forknum, blocknum, buffer, COMMON_STORAGE);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -853,7 +855,9 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
 #ifdef USE_PREFETCH
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        CfsMdPrefetch(reln, forknum, blocknum, false, COMMON_STORAGE);
+        int fd = CfsGetFd(reln, forknum, blocknum, false, EXTENT_OPEN_FILE);
+        CfsMdPrefetch(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                      forknum, blocknum, COMMON_STORAGE);
         return;
     }
     off_t seekpos;
@@ -877,10 +881,13 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
  * This accepts a range of blocks because flushing several pages at once is
  * considerably more efficient than doing so individually.
  */
-void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
+void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                 BlockNumber nblocks, RelFileNode relNode)
 {
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        CfsWriteBack(reln, forknum, blocknum, nblocks, COMMON_STORAGE);
+        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, EXTENT_OPEN_FILE);
+        CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
+                     nblocks, COMMON_STORAGE);
         return;
     }
     /*
@@ -1260,7 +1267,9 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     }
 
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        nbytes = CfsReadPage(reln, forknum, blocknum, buffer, COMMON_STORAGE);
+        int fd = CfsGetFd(reln, forknum, blocknum, false, EXTENT_OPEN_FILE);
+        nbytes = CfsReadPage(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                             forknum, blocknum, buffer, COMMON_STORAGE);
         if (nbytes < 0) {
             return SMGR_RD_CRC_ERROR;
         }
@@ -1451,7 +1460,9 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
     bool compressed = IS_COMPRESSED_MAINFORK(reln, forknum);
     if (compressed) {
-        nbytes = (int)CfsWritePage(reln, forknum, blocknum, buffer, skipFsync, false, COMMON_STORAGE);
+        int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, EXTENT_OPEN_FILE);
+        nbytes = (int)CfsWritePage(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
+                                   forknum, blocknum, buffer, false, COMMON_STORAGE);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -1690,7 +1701,10 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 
             auto truncateOffset = (off_t)last_seg_blocks * BLCKSZ;
             if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-                truncateOffset = CfsMdTruncate(reln, forknum, nblocks, false, COMMON_STORAGE);
+                int fd = CfsGetFd(reln, forknum, nblocks, false, EXTENT_OPEN_FILE);
+                truncateOffset = CfsMdTruncate(reln, reln->smgr_rnode.node, fd,
+                                               CFS_LOGIC_BLOCKS_PER_EXTENT,
+                                               forknum, nblocks, COMMON_STORAGE);
             }
 
             if (FileTruncate(v->mdfd_vfd, truncateOffset, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
@@ -2134,39 +2148,6 @@ bool MatchMdFileTag(const FileTag *ftag, const FileTag *candidate)
      * the ftag from the SYNC_FILTER_REQUEST request, so they're forgotten.
      */
     return ftag->rnode.dbNode == candidate->rnode.dbNode;
-}
-
-ExtentLocation StorageConvert(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync,
-                              int type)
-{
-    RelFileCompressOption option;
-    TransCompressOptions(sRel->smgr_rnode.node, &option);
-
-    BlockNumber extentNumber = logicBlockNumber / CFS_LOGIC_BLOCKS_PER_EXTENT;
-    BlockNumber extentOffset = logicBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
-    BlockNumber extentStart = (extentNumber * CFS_EXTENT_SIZE) % CFS_MAX_BLOCK_PER_FILE;  // 0   129      129*2 129*3
-    BlockNumber extentHeader = extentStart + CFS_LOGIC_BLOCKS_PER_EXTENT;  //              128 129+128  129*2+128
-    MdfdVec *v = NULL;
-    int fd = -1;
-    if (type == EXTENT_OPEN_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_FAIL);
-    } else if (type == WRITE_BACK_OPEN_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_RETURN_NULL);
-    } else if (type == EXTENT_CREATE_FILE) {
-        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_CREATE);
-    }
-    if (v != NULL) {
-        fd = v->mdfd_vfd;
-    }
-    return {.fd = fd,
-            .relFileNode = sRel->smgr_rnode.node,
-            .extentNumber = extentNumber,
-            .extentStart = extentStart,
-            .extentOffset = extentOffset,
-            .headerNum = extentHeader,
-            .chrunk_size = (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
-            .algorithm = (uint8)option.compressAlgorithm
-    };
 }
 
 MdfdVec *CfsMdOpenReln(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior behavior)

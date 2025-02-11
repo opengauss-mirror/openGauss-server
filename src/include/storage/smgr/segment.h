@@ -26,6 +26,9 @@
 
 #include "storage/smgr/segment_internal.h"
 
+#include "storage/smgr/cfs_addressing.h"
+#include "storage/cfs/cfs_md.h"
+
 /* smgr API functions */
 void seg_init();
 void seg_shutdown();
@@ -37,7 +40,8 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
 void seg_prefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 void seg_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
-void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                   RelFileNode relNode);
 BlockNumber seg_nblocks(SMgrRelation reln, ForkNumber forknum);
 BlockNumber seg_totalblocks(SMgrRelation reln, ForkNumber forknum);
 void seg_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
@@ -50,9 +54,6 @@ void seg_async_write(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **
 void seg_move_buckets(const RelFileNodeBackend &dest, const RelFileNodeBackend &src, List *bucketList);
 bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk,
     XLogPhyBlock *fsm_pblk = NULL);
-void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber *blocknums, char *buffer,
-                     BlockNumber *locBlock);
-BlockNumber seg_direct_read_get_range(BlockNumber logic_id);
 
 /* Read/write by physical block number; used for segment meta data */
 void seg_physical_read(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, BlockNumber blocknum, char *buffer);
@@ -72,6 +73,7 @@ int seg_unlink_filetag(const FileTag *ftag, char *path);
 void segForgetDatabaseFsyncRequests(Oid dbid);
 bool seg_filetag_matches(const FileTag *ftag, const FileTag *candidate);
 void df_extend_file_vector(SegLogicFile *sf);
+RelFileNode EXTENT_GROUP_RNODE(SegSpace *spc, ExtentSize extent_size, uint2 opt);
 
 /*
  * XLog Atomic Operation APIs

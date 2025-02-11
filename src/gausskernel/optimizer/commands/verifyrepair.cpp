@@ -38,6 +38,7 @@
 #include "storage/smgr/segment.h"
 #include "storage/cfs/cfs_converter.h"
 #include "storage/cfs/cfs_repair.h"
+#include "storage/cfs/cfs_md.h"
 
 const int TIMEOUT_MIN = 60;
 const int TIMEOUT_MAX = 3600;
@@ -854,15 +855,19 @@ bool isNeedRepairPageByMem(char* disk_page_res, BlockNumber blockNum, char* mem_
 void gs_tryrepair_compress_extent(SMgrRelation reln, BlockNumber logicBlockNumber)
 {
     errno_t rc = 0;
-    ExtentLocation location = cfsLocationConverts[COMMON_STORAGE](reln, MAIN_FORKNUM, logicBlockNumber, true,
-                                                                  EXTENT_OPEN_FILE);
+    int fd = CfsGetFd(reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
+    ExtentLocation location =
+        g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd,
+                                           CFS_LOGIC_BLOCKS_PER_EXTENT, MAIN_FORKNUM,
+                                           logicBlockNumber);
 
     char path[MAX_PATH];
     rc = sprintf_s(path, MAX_PATH, "[RelFileNode:%u/%u/%u], extentNumber:%d, extentStart:%d,"
                   "extentOffset:%d, headerNum:%d, chunk_size:%d",
-        location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
-        (int)location.extentNumber, (int)location.extentStart, (int)location.extentOffset,
-        (int)location.headerNum, (int)location.chrunk_size);
+                   location.relFileNode.spcNode, location.relFileNode.dbNode,
+                   location.relFileNode.relNode, (int)location.extentNumber,
+                   (int)location.extentStart, (int)location.extentOffset,
+                   (int)location.headerNum, (int)location.chunk_size);
     securec_check_ss(rc, "", "");
 
     RemoteReadFileKey repairFileKey;

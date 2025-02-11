@@ -606,7 +606,7 @@ COMPRESS_ERROR_STATE PageCompression::TruncateFile(BlockNumber newBlockNumber)
         }
     }
     uint32 start = extentStart * BLCKSZ + max * cfsExtentHeader->chunk_size;
-    uint32 len = (uint32)((CFS_MAX_LOGIC_CHRUNKS_NUMBER(cfsExtentHeader->chunk_size) - max) *
+    uint32 len = (uint32)((CFS_MAX_LOGIC_CHUNKS_NUMBER(cfsExtentHeader->chunk_size) - max) *
                           cfsExtentHeader->chunk_size);
     if (len >= PC_CUSTOM_VALUE_LARGESIZE) {
         start += len % PC_CUSTOM_VALUE_LARGESIZE;
@@ -649,7 +649,7 @@ void PunchHoleForCompressedFile(FILE* file, const char *filename)
 
         CfsExtentHeader *cfsExtentHeader = (CfsExtentHeader *)(void *)pcabuffer;
         uint32 chunkSize = cfsExtentHeader->chunk_size;
-        uint32 freeChunk = CFS_MAX_LOGIC_CHRUNKS_NUMBER(chunkSize) - cfsExtentHeader->allocated_chunks;
+        uint32 freeChunk = CFS_MAX_LOGIC_CHUNKS_NUMBER(chunkSize) - cfsExtentHeader->allocated_chunks;
         uint32 freeSize = freeChunk * chunkSize;
         if (freeSize < PC_CUSTOM_VALUE_LARGESIZE) {
             continue;

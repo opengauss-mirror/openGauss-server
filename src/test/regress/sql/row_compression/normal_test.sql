@@ -16,6 +16,27 @@ alter index normal_test.tbl_pc_id_idx set (compress_chunk_size=2048); --failed
 alter index normal_test.tbl_pc_id_idx set (compress_prealloc_chunks=2); --success
 alter index normal_test.tbl_pc_id_idx set (compress_level=2); --success
 
+--segment
+CREATE TABLE normal_test.tbl_pc_seg(id int, c1 text) WITH(compresstype=1, segment=on);
+\d+ normal_test.tbl_pc_seg
+INSERT INTO normal_test.tbl_pc_seg SELECT id, id::text FROM generate_series(1,1000) id;
+select count(*) from normal_test.tbl_pc_seg;
+select count(*) from normal_test.tbl_pc_seg where id < 100;
+checkpoint;
+vacuum normal_test.tbl_pc_seg;
+select count(*) from normal_test.tbl_pc_seg;
+select count(*) from normal_test.tbl_pc_seg where id < 100;
+
+-- normal segment index
+create index on normal_test.tbl_pc_seg(id) WITH (compresstype=2,compress_chunk_size=1024);
+alter index normal_test.tbl_pc_seg_id_idx set (compresstype=1); --failed
+alter index normal_test.tbl_pc_seg_id_idx set (compress_chunk_size=2048); --failed
+alter index normal_test.tbl_pc_seg_id_idx set (compress_prealloc_chunks=2); --success
+alter index normal_test.tbl_pc_seg_id_idx set (compress_level=2); --success
+select count(*) from normal_test.tbl_pc_seg;
+select count(*) from normal_test.tbl_pc_seg where id < 100;
+drop table normal_test.tbl_pc_seg;
+
 set enable_seqscan = off;
 set enable_bitmapscan = off;
 select count(*) from normal_test.tbl_pc;

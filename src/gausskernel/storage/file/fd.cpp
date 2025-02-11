@@ -4095,10 +4095,128 @@ void FileAllocate(File file, uint32 offset, uint32 size)
                         errmsg("fallocate failed on relation: \"%s\": ", FilePathName(file))));
     }
 }
+/** punch hole file allocate interface.
+ @param[in]     fd       the file handle.
+ @param[in]     offset   the offset from file header.
+ @param[in]     size     the punch hole size. */
+void FilePunchHoleAlloc(File fd, uint32 offset, uint32 size)
+{
+    if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed fd: \"%d\"", fd)));
+    }
+}
 
 void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size)
 {
     if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed on relation: \"%s\"", path)));
     }
+}
+
+/** read interface without VfdCache.
+ @param[in]     file     the file handle.
+ @param[in]     offset   the offset from file header.
+ @param[in]     wait_event_info   Wait Events.
+ @return  read byte size. return -1 in any failure. */
+int DirectFilePRead(File fd, char *buf, int amount, off_t off, uint32 wait_event_info)
+{
+    ssize_t nbytes = 0;
+    int count = 0;
+    while (count < EIO_RETRY_TIMES) {
+        pgstat_report_waitevent(wait_event_info);
+        nbytes = pread(fd, buf, amount, off);
+        pgstat_report_waitevent(WAIT_EVENT_END);
+        /*
+        * Windows may run out of kernel buffers and return "Insufficient
+        * system resources" error.  Wait a bit and retry to solve it.
+        *
+        * It is rumored that EINTR is also possible on some Unix filesystems,
+        * in which case immediate retry is indicated.
+        */
+#ifdef WIN32
+            DWORD error = GetLastError();
+
+            switch (error) {
+                case ERROR_NO_SYSTEM_RESOURCES:
+                    pg_usleep(1000L);
+                    errno = EINTR;
+                    break;
+                default:
+                    _dosmaperr(error);
+                    break;
+            }
+#endif
+        /* OK to retry if interrupted */
+        if (errno == EINTR)
+                continue;
+        if (errno == EIO) {
+            count++;
+            ereport(WARNING,
+                    (errmsg("FilePRead: %d " INT64_FORMAT " %d \
+                            failed, then retry: Input/Output ERROR", fd, off, amount)));
+            continue;
+        }
+        /* if nbytes >= 0, read successed or we meet errors can't be fixed by retry. */
+        break;
+    }
+    if (nbytes != amount) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                 errcode_for_file_access(),
+                 errmsg("could not read expected len from file:%d, off:%ld, amount:%d",
+                        fd, off, amount),
+                 errdetail("errno: %d", errno)));
+    }
+    return nbytes;
+}
+
+/** write interface without VfdCache.
+ @param[in]     fd                the file handle.
+ @param[in]     buf               the buffer to write to disk.
+ @param[in]     amount            the byte amount to write.
+ @param[in]     offset            the offset from file header.
+ @param[in]     wait_event_info   Wait Events.
+ @return write byte size */
+int DirectFilePWrite(File fd, const char *buf, int amount, off_t offset, uint32 wait_event_info)
+{
+    ssize_t nbytes = 0;
+    int count = 0;
+
+    while (count < EIO_RETRY_TIMES) {
+        pgstat_report_waitevent(wait_event_info);
+        nbytes = pwrite(fd, buf, amount, offset);
+        pgstat_report_waitevent(WAIT_EVENT_END);
+#ifdef WIN32
+        DWORD error = GetLastError();
+
+        switch (error) {
+            case ERROR_NO_SYSTEM_RESOURCES:
+                pg_usleep(1000L);
+                errno = EINTR;
+                break;
+            default:
+                _dosmaperr(error);
+                break;
+        }
+#endif
+        /* OK to retry if interrupted */
+        if (errno == EINTR)
+            continue;
+        if (errno == EIO) {
+            count++;
+            ereport(WARNING, (errmsg("FilePWrite: %d " INT64_FORMAT " %d \
+                              failed, then retry: Input/Output ERROR", fd, offset, amount)));
+            continue;
+        }
+        /* if nbytes >= 0, read successed or we meet errors can't be fixed by retry. */
+        break;
+    }
+    if (nbytes != amount) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                 errcode_for_file_access(),
+                 errmsg("could not write segment block offset:%ld, amount:%d in file %d", offset, amount, fd),
+                 errdetail("errno: %d", errno)));
+    }
+    return nbytes;
 }

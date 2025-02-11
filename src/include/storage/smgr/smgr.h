@@ -179,7 +179,8 @@ extern void smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber bloc
 extern SMGR_READ_STATUS smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void smgrbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);
 extern void smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
-extern void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+extern void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                          BlockNumber nblocks, RelFileNode relNode);
 extern BlockNumber smgrnblocks(SMgrRelation reln, ForkNumber forknum);
 extern BlockNumber smgrnblocks_cached(SMgrRelation reln, ForkNumber forknum);
 extern BlockNumber smgrtotalblocks(SMgrRelation reln, ForkNumber forknum);
@@ -208,7 +209,8 @@ extern void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
 extern SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void mdreadbatch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);
 extern void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
-extern void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+extern void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                        RelFileNode relNode);
 extern BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum);
 extern void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
 extern void mdimmedsync(SMgrRelation reln, ForkNumber forknum);
@@ -246,7 +248,8 @@ extern void PrefetchUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber 
 extern SMGR_READ_STATUS ReadUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer);
 extern void WriteUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, const char *buffer,
     bool skipFsync);
-extern void WritebackUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, BlockNumber nblocks);
+extern void WritebackUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, BlockNumber nblocks,
+                              RelFileNode relNode);
 extern BlockNumber GetUndoFileNblocks(SMgrRelation reln, ForkNumber forknum);
 extern void CheckUndoFileDirectory(UndoPersistence upersistence);
 extern void CleanUndoFileDirectory(UndoPersistence upersistence);
@@ -277,6 +280,7 @@ SMGR_READ_STATUS exrto_read(SMgrRelation reln, ForkNumber forknum, BlockNumber b
 void exrto_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skip_fsync);
 BlockNumber exrto_nblocks(SMgrRelation reln, ForkNumber forknum);
 void exrto_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
-void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+void exrto_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                     RelFileNode relNode);
 
 #endif /* SMGR_H */

@@ -56624,8 +56624,8 @@ msgstr "不允许为非dfs表分配版本选项。"
 
 #: optimizer/commands/tablecmds.cpp:1234
 #, c-format
-msgid "compresstype can not be used in segment table, column table, view, unlogged table or temp table."
-msgstr "Compresstype不能用于段表, 列表, 视图, 非日志表或临时表."
+msgid "compresstype can not be used in column table, view, unlogged table or temp table."
+msgstr "Compresstype不能用于列表, 视图, 非日志表或临时表."
 
 #: optimizer/commands/tablecmds.cpp:1320
 #, c-format
@@ -105352,11 +105352,6 @@ msgstr "回写时, 段空间[%u, %u]不存在."
 #, c-format
 msgid "Blocknum %u is Invalid. \n"
 msgstr "Blocknum %u无效. \n"
-
-#: storage/smgr/segstore.cpp:2005
-#, c-format
-msgid "seg_direct_read blocknum exceeds segment size"
-msgstr "seg_direct_read块超过了段大小"
 
 #: storage/smgr/segstore.cpp:2006
 #, c-format

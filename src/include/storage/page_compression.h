@@ -248,6 +248,7 @@ inline void TransCompressOptions(const RelFileNode& node, RelFileCompressOption*
 
 #define IS_COMPRESSED_MAINFORK(reln, forkNum) ((reln)->smgr_rnode.node.opt != 0 && (forkNum) == MAIN_FORKNUM)
 #define IS_COMPRESSED_RNODE(rnode, forkNum) ((rnode).opt != 0 && (forkNum) == MAIN_FORKNUM)
+#define IS_SEG_COMPRESSED_RNODE(rnode, forkNum) ((rnode).opt != 0 && (forkNum) == MAIN_FORKNUM &&(rnode).relNode >= 3)
 /* Compress function */
 template <uint8 pagetype>
 extern int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option);

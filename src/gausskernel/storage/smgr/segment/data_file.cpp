@@ -35,6 +35,8 @@
 #include "storage/file/fio_device.h"
 #include "postmaster/pagerepair.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "storage/cfs/cfs_md.h"
+#include "storage/page_compression.h"
 
 #define DSS_FD_CHECK(fd) (ENABLE_DSS) && (fd < DSS_HANDLE_BASE) 
 
@@ -248,6 +250,21 @@ SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber 
 
     SegPhysicalFile spf = sf->segfiles[sliceno];
     return spf;
+}
+
+/** Get fd for segment block.
+ @param[in]     sf        SegLogicFile.
+ @param[in]     blocknum   physical block number.
+ @return  file handler. return -1 in any failure. */
+int df_get_fd(SegLogicFile *sf, BlockNumber blocknum)
+{
+    int sliceno = DF_OFFSET_TO_SLICENO(((off_t)blocknum) * BLCKSZ);
+    SegPhysicalFile spf = df_get_physical_file(sf, sliceno, blocknum);
+    char *filename = slice_filename(sf->filename, sliceno);
+    if (spf.fd < 0) {
+        spf.fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+    }
+    return spf.fd;
 }
 
 void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks)

@@ -9,7 +9,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = md.o smgr.o smgrtype.o knl_uundofile.o segstore.o page_compression.o storage_exrto_file.o
+OBJS = md.o smgr.o smgrtype.o knl_uundofile.o segstore.o page_compression.o storage_exrto_file.o cfs_addressing.o
 
 SUBDIRS = segment cfs
 

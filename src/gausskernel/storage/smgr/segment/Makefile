@@ -10,6 +10,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = data_file.o extent_group.o segbuffer.o space.o segxlog.o inverse_ptr.o xlog_atomic_op.o
+OBJS = data_file.o extent_group.o segbuffer.o space.o segxlog.o inverse_ptr.o xlog_atomic_op.o segment_cfs_addressing.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

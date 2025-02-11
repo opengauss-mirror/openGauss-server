@@ -583,7 +583,7 @@ int ReadFileByReadDisk(SegSpace* spc, RemoteReadFileKey *key, char* bufBlock, Bl
             .dbNode = key->relfilenode.dbNode,
             .relNode = key->relfilenode.relNode,
             .bucketNode = SegmentBktId,
-            .opt = 0
+            .opt = key->relfilenode.opt
         };
 SEG_RETRY:
         seg_physical_read(spc, fakenode, key->forknum, blocknum, (char *)bufBlock);
