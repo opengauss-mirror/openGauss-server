@@ -4,6 +4,14 @@
 #include "fmgr/fmgr_comp.h"
 #include <vector>
 
+#define GENERIC_DEFAULT_ENABLE_PQ false
+#define GENERIC_DEFAULT_PQ_M 8
+#define GENERIC_MIN_PQ_M 1
+#define GENERIC_MAX_PQ_M HNSW_MAX_DIM
+#define GENERIC_DEFAULT_PQ_KSUB 256
+#define GENERIC_MIN_PQ_KSUB 1
+#define GENERIC_MAX_PQ_KSUB 256
+
 typedef struct VectorArrayData {
     int length;
     int maxlen;
@@ -12,9 +20,31 @@ typedef struct VectorArrayData {
     char *items;
 } VectorArrayData;
 
+typedef struct PQParams {
+    int pqM;
+    int pqKsub;
+    int funcType;
+    int dim;
+    int pqMode;
+    size_t subItemSize;
+    char *pqTable;
+} PQParams;
+
 #define VECTOR_ARRAY_SIZE(_length, _size) (sizeof(VectorArrayData) + (_length) * MAXALIGN(_size))
 
 typedef VectorArrayData * VectorArray;
+
+typedef struct st_pq_func {
+    bool inited;
+    void *handle;
+    int (*ComputePQTable)(VectorArray samples, PQParams *params);
+    int (*ComputeVectorPQCode)(float *vector, const PQParams *params, uint8 *pqCode);
+    int (*GetPQDistanceTableSdc)(const PQParams *params, float *pqDistanceTable);
+    int (*GetPQDistanceTableAdc)(float *vector, const PQParams *params, float *pqDistanceTable);
+    int (*GetPQDistance)(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
+                         const float *pqDistanceTable, float *pqDistance);
+} pq_func_t;
+extern pq_func_t g_pq_func;
 
 static inline Pointer VectorArrayGet(VectorArray arr, int offset)
 {
@@ -39,6 +69,6 @@ void BitSumCenter(Pointer v, float *x);
 VectorArray VectorArrayInit(int maxlen, int dimensions, Size itemsize);
 void VectorArrayFree(VectorArray arr);
 
-int HNSWPQInit();
-void HNSWPQUinit();
+int PQInit();
+void PQUinit();
 #endif

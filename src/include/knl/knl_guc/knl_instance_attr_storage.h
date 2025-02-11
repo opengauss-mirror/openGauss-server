@@ -253,7 +253,7 @@ typedef struct knl_instance_attr_storage {
     int uwal_truncate_interval;
     bool uwal_async_append_switch;
 
-    bool enable_hnswpq;
+    bool enable_pq;
     int num_slru_buffers[SLRU_BUFFER_KIND];
     char* num_slru_buffers_str;
     char* lmemfabric_client_path;

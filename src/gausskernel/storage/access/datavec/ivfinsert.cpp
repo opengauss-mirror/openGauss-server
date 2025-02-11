@@ -36,7 +36,10 @@
 static void FindInsertPage(Relation index, Datum *values, BlockNumber *insertPage, ListInfo *listInfo)
 {
     double minDistance = DBL_MAX;
-    BlockNumber nextblkno = IVFFLAT_HEAD_BLKNO;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
+    IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
+    BlockNumber nextblkno = IVFPQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
     FmgrInfo *procinfo;
     Oid collation;
 
@@ -79,6 +82,49 @@ static void FindInsertPage(Relation index, Datum *values, BlockNumber *insertPag
     }
 }
 
+static void InitPQParamsOnDisk(Relation index, PQParams *params, int dim, bool *enablePQ,
+                               bool *byResidual, uint16 *pqcodeSize)
+{
+    Buffer buf;
+    Page page;
+    IvfflatMetaPage metap;
+    const IvfflatTypeInfo *typeInfo = IvfflatGetTypeInfo(index);
+
+    buf = ReadBuffer(index, IVFFLAT_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = IvfflatPageGetMeta(page);
+    if (unlikely(metap->magicNumber != IVFFLAT_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "ivfflat index is not valid");
+    }
+
+    *enablePQ = metap->enablePQ;
+    params->pqM = metap->pqM;
+    params->pqKsub = metap->pqKsub;
+    *byResidual = metap->byResidual;
+    *pqcodeSize = metap->pqcodeSize;
+    UnlockReleaseBuffer(buf);
+
+    if (*enablePQ) {
+        FmgrInfo *procinfo = index_getprocinfo(index, 1, IVFFLAT_DISTANCE_PROC);
+        FmgrInfo *normprocinfo = IvfflatOptionalProcInfo(index, IVFFLAT_NORM_PROC);
+        params->funcType = getIVFPQfunctionType(procinfo, normprocinfo);
+        params->dim = dim;
+        params->subItemSize = typeInfo->itemSize(dim / params->pqM);
+
+        /* Now save pqTable in the relcache entry. */
+        if (index->pqTable == NULL) {
+            MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
+            index->pqTable = IVFPQLoadPQtable(index);
+            (void)MemoryContextSwitchTo(oldcxt);
+        }
+        params->pqTable = index->pqTable;
+    } else {
+        params->pqTable = NULL;
+    }
+}
+
 /*
  * Insert a tuple into the index
  */
@@ -95,6 +141,11 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     BlockNumber insertPage = InvalidBlockNumber;
     ListInfo listInfo;
     BlockNumber originalInsertPage;
+    PQParams params;
+    bool enablePQ;
+    bool byResidual;
+    uint16 pqcodeSize;
+    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
     /* Detoast once for all calls */
     value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
@@ -113,6 +164,8 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
 
     /* Ensure index is valid */
     IvfflatGetMetaPageInfo(index, NULL, NULL);
+
+    InitPQParamsOnDisk(index, &params, dim, &enablePQ, &byResidual, &pqcodeSize);
 
     /* Find the insert page - sets the page and list info */
     FindInsertPage(index, values, &insertPage, &listInfo);
@@ -135,7 +188,7 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
 
         state = GenericXLogStart(index);
         page = GenericXLogRegisterBuffer(state, buf, 0);
-        if (PageGetFreeSpace(page) >= itemsz) {
+        if (PageGetFreeSpace(page) >= itemsz + MAXALIGN(pqcodeSize)) {
             break;
         }
 
@@ -174,6 +227,29 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
             buf = newbuf;
             page = GenericXLogRegisterBuffer(state, buf, 0);
             break;
+        }
+    }
+
+    if (enablePQ) {
+        uint8 *pqcode = (uint8 *)palloc(pqcodeSize);
+        float *vec = ((Vector *)value)->x;
+        if (byResidual) {
+            float *resVec = (float *)palloc(dim * sizeof(float));
+            Buffer cbuf = ReadBuffer(index, listInfo.blkno);
+            LockBuffer(buf, BUFFER_LOCK_SHARE);
+            Page cpage = BufferGetPage(cbuf);
+            IvfflatList list = (IvfflatList)PageGetItem(cpage, PageGetItemId(cpage, listInfo.offno));
+
+            for (int i = 0; i < dim; i++) {
+                resVec[i] = vec[i] - list->center.x[i];
+            }
+            vec = resVec;
+            UnlockReleaseBuffer(cbuf);
+            IvfComputeVectorPQCode(vec, &params, pqcode);
+            ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodeSize);
+                errno_t rc = memcpy_s(
+                    ((char *)page) + ((PageHeader)page)->pd_upper, pqcodeSize, (char *)pqcode, pqcodeSize);
+                securec_check_c(rc, "\0", "\0");
         }
     }
 

@@ -821,7 +821,7 @@ Datum vector_l2_squared_distance(PG_FUNCTION_ARGS)
 }
 
 #ifdef __aarch64__
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float dis = 0.0f;
@@ -850,7 +850,7 @@ VectorInnerProduct(int dim, float *ax, float *bx)
 }
 #else
 
-VECTOR_TARGET_CLONES static float VectorInnerProduct(int dim, float *ax, float *bx)
+VECTOR_TARGET_CLONES float VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float distance = 0.0;
 
@@ -1538,6 +1538,183 @@ Datum sparsevec_to_vector(PG_FUNCTION_ARGS)
 
     PG_RETURN_POINTER(result);
 }
+
+#ifdef __aarch64__
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    const size_t nSimd = n - (n & 3);
+    const float32x4_t bfv = vdupq_n_f32(bf);
+    size_t i;
+
+    for (i = 0; i < nSimd; i += 4) {
+        const float32x4_t ai = vld1q_f32(ax + i);
+        const float32x4_t bi = vld1q_f32(bx + i);
+        const float32x4_t ci = vfmaq_f32(ai, bfv, bi);
+        vst1q_f32(cx + i, ci);
+    }
+    for (; i < n; ++i) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#else
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    for (size_t i = 0; i < n; i++) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#endif
+
+#ifdef __aarch64__
+struct ElementOpL2 {
+    static float32x4_t op(float32x4_t x, float32x4_t y) {
+        float32x4_t tmp = vsubq_f32(x, y);
+        return vmulq_f32(tmp, tmp);
+    }
+};
+
+struct ElementOpIP {
+    static float32x4_t op(float32x4_t x, float32x4_t y) {
+        return vsubq_f32(x, y);
+    }
+};
+
+template <class ElementOp>
+void VectorOpNYD4(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float32x4_t x0 = vld1q_f32(x);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        accu = vaddq_f32(accu, accu);
+        accu = vaddq_f32(accu, accu);
+        dis[i] = vgetq_lane_f32(accu, 0);
+    }
+}
+
+template <class ElementOp>
+void VectorOpNYD8(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    /* neon support 128 bit, float is 32 bit, 4 float one batch */
+    int batch = 4;
+    float32x4_t x0 = vld1q_f32(x);
+    float32x4_t x1 = vld1q_f32(x + batch);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x1, vld1q_f32(y)));
+        accu = vaddq_f32(accu, accu);
+        accu = vaddq_f32(accu, accu);
+        dis[i] = vgetq_lane_f32(accu, 0);
+    }
+}
+
+template <class ElementOp>
+void VectorOpNYD16(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    /* neon support 128 bit, float is 32 bit, 4 float one batch */
+    int batch = 4;
+    float32x4_t x0 = vld1q_f32(x);
+    float32x4_t x1 = vld1q_f32(x + batch);
+    float32x4_t x2 = vld1q_f32(x + batch * 2);
+    float32x4_t x3 = vld1q_f32(x + batch * 3);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x1, vld1q_f32(y)));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x2, vld1q_f32(y)));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x3, vld1q_f32(y)));
+        accu = vaddq_f32(accu, accu);
+        accu = vaddq_f32(accu, accu);
+        dis[i] = vgetq_lane_f32(accu, 0);
+    }
+}
+#endif
+
+void VectorL2SquaredDistanceNYRef(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float *y;
+    for (size_t i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        dis[i] = VectorL2SquaredDistance(d, x, y);
+        y += d;
+    }
+}
+
+#ifdef __aarch64__
+void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+#define DISPATCH(dval) \
+    case dval: \
+        VectorOpNYD##dval<ElementOpL2>(ny, x, pqTable, subSize, offset, dis); \
+        return;
+
+    switch (d) {
+        DISPATCH(4)
+        DISPATCH(8)
+        DISPATCH(16)
+        default:
+            VectorL2SquaredDistanceNYRef(d, ny, x, pqTable, subSize, offset, dis);
+            return;
+    }
+#undef DISPATCH
+}
+#else
+void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    VectorL2SquaredDistanceNYRef(d, ny, x, pqTable, subSize, offset, dis);
+}
+#endif
+
+void VectorInnerProductNYRef(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float *y;
+    for (size_t i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        dis[i] = VectorInnerProduct(d, x, y);
+    }
+}
+
+#ifdef __aarch64__
+void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+#define DISPATCH(dval) \
+    case dval: \
+        VectorOpNYD##dval<ElementOpIP>(ny, x, pqTable, subSize, offset, dis); \
+        return;
+
+    switch (d) {
+        DISPATCH(4)
+        DISPATCH(8)
+        DISPATCH(16)
+        default:
+            VectorInnerProductNYRef(d, ny, x, pqTable, subSize, offset, dis);
+            return;
+    }
+#undef DISPATCH
+}
+#else
+void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    VectorInnerProductNYRef(d, ny, x, pqTable, subSize, offset, dis);
+}
+#endif
 
 /*
  * WAL-log a range of blocks in a relation.

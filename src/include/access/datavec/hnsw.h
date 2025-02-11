@@ -74,13 +74,6 @@
 #define HNSW_MIN_THRESHOLD 160
 #define HNSW_MAX_THRESHOLD INT32_MAX
 #define HNSW_MAX_EF_SEARCH 1000000
-#define HNSW_DEFAULT_ENABLE_PQ false
-#define HNSW_DEFAULT_PQ_M 8
-#define HNSW_MIN_PQ_M 1
-#define HNSW_MAX_PQ_M HNSW_MAX_DIM
-#define HNSW_DEFAULT_PQ_KSUB 256
-#define HNSW_MIN_PQ_KSUB 1
-#define HNSW_MAX_PQ_KSUB 256
 
 #define HNSW_PQMODE_ADC 1
 #define HNSW_PQMODE_SDC 2
@@ -109,8 +102,8 @@
 /* PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE is 1 */
 #define PROGRESS_HNSW_PHASE_LOAD 2
 
-#define HNSWPQ_SUCCESS 0
-#define HNSWPQ_ERROR (-1)
+#define PQ_SUCCESS 0
+#define PQ_ERROR (-1)
 
 #define HNSWPQ_MAX_PATH_LEN 4096
 #ifndef MAX_PATH_LEN
@@ -119,8 +112,8 @@
 
 #define HNSWPQ_DEFAULT_TARGET_ROWS 300
 
-#define HNSWPQ_ENV_PATH "DATAVEC_HNSWPQ_LIB_PATH"
-#define HNSWPQ_SO_NAME "libkvecturbo.so"
+#define PQ_ENV_PATH "DATAVEC_PQ_LIB_PATH"
+#define PQ_SO_NAME "libkvecturbo.so"
 
 #define HNSW_MAX_SIZE \
     (BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(HnswPageOpaqueData)) - sizeof(ItemIdData))
@@ -385,15 +378,6 @@ typedef struct HnswTypeInfo {
     void (*checkValue)(Pointer v);
 } HnswTypeInfo;
 
-typedef struct PQParams {
-    int pqM;
-    int pqKsub;
-    int funcType;
-    int dim;
-    size_t subItemSize;
-    char *pqTable;
-} PQParams;
-
 typedef struct HnswBuildState {
     /* Info */
     Relation heap;
@@ -621,18 +605,6 @@ typedef struct Candidate {
     uint8 heaptidsLength;
 } Candidate;
 
-typedef struct st_hnswpq_func {
-    bool inited;
-    void *handle;
-    int (*ComputePQTable)(VectorArray samples, PQParams *params);
-    int (*ComputeVectorPQCode)(float *vector, const PQParams *params, uint8 *pqCode);
-    int (*GetPQDistanceTableSdc)(const PQParams *params, float *pqDistanceTable);
-    int (*GetPQDistanceTableAdc)(float *vector, const PQParams *params, float *pqDistanceTable);
-    int (*GetPQDistance)(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
-                         const float *pqDistanceTable, float *PQDistance);
-} hnswpq_func_t;
-
-
 /* Methods */
 int HnswGetM(Relation index);
 int HnswGetEfConstruction(Relation index);
@@ -681,8 +653,6 @@ bool HnswDelete(Relation index, Datum *values, const bool *isnull, ItemPointer h
 void HnswUpdateAppendMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber eleInsertPage,
                               BlockNumber neiInsertPage, ForkNumber forkNum, bool building);
 void FlushPQInfo(HnswBuildState *buildstate);
-char *LoadPQtable(Relation index);
-float *LoadPQDisTable(Relation index);
 void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
                                uint16 *pqDisTableNblk, uint32 *pqDisTableSize);
 
@@ -691,7 +661,7 @@ int ComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode);
 int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable);
 int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
 int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
-                  const float *pqDistanceTable, float *PQDistance);
+                  const float *pqDistanceTable, float *pqDistance);
 int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ);
 
