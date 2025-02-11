@@ -34,6 +34,7 @@
 #include "fmgr.h"
 #include "access/tupdesc.h"
 #include "utils/atomic.h"
+#include "storage/lock/lwlock.h"
 
 
 enum PQResult {
@@ -70,6 +71,7 @@ public:
         current_attach_sessionid = 0;
         saved_deadlock_timeout = 0;
         RefSessionCount();
+        m_autonomous_lock = LWLockAssign(LWTRANCHE_AUTONOMOUS_QUERY_ENTRY);
     }
 
     ATResult ExecSimpleQuery(const char* query, TupleDesc resultTupleDesc, int64 currentXid, bool isLockWait = false,
@@ -86,7 +88,7 @@ public:
     uint64 current_attach_sessionid = 0;
 
 private:
-    void AddSessionCount(void);
+    void AddSessionCount(bool isWait);
     void ReduceSessionCount(void);
     inline void AddRefcount()
     {
@@ -115,6 +117,7 @@ private:
     PGresult* m_res = NULL;
 
     static pg_atomic_uint32 m_sessioncnt;
+    LWLock *m_autonomous_lock;
 
     int saved_deadlock_timeout = 0;
 };

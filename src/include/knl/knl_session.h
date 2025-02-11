@@ -3213,6 +3213,9 @@ typedef struct knl_session_context {
 
     knl_u_datavec_context datavec_ctx;
 
+    bool is_partition_autonomous_query;
+    bool is_partition_autonomous_session;
+
 #ifdef ENABLE_HTAP
     knl_u_imcstore_context imcstore_ctx;
 #endif

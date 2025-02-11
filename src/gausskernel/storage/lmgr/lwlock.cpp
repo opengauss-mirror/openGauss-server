@@ -219,6 +219,7 @@ static const char *BuiltinTrancheNames[] = {
     "IMCSDescLock",
 #endif
     "cbmWaitTaskLock",
+    "AutonomousSessionLock",
     "ClogSlruBankLock",
     "CsnlogSlruBankLock",
     "MultixactOffsetSlruBankLock",

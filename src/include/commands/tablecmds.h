@@ -216,7 +216,7 @@ extern void ATExecSetIndexUsableState(Oid objclassOid, Oid objOid, bool newState
 extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema, bool* partkeyIsFunc = NULL);
-
+extern void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partState);
 extern bool IsPartKeyFunc(Relation rel, bool isPartRel, bool forSubPartition, PartitionExprKeyInfo* partExprKeyInfo = NULL);
 extern void ComparePartitionValue(List* pos, FormData_pg_attribute* attrs, List *partitionList, bool isPartition = true, bool partkeyIsFunc = false);
 extern void CompareListValue(const List* pos, FormData_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc = false);

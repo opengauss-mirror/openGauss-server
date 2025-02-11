@@ -682,7 +682,6 @@ static void ATPrepDropSubPartition(Relation rel);
 static void ATPrepUnusableIndexPartition(Relation rel);
 static void ATPrepUnusableAllIndexOnPartition(Relation rel);
 static void ATExecAddPartition(Relation rel, AddPartitionState *partState);
-static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partState);
 static void ATExecAddSubPartition(Relation rel, AddSubPartitionState *subpartState);
 static void CheckForAddPartition(Relation rel, List *partDefStateList);
 static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpartDefStateList);
@@ -7422,11 +7421,6 @@ ObjectAddress renamePartition(RenameStmt* stmt)
                 errmsg("partition \"%s\" of relation \"%s\" already exists", stmt->newname, stmt->relation->relname)));
     }
 
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
-        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    }
-
     /* Do the work */
     renamePartitionInternal(partitionedTableOid, partitionOid, stmt->newname);
 
@@ -9353,6 +9347,11 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         if (!PARTITIONNO_IS_VALID(partitionno)) {
             RelationResetPartitionno(rel->rd_id, ShareUpdateExclusiveLock);
         }
+
+        // add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION
+        if (RELATION_IS_INTERVAL_PARTITIONED(rel) && !u_sess->is_partition_autonomous_session) {
+            LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
+        }
     }
     
     if (sqlcmd_partition_index_ddl_cmd(cmd->subtype) && RelationIsIndex(rel)) {
@@ -9702,8 +9701,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
 
     /* Recode time of alter relation. */
     PgObjectType objectType = GetPgObjectTypePgClass(tab->relkind);
-    if (objectType != OBJECT_TYPE_INVALID) {
+    if (objectType != OBJECT_TYPE_INVALID && !u_sess->is_partition_autonomous_session) {
         UpdatePgObjectMtime(tab->relid, objectType);
+    }
+
+    if (u_sess->is_partition_autonomous_session) {
+        UpdatePgObjectChangecsn(tab->relid, objectType);
     }
 
     /* take ExclusiveLock to avoid PARTITION DDL COMMIT until we finish the InitPlan. Oid info will be masked here, and
@@ -20289,11 +20292,6 @@ static void ATExecSetTableSpaceForPartitionP2(AlteredTableInfo* tab, Relation re
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition number is invalid or out-of-range")));
     }
 
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
-        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    }
-
     tab->partid = partOid;
 }
 
@@ -25026,7 +25024,7 @@ static void ATPrepAddPartition(Relation rel)
             ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not add partition against NON-PARTITIONED table")));
     }
 
-    if (rel->partMap->type == PART_TYPE_INTERVAL) {
+    if (rel->partMap->type == PART_TYPE_INTERVAL && !u_sess->is_partition_autonomous_session) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
             errmsg("can not add partition against interval partitioned table")));
     }
@@ -25631,6 +25629,8 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
         ComparePartitionValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, true, partkeyIsFunc);
     } else if (rel->partMap->type == PART_TYPE_LIST) {
         CompareListValue(partKeyPosList, (RelationGetDescr(rel))->attrs, partDefStateList, partkeyIsFunc);
+    } else if (PartitionMapIsInterval(rel->partMap)) {
+        Assert(list_length(partDefStateList) == 1);
     }
     list_free_ext(partKeyPosList);
 
@@ -25723,7 +25723,7 @@ static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpar
  * Description	:
  * Notes		:
  */
-static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partState)
+void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partState)
 {
     Relation pgPartRel = NULL;
     Oid newPartOid = InvalidOid;
@@ -25736,6 +25736,7 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
     ListCell* cell = NULL;
     Oid bucketOid;
     Relation parentrel = NULL;
+    char partStrategy = PartTypeGetPartStrategy(rel->partMap->type);
     char subparttype = PART_STRATEGY_INVALID;
     int2vector *subpartitionKey = NULL;
     PartitionDefState* partDef = NULL;
@@ -25794,7 +25795,7 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
         partDef = (PartitionDefState*)lfirst(cell);
 
         PartitionState *partitionState = makeNode(PartitionState);
-        partitionState->partitionStrategy = PartitionMapIsRange(rel) ? PART_STRATEGY_RANGE : PART_STRATEGY_LIST;
+        partitionState->partitionStrategy = partStrategy;
         partitionState->partitionNameList = partitionNameList;
         if (RelationIsSubPartitioned(rel)) {
             partitionState->subPartitionState = makeNode(PartitionState);
@@ -25831,7 +25832,8 @@ static void ATExecAddPartitionInternal(Relation rel, AddPartitionState *partStat
                 AccessExclusiveLock,
                 subpartitionKey,
                 RelationIsPartitionOfSubPartitionTable(rel),
-                &partExprKeyInfo);
+                &partExprKeyInfo,
+                partStrategy);
         }
 
         Oid partTablespaceOid =
@@ -26066,11 +26068,6 @@ static void ATExecDropPartition(Relation rel, AlterTableCmd *cmd)
 
     /* getting the dropping partition's oid, and lock partition */
     partOid = GetPartOidByATcmd(rel, cmd, "DROP PARTITION");
-
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
-        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    }
 
     /* check 1: check validity of partition oid */
     if (!OidIsValid(partOid)) {
@@ -27102,11 +27099,6 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
     }
 #endif
 
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(rel)) {
-        LockPartitionObject(rel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    }
-
     if (RelationIsSubPartitioned(rel)) {
         ATExecTruncatePartitionForSubpartitionTable(rel, partOid, cmd, hasGPI);
         return;
@@ -27917,11 +27909,6 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         renameTargetPart = true;
     }
 
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
-        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
-    }
-
     if (cmd->alterGPI) {
         destPartOid = AddTemporaryRangePartitionForAlterPartitions(cmd, partTableRel, curPartIndex, &renameTargetPart);
         int partitionno = GetPartitionnoFromSequence(partTableRel->partMap, curPartIndex);
@@ -28392,11 +28379,6 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     if (!OidIsValid(partOid)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("Specified partition does not exist")));
-    }
-
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
-        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     }
 
     Assert(OidIsValid(ordTableOid));
@@ -29866,11 +29848,6 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
             partTableRel->rd_att->attrs, partMap->base.partitionKey, splitPart->partition_for_values);
         srcPartOid = PartitionValuesGetPartitionOid(
             partTableRel, splitPart->partition_for_values, AccessExclusiveLock, true, true, false);
-    }
-
-    /* add INTERVAL_PARTITION_LOCK_SDEQUENCE here to avoid ADD INTERVAL PARTITION */
-    if (RELATION_IS_INTERVAL_PARTITIONED(partTableRel)) {
-        LockPartitionObject(partTableRel->rd_id, INTERVAL_PARTITION_LOCK_SDEQUENCE, PARTITION_EXCLUSIVE_LOCK);
     }
 
     // check final partition num

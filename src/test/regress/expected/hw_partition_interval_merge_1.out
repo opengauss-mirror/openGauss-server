@@ -33,6 +33,7 @@ prepare pg_partition_sql2(char) as
     create index interval_sales_1_time_id_idx on interval_sales_1 (time_id) local;
     create index interval_sales_1_quantity_sold_idx on interval_sales_1 (quantity_sold) local;
     alter table interval_sales_1 split partition p0 at (to_date('2007-02-10', 'YYYY-MM-DD')) into (partition p0_1, partition p0_2);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     execute pg_partition_sql2('interval_sales_1');
      relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
 ------------------+----------+----------+-------------+--------------+-------------+------------
@@ -126,6 +127,7 @@ ERROR:  source partitions must be continuous and in ascending order of boundary
 (16 rows)
 
     alter table interval_sales_1 merge partitions p0_1, p0_2, p1 into partition p01;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     execute pg_partition_sql2('interval_sales_1');
      relname      | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
 ------------------+----------+----------+-------------+--------------+-------------+------------
@@ -225,6 +227,7 @@ ERROR:  source partitions must be continuous and in ascending order of boundary
 (14 rows)
 
     alter table interval_sales_1 merge partitions sys_p6, sys_p7, sys_p8 into partition sys_p6_p7_p8;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     select *
     from interval_sales_1 partition (sys_p6);
 ERROR:  partition "sys_p6" of relation "interval_sales_1" does not exist
@@ -263,6 +266,7 @@ ERROR:  partition "sys_p8" of relation "interval_sales_1" does not exist
     -- 2.3 merge interval partition and range partition
     -- FIRST, build a range partition which is continuous with a interval partition
     alter table interval_sales_1 merge partitions sys_p2, sys_p1 into partition sys_p2_p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     -- 2.3.1 merge sys_p2_p1 with sys_p3 in wrong order
     alter table interval_sales_1 merge partitions sys_p3, sys_p2_p1 into partition sys_p2_p1_p3;
 ERROR:  source partitions must be continuous and in ascending order of boundary
@@ -284,6 +288,7 @@ ERROR:  source partitions must be continuous and in ascending order of boundary
 (1 row)
 
     alter table interval_sales_1 merge partitions sys_p2_p1, sys_p3 into partition sys_p2_p1_p3;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     select *
     from interval_sales_1 partition (sys_p2_p1_p3);
  prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
@@ -314,6 +319,7 @@ ERROR:  source partitions must be continuous and in ascending order of boundary
 ERROR:  source partitions must be continuous and in ascending order of boundary
     -- 2.4.1 merge interval partition and range partition into one in right order
     alter table interval_sales_1 merge partitions sys_p2_p1_p3, sys_p9 into partition sys_p9_p2_p1_p3;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     select *
     from interval_sales_1 partition (sys_p9_p2_p1_p3);
  prod_id | cust_id |         time_id          | channel_id | promo_id | quantity_sold | amount_sold 
@@ -376,6 +382,7 @@ NOTICE:  table "partiton_table_001" does not exist, skipping
 (7 rows)
 
     alter table partiton_table_001 merge partitions sys_p1, sys_p2 into PARTITION sys_p4;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
     execute pg_partition_sql2('partiton_table_001');
         relname        | parttype | rangenum | intervalnum | partstrategy |  interval   |  boundary  
 -----------------------+----------+----------+-------------+--------------+-------------+------------

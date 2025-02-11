@@ -31,6 +31,7 @@
 #include "knl/knl_session.h"
 #include "access/htup.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_partition.h"
 #include "nodes/primnodes.h"
 #include "storage/lock/lock.h"
 #include "utils/hsearch.h"
@@ -195,5 +196,7 @@ extern inline Oid GetAttTypeOid(Oid attType)
     }
     return attType;
 }
+
+extern char PartTypeGetPartStrategy(PartitionType partType);
 
 #endif /* PARTITIONMAP_H_ */

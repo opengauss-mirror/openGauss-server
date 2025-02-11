@@ -521,20 +521,17 @@ explain (costs off) select count(*) from interval_normal_date where b <= 500;
 (5 rows)
 
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
-       relname        | parttype |                    reloptions                     
-----------------------+----------+---------------------------------------------------
- interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
- sys_p2               | p        | {orientation=row,compression=no,wait_clean_gpi=y}
-(2 rows)
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
 
 alter table interval_normal_date drop partition sys_p2;
 NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 commit;
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
-       relname        | parttype |                    reloptions                     
-----------------------+----------+---------------------------------------------------
- interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
-(1 row)
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
 
 vacuum  analyze interval_normal_date;
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;

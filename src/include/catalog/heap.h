@@ -158,7 +158,7 @@ extern void heapDropPartitionList(Relation rel, List* partitionList);
 extern Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                  Oid bucketOid, RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                  const bool* isTimestamptz, StorageType storage_type, LOCKMODE partLockMode, int2vector* subpartition_key = NULL, bool isSubPartition = false,
-                                 PartitionExprKeyInfo *partExprKeyInfo = NULL);
+                                 PartitionExprKeyInfo *partExprKeyInfo = NULL, char partStrategy = PART_STRATEGY_RANGE);
 
 extern Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, ListPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,

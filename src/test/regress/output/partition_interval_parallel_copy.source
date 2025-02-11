@@ -1,0 +1,1107 @@
+-- test interval partition table auto extend by autonomous transaction
+create schema partition_interval_parallel_copy;
+set current_schema to partition_interval_parallel_copy;
+set DateStyle = 'ISO, MDY';
+-- check max_concurrent_autonomous_transactions
+show max_concurrent_autonomous_transactions;
+ max_concurrent_autonomous_transactions 
+----------------------------------------
+ 10
+(1 row)
+
+-- interval partition table type 1
+-- partition key timestamp
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 hour') (partition p0 values less than('2022-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {2022-01-01}            | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- rename partition
+alter table t1 rename partition p0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {2022-01-01}            | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2021-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(17 rows)
+
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(17 rows)
+
+-- drop partition
+alter table t1 drop partition p14;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- exchange partition
+drop table if exists t1_1;
+NOTICE:  table "t1_1" does not exist, skipping
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2019-04-01 00:00:00 | host_41  |        4.1
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(19 rows)
+
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+     Table "partition_interval_parallel_copy.t1"
+   Column   |            Type             | Modifiers 
+------------+-----------------------------+-----------
+ time       | timestamp without time zone | 
+ hostname   | text                        | 
+ usage_user | double precision            | 
+Indexes:
+    "t1_index1" btree ("time") TABLESPACE pg_default
+    "t1_index2" btree (hostname) LOCAL TABLESPACE pg_default
+Partition By RANGE(time) INTERVAL('1 hour')
+Number of partitions: 15 (View pg_partition to check each partition range.)
+
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+-- partition key timestamptz
+create table t2 (time timestamptz, hostname text, usage_user float) partition by range(time) interval('1 day') (partition p0 values less than('2022-01-01'));
+\copy t2 from 'data/partition_interval_parallel_copy.data' parallel 5 WITH (delimiter',');
+select * from t2 order by time, hostname, usage_user;
+          time          | hostname | usage_user 
+------------------------+----------+------------
+ 2022-01-01 01:01:01-08 | host_01  |          1
+ 2022-02-02 02:02:02-08 | host_02  |          2
+ 2022-03-03 03:03:03-08 | host_03  |          3
+ 2022-04-04 04:04:04-07 | host_04  |          4
+ 2022-05-05 05:05:05-07 | host_05  |          5
+ 2022-06-06 06:06:06-07 | host_06  |          6
+ 2022-07-07 07:07:07-07 | host_07  |          7
+ 2022-08-01 08:00:00-07 | host_25  |         75
+ 2022-08-01 08:00:00-07 | host_27  |         46
+ 2022-08-01 08:00:00-07 | host_27  |         47
+ 2022-08-08 08:08:08-07 | host_08  |          8
+ 2022-09-01 08:00:00-07 | host_27  |         48
+ 2022-09-01 08:00:00-07 | host_27  |         49
+ 2022-09-01 08:00:00-07 | host_27  |         50
+ 2022-09-09 09:09:09-07 | host_09  |          9
+ 2022-10-01 10:10:10-07 | host_10  |         10
+ 2022-11-01 11:11:11-07 | host_11  |         11
+ 2022-12-01 12:12:12-08 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't2' order by p.boundaries;
+ parttype |         boundaries         | partstrategy | indisusable |                    reloptions                     
+----------+----------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00-08"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-02 00:00:00-08"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-03 00:00:00-08"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-04 00:00:00-08"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-05 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-06 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-07 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-08 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-02 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-09 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-02 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-10 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-02 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-02 01:00:00-07"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-02 00:00:00-08"} | i            | t           | {orientation=row,compression=no}
+ r        |                            | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- drop partition
+alter table t2 drop partition p0;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+-- add partition, expect error
+alter table t2 add partition p1 values less than ('2000-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+-- partition key date
+create table t3 (time date, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 values less than('2022-01-01'));
+\copy t3 from 'data/partition_interval_parallel_copy.data' parallel 6 WITH (delimiter',');
+select * from t3 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't3' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {2022-01-01}            | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- drop partition
+alter table t3 drop partition p0;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+-- add partition, expect error
+alter table t3 add partition p1 values less than ('2000-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+-- disable row movement
+create table t4 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 hour') (partition p0 values less than('2022-01-01')) disable row movement;
+\copy t4 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t4 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't4' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {2022-01-01}            | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 02:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-02 03:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-03 04:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-04 05:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-05 06:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-06 07:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-07 08:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-08 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 09:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-09 10:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 11:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 12:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 13:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(16 rows)
+
+-- expect error
+update t4 set time='2022-08-09 00:00:00' where hostname = 'host_08';
+ERROR:  fail to update partitioned table "t4"
+DETAIL:  disable row movement
+-- interval partition type 2
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 start ('2022-01-01') end ('2022-02-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2021-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(15 rows)
+
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(15 rows)
+
+-- drop partition
+alter table t1 drop partition p14;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | i            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2019-04-01 00:00:00 | host_41  |        4.1
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(19 rows)
+
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+     Table "partition_interval_parallel_copy.t1"
+   Column   |            Type             | Modifiers 
+------------+-----------------------------+-----------
+ time       | timestamp without time zone | 
+ hostname   | text                        | 
+ usage_user | double precision            | 
+Indexes:
+    "t1_index1" btree ("time") TABLESPACE pg_default
+    "t1_index2" btree (hostname) LOCAL TABLESPACE pg_default
+Partition By RANGE(time) INTERVAL('1 month')
+Number of partitions: 13 (View pg_partition to check each partition range.)
+
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+-- interval partition type 3
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) (partition p0 start ('2022-01-01') end ('2023-01-01') every('1 month'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2021-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(15 rows)
+
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(15 rows)
+
+-- drop partition
+alter table t1 drop partition p14;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-02-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-03-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-04-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-05-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-06-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-07-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-08-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-09-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-10-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-11-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-12-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2023-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | r            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(14 rows)
+
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2019-04-01 00:00:00 | host_41  |        4.1
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(19 rows)
+
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+     Table "partition_interval_parallel_copy.t1"
+   Column   |            Type             | Modifiers 
+------------+-----------------------------+-----------
+ time       | timestamp without time zone | 
+ hostname   | text                        | 
+ usage_user | double precision            | 
+Indexes:
+    "t1_index1" btree ("time") TABLESPACE pg_default
+    "t1_index2" btree (hostname) LOCAL TABLESPACE pg_default
+Partition By RANGE(time)
+Number of partitions: 13 (View pg_partition to check each partition range.)
+
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+-- interval partition type 4
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 start ('2022-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(3 rows)
+
+-- rename partition
+alter table t1 rename partition p0_0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(3 rows)
+
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2021-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(4 rows)
+
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(3 rows)
+
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2022-01-01 00:00:00')
+);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2022-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(4 rows)
+
+-- drop partition
+alter table t1 drop partition p14;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {NULL}                  | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(3 rows)
+
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2019-04-01 00:00:00 | host_41  |        4.1
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(19 rows)
+
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+     Table "partition_interval_parallel_copy.t1"
+   Column   |            Type             | Modifiers 
+------------+-----------------------------+-----------
+ time       | timestamp without time zone | 
+ hostname   | text                        | 
+ usage_user | double precision            | 
+Indexes:
+    "t1_index1" btree ("time") TABLESPACE pg_default
+    "t1_index2" btree (hostname) LOCAL TABLESPACE pg_default
+Partition By RANGE(time) INTERVAL('1 month')
+Number of partitions: 2 (View pg_partition to check each partition range.)
+
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+-- interval partition type 5
+drop table if exists t1;
+create table t1 (time timestamp, hostname text, usage_user float) partition by range(time) interval('1 month') (partition p0 end ('2024-01-01'));
+\copy t1 from 'data/partition_interval_parallel_copy.data' parallel 4 WITH (delimiter',');
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2022-01-01 01:01:01 | host_01  |          1
+ 2022-02-02 02:02:02 | host_02  |          2
+ 2022-03-03 03:03:03 | host_03  |          3
+ 2022-04-04 04:04:04 | host_04  |          4
+ 2022-05-05 05:05:05 | host_05  |          5
+ 2022-06-06 06:06:06 | host_06  |          6
+ 2022-07-07 07:07:07 | host_07  |          7
+ 2022-08-01 08:00:00 | host_25  |         75
+ 2022-08-01 08:00:00 | host_27  |         46
+ 2022-08-01 08:00:00 | host_27  |         47
+ 2022-08-08 08:08:08 | host_08  |          8
+ 2022-09-01 08:00:00 | host_27  |         48
+ 2022-09-01 08:00:00 | host_27  |         49
+ 2022-09-01 08:00:00 | host_27  |         50
+ 2022-09-09 09:09:09 | host_09  |          9
+ 2022-10-01 10:10:10 | host_10  |         10
+ 2022-11-01 11:11:11 | host_11  |         11
+ 2022-12-01 12:12:12 | host_12  |         12
+(18 rows)
+
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2024-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(2 rows)
+
+-- rename partition
+alter table t1 rename partition p0 to p1;
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2024-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=n}
+(2 rows)
+
+-- split partition type 1
+alter table t1 split partition p1 at ('2021-01-01 00:00:00') into (partition p11, partition p12);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2021-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2024-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+(3 rows)
+
+-- merge partition
+alter table t1 merge partitions p11, p12 into partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2024-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+(2 rows)
+
+-- split partition type 2
+alter table t1 split partition p1 into (
+    partition p13 values less than ('2020-01-01 00:00:00'),
+    partition p14 values less than ('2024-01-01 00:00:00')
+);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ p        | {"2024-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+(3 rows)
+
+-- drop partition
+alter table t1 drop partition p14;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select p.parttype, p.boundaries, p.partstrategy, p.indisusable, p.reloptions
+    from pg_partition p join pg_class c on p.parentid = c.oid where c.relname = 't1' order by p.boundaries;
+ parttype |       boundaries        | partstrategy | indisusable |                    reloptions                     
+----------+-------------------------+--------------+-------------+---------------------------------------------------
+ p        | {"2020-01-01 00:00:00"} | r            | t           | {orientation=row,compression=no}
+ r        |                         | i            | t           | {orientation=row,compression=no,wait_clean_gpi=y}
+(2 rows)
+
+-- exchange partition
+drop table if exists t1_1;
+create table t1_1 (time timestamp, hostname text, usage_user float);
+insert into t1_1 values('2019-04-01', 'host_41', 4.1);
+alter table t1 exchange partition(p13) with table t1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+select * from t1 order by time, hostname, usage_user;
+        time         | hostname | usage_user 
+---------------------+----------+------------
+ 2019-04-01 00:00:00 | host_41  |        4.1
+(1 row)
+
+-- create index
+create index t1_index1 on t1 (time) global;
+create index t1_index2 on t1 (hostname) local;
+\d t1
+     Table "partition_interval_parallel_copy.t1"
+   Column   |            Type             | Modifiers 
+------------+-----------------------------+-----------
+ time       | timestamp without time zone | 
+ hostname   | text                        | 
+ usage_user | double precision            | 
+Indexes:
+    "t1_index1" btree ("time") TABLESPACE pg_default
+    "t1_index2" btree (hostname) LOCAL TABLESPACE pg_default
+Partition By RANGE(time) INTERVAL('1 month')
+Number of partitions: 1 (View pg_partition to check each partition range.)
+
+-- add partition, expect error
+alter table t1 add partition p1 values less than ('2024-1-1 00:00:00');
+ERROR:  can not add partition against interval partitioned table
+drop table t1;
+drop table t1_1;
+drop table t2;
+drop table t3;
+drop table t4;
+reset DateStyle;
+drop schema partition_interval_parallel_copy;

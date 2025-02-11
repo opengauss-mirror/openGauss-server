@@ -680,6 +680,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
       PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
      (RELKIND_RELATION == (relation)->rd_rel->relkind || RELKIND_INDEX == (relation)->rd_rel->relkind))
 
+#define RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION \
+    g_instance.attr.attr_storage.max_concurrent_autonomous_transactions > 0
+
 /*  
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket

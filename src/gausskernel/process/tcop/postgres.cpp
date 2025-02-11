@@ -9235,6 +9235,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'u': /* Autonomous transaction */
             {
+                int msgType = pq_getmsgbyte(&input_message);
+                u_sess->is_partition_autonomous_session = msgType == 'P';
                 u_sess->is_autonomous_session = true; 
                 Oid currentUserId = pq_getmsgint(&input_message, 4);
                 u_sess->autonomous_parent_sessionid = pq_getmsgint64(&input_message);

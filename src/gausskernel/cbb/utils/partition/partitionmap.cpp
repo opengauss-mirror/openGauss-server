@@ -3212,3 +3212,19 @@ Const **transformConstIntoPartkeyType(FormData_pg_attribute *attrs, int2vector *
 
     return boundary;
 }
+
+char PartTypeGetPartStrategy(PartitionType partType)
+{
+    switch (partType) {
+        case PART_TYPE_RANGE:
+            return PART_STRATEGY_RANGE;
+        case PART_TYPE_INTERVAL:
+            return PART_STRATEGY_INTERVAL;
+        case PART_TYPE_LIST:
+            return PART_STRATEGY_LIST;
+        case PART_TYPE_HASH:
+            return PART_STRATEGY_HASH;
+        default:
+            return PART_STRATEGY_INVALID;
+    }
+}

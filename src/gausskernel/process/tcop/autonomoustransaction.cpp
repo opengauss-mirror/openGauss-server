@@ -57,8 +57,34 @@ pg_atomic_uint32 AutonomousSession::m_sessioncnt = 0;
  * m_sessioncnt Number of sessions started by 
  * autonomous transactions on the current node
  */
-void AutonomousSession::AddSessionCount(void)
+void AutonomousSession::AddSessionCount(bool isWait)
 {
+    if (isWait) {
+        int autonomous_wait_timeout = 600000000L; // 10 min
+        int autonomous_wait_step = 1000L; // 1 millisecond
+        int autonomous_wait_count = autonomous_wait_timeout / autonomous_wait_step;
+        int step = 0;
+        LWLockAcquire(m_autonomous_lock, LW_EXCLUSIVE);
+        while (true) {
+            if (GetSessionCount() < (uint32)g_instance.attr.attr_storage.max_concurrent_autonomous_transactions) {
+                AddRefcount();
+                ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc session : %d",
+                    m_sessioncnt)));
+                break;
+            }
+            
+            CHECK_FOR_INTERRUPTS();
+            if (step++ > autonomous_wait_count) {
+                LWLockRelease(m_autonomous_lock);
+                ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
+                        errmsg("concurrent autonomous transactions reach its maximun : %d",
+                            g_instance.attr.attr_storage.max_concurrent_autonomous_transactions)));
+            }
+            pg_usleep(autonomous_wait_step);
+        }
+        LWLockRelease(m_autonomous_lock);
+        return;
+    }
     if (GetSessionCount() < (uint32)g_instance.attr.attr_storage.max_concurrent_autonomous_transactions) {
         AddRefcount();
         ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc session : %d", m_sessioncnt)));
@@ -120,7 +146,7 @@ void AutonomousSession::AttachSession(void)
     t_thrd.int_cxt.ImmediateInterruptOK = true;
     /* Allow cancel/die interrupts */
     CHECK_FOR_INTERRUPTS();
-    AddSessionCount();
+    AddSessionCount(u_sess->is_partition_autonomous_query);
     m_conn = PQconnectdb(connInfo);
     PQsetNoticeProcessor(m_conn, ProcessorNotice, NULL);
     t_thrd.int_cxt.ImmediateInterruptOK = old;
@@ -256,7 +282,7 @@ void CreateAutonomousSession(void)
  */
 void DestoryAutonomousSession(bool force)
 {
-    if (u_sess->SPI_cxt.autonomous_session && (force || u_sess->SPI_cxt._connected == 0)) {
+    if (u_sess->SPI_cxt.autonomous_session && (force || u_sess->SPI_cxt._connected <= 0)) {
         u_sess->SPI_cxt.autonomous_session->ReSetDeadLockTimeOut();
         u_sess->SPI_cxt.autonomous_session->DetachSession();
         AutonomousSession* autonomousSession = u_sess->SPI_cxt.autonomous_session;
@@ -515,7 +541,9 @@ int PQsendQueryAutonm(PGconn* conn, const char* query)
     uint32 sessionId_l32 = sessionId;
     uint32 sessionId_h32 = sessionId >> 32;
     /* construct the outgoing Query message */
-    bool execFlag = pqPutMsgStart('u', false, conn) < 0 || pqPutInt((int)currentId, 4, conn)
+    char subCommand = u_sess->is_partition_autonomous_query ? 'P' : 'A';
+    bool execFlag = pqPutMsgStart('u', false, conn) < 0 || pqPutc(subCommand, conn) < 0
+        || pqPutInt((int)currentId, 4, conn)
         || pqPutInt(sessionId_h32, 4, conn) || pqPutInt(sessionId_l32, 4, conn)
         || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0;
     if (execFlag) {
