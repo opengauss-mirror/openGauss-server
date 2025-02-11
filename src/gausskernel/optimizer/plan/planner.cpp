@@ -9328,7 +9328,7 @@ static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
 
 static bool IsCollationUnSupportedByVectorEngine(Oid collation)
 {
-    if (!DB_IS_CMPT(B_FORMAT)) {
+    if (!DB_IS_CMPT_BD) {
         return false;
     }
 

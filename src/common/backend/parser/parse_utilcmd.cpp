@@ -5396,7 +5396,7 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column)
                 parser_errposition(cxt->pstate, column->typname->location)));
     }
 
-    if (!DB_IS_CMPT(B_FORMAT) && column->collClause) {
+    if (!DB_IS_CMPT_BD && column->collClause) {
         LookupCollation(cxt->pstate, column->collClause->collname, column->collClause->location);
         /* Complain if COLLATE is applied to an uncollatable type */
         if (!OidIsValid(typtup->typcollation))

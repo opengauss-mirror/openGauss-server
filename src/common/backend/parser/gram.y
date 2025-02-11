@@ -16232,9 +16232,9 @@ collate:
 					errmsg("Un-support feature"),
 					errdetail(specifying character sets and collations is not yet supported)));
 #endif
-				if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+				if (!DB_IS_CMPT_BD) {
 					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("specifying character sets and collations is supported only in B-format database")));
+						errmsg("specifying character sets and collations is supported only in B-format or D-format database")));
 				}
 				$$ = $3;
 			}
@@ -24537,11 +24537,11 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list_for_no_table_function
 								     parser_errposition(@4)));
 					}
 #else
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+					if (!DB_IS_CMPT_BD) {
 						if (list_length($4) > 1) {
 							ereport(errstate, 
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("multi-relation update only support in B-format database")));
+									 errmsg("multi-relation update only support in B-format or D-format database")));
 						}
 						if (!IsA(linitial($4), RangeVar)) {
 							ereport(errstate,
@@ -27609,7 +27609,7 @@ charset:
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					errmsg("specifying character sets and collations is not yet supported")));
 #endif
-				if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+				if (!DB_IS_CMPT_BD) {
 					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("specifying character sets and collations is supported only in B-format database")));
 				}
@@ -27635,9 +27635,9 @@ convert_charset:
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					errmsg("specifying character sets and collations is not yet supported")));
 #endif
-				if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+				if (!DB_IS_CMPT_BD) {
 					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("specifying character sets and collations is supported only in B-format database")));
+						errmsg("specifying character sets and collations is supported only in B-format or D-format database")));
 				}
 				$$ = PG_INVALID_ENCODING;
 			}
@@ -34691,10 +34691,10 @@ static void checkDeleteRelationError()
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				errmsg("multi-relation delete is not yet supported.")));
 #endif
-	if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
+	if (!DB_IS_CMPT_BD)						
 		ereport(errstate, 
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("multi-relation delete only support in B-format database")));
+					errmsg("multi-relation delete only support in B-format or D-format database")));
 }
 
 #ifndef MAX_SUPPORTED_FUNC_FOR_PART_EXPR

@@ -808,7 +808,7 @@ create table t_t_mutil_t2(col1 int,col2 int);
 ERROR:  relation "t_t_mutil_t2" already exists in schema "public"
 DETAIL:  creating new table with existing name in the same schema
 update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.col2=4 where a.col1=b.col1;
-ERROR:  multi-relation update only support in B-format database
+ERROR:  multi-relation update only support in B-format or D-format database
 --ustore update
 set ustore_attr to 'enable_candidate_buf_usage_count=true;enable_ustore_partial_seqscan=true';
 drop table if exists ustore_t1;

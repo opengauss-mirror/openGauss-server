@@ -1823,7 +1823,7 @@ Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* arg
                                                      Int32GetDatum(varRelid)));
     }
 
-    if (DB_IS_CMPT(B_FORMAT)) {
+    if (DB_IS_CMPT_BD) {
         tmp_encoding = get_valid_charset_by_collation(inputcollid);
         db_encoding = GetDatabaseEncoding();
     }

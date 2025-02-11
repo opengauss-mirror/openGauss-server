@@ -4807,7 +4807,7 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
      * Finally, take care of collations in the finished expression.
      */
     assign_expr_collations(pstate, expr);
-    if (DB_IS_CMPT(B_FORMAT) && OidIsValid(attcollation)) {
+    if (DB_IS_CMPT_BD && OidIsValid(attcollation)) {
         int attcharset = get_valid_charset_by_collation(attcollation);
         expr = coerce_to_target_charset(expr, attcharset, atttypid, atttypmod, attcollation);
     }

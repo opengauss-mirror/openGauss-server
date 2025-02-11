@@ -193,7 +193,7 @@ int get_charset_by_collation(Oid coll_oid)
 
 int get_valid_charset_by_collation(Oid coll_oid)
 {
-    if (!DB_IS_CMPT(B_FORMAT)) {
+    if (!DB_IS_CMPT_BD) {
         return GetDatabaseEncoding();
     }
     int charset = get_charset_by_collation(coll_oid);

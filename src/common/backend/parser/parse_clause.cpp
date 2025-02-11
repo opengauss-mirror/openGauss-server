@@ -212,7 +212,7 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
      * for DELETE and UPDATE, maybe target table has been added to rtable before.
      * if that, no need to do that again, just set resultRelation to the existed rtindex.
      */
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+    if (DB_IS_CMPT_BD) {
         if (multiModify && (requiredPerms & ACL_UPDATE)) {
             relation = parserOpenTable(pstate, relRv, RowExclusiveLock, true, false, true);
             /* When update multiple relations, rte has been just now added to p_rtable in transformFromClauseItem. */

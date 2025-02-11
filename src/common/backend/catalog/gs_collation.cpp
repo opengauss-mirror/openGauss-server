@@ -47,7 +47,7 @@ bool is_b_format_collation(Oid collation)
 
 bool is_support_b_format_collation(Oid collation)
 {
-    if (is_b_format_collation(collation) && !DB_IS_CMPT(B_FORMAT)) {
+    if (is_b_format_collation(collation) && !DB_IS_CMPT_BD) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
                 errdetail("this collation only support in B-format database")));
