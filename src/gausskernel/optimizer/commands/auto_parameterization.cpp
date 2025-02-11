@@ -93,7 +93,8 @@ bool isQualifiedIuds(Node* parsetree)
         case T_InsertStmt: {
             InsertStmt* stmt = (InsertStmt*)parsetree;
             if (stmt->returningList != NIL || stmt->withClause != NULL || stmt->upsertClause != NULL ||
-                stmt->hintState != NULL || ((SelectStmt *)stmt->selectStmt)->valuesLists == NULL) {
+                stmt->hintState != NULL || stmt->selectStmt == NULL ||
+                ((SelectStmt*)stmt->selectStmt)->valuesLists == NULL) {
                 res = false;
             }
             break;
