@@ -56,20 +56,32 @@
 
 /* Preserved page numbers */
 #define IVFFLAT_METAPAGE_BLKNO 0
-#define IVFFLAT_HEAD_BLKNO 1 /* first list page */
+#define IVFPQTABLE_START_BLKNO 1 /* first list page of pqtable start page */
 
 /* IVFFlat parameters */
 #define IVFFLAT_DEFAULT_LISTS 100
 #define IVFFLAT_MIN_LISTS 1
 #define IVFFLAT_MAX_LISTS 32768
 #define IVFFLAT_DEFAULT_PROBES 1
-#define IVFFLAT_DEFAULT_PQ_RESIDUAL false
+
+/* IVFPQ parameters */
+#define IVFPQ_DEFAULT_RESIDUAL false
+#define IVFPQ_DIS_L2 1
+#define IVFPQ_DIS_IP 2
+#define IVFPQ_DIS_COSINE 3
+#define IVFPQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
 
 /* Build phases */
 /* PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE is 1 */
 #define PROGRESS_IVFFLAT_PHASE_KMEANS 2
 #define PROGRESS_IVFFLAT_PHASE_ASSIGN 3
 #define PROGRESS_IVFFLAT_PHASE_LOAD 4
+
+#define IVF_NUM_COLUMNS 4
+#define IVF_LISTID 1
+#define IVF_TID 2
+#define IVF_VECTOR 3
+#define IVF_RESIDUAL 4
 
 #define IVFFLAT_LIST_SIZE(size) (offsetof(IvfflatListData, center) + (size))
 
@@ -277,6 +289,7 @@ typedef struct IvfflatScanList {
     pairingheap_node ph_node;
     BlockNumber startPage;
     double distance;
+    int key;
 } IvfflatScanList;
 
 typedef struct IvfflatScanOpaqueData {
@@ -298,12 +311,29 @@ typedef struct IvfflatScanOpaqueData {
     Oid collation;
     Datum (*distfunc)(FmgrInfo *flinfo, Oid collation, Datum arg1, Datum arg2);
 
+    /* PQ info */
+    bool enablePQ;
+    int pqM;
+    int pqKsub;
+    int funcType;
+    bool byResidual;
+    int kreorder;
+    MemoryContext pqCtx;
+
     /* Lists */
     pairingheap *listQueue;
     IvfflatScanList lists[FLEXIBLE_ARRAY_MEMBER]; /* must come last */
 } IvfflatScanOpaqueData;
 
 typedef IvfflatScanOpaqueData *IvfflatScanOpaque;
+
+typedef struct IvfpqPairingHeapNode {
+    pairingheap_node ph_node;
+    double distance;
+    ItemPointer heapTid;
+    BlockNumber indexBlk;
+    OffsetNumber indexOff;
+} IvfpqPairingHeapNode;
 
 /* Methods */
 void IvfflatKmeans(Relation index, VectorArray samples, VectorArray centers, const IvfflatTypeInfo *typeInfo);
@@ -340,6 +370,13 @@ int IvfGetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDis
 int IvfGetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
                      const float *pqDistanceTable, float *pqDistance);
 
+void GetPQInfoOnDisk(IvfflatScanOpaque so, Relation index);
+void IvfpqComputeQueryRelTables(IvfflatScanOpaque so, Relation index, Datum q, float *simTable);
+uint8 *LoadPQCode(IndexTuple itup);
+float GetPQDistance(float *pqDistanceTable, uint8 *code, double dis0, int pqM, int pqKsub, bool innerPro);
+IvfpqPairingHeapNode * IvfpqCreatePairingHeapNode(float distance, ItemPointer heapTid,
+                                                  BlockNumber indexBlk, OffsetNumber indexOff);
+char* IVFPQLoadPQtable(Relation index);
 
 Datum ivfflathandler(PG_FUNCTION_ARGS);
 Datum ivfflatbuild(PG_FUNCTION_ARGS);

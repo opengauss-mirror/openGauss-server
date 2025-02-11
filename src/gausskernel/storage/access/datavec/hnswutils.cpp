@@ -1522,7 +1522,7 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
 }
 
 /*
-* Get the info related to pqTable in append metapage
+* Get the info related to pqTable in metapage
 */
 void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
                                uint16 *pqDisTableNblk, uint32 *pqDisTableSize)

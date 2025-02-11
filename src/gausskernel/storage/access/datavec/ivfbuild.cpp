@@ -346,14 +346,14 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum *values, Ivffl
 
     /* Create a virtual tuple */
     ExecClearTuple(slot);
-    slot->tts_values[0] = Int32GetDatum(closestCenter);
-    slot->tts_isnull[0] = false;
-    slot->tts_values[1] = PointerGetDatum(tid);
-    slot->tts_isnull[1] = false;
-    slot->tts_values[2] = value;
-    slot->tts_isnull[2] = false;
-    slot->tts_values[3] = residual == NULL ? NULL : PointerGetDatum(residual);
-    slot->tts_isnull[3] = residual == NULL ? true : false;
+    slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(closestCenter);
+    slot->tts_isnull[IVF_LISTID - 1] = false;
+    slot->tts_values[IVF_TID - 1] = PointerGetDatum(tid);
+    slot->tts_isnull[IVF_TID - 1] = false;
+    slot->tts_values[IVF_VECTOR - 1] = value;
+    slot->tts_isnull[IVF_VECTOR - 1] = false;
+    slot->tts_values[IVF_RESIDUAL - 1] = residual == NULL ? NULL : PointerGetDatum(residual);
+    slot->tts_isnull[IVF_RESIDUAL - 1] = residual == NULL ? true : false;
     ExecStoreVirtualTuple(slot);
 
     /*
@@ -528,11 +528,11 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
         elog(ERROR, "dimensions must be greater than one for this opclass");
 
     /* Create tuple description for sorting */
-    buildstate->tupdesc = CreateTemplateTupleDesc(4, false);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)1, "list", INT4OID, -1, 0);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)2, "tid", TIDOID, -1, 0);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)3, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)4, "residual", VECTOROID, -1, 0);
+    buildstate->tupdesc = CreateTemplateTupleDesc(IVF_NUM_COLUMNS, false);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_LISTID, "list", INT4OID, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_TID, "tid", TIDOID, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_VECTOR, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_RESIDUAL, "residual", VECTOROID, -1, 0);
 
     buildstate->slot = MakeSingleTupleTableSlot(buildstate->tupdesc);
 

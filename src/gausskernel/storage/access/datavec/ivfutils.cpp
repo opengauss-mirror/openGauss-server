@@ -205,6 +205,166 @@ void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage
     }
 }
 
+char* IVFPQLoadPQtable(Relation index)
+{
+    Buffer buf;
+    Page page;
+    uint16 nblks;
+    uint32 curFlushSize;
+    uint32 pqTableSize;
+    char* pqTable;
+
+    IvfGetPQInfoFromMetaPage(index, &nblks, &pqTableSize, NULL, NULL);
+    pqTable = (char*)palloc0(pqTableSize);
+
+    for (uint16 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ? (pqTableSize - i * IVFPQTABLE_STORAGE_SIZE) : IVFPQTABLE_STORAGE_SIZE;
+        buf = ReadBuffer(index, IVFPQTABLE_START_BLKNO + i);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+        errno_t err = memcpy_s(pqTable + i * IVFPQTABLE_STORAGE_SIZE, curFlushSize,
+                               PageGetContents(page), curFlushSize);
+        securec_check(err, "\0", "\0");
+        UnlockReleaseBuffer(buf);
+    }
+    return pqTable;
+}
+
+float* IVFPQLoadPQDisTable(Relation index)
+{
+    Buffer buf;
+    Page page;
+    uint16 pqTableNblk;
+    uint16 nblks;
+    uint32 curFlushSize;
+    uint32 pqDisTableSize;
+    float* disTable;
+
+    IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &nblks, &pqDisTableSize);
+    disTable = (float*)palloc0(pqDisTableSize);
+
+    BlockNumber startBlkno = IVFPQTABLE_START_BLKNO + pqTableNblk;
+    for (uint16 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ? (pqDisTableSize - i * IVFPQTABLE_STORAGE_SIZE) : IVFPQTABLE_STORAGE_SIZE;
+        buf = ReadBuffer(index, startBlkno + i);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+        errno_t err = memcpy_s((char*)disTable + i * IVFPQTABLE_STORAGE_SIZE, curFlushSize,
+                               PageGetContents(page), curFlushSize);
+        securec_check(err, "\0", "\0");
+        UnlockReleaseBuffer(buf);
+    }
+    return disTable;
+}
+
+/*
+ * Get Ivfflat PQ info
+ */
+void GetPQInfoOnDisk(IvfflatScanOpaque so, Relation index)
+{
+    Buffer buf;
+    Page page;
+    IvfflatMetaPage metap;
+
+    buf = ReadBuffer(index, IVFFLAT_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = IvfflatPageGetMeta(page);
+    if (unlikely(metap->magicNumber != IVFFLAT_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "ivfflat index is not valid");
+    }
+
+    so->enablePQ = metap->enablePQ;
+    so->pqM = metap->pqM;
+    so->pqKsub = metap->pqKsub;
+    so->byResidual = metap->byResidual;
+    UnlockReleaseBuffer(buf);
+
+    if (so->enablePQ) {
+        so->funcType = getIVFPQfunctionType(so->procinfo, so->normprocinfo);
+        /* Now save pqTable and pqDistanceTable in the relcache entry. */
+        if (index->pqTable == NULL) {
+            MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
+            index->pqTable = IVFPQLoadPQtable(index);
+            (void)MemoryContextSwitchTo(oldcxt);
+        }
+        if (index->pqDistanceTable == NULL && so->byResidual && so->funcType != IVFPQ_DIS_IP) {
+            MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
+            index->pqDistanceTable = IVFPQLoadPQDisTable(index);
+            (void)MemoryContextSwitchTo(oldcxt);
+        }
+    }
+}
+
+void IvfpqComputeQueryRelTablesInternal(IvfflatScanOpaque so, float *q, char *pqTable, bool innerPro, float *simTable)
+{
+    int pqM = so->pqM;
+    int pqKsub = so->pqKsub;
+    int dim = so->dimensions;
+    int dsub = dim / pqM;
+    Size subSize = MAXALIGN(so->typeInfo->itemSize(dsub));
+
+    for (int m = 0; m < pqM; m++) {
+        int offset = m * pqKsub;
+        float *qsubVector = q + m * dsub;
+        float *dis = simTable + offset;
+        /* one-to-many computation */
+        if (innerPro) {
+            /* negate when GetPQDistance  */
+            VectorInnerProductNY(dsub, pqKsub, qsubVector, pqTable, subSize, offset, dis);
+        } else {
+            VectorL2SquaredDistanceNY(dsub, pqKsub, qsubVector, pqTable, subSize, offset, dis);
+        }
+    }
+}
+
+/*
+ * Precompute some tables specific to query q, r is cluster center of PQ.
+ */
+void IvfpqComputeQueryRelTables(IvfflatScanOpaque so, Relation index, Datum q, float *simTable)
+{
+    if (so->funcType == IVFPQ_DIS_IP) {
+        /* compute q*r */
+        IvfpqComputeQueryRelTablesInternal(so, DatumGetVector(q)->x, index->pqTable, true, simTable);
+    } else {
+        /* funcType is cosine or l2 */
+        if (so->byResidual) {
+            /* compute q*r */
+            IvfpqComputeQueryRelTablesInternal(so, DatumGetVector(q)->x, index->pqTable, true, simTable);
+        } else {
+            /* compute (q-r)^2 */
+            IvfpqComputeQueryRelTablesInternal(so, DatumGetVector(q)->x, index->pqTable, false, simTable);
+        }
+    }
+}
+
+uint8 *LoadPQCode(IndexTuple itup)
+{
+    return (uint8 *)((char *)itup + MAXALIGN(IndexTupleSize(itup)));
+}
+
+float GetPQDistance(float *pqDistanceTable, uint8 *code, double dis0, int pqM, int pqKsub, bool innerPro)
+{
+    float resDistance = dis0;
+    for (int i = 0; i < pqM; i++) {
+        int offset = i * pqKsub + code[i];
+        resDistance += pqDistanceTable[offset];
+    }
+    return innerPro ? (0 - resDistance) : resDistance;
+}
+
+IvfpqPairingHeapNode * IvfpqCreatePairingHeapNode(float distance, ItemPointer heapTid,
+                                                  BlockNumber indexBlk, OffsetNumber indexOff)
+{
+    IvfpqPairingHeapNode *n = (IvfpqPairingHeapNode *)palloc(sizeof(IvfpqPairingHeapNode));
+    n->distance = distance;
+    n->heapTid = heapTid;
+    n->indexBlk = indexBlk;
+    n->indexOff = indexOff;
+    return n;
+}
+
 /*
  * Get type info
  */
@@ -263,7 +423,7 @@ int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo)
             return IVF_PQ_DIS_COSINE;
         }
     } else {
-        ereport(ERROR, (errmsg("current data type or distance type can't support ivfflatpq.")));
+        ereport(ERROR, (errmsg("current data type or distance type can't support IVFPQ.")));
         return -1;
     }
 }
@@ -365,7 +525,7 @@ int IvfGetByResidual(Relation index)
         return opts->byResidual;
     }
 
-    return IVFFLAT_DEFAULT_PQ_RESIDUAL;
+    return IVFPQ_DEFAULT_RESIDUAL;
 }
 
 void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)
