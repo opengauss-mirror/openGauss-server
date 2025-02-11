@@ -653,8 +653,6 @@ bool HnswDelete(Relation index, Datum *values, const bool *isnull, ItemPointer h
 void HnswUpdateAppendMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber eleInsertPage,
                               BlockNumber neiInsertPage, ForkNumber forkNum, bool building);
 void FlushPQInfo(HnswBuildState *buildstate);
-char *LoadPQtable(Relation index);
-float *LoadPQDisTable(Relation index);
 void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
                                uint16 *pqDisTableNblk, uint32 *pqDisTableSize);
 

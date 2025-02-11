@@ -3141,7 +3141,7 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
-    /* init datavec hnswpq */
+    /* init datavec pq */
     if (g_instance.attr.attr_storage.enable_pq) {
         int ret = PQInit();
         if (ret != 0) {

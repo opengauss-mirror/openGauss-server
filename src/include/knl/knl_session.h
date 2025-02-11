@@ -3010,6 +3010,7 @@ typedef struct knl_u_datavec_context {
     int hnsw_ef_search;
     int hnsw_earlystop_threshold;
     int ivfflat_probes;
+    int ivfpq_kreorder;
 } knl_u_datavec_context;
 
 typedef struct knl_session_context {
