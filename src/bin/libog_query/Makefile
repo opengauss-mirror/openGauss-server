@@ -27,8 +27,8 @@ endif
 SRC_FILES := $(wildcard src*.cpp) $(wildcard contrib*.cpp)
 OBJ_FILES := $(SRC_FILES:.cpp=.o)
 
-override CFLAGS += -g3 -gdwarf-2 -I. -Iinclude -I$(top_builddir)/src/include/knl -Wall -Wno-unused-function -Wno-unused-value -Wno-unused-variable -fno-strict-aliasing -fwrapv -fPIC -DPGXC -DDOLPHIN -DENABLE_MOT -DENABLE_HTAP -fno-exceptions -Wwrite-strings -L$(GAUSSHOME)/lib -lstdc++ -lcjson -lsecurec -DUSE_ASSERT_CHECKING -DMEMORY_CONTEXT_CHECKING
-override CXXFLAGS += -g3 -gdwarf-2 -I. -Iinclude -I$(top_builddir)/src/include/knl -Wall -Wno-unused-function -Wno-unused-value -Wno-unused-variable -fno-strict-aliasing -fwrapv -fPIC -DPGXC -DDOLPHIN -DENABLE_MOT -DENABLE_HTAP -fno-exceptions -Wwrite-strings -L$(GAUSSHOME)/lib -lstdc++ -lcjson -lsecurec -DUSE_ASSERT_CHECKING -DMEMORY_CONTEXT_CHECKING
+override CFLAGS += -g3 -gdwarf-2 -I. -Iinclude -Iinclude/plugin_parser -I$(top_builddir)/src/include/knl -Wall -Wno-unused-function -Wno-unused-value -Wno-unused-variable -fno-strict-aliasing -fwrapv -fPIC -DPGXC -DENABLE_MOT -DENABLE_HTAP -fno-exceptions -Wwrite-strings -L$(GAUSSHOME)/lib -lstdc++ -lcjson -lsecurec -DUSE_ASSERT_CHECKING -DMEMORY_CONTEXT_CHECKING
+override CXXFLAGS += -g3 -gdwarf-2 -I. -Iinclude -Iinclude/plugin_parser -I$(top_builddir)/src/include/knl -Wall -Wno-unused-function -Wno-unused-value -Wno-unused-variable -fno-strict-aliasing -fwrapv -fPIC -DPGXC -DENABLE_MOT -DENABLE_HTAP -fno-exceptions -Wwrite-strings -L$(GAUSSHOME)/lib -lstdc++ -lcjson -lsecurec -DUSE_ASSERT_CHECKING -DMEMORY_CONTEXT_CHECKING
 
 override PG_CONFIGURE_FLAGS += -q --without-readline --without-zlib --without-icu
 
