@@ -2647,7 +2647,7 @@ found_branch:
      * if it was already in the buffer pool, we're done
      */
     if (found) {
-        if (ENABLE_DMS) {
+        if (ENABLE_DMS && !isLocalBuf) {
             MarkReadPblk(bufHdr->buf_id, pblk);
         }
         if (!isExtend) {
@@ -2754,7 +2754,7 @@ found_branch:
     }
 
     /* DMS: Try get page remote */
-    if (ENABLE_DMS) {
+    if (ENABLE_DMS && !isLocalBuf) {
         MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
         if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
             Assert(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));

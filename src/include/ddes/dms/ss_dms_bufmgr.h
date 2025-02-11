@@ -28,7 +28,6 @@
 #include "storage/buf/buf_internals.h"
 #include "access/xlogproc.h"
 
-#define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
 #define SS_BUF_MAX_WAIT_TIME (1000L * 1000 * 20) // 20s
 #define SS_BUF_WAIT_TIME_IN_ONDEMAND_REALTIME_BUILD (100000L)  // 100ms
 
@@ -85,6 +84,18 @@ Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
 void DmsReleaseBuffer(int buffer, bool is_seg);
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
 void ForgetBufferNeedCheckPin(Buffer buf_id);
+
+#ifdef USE_ASSERT_CHECKING
+inline dms_buf_ctrl_t* GetDmsBufCtrl(int id)
+{
+    Assert(id >= 0);
+    return &t_thrd.storage_cxt.dmsBufCtl[(id)];
+}
+
+#else
+#define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
+
+#endif
 
 inline bool SSBufferIsDirty(BufferDesc *buf_desc)
 {
