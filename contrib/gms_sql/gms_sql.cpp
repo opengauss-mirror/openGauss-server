@@ -92,7 +92,9 @@ create_cursors()
                                             "gms_sql persist context",
                                             ALLOCSET_DEFAULT_SIZES);
         get_session_context()->gms_sql_cxt = persist_cxt;
-        get_session_context()->gms_sql_cursors = (CursorData*)MemoryContextAllocZero(persist_cxt, u_sess->attr.attr_common.maxOpenCursorCount * sizeof(CursorData));
+        if (!get_session_context()->gms_sql_cursors) {
+            get_session_context()->gms_sql_cursors = (CursorData*)MemoryContextAllocZero(persist_cxt, u_sess->attr.attr_common.maxOpenCursorCount * sizeof(CursorData));
+        }
     }
 }
 static void
