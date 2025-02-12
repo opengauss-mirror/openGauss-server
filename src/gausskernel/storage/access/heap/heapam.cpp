@@ -105,6 +105,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "ddes/dms/ss_transaction.h"
+#include "db4ai/db4ai_cpu.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/ts_store_insert.h"
@@ -10373,11 +10374,11 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     ItemPointer tid = &scan->xs_ctup.t_self;
     bool got_heap_tuple = false;
 
+    /* Switch to correct buffer if we don't have it already */
+    Buffer prev_buf = scan->xs_cbuf;
+
     /* We can skip the buffer-switching logic if we're in mid-HOT chain. */
     if (!scan->xs_continue_hot) {
-        /* Switch to correct buffer if we don't have it already */
-        Buffer prev_buf = scan->xs_cbuf;
-
         scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, ItemPointerGetBlockNumber(tid));
 
         /* In single mode and hot standby, we may get a null buffer if index
@@ -10399,6 +10400,19 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     if (RelationGetRelid(scan->heapRelation) == PartitionRelationId && BufferExclusiveLockHeldByMe(scan->xs_cbuf)) {
         ereport(ERROR, (errmsg("deadlock detected: requesting lock on pg_partition page while already holding it."),
                         errhint("retry this operation after other DDL operation finished.")));
+    }
+
+    /* Prefetch page header to quickly locate heap buffer by index. */
+    if (u_sess->attr.attr_storage.enable_heap_prefetch && prev_buf != scan->xs_cbuf) {
+        register char *dp = (char *)BufferGetPage(scan->xs_cbuf);
+        prefetch(dp, 0, 0);
+        prefetch(dp + 64, 0, 0);
+        prefetch(dp + 128, 0, 0);
+        prefetch(dp + 192, 0, 0);
+        prefetch(dp + 256, 0, 0);
+        prefetch(dp + 320, 0, 0);
+        prefetch(dp + 384, 0, 0);
+        prefetch(dp + 448, 0, 0);
     }
 
     /* Obtain share-lock on the buffer so we can examine visibility */

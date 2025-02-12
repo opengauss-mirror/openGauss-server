@@ -2026,6 +2026,19 @@ static void InitConfigureNamesBool()
             false
         },
 #endif
+        {{"enable_heap_prefetch",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable prefetch heap header"),
+            NULL
+            },
+            &u_sess->attr.attr_storage.enable_heap_prefetch,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"enable_gtt_concurrent_truncate",
             PGC_SIGHUP,
             NODE_SINGLENODE,

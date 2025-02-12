@@ -315,6 +315,7 @@ synchronous_standby_names = '*'	# standby servers that provide sync rep
 				# It's global control for all transactions
 #vacuum_defer_cleanup_age = 0	# number of xacts by which cleanup is delayed
 #enable_vacuum_extreme_xmin = off # Use extreme xmin to vacuum
+#enable_heap_prefetch = on # Enable prefetch heap header
 #data_replicate_buffer_size = 16MB	# data replication buffer size
 walsender_max_send_size = 8MB  # Size of walsender max send size
 #enable_data_replicate = on
