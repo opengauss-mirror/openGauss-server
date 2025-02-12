@@ -389,7 +389,7 @@ Datum corr_k_final_fn(PG_FUNCTION_ARGS)
     if (n0 == tiedX || n0 == tiedY) {
         PG_RETURN_NULL();
     }
-    float8 tau_b = (float8)(concordant - discordant) / sqrt((n0 - tiedX) * (n0 - tiedY));
+    float8 tau_b = (float8)(concordant - discordant) / sqrt((float8)(n0 - tiedX) * (float8)(n0 - tiedY));
 
     if (mode == ModeType::COEFFICIENT) {
         result = tau_b;

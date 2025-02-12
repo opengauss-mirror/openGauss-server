@@ -300,6 +300,24 @@ CORR_S(value2, value4) AS corr_value2_value4,
 CORR_S(value3, value4) AS corr_value3_value4
 FROM test_data3;
 
+CREATE TABLE sales_data (
+price DECIMAL(10, 2),
+quantity_sold INT
+);
+
+DECLARE
+i NUMBER := 1;
+BEGIN
+FOR i IN 1..10000 LOOP
+INSERT INTO sales_data (price, quantity_sold) VALUES (i, i);
+END LOOP;
+COMMIT;
+END;
+/
+
+SELECT CORR_S(price, quantity_sold) FROM sales_data;
+SELECT CORR_K(price, quantity_sold) FROM sales_data;
+
 drop table test_table;
 drop table null_table1;
 drop table null_table2;
@@ -310,5 +328,6 @@ drop table test_data;
 drop table test_data1;
 drop table test_data2;
 drop table test_data3;
+DROP TABLE sales_data;
 drop table t1;
 drop schema aggregate CASCADE;
