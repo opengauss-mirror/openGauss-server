@@ -42,6 +42,7 @@
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
 #include "storage/buf/buf_internals.h"
+#include "../../page/pageparse.h"
 #include "storage/freespace.h"
 #include "storage/ipc.h"
 #include "utils/guc.h"
@@ -126,6 +127,9 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
         } else if (isSegmentPage) {
+            if (ENABLE_DMS) {
+                DumpPageToSpecifiedDirectory(bufferinfo->buf, "segment", true, NULL, 0, pblk, "lsn_check_dump");
+            }
             return XLogLsnCheckLogInvalidPage(bufferinfo, SEGPAGE_LSN_CHECK_ERROR, pblk);
         } else if (PageIsJustAfterFullPageWrite(page)) {
             ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -1639,7 +1643,12 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
 
         bool willinit = XLogBlockDataGetBlockFlags(blockdatarec) & BKPBLOCK_WILL_INIT;
         bool buf_willinit = XLogBlockDataGetBlockFlags(blockdatarec) & REGBUF_WILL_INIT;
+        RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
         if ((willinit == false) && (notfound == true)) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] XLogBlockGetOperatorBuffer:"
+                "page not found, xlogLsn:%lu, pageLsn:%lu", blockinfo->rnode.spcNode,
+                blockinfo->rnode.dbNode, blockinfo->rnode.relNode, blockinfo->rnode.bucketNode,
+                blockinfo->forknum, blockinfo->blkno, xlogLsn, pageLsn)));
             return BLK_NOTFOUND;
         }
 

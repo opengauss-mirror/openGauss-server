@@ -1658,3 +1658,203 @@ Datum gs_parse_page_bypath(PG_FUNCTION_ARGS)
     char *outputFilename = ParsePage(path, blocknum, relation_type, read_memory);
     PG_RETURN_TEXT_P(cstring_to_text(outputFilename));
 }
+
+bool CheckDumpPageSpecifiedDirectory(char* specifiedDir)
+{
+    errno_t rc = EOK;
+    char *dumpDir = (char *)palloc0(MAXFILENAME * sizeof(char));
+
+    rc = snprintf_s(dumpDir, MAXFILENAME, MAXFILENAME -1, "%s/%s", u_sess->attr.attr_common.Log_directory, "dump");
+    securec_check_ss(rc, "\0", "\0");
+
+    if (mkdir(dumpDir, S_IRWXU) < 0 && errno != EEXIST) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", dumpDir)));
+        pfree(dumpDir);
+        return false;
+    }
+
+    if (strcmp(specifiedDir, "") != 0) {
+        rc = strcat_s(dumpDir, strlen(dumpDir) + strlen("/") + 1, "/");
+        securec_check_ss(rc, "\0", "\0");
+        rc = strcat_s(dumpDir, strlen(dumpDir) + strlen(specifiedDir) + 1, specifiedDir);
+        securec_check_ss(rc, "\0", "\0");
+
+        if (mkdir(dumpDir, S_IRWXU) < 0 && errno != EEXIST) {
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", dumpDir)));
+            pfree(dumpDir);
+            return false;
+        }
+    }
+
+    pfree(dumpDir);
+    return true;
+}
+
+/*
+ * Function：dump_page_to_specified_directory
+ * Description: dump one page to specified directory which named by page erroe type.
+ * Support dump page: heap, segment_heap
+ * Support parse page: heap
+ * Support dump page input fomat: buffer, page, (rel, blkno)
+ * pblk is NULL: On condition of segment head page, pblk is null.
+ */
+void DumpPageToSpecifiedDirectory(Buffer buffer, char* pageType, bool dump, Relation rel, BlockNumber blkno,
+                                  const XLogPhyBlock *pblk, char* specifiedDir)
+{
+    errno_t rc = EOK;
+    BufferDesc *buf_desc = nullptr;
+    RelFileNode rnode = {InvalidOid, InvalidOid, InvalidOid, InvalidBktId, 0};
+    Page dump_page = nullptr;
+    BlockNumber blocknum = InvalidBlockNumber;
+    BlockNumber seg_block = InvalidBlockNumber;
+    struct stat statbuf;
+
+    if (BufferIsInvalid(buffer)) {
+        ereport(WARNING, (errmsg("[SS] dump_one_page: buffer %d is invalid, so dump page do not execute.", buffer)));
+        return;
+    }
+
+    buf_desc = GetBufferDescriptor(buffer - 1);
+    rnode.spcNode = buf_desc->tag.rnode.spcNode;
+    rnode.dbNode = buf_desc->tag.rnode.dbNode;
+    rnode.relNode = buf_desc->tag.rnode.relNode;
+    blocknum = buf_desc->tag.blockNum;
+    dump_page = BufferGetPage(buffer);
+
+    char *outputFilename = (char *)palloc0(MAXFILENAME * sizeof(char));
+    if (!CheckDumpPageSpecifiedDirectory(specifiedDir)) {
+        pfree(outputFilename);
+        return;
+    }
+
+    if (strcmp(pageType, "segment") == 0) {
+        uint8 seg_fileno;
+        if (pblk != NULL) {
+            seg_fileno = pblk->relNode;
+            seg_block = pblk->block;
+        } else {
+            SegPageLocation loc = seg_get_physical_location(rnode, MAIN_FORKNUM, blocknum, false);
+            seg_fileno = EXTENT_SIZE_TO_TYPE(loc.extent_size);
+            seg_block = loc.blocknum;
+            ereport(LOG, (errmodule(MOD_REMOTE), errmsg("[SS] DumpPageToSpecifiedDirectory: get physical location"
+                "page info:%u/%u/%u forknum %d blknum:%u, (pblk %u/%d)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, buf_desc->tag.forkNum,
+                blocknum, pblk->relNode, pblk->block)));
+        }
+        if (strcmp(specifiedDir, "") != 0) {
+            rc = snprintf_s(outputFilename, MAXFILENAME, MAXFILENAME -1,
+                            "%s/%s/%s/%u_%u_%u_%u_%u_%u.%s", u_sess->attr.attr_common.Log_directory, "dump",
+                            specifiedDir, rnode.spcNode, rnode.dbNode, rnode.relNode, blocknum, seg_fileno,
+                            seg_block, pageType);
+            securec_check_ss(rc, "\0", "\0");
+        } else {
+            rc = snprintf_s(outputFilename, MAXFILENAME, MAXFILENAME -1,
+                            "%s/%s/%u_%u_%u_%u_%u_%u.%s", u_sess->attr.attr_common.Log_directory, "dump",
+                            rnode.spcNode, rnode.dbNode, rnode.relNode, blocknum, seg_fileno, seg_block, pageType);
+            securec_check_ss(rc, "\0", "\0");
+        }
+    } else {
+        if (strcmp(specifiedDir, "") != 0) {
+            rc = snprintf_s(outputFilename, MAXFILENAME, MAXFILENAME -1,
+                            "%s/%s/%s/%u_%u_%u_%u.%s", u_sess->attr.attr_common.Log_directory, "dump", specifiedDir,
+                            rnode.spcNode, rnode.dbNode, rnode.relNode, blocknum, pageType);
+            securec_check_ss(rc, "\0", "\0");
+        } else {
+            rc = snprintf_s(outputFilename, MAXFILENAME, MAXFILENAME -1,
+                            "%s/%s/%u_%u_%u_%u.%s", u_sess->attr.attr_common.Log_directory, "dump",
+                            rnode.spcNode, rnode.dbNode, rnode.relNode, blocknum, pageType);
+            securec_check_ss(rc, "\0", "\0");
+        }
+    }
+
+    if (lstat(outputFilename, &statbuf) == 0) {
+        return;
+    }
+
+    FILE *outputfile = fopen(outputFilename, "w+");
+    if (outputfile == nullptr) {
+        ereport(WARNING, (errcode_for_file_access(), (errmsg("[SS] dump_page_to_specified_directory:"
+            "could not open %s: %s", outputFilename, TRANSLATE_ERRNO))));
+        pfree(outputFilename);
+        return;
+    }
+
+    uint result = fwrite(dump_page, sizeof(char), BLCKSZ, outputfile);
+    if (result != BLCKSZ) {
+        ereport(WARNING,
+                (errcode_for_file_access(),
+                errmsg("[SS] dump_page_to_specified_directory:could not write file %s: %s",
+                outputFilename, TRANSLATE_ERRNO)));
+        fclose(outputfile);
+        pfree(outputFilename);
+        return;
+    }
+
+    fclose(outputfile);
+
+    BufferTag buf_tag;
+    INIT_BUFFERTAG(buf_tag, rnode, 0, blocknum);
+    if (dump) {
+        if (strcmp(pageType, "segment") == 0) {
+            DumpOnePage(dump_page, buf_tag, pageType, specifiedDir, seg_block, rnode);
+        } else {
+            DumpOnePage(dump_page, buf_tag, pageType, specifiedDir, blocknum, rnode);
+        }
+    }
+    pfree(outputFilename);
+}
+
+void DumpOnePage(Page buffer, const BufferTag& buf_tag, char* pageType, char* specifiedDir,
+                 BlockNumber blkno, const RelFileNode &rnode)
+{
+    errno_t rc = EOK;
+    PageParseText *page_parse_ctx = nullptr;
+    page_parse_ctx = (PageParseText *)palloc0(sizeof(PageParseText) + MAXOUTPUTLEN * sizeof(char));
+    rc = memset_s(page_parse_ctx, sizeof(PageParseText) + MAXOUTPUTLEN * sizeof(char),
+                  0, sizeof(PageParseText) + MAXOUTPUTLEN * sizeof(char));
+    securec_check_ss(rc, "\0", "\0");
+
+    char *strOutput = page_parse_ctx->format_output;
+    const PageHeader dump_page = (const PageHeader)buffer;
+
+    ParseOnePage(dump_page, blkno, strOutput, pageType, 0, false);
+
+    char *dumpFilename = (char *)palloc0(MAXFILENAME * sizeof(char));
+
+    if (strcmp(specifiedDir, "") != 0) {
+        rc = snprintf_s(dumpFilename, MAXFILENAME, MAXFILENAME -1,
+                        "%s/%s/%s/%u_%u_%u_%u.dump", u_sess->attr.attr_common.Log_directory, "dump", specifiedDir,
+                        buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.blockNum);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(dumpFilename, MAXFILENAME, MAXFILENAME -1,
+                        "%s/%s/%u_%u_%u_%u.dump", u_sess->attr.attr_common.Log_directory, "dump",
+                        buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.blockNum);
+        securec_check_ss(rc, "\0", "\0");
+    }
+
+    FILE *outputfile = fopen(dumpFilename, "w+");
+    if (outputfile == nullptr) {
+        ereport(WARNING, (errcode_for_file_access(), (errmsg("[SS] dump_one_page: cannot open %s", dumpFilename))));
+        pfree(dumpFilename);
+        pfree(page_parse_ctx);
+        return;
+    }
+
+    ereport(LOG, (errmsg("[SS] dump page to specified directory start.")));
+    uint result = fwrite(strOutput, 1, strlen(strOutput), outputfile);
+    if (result != strlen(strOutput)) {
+        ereport(WARNING, (errcode(ERRCODE_FILE_WRITE_FAILED),
+                (errmsg("[SS] dump_one_page: cannot write %s", dumpFilename))));
+        fclose(outputfile);
+        pfree(dumpFilename);
+        pfree(page_parse_ctx);
+        return;
+    }
+    ereport(LOG, (errmsg("[SS] dump page to specified directory end.")));
+
+    fclose(outputfile);
+    pfree(dumpFilename);
+    pfree(page_parse_ctx);
+    return;
+}
