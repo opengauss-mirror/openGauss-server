@@ -1549,6 +1549,8 @@ is_identif(unsigned char c)
         return true;
     else if (c >= 0200)
         return true;
+    else if (c >= '0' && c <= '9')
+        return true;
     else
         return false;
 }

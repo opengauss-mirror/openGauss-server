@@ -752,6 +752,85 @@ CONTEXT:  referenced column: close_cursor
 select gms_sql.close_cursor(-1);
 ERROR:  cursor -1 value of cursor id is out of range
 CONTEXT:  referenced column: close_cursor
+--:1传参 test
+drop table if exists cux_demo;
+NOTICE:  table "cux_demo" does not exist, skipping
+create table cux_demo(a int,b int);
+insert into cux_demo values(1,2);
+insert into cux_demo values(2,2);
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, '1', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+NOTICE:  CURSOR_NAME,0
+NOTICE:  p_no,80
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':1', p_no);
+gms_sql.bind_variable(CURSOR_NAME, ':2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+NOTICE:  CURSOR_NAME,0
+NOTICE:  p_no,80
+--err test
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':11232153235', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+raise notice ':1,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+ERROR:  variable "11232153235" doesn't exists
+CONTEXT:  SQL statement "CALL gms_sql.bind_variable(CURSOR_NAME,':11232153235',p_no)"
+PL/pgSQL function inline_code_block line 7 at PERFORM
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':abc', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+raise notice ':1,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+ERROR:  variable "abc" doesn't exists
+CONTEXT:  SQL statement "CALL gms_sql.bind_variable(CURSOR_NAME,':abc',p_no)"
+PL/pgSQL function inline_code_block line 7 at PERFORM
 drop extension gms_sql;
 create extension gms_xmlgen;
 create extension gms_sql;

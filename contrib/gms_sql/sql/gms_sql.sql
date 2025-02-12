@@ -314,6 +314,79 @@ select gms_sql.is_open(3);
 select gms_sql.close_cursor(10000);
 select gms_sql.close_cursor(-1);
 
+--:1传参 test
+drop table if exists cux_demo;
+create table cux_demo(a int,b int);
+insert into cux_demo values(1,2);
+insert into cux_demo values(2,2);
+
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, '1', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':1', p_no);
+gms_sql.bind_variable(CURSOR_NAME, ':2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+
+--err test
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':11232153235', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+raise notice ':1,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+
+DECLARE
+p_no NUMBER := 80;
+CURSOR_NAME INTEGER := gms_sql.open_cursor;
+row_process INTEGER;
+v_b NUMBER;
+BEGIN
+gms_sql.parse(CURSOR_NAME, 'select * from cux_demo where a = :1 and b = :2', gms_sql.native);
+gms_sql.bind_variable(CURSOR_NAME, ':abc', p_no);
+gms_sql.bind_variable(CURSOR_NAME, '2', p_no);
+raise notice 'CURSOR_NAME,%',CURSOR_NAME;
+raise notice 'p_no,%',p_no;
+raise notice ':1,%',p_no;
+row_process := gms_sql.execute(CURSOR_NAME);
+gms_sql.close_cursor(CURSOR_NAME);
+END;
+/
+
 drop extension gms_sql;
 create extension gms_xmlgen;
 create extension gms_sql;
