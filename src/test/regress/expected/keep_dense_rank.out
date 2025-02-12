@@ -253,6 +253,33 @@ select count(id1) keep (DENSE_RANK FIRST ORDER BY id2 asc nulls first) from keep
      2
 (1 row)
 
+drop table t1 cascade;
+ERROR:  table "t1" does not exist
+create table t1(a clob, b int, c int);
+insert into t1 values('10',20,1);
+insert into t1 values('10',21,2);
+insert into t1 values('11',20,4);
+insert into t1 values('11',21,8);
+insert into t1 values('12',21,10);
+select avg(all a) from t1;
+         avg         
+---------------------
+ 10.8000000000000000
+(1 row)
+
+select avg(all a) keep(dense_rank first order by b) from t1;
+         avg         
+---------------------
+ 10.5000000000000000
+(1 row)
+
+select count(*) keep(dense_rank first order by b) from t1;
+ count 
+-------
+     2
+(1 row)
+
+drop table t1 cascade;
 \c regression;
 drop database if exists keep_func_adb;
 --only A_FORMAT support keep func
