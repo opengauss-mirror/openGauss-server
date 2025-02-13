@@ -1830,6 +1830,9 @@ static bool CheckCompatibilityForDDLPublications(const char* conninfo, List *pub
                 case PG_FORMAT:
                     checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_PG].name);
                     break;
+                case D_FORMAT:
+                    checkres = !pg_strcasecmp(datcompatibility, g_dbCompatArray[DB_CMPT_D].name);
+                    break;
                 default:
                     checkres = false;
             }

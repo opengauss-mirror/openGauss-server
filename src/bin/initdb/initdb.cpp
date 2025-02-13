@@ -1824,7 +1824,8 @@ static void bootstrap_template1(void)
     if (pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_A].name) == 0 ||
         pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_B].name) == 0 ||
         pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_C].name) == 0 ||
-        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_PG].name) == 0) {
+        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_PG].name) == 0 ||
+        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_D].name) == 0) {
         bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", dbcompatibility);
     } else if (strlen(dbcompatibility) == 0) {
         /* If we do not specify database compatibility, set B defaultly for distribution, A defaultly for single. */
