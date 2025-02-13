@@ -190,11 +190,6 @@ static void redo_update_seghead(Buffer buffer, const char *data)
     }
     head->nextents = xlog_data->nextents;
     head->total_blocks = xlog_data->total_blocks;
-    /* If all extents is freed, flush segment header to disk */
-    if (head->total_blocks == 0) {
-        SegmentCheck(head->nextents == 0);
-        FlushOneSegmentBuffer(buffer);
-    }
 }
 
 static void redo_new_level0_page(Buffer buffer, const char *data)
