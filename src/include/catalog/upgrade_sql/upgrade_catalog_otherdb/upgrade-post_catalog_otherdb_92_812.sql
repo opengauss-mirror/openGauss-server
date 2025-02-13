@@ -826,7 +826,7 @@ COMMENT ON OPERATOR pg_catalog.<>(anyset, int2) IS 'not equal';
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint2lt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
-COMMENT ON OPERATOR pg_catalog.<>(anyset, int2) IS 'not equal';
+COMMENT ON OPERATOR pg_catalog.<(anyset, int2) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint2gt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
