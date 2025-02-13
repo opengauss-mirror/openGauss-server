@@ -3328,7 +3328,9 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
             {
                 if (counter1 > 0)
                     appendStringInfo(&union_all_sql, ",");
-                appendStringInfo(&union_all_sql, " %s AS %s", strVal((Value *)linitial(((ColumnRef *)resTarget->val)->fields)), strVal((Value *)lfirst(colCell)));
+                appendStringInfo(&union_all_sql, " \"%s\" AS %s",
+                    strVal((Value *)linitial(((ColumnRef *)resTarget->val)->fields)),
+                    strVal((Value *)lfirst(colCell)));
                 counter1++;
             }
             else {
