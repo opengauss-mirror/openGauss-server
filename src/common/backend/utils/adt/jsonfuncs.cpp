@@ -2536,10 +2536,14 @@ static void populate_recordset_object_start(void *state)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("cannot call json_populate_recordset on an object")));
-    } else if (lex_level > 1 && !_state->use_json_as_text) {
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-         errmsg("cannot call json_populate_recordset with nested objects")));
+    } else if (lex_level > 1) {
+        if (!_state->use_json_as_text) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("cannot call json_populate_recordset with nested objects")));
+        } else {
+            return;
+        }
     }
 
     /* set up a new hash for this entry */
