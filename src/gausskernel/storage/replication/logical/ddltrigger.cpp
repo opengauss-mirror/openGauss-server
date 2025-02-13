@@ -27,6 +27,7 @@
 #include "replication/ddlmessage.h"
 #include "tcop/ddldeparse.h"
 #include "utils/lsyscache.h"
+#include "knl/knl_variable.h"
 
 const char* string_objtype(ObjectType objtype, bool isgrant);
 
@@ -63,7 +64,7 @@ bool relation_support_ddl_replication(Oid relid, bool rewrite)
     
     Relation rel = relation_open(relid, AccessShareLock);
     Oid relrewrite = RelationGetRelrewriteOption(rel);
-    if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+    if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP || u_sess->is_partition_autonomous_session) {
         support = false;
     } else if (rel->rd_rel->relkind == RELKIND_RELATION) {
         if (pg_strcasecmp(RelationGetOrientation(rel), ORIENTATION_ROW)) {
