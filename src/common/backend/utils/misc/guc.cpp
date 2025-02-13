@@ -606,6 +606,8 @@ static void InitConfigureNamesReal();
 static void InitConfigureNamesString();
 static void InitConfigureNamesEnum();
 
+static char** read_shared_guc_file(const char *path);
+
 /*
  * isMatchOptionName - Check wether the option name is in the configure file.
  *
@@ -12849,6 +12851,10 @@ char** alloc_opt_lines(int opt_lines_num)
  */
 char** read_guc_file(const char* path)
 {
+    if (is_dss_file(path)) {
+        return read_shared_guc_file(path);
+    }
+
     FILE* infile = NULL;
     int maxlength = 1, linelen = 0;
     int nlines = 0;
@@ -13057,34 +13063,7 @@ static int update_hba_file(char *scpath, char *despath)
     return 0;
 }
 
-static char** read_local_guc_file(char *path)
-{
-    char **lines = nullptr;
-    bool read_guc_file_success = true;
-    
-    PG_TRY();
-    {
-        lines = read_guc_file(path);
-    }
-    PG_CATCH();
-    {
-        read_guc_file_success = false;
-        EmitErrorReport();
-        FlushErrorState();
-    }
-    PG_END_TRY();
-    if (!read_guc_file_success) {
-        /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
-        return NULL;
-    }
-    if (lines == NULL) {
-        ereport(LOG, (errmsg("the config file has no data,please check it.")));
-        return NULL;
-    }
-    return lines;
-}
-
-static char** read_shared_guc_file(char *path) 
+static char** read_shared_guc_file(const char *path) 
 {
     int infileFd = 0;
     int maxlength = 1, linelen = 0;
@@ -13240,7 +13219,7 @@ static int update_shared_guc_file(char *path)
                          g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, CONFIG_BAK_FILENAME_PM);
     securec_check_ss(ret, "\0", "\0");
 
-    lines = read_local_guc_file(g_instance.attr.attr_common.ConfigFileName);
+    lines = read_guc_file(g_instance.attr.attr_common.ConfigFileName);
     if (lines == nullptr) {
         return -1;
     }
@@ -13336,7 +13315,6 @@ static int update_local_guc_file(char *path)
     }
 
     char **lines = nullptr;
-    bool read_guc_file_success = true;
     char *temp_buf = nullptr;
     int temp_buf_len = 0;
     int count = 0;
@@ -13354,21 +13332,7 @@ static int update_local_guc_file(char *path)
         pg_usleep(200000L);  /* sleep 200ms for lstat next time */
     }
 
-    PG_TRY();
-    {
-        lines = read_shared_guc_file(g_instance.datadir_cxt.configFilePath);
-    }
-    PG_CATCH();
-    {
-        read_guc_file_success = false;
-        EmitErrorReport();
-        FlushErrorState();
-    }
-    PG_END_TRY();
-    if (!read_guc_file_success) {
-        /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
-        return -1;
-    }
+    lines = read_guc_file(g_instance.datadir_cxt.configFilePath);
     if (lines == nullptr) {
         ereport(LOG, (errmsg("the shared config file \"%s\" has no data, please check it.",
                              g_instance.datadir_cxt.configFilePath)));
