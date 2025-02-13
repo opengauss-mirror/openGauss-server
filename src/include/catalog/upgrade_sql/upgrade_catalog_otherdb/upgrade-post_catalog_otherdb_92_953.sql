@@ -18,5 +18,9 @@ select pg_catalog.update_pg_description(1327, 'gbk_chinese_ci collation');
 select pg_catalog.update_pg_description(1328, 'gbk_bin collation');
 select pg_catalog.update_pg_description(1800, 'gb18030_chinese_ci collation');
 select pg_catalog.update_pg_description(1801, 'gb18030_bin collation');
+select pg_catalog.update_pg_description(1539, 'utf8mb4_bin collation');
+select pg_catalog.update_pg_description(1538, 'utf8mb4_unicode_ci collation');
+select pg_catalog.update_pg_description(1537, 'utf8mb4_general_ci collation');
+select pg_catalog.update_pg_description(1026, 'binary collation');
 
 DROP FUNCTION pg_catalog.update_pg_description;
