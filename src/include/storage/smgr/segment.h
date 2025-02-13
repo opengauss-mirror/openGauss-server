@@ -54,6 +54,10 @@ void seg_async_write(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **
 void seg_move_buckets(const RelFileNodeBackend &dest, const RelFileNodeBackend &src, List *bucketList);
 bool seg_fork_exists(SegSpace *spc, SMgrRelation reln, ForkNumber forknum, const XLogPhyBlock *pblk,
     XLogPhyBlock *fsm_pblk = NULL);
+/* seg_direct_read and seg_direct_read_get_range is used by spq plugin, don't delete! */
+void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber *blocknums, char *buffer,
+                     BlockNumber *locBlock);
+BlockNumber seg_direct_read_get_range(BlockNumber logic_id);
 
 /* Read/write by physical block number; used for segment meta data */
 void seg_physical_read(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, BlockNumber blocknum, char *buffer);
