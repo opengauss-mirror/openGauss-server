@@ -756,218 +756,272 @@ DROP OPERATOR IF EXISTS pg_catalog.>=(text, anyset) CASCADE;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = seteq, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(anyset, anyset) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setne, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, anyset) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setlt, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(anyset, anyset) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setgt, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(anyset, anyset) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setle, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(anyset, anyset) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setge, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(anyset, anyset) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint8eq, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(anyset, int8) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint8ne, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, int8) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint8lt, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(anyset, int8) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint8gt, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(anyset, int8) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint8le, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(anyset, int8) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint8ge, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(anyset, int8) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint2eq, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(anyset, int2) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint2ne, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, int2) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint2lt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, int2) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint2gt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(anyset, int2) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint2le, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(anyset, int2) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint2ge, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(anyset, int2) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint4eq, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(anyset, int4) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint4ne, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, int4) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint4lt, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(anyset, int4) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint4gt, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(anyset, int4) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint4le, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(anyset, int4) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint4ge, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(anyset, int4) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int8seteq, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(int8, anyset) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int8setne, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(int8, anyset) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int8setlt, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(int8, anyset) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int8setgt, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(int8, anyset) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int8setle, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(int8, anyset) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int8setge, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(int8, anyset) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int2seteq, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(int2, anyset) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int2setne, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(int2, anyset) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int2setlt, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(int2, anyset) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int2setgt, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(int2, anyset) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int2setle, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(int2, anyset) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int2setge, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(int2, anyset) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int4seteq, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
+COMMENT ON OPERATOR pg_catalog.=(int4, anyset) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int4setne, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(int4, anyset) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int4setlt, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(int4, anyset) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int4setgt, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(int4, anyset) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int4setle, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(int4, anyset) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int4setge, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(int4, anyset) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = settexteq, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
+COMMENT ON OPERATOR pg_catalog.=(anyset, text) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = settextne, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(anyset, text) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = settextlt, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(anyset, text) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = settextgt, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(anyset, text) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = settextle, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(anyset, text) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = settextge, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(anyset, text) IS 'greater than or equal';
 
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = textseteq, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
+COMMENT ON OPERATOR pg_catalog.=(text, anyset) IS 'equal';
 
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = textsetne, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<>(text, anyset) IS 'not equal';
 
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = textsetlt, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<(text, anyset) IS 'less than';
 
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = textsetgt, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>(text, anyset) IS 'greater than';
 
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = textsetle, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.<=(text, anyset) IS 'less than or equal';
 
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = textsetge, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
+COMMENT ON OPERATOR pg_catalog.>=(text, anyset) IS 'greater than or equal';
 
 --------------------------------------------------------------
 -- add new pg_cast
