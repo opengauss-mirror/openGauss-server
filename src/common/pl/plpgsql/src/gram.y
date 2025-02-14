@@ -9241,8 +9241,10 @@ read_sql_construct6(int until,
     int					nest_layers = 0;
     int					left_brace_count = 0;
     int					right_brace_count = 0;
-    bool					stop_count = false;
+    bool				stop_count = false;
     int					stop_tok;
+    bool				record_typename = false;
+    int					bracket_diff=0;
     /* mark if there are 2 table of index by var call functions in an expr */
     int tableof_func_dno = -1;
     int tableof_var_dno = -1;
@@ -9271,9 +9273,10 @@ read_sql_construct6(int until,
     {
         prev_tok = tok;
         tok = yylex();
-        if (tok == ',' && (left_brace_count - right_brace_count) > 0 && 
-           (left_brace_count - right_brace_count) < MAX_LAYER) {
-            typname_indexs[left_brace_count - right_brace_count] = typname_indexs[left_brace_count - right_brace_count] + 1;
+        bracket_diff = left_brace_count - right_brace_count;
+        record_typename = bracket_diff < MAX_LAYER && bracket_diff >= 0;  
+        if (tok == ',' && record_typename) {
+            typname_indexs[bracket_diff] = typname_indexs[bracket_diff] + 1;
         }
         if (tok == '\"' || tok == '\'') {
             if (stop_count && stop_tok == tok) {
@@ -9579,8 +9582,11 @@ read_sql_construct6(int until,
                 brack_cnt--;
                 /* fall through */
             case ')':
-                if (!stop_count)
+                if (!stop_count) {
                     right_brace_count++;
+                    bracket_diff = left_brace_count - right_brace_count;
+                    record_typename = bracket_diff < MAX_LAYER && bracket_diff >= 0;
+                }
                 if (context.list_right_bracket && context.list_right_bracket->length
                     && linitial_int(context.list_right_bracket) == parenlevel) {
                     /* append bracket instead of parentheses */
@@ -9855,11 +9861,13 @@ read_sql_construct6(int until,
                 {
                     nest_layers = var->nest_layers;
                 }
-                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                ntype->typname = pstrdup(var->refname);
-                ntype->layer = left_brace_count - right_brace_count;
-                ntype->index = typname_indexs[ntype->layer] + 1;
-                nest_typnames = lappend(nest_typnames, ntype);
+                if (record_typename) {
+                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                    ntype->typname = pstrdup(var->refname);
+                    ntype->layer = bracket_diff;
+                    ntype->index = typname_indexs[ntype->layer] + 1;
+                    nest_typnames = lappend(nest_typnames, ntype);
+                }
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
                 break;
             }
@@ -9885,23 +9893,27 @@ read_sql_construct6(int until,
                 {
                     nest_layers = var->nest_layers;
                 }
-                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                ntype->typname = pstrdup(var->refname);
-                ntype->layer = left_brace_count - right_brace_count;
-                ntype->index = typname_indexs[ntype->layer] + 1;
-                nest_typnames = lappend(nest_typnames, ntype);
+                if (record_typename) {
+                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                    ntype->typname = pstrdup(var->refname);
+                    ntype->layer = bracket_diff;
+                    ntype->index = typname_indexs[ntype->layer] + 1;
+                    nest_typnames = lappend(nest_typnames, ntype);
+                }
                 ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
                 break;
             }
             case T_RECORD:
             {
-                int dno = yylval.wdatum.datum->dno;
-                PLpgSQL_rec_type* rec_type = (PLpgSQL_rec_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
-                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                ntype->typname = pstrdup(rec_type->typname);
-                ntype->layer = left_brace_count - right_brace_count;
-                ntype->index = typname_indexs[ntype->layer] + 1;
-                nest_typnames = lappend(nest_typnames, ntype);
+                if (record_typename) {
+                    int dno = yylval.wdatum.datum->dno;
+                    PLpgSQL_rec_type* rec_type = (PLpgSQL_rec_type *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                    ntype->typname = pstrdup(rec_type->typname);
+                    ntype->layer = bracket_diff;
+                    ntype->index = typname_indexs[ntype->layer] + 1;
+                    nest_typnames = lappend(nest_typnames, ntype);
+                }
                 break;
             }
             case T_DATUM:
@@ -9943,58 +9955,62 @@ read_sql_construct6(int until,
                 }
             case T_WORD:
             {
-                char *name = yylval.word.ident;
-                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                ntype->typname = pstrdup(name);
-                ntype->layer = left_brace_count - right_brace_count;
-                ntype->index = typname_indexs[ntype->layer] + 1;
-                nest_typnames = lappend(nest_typnames, ntype);
+                if (record_typename) {
+                    char *name = yylval.word.ident;
+                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                    ntype->typname = pstrdup(name);
+                    ntype->layer = bracket_diff;
+                    ntype->index = typname_indexs[ntype->layer] + 1;
+                    nest_typnames = lappend(nest_typnames, ntype);
+                }
                 AddNamespaceIfPkgVar(yylval.word.ident, save_IdentifierLookup);
                 ds_changed = construct_word(&ds, &context, &tok, parenlevel, loc);
                 break;
             }
             case T_CWORD:
             {
-                List* name_list = yylval.cword.idents;
-                switch(name_list->length) {
-                    case 2:
-                    {
-                        char* packageName =  strVal(linitial(name_list));
-                        char* typeName =  strVal(lsecond(name_list));
-                        Oid namespaceOid = getCurrentNamespace();
-                        Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
-                        if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
-                            Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
-                            if (type_oid != InvalidOid) {
-                                char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
-                                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                                ntype->typname = pstrdup(castTypeName);
-                                ntype->layer = left_brace_count - right_brace_count;
-                                ntype->index = typname_indexs[ntype->layer] + 1;
-                                nest_typnames = lappend(nest_typnames, ntype);
+                if (record_typename) {
+                    List* name_list = yylval.cword.idents;
+                    switch(name_list->length) {
+                        case 2:
+                        {
+                            char* packageName =  strVal(linitial(name_list));
+                            char* typeName =  strVal(lsecond(name_list));
+                            Oid namespaceOid = getCurrentNamespace();
+                            Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
+                            if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
+                                Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
+                                if (type_oid != InvalidOid) {
+                                    char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
+                                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                                    ntype->typname = pstrdup(castTypeName);
+                                    ntype->layer = bracket_diff;
+                                    ntype->index = typname_indexs[ntype->layer] + 1;
+                                    nest_typnames = lappend(nest_typnames, ntype);
+                                }
                             }
+                            break;
                         }
-                        break;
-                    }
-                    case 3:
-                    {
-                        char* namesapceName =  strVal(linitial(name_list));
-                        char* packageName =  strVal(lsecond(name_list));
-                        char* typeName =  strVal(lthird(name_list));
-                        Oid namespaceOid = namesapceName ? get_namespace_oid(namesapceName, true) : InvalidOid;
-                        Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
-                        if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
-                            Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
-                            if (type_oid != InvalidOid) {
-                                char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
-                                PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
-                                ntype->typname = pstrdup(castTypeName);
-                                ntype->layer = left_brace_count - right_brace_count;
-                                ntype->index = typname_indexs[ntype->layer] + 1;
-                                nest_typnames = lappend(nest_typnames, ntype);
+                        case 3:
+                        {
+                            char* namesapceName =  strVal(linitial(name_list));
+                            char* packageName =  strVal(lsecond(name_list));
+                            char* typeName =  strVal(lthird(name_list));
+                            Oid namespaceOid = namesapceName ? get_namespace_oid(namesapceName, true) : InvalidOid;
+                            Oid pkgOid = packageName ? PackageNameGetOid(packageName, namespaceOid) : InvalidOid;
+                            if (pkgOid != InvalidOid && namespaceOid != InvalidOid) {
+                                Oid type_oid = LookupTypeInPackage(name_list, typeName, pkgOid, namespaceOid);
+                                if (type_oid != InvalidOid) {
+                                    char* castTypeName = CastPackageTypeName(typeName, pkgOid, pkgOid != InvalidOid, true);
+                                    PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type*)palloc(sizeof(PLpgSQL_nest_type));
+                                    ntype->typname = pstrdup(castTypeName);
+                                    ntype->layer = bracket_diff;
+                                    ntype->index = typname_indexs[ntype->layer] + 1;
+                                    nest_typnames = lappend(nest_typnames, ntype);
+                                }
                             }
+                            break;
                         }
-                        break;
                     }
                 }
                 ds_changed = construct_cword(&ds, &context, &tok, parenlevel, loc);
@@ -10071,7 +10087,7 @@ read_sql_construct6(int until,
         if (IS_ARRAY_STATE(context.list_array_state, ARRAY_COERCE)) {
             /* always append right parentheses at end of each element */
             appendStringInfoString(&ds, right_parentheses);
-            if ((left_brace_count - right_brace_count) > nest_layers) {
+            if (bracket_diff > nest_layers) {
                 plpgsql_append_object_typename(&ds, (PLpgSQL_type *)linitial(context.list_datatype));
             }
             SET_ARRAY_STATE(context.list_array_state, ARRAY_SEPERATOR);
