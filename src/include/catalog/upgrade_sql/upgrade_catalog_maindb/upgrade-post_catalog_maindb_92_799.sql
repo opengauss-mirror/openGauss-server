@@ -66,7 +66,7 @@ BEGIN
 	SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5721;
 	CREATE OR REPLACE FUNCTION pg_catalog.get_local_active_session
 		(OUT sampleid bigint, OUT sample_time timestamp with time zone, OUT need_flush_sample boolean, OUT databaseid oid, OUT thread_id bigint, OUT sessionid bigint, OUT start_time timestamp with time zone, OUT event text, OUT lwtid integer, OUT psessionid bigint, OUT tlevel integer, OUT smpid integer, OUT userid oid, OUT application_name text, OUT client_addr inet, OUT client_hostname text, OUT client_port integer, OUT query_id bigint, OUT unique_query_id bigint, OUT user_id oid, OUT cn_id integer, OUT unique_query text, OUT locktag text, OUT lockmode text, OUT block_sessionid bigint, OUT wait_status text, OUT global_sessionid text, OUT xact_start_time timestamp with time zone, OUT query_start_time timestamp with time zone, OUT state text)
-		RETURNS setof record LANGUAGE INTERNAL VOLATILE NOT FENCED as 'get_local_active_session';
+		RETURNS setof record LANGUAGE INTERNAL STABLE NOT FENCED NOT SHIPPABLE ROWS 100 as 'get_local_active_session';
     CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
 	  WITH RECURSIVE
 		las(sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
@@ -483,6 +483,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 9377;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_get_parallel_decode_status(OUT slot_name text, OUT parallel_decode_num int4, OUT read_change_queue_length text, OUT decode_change_queue_length text, OUT reader_lsn text, OUT working_txn_cnt int8, OUT working_txn_memory int8)
  RETURNS SETOF RECORD
  LANGUAGE internal
+ STABLE NOT FENCED NOT SHIPPABLE
 AS $function$gs_get_parallel_decode_status$function$;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
@@ -687,12 +688,13 @@ LANGUAGE plpgsql NOT FENCED;DROP FUNCTION IF EXISTS pg_catalog.gs_get_history_me
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5257;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_get_history_memory_detail(
 cstring,
-OUT memory_info text) RETURNS SETOF TEXT LANGUAGE INTERNAL as 'gs_get_history_memory_detail';DROP FUNCTION IF EXISTS gs_is_dw_io_blocked() CASCADE;
+OUT memory_info text) RETURNS SETOF TEXT LANGUAGE INTERNAL IMMUTABLE NOT FENCED NOT SHIPPABLE ROWS 100 as 'gs_get_history_memory_detail';
+DROP FUNCTION IF EXISTS gs_is_dw_io_blocked() CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4772;
-CREATE OR REPLACE FUNCTION pg_catalog.gs_is_dw_io_blocked(OUT result boolean)
+CREATE OR REPLACE FUNCTION pg_catalog.gs_is_dw_io_blocked(OUT boolean)
  RETURNS SETOF boolean
  LANGUAGE internal
- STABLE STRICT NOT FENCED NOT SHIPPABLE
+ STABLE STRICT NOT FENCED NOT SHIPPABLE ROWS 1000
 AS $function$gs_is_dw_io_blocked$function$;
 
 DROP FUNCTION IF EXISTS gs_block_dw_io(integer, text) CASCADE;
