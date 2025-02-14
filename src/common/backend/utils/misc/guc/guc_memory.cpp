@@ -789,6 +789,8 @@ static bool check_max_borrow_memory(int* newval, void** extra, GucSource source)
     if (*newval % minRackAllocSizeKb == 0) {
         return true;
     }
+    ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        errmsg("max_borrow_memory must be a integer multiple of 128MB.")));
     return false;
 }
 
