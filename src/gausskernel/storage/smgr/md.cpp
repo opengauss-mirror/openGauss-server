@@ -597,7 +597,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
                  */
                 if (do_truncate(segpath) < 0 && errno == ENOENT)
                     break;
-                
+
                 /*
                  * Forget any pending sync requests for this segment before we
                  * try to unlink.
@@ -670,7 +670,7 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     }
 
     if (unlikely((IS_COMPRESSED_MAINFORK(reln, forknum)))) {
-        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, skipFsync, EXTENSION_CREATE);
+        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, skipFsync, EXTENT_OPEN_FILE);
         CfsExtendExtent(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
                         forknum, blocknum, buffer, COMMON_STORAGE);
     } else {
@@ -885,7 +885,7 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
                  BlockNumber nblocks, RelFileNode relNode)
 {
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, EXTENT_OPEN_FILE);
+        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, WRITE_BACK_OPEN_FILE);
         CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
                      nblocks, COMMON_STORAGE);
         return;
@@ -950,7 +950,7 @@ void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t **dLis
     if (IS_COMPRESSED_MAINFORK(reln, forkNum)) {
         return;
     }
-    
+
     if (ENABLE_DSS) {
         return;
     }

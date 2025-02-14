@@ -1222,35 +1222,65 @@ void CompressPagePrepareConvert(char *src, bool diff_convert, bool *real_ByteCon
     }
 }
 
-inline size_t CompressReservedLen(const char* page)
+/** Get the page header size according to the page type
+ @param[in]  pageType   the page type: USTORE、ASTORE...
+ @return  The page header size of the specific type. */
+inline size_t GetSizeOfHeadData(uint8 pageType)
 {
-    auto length = offsetof(HeapPageCompressData, page_header) - offsetof(HeapPageCompressData, data);
-    return GetPageHeaderSize(page) + length;
+    if (pageType == PG_UHEAP_PAGE_LAYOUT_VERSION) {
+        return SizeOfUHeapPageHeaderData;
+    } else if (pageType == PG_HEAP_PAGE_LAYOUT_VERSION) {
+        return SizeOfHeapPageHeaderData;
+    } else {
+        return SizeOfPageHeaderData;
+    }
 }
 
-/**
- * CompressPageBufferBound()
- * -- Get the destination buffer boundary to compress one page.
- * Return needed destination buffer size for compress one page or
- *     -1 for unrecognized compression algorithm
- */
+/** Get the compressed page header size according to the page type
+ @param[in]  pageType   the page type: USTORE、ASTORE...
+ @return  The page header size of the specific type. */
+inline size_t GetSizeOfCprsHeadData(uint8 pageType)
+{
+    if (pageType == PG_UHEAP_PAGE_LAYOUT_VERSION) {
+        return offsetof(UHeapPageCompressData, data);
+    } else if (pageType == PG_HEAP_PAGE_LAYOUT_VERSION) {
+        return offsetof(HeapPageCompressData, data);
+    } else {
+        return offsetof(PageCompressData, data);
+    }
+}
+
+/** Get the destination buffer boundary to compress one page. The compressed page format include
+ compressed page header and compressed page data.
+ @param[in]     page        the source page to be compressed.
+ @param[in]     algorithm   the algorithm of compression: pglz, zstd, zlib.
+ @return the compressed page size, return -1 if the algorithm is unrecognized. */
 int CompressPageBufferBound(const char* page, uint8 algorithm)
 {
+    auto pageType = PageGetPageLayoutVersion(page);
+    auto srcHeaderSzie = GetSizeOfHeadData(pageType);
+    int compressedDstBound = -1;
     switch (algorithm) {
         case COMPRESS_ALGORITHM_PGLZ:
-            return BLCKSZ * 2;
+            compressedDstBound = BLCKSZ * 2;
+            break;
         case COMPRESS_ALGORITHM_ZSTD:
-            return ZSTD_compressBound(BLCKSZ - CompressReservedLen(page));
+            compressedDstBound = ZSTD_compressBound(BLCKSZ - srcHeaderSzie);
+            break;
         case COMPRESS_ALGORITHM_PGZSTD:
-            return BLCKSZ + 4;
+            compressedDstBound = BLCKSZ + 4;
+            break;
         case COMPRESS_ALGORITHM_ZLIB: {
-            uLong bound = ZLIB_compressBound(BLCKSZ - CompressReservedLen(page));
+            uLong bound = ZLIB_compressBound(BLCKSZ - srcHeaderSzie);
             Assert(bound <= INT_MAX);
-            return static_cast<int>(bound);
+            compressedDstBound = static_cast<int>(bound);
+            break;
         }
         default:
             return -1;
     }
+
+    return GetSizeOfCprsHeadData(pageType) + compressedDstBound;
 }
 
 int CompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option)
@@ -1287,28 +1317,6 @@ int DecompressPage(const char* src, char* dst)
 
     // no need to compress
     return -1;
-}
-
-inline size_t GetSizeOfHeadData(uint8 pagetype)
-{
-    if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
-        return SizeOfUHeapPageHeaderData;
-    } else if (pagetype == PG_HEAP_PAGE_LAYOUT_VERSION) {
-        return SizeOfHeapPageHeaderData;
-    } else {
-        return SizeOfPageHeaderData;
-    }
-}
-
-inline size_t GetSizeOfCprsHeadData(uint8 pagetype)
-{
-    if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
-        return offsetof(UHeapPageCompressData, data);
-    } else if (pagetype == PG_HEAP_PAGE_LAYOUT_VERSION) {
-        return offsetof(HeapPageCompressData, data);
-    } else {
-        return offsetof(PageCompressData, data);
-    }
 }
 
 #ifndef FRONTEND
@@ -1372,6 +1380,8 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
     bool real_ByteConvert = false;
     errno_t rc;
     THR_LOCAL char src_copy[BLCKSZ];
+    Assert(dst_size > GetSizeOfCprsHeadData(pagetype));
+    size_t compressd_buffer_size = dst_size - GetSizeOfCprsHeadData(pagetype);
 
     if (option.byteConvert) {
         rc = memcpy_s(src_copy, BLCKSZ, src, BLCKSZ);
@@ -1400,17 +1410,17 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
             bool zstd_with_ctx = t_thrd.page_compression_cxt.zstd_cctx != NULL;
             if (!zstd_with_ctx) {
                 compressed_size =
-                    ZSTD_compress(data, dst_size, compress_src + sizeOfHeaderData,
+                    ZSTD_compress(data, compressd_buffer_size, compress_src + sizeOfHeaderData,
                                   BLCKSZ - sizeOfHeaderData, level);
             } else {
                 compressed_size =
                     ZSTD_compress_advanced((ZSTD_CCtx *)t_thrd.page_compression_cxt.zstd_cctx,
-                                           data, dst_size, compress_src + sizeOfHeaderData,
+                                           data, compressd_buffer_size, compress_src + sizeOfHeaderData,
                                            BLCKSZ - sizeOfHeaderData, NULL, 0, g_zstd_params);
             }
 #else
             compressed_size =
-                ZSTD_compress(data, dst_size, compress_src + sizeOfHeaderData,
+                ZSTD_compress(data, compressd_buffer_size, compress_src + sizeOfHeaderData,
                               BLCKSZ - sizeOfHeaderData, level);
 #endif
             if (ZSTD_isError(compressed_size)) {

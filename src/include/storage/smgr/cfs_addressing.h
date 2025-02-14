@@ -27,41 +27,73 @@
 
 struct ExtentLocation {
     int fd;
-    /* file node of the relation file */
+    /** file node of the relation file */
     RelFileNode relFileNode;
-    /* segment extent number, not used currently */
+
+    /** Not used in segment store. in common storage, it's the compression extent number in the relFileNode. */
     BlockNumber extentNumber;
-    /* the cfs extent start and offset block */
+
+    /** The cfs extent start and offset block, i.e. The block no of 0-th block of current extent in current
+    disk file. */
     BlockNumber extentStart;
+
+    /** The n-th block in current compression extent. */
     BlockNumber extentOffset;
-    /* headerNum is global physical page number, which is different from storage_convert(COM_STORAGE).
-    The reason why we do like this: headerNum is used as a part of pca key in segment-page mode, if it's
-    a slice local page number, hash conflicts will occur in pca buffer. */
+
+    /** For Segment store: it's the PCA page Blocknumber in current relFileNode. the physical position offset
+    in current file(fd) is (pcaBlkNo % RELSEG_SIZE) * BLCKSZ. otherwise, it's the PCA block number of current
+    the disk file（fd). */
     BlockNumber headerNum;
-    /* compression mata data */
+
+    /** The compression mata data. */
     uint16 chunk_size;
+
+    /** The compression algorithm. */
     uint8 algorithm;
+
+    /** Whether or not is a segment store page. */
     bool is_segment_page;
+
     /* In some cases, like cfs extent cross 1G files, we don't compress blocks in it, is_compress_allowed is false */
     bool is_compress_allowed;
+
     void info() const
     {
-        ereport(LOG, (errmsg("ExtentLocation Info, fd:%d, relFileNode:%u, extentNumber:%d, extentStart:%d,"
-                             "extentOffset:%d, headerNum:%d, chunk_size:%d, algorithm:%d, is_segment_page:%d,"
-                             " is_compress_allowed:%d", fd, relFileNode.relNode, extentNumber, extentStart,
-                             extentOffset, headerNum, chunk_size, algorithm, is_segment_page, is_compress_allowed)));
+        ereport(LOG, (errmsg("ExtentLocation Info, fd: %d, relFileNode: %u, extentNumber: %d, extentStart: %d,"
+                             "extentOffset: %d, pca block numner: %d, chunk_size: %d, algorithm: %d, "
+                             "is_segment_page: %d, is_compress_allowed: %d", fd, relFileNode.relNode, extentNumber,
+                             extentStart, extentOffset, headerNum, chunk_size, algorithm, is_segment_page,
+                             is_compress_allowed)));
     }
-    /* convert global block number to slice local block number, only for special cfs extent in segment page mode */
-    BlockNumber get_local_block_num() const
+
+    /** Get curreunt block's physical offset in current disk file, only for special cfs extent in segment page mode
+     @return the curreunt block's physical offset in current disk file. */
+    off_t GetBlockPhysicalOffset() const
     {
-        BlockNumber local_block_num = (extentStart + extentOffset) % RELSEG_SIZE;
-        return local_block_num;
+        return ((extentStart + extentOffset) % RELSEG_SIZE) * BLCKSZ;
     }
-    /* convert global header number to slice local block number, only used in segment page mode */
-    BlockNumber get_local_header_num() const
+
+    /** Get PCA page's physical offset in current disk file.
+     @return the PCA page's physical offset in current disk file. */
+    off_t GetPcaPhysicalOffset() const
     {
-        BlockNumber local_header_num = headerNum % RELSEG_SIZE;
-        return local_header_num;
+        Assert(headerNum <= RELSEG_SIZE || is_segment_page);
+        if (is_segment_page) {
+            return (headerNum % RELSEG_SIZE) * BLCKSZ;
+        }
+        return headerNum * BLCKSZ;
+    }
+
+    /** Get PCA's block number in current RelFileNode.
+     @return the PCA's block number in current RelFileNode. */
+    BlockNumber GetFileNodePcaBlkno() const
+    {
+        if (is_segment_page) {
+            return headerNum;
+        }
+
+        auto totalExBlks = extentNumber * CFS_EXTENT_SIZE;
+        return totalExBlks - (totalExBlks % RELSEG_SIZE) + headerNum;
     }
 };
 
