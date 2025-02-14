@@ -36,11 +36,11 @@
  */
 static int CompareLists(const pairingheap_node *a, const pairingheap_node *b, void *arg)
 {
-    if (((const IvfflatScanList *)a)->distance > ((const IvfflatScanList *)b)->distance) {
+    if (((const IvfflatScanList *)a)->distance < ((const IvfflatScanList *)b)->distance) {
         return 1;
     }
 
-    if (((const IvfflatScanList *)a)->distance < ((const IvfflatScanList *)b)->distance) {
+    if (((const IvfflatScanList *)a)->distance > ((const IvfflatScanList *)b)->distance) {
         return -1;
     }
 
@@ -57,8 +57,6 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
     uint16 pqDisTableNblk;
     IvfGetPQInfoFromMetaPage(scan->indexRelation, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
     BlockNumber nextblkno = IVFPQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
-    int listCount = 0;
-    double maxDistance = DBL_MAX;
     int listId = 0;
 
     /* Search all list pages */
@@ -80,37 +78,17 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
             /* Use procinfo from the index instead of scan key for performance */
             distance = DatumGetFloat8(so->distfunc(so->procinfo, so->collation, PointerGetDatum(&list->center), value));
 
-            if (listCount < so->listCount) {
+            if (listId < so->listCount) {
                 IvfflatScanList *scanlist;
 
-                scanlist = &so->lists[listCount];
+                scanlist = &so->lists[listId];
                 scanlist->startPage = list->startPage;
                 scanlist->distance = distance;
                 scanlist->key = listId;
-                listCount++;
-
+                listId++;
                 /* Add to heap */
                 pairingheap_add(so->listQueue, &scanlist->ph_node);
-
-                /* Calculate max distance */
-                if (listCount == so->listCount)
-                    maxDistance = ((IvfflatScanList *)pairingheap_first(so->listQueue))->distance;
-            } else if (distance < maxDistance) {
-                IvfflatScanList *scanlist;
-
-                /* Remove */
-                scanlist = (IvfflatScanList *)pairingheap_remove_first(so->listQueue);
-
-                /* Reuse */
-                scanlist->startPage = list->startPage;
-                scanlist->distance = distance;
-                scanlist->key = listId;
-                pairingheap_add(so->listQueue, &scanlist->ph_node);
-
-                /* Update max distance */
-                maxDistance = ((IvfflatScanList *)pairingheap_first(so->listQueue))->distance;
             }
-            listId++;
         }
 
         nextblkno = IvfflatPageGetOpaque(cpage)->nextblkno;
