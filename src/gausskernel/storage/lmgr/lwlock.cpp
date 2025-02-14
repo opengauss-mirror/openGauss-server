@@ -1483,11 +1483,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
     forget_lwlock_acquire();
 
     /* Add lock to list of locks held by this backend */
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
-        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-    t_thrd.storage_cxt.num_held_lwlocks++;
+    remember_lwlock_hold(lock, mode);
 
     /*
      * Fix the process wait semaphore's count for any absorbed wakeups.
@@ -1626,11 +1622,7 @@ bool LWLockAcquireTimeout(LWLock *lock, LWLockMode mode, int timeout_ms)
 
     if (timeout_ms > 0) {
         /* Add lock to list of locks held by this backend */
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-        t_thrd.storage_cxt.num_held_lwlocks++;
+        remember_lwlock_hold(lock, mode);
     } else {
         RESUME_INTERRUPTS();
     }
@@ -1681,11 +1673,7 @@ bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode)
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE_FAIL(T_NAME(lock), mode);
     } else {
         /* Add lock to list of locks held by this backend */
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
-            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-        t_thrd.storage_cxt.num_held_lwlocks++;
+        remember_lwlock_hold(lock, mode);
 
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE(T_NAME(lock), mode);
     }
@@ -1805,11 +1793,7 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
     } else {
         LOG_LWDEBUG("LWLockAcquireOrWait", lock, "succeeded");
         /* Add lock to list of locks held by this backend */
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-        t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
-            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-        t_thrd.storage_cxt.num_held_lwlocks++;
+        remember_lwlock_hold(lock, mode);
 
         TRACE_POSTGRESQL_LWLOCK_WAIT_UNTIL_FREE(T_NAME(lock), mode);
     }
@@ -2016,41 +2000,9 @@ void LWLockUpdateVar(LWLock *lock, uint64 *valptr, uint64 val)
  */
 void LWLockRelease(LWLock *lock)
 {
-    LWLockMode mode = LW_EXCLUSIVE;
     uint64 oldstate;
     bool check_waiters = false;
-    int i;
-
-    /* Remove lock from list of locks held.  Usually, but not always, it will
-     * be the latest-acquired lock; so search array backwards. */
-    for (i = t_thrd.storage_cxt.num_held_lwlocks - 1; i >= 0; --i) {
-        if (lock == t_thrd.storage_cxt.held_lwlocks[i].lock) {
-            mode = t_thrd.storage_cxt.held_lwlocks[i].mode;
-            break;
-        }
-    }
-    if (i < 0) {
-        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
-    }
-
-    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-    if (u_sess->attr.attr_common.pgstat_track_activities&&
-        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
-        force_backtrace_messages = true;
-        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
-        u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG, ((errmsg("lwlock %s mode %d is held "
-            "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
-            now - t_thrd.storage_cxt.lwlock_held_times[i]))));
-        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
-    }
-
-    t_thrd.storage_cxt.num_held_lwlocks--;
-    for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
-        t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
-        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
-    }
+    LWLockMode mode = forget_lwlock_hold(lock);
 
     PRINT_LWDEBUG("LWLockRelease", lock, mode);
 
@@ -2096,38 +2048,11 @@ void LWLockRelease(LWLock *lock)
 void LWLockDowngrade(LWLock *lock)
 {
     PGPROC *proc = t_thrd.proc;
-    LWLockMode mode = LW_EXCLUSIVE;
     uint64 old_state;
     /* Check if it is necessary to wake up the processes in the waiting queue. Default does not wake up */
     bool check_waiters = false;
-    int i;
-
-    /*
-     * Ensure that the thread already holds an exclusive lock, if not, report an error and stop the operation
-     * The range of parameter i is [0, num_held_lwlocks - 1], num_held_lwlocks is the number of held locks.
-     */
-    for (i = t_thrd.storage_cxt.num_held_lwlocks - 1; i >= 0; --i) {
-        if (lock == t_thrd.storage_cxt.held_lwlocks[i].lock) {
-            mode = t_thrd.storage_cxt.held_lwlocks[i].mode;
-            break;
-        }
-    }
-    if ((i < 0) || (mode != LW_EXCLUSIVE)) {
-        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s not held or not exclusive mode", T_NAME(lock))));
-    }
-
-    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-    if (u_sess->attr.attr_common.pgstat_track_activities &&
-        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
-        force_backtrace_messages = true;
-        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
-        u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG, ((errmsg("lwlock %s mode %d is held "
-            "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
-            now - t_thrd.storage_cxt.lwlock_held_times[i]))));
-        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
-    }
+    int i = find_lwlock_hold(lock);
+    LWLockMode mode = t_thrd.storage_cxt.held_lwlocks[i].mode;
 
     PRINT_LWDEBUG("LWLockDowngrade", lock, mode);
 
@@ -2303,7 +2228,6 @@ void LWLockOwn(LWLock *lock)
 void LWLockDisown(LWLock *lock)
 {
     uint64 expected_state;
-    int i;
 
     /* Ensure that lock is held */
     expected_state = pg_atomic_read_u64(&lock->state);
@@ -2311,33 +2235,7 @@ void LWLockDisown(LWLock *lock)
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
 
-    for (i = t_thrd.storage_cxt.num_held_lwlocks; --i >= 0;) {
-        if (lock == t_thrd.storage_cxt.held_lwlocks[i].lock) {
-            break;
-        }
-    }
-
-    if (i < 0) {
-        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
-    }
-
-    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities? GetCurrentTimestamp() : (TimestampTz)0);
-    if (u_sess->attr.attr_common.pgstat_track_activities &&
-        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
-        force_backtrace_messages = true;
-        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
-        u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG, ((errmsg("lwlock %s mode %d is held "
-            "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
-            now - t_thrd.storage_cxt.lwlock_held_times[i]))));
-        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
-    }
-
-    t_thrd.storage_cxt.num_held_lwlocks--;
-    for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
-        t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
-    }
+    forget_lwlock_hold(lock);
 
     RESUME_INTERRUPTS();
 }
