@@ -492,6 +492,9 @@ test: accept_empty_str not_accept_empty_str pg_empty_str accept_empty_copy not_a
 
 test: lateral lateral_with_dop lateral_dump
 
+# test for forbid remote DDL
+test: forbid_ddl
+
 #test: gin/cgin
 test: cgin_select ignore_keyword_list keywords
 test: gin_select

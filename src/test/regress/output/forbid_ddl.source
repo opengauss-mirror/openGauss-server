@@ -1,0 +1,149 @@
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "listen_addresses='*'" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_nonowner_remote_ddl=off" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -h "host    all             all             `ip addr show | grep \"inet \" | grep -v 127.0.0.1 | awk '{print $2}' | cut -d \"/\" -f 1`/32            sha256" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 5
+-- forbin nonowner remote ddl
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create user grantee with password 'Asdf@1234';"
+CREATE ROLE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on database regression to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on schema public to grantee;"
+GRANT
+-- database
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create database db_ddl;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on database db_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d db_ddl -U "grantee" -W "Asdf@1234" -c "create schema test;"
+ERROR:  permission denied for database db_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d db_ddl -U "grantee" -W "Asdf@1234" -c "alter database db_ddl reset all";
+ERROR:  permission denied for database db_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d db_ddl -U "grantee" -W "Asdf@1234" -c "comment on database db_ddl IS 'test';"
+ERROR:  permission denied for database db_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop database db_ddl;"
+ERROR:  permission denied for database db_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on database db_ddl IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p 8798 -d regression -U "grantee" -W "Asdf@1234" -c "drop database db_ddl;"
+DROP DATABASE
+-- tablespace
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create tablespace ts_ddl relative location 'ts_ddl';"
+CREATE TABLESPACE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on tablespace ts_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "alter tablespace ts_ddl resize maxsize unlimited;"
+ERROR:  permission denied for tablespace ts_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "create table test(id int) tablespace ts_ddl;"
+ERROR:  permission denied for tablespace ts_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on tablespace ts_ddl IS 'test';"
+ERROR:  permission denied for tablespace ts_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop table test;"
+ERROR:  table "test" does not exist
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop tablespace ts_ddl;"
+ERROR:  permission denied for tablespace ts_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on tablespace ts_ddl IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop tablespace ts_ddl;"
+DROP TABLESPACE
+-- namespace
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create schema ns_ddl;"
+CREATE SCHEMA
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on schema ns_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "alter schema ns_ddl without blockchain;"
+ERROR:  permission denied for schema ns_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "create table ns_ddl.test(id int);"
+ERROR:  permission denied for schema ns_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on schema ns_ddl IS 'test';"
+ERROR:  permission denied for schema ns_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop schema ns_ddl cascade;"
+ERROR:  permission denied for schema ns_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on schema ns_ddl IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop schema ns_ddl cascade;"
+DROP SCHEMA
+-- class
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create table tb_ddl(id int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on table tb_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "truncate table tb_ddl;"
+ERROR:  permission denied for relation tb_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "alter table tb_ddl enable row level security;"
+ERROR:  permission denied for relation tb_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on table tb_ddl IS 'test';"
+ERROR:  permission denied for relation tb_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "vacuum tb_ddl;"
+WARNING:  skipping "tb_ddl" --- only table or database owner can vacuum it
+VACUUM
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "create index on tb_ddl(id);"
+ERROR:  permission denied for relation tb_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop table tb_ddl;"
+ERROR:  permission denied for relation tb_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on table tb_ddl IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop table tb_ddl;"
+DROP TABLE
+-- proc
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create function fn_ddl(id int) returns int as \$\$ begin return i; end; \$\$ language plpgsql;"
+CREATE FUNCTION
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on function fn_ddl(int) to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "alter function fn_ddl(int) reset all;"
+ERROR:  permission denied for function fn_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on function fn_ddl(int) IS 'test';"
+ERROR:  permission denied for function fn_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop function fn_ddl(int);"
+ERROR:  permission denied for function fn_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on function fn_ddl(int) IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop function fn_ddl(int);"
+DROP FUNCTION
+-- type
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create type tp_ddl as enum ('A', 'B');"
+CREATE TYPE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges on type tp_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "alter type tp_ddl add value 'test';"
+ERROR:  permission denied for type tp_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on type tp_ddl IS 'test';"
+ERROR:  permission denied for type tp_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "drop type tp_ddl;"
+ERROR:  permission denied for type tp_ddl
+DETAIL:  N/A
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on type tp_ddl IS 'test';"
+COMMENT
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop type tp_ddl;"
+DROP TYPE
+-- attribute
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "create table column_ddl(a int, b int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "grant all privileges (a) on column_ddl to grantee;"
+GRANT
+\! @abs_bindir@/gsql -p @portstring@ -h `ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d "/" -f 1` -d regression -U "grantee" -W "Asdf@1234" -c "comment on column column_ddl.a is 'test';"
+ERROR:  permission denied for relation column_ddl
+DETAIL:  N/A
