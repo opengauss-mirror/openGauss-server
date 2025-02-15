@@ -753,271 +753,325 @@ DROP OPERATOR IF EXISTS pg_catalog.<=(text, anyset) CASCADE;
 DROP OPERATOR IF EXISTS pg_catalog.>=(text, anyset) CASCADE;
 
 -- create operator with oid auto-allocated
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6435;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = seteq, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(anyset, anyset) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6436;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setne, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(anyset, anyset) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6437;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setlt, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(anyset, anyset) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6438;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setgt, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(anyset, anyset) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6439;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setle, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(anyset, anyset) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6440;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setge, LEFTARG = anyset, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(anyset, anyset) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6441;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint8eq, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(anyset, int8) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6442;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint8ne, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(anyset, int8) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6443;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint8lt, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(anyset, int8) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6444;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint8gt, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(anyset, int8) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6445;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint8le, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(anyset, int8) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6446;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint8ge, LEFTARG = anyset, RIGHTARG = int8, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(anyset, int8) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6447;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint2eq, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(anyset, int2) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6448;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint2ne, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(anyset, int2) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6449;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint2lt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(anyset, int2) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6450;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint2gt, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(anyset, int2) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6451;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint2le, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(anyset, int2) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6452;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint2ge, LEFTARG = anyset, RIGHTARG = int2, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(anyset, int2) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6453;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = setint4eq, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(anyset, int4) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6454;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = setint4ne, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(anyset, int4) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6455;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = setint4lt, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(anyset, int4) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6456;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = setint4gt, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(anyset, int4) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6457;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = setint4le, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(anyset, int4) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6458;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = setint4ge, LEFTARG = anyset, RIGHTARG = int4, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(anyset, int4) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6462;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int8seteq, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(int8, anyset) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6463;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int8setne, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(int8, anyset) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6464;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int8setlt, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(int8, anyset) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6465;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int8setgt, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(int8, anyset) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6466;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int8setle, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(int8, anyset) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6467;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int8setge, LEFTARG = int8, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(int8, anyset) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6468;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int2seteq, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(int2, anyset) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6469;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int2setne, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(int2, anyset) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6470;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int2setlt, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(int2, anyset) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6471;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int2setgt, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(int2, anyset) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6472;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int2setle, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(int2, anyset) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6473;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int2setge, LEFTARG = int2, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(int2, anyset) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6474;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = int4seteq, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 );
 COMMENT ON OPERATOR pg_catalog.=(int4, anyset) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6475;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = int4setne, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(int4, anyset) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6476;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = int4setlt, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(int4, anyset) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6477;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = int4setgt, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(int4, anyset) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6478;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = int4setle, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(int4, anyset) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6479;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = int4setge, LEFTARG = int4, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(int4, anyset) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6553;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = settexteq, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
 COMMENT ON OPERATOR pg_catalog.=(anyset, text) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6554;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = settextne, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(anyset, text) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6555;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = settextlt, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(anyset, text) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6556;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = settextgt, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(anyset, text) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6557;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = settextle, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(anyset, text) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6558;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = settextge, LEFTARG = anyset, RIGHTARG = text, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>=(anyset, text) IS 'greater than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6559;
 CREATE OPERATOR pg_catalog.=( 
  PROCEDURE = textseteq, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.=), NEGATOR = OPERATOR(pg_catalog.<>), RESTRICT = eqsel, JOIN = eqjoinsel, HASHES
 );
 COMMENT ON OPERATOR pg_catalog.=(text, anyset) IS 'equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6560;
 CREATE OPERATOR pg_catalog.<>( 
  PROCEDURE = textsetne, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<>), NEGATOR = OPERATOR(pg_catalog.=), RESTRICT = neqsel, JOIN = neqjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<>(text, anyset) IS 'not equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6561;
 CREATE OPERATOR pg_catalog.<( 
  PROCEDURE = textsetlt, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>), NEGATOR = OPERATOR(pg_catalog.>=), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<(text, anyset) IS 'less than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6562;
 CREATE OPERATOR pg_catalog.>( 
  PROCEDURE = textsetgt, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<), NEGATOR = OPERATOR(pg_catalog.<=), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.>(text, anyset) IS 'greater than';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6563;
 CREATE OPERATOR pg_catalog.<=( 
  PROCEDURE = textsetle, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.>=), NEGATOR = OPERATOR(pg_catalog.>), RESTRICT = scalarltsel, JOIN = scalarltjoinsel
 );
 COMMENT ON OPERATOR pg_catalog.<=(text, anyset) IS 'less than or equal';
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 6564;
 CREATE OPERATOR pg_catalog.>=( 
  PROCEDURE = textsetge, LEFTARG = text, RIGHTARG = anyset, COMMUTATOR = OPERATOR(pg_catalog.<=), NEGATOR = OPERATOR(pg_catalog.<), RESTRICT = scalargtsel, JOIN = scalargtjoinsel
 );
