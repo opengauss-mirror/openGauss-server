@@ -13490,6 +13490,13 @@ void check_variable_value_info(const char* var_name, const Expr* var_expr)
     USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
 
     if (found) {
+        if (IsA(entry->value, Const)) {
+            Const *con = entry->value;
+            if(!con->constbyval) {
+                Pointer s = DatumGetPointer(con->constvalue);
+                pfree_ext(s);
+            }
+        }
         pfree_ext(entry->value);
         entry->value = (Const *)copyObject((Const *)(var_expr));
         entry->isParse = false;
