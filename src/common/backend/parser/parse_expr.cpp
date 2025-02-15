@@ -1870,9 +1870,7 @@ static Node* transformUserVar(UserVar *uservar)
     result->name = uservar->name;
     result->value = (Expr *)con;
 
-    USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     /* if uservar is parsed, set to true */
-    entry->value = (Const *)copyObject(con);
     entry->isParse = true;
 
     return (Node *)result;
