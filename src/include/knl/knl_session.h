@@ -45,6 +45,7 @@
 
 #include <signal.h>
 
+#include "postgres.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/borrow_mem_pool.h"
 #endif
