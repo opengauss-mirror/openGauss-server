@@ -108,7 +108,7 @@ int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int exten
         - It's under a DSS storage.
         - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
-        nbytes = DirectFilePRead(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
+        nbytes = DirectFilePRead(location.fd, buffer, BLCKSZ, location.GetBlockPhysicalOffset(),
                                  (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         ereport(LOG, (errmodule(MOD_SEGMENT_PAGE),
                       errmsg("don't compress block due to it's a slice-acrossed block,"
@@ -647,7 +647,7 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
         - It's under a DSS storage.
         - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
     if (location.is_segment_page && (!location.is_compress_allowed)) {
-        nbytes = DirectFilePWrite(location.fd, buffer, BLCKSZ, location.get_local_block_num() * BLCKSZ,
+        nbytes = DirectFilePWrite(location.fd, buffer, BLCKSZ, location.GetBlockPhysicalOffset(),
                                   (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         ereport(LOG, (errmsg("CfsWritePage with out compress, logicBlockNumber:%u, fd:%d, extent_size:%d,"
                              "forknum:%d,type:%d, RelFileNode.relNode:%d, RelFileNode.opt:%d",
@@ -1033,7 +1033,7 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
     /* load the pca page directly */
     CfsExtentHeader *pca_disk = (CfsExtentHeader *)palloc0(BLCKSZ);
     CfsExtentHeader *pca_mem = (CfsExtentHeader *)palloc0(BLCKSZ);
-    int nbytes = FilePRead(location.fd, (char *)pca_disk, BLCKSZ, location.headerNum * BLCKSZ,
+    int nbytes = FilePRead(location.fd, (char *)pca_disk, BLCKSZ, location.GetPcaPhysicalOffset(),
                            (uint32)WAIT_EVENT_DATA_FILE_READ);
     if (nbytes != BLCKSZ) {
         pfree(pca_disk);
@@ -1430,7 +1430,7 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
     Assert(relation != NULL && IS_COMPRESSED_MAINFORK(relation, extInfo->forknum));
 
     int fd = CfsGetFd(relation, extInfo->forknum,
-        extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT, false, EXTENT_OPEN_FILE);
+        extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT, false, WRITE_BACK_OPEN_FILE);
     ExtentLocation location =
         StorageConvert(relation, relation->smgr_rnode.node, fd, CFS_EXTENT_SIZE, extInfo->forknum,
                        extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
@@ -1551,10 +1551,10 @@ static void CfsPunchHole(const ExtentLocation &location, CfsExtentHeader *assist
     uint32 chunksum = assistPca->allocated_chunks;
 
     uint32 punchOffset = chunksum * assistPca->chunk_size;
-    punchOffset = TYPEALIGN(MIN_FALLOCATE_SIZE, punchOffset); // alignment of 4K, the uint of punch hole
-
+    /* alignment of 4K, the uint of punch hole */
+    punchOffset = TYPEALIGN(MIN_FALLOCATE_SIZE, punchOffset);
     uint32 start = location.extentStart * BLCKSZ + punchOffset;
-    uint32 punchSize = (location.headerNum - location.extentStart) * BLCKSZ - punchOffset;
+    uint32 punchSize = location.GetPcaPhysicalOffset() - location.extentStart * BLCKSZ - punchOffset;
 
     if (punchSize == 0) {
         return;
@@ -1601,7 +1601,7 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     CfsWriteFile(assistfd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ + BLCKSZ, 0);
 
     Assert(ctrl->ref_num == 1);
-    
+
     if (location.is_segment_page) {
         nbytes =
             DirectFilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
@@ -1610,7 +1610,7 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
         nbytes = FilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
                             (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     }
-    
+
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
         pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to write the %d ext to file %s",

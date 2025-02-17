@@ -296,14 +296,13 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
     rc = (errno_t)memcpy_sp(&item->pca_key, sizeof(CfsBufferKey), key, sizeof(CfsBufferKey));
     securec_check(rc, "", "");
 
-    // load real page from disk by mmap
+    auto pca_offs = location.GetPcaPhysicalOffset();
     if (location.is_segment_page) {
-        nbytes = DirectFilePRead(location.fd, (char *)item->pca_page, BLCKSZ,
-                                 location.get_local_header_num() * BLCKSZ);
+        nbytes = DirectFilePRead(location.fd, (char *)item->pca_page, BLCKSZ, pca_offs);
     } else {
-        nbytes = FilePRead(location.fd, (char *)item->pca_page, BLCKSZ,
-                           location.headerNum * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_READ);
+        nbytes = FilePRead(location.fd, (char *)item->pca_page, BLCKSZ, pca_offs, (uint32)WAIT_EVENT_DATA_FILE_READ);
     }
+
     if (nbytes != BLCKSZ) {
         item->load_status = CTRL_PAGE_LOADED_ERROR;
         ereport(DEBUG5, (errcode(ERRCODE_DATA_CORRUPTED),
@@ -361,7 +360,7 @@ pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLo
     CfsBufferKey key = {
         {location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
          location.relFileNode.bucketNode},
-        location.headerNum
+        location.GetFileNodePcaBlkno()
     };
     uint32 hashcode = pca_hashcode(&key);
 
@@ -434,15 +433,16 @@ void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bo
 {
     if (need_write) {
         int nbytes = BLCKSZ;
+        auto pca_offs = location.GetPcaPhysicalOffset();
         // sync to disk
         if (location.is_segment_page && location.is_compress_allowed) {
-            nbytes = DirectFilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ,
-                                      location.get_local_header_num() * BLCKSZ,
+            nbytes = DirectFilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ, pca_offs,
                                       (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         } else {
-            nbytes = FilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ, location.headerNum * BLCKSZ,
+            nbytes = FilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ, pca_offs,
                                 (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         }
+
         if (nbytes != BLCKSZ) {
             // get the ctrl locked before, the thread is still keep the lock, release ctrl lock and decrease the ref_num
             (void)pg_atomic_fetch_sub_u32(&ctrl->ref_num, 1);
@@ -808,7 +808,7 @@ CfsHeaderPagerCheckStatus CheckAndRepairCompressAddress(CfsExtentHeader *pcMap, 
         for (int i = 0; i < pcAddr->allocated_chunks; i++) {
             if (pcAddr->chunknos[i]) {
                 const char *formatStr = i == 0 ? "%u" : ",%u";
-                rc = snprintf_s(p, (sizeof(buf) - (unsigned long)(p - buf)), 
+                rc = snprintf_s(p, (sizeof(buf) - (unsigned long)(p - buf)),
                                 (sizeof(buf) - (unsigned long)(p - buf)) - 1, formatStr, pcAddr->chunknos[i]);
                 securec_check_ss(rc, "\0", "\0");
                 p += strlen(p);

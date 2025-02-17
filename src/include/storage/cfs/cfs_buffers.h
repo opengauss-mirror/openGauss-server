@@ -5,8 +5,13 @@
 #include "storage/smgr/cfs_addressing.h"
 #include "storage/cfs/cfs_repair.h"
 
+/** The hash key of PCA page in pca shared buffer. */
 struct CfsBufferKey {
+    /** The relation file node information. */
     RelFileNodeV2 relFileNode;
+
+    /** The PCA's block number in current RelFileNode. Note: It's unique in every RelFileNodes
+     whatever for common storage or segment storage. */
     uint32 extent_header;
 };
 
