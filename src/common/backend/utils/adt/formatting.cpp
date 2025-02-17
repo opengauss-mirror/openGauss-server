@@ -4464,7 +4464,8 @@ Datum timestamp_to_char_nlsparam(PG_FUNCTION_ARGS)
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
-    if (nlsFmtStr && (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
+    if (nlsFmtStr &&
+        (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
         res = (text *)DirectFunctionCall2Coll(timestamp_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
@@ -4490,7 +4491,8 @@ Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS)
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
-    if (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0) {
+    if (nlsFmtStr &&
+        (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
         res = (text *)DirectFunctionCall2Coll(timestamptz_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
@@ -4591,7 +4593,8 @@ Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS)
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
-    if (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0) {
+    if (nlsFmtStr &&
+        (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
         res = (text *)DirectFunctionCall2Coll(interval_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
