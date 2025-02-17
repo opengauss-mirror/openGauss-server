@@ -3619,8 +3619,8 @@ drop function t_inner;
 -- get time
 ---------------------------
 select gms_utility.get_time();
-  get_time  
-------------
+--?.get_time*
+--?.*
 --?.*
 (1 row)
 
@@ -3994,6 +3994,33 @@ tablename: ",d"
 call test_comma_to_table('"a,b,c,d"');
 table len: 1
 tablename: "a,b,c,d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('"123a"."123b","123c"."123d"');
+table len: 2
+tablename: "123a"."123b"
+tablename: "123c"."123d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('"#123a"."#123b","#123c"."#123d"');
+table len: 2
+tablename: "#123a"."#123b"
+tablename: "#123c"."#123d"
+ test_comma_to_table 
+---------------------
+ 
+(1 row)
+
+call test_comma_to_table('"$123a"."$123b","$123c"."$123d"');
+table len: 2
+tablename: "$123a"."$123b"
+tablename: "$123c"."$123d"
  test_comma_to_table 
 ---------------------
  
