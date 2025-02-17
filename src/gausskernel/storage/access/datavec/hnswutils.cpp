@@ -785,7 +785,12 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
             params = &pqinfo->params;
             Vector *vd1 = &etup->data;
             Vector *vd2 = (Vector *)DatumGetPointer(*q);
-            float exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
+            float exactDis;
+            if (pqinfo->params.funcType == HNSW_PQ_DIS_IP) {
+                exactDis = -VectorInnerProduct(params->dim, vd1->x, vd2->x);
+            } else {
+                exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
+            }
             *distance = exactDis;
         }
     }
