@@ -13,8 +13,22 @@
 /* blob/clob最大存储长度1G*/
 #define LOBMAXSIZE (int64)0x3fffffff
 #define AMOUNT_MAX_SIZE 32767
+
+#define MAX_SLOTS 50
+
+typedef struct BfileFileSlot
+{
+    FILE   *file;
+    int	   max_linesize;
+    int	   encoding;
+    int32  id;
+} BfileFileSlot;
+
 typedef struct GmsLobContext {
     struct HTAB* gmsLobNameHash;
+    /* bfile.cpp */
+    BfileFileSlot	slots[MAX_SLOTS];   /* initilaized with zeros */
+    int32	slotid = 0;    /* next slot id */
 } GmsLobContext;
 
 extern "C" Datum gms_lob_og_createtemporary(PG_FUNCTION_ARGS);

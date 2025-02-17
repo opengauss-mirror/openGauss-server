@@ -137,3 +137,45 @@ CREATE OR REPLACE FUNCTION gms_lob.getlength(lobname text DEFAULT ':')
 RETURNS void
 AS 'MODULE_PATHNAME', 'gms_lob_og_null'
 LANGUAGE C IMMUTABLE STRICT NOT FENCED;
+
+-- bfile function
+CREATE OR REPLACE FUNCTION gms_lob.bfileopen(bfileobj bfile, mode integer, bfilename text DEFAULT ':')
+RETURNS pg_catalog.bfile
+AS 'MODULE_PATHNAME','bfileopen'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION gms_lob.bfileclose(bfileobj bfile, bfilename text DEFAULT ':')
+RETURNS void
+AS 'MODULE_PATHNAME','bfileclose'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION gms_lob.bfileread(bfileobj bfile,  amount integer, startpoint integer, bfilename text DEFAULT ':')
+RETURNS RAW
+AS 'MODULE_PATHNAME','bfileread'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION gms_lob.getlength(bfileobj bfile, bfilename text DEFAULT ':')
+RETURNS integer
+AS 'MODULE_PATHNAME','getlength'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION gms_lob.read(IN bfileobj bfile, IN amount integer, IN startpoint integer, INOUT buffer raw, bfilename text DEFAULT ':')
+RETURNS RAW AS $$
+BEGIN
+    $4 := '';
+    select gms_lob.bfileread($1, $2, $3) into $4;
+    RETURN $4;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE or replace  PROCEDURE gms_lob.fileopen(bfileobj IN OUT bfile, mode IN integer, bfilename text DEFAULT ':') package
+AS
+BEGIN
+    bfileobj := gms_lob.bfileopen(bfileobj, mode);
+END;
+
+CREATE or replace  PROCEDURE gms_lob.fileclose(bfileobj IN bfile, bfilename text DEFAULT ':') package
+AS
+BEGIN
+    gms_lob.bfileclose(bfileobj);
+END;

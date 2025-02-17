@@ -2905,6 +2905,7 @@ enum knl_ext_fdw_type {
     POSTGRES_TYPE_FDW,
     /* Add new external FDW type before MAX_TYPE_FDW */
     PLDEBUG_TYPE,
+    BFILE_TYPE_FDW,
     MAX_TYPE_FDW
 };
 

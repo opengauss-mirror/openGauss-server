@@ -380,6 +380,10 @@ DATA(insert OID = 90 ( clob	   PGNSP PGUID -1 f b S t t \054 0	0  3202 textin te
 #define CLOBOID  90
 DATA(insert OID = 3202 ( _clob    PGNSP PGUID -1 f b A f t \054 0 90 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
 
+DATA(insert OID = 91 ( bfile    PGNSP PGUID -1 f b U f t \054 0	0  3203 bfilein bfileout bfilerecv bfilesend - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
+#define BFILEOID  91
+DATA(insert OID = 3203 ( _bfile    PGNSP PGUID -1 f b A f t \054 0 91 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+
 /* hand-built rowtype entries for bootstrapped catalogs */
 /* NB: OIDs assigned here must match the BKI_ROWTYPE_OID declarations */
 

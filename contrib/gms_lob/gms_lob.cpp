@@ -77,6 +77,7 @@ void init_session_vars(void) {
         (GmsLobContext*)MemoryContextAllocZero(u_sess->self_mem_cxt, sizeof(GmsLobContext));
     u_sess->attr.attr_common.extension_session_vars_array[gmslob_index] = psc;
     psc->gmsLobNameHash = NULL;
+    psc->slotid = 0;
 }
 
 GmsLobContext* get_session_context() {

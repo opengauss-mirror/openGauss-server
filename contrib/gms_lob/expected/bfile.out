@@ -1,0 +1,219 @@
+create extension gms_lob;
+create extension gms_output;
+CREATE or REPLACE DIRECTORY bfile_test_dir AS '/tmp';
+create table falt_bfile (id number, bfile_name bfile);
+insert into falt_bfile values(1, bfilename('bfile_test_dir','regress_bfile.txt'));
+copy (select * from falt_bfile) to '/tmp/regress_bfile.txt';
+select gms_output.enable;
+ enable 
+--------
+ 
+(1 row)
+
+---------bfilename函数-------------------
+--测试参数为空值
+select bfilename('', 'a');
+    bfilename    
+-----------------
+ bfilename(NULL)
+(1 row)
+
+select bfilename('a', '');
+    bfilename    
+-----------------
+ bfilename(NULL)
+(1 row)
+
+--测试参数带空格
+select bfilename('sdf sfa', 'as df .txt');
+             bfilename              
+------------------------------------
+ bfilename('sdf sfa', 'as df .txt')
+(1 row)
+
+---------bfilein函数---------------------
+--测试参数为空值
+select bfilein('');
+ bfilein 
+---------
+ 
+(1 row)
+
+--测试参数格式不对
+select bfilein('bfilenamell(sdf,asdf)');
+ERROR:  invalid input syntax for bfile: "bfilenamell(sdf,asdf)"
+CONTEXT:  referenced column: bfilein
+--测试参数格式带空格
+select bfilein(' bfilename ( sdf , asdf ) ');
+         bfilein          
+--------------------------
+ bfilename('sdf', 'asdf')
+(1 row)
+
+--正常值测试
+select bfilein('bfilename(bfile_test_dir,regress_bfile.txt)');
+                     bfilein                      
+--------------------------------------------------
+ bfilename('bfile_test_dir', 'regress_bfile.txt')
+(1 row)
+
+---------bfileout函数---------------------
+--测试参数为空值
+select bfileout('');
+ bfileout 
+----------
+ 
+(1 row)
+
+--正常值测试
+select bfileout(bfilename('bfile_test_dir','regress_bfile.txt'));
+                     bfileout                     
+--------------------------------------------------
+ bfilename('bfile_test_dir', 'regress_bfile.txt')
+(1 row)
+
+---------bfilerecv函数---------------------
+--测试参数为空值
+select bfilerecv('');
+ERROR:  cannot accept a value of type internal
+LINE 1: select bfilerecv('');
+                         ^
+CONTEXT:  referenced column: bfilerecv
+---------bfilesend函数---------------------
+--测试参数为空值
+select bfilesend('');
+ bfilesend 
+-----------
+ 
+(1 row)
+
+--正常值测试
+select bfilesend(bfilename('bfile_test_dir','regress_bfile.txt'));
+                                      bfilesend                                       
+--------------------------------------------------------------------------------------
+ \x0000000f000000126266696c655f746573745f64697200726567726573735f6266696c652e74787400
+(1 row)
+
+---------bfileopen函数----------------------
+--测试参数为空值
+select gms_lob.bfileopen('', 0);
+ERROR:  invalid null input for bfileopen
+CONTEXT:  referenced column: bfileopen
+--无效路径
+select gms_lob.bfileopen(bfilename('bfile_test_dir','bfile_test.txt'), 0);
+ERROR:  INVALID_PATH
+DETAIL:  No such file or directory
+CONTEXT:  referenced column: bfileopen
+---------bfileclose函数---------------------
+--测试参数为空值
+select gms_lob.bfileclose('');
+ERROR:  invalid null input for bfileclose
+CONTEXT:  referenced column: bfileclose
+--关闭未打开的bfile对象文件
+select gms_lob.bfileclose(bfilename('bfile_test_dir','regress_bfile.txt'));
+ bfileclose 
+------------
+ 
+(1 row)
+
+--读取文件偏移量大于文件大小
+DECLARE
+    buff raw(2000);
+    my_bfile bfile;
+    amount integer;
+    f_offset integer := 1;
+BEGIN
+    my_bfile := bfilename('bfile_test_dir','regress_bfile.txt');
+    gms_lob.fileopen(my_bfile, 0);
+    amount := gms_lob.getlength(my_bfile);
+    f_offset := amount + f_offset;
+    gms_lob.read(my_bfile, amount, f_offset, buff);
+    gms_lob.fileclose(my_bfile);
+    gms_output.put_line(CONVERT_FROM(decode(buff,'hex'), 'SQL_ASCII'));
+END;
+/
+--读取文件偏移量小于1
+DECLARE
+    buff raw(2000);
+    my_bfile bfile;
+    amount integer;
+    f_offset integer := 0;
+BEGIN
+    my_bfile := bfilename('bfile_test_dir','regress_bfile.txt');
+    gms_lob.fileopen(my_bfile, 0);
+    amount := gms_lob.getlength(my_bfile);
+    gms_lob.read(my_bfile, amount, f_offset, buff);
+    gms_lob.fileclose(my_bfile);
+    gms_output.put_line(CONVERT_FROM(decode(buff,'hex'), 'SQL_ASCII'));
+END;
+/
+ERROR:  INVALID_ARG
+DETAIL:  arg offset is invalid, offset value at least is 1
+CONTEXT:  referenced column: bfileread
+SQL statement "select gms_lob.bfileread($1, $2, $3)"
+PL/pgSQL function gms_lob.read(bfile,integer,integer,raw,text) line 4 at SQL statement
+SQL statement "CALL gms_lob.read(my_bfile,amount,f_offset,buff)"
+PL/pgSQL function inline_code_block line 9 at SQL statement
+--读取的数据量小于1字节
+DECLARE
+    buff raw(2000);
+    my_bfile bfile;
+    amount integer := 0;
+    f_offset integer := 1;
+BEGIN
+    my_bfile := bfilename('bfile_test_dir','regress_bfile.txt');
+    gms_lob.fileopen(my_bfile, 0);
+    gms_lob.read(my_bfile, amount, f_offset, buff);
+    gms_lob.fileclose(my_bfile);
+    gms_output.put_line(CONVERT_FROM(decode(buff,'hex'), 'SQL_ASCII'));
+END;
+/
+ERROR:  INVALID_ARG
+DETAIL:  arg amount is invalid, amount at lease is 1
+CONTEXT:  referenced column: bfileread
+SQL statement "select gms_lob.bfileread($1, $2, $3)"
+PL/pgSQL function gms_lob.read(bfile,integer,integer,raw,text) line 4 at SQL statement
+SQL statement "CALL gms_lob.read(my_bfile,amount,f_offset,buff)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+--读取的数据量大于1MB
+DECLARE
+    buff raw(2000);
+    my_bfile bfile;
+    amount integer := 1024 * 1024 + 1;
+    f_offset integer := 1;
+BEGIN
+    my_bfile := bfilename('bfile_test_dir','regress_bfile.txt');
+    gms_lob.fileopen(my_bfile, 0);
+    gms_lob.read(my_bfile, amount, f_offset, buff);
+    gms_lob.fileclose(my_bfile);
+    gms_output.put_line(CONVERT_FROM(decode(buff,'hex'), 'SQL_ASCII'));
+END;
+/
+ERROR:  INVALID_ARG
+DETAIL:  arg amount is invalid, amount should not exceed 1M
+CONTEXT:  referenced column: bfileread
+SQL statement "select gms_lob.bfileread($1, $2, $3)"
+PL/pgSQL function gms_lob.read(bfile,integer,integer,raw,text) line 4 at SQL statement
+SQL statement "CALL gms_lob.read(my_bfile,amount,f_offset,buff)"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+--正常读取
+DECLARE
+    buff raw(2000);
+    my_bfile bfile;
+    amount integer;
+    f_offset integer := 1;
+BEGIN
+    my_bfile := bfilename('bfile_test_dir','regress_bfile.txt');
+    gms_lob.fileopen(my_bfile, 0);
+    amount := gms_lob.getlength(my_bfile);
+    gms_lob.read(my_bfile, amount, f_offset, buff);
+    gms_lob.fileclose(my_bfile);
+    gms_output.put_line(CONVERT_FROM(decode(buff,'hex'), 'SQL_ASCII'));
+END;
+/
+1	bfilename('bfile_test_dir', 'regress_bfile.txt')
+
+drop table falt_bfile;
+drop  DIRECTORY bfile_test_dir;
+drop extension gms_output;
+drop extension gms_lob;
