@@ -50,15 +50,15 @@ void SegGetCfsExtentByPhyBlockNum(int extent_size,  ForkNumber forknum, BlockNum
     /* blocknum = *cfs_extent_start_page + *cfs_extent_offset_page. */
     *cfs_extent_start_page = blocknum - *cfs_extent_offset_page;
 
-    ereport(LOG,
+    ereport(DEBUG2,
             (errmodule(MOD_SEGMENT_PAGE),
              errmsg("seg_get_cfs_extent_by_phyblocknum"
-                    " physical_block_num:%d, "
+                    " physical_block_num: %d, "
                     " group_total_blocks: %u, "
-                    " offset_in_group:%d, offset_in_group_data:%d, "
-                    " cfs_extent_offset_page:%d, "
-                    " cfs_extent_start_page:%d, "
-                    " extent_size:%d, ",
+                    " offset_in_group: %d, offset_in_group_data: %d, "
+                    " cfs_extent_offset_page: %d, "
+                    " cfs_extent_start_page: %d, "
+                    " extent_size: %d, ",
                     blocknum,
                     group_total_blocks,
                     offset_in_group,
@@ -96,8 +96,8 @@ bool seg_page_accross_cfs_extent(BlockNumber cfs_extent_start_page, BlockNumber 
 {
     if (DF_OFFSET_TO_SLICENO(((off_t)cfs_extent_start_page) * BLCKSZ) !=
         DF_OFFSET_TO_SLICENO(((off_t)cfs_extent_end_page) * BLCKSZ)) {
-        ereport(LOG, (errmsg("block is slice-accrossed, cfs_extent_start_page:%d, cfs_extent_end_page:%d",
-                             cfs_extent_start_page, cfs_extent_end_page)));
+        ereport(DEBUG2, (errmsg("block is slice-accrossed, cfs_extent_start_page: %d, cfs_extent_end_page: %d",
+                                cfs_extent_start_page, cfs_extent_end_page)));
         return true;
     }
     return false;
@@ -116,24 +116,25 @@ bool SegCompressAllowed(const RelFileNode& rel_node, ForkNumber forknum, BlockNu
     BlockNumber cfs_extent_start_page;
 
     if (!IS_SEG_COMPRESSED_RNODE(rel_node, forknum) || ENABLE_DSS) {
-        ereport(LOG, (errmsg("[sgement compress] Not a compression allowed block:%d", blocknum)));
+        ereport(DEBUG2, (errmsg("[sgement compress] Not a compression allowed block: %d, "
+                                "because of low level segment extent group file", blocknum)));
         return false;
     }
 
     if (blocknum <= DF_MAP_HEAD_PAGE) {
-        ereport(LOG, (errmsg("[sgement compress] Not a compression allowed block:%d due to slice meta block,"
+        ereport(DEBUG2, (errmsg("[sgement compress] Not a compression allowed block:%d due to slice meta block,"
                              "max slice meta block no:%d.", blocknum, DF_MAP_HEAD_PAGE)));
         return false;
     }
 
     if (extent_size <= EXT_SIZE_8) {
-        ereport(LOG, (errmsg("[sgement compress] Not a compression allowed block:%d due to small extent size: %d.",
+        ereport(DEBUG2, (errmsg("[sgement compress] Not a compression allowed block:%d due to small extent size: %d.",
                              blocknum, extent_size)));
         return false;
     }
 
     if (!SegIsDataBlock(blocknum, extent_size)) {
-        ereport(LOG, (errmsg("[sgement compress] Not a compression allowed block:%d due to it's a data block.",
+        ereport(DEBUG2, (errmsg("[sgement compress] Not a compression allowed block:%d due to it's a data block.",
                              blocknum)));
         return false;
     }
@@ -146,7 +147,7 @@ bool SegCompressAllowed(const RelFileNode& rel_node, ForkNumber forknum, BlockNu
     this kind of cfs extent either And this special type pca page wil not be persisted but will be padded
     by pca_buf_padding when it's required. */
     if (seg_page_accross_cfs_extent(cfs_extent_start_page, cfs_extent_end_page)) {
-        ereport(LOG,(errmsg("[sgement compress]  not compression allowed block:%d due to accross slice,"
+        ereport(DEBUG2,(errmsg("[sgement compress]  not compression allowed block:%d due to accross slice,"
                             "cfs_extent_start_page:%d,"
                             "cfs_extent_end_page:%d,"
                             "sliceno%d,"
