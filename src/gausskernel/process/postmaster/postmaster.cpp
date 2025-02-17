@@ -4297,9 +4297,7 @@ static int ServerLoop(void)
         }
 
 #ifdef ENABLE_HTAP
-        if (g_instance.pid_cxt.IMCStoreVacuumPID == 0 &&
-            (pmState == PM_RUN || pmState == PM_HOT_STANDBY ||
-            t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE)) {
+        if (g_instance.pid_cxt.IMCStoreVacuumPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
             g_instance.pid_cxt.IMCStoreVacuumPID = initialize_util_thread(IMCSTORE_VACUUM);
             ereport(LOG,
                 (errmsg("ServerLoop create ImcsVacuum(%lu) for pmState:%u, ServerMode:%u.",
