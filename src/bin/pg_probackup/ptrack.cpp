@@ -210,7 +210,7 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
  * We fetch a list of changed files with their ptrack maps.  After that files
  * are merged with their bitmaps.  File without bitmap is treated as unchanged.
  */
-void
+parray *
 make_pagemap_from_ptrack(parray *files,
                          PGconn *backup_conn,
                          XLogRecPtr lsn)
@@ -225,7 +225,7 @@ make_pagemap_from_ptrack(parray *files,
     if (filemaps != NULL)
         parray_qsort(filemaps, pgFileMapComparePath);
     else
-        return;
+        return nullptr;
 
     dummy_map = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
 
@@ -283,6 +283,6 @@ make_pagemap_from_ptrack(parray *files,
             file->pagemap.bitmap = (unsigned char *)map->pagemap;
         }
     }
-    free(filemaps);
     free(dummy_map);
+    return filemaps;
 }

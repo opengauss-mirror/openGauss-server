@@ -76,6 +76,28 @@ static PQExpBufferData show_buf;
 static bool first_instance = true;
 static int32 json_level = 0;
 
+void
+InstanceFree(InstanceConfig *instance)
+{
+    pg_free(instance->name);
+    pg_free(instance->pgdata);
+    pg_free(instance->external_dir_str);
+    pg_free(const_cast<char *>(instance->conn_opt.pgdatabase));
+    pg_free(const_cast<char *>(instance->conn_opt.pghost));
+    pg_free(const_cast<char *>(instance->conn_opt.pgport));
+    pg_free(const_cast<char *>(instance->conn_opt.pguser));
+    pg_free(instance->restore_command);
+    pg_free(instance->remote.host);
+    pg_free(instance->remote.port);
+    pg_free(instance->remote.path);
+    pg_free(instance->remote.user);
+    pg_free(instance->remote.ssh_options);
+    pg_free(instance->remote.ssh_config);
+    pg_free(instance->remote.libpath);
+    pg_free(instance->dss.socketpath);
+    pg_free(instance);
+}
+
 /*
  * Entry point of pg_probackup SHOW subcommand.
  */
@@ -140,7 +162,9 @@ do_show(const char *instance_name, time_t requested_backup_id, bool show_archive
             show_instance(instance, requested_backup_id, false);
 
         show_instance_end();
-        pfree(instance);
+        
+        InstanceFree(instance);
+
         return 0;
     }
     else
