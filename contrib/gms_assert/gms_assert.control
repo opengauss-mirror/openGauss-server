@@ -1,0 +1,5 @@
+# gms_assert extension
+comment = 'provides the interface to validate properties of the input value'
+default_version = '1.0'
+module_pathname = '$libdir/gms_assert'
+relocatable = false

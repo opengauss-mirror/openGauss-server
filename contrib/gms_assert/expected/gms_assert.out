@@ -1,0 +1,656 @@
+create database gms_assert_testdb;
+\c gms_assert_testdb
+create schema gms_assert_test;
+set search_path=gms_assert_test;
+create extension gms_assert;
+-- NOOP
+SELECT gms_assert.noop(NULL);
+ noop 
+------
+ 
+(1 row)
+
+SELECT gms_assert.noop('');
+ noop 
+------
+ 
+(1 row)
+
+SELECT gms_assert.noop('\s\t\n');
+  noop  
+--------
+ \s\t\n
+(1 row)
+
+SELECT gms_assert.noop(E'\s\t\n');
+   noop   
+----------
+ s       +
+ 
+(1 row)
+
+SELECT gms_assert.noop(4.1);
+ noop 
+------
+ 4.1
+(1 row)
+
+SELECT gms_assert.noop('A line. ');
+   noop   
+----------
+ A line. 
+(1 row)
+
+-- ENQUOTE_LITERAL
+SELECT gms_assert.enquote_literal('\s\t\n');
+ enquote_literal 
+-----------------
+ '\s\t\n'
+(1 row)
+
+SELECT gms_assert.enquote_literal(E'\s\t\n');
+ enquote_literal 
+-----------------
+ 's             +
+ '
+(1 row)
+
+SELECT gms_assert.enquote_literal(4.1);
+ enquote_literal 
+-----------------
+ '4.1'
+(1 row)
+
+SELECT gms_assert.enquote_literal(NULL); -- ''
+ enquote_literal 
+-----------------
+ ''
+(1 row)
+
+SELECT gms_assert.enquote_literal(''); -- ''
+ enquote_literal 
+-----------------
+ ''
+(1 row)
+
+SELECT gms_assert.enquote_literal('AbC'); -- 'AbC'
+ enquote_literal 
+-----------------
+ 'AbC'
+(1 row)
+
+SELECT gms_assert.enquote_literal('A''''bC'); -- 'A''bC'
+ enquote_literal 
+-----------------
+ 'A''bC'
+(1 row)
+
+SELECT gms_assert.enquote_literal('A''bC'); -- ERROR
+ERROR:  numeric or value error
+CONTEXT:  referenced column: enquote_literal
+SELECT gms_assert.enquote_literal('''AbC'); -- ERROR
+ERROR:  numeric or value error
+CONTEXT:  referenced column: enquote_literal
+SELECT gms_assert.enquote_literal('''AbC'''); -- 'AbC'
+ enquote_literal 
+-----------------
+ 'AbC'
+(1 row)
+
+SELECT gms_assert.enquote_literal('''A''''bC'''); -- 'A''bC'
+ enquote_literal 
+-----------------
+ 'A''bC'
+(1 row)
+
+SELECT gms_assert.enquote_literal(E'\'A\'\'bC\''); -- 'A''bC'
+ enquote_literal 
+-----------------
+ 'A''bC'
+(1 row)
+
+SELECT gms_assert.enquote_literal('''A''bC'''); -- ERROR
+ERROR:  numeric or value error
+CONTEXT:  referenced column: enquote_literal
+SELECT gms_assert.enquote_literal('\n\s\t&%\'); -- '\n\s\t&%\'
+ enquote_literal 
+-----------------
+ '\n\s\t&%\'
+(1 row)
+
+SELECT gms_assert.enquote_literal('''\n\s\t&%\'''); -- '\n\s\t&%\'
+ enquote_literal 
+-----------------
+ '\n\s\t&%\'
+(1 row)
+
+SELECT gms_assert.enquote_literal(E'\'\s\t&%\''); -- 's      &%'
+ enquote_literal 
+-----------------
+ 's      &%'
+(1 row)
+
+SELECT gms_assert.enquote_literal(E'O\'\'hello'); -- 'O''hello'
+ enquote_literal 
+-----------------
+ 'O''hello'
+(1 row)
+
+SELECT gms_assert.enquote_literal(E'\'O\'\'hello\''); -- 'O''hello'
+ enquote_literal 
+-----------------
+ 'O''hello'
+(1 row)
+
+SELECT gms_assert.enquote_literal(10.01); -- '10.01'
+ enquote_literal 
+-----------------
+ '10.01'
+(1 row)
+
+-- SIMPLE_SQL_NAME
+SELECT gms_assert.simple_sql_name('a\s\t\n');
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name(E'as\t\n');
+ simple_sql_name 
+-----------------
+ as
+(1 row)
+
+SELECT gms_assert.simple_sql_name(E'as\t\n\?');
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name(4.1);
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name(NULL); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name(''); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name('a_B'); -- a_B
+ simple_sql_name 
+-----------------
+ a_B
+(1 row)
+
+SELECT gms_assert.simple_sql_name('_B'); -- _B
+ simple_sql_name 
+-----------------
+ _B
+(1 row)
+
+SELECT gms_assert.simple_sql_name('€9'); -- €9
+ simple_sql_name 
+-----------------
+ €9
+(1 row)
+
+SELECT gms_assert.simple_sql_name('          a_1B$# '); -- a_1B$#
+ simple_sql_name 
+-----------------
+ a_1B$#
+(1 row)
+
+SELECT gms_assert.simple_sql_name('          a_  1B$# '); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name('a_*B'); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name('a_""B'); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+SELECT gms_assert.simple_sql_name('"a_B"'); -- "a_B"
+ simple_sql_name 
+-----------------
+ "a_B"
+(1 row)
+
+SELECT gms_assert.simple_sql_name('    "a_ *B" '); -- "a_ *B"
+ simple_sql_name 
+-----------------
+ "a_ *B"
+(1 row)
+
+SELECT gms_assert.simple_sql_name('"a_""B"'); -- "a_""B"
+ simple_sql_name 
+-----------------
+ "a_""B"
+(1 row)
+
+SELECT gms_assert.simple_sql_name('"a_B'); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: simple_sql_name
+-- ENQUOTE_NAME
+SELECT gms_assert.enquote_name(NULL);
+ enquote_name 
+--------------
+ ""
+(1 row)
+
+SELECT gms_assert.enquote_name('');
+ enquote_name 
+--------------
+ ""
+(1 row)
+
+SELECT gms_assert.enquote_name('a\s\t\n');
+ enquote_name 
+--------------
+ "A\S\T\N"
+(1 row)
+
+SELECT gms_assert.enquote_name(E'a\s\t\n');
+ enquote_name 
+--------------
+ "AS         +
+ "
+(1 row)
+
+SELECT gms_assert.enquote_name(4.1);
+ enquote_name 
+--------------
+ "4.1"
+(1 row)
+
+SELECT gms_assert.enquote_name('Ab_c'); -- "AB_C"
+ enquote_name 
+--------------
+ "AB_C"
+(1 row)
+
+SELECT gms_assert.enquote_name('A''b_c'); -- "A'B_C"
+ enquote_name 
+--------------
+ "A'B_C"
+(1 row)
+
+SELECT gms_assert.enquote_name('A""b_c'); -- "A""B_C"
+ enquote_name 
+--------------
+ "A""B_C"
+(1 row)
+
+SELECT gms_assert.enquote_name('A"ss"b_c'); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: enquote_name
+SELECT gms_assert.enquote_name('"Ab _c"'); -- "Ab _c"
+ enquote_name 
+--------------
+ "Ab _c"
+(1 row)
+
+SELECT gms_assert.enquote_name('   "Ab _c" '); -- ERROR
+ERROR:  invalid SQL name
+CONTEXT:  referenced column: enquote_name
+SELECT gms_assert.enquote_name('Ab_c', true); -- "AB_C"
+ enquote_name 
+--------------
+ "AB_C"
+(1 row)
+
+SELECT gms_assert.enquote_name('Ab_c', false); -- "Ab_c"
+ enquote_name 
+--------------
+ "Ab_c"
+(1 row)
+
+SELECT gms_assert.enquote_name('Ab_c', NULL); -- "Ab_c"
+ enquote_name 
+--------------
+ "Ab_c"
+(1 row)
+
+SELECT gms_assert.enquote_name('"Ab_c"', true); -- "Ab_c"
+ enquote_name 
+--------------
+ "Ab_c"
+(1 row)
+
+-- QUALIFIED_SQL_NAME
+SELECT gms_assert.qualified_sql_name(NULL); -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name(''); -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name('a\s\t\n'); -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name(E'a\s\t\n');
+ qualified_sql_name 
+--------------------
+ as                +
+ 
+(1 row)
+
+SELECT gms_assert.qualified_sql_name(E'a\s\t\n\?'); -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name(4.1); -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name('a_$bc');
+ qualified_sql_name 
+--------------------
+ a_$bc
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('  a_$bc ');
+ qualified_sql_name 
+--------------------
+   a_$bc 
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e');
+ qualified_sql_name 
+--------------------
+ a_$bc.d#e
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('"A*bc"."d#E"');
+ qualified_sql_name 
+--------------------
+ "A*bc"."d#E"
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e@fg');
+ qualified_sql_name 
+--------------------
+ a_$bc.d#e@fg
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('ƒ1.€9@abc™');
+ qualified_sql_name 
+--------------------
+ ƒ1.€9@abc™
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e@fg@hi');
+ qualified_sql_name 
+--------------------
+ a_$bc.d#e@fg@hi
+(1 row)
+
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e@fg@hi.jk');
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e@fg@hi@jk');
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: qualified_sql_name
+SELECT gms_assert.qualified_sql_name('a_$bc.d#e@"fg@hi"@jk');
+  qualified_sql_name  
+----------------------
+ a_$bc.d#e@"fg@hi"@jk
+(1 row)
+
+-- SCHEMA_NAME
+SELECT gms_assert.schema_name(NULL);
+ERROR:  invalid schema
+CONTEXT:  referenced column: schema_name
+SELECT gms_assert.schema_name('');
+ERROR:  invalid schema
+CONTEXT:  referenced column: schema_name
+SELECT gms_assert.schema_name(E'public\t\n');
+ERROR:  invalid schema
+CONTEXT:  referenced column: schema_name
+SELECT gms_assert.schema_name('public');
+ schema_name 
+-------------
+ public
+(1 row)
+
+SELECT gms_assert.schema_name('Public');
+ERROR:  invalid schema
+CONTEXT:  referenced column: schema_name
+DROP SCHEMA IF EXISTS schem1;
+NOTICE:  schema "schem1" does not exist, skipping
+SELECT gms_assert.schema_name('schem1');
+ERROR:  invalid schema
+CONTEXT:  referenced column: schema_name
+CREATE SCHEMA schem1;
+SELECT gms_assert.schema_name('schem1');
+ schema_name 
+-------------
+ schem1
+(1 row)
+
+-- SQL_OBJECT_NAME
+SELECT gms_assert.sql_object_name('tbl@abcd');
+ sql_object_name 
+-----------------
+ tbl@abcd
+(1 row)
+
+CREATE TABLE "Tab1"(id int);
+CREATE TABLE "Tab1@remote"(id int);
+CREATE TABLE "tab2"(id int);
+CREATE TABLE "a\b"(id int);
+SELECT gms_assert.sql_object_name('"Tab1"');
+ sql_object_name 
+-----------------
+ "Tab1"
+(1 row)
+
+SELECT gms_assert.sql_object_name('"Tab1@remote"');
+ sql_object_name 
+-----------------
+ "Tab1@remote"
+(1 row)
+
+SELECT gms_assert.sql_object_name('tab1'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+SELECT gms_assert.sql_object_name('tab2');
+ sql_object_name 
+-----------------
+ tab2
+(1 row)
+
+SELECT gms_assert.sql_object_name(E'tab2\t\n');
+ sql_object_name 
+-----------------
+ tab2           +
+ 
+(1 row)
+
+SELECT gms_assert.sql_object_name(E'tab2\t\n\?');  -- ERROR
+ERROR:  invalid qualified SQL name
+CONTEXT:  referenced column: sql_object_name
+SELECT gms_assert.sql_object_name('"tab2"'); -- "tab2"
+ sql_object_name 
+-----------------
+ "tab2"
+(1 row)
+
+SELECT gms_assert.sql_object_name('"TAB2"'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+SELECT gms_assert.sql_object_name(E'"a\\b"');
+ sql_object_name 
+-----------------
+ "a\b"
+(1 row)
+
+DROP TABLE "Tab1";
+DROP TABLE "Tab1@remote";
+DROP TABLE "tab2";
+DROP TABLE "a\b";
+SELECT gms_assert.sql_object_name('"Tab1@remote"');
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+SELECT gms_assert.sql_object_name('Tab1@remote');
+ sql_object_name 
+-----------------
+ Tab1@remote
+(1 row)
+
+CREATE TABLE schem1.tb(id int);
+CREATE INDEX tbidx ON schem1.tb(id);
+CREATE VIEW schem1.tbv AS SELECT * FROM schem1.tb;
+CREATE SYNONYM syn1 FOR schem1.tb;
+CREATE SYNONYM syn2 FOR tb;
+SELECT gms_assert.sql_object_name('tb'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+SELECT gms_assert.sql_object_name('schem1.tb'); -- schem1.tb
+ sql_object_name 
+-----------------
+ schem1.tb
+(1 row)
+
+SELECT gms_assert.sql_object_name('Schem1.TB'); -- Schem1.TB
+ sql_object_name 
+-----------------
+ Schem1.TB
+(1 row)
+
+SELECT gms_assert.sql_object_name(CURRENT_CATALOG || '.schem1.tb');
+       sql_object_name       
+-----------------------------
+ gms_assert_testdb.schem1.tb
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem1.tbidx');
+ sql_object_name 
+-----------------
+ schem1.tbidx
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem1.tbv');
+ sql_object_name 
+-----------------
+ schem1.tbv
+(1 row)
+
+SELECT gms_assert.sql_object_name('syn1');
+ sql_object_name 
+-----------------
+ syn1
+(1 row)
+
+SELECT gms_assert.sql_object_name('syn2'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+DROP SCHEMA IF EXISTS schem2;
+NOTICE:  schema "schem2" does not exist, skipping
+CREATE SCHEMA schem2;
+CREATE OR REPLACE PACKAGE schem2.pkg1 AS
+    FUNCTION access_func (funcname varchar2) RETURN varchar2;
+    FUNCTION public_func1(a INTEGER) RETURN INTEGER;
+END pkg1;
+/
+CREATE OR REPLACE PACKAGE BODY schem2.pkg1 AS 
+    FUNCTION access_func (funcname varchar2) RETURN varchar2 IS
+    BEGIN
+        RETURN gms_assert.sql_object_name(funcname);
+    END access_func;
+
+    FUNCTION private_func1(a INTEGER) RETURN INTEGER IS
+    BEGIN
+        RETURN a;
+    END private_func1;
+
+    FUNCTION public_func1(a INTEGER) RETURN INTEGER IS
+    BEGIN
+        RETURN private_func1(a);
+    END public_func1;
+END pkg1;
+/
+SELECT gms_assert.sql_object_name('schem2.pkg1');
+ sql_object_name 
+-----------------
+ schem2.pkg1
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem2.pkg1.public_func1');
+     sql_object_name      
+--------------------------
+ schem2.pkg1.public_func1
+(1 row)
+
+SELECT gms_assert.sql_object_name(CURRENT_CATALOG || '.schem2.pkg1.public_func1');
+              sql_object_name               
+--------------------------------------------
+ gms_assert_testdb.schem2.pkg1.public_func1
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem2.pkg1.private_func1');
+      sql_object_name      
+---------------------------
+ schem2.pkg1.private_func1
+(1 row)
+
+SELECT schem2.pkg1.access_func('private_func1'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  PL/pgSQL function access_func(character varying) line 2 at RETURN
+referenced column: access_func
+SELECT schem2.pkg1.access_func('pkg1.private_func1'); -- pkg1.private_func1
+    access_func     
+--------------------
+ pkg1.private_func1
+(1 row)
+
+DROP USER IF EXISTS usr1 cascade;
+NOTICE:  role "usr1" does not exist, skipping
+CREATE USER usr1 WITH password '1234@abcd';
+SET SESSION AUTHORIZATION usr1 password '1234@abcd';
+SELECT gms_assert.sql_object_name('schem1.tb'); -- ERROR
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+\c -
+GRANT USAGE ON SCHEMA schem1 TO usr1;
+SET SESSION AUTHORIZATION usr1 password '1234@abcd';
+SELECT gms_assert.sql_object_name('schem1.tb');
+ sql_object_name 
+-----------------
+ schem1.tb
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem1.tbidx');
+ sql_object_name 
+-----------------
+ schem1.tbidx
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem1.tbv'); 
+ sql_object_name 
+-----------------
+ schem1.tbv
+(1 row)
+
+SELECT gms_assert.sql_object_name('syn1');
+ERROR:  invalid object name
+CONTEXT:  referenced column: sql_object_name
+\c -
+GRANT USAGE ON SCHEMA schem2 TO usr1;
+SET SESSION AUTHORIZATION usr1 password '1234@abcd';
+SELECT gms_assert.sql_object_name('schem2.pkg1');
+ sql_object_name 
+-----------------
+ schem2.pkg1
+(1 row)
+
+SELECT gms_assert.sql_object_name('schem2.pkg1.public_func1');
+     sql_object_name      
+--------------------------
+ schem2.pkg1.public_func1
+(1 row)
+
+\c -
+DROP USER IF EXISTS usr1 CASCADE;
+DROP SCHEMA schem1 CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table schem1.tb
+drop cascades to view schem1.tbv
+DROP SCHEMA schem2 CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to package 16420
+drop cascades to function schem2.access_func(character varying)
+drop cascades to function schem2.private_func1(integer)
+drop cascades to function schem2.public_func1(integer)
+\c postgres
+drop database gms_assert_testdb;
