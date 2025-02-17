@@ -350,7 +350,8 @@ void BackgroundWriterMain(void)
          * time. E.g. Checkpointer, when active, is barely ever in its
          * mainloop and thus makes it hard to log regularly.
          */
-        if (XLogStandbyInfoActive() && !RecoveryInProgress()) {
+        if (XLogStandbyInfoActive() && !RecoveryInProgress() &&
+            (!SS_DISASTER_CLUSTER || SS_DISASTER_CLUSTER && SS_PRIMARY_MODE)) {
             TimestampTz timeout = 0;
             TimestampTz now = GetCurrentTimestamp();
             timeout = TimestampTzPlusMilliseconds(last_snapshot_ts, LOG_SNAPSHOT_INTERVAL_MS);
