@@ -40,6 +40,13 @@
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcs_ctlg.h"
 
+void CheckImcstoreCacheReady()
+{
+    if (CHECK_IMCSTORE_CACHE_DOWN) {
+        ereport(ERROR, (errmsg("Imcstore Cache is recovering, please wait or restart database.")));
+    }
+}
+
 bool CheckDBName(const char* dbname)
 {
     if (strcmp(dbname, get_database_name(u_sess->proc_cxt.MyDatabaseId)) != 0) {
@@ -78,6 +85,7 @@ void CheckAndSetDBName()
     dbnameRefCount = pg_atomic_read_u32(&g_instance.imcstore_cxt.dbname_reference_count);
     if (dbnameRefCount == 0) {
         pg_atomic_add_fetch_u32(&g_instance.imcstore_cxt.dbname_reference_count, 1);
+        g_instance.imcstore_cxt.dboid = u_sess->proc_cxt.MyDatabaseId;
         g_instance.imcstore_cxt.dbname = pg_strdup(get_database_name(u_sess->proc_cxt.MyDatabaseId));
         if (IMCS_IS_PRIMARY_MODE) {
             ereport(LOG, (errmsg("HTAP: Set DB name: %s.", g_instance.imcstore_cxt.dbname)));
@@ -105,6 +113,7 @@ void ResetDBNameIfNeed()
             SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
         }
         ereport(LOG, (errmsg("No imcstore tables left, cur DB name: %s, Reset it.", g_instance.imcstore_cxt.dbname)));
+        g_instance.imcstore_cxt.dboid = InvalidOid;
         g_instance.imcstore_cxt.dbname = nullptr;
     }
     pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
@@ -708,6 +717,7 @@ void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg)
     Relation rel = heap_open(relOid, NoLock);
     PG_TRY();
     {
+        CheckImcstoreCacheReady();
         AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
     }
     PG_CATCH();
@@ -743,6 +753,7 @@ void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo input
 
     PG_TRY();
     {
+        CheckImcstoreCacheReady();
         /* create imcsdesc for rel if not populated  */
         if (IMCU_CACHE->GetImcsDesc(relOid) == NULL) {
             // first partitition to populate, create imcsdesc for partitioned table
@@ -778,6 +789,11 @@ void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo input
 
 void UnPopulateImcsOnStandby(Oid relOid)
 {
+    if (CHECK_IMCSTORE_CACHE_DOWN) {
+        pq_putemptymessage('E');
+        pq_flush();
+        ereport(ERROR, (errmsg("Imcstore Cache is recovering, please wait a moment or restart database.")));
+    }
     if (RelHasImcs(relOid)) {
         /* Make sure we are in a transaction command */
         start_xact_command();
@@ -803,6 +819,11 @@ void UnPopulateImcsOnStandby(Oid relOid)
 
 void UnPopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid)
 {
+    if (CHECK_IMCSTORE_CACHE_DOWN) {
+        pq_putemptymessage('E'); /* PlanIdComplete */
+        pq_flush();
+        ereport(ERROR, (errmsg("Imcstore Cache is recovering, please wait a moment or restart database.")));
+    }
     if (RelHasImcs(partOid)) {
         /* Make sure we are in a transaction command */
         start_xact_command();

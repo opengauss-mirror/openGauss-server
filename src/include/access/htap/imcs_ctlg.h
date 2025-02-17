@@ -43,6 +43,10 @@
 #define CHECK_WALRCV_FREQ 1024
 #define WALRCV_STATUS_UP 0
 #define WALRCV_STATUS_DOWN 1
+#define IMCSTORE_CACHE_UP 0
+#define IMCSTORE_CACHE_DOWN 1
+#define CHECK_IMCSTORE_CACHE_DOWN \
+    (pg_atomic_read_u32(&g_instance.imcstore_cxt.is_imcstore_cache_down) == IMCSTORE_CACHE_DOWN)
 
 #define MAX_IMCS_ROWS_ONE_CU(rel) \
     (((RelationIsAstoreFormat(rel)) ? MaxHeapTuplesPerPage : MaxUHeapTuplesPerPage(rel)) * MAX_IMCS_PAGES_ONE_CU)
@@ -78,6 +82,8 @@ typedef struct IMCSPopulateSharedContext {
     uint32* curTotalScanBlks;
     pg_atomic_uint32 cuThreadId;
 } PopulateSharedContext;
+
+extern void CheckImcstoreCacheReady();
 
 extern void CheckAndSetDBName();
 

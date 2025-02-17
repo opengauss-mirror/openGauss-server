@@ -648,6 +648,7 @@ static void knl_t_imcstore_vacuum_init(knl_t_imcstore_vacuum_context* vacuum_cxt
 {
     vacuum_cxt->got_SIGHUP = false;
     vacuum_cxt->got_SIGTERM = false;
+    vacuum_cxt->got_SIGUSR2 = false;
 }
 #endif
 

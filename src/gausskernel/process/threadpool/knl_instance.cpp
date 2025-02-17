@@ -312,6 +312,8 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
     pg_atomic_init_u32(&(context->is_walrcv_down), WALRCV_STATUS_UP);
     pg_atomic_init_u32(&(context->dbname_reference_count), 0);
     context->should_clean = false;
+    pg_atomic_init_u32(&(context->is_imcstore_cache_down), IMCSTORE_CACHE_UP);
+    context->dboid = InvalidOid;
 }
 #endif
 

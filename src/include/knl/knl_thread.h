@@ -1542,6 +1542,7 @@ typedef struct knl_t_vacuum_context {
 typedef struct knl_t_imcstore_vacuum_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t got_SIGTERM;
+    volatile sig_atomic_t got_SIGUSR2;
 } knl_t_imcstore_vacuum_context;
 #endif
 

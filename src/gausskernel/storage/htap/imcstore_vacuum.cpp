@@ -96,6 +96,33 @@ static void IMCStoreVacuumSigHupHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+static void IMCStoreVacuumSigUsr2Handler(SIGNAL_ARGS)
+{
+    int save_errno = errno;
+
+    t_thrd.imcstore_vacuum_cxt.got_SIGUSR2 = true;
+    pg_atomic_write_u32(&g_instance.imcstore_cxt.is_imcstore_cache_down, IMCSTORE_CACHE_DOWN);
+
+    if (t_thrd.proc)
+        SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
+
+    errno = save_errno;
+}
+
+static void CleanAllCacheCU()
+{
+    IMCUDataCacheMgr::ResetInstance();
+    if (g_instance.imcstore_cxt.vacuum_queue) {
+        delete g_instance.imcstore_cxt.vacuum_queue;
+        g_instance.imcstore_cxt.vacuum_queue = new MpmcBoundedQueue<IMCStoreVacuumTarget>(VACUUMQUEUE_SIZE);
+    }
+    g_instance.imcstore_cxt.should_clean = false;
+    g_instance.imcstore_cxt.dbname = nullptr;
+    g_instance.imcstore_cxt.dboid = InvalidOid;
+    pg_atomic_write_u32(&(g_instance.imcstore_cxt.dbname_reference_count), 0);
+    pg_atomic_write_u32(&g_instance.imcstore_cxt.is_imcstore_cache_down, IMCSTORE_CACHE_UP);
+}
+
 /* SIGTERM: time to die */
 static void IMCStoreVacuumSigtermHandler(SIGNAL_ARGS)
 {
@@ -390,7 +417,7 @@ void IMCStoreVacuumWorkerMain(void)
 
     gspqsignal(SIGPIPE, SIG_IGN);
     gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
-    gspqsignal(SIGUSR2, SIG_IGN);
+    gspqsignal(SIGUSR2, IMCStoreVacuumSigUsr2Handler);
     gspqsignal(SIGFPE, FloatExceptionHandler);
     gspqsignal(SIGCHLD, SIG_DFL);
     gspqsignal(SIGURG, print_stack);
@@ -445,8 +472,12 @@ void IMCStoreVacuumWorkerMain(void)
     pgstat_report_appname("IMCStore Vacuum");
     pgstat_report_activity(STATE_RUNNING, NULL);
 
+    if (CHECK_IMCSTORE_CACHE_DOWN) {
+        CleanAllCacheCU();
+    }
+
     // get database name
-    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM) {
+    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
         bool dbnameInited;
         pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
         dbnameInited = g_instance.imcstore_cxt.dbname != NULL;
@@ -479,7 +510,7 @@ void IMCStoreVacuumWorkerMain(void)
     SetProcessingMode(NormalProcessing);
 
     IMCStoreVacuumTarget target;
-    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM) {
+    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
         int rc = 0;
 
         if (g_instance.imcstore_cxt.should_clean) {
@@ -560,6 +591,11 @@ void IMCStoreVacuumWorkerMain(void)
         finish_xact_command();
         MemoryContextSwitchTo(oldcontext);
     }
+
+    if (t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
+        CleanAllCacheCU();
+    }
+
     elog(LOG, "imcstore vacuum thread is shutting down.");
 }
 #endif
