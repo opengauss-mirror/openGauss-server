@@ -11528,7 +11528,7 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
             Node* nls_fmt_str = UpdateVarattnoAfterAddColumn(expr->nls_fmt_str, startattnum, endattnum, is_increase);
             newexpr->nls_fmt_str = nls_fmt_str;
             Node* default_expr = UpdateVarattnoAfterAddColumn(expr->default_expr, startattnum, endattnum, is_increase);
-            newexpr->default_expr = default_expr;            
+            newexpr->default_expr = default_expr; 
             return (Node *)newexpr;
         }
         case T_ArrayExpr: {

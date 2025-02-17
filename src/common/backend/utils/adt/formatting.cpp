@@ -4366,47 +4366,6 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
     return res;
 }
 
-/**
-* Check nls param is valid. Don't need get the value yet.
- */
-bool check_nls_args(const char *argname)
-{
-    List *nlslist = NULL;
-    char *nlskey = NULL;
-    char *nlsvalue = NULL;
-
-    char *raw = pstrdup(argname);
-
-    /*
-     * Split string like: NLS_DATA_LANGUAGE=ENGLISH.
-     * Converting strings to lowercase and removing back and forth spaces.
-     */
-    if (!SplitIdentifierString(raw, '=', &nlslist) || list_length(nlslist) != 2) {
-        list_free(nlslist);
-        FREE_POINTER(raw);
-        return false;
-    }
-
-    nlskey = (char *)linitial(nlslist);
-    if (strcmp(nlskey, "nls_date_language")) {
-        list_free(nlslist);
-        FREE_POINTER(raw);
-        return false;
-    }
-
-    nlsvalue = (char *)lsecond(nlslist);
-    if (strcmp(nlsvalue, "english") && strcmp(nlsvalue, "american")) {
-        list_free(nlslist);
-        FREE_POINTER(raw);
-        return false;
-    }
-
-    list_free(nlslist);
-    FREE_POINTER(raw);
-
-    return true;
-}
-
 /****************************************************************************
  *				Public routines
  ***************************************************************************/
@@ -4504,12 +4463,15 @@ Datum timestamp_to_char_nlsparam(PG_FUNCTION_ARGS)
     text* res = NULL;
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
-    if (check_nls_args(nls_arg)) {
+    char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
+    if (nlsFmtStr && (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
         res = (text *)DirectFunctionCall2Coll(timestamp_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
+        pfree_ext(nls_arg);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
-            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errmsg("NLS parameter %s is not supported!", nlsFmtStr ? nlsFmtStr : ""),
+            errdetail("Not support the given nls parameter."),
             errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
     }
 
@@ -4527,12 +4489,15 @@ Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS)
     }
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
-    if (check_nls_args(nls_arg)) {
+    char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
+    if (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0) {
         res = (text *)DirectFunctionCall2Coll(timestamptz_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
+        pfree_ext(nls_arg);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
-            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errmsg("NLS parameter %s is not supported!", nlsFmtStr ? nlsFmtStr : ""),
+            errdetail("Not support the given nls parameter."),
             errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
     }
 
@@ -4625,12 +4590,15 @@ Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS)
     }
 
     nls_arg = text_to_cstring(PG_GETARG_TEXT_P(2));
-    if (check_nls_args(nls_arg)) {
+    char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
+    if (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0) {
         res = (text *)DirectFunctionCall2Coll(interval_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
+        pfree_ext(nls_arg);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
-            errmsg("NLS parameter %s is not supported!", nls_arg), errdetail("Not support the given nls parameter."),
+            errmsg("NLS parameter %s is not supported!", nlsFmtStr ? nlsFmtStr : ""),
+            errdetail("Not support the given nls parameter."),
             errcause("Error in the nls parameter."), erraction("Please check and revise your parameter.")));
     }
 
@@ -4644,7 +4612,7 @@ Datum blob_to_char(PG_FUNCTION_ARGS)
     const char* enc = NULL;
     int32 csid = PG_GETARG_INT32(1);
     if (csid < 0 || csid >= MAX_CSID || g_csid2enc[csid] == NULL) {
-ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OPT),
             errmsg("CSID %d is not supported!", csid), errdetail("Not support the given CSID."),
             errcause("Error in the CSID."), erraction("Please check and revise your parameter.")));
     }

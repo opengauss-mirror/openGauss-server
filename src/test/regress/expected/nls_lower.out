@@ -1,0 +1,3151 @@
+--所有语言
+--对应
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = cy_GB') AS lower_case_string ;
+                  lower_case_string                   
+------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = en_GB') AS lower_case_string ;
+                  lower_case_string                   
+------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = English') AS lower_case_string ;
+ERROR:  collation "English" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = ENGLISH_M') AS lower_case_string ;
+ERROR:  collation "ENGLISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XENGLISH') AS lower_case_string ;
+ERROR:  collation "XENGLISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = ENGLISH_CI') AS lower_case_string ;
+ERROR:  collation "ENGLISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = ENGLISH_AI') AS lower_case_string ;
+ERROR:  collation "ENGLISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XENGLISH_AI') AS lower_case_string ;
+ERROR:  collation "XENGLISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = AMERICAN') AS lower_case_string ;
+ERROR:  collation "AMERICAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = AMERICAN_M') AS lower_case_string ;
+ERROR:  collation "AMERICAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XAMERICAN') AS lower_case_string ;
+ERROR:  collation "XAMERICAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = AMERICAN_CI') AS lower_case_string ;
+ERROR:  collation "AMERICAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = AMERICAN_AI') AS lower_case_string ;
+ERROR:  collation "AMERICAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XAMERICAN_AI') AS lower_case_string ;
+ERROR:  collation "XAMERICAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XAMERICAN_CI') AS lower_case_string ;
+ERROR:  collation "XAMERICAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = de_DE') AS lower_case_string ;
+                      lower_case_string                       
+--------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzääööüüßß
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = de_AT') AS lower_case_string ;
+                      lower_case_string                       
+--------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzääööüüßß
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = de_LU') AS lower_case_string ;
+                      lower_case_string                       
+--------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzääööüüßß
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = fy_DE') AS lower_case_string ;
+                      lower_case_string                       
+--------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzääööüüßß
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = hsb_DE') AS lower_case_string ;
+                      lower_case_string                       
+--------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzääööüüßß
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = GERMAN_M') AS lower_case_string ;
+ERROR:  collation "GERMAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = XGERMAN') AS lower_case_string ;
+ERROR:  collation "XGERMAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = GERMAN_CI') AS lower_case_string ;
+ERROR:  collation "GERMAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = GERMAN_AI') AS lower_case_string ;
+ERROR:  collation "GERMAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = XGERMAN_CI') AS lower_case_string ;
+ERROR:  collation "XGERMAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = XGERMAN_AI') AS lower_case_string ;
+ERROR:  collation "XGERMAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = fr_FR') AS lower_case_string ;
+                             lower_case_string                              
+----------------------------------------------------------------------------
+ aabbccddeeééèèêêëëffgghhiiîîïïjjkkllmmnnooôôööppqqrrssttuuûûüüvvwwxxyyÿÿzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = ca_FR') AS lower_case_string ;
+                             lower_case_string                              
+----------------------------------------------------------------------------
+ aabbccddeeééèèêêëëffgghhiiîîïïjjkkllmmnnooôôööppqqrrssttuuûûüüvvwwxxyyÿÿzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = fr_CH') AS lower_case_string ;
+                             lower_case_string                              
+----------------------------------------------------------------------------
+ aabbccddeeééèèêêëëffgghhiiîîïïjjkkllmmnnooôôööppqqrrssttuuûûüüvvwwxxyyÿÿzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = fr_CA') AS lower_case_string ;
+                             lower_case_string                              
+----------------------------------------------------------------------------
+ aabbccddeeééèèêêëëffgghhiiîîïïjjkkllmmnnooôôööppqqrrssttuuûûüüvvwwxxyyÿÿzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = fr_LU') AS lower_case_string ;
+                             lower_case_string                              
+----------------------------------------------------------------------------
+ aabbccddeeééèèêêëëffgghhiiîîïïjjkkllmmnnooôôööppqqrrssttuuûûüüvvwwxxyyÿÿzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = FRENCH') AS lower_case_string ;
+ERROR:  collation "FRENCH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = FRENCH_M') AS lower_case_string ;
+ERROR:  collation "FRENCH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = XFRENCH') AS lower_case_string ;
+ERROR:  collation "XFRENCH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = FRENCH_CI') AS lower_case_string ;
+ERROR:  collation "FRENCH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = FRENCH_AI') AS lower_case_string ;
+ERROR:  collation "FRENCH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = XFRENCH_CI') AS lower_case_string ;
+ERROR:  collation "XFRENCH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = XFRENCH_AI') AS lower_case_string ;
+ERROR:  collation "XFRENCH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--冰岛
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = is_IS') AS lower_case_string;
+                           lower_case_string                            
+------------------------------------------------------------------------
+ aabbddððeeffgghhiijjkkllmmnnoopprrssttuuvvxxyyþþääööááýýúúííééóóææððþþ
+(1 row)
+
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC') AS lower_case_string ;
+ERROR:  collation "ICELANDIC" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC_M') AS lower_case_string ;
+ERROR:  collation "ICELANDIC_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = XICELANDIC') AS lower_case_string ;
+ERROR:  collation "XICELANDIC" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC_CI') AS lower_case_string ;
+ERROR:  collation "ICELANDIC_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC_AI') AS lower_case_string ;
+ERROR:  collation "ICELANDIC_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC_CI') AS lower_case_string ;
+ERROR:  collation "ICELANDIC_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbDdÐðEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvXxYyÞþÄäÖöÁáÝýÚúÍíÉéÓóÆæÐðÞþ', 'NLS_SORT = ICELANDIC_AI') AS lower_case_string ;
+ERROR:  collation "ICELANDIC_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_AR') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = an_ES') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = ast_ES') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_BO') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_CL') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_CO') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_CR') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_CU') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_DO') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_EC') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_ES') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_GT') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_HN') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_MX') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_NI') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_PA') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_PE') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_PR') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_SV') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_US') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_UY') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = es_VE') AS lower_case_string;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhiiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = estonian') AS lower_case_string;
+ERROR:  collation "estonian" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = SPANISH') AS lower_case_string ;
+ERROR:  collation "SPANISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = SPANISH_M') AS lower_case_string ;
+ERROR:  collation "SPANISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = XSPANISH') AS lower_case_string ;
+ERROR:  collation "XSPANISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = SPANISH_CI') AS lower_case_string ;
+ERROR:  collation "SPANISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = SPANISH_AI') AS lower_case_string ;
+ERROR:  collation "SPANISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = XSPANISH_CI') AS lower_case_string ;
+ERROR:  collation "XSPANISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = XSPANISH_AI') AS lower_case_string ;
+ERROR:  collation "XSPANISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = ca_IT') AS lower_case_string ;
+                         lower_case_string                          
+--------------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzààèèééììòòóóùù
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = ITALIAN') AS lower_case_string ;
+ERROR:  collation "ITALIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = ITALIAN_M') AS lower_case_string ;
+ERROR:  collation "ITALIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = XITALIAN') AS lower_case_string ;
+ERROR:  collation "XITALIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = ITALIAN_CI') AS lower_case_string ;
+ERROR:  collation "ITALIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = ITALIAN_AI') AS lower_case_string ;
+ERROR:  collation "ITALIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = XITALIAN_CI') AS lower_case_string ;
+ERROR:  collation "XITALIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = XITALIAN_AI') AS lower_case_string ;
+ERROR:  collation "XITALIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = PORTUGUESS') AS lower_case_string ;
+ERROR:  collation "PORTUGUESS" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = PORTUGUESS_M') AS lower_case_string ;
+ERROR:  collation "PORTUGUESS_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = XPORTUGUESS') AS lower_case_string ;
+ERROR:  collation "XPORTUGUESS" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = PORTUGUESS_CI') AS lower_case_string ;
+ERROR:  collation "PORTUGUESS_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = PORTUGUESS_AI') AS lower_case_string ;
+ERROR:  collation "PORTUGUESS_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = XPORTUGUESS_CI') AS lower_case_string ;
+ERROR:  collation "XPORTUGUESS_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = XPORTUGUESS_AI') AS lower_case_string ;
+ERROR:  collation "XPORTUGUESS_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = DUTCH') AS lower_case_string;
+ERROR:  collation "DUTCH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = DUTCH') AS lower_case_string ;
+ERROR:  collation "DUTCH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = DUTCH_M') AS lower_case_string ;
+ERROR:  collation "DUTCH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = XDUTCH') AS lower_case_string ;
+ERROR:  collation "XDUTCH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = DUTCH_CI') AS lower_case_string ;
+ERROR:  collation "DUTCH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = DUTCH_AI') AS lower_case_string ;
+ERROR:  collation "DUTCH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = XDUTCH_CI') AS lower_case_string ;
+ERROR:  collation "XDUTCH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = XDUTCH_AI') AS lower_case_string ;
+ERROR:  collation "XDUTCH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH') AS lower_case_string ;
+ERROR:  collation "SWEDISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH_M') AS lower_case_string ;
+ERROR:  collation "SWEDISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = XSWEDISH') AS lower_case_string ;
+ERROR:  collation "XSWEDISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH_CI') AS lower_case_string ;
+ERROR:  collation "SWEDISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH_AI') AS lower_case_string ;
+ERROR:  collation "SWEDISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH_CI') AS lower_case_string ;
+ERROR:  collation "SWEDISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = SWEDISH_AI') AS lower_case_string ;
+ERROR:  collation "SWEDISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = da_DK') AS lower_case_string ;
+                     lower_case_string                      
+------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzææøøåå
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = en_DK') AS lower_case_string ;
+                     lower_case_string                      
+------------------------------------------------------------
+ aabbccddeeffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzzææøøåå
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH') AS lower_case_string ;
+ERROR:  collation "DANISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH_M') AS lower_case_string ;
+ERROR:  collation "DANISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = XDANISH') AS lower_case_string ;
+ERROR:  collation "XDANISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH_CI') AS lower_case_string ;
+ERROR:  collation "DANISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH_AI') AS lower_case_string ;
+ERROR:  collation "DANISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH_CI') AS lower_case_string ;
+ERROR:  collation "DANISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = DANISH_AI') AS lower_case_string ;
+ERROR:  collation "DANISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN_M') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = XNORWEGIAN') AS lower_case_string ;
+ERROR:  collation "XNORWEGIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN_CI') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN_AI') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN_CI') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = NORWEGIAN_AI') AS lower_case_string ;
+ERROR:  collation "NORWEGIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH') AS lower_case_string ;
+ERROR:  collation "FINNISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH_M') AS lower_case_string ;
+ERROR:  collation "FINNISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = XFINNISH') AS lower_case_string ;
+ERROR:  collation "XFINNISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH_CI') AS lower_case_string ;
+ERROR:  collation "FINNISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH_AI') AS lower_case_string ;
+ERROR:  collation "FINNISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH_CI') AS lower_case_string ;
+ERROR:  collation "FINNISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = FINNISH_AI') AS lower_case_string ;
+ERROR:  collation "FINNISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = csb_PL') AS lower_case_string ;
+                       lower_case_string                        
+----------------------------------------------------------------
+ aabbccććddeeęęffgghhiijjkkllłłmmnnńńooóópprrssśśttuuwwyyzzźźżż
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH') AS lower_case_string ;
+ERROR:  collation "POLISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH_M') AS lower_case_string ;
+ERROR:  collation "POLISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = XPOLISH') AS lower_case_string ;
+ERROR:  collation "XPOLISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH_CI') AS lower_case_string ;
+ERROR:  collation "POLISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH_AI') AS lower_case_string ;
+ERROR:  collation "POLISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH_CI') AS lower_case_string ;
+ERROR:  collation "POLISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = POLISH_AI') AS lower_case_string ;
+ERROR:  collation "POLISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = cs_CZ') AS lower_case_string;
+                       lower_case_string                        
+----------------------------------------------------------------
+ aabbccddeeffgghhchchiijjkkllmmnnooppqqrrssššttťťuuvvwwxxyyzzžž
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH') AS lower_case_string ;
+ERROR:  collation "CZECH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH_M') AS lower_case_string ;
+ERROR:  collation "CZECH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = XCZECH') AS lower_case_string ;
+ERROR:  collation "XCZECH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH_AI') AS lower_case_string ;
+ERROR:  collation "CZECH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH_CI') AS lower_case_string ;
+ERROR:  collation "CZECH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH_AI') AS lower_case_string ;
+ERROR:  collation "CZECH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = CZECH_CI') AS lower_case_string ;
+ERROR:  collation "CZECH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN_M') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = XHUNGARIAN') AS lower_case_string ;
+ERROR:  collation "XHUNGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN_AI') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN_CI') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN_AI') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = HUNGARIAN_CI') AS lower_case_string ;
+ERROR:  collation "HUNGARIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN') AS lower_case_string ;
+ERROR:  collation "ROMANIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN_M') AS lower_case_string ;
+ERROR:  collation "ROMANIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = XROMANIAN') AS lower_case_string ;
+ERROR:  collation "XROMANIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN_AI') AS lower_case_string ;
+ERROR:  collation "ROMANIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN_CI') AS lower_case_string ;
+ERROR:  collation "ROMANIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN_AI') AS lower_case_string ;
+ERROR:  collation "ROMANIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = ROMANIAN_CI') AS lower_case_string ;
+ERROR:  collation "ROMANIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = el_CY') AS lower_case_string ;
+                 lower_case_string                 
+---------------------------------------------------
+ ααββγγδδεεζζηηθθιικκλλμμννξξοοππρρσσςττυυφφχχψψωω
+(1 row)
+
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = el_GR') AS lower_case_string ;
+                 lower_case_string                 
+---------------------------------------------------
+ ααββγγδδεεζζηηθθιικκλλμμννξξοοππρρσσςττυυφφχχψψωω
+(1 row)
+
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK') AS lower_case_string ;
+ERROR:  collation "GREEK" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK_M') AS lower_case_string ;
+ERROR:  collation "GREEK_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = XGREEK') AS lower_case_string ;
+ERROR:  collation "XGREEK" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK_AI') AS lower_case_string ;
+ERROR:  collation "GREEK_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK_CI') AS lower_case_string ;
+ERROR:  collation "GREEK_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK_AI') AS lower_case_string ;
+ERROR:  collation "GREEK_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = GREEK_CI') AS lower_case_string ;
+ERROR:  collation "GREEK_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = bg_BG') AS lower_case_string;
+                       lower_case_string                        
+----------------------------------------------------------------
+ ааббввггддеежжззииййккллммннооппррссттууффххццччшшщщъъыыььююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN') AS lower_case_string ;
+ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN_M') AS lower_case_string ;
+ERROR:  collation "BULGARIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = XBULGARIAN') AS lower_case_string ;
+ERROR:  collation "XBULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN_AI') AS lower_case_string ;
+ERROR:  collation "BULGARIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN_CI') AS lower_case_string ;
+ERROR:  collation "BULGARIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN_AI') AS lower_case_string ;
+ERROR:  collation "BULGARIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN_CI') AS lower_case_string ;
+ERROR:  collation "BULGARIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = crh_UA') AS lower_case_string ;
+                         lower_case_string                          
+--------------------------------------------------------------------
+ ааббввггґґддееєєжжззииііїїййккллммннооппррссттууффххццччшшщщььююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN_M') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = XUKRAINIAN') AS lower_case_string ;
+ERROR:  collation "XUKRAINIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN_AI') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN_CI') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN_AI') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = UKRAINIAN_CI') AS lower_case_string ;
+ERROR:  collation "UKRAINIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN') AS lower_case_string ;
+ERROR:  collation "SERBIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN_M') AS lower_case_string ;
+ERROR:  collation "SERBIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = XSERBIAN') AS lower_case_string ;
+ERROR:  collation "XSERBIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN_AI') AS lower_case_string ;
+ERROR:  collation "SERBIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN_CI') AS lower_case_string ;
+ERROR:  collation "SERBIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN_AI') AS lower_case_string ;
+ERROR:  collation "SERBIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = SERBIAN_CI') AS lower_case_string ;
+ERROR:  collation "SERBIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN_M') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = XMACEDONIAN') AS lower_case_string ;
+ERROR:  collation "XMACEDONIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN_AI') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN_CI') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN_AI') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = MACEDONIAN_CI') AS lower_case_string ;
+ERROR:  collation "MACEDONIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = be_BY') AS lower_case_string ;
+                       lower_case_string                        
+----------------------------------------------------------------
+ ааббввггґґддееёёжжззііййккллммннооппррссттууффххццччшшщщььююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN_M') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = XBELARUSIAN') AS lower_case_string ;
+ERROR:  collation "XBELARUSIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN_AI') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN_CI') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN_AI') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BELARUSIAN_CI') AS lower_case_string ;
+ERROR:  collation "BELARUSIAN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = tr_CY') AS lower_case_string;
+                     lower_case_string                      
+------------------------------------------------------------
+ aabbccççddeeffggğğhhııiijjkkllmmnnooööpprrssşşttuuüüvvyyzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = tr_TR') AS lower_case_string;
+                     lower_case_string                      
+------------------------------------------------------------
+ aabbccççddeeffggğğhhııiijjkkllmmnnooööpprrssşşttuuüüvvyyzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH') AS lower_case_string ;
+ERROR:  collation "TURKISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH_M') AS lower_case_string ;
+ERROR:  collation "TURKISH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = XTURKISH') AS lower_case_string ;
+ERROR:  collation "XTURKISH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH_AI') AS lower_case_string ;
+ERROR:  collation "TURKISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH_CI') AS lower_case_string ;
+ERROR:  collation "TURKISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH_AI') AS lower_case_string ;
+ERROR:  collation "TURKISH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = TURKISH_CI') AS lower_case_string ;
+ERROR:  collation "TURKISH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = az_AZ') AS lower_case_string;
+                       lower_case_string                        
+----------------------------------------------------------------
+ aabbccççddeeffggğğhhxxııiijjkkqqllmmnnooööpprrssşşttuuüüvvyyzz
+(1 row)
+
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI_M') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = XAZERBAIJANI') AS lower_case_string ;
+ERROR:  collation "XAZERBAIJANI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI_AI') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI_CI') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI_AI') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = AZERBAIJANI_CI') AS lower_case_string ;
+ERROR:  collation "AZERBAIJANI_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH') AS lower_case_string ;
+ERROR:  collation "KAZAKH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH_M') AS lower_case_string ;
+ERROR:  collation "KAZAKH_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH') AS lower_case_string ;
+ERROR:  collation "KAZAKH" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH_AI') AS lower_case_string ;
+ERROR:  collation "KAZAKH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH_CI') AS lower_case_string ;
+ERROR:  collation "KAZAKH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH_AI') AS lower_case_string ;
+ERROR:  collation "KAZAKH_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = KAZAKH_CI') AS lower_case_string ;
+ERROR:  collation "KAZAKH_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = SCHINESE_PINYIN_M') AS lower_case_string ;
+ERROR:  collation "SCHINESE_PINYIN_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = SCHINESE_PINYIN') AS lower_case_string ;
+ERROR:  collation "SCHINESE_PINYIN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = SCHINESE') AS lower_case_string ;
+ERROR:  collation "SCHINESE" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = SCHINESE_PINYIN_CI') AS lower_case_string ;
+ERROR:  collation "SCHINESE_PINYIN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = SCHINESE_PINYIN_AI') AS lower_case_string ;
+ERROR:  collation "SCHINESE_PINYIN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XSCHINESE_PINYIN_CI') AS lower_case_string ;
+ERROR:  collation "XSCHINESE_PINYIN_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XSCHINESE_PINYIN_AI') AS lower_case_string ;
+ERROR:  collation "XSCHINESE_PINYIN_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XSCHINESE') AS lower_case_string ;
+ERROR:  collation "XSCHINESE" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--通用 (BINARY)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--通用 (BINARY)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_M') AS lower_case_string ;
+ERROR:  collation "BINARY_M" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--通用 (BINARY)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = XBINARY') AS lower_case_string ;
+ERROR:  collation "XBINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--通用 (BINARY)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_AI') AS lower_case_string ;
+ERROR:  collation "BINARY_AI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--通用 (BINARY)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--英语 (English)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--美国(American)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--德语 (German)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÄäÖöÜüẞß', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--法语 (French)
+SELECT NLS_LOWER('AaBbCcDdEeÉéÈèÊêËëFfGgHhIiÎîÏïJjKkLlMmNnOoÔôÖöPpQqRrSsTtUuÛûÜüVvWwXxYyŸÿZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--西班牙语 (Spanish)
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--意大利语 (Italian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÈèÉéÌìÒòÓóÙù', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--葡萄牙语 (Portuguese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÂâÃãÄäÈèÉéÊêËëÌìÍíÎîÏïÒòÓóÔôÕõÖöÙùÚúÛûÜüÇç', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--荷兰语 (Dutch)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÀàÁáÇçÉéËëÍíÏïÓóÖöÚúÜüÝý', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--瑞典语 (Swedish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--丹麦语 (Danish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--挪威语 (Norwegian)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÆæØøÅå', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--芬兰语 (Finnish)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZzÅåÄäÖö', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--波兰语 (Polish)
+SELECT NLS_LOWER('AaBbCcĆćDdEeĘęFfGgHhIiJjKkLlŁłMmNnŃńOoÓóPpRrSsŚśTtUuWwYyZzŹźŻż', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--捷克语 (Czech)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhChchIiJjKkLlMmNnOoPpQqRrSsŠšTtŤťUuVvWwXxYyZzŽž', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--匈牙利语 (Hungarian)
+SELECT NLS_LOWER('AaÁáBbCcCscsDdDzdzDzdzsEeÉéFfGg GygyHhIiÍíJjKkLlLylyMmNnNynyOoÓóÖöŐőPpQqRrSsSzszTtTytyUuÚúÜüŰűVvWwXxYyZzZszs', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--罗马尼亚语 (Romanian)
+SELECT NLS_LOWER('AaĂăÂâBbCcCiçıDdEeFfGgGiğıHhIiÎîJjKkLlMmNnOoPpQqRrSsȘșTtȚțUuVvWwXxYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--希腊语 (Greek)
+SELECT NLS_LOWER('ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψΩω', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--保加利亚语 (Bulgarian)
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--乌克兰语 (Ukrainian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЄєЖжЗзИиІіЇїЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--塞尔维亚语 (Serbian)
+SELECT NLS_LOWER('АаБбВвГгДдЂђЕеЖ⚗ИиЈјКкЛлЉљМмНнЊњОоПпРрСсТтЋћУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--马其顿语 (Macedonian)
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--白俄罗斯语 (Belarusian)
+SELECT NLS_LOWER('АаБбВвГгҐґДдЕеЁёЖжЗзІіЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЬьЮюЯя', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--土耳其语 (Turkish)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhIıİiJjKkLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--阿塞拜疆语 (Azerbaijani)
+SELECT NLS_LOWER('AaBbCcÇçDdEeFfGgĞğHhXxIıİiJjKkQqLlMmNnOoÖöPpRrSsŞşTtUuÜüVvYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--哈萨克语 (Kazakh)
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--汉语 (Chinese)
+SELECT NLS_LOWER('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz', 'NLS_SORT = BINARY_CI') AS lower_case_string ;
+ERROR:  collation "BINARY_CI" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--语言不对应
+SELECT NLS_LOWER('AaÁáÀàÂâÄäBbCcDdEeÉéÈèÊêËëFfGgHhIiÍíÌìÎîÏïJjKkLlMmNnÑñOoÓóÒòÔôÖöPpQqRrSsTtUuÚúÙùÛûÜüVvWwXxYyÝýZz', 'NLS_SORT = az_AZ') AS lower_case_string ;
+                                        lower_case_string                                         
+--------------------------------------------------------------------------------------------------
+ aaááààââääbbccddeeééèèêêëëffgghhıiííììîîïïjjkkllmmnnññooóóòòôôööppqqrrssttuuúúùùûûüüvvwwxxyyýýzz
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгҒғДдЕеЁёЖжЗзИиЙйКкҚқЛлМмНнҢңОоПпРрСсТтУуҰұФфХхҺһЦцЧчШшЩщЪъЫыЬьЭэЮюЯя', 'NLS_SORT = az_AZ') AS lower_case_string ;
+                              lower_case_string                               
+------------------------------------------------------------------------------
+ ааббввггғғддееёёжжззииййккққллммннңңооппррссттууұұффххһһццччшшщщъъыыььээююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгДдЃѓЕеЖжЗзЅѕИиЈјКкЛлЉљМмНнЊ⚗ОоПпРрСсТтЌќУуФфХхЦцЧчЏџШш', 'NLS_SORT = az_AZ') AS lower_case_string ;
+                       lower_case_string                        
+----------------------------------------------------------------
+ ааббввггддѓѓеежжззѕѕиијјккллљљммннњ⚗ооппррссттќќууффххццччџџшш
+(1 row)
+
+--检验clob类型
+------------------------------------------------------------------------------------------------------------
+SELECT NLS_LOWER(cast('AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz' AS CLOB), 'NLS_SORT = BINARY') AS lower_case_string ;
+ERROR:  collation "BINARY" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+drop table example_clob;
+ERROR:  table "example_clob" does not exist
+CREATE TABLE example_clob (
+                               id          SERIAL PRIMARY KEY, -- 自动递增的主键
+                               name        VARCHAR2(100),                                       -- 普通字符串列
+                               clob_column CLOB
+);
+NOTICE:  CREATE TABLE will create implicit sequence "example_clob_id_seq" for serial column "example_clob.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "example_clob_pkey" for table "example_clob"
+INSERT INTO example_clob (name, clob_column)
+VALUES ('Example Entry', TO_CLOB('This is a large text entry that will be stored in the CLOB column.'));
+--检验nls_lower中嵌套cast转clob能否成功
+SELECT NLS_LOWER(clob_column) FROM example_clob;
+                             nls_lower                              
+--------------------------------------------------------------------
+ this is a large text entry that will be stored in the clob column.
+(1 row)
+
+-----------------------------------------------------------------------------------------------------------------------
+--oracle
+--嵌套表类型,集合类型
+-- 定义 VARRAY 类型
+CREATE TYPE number_varray_type AS VARRAY(10) OF NUMBER;
+-- 创建表时使用 VARRAY 类型
+CREATE TABLE employee_skills (
+                                 employee_id NUMBER PRIMARY KEY,
+                                 skills      number_varray_type
+);
+ERROR:  type "number_varray_type" is not supported as column type
+DETAIL:  "number_varray_type" is a nest table type
+-- 定义嵌套表类型
+CREATE TYPE string_table_type AS TABLE OF VARCHAR2(100);
+-- 创建表时使用嵌套表类型
+CREATE TABLE project_tasks (
+                               project_id NUMBER PRIMARY KEY,
+                               tasks      string_table_type
+) NESTED TABLE tasks STORE AS tasks_nt;
+ERROR:  syntax error at or near "NESTED"
+LINE 4: ) NESTED TABLE tasks STORE AS tasks_nt;
+          ^
+INSERT INTO employee_skills (employee_id, skills)
+VALUES (1, number_varray_type(101, 102, 103));
+ERROR:  relation "employee_skills" does not exist on datanode1
+LINE 1: INSERT INTO employee_skills (employee_id, skills)
+                    ^
+INSERT INTO project_tasks (project_id, tasks)
+VALUES (1, string_table_type('Task 1', 'Task 2', 'Task 3'));
+ERROR:  relation "project_tasks" does not exist on datanode1
+LINE 1: INSERT INTO project_tasks (project_id, tasks)
+                    ^
+select * from project_tasks;
+ERROR:  relation "project_tasks" does not exist on datanode1
+LINE 1: select * from project_tasks;
+                      ^
+select nls_lower(tasks) from project_tasks;
+ERROR:  relation "project_tasks" does not exist on datanode1
+LINE 1: select nls_lower(tasks) from project_tasks;
+                                     ^
+--opengauss
+-- 创建一个包含数组列的表
+drop table employee_skills;
+ERROR:  table "employee_skills" does not exist
+CREATE TABLE employee_skills (
+                                 employee_id INT PRIMARY KEY,
+                                 skills      NUMERIC[] ,-- 使用 PostgreSQL/OpenGauss 数组类型
+                                 strings      varchar(20)[]
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employee_skills_pkey" for table "employee_skills"
+-- 插入数据到带有数组列的表中
+INSERT INTO employee_skills (employee_id, skills,strings)
+VALUES (1, ARRAY[101, 102, 103],ARRAY['WEFWEF', 'WEFHTHT', 'WIEJFLW']);
+select * from employee_skills;
+ employee_id |    skills     |         strings          
+-------------+---------------+--------------------------
+           1 | {101,102,103} | {WEFWEF,WEFHTHT,WIEJFLW}
+(1 row)
+
+------------------------------------------------------------------------------------------------------------------------
+--oracle
+--创建一张student表
+drop table student;
+ERROR:  table "student" does not exist
+CREATE TABLE student (
+                         student_id INT PRIMARY KEY,-- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE -- 电子邮件，唯一约束
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "student_email_key" for table "student"
+-- 插入单个学生记录
+INSERT INTO student (student_id,first_name, last_name, date_of_birth, gender, email)
+VALUES (1,'张', '三', TO_DATE('1995-07-23', 'YYYY-MM-DD'), 'M', 'zhangsan@example.com');
+-- 插入单个学生记录
+INSERT INTO student (student_id,first_name, last_name, date_of_birth, gender, email)
+VALUES (2,'李', '四', TO_DATE('1994-05-15', 'YYYY-MM-DD'), 'F', 'lisi@example.com');
+-- 插入单个学生记录
+INSERT INTO student (student_id,first_name, last_name, date_of_birth, gender, email)
+VALUES (3,'王', '五', TO_DATE('1996-12-01', 'YYYY-MM-DD'), 'M', 'wangwu@example.com');
+-- 插入单个学生记录
+INSERT INTO student (student_id,first_name, last_name, date_of_birth, gender, email)
+VALUES (4,'赵', '六', TO_DATE('1997-03-18', 'YYYY-MM-DD'), 'F', 'zhaoliu@example.com');
+select * from student;
+ student_id | first_name | last_name |      date_of_birth       | gender |        email         
+------------+------------+-----------+--------------------------+--------+----------------------
+          1 | 张         | 三        | Sun Jul 23 00:00:00 1995 | M      | zhangsan@example.com
+          2 | 李         | 四        | Sun May 15 00:00:00 1994 | F      | lisi@example.com
+          3 | 王         | 五        | Sun Dec 01 00:00:00 1996 | M      | wangwu@example.com
+          4 | 赵         | 六        | Tue Mar 18 00:00:00 1997 | F      | zhaoliu@example.com
+(4 rows)
+
+--nls_lower中包含子查询
+select nls_lower((select gender from student)) ;
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: nls_lower
+select gender from student;
+ gender 
+--------
+ M
+ F
+ M
+ F
+(4 rows)
+
+-----------------------------------------------------------------------------
+--opengauss
+--创建一张student表
+drop table student;
+CREATE TABLE student (
+                         student_id SERIAL PRIMARY KEY,-- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE -- 电子邮件，唯一约束
+);
+NOTICE:  CREATE TABLE will create implicit sequence "student_student_id_seq" for serial column "student.student_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "student_email_key" for table "student"
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('张', '三', TO_DATE('1995-07-23', 'YYYY-MM-DD'), 'M', 'zhangsan@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('李', '四', TO_DATE('1994-05-15', 'YYYY-MM-DD'), 'F', 'lisi@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('王', '五', TO_DATE('1996-12-01', 'YYYY-MM-DD'), 'M', 'wangwu@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('赵', '六', TO_DATE('1997-03-18', 'YYYY-MM-DD'), 'F', 'zhaoliu@example.com');
+select * from student;
+ student_id | first_name | last_name |      date_of_birth       | gender |        email         
+------------+------------+-----------+--------------------------+--------+----------------------
+          1 | 张         | 三        | Sun Jul 23 00:00:00 1995 | M      | zhangsan@example.com
+          2 | 李         | 四        | Sun May 15 00:00:00 1994 | F      | lisi@example.com
+          3 | 王         | 五        | Sun Dec 01 00:00:00 1996 | M      | wangwu@example.com
+          4 | 赵         | 六        | Tue Mar 18 00:00:00 1997 | F      | zhaoliu@example.com
+(4 rows)
+
+--nls_lower中包含子查询
+select nls_lower((select gender from student)) ;
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: nls_lower
+select gender from student;
+ gender 
+--------
+ M
+ F
+ M
+ F
+(4 rows)
+
+--oracle
+--被包含
+select to_number(nls_lower('ASDAIOJOmalksJOW') default 999 on conversion error );
+ to_number 
+-----------
+       999
+(1 row)
+
+select to_number(123 default nls_lower('123') on conversion error );
+ to_number 
+-----------
+       123
+(1 row)
+
+select to_char(nls_lower('ASDAIOJOmalksJOW') );
+     to_char      
+------------------
+ asdaiojomalksjow
+(1 row)
+
+select to_char(nls_lower(gender) )from student;
+ to_char 
+---------
+ m
+ f
+ m
+ f
+(4 rows)
+
+--opengauss
+--被包含
+select to_number(nls_lower('ASDAIOJOmalksJOW') default 999 on conversion error );
+ to_number 
+-----------
+       999
+(1 row)
+
+select to_number(123 default nls_lower('123') on conversion error );
+ to_number 
+-----------
+       123
+(1 row)
+
+select to_char(nls_lower('ASDAIOJOmalksJOW') );
+     to_char      
+------------------
+ asdaiojomalksjow
+(1 row)
+
+select to_char(nls_lower(gender) )from student;
+ to_char 
+---------
+ m
+ f
+ m
+ f
+(4 rows)
+
+-----------------------------------------------------------------------------------------------------------------
+--数据类型
+--用户可以想到的合法输入
+--测试列
+select nls_lower(gender) from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+--nls_lower()函数可以想到的合法数据类型
+drop table student;
+CREATE TABLE student (
+                         student_id SERIAL PRIMARY KEY, -- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE -- 电子邮件，唯一约束
+);
+NOTICE:  CREATE TABLE will create implicit sequence "student_student_id_seq" for serial column "student.student_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "student_email_key" for table "student"
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('张', '三', TO_DATE('1995-07-23', 'YYYY-MM-DD'), 'M', 'zhangsan@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('李', '四', TO_DATE('1994-05-15', 'YYYY-MM-DD'), 'F', 'lisi@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('王', '五', TO_DATE('1996-12-01', 'YYYY-MM-DD'), 'M', 'wangwu@example.com');
+-- 插入单个学生记录
+INSERT INTO student (first_name, last_name, date_of_birth, gender, email)
+VALUES ('赵', '六', TO_DATE('1997-03-18', 'YYYY-MM-DD'), 'F', 'zhaoliu@example.com');
+commit;
+WARNING:  there is no transaction in progress
+--列
+select * from student;
+ student_id | first_name | last_name |      date_of_birth       | gender |        email         
+------------+------------+-----------+--------------------------+--------+----------------------
+          1 | 张         | 三        | Sun Jul 23 00:00:00 1995 | M      | zhangsan@example.com
+          2 | 李         | 四        | Sun May 15 00:00:00 1994 | F      | lisi@example.com
+          3 | 王         | 五        | Sun Dec 01 00:00:00 1996 | M      | wangwu@example.com
+          4 | 赵         | 六        | Tue Mar 18 00:00:00 1997 | F      | zhaoliu@example.com
+(4 rows)
+
+select nls_lower(cast(gender as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as nvarchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as TEXT))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as clob))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as varchar2(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as nvarchar2(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as nchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as char(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender as CHARACTER(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+--直接转换
+select nls_lower(cast('ascaSDSV' as varchar(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as nvarchar(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as clob));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as varchar2(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as nvarchar2(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as nchar(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as char(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' as CHARACTER(20)));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+--::
+select nls_lower(cast(gender :: varchar(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: nvarchar(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: TEXT)as varchar(20))from student;
+ERROR:  syntax error at or near ")"
+LINE 1: select nls_lower(cast(gender :: TEXT)as varchar(20))from stu...
+                                            ^
+select nls_lower(cast(gender :: clob)as varchar(20))from student;
+ERROR:  syntax error at or near ")"
+LINE 1: select nls_lower(cast(gender :: clob)as varchar(20))from stu...
+                                            ^
+select nls_lower(cast(gender :: varchar2(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: nvarchar2(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: nchar(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: char(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+select nls_lower(cast(gender :: CHARACTER(20)as varchar(20)))from student;
+ nls_lower 
+-----------
+ m
+ f
+ m
+ f
+(4 rows)
+
+--直接转换
+select nls_lower(cast('ascaSDSV' :: varchar(20)as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: nvarchar(20)as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: TEXT as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: clob as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: varchar2(20) as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: nvarchar2(20) as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: nchar(20) as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: char(20) as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+select nls_lower(cast('ascaSDSV' :: CHARACTER(20) as TEXT));
+ nls_lower 
+-----------
+ ascasdsv
+(1 row)
+
+--不合法
+--空
+select nls_lower('');
+ nls_lower 
+-----------
+ 
+(1 row)
+
+select nls_lower(''+'');
+ nls_lower 
+-----------
+ 
+(1 row)
+
+select nls_lower(null);
+ nls_lower 
+-----------
+ 
+(1 row)
+
+select nls_lower(' ');
+ nls_lower 
+-----------
+  
+(1 row)
+
+--不合法的输入类型
+------------------------------------------------------------------------------------------------------------------------
+--oracle
+--输入格式
+select nls_lower(123+'ASEFWEF');
+ERROR:  invalid input syntax for integer: "ASEFWEF"
+LINE 1: select nls_lower(123+'ASEFWEF');
+                             ^
+CONTEXT:  referenced column: nls_lower
+select nls_lower(123+'123');
+ nls_lower 
+-----------
+ 246
+(1 row)
+
+select nls_lower(to_number(1231)+'123');
+ nls_lower 
+-----------
+ 1354
+(1 row)
+
+select nls_lower(123||'ASEFWEF');
+ nls_lower  
+------------
+ 123asefwef
+(1 row)
+
+select nls_lower('qnoPWOEPWEJFPWJEPF'||'ASEFWEF');
+         nls_lower         
+---------------------------
+ qnopwoepwejfpwjepfasefwef
+(1 row)
+
+select nls_lower('  ASEFWEF ');
+ nls_lower  
+------------
+   asefwef 
+(1 row)
+
+select nls_lower('  AS EF WE F ');
+   nls_lower   
+---------------
+   as ef we f 
+(1 row)
+
+select nls_lower(NULL+'  ASEFWEF ');
+ERROR:  invalid input syntax for type numeric: "  ASEFWEF "
+LINE 1: select nls_lower(NULL+'  ASEFWEF ');
+                              ^
+CONTEXT:  referenced column: nls_lower
+select nls_lower('  ASE123897FW(*&(中文字符EF ');
+          nls_lower           
+------------------------------
+   ase123897fw(*&(中文字符ef 
+(1 row)
+
+------------------------------------------------------------------------------------------------------------------------
+--opengauss
+--输入格式
+select nls_lower(123+'ASEFWEF');
+ERROR:  invalid input syntax for integer: "ASEFWEF"
+LINE 1: select nls_lower(123+'ASEFWEF');
+                             ^
+CONTEXT:  referenced column: nls_lower
+select nls_lower(123+'123');
+ nls_lower 
+-----------
+ 246
+(1 row)
+
+select nls_lower(to_number(1231)+'123');
+ nls_lower 
+-----------
+ 1354
+(1 row)
+
+select nls_lower(123||'ASEFWEF');
+ nls_lower  
+------------
+ 123asefwef
+(1 row)
+
+select nls_lower('qnoPWOEPWEJFPWJEPF'||'ASEFWEF');
+         nls_lower         
+---------------------------
+ qnopwoepwejfpwjepfasefwef
+(1 row)
+
+select nls_lower('  ASEFWEF ');
+ nls_lower  
+------------
+   asefwef 
+(1 row)
+
+select nls_lower('  AS EF WE F ');
+   nls_lower   
+---------------
+   as ef we f 
+(1 row)
+
+select nls_lower(NULL+'  ASEFWEF ');
+ERROR:  invalid input syntax for type numeric: "  ASEFWEF "
+LINE 1: select nls_lower(NULL+'  ASEFWEF ');
+                              ^
+CONTEXT:  referenced column: nls_lower
+select nls_lower('  ASE123897FW(*&(中文字符EF ');
+          nls_lower           
+------------------------------
+   ase123897fw(*&(中文字符ef 
+(1 row)
+
+--oracle
+--不合法输入格式
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN') AS lower_case_string ;
+ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BUL按时打卡AN') AS lower_case_string ;
+ERROR:  collation "BUL按时打卡AN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_拉克丝的 = BULGARIAN') AS lower_case_string ;
+ERROR:  invalid format: NLS_拉克丝的
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS卢卡斯RT = BUL阿斯顿IAN') AS lower_case_string ;
+ERROR:  invalid format: NLS卢卡斯RT
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NL S_ SORT = BUL GA RIAN') AS lower_case_string ;
+                       lower_case_string                        
+----------------------------------------------------------------
+ ааббввггддеежжззииййккллммннооппррссттууффххццччшшщщъъыыььююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', '    NLS_SORT = BULGARIAN  ') AS lower_case_string ;
+ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--opengauss
+--不合法输入格式
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BULGARIAN') AS lower_case_string ;
+ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_SORT = BUL按时打卡AN') AS lower_case_string ;
+ERROR:  collation "BUL按时打卡AN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_拉克丝的 = BULGARIAN') AS lower_case_string ;
+ERROR:  invalid format: NLS_拉克丝的
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS卢卡斯RT = BUL阿斯顿IAN') AS lower_case_string ;
+ERROR:  invalid format: NLS卢卡斯RT
+CONTEXT:  referenced column: lower_case_string
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NL S_ SORT = BUL GA RIAN') AS lower_case_string ;
+                       lower_case_string                        
+----------------------------------------------------------------
+ ааббввггддеежжззииййккллммннооппррссттууффххццччшшщщъъыыььююяя
+(1 row)
+
+SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', '    NLS_SORT = BULGARIAN  ') AS lower_case_string ;
+ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
+CONTEXT:  referenced column: lower_case_string
+--create
+drop table student;
+CREATE TABLE student (
+                         student_id SERIAL PRIMARY KEY,-- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE -- 电子邮件，唯一约束
+);
+NOTICE:  CREATE TABLE will create implicit sequence "student_student_id_seq" for serial column "student.student_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "student_email_key" for table "student"
+drop table student;
+CREATE TABLE student (
+                         student_id SERIAL PRIMARY KEY, -- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE, -- 电子邮件，唯一约束
+                         lower nls_lower(123)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "student_student_id_seq" for serial column "student.student_id"
+ERROR:  type "nls_lower" does not exist
+LINE 8:                          lower nls_lower(123)
+                                       ^
+--create as
+drop table student1;
+ERROR:  table "student1" does not exist
+CREATE TABLE student1 AS
+SELECT nls_lower(gender) lower_gender FROM student;
+ERROR:  relation "student" does not exist on datanode1
+LINE 2: SELECT nls_lower(gender) lower_gender FROM student;
+                                                   ^
+select * from student1;
+ERROR:  relation "student1" does not exist on datanode1
+LINE 1: select * from student1;
+                      ^
+drop table student1;
+ERROR:  table "student1" does not exist
+CREATE TABLE nls_lower('STUDENT1') AS
+SELECT nls_lower(gender) lower_gender FROM student;
+ERROR:  syntax error at or near "'STUDENT1'"
+LINE 1: CREATE TABLE nls_lower('STUDENT1') AS
+                               ^
+--alter
+drop table student;
+ERROR:  table "student" does not exist
+CREATE TABLE student (
+                         student_id SERIAL PRIMARY KEY,-- 自动递增的学生ID
+                         first_name VARCHAR2(50) NOT NULL, -- 名字
+                         last_name VARCHAR2(50) NOT NULL, -- 姓氏
+                         date_of_birth DATE NOT NULL, -- 出生日期
+                         gender CHAR(1), -- 性别，M 或 F
+                         email VARCHAR2(100) UNIQUE -- 电子邮件，唯一约束
+);
+NOTICE:  CREATE TABLE will create implicit sequence "student_student_id_seq" for serial column "student.student_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "student_email_key" for table "student"
+ALTER TABLE student ADD (email1 VARCHAR2(100));
+ALTER TABLE student ADD (email1 VARCHAR2(100) default nls_lower('email1'));
+ERROR:  column "email1" of relation "student" already exists
+--drop
+drop table nls_lower('TESTDROP');
+ERROR:  syntax error at or near "("
+LINE 1: drop table nls_lower('TESTDROP');
+                            ^
+--truncate(q清空表中的所有内容)
+TRUNCATE TABLE nls_lower('STUDENT');
+ERROR:  syntax error at or near "("
+LINE 1: TRUNCATE TABLE nls_lower('STUDENT');
+                                ^
+--merge into演示
+--功能使用
+drop table employees;
+ERROR:  table "employees" does not exist
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+drop table new_employees;
+ERROR:  table "new_employees" does not exist
+CREATE TABLE new_employees (
+                               employee_id NUMBER PRIMARY KEY,
+                               first_name VARCHAR2(50),
+                               last_name VARCHAR2(50),
+                               salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "new_employees_pkey" for table "new_employees"
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 65000); -- 更新现有员工的薪水
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (3, 'Alice', 'Johnson', 80000); -- 新增员工
+COMMIT;
+WARNING:  there is no transaction in progress
+MERGE INTO employees e
+USING new_employees ne
+ON (e.employee_id = ne.employee_id)
+WHEN MATCHED THEN
+    UPDATE SET e.salary = ne.salary -- 只更新薪水字段
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, first_name, last_name, salary)
+    VALUES (ne.employee_id, ne.first_name, ne.last_name, ne.salary);
+SELECT * FROM employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           2 | Jane       | Smith     |  70000
+           1 | John       | Doe       |  65000
+           3 | Alice      | Johnson   |  80000
+(3 rows)
+
+--nls_lower
+drop table employees;
+drop table new_employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+CREATE TABLE new_employees (
+                               employee_id NUMBER PRIMARY KEY,
+                               first_name VARCHAR2(50),
+                               last_name VARCHAR2(50),
+                               salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "new_employees_pkey" for table "new_employees"
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 65000); -- 更新现有员工的薪水
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (3, 'Alice', 'Johnson', 80000); -- 新增员工
+COMMIT;
+WARNING:  there is no transaction in progress
+--on处使用函数
+MERGE INTO employees e
+USING new_employees ne
+ON (e.employee_id = nls_lower(ne.employee_id))
+WHEN MATCHED THEN
+    UPDATE SET e.salary = ne.salary -- 只更新薪水字段
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, first_name, last_name, salary)
+    VALUES (ne.employee_id, ne.first_name, ne.last_name, ne.salary);
+select * from employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           2 | Jane       | Smith     |  70000
+           1 | John       | Doe       |  65000
+           3 | Alice      | Johnson   |  80000
+(3 rows)
+
+--insert
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', nls_lower('WANG Cires'), 60000);
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees;
+ employee_id | first_name | last_name  | salary 
+-------------+------------+------------+--------
+           1 | John       | wang cires |  60000
+(1 row)
+
+--update
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', nls_lower('WANG Cires'), 60000);
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees;
+ employee_id | first_name | last_name  | salary 
+-------------+------------+------------+--------
+           1 | John       | wang cires |  60000
+(1 row)
+
+UPDATE employees
+SET salary = 70000
+WHERE employee_id = nls_lower(1);
+select * from employees;
+ employee_id | first_name | last_name  | salary 
+-------------+------------+------------+--------
+           1 | John       | wang cires |  70000
+(1 row)
+
+--delete
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', nls_lower('WANG Cires'), 60000);
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees;
+ employee_id | first_name | last_name  | salary 
+-------------+------------+------------+--------
+           1 | John       | wang cires |  60000
+(1 row)
+
+DELETE FROM employees
+WHERE employee_id = 1;
+select * from employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+(0 rows)
+
+--union
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+drop table new_employees;
+CREATE TABLE new_employees (
+                               employee_id NUMBER PRIMARY KEY,
+                               first_name VARCHAR2(50),
+                               last_name VARCHAR2(50),
+                               salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "new_employees_pkey" for table "new_employees"
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 65000); -- 更新现有员工的薪水
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (3, 'Alice', 'Johnson', 80000); -- 新增员工
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees where employee_id=1
+union
+select * from new_employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | John       | Doe       |  60000
+           1 | John       | Doe       |  65000
+           3 | Alice      | Johnson   |  80000
+(3 rows)
+
+--join
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+drop table new_employees;
+CREATE TABLE new_employees (
+                               employee_id NUMBER PRIMARY KEY,
+                               first_name VARCHAR2(50),
+                               last_name VARCHAR2(50),
+                               salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "new_employees_pkey" for table "new_employees"
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 65000); -- 更新现有员工的薪水
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (3, 'Alice', 'Johnson', 80000); -- 新增员工
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | John       | Doe       |  60000
+           2 | Jane       | Smith     |  70000
+(2 rows)
+
+select * from new_employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | John       | Doe       |  65000
+           3 | Alice      | Johnson   |  80000
+(2 rows)
+
+select * from employees
+left join
+new_employees
+on employees.employee_id=new_employees.employee_id
+WHERE employees.first_name=('J'||NLS_LOWER('OHN'));
+ employee_id | first_name | last_name | salary | employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------+-------------+------------+-----------+--------
+           1 | John       | Doe       |  60000 |           1 | John       | Doe       |  65000
+(1 row)
+
+--distinct
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+drop table new_employees;
+CREATE TABLE new_employees (
+                               employee_id NUMBER PRIMARY KEY,
+                               first_name VARCHAR2(50),
+                               last_name VARCHAR2(50),
+                               salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "new_employees_pkey" for table "new_employees"
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 65000); -- 更新现有员工的薪水
+INSERT INTO new_employees (employee_id, first_name, last_name, salary) VALUES (3, 'Alice', 'Johnson', 80000); -- 新增员工
+COMMIT;
+WARNING:  there is no transaction in progress
+select * from employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | John       | Doe       |  60000
+           2 | Jane       | Smith     |  70000
+(2 rows)
+
+select * from new_employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | John       | Doe       |  65000
+           3 | Alice      | Johnson   |  80000
+(2 rows)
+
+select distinct * from employees
+                  left join
+              new_employees
+              on employees.employee_id=new_employees.employee_id
+WHERE employees.first_name=('J'||NLS_LOWER('OHN'));
+ employee_id | first_name | last_name | salary | employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------+-------------+------------+-----------+--------
+           1 | John       | Doe       |  60000 |           1 | John       | Doe       |  65000
+(1 row)
+
+--group by ... having
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+select sum(employee_id),nls_lower(first_name) from employees group by employee_id,first_name having nls_lower(employee_id)=1;
+ sum | nls_lower 
+-----+-----------
+   1 | john
+(1 row)
+
+--order by
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (1, 'John', 'Doe', 60000);
+INSERT INTO employees (employee_id, first_name, last_name, salary) VALUES (2, 'Jane', 'Smith', 70000);
+COMMIT;
+WARNING:  there is no transaction in progress
+select *
+from employees
+order by nls_lower(first_name);
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           2 | Jane       | Smith     |  70000
+           1 | John       | Doe       |  60000
+(2 rows)
+
+--分区表
+--范围分区
+drop table sales;
+ERROR:  table "sales" does not exist
+CREATE TABLE sales (
+                       sale_id NUMBER,
+                       sale_date DATE,
+                       customer_id NUMBER,
+                       strtest varchar(20)
+                   )
+    PARTITION BY RANGE (sale_date)
+(
+    PARTITION p1 VALUES LESS THAN (TO_DATE('2020-01-01', 'YYYY-MM-DD')),
+    PARTITION p2 VALUES LESS THAN (TO_DATE('2021-01-01', 'YYYY-MM-DD')),
+    PARTITION p3 VALUES LESS THAN (TO_DATE('2022-01-01', 'YYYY-MM-DD')),
+    PARTITION p4 VALUES LESS THAN (TO_DATE('2023-01-01', 'YYYY-MM-DD'))
+);
+insert into sales values (1,TO_DATE('2021-05-09', 'YYYY-MM-DD'),1,'ASDF');
+select nls_lower(strtest) from sales;
+ nls_lower 
+-----------
+ asdf
+(1 row)
+
+--哈希分区
+drop table customers;
+ERROR:  table "customers" does not exist
+CREATE TABLE customers (
+                           customer_id NUMBER,
+                           customer_name VARCHAR2(100)
+)
+    PARTITION BY HASH (customer_id)
+    PARTITIONS 4;
+insert into customers values (1,'ASFFG');
+select nls_lower(customer_name) from customers;
+ nls_lower 
+-----------
+ asffg
+(1 row)
+
+--列表分区
+DROP TABLE employees;
+CREATE TABLE employees (
+                           employee_id NUMBER,
+                           department_id NUMBER,
+                           employee_name VARCHAR2(100)
+)
+    PARTITION BY LIST (department_id)
+(
+    PARTITION p1 VALUES (1, 2),
+    PARTITION p2 VALUES (3, 4),
+    PARTITION p3 VALUES (5, 6)
+);
+insert into employees values (1,3,'ASDG');
+select nls_lower(employee_name) from employees;
+ nls_lower 
+-----------
+ asdg
+(1 row)
+
+--区间分区
+drop table sales;
+CREATE TABLE sales (
+                       sale_id   BIGINT,
+                       sale_date DATE,
+                       amount    NUMERIC,
+                       strtest   VARCHAR(20)
+)
+    PARTITION BY RANGE (sale_date)
+(
+    PARTITION p_initial VALUES LESS THAN ('2024-01-01')
+);
+insert into sales values (1,to_date('2020-02-01','yyyy-mm-dd'),1,'SDFSDFS');
+select nls_lower(strtest) from sales;
+ nls_lower 
+-----------
+ sdfsdfs
+(1 row)
+
+--二级分区
+drop table sales;
+CREATE TABLE sales (
+                       sale_id NUMBER,
+                       sale_date DATE,
+                       customer_id NUMBER,
+                       amount NUMBER,
+                       strtest varchar2(20)
+)
+    PARTITION BY RANGE (sale_date)
+    SUBPARTITION BY HASH (customer_id)
+    SUBPARTITIONS 4 -- 每个范围分区包含 4 个哈希子分区
+(
+    PARTITION p2023 VALUES LESS THAN (TO_DATE('2024-01-01', 'YYYY-MM-DD')),
+    PARTITION p2024 VALUES LESS THAN (TO_DATE('2025-01-01', 'YYYY-MM-DD'))
+);
+insert into sales values (1,to_date('2020-02-01','yyyy-mm-dd'),1,1,'ASDV');
+select nls_lower(strtest) from sales;
+ nls_lower 
+-----------
+ asdv
+(1 row)
+
+-----------------------------------------
+--视图
+--普通视图
+drop table sales;
+CREATE TABLE sales (
+                       sale_id NUMBER,
+                       sale_date DATE,
+                       customer_id NUMBER,
+                       amount NUMBER,
+                       strtest varchar2(20)
+)
+    PARTITION BY RANGE (sale_date)
+    SUBPARTITION BY HASH (customer_id)
+    SUBPARTITIONS 4 -- 每个范围分区包含 4 个哈希子分区
+(
+    PARTITION p2023 VALUES LESS THAN (TO_DATE('2024-01-01', 'YYYY-MM-DD')),
+    PARTITION p2024 VALUES LESS THAN (TO_DATE('2025-01-01', 'YYYY-MM-DD'))
+);
+insert into sales values (1,to_date('2020-02-01','yyyy-mm-dd'),1,1,'ASDV');
+drop view sim_sales_view;
+ERROR:  view "sim_sales_view" does not exist
+create view sim_sales_view as
+select nls_lower(strtest) strtest from sales;
+select nls_lower(strtest) from sim_sales_view;
+ nls_lower 
+-----------
+ asdv
+(1 row)
+
+----------------------------
+--物化视图
+drop table sales;
+CREATE TABLE sales (
+                       sale_id NUMBER,
+                       sale_date DATE,
+                       customer_id NUMBER,
+                       amount NUMBER,
+                       strtest varchar2(20)
+)
+    PARTITION BY RANGE (sale_date)
+    SUBPARTITION BY HASH (customer_id)
+    SUBPARTITIONS 4 -- 每个范围分区包含 4 个哈希子分区
+(
+    PARTITION p2023 VALUES LESS THAN (TO_DATE('2024-01-01', 'YYYY-MM-DD')),
+    PARTITION p2024 VALUES LESS THAN (TO_DATE('2025-01-01', 'YYYY-MM-DD'))
+);
+insert into sales values (1,to_date('2020-02-01','yyyy-mm-dd'),1,1,'ASDV');
+drop MATERIALIZED view mat_sales_view;
+ERROR:  materialized view "mat_sales_view" does not exist
+create MATERIALIZED VIEW mat_sales_view as
+select nls_lower(strtest) strtest from sales;
+select nls_lower(strtest) from mat_sales_view;
+ nls_lower 
+-----------
+ asdv
+(1 row)
+
+-------------------------------
+--增量物化视图(这个需要在opengauss上验证)
+DROP TABLE company;
+ERROR:  table "company" does not exist
+CREATE TABLE company (
+                         id integer PRIMARY KEY,
+                         name varchar(10)  NOT NULL,
+                         age integer NOT NULL,
+                         address varchar(20) NOT NULL,
+                         salary integer NOT NULL
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "company_pkey" for table "company"
+--插入测试数据
+INSERT INTO company VALUES (1, 'Paul', 32, 'California', 20000);
+INSERT INTO company VALUES (2, 'Allen', 25, 'Texas', 15000);
+commit;
+WARNING:  there is no transaction in progress
+CREATE INCREMENTAL MATERIALIZED VIEW view_company AS
+select * from company;
+REFRESH INCREMENTAL MATERIALIZED VIEW view_company;
+SELECT * FROM view_company;
+ id | name  | age |  address   | salary 
+----+-------+-----+------------+--------
+  1 | Paul  |  32 | California |  20000
+  2 | Allen |  25 | Texas      |  15000
+(2 rows)
+
+DROP MATERIALIZED VIEW view_company;
+-----------------------------------------------------------------
+--作为列的默认值
+drop table orders;
+ERROR:  table "orders" does not exist
+CREATE TABLE orders (
+                        order_id SERIAL PRIMARY KEY,
+                        region VARCHAR2(50) DEFAULT nls_lower('ASDF'),
+                        amount NUMBER DEFAULT 0
+);
+NOTICE:  CREATE TABLE will create implicit sequence "orders_order_id_seq" for serial column "orders.order_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "orders_pkey" for table "orders"
+insert into orders values (1,null,null);
+select * from orders;
+ order_id | region | amount 
+----------+--------+--------
+        1 |        |       
+(1 row)
+
+select region from orders;
+ region 
+--------
+ 
+(1 row)
+
+---------------------------------------
+--在函数中使用nls_lower
+CREATE OR REPLACE FUNCTION lower_with_locale (
+    input_string IN VARCHAR2,
+    locale_name  IN VARCHAR2 DEFAULT 'bg_BG'
+) RETURN VARCHAR2
+    IS
+BEGIN
+    -- 使用 NLS_LOWER 函数根据指定的语言环境转换为小写
+    RETURN NLS_LOWER(input_string, 'NLS_SORT=' || locale_name);
+END;
+/
+-- 使用默认语言环境 'AMERICAN'
+SELECT lower_with_locale('HELLO WORLD') AS result ;
+   result    
+-------------
+ hello world
+(1 row)
+
+-- 指定语言环境
+SELECT lower_with_locale('HALLO WELT', 'tr_CY') AS result ;
+   result   
+------------
+ hallo welt
+(1 row)
+
+--------------------------------------------
+--创建一个存储过程
+--先创建一张表存储存储过程的生成结果
+drop table sp;
+ERROR:  table "sp" does not exist
+create table sp (
+    test varchar2(20)
+);
+CREATE OR REPLACE PROCEDURE convert_to_lower (
+    p_input_string IN VARCHAR2  -- 输入字符串
+)
+    IS
+BEGIN
+    insert into sp
+    select nls_lower(p_input_string) ;
+END;
+/
+call  convert_to_lower('ASDFRG');
+ convert_to_lower 
+------------------
+ 
+(1 row)
+
+SELECT * FROM SP;
+  test  
+--------
+ asdfrg
+(1 row)
+
+----------------------------
+--包（packages）
+CREATE OR REPLACE PACKAGE string_operations AS
+    -- 公共过程：将字符串转换为小写并插入到表中
+    PROCEDURE convert_to_lower (
+        p_input_string IN VARCHAR2  -- 输入字符串
+    );
+
+    -- 如果需要，还可以在这里声明其他公共函数或过程
+END string_operations;
+/
+CREATE OR REPLACE PACKAGE BODY string_operations AS
+
+    -- 实现公共过程
+    PROCEDURE convert_to_lower (
+        p_input_string IN VARCHAR2  -- 输入字符串
+    ) IS
+    BEGIN
+        -- 插入转换后的字符串到表 sp 中
+        INSERT INTO sp (test)
+        SELECT NLS_LOWER(p_input_string) ;
+
+        -- 提交事务以保存更改（可选）
+        COMMIT;
+    -- 如果需要，可以在此处添加私有过程或函数
+
+BEGIN
+    -- 初始化代码块（可选）
+    NULL; -- 这里可以放置一些初始化逻辑
+END string_operations;
+/
+ERROR:  procedure is not ended correctly at end of input
+LINE 17: END 
+             ^
+QUERY:   PACKAGE  DECLARE  -- 实现公共过程
+    PROCEDURE convert_to_lower (
+        p_input_string IN VARCHAR2  -- 输入字符串
+    ) IS
+    BEGIN
+        -- 插入转换后的字符串到表 sp 中
+        INSERT INTO sp (test)
+        SELECT NLS_LOWER(p_input_string) ;
+
+        -- 提交事务以保存更改（可选）
+        COMMIT;
+    -- 如果需要，可以在此处添加私有过程或函数
+
+BEGIN
+    -- 初始化代码块（可选）
+    NULL; -- 这里可以放置一些初始化逻辑
+END 
+CONTEXT:  compilation of PL/pgSQL package near line 1
+BEGIN
+    -- 调用 Package 中的过程
+    string_operations.convert_to_lower('NCIUDI');
+END;
+/
+ERROR:  package body not defined
+CONTEXT:  SQL statement "CALL string_operations.convert_to_lower('NCIUDI')"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+-- 查询表中的内容
+SELECT * FROM sp;
+  test  
+--------
+ asdfrg
+(1 row)
+
+-----------------------------------------------
+--触发器
+drop table employees;
+CREATE TABLE employees (
+        employee_id NUMBER PRIMARY KEY,
+        first_name VARCHAR2(50),
+        last_name VARCHAR2(50),
+        salary NUMBER
+             );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+        CREATE OR REPLACE FUNCTION lowercase_names_trigger()
+RETURNS trigger AS $$
+        BEGIN
+            -- 将名字和姓氏转换为小写
+            NEW.first_name := NLS_LOWER(NEW.first_name);
+            NEW.last_name := NLS_LOWER(NEW.last_name);
+
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER trg_lower_case_names
+BEFORE INSERT ON employees
+        FOR EACH ROW
+        EXECUTE PROCEDURE lowercase_names_trigger();
+INSERT INTO employees (employee_id,first_name, last_name,salary) VALUES (1,'JOHN', 'DOE',123);
+INSERT INTO employees (employee_id,first_name, last_name,salary) VALUES (2,'JANE', 'SMITH',234);
+-- 查询表中的内容
+SELECT * FROM employees;
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | john       | doe       |    123
+           2 | jane       | smith     |    234
+(2 rows)
+
+-------------------------------------------------------------
+--prepare（仅有postgressql支持）
+-- 创建一个简单的表（如果尚未存在）
+-- 如果表结构不匹配，先删除旧表
+-- 准备一个带有条件的查询
+PREPARE search_employee (TEXT) AS
+SELECT * FROM employees WHERE NLS_LOWER(last_name) = NLS_LOWER($1);
+-- 执行准备好的查询
+EXECUTE search_employee('DOE');
+ employee_id | first_name | last_name | salary 
+-------------+------------+-----------+--------
+           1 | john       | doe       |    123
+(1 row)
+
+-------------------------------------------
+--表达式
+select 'asce`32'||nls_lower('OQIWJDOQN');
+     ?column?     
+------------------
+ asce`32oqiwjdoqn
+(1 row)
+
+SELECT TO_NUMBER('1231'+NLS_LOWER('1231'));
+ to_number 
+-----------
+      2462
+(1 row)
+
+-----------------------------------------------
+--行存表
+drop table row_table;
+ERROR:  table "row_table" does not exist
+create table row_table(
+    strtest varchar2(20)
+);
+insert into row_table values ('ASIOJAS');
+select nls_lower(strtest) from row_table;
+ nls_lower 
+-----------
+ asiojas
+(1 row)
+
+--列存表
+DROP TABLE customer_test2;
+ERROR:  table "customer_test2" does not exist
+CREATE TABLE customer_test2
+(
+  state_ID   CHAR(2),
+  state_NAME VARCHAR2(40),
+  area_ID    NUMBER
+)
+WITH (ORIENTATION = COLUMN);
+insert into customer_test2 values('JK','GEYMUMSW','1');
+insert into customer_test2 values('AS','GERSCGTRTHW','1');
+insert into customer_test2 values('VR','GWDQVDVSW','1');
+SELECT * FROM customer_test2;
+ state_id | state_name  | area_id 
+----------+-------------+---------
+ JK       | GEYMUMSW    |       1
+ AS       | GERSCGTRTHW |       1
+ VR       | GWDQVDVSW   |       1
+(3 rows)
+
+SELECT NLS_LOWER(state_ID) FROM customer_test2;
+ nls_lower 
+-----------
+ jk
+ as
+ vr
+(3 rows)
+
+--临时表
+-- 创建一个每事务结束都会清空的临时表
+-- 提交事务（这将删除所有行）
+COMMIT;
+WARNING:  there is no transaction in progress
+-- 再次查询（此时应该没有数据）
+SELECT * FROM temp_sales;
+ERROR:  relation "temp_sales" does not exist on datanode1
+LINE 1: SELECT * FROM temp_sales;
+                      ^
+---------------------------------------------------
+--where中使用nls_lower函数
+drop table employees;
+CREATE TABLE employees (
+                           employee_id NUMBER PRIMARY KEY,
+                           first_name VARCHAR2(50),
+                           last_name VARCHAR2(50),
+                           salary NUMBER
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+insert into employees values (1,'ASDASDJAO','IASHDOIASD',1);
+SELECT nls_lower(first_name) from employees where nls_lower(first_name)='asdasdjao';
+ nls_lower 
+-----------
+ asdasdjao
+(1 row)
+
+--枚举类型
+-- 1. 创建枚举类型
+CREATE TYPE order_status AS ENUM ('Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled');
+-- 2. 创建包含枚举类型列的表
+DROP TABLE orders;
+CREATE TABLE orders (
+        order_id SERIAL PRIMARY KEY,
+        customer_name VARCHAR(100) NOT NULL,
+        status order_status NOT NULL DEFAULT 'Pending'
+             );
+NOTICE:  CREATE TABLE will create implicit sequence "orders_order_id_seq" for serial column "orders.order_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "orders_pkey" for table "orders"
+-- 3. 插入订单记录
+INSERT INTO orders (customer_name, status)
+VALUES
+    ('Alice', 'Pending'),
+('Bob', 'Processing'),
+('Charlie', 'Shipped'),
+('David', 'Delivered'),
+('Eve', 'Cancelled');
+-- 4. 查询所有订单
+SELECT * FROM orders;
+ order_id | customer_name |   status   
+----------+---------------+------------
+        1 | Alice         | Pending
+        2 | Bob           | Processing
+        3 | Charlie       | Shipped
+        4 | David         | Delivered
+        5 | Eve           | Cancelled
+(5 rows)
+
+SELECT NLS_LOWER(status) FROM orders;
+ERROR:  function nls_lower(order_status) does not exist
+LINE 1: SELECT NLS_LOWER(status) FROM orders;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: nls_lower
+-- 7. 删除枚举类型（如果不再需要）
+DROP TABLE orders;
+DROP TYPE order_status;
+create table test1(col1 blob);
+INSERT INTO test1 (col1)
+VALUES ( '47'::blob);
+INSERT INTO test1 (col1)
+VALUES ( 'C49E'::blob);
+select nls_lower(col1) from test1;
+ERROR:  function nls_lower(blob) does not exist
+LINE 1: select nls_lower(col1) from test1;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: nls_lower
+drop table TS;
+ERROR:  table "ts" does not exist
+CREATE TABLE TS(COL1 BYTEA, COL2 VARCHAR(20), COL3 CHAR(20), COL4 TEXT);
+INSERT INTO TS VALUES('rrtbrta','qwdqac','\x220203','QPOEDQP');
+INSERT INTO TS VALUES('aiojoihcASC','\x523203','\x810203','MCKSNCKSDC');
+INSERT INTO TS VALUES ('\xc48c45534bc39d' , '\xc48c45534bc39d', '\xc48c45534bc39d', 'CWIVJOWV');
+INSERT INTO TS VALUES ('\x45534b', '\xc48c45534bc39d', '\xc48c45534bc39d', 'QWIODJOWIEC');
+select * from TS;
+           col1           |       col2       |         col3         |    col4     
+--------------------------+------------------+----------------------+-------------
+ \x72727462727461         | qwdqac           | \x220203             | QPOEDQP
+ \x61696f6a6f696863415343 | \x523203         | \x810203             | MCKSNCKSDC
+ \xc48c45534bc39d         | \xc48c45534bc39d | \xc48c45534bc39d     | CWIVJOWV
+ \x45534b                 | \xc48c45534bc39d | \xc48c45534bc39d     | QWIODJOWIEC
+(4 rows)
+
+SELECT NLS_LOWER(COL1)from TS;
+        nls_lower         
+--------------------------
+ \x72727462727461
+ \x61696f6a6f696863617363
+ \xc48d65736bc3bd
+ \x65736b
+(4 rows)
+
+SELECT NLS_LOWER(COL2)from TS;
+    nls_lower     
+------------------
+ qwdqac
+ \x523203
+ \xc48c45534bc39d
+ \xc48c45534bc39d
+(4 rows)
+
+SELECT NLS_LOWER(COL3)from TS;
+    nls_lower     
+------------------
+ \x220203
+ \x810203
+ \xc48c45534bc39d
+ \xc48c45534bc39d
+(4 rows)
+
+SELECT NLS_LOWER(COL4)from TS;
+  nls_lower  
+-------------
+ qpoedqp
+ mcksncksdc
+ cwivjowv
+ qwiodjowiec
+(4 rows)
+

@@ -315,7 +315,7 @@ Datum numeric_in(PG_FUNCTION_ARGS)
     Numeric res;
     const char* cp = nullptr;
     char* formattedStr = nullptr;
-    unsigned int precision, scale;    
+    unsigned int precision, scale;
     if (u_sess && u_sess->parser_cxt.fmt_str) {
         text* sourceValue = cstring_to_text(str);
         text* fmt = cstring_to_text(u_sess->parser_cxt.fmt_str);

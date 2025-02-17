@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93035;
+const uint32 GRAND_VERSION_NUM = 93036;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+ const uint32 NLS_LOWER_VERSION_NUMBER = 93036;
 const uint32 SUPPORT_D_FORMAT_DATABASE = 93035;
 const uint32 STATISTIC_HISTORY_VERSION_NUMBER = 93033;
 const uint32 RAISE_APPLICATION_ERROR = 93031;

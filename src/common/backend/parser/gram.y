@@ -16695,7 +16695,7 @@ every_interval:
 					t = SystemTypeName("interval");
 					t->typmods = $2;
 					Node *num = makeIntConst($1, @1);
-		            $$ = makeTypeCast(num, t, NULL, NULL, NULL, -1);	
+		            $$ = makeTypeCast(num, t, NULL, NULL, NULL, -1);
 				}
 				| Sconst event_interval_unit
 				{
@@ -29307,7 +29307,7 @@ func_application_special:	func_name '(' ')'
                     n->args = lappend(n->args, makeNullAConst(-1));
 					// nls param constraints is NULL
                     n->args = lappend(n->args, makeNullAConst(-1));
-					
+
 					n->agg_order = NIL;
                     n->agg_star = FALSE;
                     n->agg_distinct = FALSE;
@@ -29328,8 +29328,8 @@ func_application_special:	func_name '(' ')'
 					FuncCall *n = makeNode(FuncCall);
                     n->funcname = $1;
 
-					// args: 
-					//   input_expr, default_val, 
+					// args:
+					//   input_expr, default_val,
 					//   is DEFAULT gramy, default expr is column ref,
 					//   fmt constraints, nls param constraints
                     n->args = lappend($3, $5);
@@ -29341,7 +29341,7 @@ func_application_special:	func_name '(' ')'
                     n->args = lappend(n->args, $9);
 					// nls param constraints is NULL
                     n->args = lappend(n->args, makeNullAConst(-1));
-					
+
 					n->agg_order = NIL;
                     n->agg_star = FALSE;
                     n->agg_distinct = FALSE;
@@ -29357,7 +29357,7 @@ func_application_special:	func_name '(' ')'
                     n->funcname = $1;
 
 					// args: 
-					//   input_expr, default_val, 
+					//   input_expr, default_val,
 					//   is DEFAULT gramy, default expr is column ref,
 					//   fmt constraints, nls param constraints
                     n->args = lappend($3, $5);
@@ -29847,15 +29847,15 @@ func_expr_common_subexpr:
 			| CAST '(' a_expr AS Typename ')'
 				{ $$ = makeTypeCast($3, $5, NULL, NULL, NULL, @1); }
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause')'
-				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }		
+				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause ')'
-				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }												
+				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }											
 			| CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause ')'
-				{ $$ = makeTypeCast($3, $5, $7, NULL, $6, @1); }				
+				{ $$ = makeTypeCast($3, $5, $7, NULL, $6, @1); }	
 			| CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause opt_default_nls_clause ')'
 				{ $$ = makeTypeCast($3, $5, $7, $8, $6, @1); }
 			| CAST '(' a_expr AS Typename default_on_err_expr ')'
-				{ $$ = makeTypeCast($3, $5, NULL, NULL, $6, @1); }					
+				{ $$ = makeTypeCast($3, $5, NULL, NULL, $6, @1); }	
 			| EXTRACT '(' extract_list ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -32548,7 +32548,7 @@ makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *
 	n->typname = typname;
 	n->fmt_str = fmt_list;
 	n->nls_fmt_str = nls_fmt;
-	n->default_expr = default_expr;	
+	n->default_expr = default_expr;
 	n->location = location;
 	return (Node *) n;
 }

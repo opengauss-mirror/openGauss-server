@@ -9656,7 +9656,7 @@ a_expr:		c_expr									{ $$ = $1; }
 			| FCONST_D
 				{
 					Node *num = makeFloatConst($1, @1);
-					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);	
+					$$ = makeTypeCast(num, SystemTypeName("float8"), NULL, NULL, NULL, @1);
 				}
 		;
 
@@ -10182,7 +10182,7 @@ func_application:	func_name '(' ')'
 					n->location = @1;
 					n->call_func = false;
 					$$ = (Node *) n;
-				}				
+				}
 		;
 
 func_expr_common_subexpr:
@@ -10427,11 +10427,11 @@ func_expr_common_subexpr:
 			| CAST '(' a_expr AS Typename ')'
 				{ $$ = makeTypeCast($3, $5, NULL, NULL, NULL, @1); }
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause')'
-				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }		
+				{ $$ = makeTypeCast($3, $5, $6, NULL, NULL, @1); }
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause ')'
-				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }												
+				{ $$ = makeTypeCast($3, $5, $6, $7, NULL, @1); }						
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause default_on_err_expr ')'
-				{ $$ = makeTypeCast($3, $5, $6, NULL, $7, @1); }				
+				{ $$ = makeTypeCast($3, $5, $6, NULL, $7, @1); }
 			| CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause default_on_err_expr ')'
 				{ $$ = makeTypeCast($3, $5, $6, $7, $8, @1); }
 			| CAST '(' a_expr AS Typename default_on_err_expr ')'
@@ -10707,7 +10707,7 @@ default_on_err_expr:
 	DEFAULT a_expr ON CONVERSION_P ERROR_P {
 		$$ = $2;
 	}
-	;				
+	;
 /*
  * SQL/XML support
  */
@@ -12558,7 +12558,7 @@ makeTypeCast(Node *arg, TypeName *typname, Node *fmt_list, Node *nls_fmt, Node *
 	n->typname = typname;
 	n->default_expr = default_expr;
 	n->fmt_str = fmt_list;
-	n->nls_fmt_str = nls_fmt;	
+	n->nls_fmt_str = nls_fmt;
 	n->location = location;
 	return (Node *) n;
 }
