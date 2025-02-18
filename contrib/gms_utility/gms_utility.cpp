@@ -2043,10 +2043,11 @@ Datum gms_comma_to_table(PG_FUNCTION_ARGS)
     while (namelist[end] != '\0') {
         if (namelist[end] == '"') {
             if (IS_QUOTE_END(quoteState)) {
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Invalid parameter value \"%s\" after quotation", namelist)));
+                /* Do not check quote state here. */
+                quoteState = QUOTE_STARTED;
+            } else {
+                quoteState <<= 1;
             }
-            quoteState <<= 1;
             end++;
         } else if (!IS_QUOTE_STARTED(quoteState) && namelist[end] == separator) {
             if (start == end) {
