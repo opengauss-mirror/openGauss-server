@@ -280,6 +280,12 @@ SELECT TO_NUMBER(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
       3.14
 (7 rows)
 
+SELECT to_number('<1234>' DEFAULT 999 ON CONVERSION ERROR,'PR9999999');
+ERROR:  "9" must be ahead of "PR"
+CONTEXT:  referenced column: to_number
+SELECT  TO_NUMBER('1234.56' default 999 on conversion error ,'99.99');
+ERROR:  Exceeding the maximum value required by fmt
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(c2 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
                 to_number                
 -----------------------------------------
