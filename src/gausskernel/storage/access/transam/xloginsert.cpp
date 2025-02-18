@@ -87,6 +87,11 @@ void XLogBeginInsert(void)
     Assert(t_thrd.xlog_cxt.mainrdata_len == 0);
     Assert(!(SS_CLUSTER_ONDEMAND_RECOVERY && SS_STANDBY_MODE));
 
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("instance is in standby mode"),
+                        errhint("standby node cannot make new WAL entries in shared storage mode.")));
+    }
+
     /* cross-check on whether we should be here or not */
     if (!XLogInsertAllowed())
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
