@@ -4028,6 +4028,17 @@ static TidScan* _readTidScan(TidScan* local_node)
     READ_DONE();
 }
 
+static TidRangeScan* _readTidRangeScan(TidRangeScan* local_node)
+{
+    READ_LOCALS_NULL(TidRangeScan);
+    READ_TEMP_LOCALS();
+
+    _readScan(&local_node->scan);
+    READ_NODE_FIELD(tidrangequals);
+
+    READ_DONE();
+}
+
 static IndexOnlyScan* _readIndexOnlyScan(IndexOnlyScan* local_node)
 {
     READ_LOCALS_NULL(IndexOnlyScan);
@@ -7116,6 +7127,8 @@ Node* parseNodeString(void)
         return_value = _readDefElem(NULL);
     } else if (MATCH("TIDSCAN", 7)) {
         return_value = _readTidScan(NULL);
+    } else if (MATCH("TIDRANGESCAN", 12)) {
+        return_value = _readTidRangeScan(NULL);
     } else if (MATCH("ERRORCACHEENTRY", 15)) {
         return_value = _readErrorCacheEntry(NULL);
     } else if (MATCH("ROWTOVEC", 8)) {

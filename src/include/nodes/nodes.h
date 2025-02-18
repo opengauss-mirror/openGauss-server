@@ -932,8 +932,12 @@ typedef enum NodeTag {
     T_UnrotateClause,
     T_RotateInCell,
     T_UnrotateInCell,
-    T_KeepClause
+    T_KeepClause,
 
+    /* Tags for TidRangeScan */
+    T_TidRangeScan = 7000,
+    T_TidRangePath,
+    T_TidRangeScanState
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

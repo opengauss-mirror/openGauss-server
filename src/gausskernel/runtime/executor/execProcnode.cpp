@@ -108,6 +108,7 @@
 #include "executor/node/nodeSubplan.h"
 #include "executor/node/nodeSubqueryscan.h"
 #include "executor/node/nodeTidscan.h"
+#include "executor/node/nodeTidrangescan.h"
 #include "executor/node/nodeUnique.h"
 #include "executor/node/nodeValuesscan.h"
 #include "executor/node/nodeWindowAgg.h"
@@ -345,6 +346,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitBitmapHeapScan((BitmapHeapScan*)node, estate, eflags);
         case T_TidScan:
             return (PlanState*)ExecInitTidScan((TidScan*)node, estate, eflags);
+        case T_TidRangeScan:
+            return (PlanState*)ExecInitTidRangeScan((TidRangeScan*)node, estate, eflags);
         case T_SubqueryScan:
             return (PlanState*)ExecInitSubqueryScan((SubqueryScan*)node, estate, eflags);
         case T_FunctionScan:
@@ -1196,6 +1199,10 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_TidScanState:
             ExecEndTidScan((TidScanState*)node);
+            break;
+        
+        case T_TidRangeScanState:
+            ExecEndTidRangeScan((TidRangeScanState*)node);
             break;
 
         case T_SubqueryScanState:

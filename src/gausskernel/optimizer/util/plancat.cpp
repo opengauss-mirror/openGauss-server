@@ -21,6 +21,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "catalog/catalog.h"
@@ -909,6 +910,12 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
         rel->fdwroutine = NULL;
     }
 
+    /* Collect info about functions implemented by the rel's table AM. */
+    if (relation->rd_tam_ops &&
+        relation->rd_tam_ops->scan_set_tidrange != NULL &&
+        relation->rd_tam_ops->scan_getnextslot_tidrange != NULL)
+        rel->amflags |= AMFLAG_HAS_TID_RANGE;
+        
     heap_close(relation, NoLock);
 
     /*

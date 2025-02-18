@@ -48,6 +48,7 @@
 #include "optimizer/restrictinfo.h"
 
 static bool IsTidEqualClause(OpExpr* node, int varno);
+static bool IsTidRangeClause(RestrictInfo *rinfo, RelOptInfo *rel);
 static bool IsTidEqualAnyClause(ScalarArrayOpExpr* node, int varno);
 static List* TidQualFromExpr(Node* expr, int varno);
 
@@ -102,6 +103,75 @@ static bool IsTidEqualClause(OpExpr* node, int varno)
     return true; /* success */
 }
 
+/*
+ * Does this Var represent the CTID column of the specified baserel?
+ */
+static inline bool IsCTIDVar(Var *var, RelOptInfo *rel)
+{
+    /* The vartype check is strictly paranoia */
+    if (var->varattno == SelfItemPointerAttributeNumber &&
+        var->vartype == TIDOID &&
+        var->varno == rel->relid &&
+        var->varlevelsup == 0)
+        return true;
+    return false;
+}
+
+static bool IsBinaryTidClause(RestrictInfo *rinfo, RelOptInfo *rel)
+{
+    OpExpr	   *node;
+    Node* arg1 = NULL;
+    Node* arg2 = NULL;
+    Node* other = NULL;
+
+    /* Must be an OpExpr */
+    if (!is_opclause(rinfo->clause))
+        return false;
+        
+    node = (OpExpr *) rinfo->clause;
+    
+    /* OpExpr must have two arguments */
+    if (list_length(node->args) != 2)
+        return false;
+
+    arg1 = (Node*)linitial(node->args);
+    arg2 = (Node*)lsecond(node->args);
+
+    /* Look for CTID as either argument */
+    other = NULL;
+    if (arg1 && IsA(arg1, Var) &&
+        IsCTIDVar((Var *) arg1, rel)) {
+        other = arg2;
+    }
+    if (other == NULL && arg2 != NULL && IsA(arg2, Var) &&
+        IsCTIDVar((Var *) arg2, rel)) {
+        other = arg1;
+    }
+    if (other == NULL)
+        return false;
+    if (exprType(other) != TIDOID)
+        return false; /* probably can't happen */
+
+    /* The other argument must be a pseudoconstant */
+    if (!is_pseudo_constant_clause(other))
+        return false;
+
+    return true; /* success */
+}
+static bool IsTidRangeClause(RestrictInfo *rinfo, RelOptInfo *rel)
+{
+    Oid			opno;
+
+    if (!IsBinaryTidClause(rinfo, rel))
+        return false;
+    opno = ((OpExpr *) rinfo->clause)->opno;
+
+    if (opno == TIDLessOperator || opno == TIDLessEqOperator ||
+        opno == TIDGreaterOperator || opno == TIDGreaterEqOperator)
+        return true;
+
+    return false;
+}
 /*
  * Check to see if a clause is of the form
  *      CTID = ANY (pseudoconstant_array)
@@ -218,6 +288,23 @@ static List* TidQualFromBaseRestrictinfo(RelOptInfo* rel)
     return rlst;
 }
 
+static List* TidRangeQualFromBaseRestrictinfo(RelOptInfo* rel)
+{
+    List* rlst = NIL;
+    ListCell* l = NULL;
+
+    if ((rel->amflags & AMFLAG_HAS_TID_RANGE) == 0)
+        return NIL;
+
+    foreach(l, rel->baserestrictinfo) {
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(l);
+
+        if (IsTidRangeClause(rinfo, rel)) {
+            rlst = lappend(rlst, rinfo);
+        }
+    }
+    return rlst;
+}
 /*
  * create_tidscan_paths
  *	  Create paths corresponding to direct TID scans of the given rel.
@@ -227,9 +314,16 @@ static List* TidQualFromBaseRestrictinfo(RelOptInfo* rel)
 void create_tidscan_paths(PlannerInfo* root, RelOptInfo* rel)
 {
     List* tidquals = NIL;
+    List* tidrangequals = NIL;
 
     tidquals = TidQualFromBaseRestrictinfo(rel);
     if (tidquals != NIL)
         add_path(root, rel, (Path*)create_tidscan_path(root, rel, tidquals));
+
+    if (!rel->isPartitionedTable)
+        tidrangequals = TidRangeQualFromBaseRestrictinfo(rel);
+    
+    if (tidrangequals != NIL)
+        add_path(root, rel, (Path*)create_tidrangescan_path(root, rel, tidrangequals));
 }
 

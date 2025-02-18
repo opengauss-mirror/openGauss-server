@@ -520,6 +520,11 @@ bool next_page(HeapScanDesc scan, ScanDirection dir, BlockNumber& page)
                     page = 0;
                 }
                 finished = (page == scan->rs_base.rs_startblock);
+                
+                // Currently rs_numblocks is only assigned in tidrangescan
+                if (!finished && scan->rs_base.rs_numblocks > 0) {
+                    finished = scan->rs_base.rs_numblocks != InvalidBlockNumber ? --scan->rs_base.rs_numblocks == 0 : false;
+                }
             }
             /*
              * Report our new scan position for synchronization purposes. We
@@ -10467,6 +10472,145 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     return NULL;
 }
 
+/*
+ * heap_setscanlimits - restrict range of a heapscan
+ *
+ * startBlk is the page to start at
+ * numBlks is number of pages to scan (InvalidBlockNumber means "all")
+ */
+void heap_setscanlimits(TableScanDesc sscan, BlockNumber startBlk, BlockNumber numBlks)
+{
+    Assert(!sscan->rs_inited); /* else too late to change */
+    /* else rs_startblock is significant */
+    Assert(!(sscan->rs_flags & SO_ALLOW_SYNC));
+
+    /* Check startBlk is valid (but allow case of zero blocks...) */
+    Assert(startBlk == 0 || startBlk < sscan->rs_nblocks);
+
+    sscan->rs_startblock = startBlk;
+    sscan->rs_numblocks = numBlks;
+}
+
+void heap_set_tidrange(TableScanDesc sscan, ItemPointer mintid, ItemPointer maxtid)
+{
+    BlockNumber startBlk;
+    BlockNumber numBlks;
+    ItemPointerData highestItem;
+    ItemPointerData lowestItem;
+
+    /*
+     * For relations without any pages, we can simply leave the TID range
+     * unset.  There will be no tuples to scan, therefore no tuples outside
+     * the given TID range.
+     */
+    if (sscan->rs_nblocks == 0)
+        return;
+
+    /*
+     * Set up some ItemPointers which point to the first and last possible
+     * tuples in the heap.
+     */
+    ItemPointerSet(&highestItem, sscan->rs_nblocks - 1, MaxOffsetNumber);
+    ItemPointerSet(&lowestItem, 0, FirstOffsetNumber);
+
+    /*
+     * If the given maximum TID is below the highest possible TID in the
+     * relation, then restrict the range to that, otherwise we scan to the end
+     * of the relation.
+     */
+    if (ItemPointerCompare(maxtid, &highestItem) < 0)
+        ItemPointerCopy(maxtid, &highestItem);
+
+    /*
+     * If the given minimum TID is above the lowest possible TID in the
+     * relation, then restrict the range to only scan for TIDs above that.
+     */
+    if (ItemPointerCompare(mintid, &lowestItem) > 0)
+        ItemPointerCopy(mintid, &lowestItem);
+
+    /*
+     * Check for an empty range and protect from would be negative results
+     * from the numBlks calculation below.
+     */
+    if (ItemPointerCompare(&highestItem, &lowestItem) < 0)
+    {
+        /* Set an empty range of blocks to scan */
+        heap_setscanlimits(sscan, 0, 0);
+        return;
+    }
+
+    /*
+     * Calculate the first block and the number of blocks we must scan. We
+     * could be more aggressive here and perform some more validation to try
+     * and further narrow the scope of blocks to scan by checking if the
+     * lowerItem has an offset above MaxOffsetNumber.  In this case, we could
+     * advance startBlk by one.  Likewise, if highestItem has an offset of 0
+     * we could scan one fewer blocks.  However, such an optimization does not
+     * seem worth troubling over, currently.
+     */
+    startBlk = ItemPointerGetBlockNumberNoCheck(&lowestItem);
+
+    numBlks = ItemPointerGetBlockNumberNoCheck(&highestItem) -
+        ItemPointerGetBlockNumberNoCheck(&lowestItem) + 1;
+
+    /* Set the start block and number of blocks to scan */
+    heap_setscanlimits(sscan, startBlk, numBlks);
+
+    /* Finally, set the TID range in sscan */
+    ItemPointerCopy(&lowestItem, &sscan->rs_mintid);
+    ItemPointerCopy(&highestItem, &sscan->rs_maxtid);
+}
+
+bool heap_getnextslot_tidrange(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot)
+{
+    HeapTuple tuple;
+    ItemPointer mintid = &sscan->rs_mintid;
+    ItemPointer maxtid = &sscan->rs_maxtid;
+
+    while((tuple = heap_getnext(sscan, direction)) != NULL) {
+        if (ItemPointerCompare(&tuple->t_self, mintid) < 0)
+        {
+            ExecClearTuple(slot);
+
+            /*
+             * When scanning backwards, the TIDs will be in descending order.
+             * Future tuples in this direction will be lower still, so we can
+             * just return false to indicate there will be no more tuples.
+             */
+            if (ScanDirectionIsBackward(direction))
+                return false;
+
+            continue;
+        }
+
+        /*
+         * Likewise for the final page, we must filter out TIDs greater than
+         * maxtid.
+         */
+        if (ItemPointerCompare(&tuple->t_self, maxtid) > 0)
+        {
+            ExecClearTuple(slot);
+
+            /*
+             * When scanning forward, the TIDs will be in ascending order.
+             * Future tuples in this direction will be higher still, so we can
+             * just return false to indicate there will be no more tuples.
+             */
+            if (ScanDirectionIsForward(direction))
+                return false;
+            continue;
+        }
+
+        break;
+    }
+    if (tuple) {
+        ExecStoreTuple(tuple, slot, sscan->rs_cbuf, false);
+        return true;
+    }
+
+    ExecClearTuple(slot);
+    return false;
+}
 #ifdef USE_SPQ
 /* ----------------
  * 		try_table_open - open a heap relation by relation OID

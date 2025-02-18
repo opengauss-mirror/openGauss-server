@@ -3131,7 +3131,10 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             (void)finalize_primnode((Node*)((TidScan*)plan)->tidquals, &context);
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
-
+        case T_TidRangeScan:
+            (void)finalize_primnode((Node*)((TidRangeScan*)plan)->tidrangequals, &context);
+            context.paramids = bms_add_members(context.paramids, scan_params);
+            break;
         case T_SubqueryScan:
 
             /*

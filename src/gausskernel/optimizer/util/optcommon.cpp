@@ -319,6 +319,9 @@ void GetPlanNodePlainText(
             else
                 *pname = *sname = *pt_options = "Tid Scan";
             break;
+        case T_TidRangeScan:
+            *pname = *sname = *pt_options = "Tid Range Scan";
+            break;
         case T_SubqueryScan:
             *pname = *sname = *pt_operation = "Subquery Scan";
             break;

@@ -269,7 +269,8 @@ static ScanState* search_plan_tree(PlanState* node, Oid table_oid)
         case T_IndexOnlyScanState:
         case T_AnnIndexScanState:
         case T_BitmapHeapScanState:
-        case T_TidScanState: {
+        case T_TidScanState:
+        case T_TidRangeScanState: {
             ScanState *sstate = (ScanState *)node;
             if (RelationGetRelid(sstate->ss_currentRelation) == table_oid) {
                 return sstate;

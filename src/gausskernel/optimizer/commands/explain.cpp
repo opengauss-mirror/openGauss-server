@@ -2181,6 +2181,7 @@ static void ExplainNode(
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
         case T_TidScan:
+        case T_TidRangeScan:
         case T_SubqueryScan:
         case T_VecSubqueryScan:
         case T_FunctionScan:
@@ -2888,6 +2889,22 @@ static void ExplainNode(
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
         } break;
+        case T_TidRangeScan: {
+                /*
+                 * The tidrangequals list has AND semantics, so be sure to
+                 * show it as an AND condition.
+                 */
+                List	   *tidquals = ((TidRangeScan *) plan)->tidrangequals;
+
+                if (list_length(tidquals) > 1)
+                    tidquals = list_make1(make_andclause(tidquals));
+                show_scan_qual(tidquals, "TID Cond", planstate, ancestors, es);
+                show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+                if (plan->qual)
+                    show_instrumentation_count("Rows Removed by Filter", 1,
+                                               planstate, es);
+            } 
+            break;
         case T_ForeignScan:
         case T_VecForeignScan: {
             ForeignScan* fScan = (ForeignScan*)plan;
@@ -8519,6 +8536,7 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es, bool multi
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
         case T_TidScan:
+        case T_TidRangeScan:
         case T_ForeignScan:
         case T_ExtensiblePlan:
         case T_VecForeignScan: {

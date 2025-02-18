@@ -945,6 +945,25 @@ static TidScan* _copyTidScan(const TidScan* from)
 }
 
 /*
+ * _copyTidRangeScan
+ */
+static TidRangeScan* _copyTidRangeScan(const TidRangeScan *from)
+{
+    TidRangeScan *newnode = makeNode(TidRangeScan);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyScanFields((const Scan *) from, (Scan *) newnode);
+
+    /*
+     * copy remainder of node
+     */
+    COPY_NODE_FIELD(tidrangequals);
+
+    return newnode;
+}
+/*
  * _copySubqueryScan
  */
 static SubqueryScan* _copySubqueryScan(const SubqueryScan* from)
@@ -8201,6 +8220,9 @@ void* copyObject(const void* from)
             break;
         case T_TidScan:
             retval = _copyTidScan((TidScan*)from);
+            break;
+        case T_TidRangeScan:
+            retval = _copyTidRangeScan((TidRangeScan*)from);
             break;
         case T_SubqueryScan:
             retval = _copySubqueryScan((SubqueryScan*)from);

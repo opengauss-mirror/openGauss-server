@@ -45,7 +45,7 @@ OBJS = execAmi.o execCurrent.o execGrouping.o execJunk.o execMain.o \
        nodeNestloop.o nodeFunctionscan.o nodeRecursiveunion.o nodeResult.o \
        nodeSamplescan.o nodeSeqscan.o nodeSetOp.o nodeSort.o nodeUnique.o \
        nodeValuesscan.o nodeCtescan.o nodeStartWithOp.o nodeWorktablescan.o \
-       nodeGroup.o nodeSubplan.o nodeSubqueryscan.o nodeTidscan.o \
+       nodeGroup.o nodeSubplan.o nodeSubqueryscan.o nodeTidscan.o nodeTidrangescan.o \
        nodeForeignscan.o nodeWindowAgg.o tstoreReceiver.o spi.o \
        nodePartIterator.o nodeStub.o execClusterResize.o lightProxy.o execMerge.o \
        nodeExtensible.o route.o nodeTrainModel.o db4ai_common.o spiDbesql.o \
