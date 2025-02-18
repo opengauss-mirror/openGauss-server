@@ -5745,7 +5745,7 @@ double approx_tuple_count(PlannerInfo* root, JoinPath* path, List* quals)
  *	width: the estimated average output tuple width in bytes.
  *	baserestrictcost: estimated cost of evaluating baserestrictinfo clauses.
  */
-void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel)
+void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel, List* pseudoPredList)
 {
     double nrows;
 
@@ -5757,7 +5757,25 @@ void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel)
         root->glob->boundParams->params_lazy_bind = false;
     }
 
+    /* Save rel-baserestrictinfo pointer so that we can restore it later */
+    List* const saveBaserestrictinfo = rel->baserestrictinfo;
+
+    /* Make a shallow copy of pseudoPredList */
+    List savedPseudoPreValue;
+    if (pseudoPredList != NIL) {
+        savedPseudoPreValue = *pseudoPredList;
+        rel->baserestrictinfo = list_concat(pseudoPredList, rel->baserestrictinfo);
+    }
+
     nrows = rel->tuples * clauselist_selectivity(root, rel->baserestrictinfo, 0, JOIN_INNER, NULL);
+
+    /* Restore rel-baserestrictinfo pointer */
+    rel->baserestrictinfo = saveBaserestrictinfo;
+
+    if (NIL != pseudoPredList) {
+        *pseudoPredList = savedPseudoPreValue;
+        list_tail(pseudoPredList)->next = NULL;
+    }
 
     if (root->glob->boundParams != NULL && root->glob->boundParams->uParamInfo != DEFUALT_INFO) {
         root->glob->boundParams->params_lazy_bind = true;
@@ -6354,27 +6372,6 @@ inline void set_rel_encode_info_if_vectorized(PlannerInfo *root, RelOptInfo *rel
     }
 }
 
-static bool set_partid_if_single_partition(RangeTblEntry* rte, Oid *targetid)
-{
-    Oid partoid;
-    if (rte->isContainPartition && list_length(rte->partitionOidList) == 1) {
-        partoid = list_nth_oid(rte->partitionOidList, 0);
-        AssertEreport(OidIsValid(partoid),
-            MOD_OPT,
-            "The partitionOid is invalid when setting the estimated output width of a base relation.");
-        *targetid = partoid;
-        return true;
-    }
-
-    if (rte->isContainSubPartition && list_length(rte->subpartitionOidList) == 1) {
-        partoid = list_nth_oid(rte->subpartitionOidList, 0);
-        Assert(OidIsValid(partoid));
-        *targetid = partoid;
-        return true;
-    }
-    return false;
-}
-
 /*
  * set_rel_width
  *		Set the estimated output width of a base relation.
@@ -6452,7 +6449,9 @@ void set_rel_width(PlannerInfo* root, RelOptInfo* rel)
             if (reloid != InvalidOid && var->varattno > 0) {
                 Oid targetid = reloid;
                 RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
-                bool ispartition = set_partid_if_single_partition(rte, &targetid);
+                char stakind;
+                GetStaRelkindAndOid(rte, rel, &stakind, &targetid);
+                bool ispartition = (STARELKIND_PARTITION == stakind);
 
                 item_width = get_attavgwidth(targetid, var->varattno, ispartition);
                 if (item_width > 0) {
@@ -6519,7 +6518,12 @@ void set_rel_width(PlannerInfo* root, RelOptInfo* rel)
         if (reloid != InvalidOid) {
             Oid partid = InvalidOid;
             RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
-            (void)set_partid_if_single_partition(rte, &partid);
+            char stakind;
+            Oid targetid;
+            GetStaRelkindAndOid(rte, rel, &stakind, &targetid);
+            if (STARELKIND_PARTITION == stakind) {
+                partid = targetid;
+            }
 
             /* Real relation, so estimate true tuple width */
             wholerow_width += get_relation_data_width(reloid, partid, rel->attr_widths - rel->min_attr);

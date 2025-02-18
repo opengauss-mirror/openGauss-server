@@ -153,6 +153,7 @@ extern Oid getListPartitionOid(PartitionMap* partitionmap, Const** partKeyValue,
 extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm);
+extern Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue);
 extern List* getRangePartitionBoundaryList(Relation rel, int sequence);
 extern List* getListPartitionBoundaryList(Relation rel, int sequence);
 extern List* getHashPartitionBoundaryList(Relation rel, int sequence);

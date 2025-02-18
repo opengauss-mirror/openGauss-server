@@ -30,6 +30,8 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/relation.h"
+#include "parser/parsetree.h"
+#include "parser/parse_expr.h"
 #include "optimizer/clauses.h"
 #include "optimizer/pruning.h"
 #include "optimizer/pruningboundary.h"
@@ -42,6 +44,8 @@
 #include "utils/relcache.h"
 #include "utils/partitionkey.h"
 #include "catalog/pg_partition_fn.h"
+#include "utils/partitionkey.h"
+#include "optimizer/restrictinfo.h"
 
 static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, PruningContext* context);
 static PruningResult* intersectChildPruningResult(const List* resultList, PruningContext* context);
@@ -81,6 +85,8 @@ static PruningResult* partitionEqualPruningWalker(PartitionType partType, Expr* 
 #define IsCleanPruningTop(topSeqPtr, pruningResult, topValue)                                         \
     ((pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && PointerIsValid((topValue)[0]) && \
         !(pruningResult)->boundary->maxClose[0])
+
+#define THRESHOLD_COUNT_LIST_PARTITION_VALUE 40
 
 static PartitionMap* GetRelPartitionMap(Relation relation)
 {
@@ -2827,4 +2833,288 @@ static bool PartitionPruningForPartialListBoundary(ListPartitionMap* listMap, Pr
         pruningResult->boundary = NULL;
     }
     return true;
+}
+
+static inline Expr* PartitionPseudoPredicateConstructPartkeyExpr(ParseState* pstate, Var* var,
+    Const* boundaryValue, char* opname)
+{
+    Const* localConst = (Const *)copyObject(boundaryValue);
+    Expr* expr = NULL;
+
+    if (localConst->constisnull) {
+        expr = (Expr *)makeNullTest(IS_NULL, (Expr *)var);
+    } else {
+        expr = (Expr *)makeSimpleA_Expr(AEXPR_OP, opname, (Node *)var, (Node *)localConst, -1);
+    }
+    expr = (Expr *)transformExpr(pstate, (Node *)expr, EXPR_KIND_PARTITION_EXPRESSION);
+
+    return expr;
+}
+
+/*
+ * Helper function for PartitionPseudoPredicateAppend().
+ * refcount for the part map has been added by the caller.
+ */
+static void PartitionPseudoPredicateRangePart(ParseState* pstate, RelOptInfo* rel,
+    const RangePartitionMap* rangePartmap, int partSeq, Var** partkeyVar, int partKeyNum, List** predList)
+{
+    Assert(partSeq != INVALID_PARTREL_SEQNO);
+    const RangeElement* partition = &(rangePartmap->rangeElements[partSeq]);
+    Const* const *boundaryH = partition->boundary;
+    Const* const *boundaryL = NULL;
+
+    Const* lowBoundaryInterval = NULL;
+    if (partition->isInterval) {
+        /*
+         * Calculate the low boundary of an interval partition.
+         * Note that we only support single partition column interval partition.
+         */
+        Assert(1 == partKeyNum);
+        lowBoundaryInterval = CalcLowBoundary(partition->boundary[0], rangePartmap->intervalValue);
+        boundaryL = &lowBoundaryInterval;
+    } else if (partSeq > 0) {
+        boundaryL = rangePartmap->rangeElements[partSeq - 1].boundary;
+    }
+
+    for (int i = 0; i < partKeyNum; i++) {
+        Var* var = partkeyVar[i];
+        if (var == NULL) {
+            continue;
+        }
+
+        if (boundaryL != NULL && equal(boundaryL[i], boundaryH[i])) {
+            if (!boundaryL[i]->ismaxvalue) {
+                Expr* expr = PartitionPseudoPredicateConstructPartkeyExpr(pstate, var, boundaryL[i], "=");
+                RestrictInfo* rinfo = make_restrictinfo(expr, true, false, false, 0, rel->relids, NULL, NULL, false);
+                *predList = lappend(*predList, rinfo);
+            }
+        } else {
+            if (!boundaryH[i]->ismaxvalue) {
+                Expr* expr = PartitionPseudoPredicateConstructPartkeyExpr(pstate, var, boundaryH[i], "<");
+                RestrictInfo* rinfo = make_restrictinfo(expr, true, false, false, 0, rel->relids, NULL, NULL, false);
+                *predList = lappend(*predList, rinfo);
+            }
+            if (boundaryL != NULL) {
+                Assert(!boundaryL[i]->ismaxvalue);
+                Expr* expr = PartitionPseudoPredicateConstructPartkeyExpr(pstate, var, boundaryL[i], ">=");
+                RestrictInfo* rinfo = make_restrictinfo(expr, true, false, false, 0, rel->relids, NULL, NULL, false);
+                *predList = lappend(*predList, rinfo);
+            }
+        }
+    }
+}
+
+/*
+ * Append a prediate that represents boundaries of a list_partition
+ * to orArgs. If more than one part key columns, AND predicates are
+ * appendeded to orArgs.
+ */
+static void PartitionPseudoPredicateOneListPart(ParseState* pstate, const ListPartElement* onePart,
+    Var** partkeyVar, int partKeyNum, List** orArgs)
+{
+    /*
+     * len is the number of values listed in the partition.
+     */
+    int numOfBoundary = onePart->len;
+    for (int b = 0; b < numOfBoundary; b++) {
+        const PartitionKey* boundary = &(onePart->boundary[b]);
+
+        /*
+         * count should match with the number of partition key columns.
+         * Take min value just in case. If count is greater than 1,
+         * we should produce an AND predicate.
+         */
+        int count = (boundary->count < partKeyNum ? boundary->count : partKeyNum);
+
+        List* andArgs = NIL;
+        for (int i = 0; i < count; i++) {
+            Var* var = partkeyVar[i];
+            if (var == NULL) {
+                continue;
+            }
+
+            Expr* expr = PartitionPseudoPredicateConstructPartkeyExpr(pstate, var, boundary->values[i], "=");
+            andArgs = lappend(andArgs, expr);
+        }
+        if (NIL != andArgs) {
+            Expr* andExpr = (Expr *)(list_length(andArgs) > 1 ? make_andclause(andArgs) : linitial(andArgs));
+            *orArgs = lappend(*orArgs, andExpr);
+        }
+    }
+}
+
+/*
+ * Helper function for PartitionPseudoPredicateAppend().
+ * refcount for the part map has been added by the caller.
+ */
+static void PartitionPseudoPredicateListPart(ParseState* pstate, RelOptInfo* rel, const ListPartitionMap* listMap,
+    int partSeq, Var** partkeyVar, int partKeyNum, List** predList)
+{
+    Assert(partSeq != INVALID_PARTREL_SEQNO);
+    /*
+     * len is the number of values listed in the partition.
+     * We will produce a OR predicate if len is greater than 1,
+     * but if len is greater than 40, we don't use pseudo predicate
+     * for pormance
+     */
+    int numOfBoundary = listMap->listElements[partSeq].len;
+    int len = 0;
+    for (int b = 0; b < numOfBoundary; ++b) {
+        int count = listMap->listElements[partSeq].boundary[b].count < partKeyNum ?
+            listMap->listElements[partSeq].boundary[b].count : partKeyNum;
+        len += count;
+        if (len > THRESHOLD_COUNT_LIST_PARTITION_VALUE) {
+            return;
+        }
+    }
+
+    if (partSeq == listMap->defaultPartSeqNo) {
+        len = 0;
+        for (int i = 0; i < listMap->listElementsNum; ++i) {
+            if (i == partSeq) {
+                continue;
+            }
+            numOfBoundary = listMap->listElements[i].len;
+            for (int b = 0; b < numOfBoundary; ++b) {
+                int count = listMap->listElements[i].boundary[b].count < partKeyNum ?
+                    listMap->listElements[i].boundary[b].count : partKeyNum;
+                len += count;
+                if (len > THRESHOLD_COUNT_LIST_PARTITION_VALUE) {
+                    return;
+                }
+            }
+        }
+    }
+
+    /*
+     * If this is the "default" partition, we need to process all other
+     * partitions, and finally produce a NOT predicate
+     */
+    if (partSeq == listMap->defaultPartSeqNo) {
+        List* orArgs = NIL;
+        for (int i = 0; i < listMap->listElementsNum; i++) {
+            if (i == partSeq) {
+                continue;
+            }
+            PartitionPseudoPredicateOneListPart(pstate, &(listMap->listElements[i]), partkeyVar, partKeyNum, &orArgs);
+        }
+        if (orArgs != NIL) {
+            Expr* orExpr = (Expr *)(list_length(orArgs) > 1 ? make_orclause(orArgs) : linitial(orArgs));
+            Expr* notExpr = (Expr *)make_notclause(orExpr);
+            RestrictInfo* rinfo = make_restrictinfo(notExpr, true, false, false, 0, rel->relids, NULL, NULL, false);
+            *predList = lappend(*predList, rinfo);
+        }
+        return;
+    }
+
+    List* orArgs = NIL;
+    PartitionPseudoPredicateOneListPart(pstate, &(listMap->listElements[partSeq]), partkeyVar, partKeyNum, &orArgs);
+    if (orArgs != NIL) {
+        Expr* orExpr = (Expr *)(list_length(orArgs) > 1 ? make_orclause(orArgs) : linitial(orArgs));
+        if (and_clause((Node *)orExpr)) {
+            ListCell* temp = NULL;
+            foreach (temp, ((BoolExpr *)orExpr)->args) {
+                RestrictInfo* rinfo = make_restrictinfo((Expr *)lfirst(temp), true, false, false, 0,
+                    rel->relids, NULL, NULL, false);
+                *predList = lappend(*predList, rinfo);
+            }
+        } else {
+            RestrictInfo* rinfo = make_restrictinfo(orExpr, true, false, false, 0, rel->relids, NULL, NULL, false);
+            *predList = lappend(*predList, rinfo);
+        }
+    }
+}
+
+/*
+ * If relation is a table, then partitionid is level-1 partition OID.
+ * If relattion is a fake relation of a level-1 partition, then partitionid is subpartition OID.
+ */
+static void PartitionPseudoPredicateAppend(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte,
+    Relation relation, Oid partitionid, List** predList)
+{
+    if (!PointerIsValid(relation->partMap) || relation->partMap->type == PART_TYPE_HASH) {
+        return;
+    }
+
+    incre_partmap_refcount(relation->partMap);
+
+    /* find partSeq that matches with partitionid */
+    int partSeq = partOidGetPartSequence(relation, partitionid) - 1;
+    if (partSeq < 0) {
+        /* not found */
+        decre_partmap_refcount(relation->partMap);
+        return;
+    }
+
+    int2vector* partKeyArray = PartitionMapGetPartKeyArray(relation->partMap);
+    int partKeyNum = partKeyArray->dim1;
+
+    bool proceed = false;
+    Var** varArray = (Var **)palloc0(partKeyNum * sizeof(Var *));
+    for (int i = 0; i < partKeyNum; i++) {
+        Oid vartypeid;
+        int32 typeMod;
+        Oid varcollid;
+
+        AttrNumber attrno = partKeyArray->values[i];
+        get_rte_attribute_type(rte, attrno, &vartypeid, &typeMod, &varcollid);
+        Var* var = makeVar(rel->relid, attrno, vartypeid, typeMod, varcollid, 0);
+        EquivalenceClass* ec = get_expr_eqClass(root, (Expr *)var);
+        if (ec && ec->ec_has_const) {
+            varArray[i] = NULL;
+        } else {
+            varArray[i] = var;
+            proceed = true;
+        }
+    }
+
+    if (proceed) {
+        ParseState* pstate = make_parsestate(NULL);
+        switch (relation->partMap->type) {
+            case PART_TYPE_RANGE:
+            case PART_TYPE_INTERVAL:
+                PartitionPseudoPredicateRangePart(pstate, rel, (RangePartitionMap *)relation->partMap,
+                    partSeq, varArray, partKeyNum, predList);
+                break;
+            case PART_TYPE_LIST:
+                PartitionPseudoPredicateListPart(pstate, rel, (ListPartitionMap *)relation->partMap,
+                    partSeq, varArray, partKeyNum, predList);
+                break;
+            case PART_TYPE_HASH:
+            case PART_TYPE_NONE:
+            case PART_TYPE_VALUE:
+            default:
+                Assert(0);
+                break;
+        }
+        pfree_ext(pstate);
+    }
+    decre_partmap_refcount(relation->partMap);
+    pfree_ext(varArray);
+}
+
+List* PartitionPseudoPredicate(PlannerInfo* root, RelOptInfo *rel, RangeTblEntry* rte)
+{
+    List* pseudoPredList = NIL;
+    
+    Relation relation = heap_open(rte->relid, NoLock);
+
+    /* construct predicate condition for level-1 partition */
+    if (TABLE_LEVEL_STATISTIC == rel->statisticFlag) {
+        PartitionPseudoPredicateAppend(root, rel, rte, relation, rte->partitionOid, &pseudoPredList);
+    }
+
+    /* construct predicate condition for subpartition */
+    if (rte->isContainSubPartition && SUBPARTITION_LEVEL_STATISTIC != rel->statisticFlag) {
+        Assert(TABLE_LEVEL_STATISTIC == rel->statisticFlag
+            || PARTITION_LEVEL_STATISTIC == rel->statisticFlag);
+        Partition partition = partitionOpen(relation, rte->partitionOid, NoLock);
+        Relation fakeRel = partitionGetRelation(relation, partition);
+        PartitionPseudoPredicateAppend(root, rel, rte, fakeRel, rte->subpartitionOid, &pseudoPredList);
+        releaseDummyRelation(&fakeRel);
+        partitionClose(relation, partition, NoLock);
+    }
+
+    heap_close(relation, NoLock);
+    return pseudoPredList;
 }

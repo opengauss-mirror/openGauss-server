@@ -164,6 +164,15 @@ void CNGuardOldQueryForVacuumFull(VacuumStmt* vacstmt, Oid relid)
     }
 }
 
+static bool CanAnalyzeRelation(VacuumStmt* vacstmt, vacuum_object* vacObj)
+{
+    return !vacuumPartition(vacstmt->flags)
+        || (t_thrd.proc->workingVersionNum >= ANALYZE_PARTITION_VERSION_NUMBER
+            && ((vacstmt->relation != NULL && vacstmt->relation->partitionname != NULL
+                && !OidIsValid(vacObj->grandparent_oid))
+            || (vacstmt->relation != NULL && vacstmt->relation->subpartitionname != NULL)));
+}
+
 /*
  * Primary entry point for VACUUM and ANALYZE commands.
  *
@@ -350,8 +359,8 @@ void vacuum(
              * as vacuum is an operation related with tuple and storage page reorganization
              */
             if (vacstmt->options & VACOPT_VACUUM) {
-                if (vacuumPartition(vacstmt->flags) || vacuumRelation(vacstmt->flags) ||
-                    vacuumMainPartition(vacstmt->flags)) {
+                if ((vacuumPartition(vacstmt->flags) && !vacuumSubParent(vacstmt->flags))
+                    || vacuumRelation(vacstmt->flags) || vacuumMainPartition(vacstmt->flags)) {
                     if (!vacuum_rel(relOid, vacstmt, do_toast))
                         continue;
                 } else {
@@ -368,11 +377,14 @@ void vacuum(
             vacstmt->issubpartition = false;
 
             if (vacstmt->options & VACOPT_ANALYZE) {
+                Oid tableOid = OidIsValid(vacObj->grandparent_oid) ? vacObj->grandparent_oid
+                               : OidIsValid(vacObj->parent_oid) ? vacObj->parent_oid
+                               : vacObj->tab_oid;
                 /*
                  * we have received user-defined table's stat info from remote coordinator
                  * in function FetchGlobalRelationStatistics, so we skip analyze
                  */
-                if (udtRemoteAnalyze(relOid))
+                if (udtRemoteAnalyze(tableOid))
                     continue;
 
                 /*
@@ -387,14 +399,12 @@ void vacuum(
                 }
 
                 /*
-                 * do NOT analyze partition, as analyze is an operation related with
-                 * data redistribution reflect and this is not meaningfull for one
-                 * or more partitions, it must be done on basis of table level, either
-                 * plain heap or partitioned heap.
+                 * do analyze on table, partition, or subpartition
                  */
-                if (!vacuumPartition(vacstmt->flags)) {
+                if (CanAnalyzeRelation(vacstmt, vacObj)) {
                     pgstat_report_waitstatus_relname(STATE_ANALYZE, get_nsp_relname(relOid));
-                    analyze_rel(relOid, vacstmt, vac_strategy);
+                    analyze_rel(tableOid, vacObj->grandparent_oid, vacObj->parent_oid, vacObj->tab_oid,
+                                vacstmt, vac_strategy);
                 }
 
                 if (use_own_xacts) {
@@ -621,6 +631,7 @@ static vacuum_object *GetVacuumObjectOfSubpartition(VacuumStmt* vacstmt, Oid rel
     vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
     vacObj->tab_oid = subpartitionid;
     vacObj->parent_oid = partitionid;
+    vacObj->grandparent_oid = relationid;
     vacObj->flags = VACFLG_SUB_PARTITION;
 
     if (t_thrd.vacuum_cxt.vac_context) {
@@ -769,8 +780,12 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
             partitionForm = (Form_pg_partition)GETSTRUCT(partitionTup);
 
             if (partitionForm->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
-                if (partitionForm->relfilenode != InvalidOid) {
-                    /* it is a partition of partition table. */
+                if (partitionForm->relfilenode != InvalidOid
+                    || !((vacstmt->options & VACOPT_FULL) || (vacstmt->options & VACOPT_VACUUM))) {
+                    /* it is a partition of partition table, or if it is a partition of
+                     * subpartitioned table, and we are not going to vacuum it, i.e. we
+                     * are analyze only, then we don't expand it into subpartitions
+                     */
                     if (t_thrd.vacuum_cxt.vac_context) {
                         oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
                     }
@@ -778,7 +793,8 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     vacObj->tab_oid = partitionid;
                     vacObj->parent_oid = relationid;
                     vacObj->gpi_vacuumed = vacstmt->gpi_vacuumed;
-                    vacObj->flags = VACFLG_SUB_PARTITION;
+                    vacObj->flags = partitionForm->relfilenode != InvalidOid ? VACFLG_SUB_PARTITION
+                                    : (VACFLG_SUB_PARTITION | VACFLG_SUB_PARENT);
                     oid_list = lappend(oid_list, vacObj);
 
                     if (t_thrd.vacuum_cxt.vac_context) {
@@ -807,6 +823,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                         vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
                         vacObj->tab_oid = HeapTupleGetOid(subPartTuple);
                         vacObj->parent_oid = HeapTupleGetOid(partitionTup);
+                        vacObj->grandparent_oid = relationid;
                         vacObj->gpi_vacuumed = vacstmt->gpi_vacuumed;
                         vacObj->flags = VACFLG_SUB_PARTITION;
                         oid_list = lappend(oid_list, vacObj);
@@ -817,6 +834,20 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     }
                     heap_endscan(subPartScan);
                     heap_close(pgpartition, AccessShareLock);
+                    /* Also add the parent partition of subpartition for analyze */
+                    if (vacstmt->options & VACOPT_ANALYZE) {
+                        vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+                        vacObj->tab_oid = partitionid;
+                        vacObj->parent_oid = relationid;
+                        vacObj->grandparent_oid = InvalidOid;
+                        vacObj->gpi_vacuumed = vacstmt->gpi_vacuumed;
+                        vacObj->flags = VACFLG_SUB_PARENT | VACFLG_SUB_PARTITION;
+                        oid_list = lappend(oid_list, vacObj);
+
+                        if (t_thrd.vacuum_cxt.vac_context) {
+                            (void)MemoryContextSwitchTo(oldcontext);
+                        }
+                    }
                 }
             }
 
@@ -2892,7 +2923,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
  * unique index, uniqueness checks will be performed anyway and had better not
  * hit dangling index pointers.
  */
-void vac_open_indexes(Relation relation, LOCKMODE lockmode, int* nindexes, Relation** Irel)
+void vac_open_indexes(Relation relation, LOCKMODE lockmode, int* nindexes, Relation** Irel, bool analyzePartition)
 {
     List* indexoidlist = NIL;
     ListCell* indexoidscan = NULL;
@@ -2917,7 +2948,9 @@ void vac_open_indexes(Relation relation, LOCKMODE lockmode, int* nindexes, Relat
         Relation indrel;
 
         indrel = index_open(indexoid, lockmode);
-        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index))
+        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)
+            /* If analyze partition, then only include partitioned index */
+            && (!analyzePartition || RelationIsPartitioned(indrel)))
             (*Irel)[i++] = indrel;
         else
             index_close(indrel, lockmode);

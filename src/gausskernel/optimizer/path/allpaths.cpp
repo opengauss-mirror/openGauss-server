@@ -1049,6 +1049,12 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     set_rel_bucketinfo(root, rel, rte);
     if (rte->ispartrel) {
         Relation relation = heap_open(rte->relid, NoLock);
+        /*
+         * Do we need to adjust base relation size due to pruning?
+         * Assume true and it will be set to false if we are already
+         * using partition level statistic.
+         */
+        bool needToAdjust = true;
         double pruningRatio = 1.0;
 
         /* get pruning result */
@@ -1068,28 +1074,41 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
             bms_num_members(rel->pruning_result->intervalSelectedPartitions);
         }
 
-        if (u_sess->attr.attr_sql.partition_page_estimation) {
-            /* If pruning exists in the partition, estimate the number of pages in the partition after pruning. */
-            if (relation->partMap != NULL && rel->pruning_result != NULL) {
-                int partItrs = 0;
-                int nparts = 0;
-                if (RelationIsSubPartitioned(relation)) {
-                    ListCell *cell = NULL;
-                    foreach (cell, rel->pruning_result->ls_selectedSubPartitions) {
-                        SubPartitionPruningResult *subPartPruningResult = (SubPartitionPruningResult *)lfirst(cell);
-                        partItrs += bms_num_members(subPartPruningResult->bm_selectedSubPartitions);
-                    }
-                    nparts = GetSubPartitionNumber(relation);
-                } else {
-                    partItrs = rel->partItrs;
-                    nparts = getPartitionNumber(relation->partMap);
-                }
-                pruningRatio = 1.0 * partItrs / nparts;
+        if (SUBPARTITION_LEVEL_STATISTIC == rel->statisticFlag) {
+            Assert(rte->isContainSubPartition);
+            needToAdjust = false;
+        } else if (PARTITION_LEVEL_STATISTIC == rel->statisticFlag) {
+            if (rte->isContainPartition) {
+                needToAdjust = false;
+            } else {
+                Assert(rte->isContainSubPartition);
             }
-        } else {
-            if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
-                RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
-                pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
+        }
+
+        if (needToAdjust) {
+            if (u_sess->attr.attr_sql.partition_page_estimation) {
+                /* If pruning exists in the partition, estimate the number of pages in the partition after pruning. */
+                if (relation->partMap != NULL && rel->pruning_result != NULL) {
+                    int partItrs = 0;
+                    int nparts = 0;
+                    if (RelationIsSubPartitioned(relation)) {
+                        ListCell *cell = NULL;
+                        foreach (cell, rel->pruning_result->ls_selectedSubPartitions) {
+                            SubPartitionPruningResult *subPartPruningResult = (SubPartitionPruningResult *)lfirst(cell);
+                            partItrs += bms_num_members(subPartPruningResult->bm_selectedSubPartitions);
+                        }
+                        nparts = GetSubPartitionNumber(relation);
+                    } else {
+                        partItrs = rel->partItrs;
+                        nparts = getPartitionNumber(relation->partMap);
+                    }
+                    pruningRatio = 1.0 * partItrs / nparts;
+                }
+            } else {
+                if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
+                    RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
+                    pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
+                }
             }
         }
 
@@ -1099,7 +1118,9 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
          * refresh pages/tuples since executor will skip some page
          * scan with pruning info
          */
-        SetPlainReSizeWithPruningRatio(rel, pruningRatio, root);
+        if (needToAdjust) {
+            SetPlainReSizeWithPruningRatio(rel, pruningRatio, root);
+        }
     }
     /*
      * Test any partial indexes of rel for applicability.  We must do this
@@ -1108,8 +1129,16 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     check_partial_indexes(root, rel);
 
     if (rte->tablesample == NULL) {
+        List* pseudoPredList = NIL;
+        if ((rte->isContainPartition && OidIsValid(rte->partitionOid)
+            && rel->statisticFlag != PARTITION_LEVEL_STATISTIC)
+            || (rte->isContainSubPartition && OidIsValid(rte->subpartitionOid)
+                && rel->statisticFlag != SUBPARTITION_LEVEL_STATISTIC)) {
+            pseudoPredList = PartitionPseudoPredicate(root, rel, rte);
+        }
         /* Mark rel with estimated output rows, width, etc */
-        set_baserel_size_estimates(root, rel);
+        set_baserel_size_estimates(root, rel, pseudoPredList);
+        list_free_deep(pseudoPredList);
     } else {
         /* Sampled relation */
         set_tablesample_rel_size(root, rel, rte);

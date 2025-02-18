@@ -184,43 +184,43 @@ create index index_01 on list_list_02(col_2  ASC ) local;
 create index index_02 on list_list_02(col_2  DESC) local;
 create index index_03 on list_list_02(col_2  NULLS first) local;
 create index index_04 on list_list_02(col_2  NULLS LAST ) local;
-explain (analyze on, timing off) select /*+ indexscan (list_list_02 index_01)*/ * from list_list_02 where col_2 in  (select col_1 from list_list_02 aa where col_1 >10 and col_1<100) order by 2 asc limit 100;
-                                                                      QUERY PLAN                                                                       
--------------------------------------------------------------------------------------------------------------------------------------------------------
- Row Adapter  (cost=51.68..51.68 rows=4 width=16) (actual rows=3 loops=1)
-   ->  Vector Limit  (cost=51.67..51.68 rows=4 width=16) (actual rows=3 loops=1)
-         ->  Vector Sort  (cost=51.67..51.68 rows=4 width=16) (actual rows=3 loops=1)
+explain (analyze on, timing off, costs off) select /*+ indexscan (list_list_02 index_01)*/ * from list_list_02 where col_2 in  (select col_1 from list_list_02 aa where col_1 >10 and col_1<100) order by 2 asc limit 100;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter (actual rows=3 loops=1)
+   ->  Vector Limit (actual rows=3 loops=1)
+         ->  Vector Sort (actual rows=3 loops=1)
                Sort Key: list_list_02.col_2
                Sort Method: quicksort  Memory: 2kB
-               ->  Vector Nest Loop  (cost=36.66..51.63 rows=4 width=16) (actual rows=3 loops=1)
-                     ->  Vector Sonic Hash Aggregate  (cost=36.66..36.68 rows=2 width=4) (actual rows=5 loops=1)
+               ->  Vector Nest Loop (actual rows=3 loops=1)
+                     ->  Vector Sonic Hash Aggregate (actual rows=5 loops=1)
                            Group By Key: aa.col_1
-                           ->  Vector Partition Iterator  (cost=0.00..36.64 rows=9 width=4) (actual rows=5 loops=1)
+                           ->  Vector Partition Iterator (actual rows=5 loops=1)
                                  Iterations: 7, Sub Iterations: 16
-                                 ->  Vector Adapter(type: BATCH MODE)  (cost=36.64..36.64 rows=9 width=4) (actual rows=5 loops=16)
+                                 ->  Vector Adapter(type: BATCH MODE) (actual rows=5 loops=16)
                                        Filter: ((col_1 > 10) AND (col_1 < 100))
                                        Rows Removed by Filter: 11
-                                       ->  Partitioned Seq Scan on list_list_02 aa  (cost=0.00..36.64 rows=9 width=4) (actual rows=16 loops=16)
+                                       ->  Partitioned Seq Scan on list_list_02 aa (actual rows=16 loops=16)
                                              Selected Partitions:  1..7
                                              Selected Subpartitions:  ALL
-                     ->  Vector Partition Iterator  (cost=0.00..7.39 rows=9 width=16) (actual rows=3 loops=5)
+                     ->  Vector Partition Iterator (actual rows=3 loops=5)
                            Iterations: 7, Sub Iterations: 16
-                           ->  Vector Adapter  (cost=7.39..7.39 rows=9 width=16) (actual rows=3 loops=80)
-                                 ->  Partitioned Index Scan using index_01 on list_list_02  (cost=0.00..7.39 rows=9 width=16) (actual rows=3 loops=80)
+                           ->  Vector Adapter (actual rows=3 loops=80)
+                                 ->  Partitioned Index Scan using index_01 on list_list_02 (actual rows=3 loops=80)
                                        Index Cond: ((col_2 = $4) AND (col_2 > 10) AND (col_2 < 100))
                                        Selected Partitions:  1..7
                                        Selected Subpartitions:  ALL
 --?.*
 (24 rows)
 
-explain (analyze on, timing off) select * from list_list_02 where ctid='(0,2)';
-                                                     QUERY PLAN                                                     
---------------------------------------------------------------------------------------------------------------------
- Row Adapter  (cost=4.01..4.01 rows=1 width=16) (actual rows=4 loops=1)
-   ->  Vector Partition Iterator  (cost=0.00..4.01 rows=1 width=16) (actual rows=4 loops=1)
+explain (analyze on, timing off, costs off) select * from list_list_02 where ctid='(0,2)';
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter (actual rows=4 loops=1)
+   ->  Vector Partition Iterator (actual rows=4 loops=1)
          Iterations: 7, Sub Iterations: 16
-         ->  Vector Adapter  (cost=4.01..4.01 rows=1 width=16) (actual rows=4 loops=16)
-               ->  Partitioned Tid Scan on list_list_02  (cost=0.00..4.01 rows=1 width=16) (actual rows=4 loops=16)
+         ->  Vector Adapter (actual rows=4 loops=16)
+               ->  Partitioned Tid Scan on list_list_02 (actual rows=4 loops=16)
                      TID Cond: (ctid = '(0,2)'::tid)
                      Selected Partitions:  1..7
                      Selected Subpartitions:  ALL

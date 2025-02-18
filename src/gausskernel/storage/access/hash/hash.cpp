@@ -67,7 +67,7 @@ Datum hashbuild(PG_FUNCTION_ARGS)
                         (errmsg("index \"%s\" already contains data.", RelationGetRelationName(index)))));
 
     /* Estimate the number of rows currently present in the table */
-    estimate_rel_size(heap, NULL, &relpages, &reltuples, &allvisfrac, NULL);
+    estimate_rel_size(heap, NULL, &relpages, &reltuples, &allvisfrac, NULL, NULL);
 
     /* Initialize the hash index metadata page and initial buckets */
     num_buckets = _hash_init(index, reltuples, MAIN_FORKNUM);

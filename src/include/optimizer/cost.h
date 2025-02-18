@@ -149,7 +149,7 @@ extern void cost_qual_eval(QualCost* cost, List* quals, PlannerInfo* root);
 extern void cost_qual_eval_node(QualCost* cost, Node* qual, PlannerInfo* root);
 extern void compute_semi_anti_join_factors(PlannerInfo* root, RelOptInfo* outerrel, RelOptInfo* innerrel,
     JoinType jointype, SpecialJoinInfo* sjinfo, List* restrictlist, SemiAntiJoinFactors* semifactors);
-extern void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel);
+extern void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel, List* pseudoPredList = NIL);
 extern double get_parameterized_baserel_size(PlannerInfo* root, RelOptInfo* rel, List* param_clauses);
 extern double get_parameterized_joinrel_size(PlannerInfo* root, RelOptInfo* rel, double outer_rows, double inner_rows,
     SpecialJoinInfo* sjinfo, List* restrict_clauses);
@@ -353,5 +353,25 @@ private:
 	Selectivity cal_eqjoinsel_inner_ai(es_candidate* es);
     void set_up_attnum_order_reversed(es_candidate* es, int* attnum_order) const;
 };
+
+inline void GetStaRelkindAndOid(RangeTblEntry* rte, RelOptInfo* rel, char* starelkind, Oid* oid)
+{
+    switch (rel->statisticFlag) {
+        case PARTITION_LEVEL_STATISTIC:
+            Assert(rte->isContainPartition || rte->isContainSubPartition);
+            *starelkind = STARELKIND_PARTITION;
+            *oid = rte->partitionOid;
+            break;
+        case SUBPARTITION_LEVEL_STATISTIC:
+            Assert(rte->isContainSubPartition);
+            *starelkind = STARELKIND_PARTITION;
+            *oid = rte->subpartitionOid;
+            break;
+        default:
+            *starelkind = STARELKIND_CLASS;
+            *oid = rte->relid;
+            break;
+    }
+}
 
 #endif /* COST_H */

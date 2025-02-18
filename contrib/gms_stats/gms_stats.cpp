@@ -273,7 +273,7 @@ Datum gs_create_stat_table(PG_FUNCTION_ARGS)
 
         appendStringInfo(executeSql, "CREATE ");
         if (global_temporary) {
-            appendStringInfo(executeSql, "GLOBAL TMEPORARY ");
+            appendStringInfo(executeSql, "GLOBAL TEMPORARY ");
         }
 
         appendStringInfo(executeSql, "TABLE %s.%s (namespaceid oid, starelid oid, partid oid, statype \"char\","       \
@@ -463,7 +463,7 @@ static Oid GetPartitionOid(Oid relid, char* partname)
     return partid;
 }
 
-static bool ExistsStatisticInfo(Oid relid)
+static bool ExistsStatisticInfo(Oid relid, Oid partid)
 {
     Relation starel = NULL;
     ScanKeyData skey[1];
@@ -479,6 +479,17 @@ static bool ExistsStatisticInfo(Oid relid)
     }
     systable_endscan(scan);
     relation_close(starel, AccessShareLock);
+
+    if (!result && OidIsValid(partid)) {
+        ScanKeyInit(&skey[0], Anum_pg_statistic_starelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partid));
+        starel = relation_open(StatisticRelationId, AccessShareLock);
+        scan = systable_beginscan(starel, StatisticRelidKindAttnumInhIndexId, true, NULL, 1, skey);
+        if (HeapTupleIsValid(systable_getnext(scan))) {
+            result = true;
+        }
+        systable_endscan(scan);
+        relation_close(starel, AccessShareLock);
+    }
     return result;
 }
 
@@ -510,7 +521,12 @@ static bool CheckColumnIsValid(Oid relid, int16 attnum)
     return !result;
 }
 
-/* update pg_statsitic */
+/**
+ * update pg_statsitic info.
+ * @param relid tableid or partitionid
+ * @param relkind table or partition
+ * @param attnum column number
+ */
 static void UpdateStatsiticInfo(Oid relid, char relkind, int16 attnum,
                         Datum* values, bool* nulls, bool* replaces)
 {
@@ -541,7 +557,6 @@ static void UpdateStatsiticInfo(Oid relid, char relkind, int16 attnum,
     CommandCounterIncrement();
 }
 
-/* update pg_class relpages and reltuples */
 static void UpdateTableStatsInfo(Oid relid, double numpages, double numtuples)
 {
     Datum values[Natts_pg_class] = {0};
@@ -576,7 +591,6 @@ static void UpdateTableStatsInfo(Oid relid, double numpages, double numtuples)
     relation_close(rel, RowExclusiveLock);
 }
 
-/* update pg_partition relpages and reltuples */
 static void UpdatePartitionStatsInfo(Oid partid, double numpages, double numtuples)
 {
     Datum values[Natts_pg_partition] = {0};
@@ -879,17 +893,16 @@ static void ExportTableClassStats(Oid namespaceid, Oid relid, Oid starelid, Oid 
     while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
         if (OidIsValid(partid)) {
             Datum val = heap_getattr(tuple, Anum_user_table_partid, RelationGetDescr(starel), &isNull);
-            if (DatumGetObjectId(val) != partid) {
+            if (!isNull && DatumGetObjectId(val) != partid) {
                 continue;
             }
-            exists = true;
-        } else {
-            exists = true;
         }
+        exists = true;
         replaces[Anum_user_table_reltuples - 1] = true;
         replaces[Anum_user_table_relpages - 1] = true;
         newtup = heap_modify_tuple(tuple, RelationGetDescr(starel), values, nulls, replaces);
         simple_heap_update(starel, &newtup->t_self, newtup);
+        break;
     }
 
     if (!exists) {
@@ -907,20 +920,22 @@ static void ExportTableClassStats(Oid namespaceid, Oid relid, Oid starelid, Oid 
 static void ExportTableStats(Oid namespaceid, Oid relid, Oid partid, Oid starelid, bool cascade)
 {
     /* If the table doesn't have statistics, not export */
-    if (!ExistsStatisticInfo(relid)) {
+    if (!ExistsStatisticInfo(relid, partid)) {
         return;
     }
 
     /* 1. export class or partition: pg_class or pg_partition relpages and reptuples */
     if (OidIsValid(partid)) {
+        /* We don't handle partition statistic info in pg_statistic now */
         ExportTableClassStats(namespaceid, relid, starelid, partid);
+        return;
     } else {
         ExportTableClassStats(namespaceid, relid, starelid, InvalidOid);
     }
 
     /* 2. export index: pg_statistic info */
     Relation rel = heap_open(relid, AccessShareLock);
-    /* only support STARELKIND_CLASS now */
+    /* Now, we don't handle partition statistic info in pg_statistic */
     char relkind = STARELKIND_CLASS;
     int attnums = RelationGetNumberOfAttributes(rel);
     bool is_index_column[attnums] = {0};
@@ -980,7 +995,7 @@ Datum gs_export_column_stats(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("Relation \"%s\".\"%s\" is not exists", statown, stattab)));
     }
 
-    /* only support STARELKIND_CLASS now */
+    /* Now, we don't handle partition statistic info in pg_statistic */
     char relkind = STARELKIND_CLASS;
     HeapTuple attTup = SearchSysCache2(ATTNAME, ObjectIdGetDatum(relid), NameGetDatum(colname));
     if (HeapTupleIsValid(attTup)) {
@@ -1032,7 +1047,7 @@ Datum gs_export_index_stats(PG_FUNCTION_ARGS)
     Oid relid = indextup->indrelid;
     CheckPermission(relid);
 
-    /* only support STARELKIND_CLASS now */
+    /* Now, we don't handle partition statistic info in pg_statistic */
     char relkind = STARELKIND_CLASS;
     for (int i = 0; i < indextup->indnatts; i++) {
         ExportColumnStats(namespaceid, relid, starelid, relkind, indextup->indkey.values[i]);
@@ -1316,14 +1331,16 @@ static void ImportTableStats(Oid namespaceid, Oid relid, Oid partid, Oid stareli
 {
     /* 1. import class or partition: pg_class or pg_partition relpages and reptuples */
     if (OidIsValid(partid)) {
+        /* We don't handle partition statistic info in pg_statistic now */
         UpdatePartitionStats(namespaceid, relid, starelid, partid);
+        return;
     } else {
         UpdateTableStats(namespaceid, relid, starelid);
     }
 
     /* 2. import index: pg_statistic info */
     Relation rel = heap_open(relid, AccessShareLock);
-    /* only support STARELKIND_CLASS now */
+    /* Now, we don't handle partition statistic info in pg_statistic */
     char relkind = STARELKIND_CLASS;
     int attnums = RelationGetNumberOfAttributes(rel);
     bool is_index_column[attnums] = {0};
@@ -1388,7 +1405,7 @@ Datum gs_import_column_stats(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("Relation \"%s\".\"%s\" has been locked", ownname, tabname)));
     }
 
-    /* only support STARELKIND_CLASS now */
+    /* Now, we don't handle partition statistic info in pg_statistic */
     char relkind = STARELKIND_CLASS;
     HeapTuple attTup = SearchSysCache2(ATTNAME, ObjectIdGetDatum(relid), NameGetDatum(colname));
     if (HeapTupleIsValid(attTup)) {
@@ -1430,7 +1447,7 @@ Datum gs_import_index_stats(PG_FUNCTION_ARGS)
     HeapTuple tup = SearchSysCache2(RELNAMENSP, NameGetDatum(indname), ObjectIdGetDatum(namespaceid));
     if (HeapTupleIsValid(tup)) {
         Oid indexid = HeapTupleGetOid(tup);
-        /* only support STARELKIND_CLASS now */
+        /* Now, we don't handle partition statistic info in pg_statistic */
         char relkind = STARELKIND_CLASS;
         ReleaseSysCache(tup);
 
@@ -1588,10 +1605,10 @@ static void DeleteColumnStats(Oid namespaceid, Oid relid, int16 attnum, Oid star
     }
     /* delete pg_statistic info */
     else {
-        Relation pgstatistic;
-        SysScanDesc scan;
+        Relation pgstatistic = NULL;
+        SysScanDesc scan = NULL;
         ScanKeyData key[3];
-        HeapTuple tuple;
+        HeapTuple tuple = NULL;
 
         ScanKeyInit(&key[0], Anum_pg_statistic_starelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
         ScanKeyInit(&key[1], Anum_pg_statistic_starelkind, BTEqualStrategyNumber, F_CHAREQ, ObjectIdGetDatum(relkind));
@@ -1718,8 +1735,10 @@ static void DeleteTableStats(Oid namespaceid, Oid relid, Oid partid, Oid stareli
 {
     /* 1. delete pg_class or pg_partition reltuples and relpages info */
     if (OidIsValid(partid)) {
+        /* If is partition, only delete pg_partition info now, do not delete pg_statistic info */
         RemovePartitionStats(namespaceid, relid, starelid, partid);
-    } else if (cascadePart) {
+        return;
+    } else {
         RemoveTableStats(namespaceid, relid, starelid, cascadePart);
     }
 
@@ -2033,7 +2052,7 @@ static void SetColumnStats(Oid namespaceid, Oid relid, int16 attnum, Oid stareli
 
         starel = heap_open(starelid, RowExclusiveLock);
         scan = heap_beginscan(starel, SnapshotNow, 4, skey);
-        while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+        if (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
             newtup = heap_modify_tuple(tuple, RelationGetDescr(starel), values, nulls, replaces);
             simple_heap_update(starel, &newtup->t_self, newtup);
             CatalogUpdateIndexes(starel, newtup);
@@ -2073,7 +2092,7 @@ static void SetColumnStats(Oid namespaceid, Oid relid, int16 attnum, Oid stareli
 
         pgstatistic = heap_open(StatisticRelationId, RowExclusiveLock);
         scan = systable_beginscan(pgstatistic, StatisticRelidKindAttnumInhIndexId, true, NULL, 3, key);
-        while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        if (HeapTupleIsValid(tuple = systable_getnext(scan))) {
             newtup = heap_modify_tuple(tuple, RelationGetDescr(pgstatistic), values, nulls, replaces);
             simple_heap_update(pgstatistic, &newtup->t_self, newtup);
             CatalogUpdateIndexes(pgstatistic, newtup);
@@ -2473,7 +2492,7 @@ static void RestoreColumnStats(HeapTuple tuple, TupleDesc tupdesc, Oid relid, ch
     UpdateStatsiticInfo(relid, relkind, attnum, values, nulls, replaces);
 }
 
-static void RestoreStats(Oid namespaceid, Oid relid, TimestampTz asOfTime)
+static void RestoreStats(Oid namespaceid, Oid relid, Oid partid, TimestampTz asOfTime)
 {
     Relation pgstahis = NULL;
     SysScanDesc scan = NULL;
@@ -2502,7 +2521,7 @@ static void RestoreStats(Oid namespaceid, Oid relid, TimestampTz asOfTime)
             int16 attnum = DatumGetInt16(heap_getattr(tuple, Anum_pg_statistic_history_staattnum,
                                         pgstahis->rd_att, &isNull));
             RestoreColumnStats(tuple, pgstahis->rd_att, relid, STARELKIND_CLASS, attnum);
-        } else if (statype == STATYPE_RELATION) {
+        } else if (statype == STATYPE_RELATION && !OidIsValid(partid)) {
 
             UpdateTableStatsInfo(relid, relpages, reltuples);
 
@@ -2512,9 +2531,12 @@ static void RestoreStats(Oid namespaceid, Oid relid, TimestampTz asOfTime)
             if (!isNull && DatumGetChar(locktypVal) == STALOCKTYPE_RELATION) {
                 LockStatistic(namespaceid, relid);
             }
-        } else if (statype == STATYPE_PARTITION) {
-            Oid partid = DatumGetObjectId(heap_getattr(tuple, Anum_pg_statistic_history_partid,
+        } else if (statype == STATYPE_PARTITION && OidIsValid(partid)) {
+            Oid tempId = DatumGetObjectId(heap_getattr(tuple, Anum_pg_statistic_history_partid,
                                         pgstahis->rd_att, &isNull));
+            if (tempId != partid) {
+                continue;
+            }
             UpdatePartitionStatsInfo(partid, relpages, reltuples);
 
             Datum locktypVal = heap_getattr(tuple, Anum_pg_statistic_history_stalocktype,
@@ -2548,7 +2570,7 @@ Datum gs_restore_table_stats(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("Relation \"%s\".\"%s\" has been locked", ownname, tabname)));
     }
 
-    RestoreStats(namespaceid, relid, asOfTimestamp);
+    RestoreStats(namespaceid, relid, InvalidOid, asOfTimestamp);
 
     pfree_ext(ownname);
     pfree_ext(tabname);
@@ -2573,7 +2595,7 @@ Datum gs_restore_schema_stats(PG_FUNCTION_ARGS)
         if (!force && CheckRelationLocked(namespaceid, relid)) {
             continue;
         }
-        RestoreStats(namespaceid, relid, asOfTimestamp);
+        RestoreStats(namespaceid, relid, InvalidOid, asOfTimestamp);
     }
 
     pfree_ext(ownname);
@@ -2639,7 +2661,7 @@ static void GatherTableStats(char* sqlString, Oid namespaceid, Oid relid, Oid pa
 
     /* save last analyzetime */
     currentAnalyzetime = GetRecentAnalyzeTime(0, relid, '\0');
-    lastExistsStats = ExistsStatisticInfo(relid);
+    lastExistsStats = ExistsStatisticInfo(relid, partid);
 
     parsetreeList = raw_parser(sqlString, NULL);
     foreach (parsetreeItem, parsetreeList) {
@@ -2663,7 +2685,7 @@ static void GatherTableStats(char* sqlString, Oid namespaceid, Oid relid, Oid pa
         if (!lastExistsStats || currentAnalyzetime == 0) {
             DeleteTableStats(namespaceid, relid, partid, InvalidOid, true, true, true);
         } else {
-            RestoreStats(namespaceid, relid, currentAnalyzetime);
+            RestoreStats(namespaceid, relid, partid, currentAnalyzetime);
         }
     }
 }
@@ -2702,6 +2724,7 @@ Datum gs_gather_table_stats(PG_FUNCTION_ARGS)
     }
 
     Oid partid = InvalidOid;
+    char parttype = '\0';
     if (PG_ARGISNULL(2)) {
         if (!force && CheckRelationLocked(namespaceid, relid)) {
             ereport(ERROR, (errmsg("Relation \"%s\".\"%s\" has been locked", ownname, tabname)));
@@ -2714,14 +2737,19 @@ Datum gs_gather_table_stats(PG_FUNCTION_ARGS)
         if (!force && CheckRelationLocked(namespaceid, relid, partid)) {
             ereport(ERROR, (errmsg("Partition \"%s\" has been locked", partname)));
         }
+        HeapTuple tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partid));
+        if (HeapTupleIsValid(tuple)) {
+            Form_pg_partition part = (Form_pg_partition)GETSTRUCT(tuple);
+            parttype = part->parttype;
+            ReleaseSysCache(tuple);
+        }
     }
 
     executeSql = makeStringInfo();
+    appendStringInfo(executeSql, "ANALYZE %s.%s", quote_identifier(ownname), quote_identifier(tabname));
     if (OidIsValid(partid)) {
-        appendStringInfo(executeSql, "VACUUM %s.%s PARTITION (%s);", quote_identifier(ownname),
-                                quote_identifier(tabname), quote_identifier(partname));
-    } else {
-        appendStringInfo(executeSql, "ANALYZE %s.%s;", quote_identifier(ownname), quote_identifier(tabname));
+        appendStringInfo(executeSql, " %s(%s);", parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION
+            ? "SUBPARTITION" : "PARTITION", quote_identifier(partname));
     }
 
     GatherTableStats(executeSql->data, namespaceid, relid, partid, starelid);

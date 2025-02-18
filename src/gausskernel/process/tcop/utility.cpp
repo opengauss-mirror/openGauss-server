@@ -11664,10 +11664,14 @@ static void delta_merge_with_exclusive_lock(VacuumStmt* stmt)
         StringInfo query = NULL;
         char* schema_name = NULL;
 
+        vo = (vacuum_object*)lfirst(lc);
+        if (vacuumSubParent(vo->flags)) {
+            continue;
+        }
+
         StartTransactionCommand();
         PushActiveSnapshot(GetTransactionSnapshot());
 
-        vo = (vacuum_object*)lfirst(lc);
         LOCKMODE lockmode = vo->is_tsdb_deltamerge ? ShareUpdateExclusiveLock : AccessExclusiveLock;
 
         /*

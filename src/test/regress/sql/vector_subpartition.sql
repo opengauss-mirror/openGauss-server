@@ -143,9 +143,9 @@ create index index_02 on list_list_02(col_2  DESC) local;
 create index index_03 on list_list_02(col_2  NULLS first) local;
 create index index_04 on list_list_02(col_2  NULLS LAST ) local;
 
-explain (analyze on, timing off) select /*+ indexscan (list_list_02 index_01)*/ * from list_list_02 where col_2 in  (select col_1 from list_list_02 aa where col_1 >10 and col_1<100) order by 2 asc limit 100;
+explain (analyze on, timing off, costs off) select /*+ indexscan (list_list_02 index_01)*/ * from list_list_02 where col_2 in  (select col_1 from list_list_02 aa where col_1 >10 and col_1<100) order by 2 asc limit 100;
 
-explain (analyze on, timing off) select * from list_list_02 where ctid='(0,2)';
+explain (analyze on, timing off, costs off) select * from list_list_02 where ctid='(0,2)';
 
 set current_schema=public;
 drop schema vector_subpartition cascade;

@@ -43,7 +43,7 @@ analyze hw_partition_vacuum_full_partition_table partition(hw_partition_vacuum_f
 select relpages > 0 as relpagesgtzero, reltuples > 0 as reltuplesgtzero from pg_partition where relname='hw_partition_vacuum_full_partition_table_p1';
  relpagesgtzero | reltuplesgtzero 
 ----------------+-----------------
- f              | f
+ t              | t
 (1 row)
 
 vacuum full hw_partition_vacuum_full_partition_table partition(hw_partition_vacuum_full_partition_table_p1);

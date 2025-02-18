@@ -39,6 +39,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 extern const uint32 SUPPORT_D_FORMAT_DATABASE;
+extern const uint32 ANALYZE_PARTITION_VERSION_NUMBER;
 extern const uint32 STATISTIC_HISTORY_VERSION_NUMBER;
 extern const uint32 FETCH_ENHANCE_VERSION_NUM;
 extern const uint32 PUBLICATION_DDL_AT_VERSION_NUM;

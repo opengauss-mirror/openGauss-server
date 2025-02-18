@@ -533,19 +533,23 @@ void ES_SELECTIVITY::match_extended_stats(es_candidate* es, List* stats_list, bo
     int max_matched = 0;
     int num_members = bms_num_members(es->left_attnums);
     char other_side_starelkind;
+    Oid other_side_oid;
     RangeTblEntry* other_side_rte = NULL;
+    RelOptInfo* other_side_rel = NULL;
     Bitmapset* this_side_attnums = NULL;
     if (left) {
         /* this side is left and the other side is right */
-        other_side_starelkind = OidIsValid(es->right_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
+        other_side_rel = es->right_rel;
         other_side_rte = es->right_rte;
         this_side_attnums = es->left_attnums;
     } else {
         /* this side is right and other side is left */
-        other_side_starelkind = OidIsValid(es->left_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
+        other_side_rel = es->left_rel;
         other_side_rte = es->left_rte;
         this_side_attnums = es->right_attnums;
     }
+
+    GetStaRelkindAndOid(other_side_rte, other_side_rel, &other_side_starelkind, &other_side_oid);
 
     /* best_matched_listcell use to save the best match from stats list */
     ListCell* best_matched_listcell = NULL;
@@ -561,7 +565,7 @@ void ES_SELECTIVITY::match_extended_stats(es_candidate* es, List* stats_list, bo
 
             Bitmapset* other_side_attnums = make_attnums_by_clause_map(es, extended_stats->bms_attnum, left);
             other_side_extended_stats = es_get_multi_column_stats(
-                other_side_rte->relid, other_side_starelkind, other_side_rte->inh, other_side_attnums);
+                other_side_oid, other_side_starelkind, other_side_rte->inh, other_side_attnums);
             if (other_side_extended_stats != NULL && matched == num_members) {
                 /* all attnums have extended stats, leave */
                 if (left) {
@@ -1178,14 +1182,19 @@ void ES_SELECTIVITY::read_statistic_eqjoinsel(es_candidate* es)
 {
     int left_num_stats = 0;
     int right_num_stats = 0;
-    char left_starelkind = OidIsValid(es->left_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
-    char right_starelkind = OidIsValid(es->right_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
+    Oid left_oid;
+    Oid right_oid;
+    char left_starelkind;
+    char right_starelkind;
+
+    GetStaRelkindAndOid(es->left_rte, es->left_rel, &left_starelkind, &left_oid);
+    GetStaRelkindAndOid(es->right_rte, es->right_rel, &right_starelkind, &right_oid);
 
     /* read all multi-column statistic from pg_statistic if possible */
     List* left_stats_list =
-        es_get_multi_column_stats(es->left_rte->relid, left_starelkind, es->left_rte->inh, &left_num_stats);
+        es_get_multi_column_stats(left_oid, left_starelkind, es->left_rte->inh, &left_num_stats);
     List* right_stats_list =
-        es_get_multi_column_stats(es->right_rte->relid, right_starelkind, es->right_rte->inh, &right_num_stats);
+        es_get_multi_column_stats(right_oid, right_starelkind, es->right_rte->inh, &right_num_stats);
 
     /* no multi-column statistic */
     if (left_num_stats == 0 || right_num_stats == 0) {
@@ -1293,13 +1302,16 @@ void ES_SELECTIVITY::cal_stadistinct_eqsel(es_candidate* es)
 void ES_SELECTIVITY::read_statistic_eqsel(es_candidate* es)
 {
     int num_stats = 0;
-    char starelkind = OidIsValid(es->left_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
+    Oid left_oid;
+    char starelkind;
+    GetStaRelkindAndOid(es->left_rte, es->left_rel, &starelkind, &left_oid);
+
     /* read all multi-column statistic from pg_statistic_ext if possible */
     statlist =
-        es_get_multi_column_stats(es->left_rte->relid, starelkind, es->left_rte->inh, &num_stats, es->has_null_clause);
+        es_get_multi_column_stats(left_oid, starelkind, es->left_rte->inh, &num_stats, es->has_null_clause);
     /* no multi-column statistic */
     if (num_stats == 0) {
-        report_no_stats(es->left_rte->relid, es->left_attnums);
+        report_no_stats(left_oid, es->left_attnums);
         remove_candidate(es);
         return;
     }

@@ -621,18 +621,42 @@ call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r'); -- err
 ERROR:  Partition "t_part_list_r" has been locked
 CONTEXT:  SQL statement "CALL gms_stats.gs_gather_table_stats(ownname,tabname,partname,stattab,statid,statown,force)"
 PL/pgSQL function gms_stats.gather_table_stats(character varying,character varying,character varying,numeric,boolean,character varying,numeric,character varying,boolean,character varying,character varying,character varying,boolean,character varying,boolean,text,character varying) line 2 at PERFORM
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r', force=>true);
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
 call gms_stats.delete_table_stats('sc_stats', 't_part', 't_part_list_r'); -- error
 ERROR:  Partition "t_part_list_r" has been locked
 CONTEXT:  SQL statement "CALL gms_stats.gs_delete_table_stats(ownname,tabname,partname,stattab,statid,cascade_parts,cascade_columns,cascade_indexes,statown,force)"
 PL/pgSQL function gms_stats.delete_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,boolean,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.delete_table_stats('sc_stats', 't_part', 't_part_list_r', force=>true);
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
 call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', numrows=>1100); -- error
 ERROR:  Partition "t_part_list_r" has been locked
 CONTEXT:  SQL statement "CALL gms_stats.gs_set_table_stats(ownname,tabname,partname,stattab,statid,numrows,numblks,statown,force)"
 PL/pgSQL function gms_stats.set_table_stats(character varying,character varying,character varying,character varying,character varying,numeric,numeric,numeric,numeric,character varying,boolean,numeric,numeric,boolean,numeric,numeric,numeric) line 2 at PERFORM
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', numrows=>1100, force=>true);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
 call gms_stats.import_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats'); -- error
 ERROR:  Partition "t_part_list_r" has been locked
 CONTEXT:  SQL statement "CALL gms_stats.gs_import_table_stats(ownname,tabname,partname,stattab,cascade,statown,force)"
 PL/pgSQL function gms_stats.import_table_stats(character varying,character varying,character varying,character varying,character varying,boolean,character varying,boolean,boolean,character varying) line 2 at PERFORM
+call gms_stats.import_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats', force=>true);
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
 call gms_stats.unlock_partition_stats('sc_stats', 't_part', 't_part_list_r');
  unlock_partition_stats 
 ------------------------
@@ -1025,6 +1049,110 @@ select b.relname, a.starelkind, a.staattnum, a.stanullfrac, a.stadistinct from p
  t_stats | c          |         2 |          .1 |           9
 (1 row)
 
+-- gather partition
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid = 't_part'::regclass and parttype != 'r';
+    relname    | reltuples | relpages 
+---------------+-----------+----------
+ t_part_list_i |         0 |        0
+ t_part_list_r |         0 |        0
+ t_part_list_v |         0 |        0
+(3 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid = 't_part'::regclass and parttype != 'r';
+    relname    | reltuples | relpages 
+---------------+-----------+----------
+ t_part_list_i |         0 |        0
+ t_part_list_r |       320 |        2
+ t_part_list_v |         0 |        0
+(3 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_part', 't_part_list_r');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid = 't_part'::regclass and parttype != 'r';
+    relname    | reltuples | relpages 
+---------------+-----------+----------
+ t_part_list_i |         0 |        0
+ t_part_list_v |         0 |        0
+ t_part_list_r |         0 |        0
+(3 rows)
+
+-- gather subpartition 
+call prepare_subpart();
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid in (select oid from pg_partition where parentId = 't_sub_part'::regclass and parttype != 'r') and parttype != 'r';
+     relname     | reltuples | relpages 
+-----------------+-----------+----------
+ subp_less_300_r |         0 |        0
+ subp_less_300_v |         0 |        0
+ subp_less_300_i |         0 |        0
+ subp_less_600_r |         0 |        0
+ subp_less_600_v |         0 |        0
+ subp_less_600_i |         0 |        0
+ subp_max_r      |         0 |        0
+ subp_max_v      |         0 |        0
+ subp_max_i      |         0 |        0
+(9 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid in (select oid from pg_partition where parentId = 't_sub_part'::regclass and parttype != 'r') and parttype != 'r';
+     relname     | reltuples | relpages 
+-----------------+-----------+----------
+ subp_less_300_r |         0 |        0
+ subp_less_300_v |         0 |        0
+ subp_less_300_i |         0 |        0
+ subp_less_600_r |       100 |        1
+ subp_less_600_v |         0 |        0
+ subp_less_600_i |         0 |        0
+ subp_max_r      |         0 |        0
+ subp_max_v      |         0 |        0
+ subp_max_i      |         0 |        0
+(9 rows)
+
+call gms_stats.delete_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, reltuples, relpages from pg_partition where parentid in (select oid from pg_partition where parentId = 't_sub_part'::regclass and parttype != 'r') and parttype != 'r';
+     relname     | reltuples | relpages 
+-----------------+-----------+----------
+ subp_less_300_r |         0 |        0
+ subp_less_300_v |         0 |        0
+ subp_less_300_i |         0 |        0
+ subp_less_600_v |         0 |        0
+ subp_less_600_i |         0 |        0
+ subp_max_r      |         0 |        0
+ subp_max_v      |         0 |        0
+ subp_max_i      |         0 |        0
+ subp_less_600_r |         0 |        0
+(9 rows)
+
 -- gather to user-table
 call gms_stats.delete_schema_stats('sc_stats');
  delete_schema_stats 
@@ -1068,7 +1196,7 @@ select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac
 select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
    relname   | count 
 -------------+-------
- t_part      |    12
+ t_part      |     4
  t_stats     |    16
  t_stats_col |    12
  t_stats_us  |    12
@@ -1426,11 +1554,81 @@ select b.relname, a.statype, a.staattnum, a.relpages, a.reltuples, a.stanullfrac
 select b.relname, count(*) from pg_statistic_history a left join pg_class b on a.starelid = b.Oid where b.relname in ('t_stats', 't_stats_us', 't_stats_col', 't_part', 't_subpart') group by b.relname order by b.relname;
    relname   | count 
 -------------+-------
- t_part      |    24
+ t_part      |    16
  t_stats     |    36
  t_stats_col |    24
  t_stats_us  |    24
 (4 rows)
+
+-- gather patition to user-table
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and parentId = 't_part'::regclass and statype = 'p' and parttype != 'r';
+ relname | statype | relpages | reltuples 
+---------+---------+----------+-----------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and parentId = 't_part'::regclass and statype = 'p' and parttype != 'r';
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ t_part_list_r | p       |        2 |       320
+(1 row)
+
+call gms_stats.delete_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and parentId = 't_part'::regclass and statype = 'p' and parttype != 'r';
+ relname | statype | relpages | reltuples 
+---------+---------+----------+-----------
+(0 rows)
+
+-- gather subpartition to user-table
+call prepare_subpart();
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and a.partid = (select Oid from pg_partition where relname = 'subp_less_600_r') and statype = 'p';
+ relname | statype | relpages | reltuples 
+---------+---------+----------+-----------
+(0 rows)
+
+call gms_stats.gather_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', stattab=>'t_tmp_stats');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and a.partid = (select Oid from pg_partition where relname = 'subp_less_600_r') and statype = 'p';
+     relname     | statype | relpages | reltuples 
+-----------------+---------+----------+-----------
+ subp_less_600_r | p       |        1 |       100
+(1 row)
+
+call gms_stats.delete_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', stattab=>'t_tmp_stats');
+ delete_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and a.partid = (select Oid from pg_partition where relname = 'subp_less_600_r') and statype = 'p';
+ relname | statype | relpages | reltuples 
+---------+---------+----------+-----------
+(0 rows)
 
 -- TEST HISTORY, drop table will drop history info
 call prepare_data();
@@ -1988,6 +2186,151 @@ select staattnum, relpages, reltuples, stanullfrac, stadistinct from t_tmp_stats
            |       10 |      1100 |             |            
 (4 rows)
 
+-- set partition, set partition of column and index not support now
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 't_part';
+ relname | relpages | reltuples 
+---------+----------+-----------
+ t_part  |        0 |         0
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 'subp_less_600_r';
+     relname     | relpages | reltuples 
+-----------------+----------+-----------
+ subp_less_600_r |        1 |       100
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 't_part_list_r';
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ t_part_list_r | p       |        2 |       320
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 'subp_less_600_r';
+     relname     | statype | relpages | reltuples 
+-----------------+---------+----------+-----------
+ subp_less_600_r | p       |        1 |       100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', numrows=>1100);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 't_part';
+ relname | relpages | reltuples 
+---------+----------+-----------
+ t_part  |        0 |         0
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 't_part';
+ relname | relpages | reltuples 
+---------+----------+-----------
+ t_part  |        0 |         0
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', numrows=>1100); 
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 'subp_less_600_r';
+     relname     | relpages | reltuples 
+-----------------+----------+-----------
+ subp_less_600_r |        1 |      1100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 'subp_less_600_r';
+     relname     | relpages | reltuples 
+-----------------+----------+-----------
+ subp_less_600_r |       10 |      1100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats', numrows=>1100);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 't_part_list_r';
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ t_part_list_r | p       |        2 |      1100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 't_part_list_r';
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ t_part_list_r | p       |       10 |      1100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', stattab=>'t_tmp_stats', numrows=>1100); 
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 'subp_less_600_r';
+     relname     | statype | relpages | reltuples 
+-----------------+---------+----------+-----------
+ subp_less_600_r | p       |        1 |      1100
+(1 row)
+
+call gms_stats.set_table_stats('sc_stats', 't_sub_part', 'subp_less_600_r', stattab=>'t_tmp_stats', numblks=>10);
+ set_table_stats 
+-----------------
+ 
+(1 row)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname = 'subp_less_600_r';
+     relname     | statype | relpages | reltuples 
+-----------------+---------+----------+-----------
+ subp_less_600_r | p       |       10 |      1100
+(1 row)
+
 -- TEST IMPORT AND EXPORT
 call prepare_data();
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_pk" for table "t_stats"
@@ -1995,18 +2338,6 @@ CONTEXT:  SQL statement "create table t_stats (id int, c2 text, c3 char(1), cons
 PL/pgSQL function prepare_data() line 3 at SQL statement
  prepare_data 
 --------------
- 
-(1 row)
-
-call prepare_part();
- prepare_part 
---------------
- 
-(1 row)
-
-call prepare_subpart();
- prepare_subpart 
------------------
  
 (1 row)
 
@@ -2302,6 +2633,138 @@ select staattnum, stanullfrac, stadistinct from pg_statistic where starelid = 't
          1 |           0 |          -1
          2 |          .1 |           9
 (2 rows)
+
+-- import partition, import partition of column and index not support now
+call prepare_part();
+ prepare_part 
+--------------
+ 
+(1 row)
+
+call prepare_subpart();
+ prepare_subpart 
+-----------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_sub_part', 'subp_max_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_sub_part', 'subp_max_r', stattab=>'t_tmp_stats');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+insert into t_part values (generate_series(1002, 1200), 'r', 'monkey');
+insert into t_sub_part values (generate_series(1002, 1200), 'r', 'monkey');
+call gms_stats.gather_table_stats('sc_stats', 't_part', 't_part_list_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.gather_table_stats('sc_stats', 't_sub_part', 'subp_max_r');
+ gather_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats2');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+call gms_stats.export_table_stats('sc_stats', 't_sub_part', 'subp_max_r', stattab=>'t_tmp_stats2');
+ export_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname in ('t_part_list_r', 'subp_max_r') order by relname;
+    relname    | relpages | reltuples 
+---------------+----------+-----------
+ subp_max_r    |        2 |       319
+ t_part_list_r |        3 |       519
+(2 rows)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats a, pg_partition b where a.partid = b.Oid and relname in ('t_part_list_r', 'subp_max_r') order by relname;
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ subp_max_r    | p       |        1 |       120
+ t_part_list_r | p       |        2 |       320
+(2 rows)
+
+select relname, statype, a.relpages, a.reltuples from t_tmp_stats2 a, pg_partition b where a.partid = b.Oid and relname in ('t_part_list_r', 'subp_max_r') order by relname;
+    relname    | statype | relpages | reltuples 
+---------------+---------+----------+-----------
+ subp_max_r    | p       |        2 |       319
+ t_part_list_r | p       |        3 |       519
+(2 rows)
+
+call gms_stats.import_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 't_part_list_r' order by relname;
+    relname    | relpages | reltuples 
+---------------+----------+-----------
+ t_part_list_r |        2 |       320
+(1 row)
+
+call gms_stats.import_table_stats('sc_stats', 't_part', 't_part_list_r', stattab=>'t_tmp_stats2');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 't_part_list_r' order by relname;
+    relname    | relpages | reltuples 
+---------------+----------+-----------
+ t_part_list_r |        3 |       519
+(1 row)
+
+call gms_stats.import_table_stats('sc_stats', 't_sub_part', 'subp_max_r', stattab=>'t_tmp_stats');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 'subp_max_r' order by relname;
+  relname   | relpages | reltuples 
+------------+----------+-----------
+ subp_max_r |        1 |       120
+(1 row)
+
+call gms_stats.import_table_stats('sc_stats', 't_sub_part', 'subp_max_r', stattab=>'t_tmp_stats2');
+ import_table_stats 
+--------------------
+ 
+(1 row)
+
+select relname, relpages, reltuples from pg_partition where relname = 'subp_max_r' order by relname;
+  relname   | relpages | reltuples 
+------------+----------+-----------
+ subp_max_r |        2 |       319
+(1 row)
 
 -- drop column then export or import
 call gms_stats.delete_schema_stats('sc_stats', stattab=>'t_tmp_stats');
