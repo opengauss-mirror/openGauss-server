@@ -279,7 +279,8 @@ static void assign_logical_decode_options_default(const char* newval, void* extr
 static bool check_uwal_devices_path(char** newval, void** extra, GucSource source);
 static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
 static void assign_recovery_parallelism(int newval, void* extra);
-static bool check_xLog_archive_dest(char** newval, void** extra, GucSource source);
+static bool check_xlog_archive_command(char** newval, void** extra, GucSource source);
+static bool check_xlog_archive_dest(char** newval, void** extra, GucSource source);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -4553,8 +4554,8 @@ static void InitStorageConfigureNamesString()
             gettext_noop("Sets the shell command that will be called to archive a WAL file."),
             NULL},
             &u_sess->attr.attr_storage.XLogArchiveCommand,
-            "",
-            NULL,
+            "%p %f",
+            check_xlog_archive_command,
             NULL,
             show_archive_command},
         {{"transaction_isolation",
@@ -4578,7 +4579,7 @@ static void InitStorageConfigureNamesString()
             NULL},
             &u_sess->attr.attr_storage.XLogArchiveDest,
             "",
-            check_xLog_archive_dest,
+            check_xlog_archive_dest,
             NULL,
             NULL},
 
@@ -7510,7 +7511,34 @@ static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource 
 }
 #endif
 
-static bool check_xLog_archive_dest(char** newval, void** extra, GucSource source)
+static bool check_xlog_archive_command(char** newval, void** extra, GucSource source)
+{
+    char xlogarchpath[MAXPGPATH * 2] = {'\0'};
+    char* endsp = nullptr;
+    int rc = 0;
+
+    if (*newval == nullptr || **newval == '\0') {
+        GUC_check_errdetail("Archive_command cannot be empty in runtime.");
+        return false;
+    }
+    if ((int)strlen(*newval) + 1 > MAXPGPATH) {
+        GUC_check_errdetail("Archive_command is too long. Please check and make sure it is correct.");
+        return false;
+    }
+    rc = snprintf_s(xlogarchpath, MAXPGPATH * 2, MAXPGPATH * 2 - 1, "%s", *newval);
+    securec_check_ss_c(rc, "\0", "\0");
+    if ((endsp = strstr(xlogarchpath, "%f")) == NULL) {
+        GUC_check_errdetail("Archive_command should be set with \"%%f\".");
+        return false;
+    }
+    if ((endsp = strstr(xlogarchpath, "%p")) == NULL) {
+        GUC_check_errdetail("Archive_command should be set with \"%%p\".");
+        return false;
+    }
+    return true;
+}
+
+static bool check_xlog_archive_dest(char** newval, void** extra, GucSource source)
 {
     if (is_dss_file(*newval)) {
         GUC_check_errdetail("Do not allow set archive log path to a shared storage path. "
