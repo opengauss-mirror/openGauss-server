@@ -759,6 +759,63 @@ SELECT interval '1 2:03:04.5678' minute to second(2) || '';
  1 day 02:03:04.57
 (1 row)
 
+-- test max value
+select interval '10000000000-01' as max_interval;
+ERROR:  interval field value out of range: "10000000000-01"
+LINE 1: select interval '10000000000-01' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
+select interval '1000000000-01' as max_interval;
+       max_interval       
+--------------------------
+ -73741823 years -11 mons
+(1 row)
+
+select interval '100000000-01' as max_interval;
+     max_interval      
+-----------------------
+ 100000000 years 1 mon
+(1 row)
+
+select interval '2147483647' as max_interval;
+  max_interval   
+-----------------
+ 2147483647 days
+(1 row)
+
+select interval '2147483648' as max_interval;
+ERROR:  interval field value out of range: "2147483648"
+LINE 1: select interval '2147483648' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
+select interval '-10000000000-01' as max_interval;
+ERROR:  interval field value out of range: "-10000000000-01"
+LINE 1: select interval '-10000000000-01' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
+select interval '-1000000000-01' as max_interval;
+       max_interval       
+--------------------------
+ -73741823 years -11 mons
+(1 row)
+
+select interval '-100000000-01' as max_interval;
+       max_interval       
+--------------------------
+ -100000000 years -1 mons
+(1 row)
+
+select interval '-2147483648' as max_interval;
+   max_interval   
+------------------
+ -2147483648 days
+(1 row)
+
+select interval '-2147483649' as max_interval;
+ERROR:  interval field value out of range: "-2147483649"
+LINE 1: select interval '-2147483649' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
 -- test casting to restricted precision (bug #14479)
 SELECT f1, 
 f1

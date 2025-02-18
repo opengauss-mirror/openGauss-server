@@ -2799,7 +2799,11 @@ int DecodeInterval(char** field, const int* ftype, int nf, int range, int* dtype
                     type = DTK_MONTH;
                     if (*field[i] == '-')
                         val2 = -val2;
-                    val = val * MONTHS_PER_YEAR + val2;
+                    long int monthes = val * MONTHS_PER_YEAR + val2;
+                    if (monthes > PG_INT32_MAX || monthes < PG_INT32_MIN) {
+                        return DTERR_FIELD_OVERFLOW;
+                    }
+                    val = static_cast<int>(monthes);
                     fval = 0;
                 } else if (*cp == '.') {
                     errno = 0;
