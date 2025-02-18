@@ -446,8 +446,8 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
 
     BlockNumber extent_start = seg_extent_location(reln->seg_space, seg_head, extent_id);
     blocknum = SegCfsLogicToPhysicMapping(reln, forknum, logic_id, extent_start, offset);
-    ereport(LOG, (errmsg("[sgement compress]Convert logic id to physical blocknum,"
-                         " logic_id: %d, physical_id:%d", logic_id, blocknum)));
+    ereport(DEBUG2, (errmsg("[sgement compress]Convert logic id to physical blocknum, "
+                            "logic_id: %d, physical_id:%d", logic_id, blocknum)));
     return {
         .extent_size = extent_size,
         .extent_id = extent_id,
@@ -1188,7 +1188,7 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
     bool need_lock = !LWLockHeldByMe(buf->content_lock);
     if (ENABLE_DMS && need_lock) {
         LockBuffer(buffer, BUFFER_LOCK_SHARE);
-    } 
+    }
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetBlock(buffer));
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, head, forknum, blocknum);
@@ -1458,8 +1458,6 @@ void seg_extend_internal(SMgrRelation reln, ForkNumber forknum, BlockNumber bloc
         total_blocks = compress ? SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         if (total_blocks <= blocknum) {
             seg_extend_segment(reln->seg_space, forknum, buffer, reln->seg_desc[forknum]->head_blocknum);
-            uint32 blocks_after_extends = compress ?
-                SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         }
         total_blocks = compress ? SegPhysicalToLogicBlkno(head->total_blocks) : head->total_blocks;
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -2165,7 +2163,6 @@ void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, S
     RelFileNode relNode =
         EXTENT_GROUP_RNODE(reln->seg_space, loc.extent_size, reln->smgr_rnode.node.opt);
     if (!SegCompressAllowed(relNode, forknum, loc.blocknum, loc.extent_size)) {
-        ereport(LOG, (errmsg("[sgement compress] don't need update pca for this block.")));
         return;
     }
     int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);

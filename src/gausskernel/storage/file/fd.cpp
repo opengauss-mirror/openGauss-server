@@ -1501,7 +1501,7 @@ File OpenTemporaryFile(bool interXact)
      */
     if (!interXact)
         ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
-    
+
     if (ENABLE_DSS) {
         file = OpenTemporaryFileInTablespaceOrDir(InvalidOid, true);
     } else {
@@ -1900,7 +1900,7 @@ void FileClose(File file)
     if (vfdP->fdstate & FD_TEMP_FILE_LIMIT) {
         /* Subtract its size from current usage (do first in case of error) */
         u_sess->storage_cxt.temporary_files_size -= vfdP->fileSize;
-        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);		
+        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);
         vfdP->fileSize = 0;
     }
 
@@ -3470,7 +3470,7 @@ static void CleanupTempFiles(bool isProcExit)
         for (i = 1; i < GetSizeVfdCache(); i++) {
             unsigned short fdstate = vfdcache[i].fdstate;
 
-            if (((fdstate & FD_DELETE_AT_CLOSE) || (fdstate & FD_CLOSE_AT_EOXACT)) && 
+            if (((fdstate & FD_DELETE_AT_CLOSE) || (fdstate & FD_CLOSE_AT_EOXACT)) &&
                 vfdcache[i].fileName != NULL) {
                 /*
                  * If we're in the process of exiting a backend process, close
@@ -4126,6 +4126,10 @@ int DirectFilePRead(File fd, char *buf, int amount, off_t off, uint32 wait_event
         pgstat_report_waitevent(wait_event_info);
         nbytes = pread(fd, buf, amount, off);
         pgstat_report_waitevent(WAIT_EVENT_END);
+
+        if (nbytes >= 0) {
+            break;
+        }
         /*
         * Windows may run out of kernel buffers and return "Insufficient
         * system resources" error.  Wait a bit and retry to solve it.
@@ -4186,6 +4190,10 @@ int DirectFilePWrite(File fd, const char *buf, int amount, off_t offset, uint32 
         pgstat_report_waitevent(wait_event_info);
         nbytes = pwrite(fd, buf, amount, offset);
         pgstat_report_waitevent(WAIT_EVENT_END);
+
+        if (nbytes >= 0) {
+            break;
+        }
 #ifdef WIN32
         DWORD error = GetLastError();
 

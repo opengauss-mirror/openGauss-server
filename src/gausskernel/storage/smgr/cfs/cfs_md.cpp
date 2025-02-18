@@ -110,7 +110,7 @@ int CfsReadPage(SMgrRelation reln, const RelFileNode &relNode, int fd, int exten
     if (location.is_segment_page && (!location.is_compress_allowed)) {
         nbytes = DirectFilePRead(location.fd, buffer, BLCKSZ, location.GetBlockPhysicalOffset(),
                                  (uint32)WAIT_EVENT_DATA_FILE_WRITE);
-        ereport(LOG, (errmodule(MOD_SEGMENT_PAGE),
+        ereport(DEBUG2, (errmodule(MOD_SEGMENT_PAGE),
                       errmsg("don't compress block due to it's a slice-acrossed block,"
                              "logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
                              "RelFileNode.relNode:%d, RelFileNode.opt:%d",
@@ -253,7 +253,7 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
             pg_flush_data(location.fd, blocknum * BLCKSZ, BLCKSZ);
             nblocks -= 1;
             blocknum += 1;
-            ereport(LOG,
+            ereport(DEBUG2,
                     (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("don't compress block due to it's a slice-acrossed"
                             "block, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d, type:%d,"
@@ -649,9 +649,14 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     if (location.is_segment_page && (!location.is_compress_allowed)) {
         nbytes = DirectFilePWrite(location.fd, buffer, BLCKSZ, location.GetBlockPhysicalOffset(),
                                   (uint32)WAIT_EVENT_DATA_FILE_WRITE);
-        ereport(LOG, (errmsg("CfsWritePage with out compress, logicBlockNumber:%u, fd:%d, extent_size:%d,"
-                             "forknum:%d,type:%d, RelFileNode.relNode:%d, RelFileNode.opt:%d",
-                             logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        ereport(DEBUG2, (errmsg("CfsWritePage with out compress, logicBlockNumber: %u, fd: %d, extent_size: %d,"
+                                "forknum: %d,type: %d, RelFileNode.relNode: %d, RelFileNode.opt: %d",
+                                logicBlockNumber, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+        if (nbytes != BLCKSZ) {
+            ereport(ERROR, (errcode(ERRCODE_DISK_FULL),
+                    errmsg("could not write block %u in file \"%s\": wrote only %d of %d bytes", logicBlockNumber,
+                           FilePathName(location.fd), nbytes, BLCKSZ), errhint("Check free disk space.")));
+        }
         return BLCKSZ;
     }
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
@@ -793,9 +798,9 @@ void CfsExtendForSeg(const RelFileNode& relNode, int fd, int extent_size, ForkNu
     if (location.fd < 0) {
         return;
     }
-    ereport(LOG,
-        (errmsg("[sgement compress]CfsExtendForSeg:%u, fd:%d, extent_size:%d, forknum:%d,type:%d,"
-                "RelFileNode.relNode:%d, RelFileNode.opt:%d",
+    ereport(DEBUG2,
+        (errmsg("[sgement compress]CfsExtendForSeg: %u, fd: %d, extent_size: %d, forknum: %d,type: %d,"
+                "RelFileNode.relNode: %d, RelFileNode.opt: %d",
                 logicBlockNumber, fd, extent_size, forknum, SEG_STORAGE, relNode.relNode,
                 relNode.opt)));
     if (location.extentOffset == 0) {
@@ -811,9 +816,9 @@ void CfsExtendForSeg(const RelFileNode& relNode, int fd, int extent_size, ForkNu
         if (location.is_segment_page && location.is_compress_allowed) {
             FilePunchHoleAlloc(location.fd, start, CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
         }
-        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("[sgement compress]InitExtentHeader relNode relFileNode:%d,"
-                       " opt:%d, headerNum: %u.",
+        ereport(DEBUG2, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("[sgement compress]InitExtentHeader relNode relFileNode: %d,"
+                       " opt: %d, headerNum: %u.",
                        relNode.relNode, relNode.opt, location.headerNum)));
     }
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
