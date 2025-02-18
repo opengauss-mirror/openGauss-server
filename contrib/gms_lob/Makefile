@@ -1,6 +1,6 @@
 # contrib/gms_lob/Makefile
 MODULE_big = gms_lob
-OBJS	= gms_lob.o
+OBJS	= gms_lob.o bfile.o
 
 EXTENSION = gms_lob
 DATA = gms_lob--1.0.sql
@@ -8,7 +8,7 @@ DATA = gms_lob--1.0.sql
 exclude_option = -fPIE
 override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))
 
-REGRESS = gms_lob
+REGRESS = gms_lob bfile
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
@@ -26,3 +26,4 @@ include $(top_srcdir)/contrib/contrib-global.mk
 endif
 
 gms_lob.o: gms_lob.cpp
+bfile.o: bfile.cpp
