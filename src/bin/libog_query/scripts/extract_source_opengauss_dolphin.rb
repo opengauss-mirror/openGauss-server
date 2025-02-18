@@ -38,6 +38,7 @@ end
 class Runner
   attr_reader :unresolved
   attr_reader :code_for_resolve
+  attr_reader :compatibility_mode
 
   def initialize
     @file_analysis = {}
@@ -58,6 +59,7 @@ class Runner
     @basepath = File.absolute_path(ARGV[0]) + '/'
     @thirdpartpath = File.absolute_path(ARGV[1]) + '/'
     @out_path = File.absolute_path(ARGV[2]) + '/'
+    @compatibility_mode = ARGV[3]
   end
 
   def blocklist(symbol)
@@ -68,47 +70,84 @@ class Runner
     @mock[symbol] = code
   end
 
-  def run
-    files = Dir.glob(@basepath + 'contrib/dolphin/plugin_parser/*.cpp') +
-      Dir.glob(@basepath + 'src/gausskernel/process/threadpool/knl_session.cpp') + # seLt_is_create_plsql_type etc
-      Dir.glob(@basepath + 'src/gausskernel/process/threadpool/knl_thread.cpp') + # seLt_is_create_plsql_type etc
-      Dir.glob(@basepath + 'src/gausskernel/storage/ipc/shmem.cpp') +
-      Dir.glob(@basepath + 'src/gausskernel/storage/access/hash/hash.cpp') +
-      Dir.glob(@basepath + 'src/gausskernel/storage/access/hash/hashfunc.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/varbit.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/lib/dllist.cpp') + # bit_in etc
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/arrayfuncs.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/ruleutils.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/mb/wchar.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/mb/mbutils.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/mmgr/*.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/hash/*.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/error/elog.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/error/assert.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/init/globals.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/datum.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/name.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/varlena.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils/adt/numutils.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/bitmapset.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/copyfuncs.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/equalfuncs.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/nodeFuncs.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/outfuncs.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/makefuncs.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/value.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/nodes/list.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/lib/stringinfo.cpp') +
-      Dir.glob(@basepath + 'src/common/port/pgstrcasecmp.cpp') +
-      Dir.glob(@basepath + 'src/common/port/qsort.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/utils/mb/encnames.cpp') +
-      Dir.glob(@basepath + 'src/common/port/gs_strerror.cpp') + # gs_strerror etc
-      Dir.glob(@basepath + 'src/common/port/strlcpy.cpp') +
-      Dir.glob(@basepath + 'src/common/backend/catalog/namespace.cpp') + # NameListToString etc
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_postgres.cpp') +
-      Dir.glob(@basepath + 'contrib/dolphin/plugin_utils.cpp') +
-      Dir.glob(@basepath + 'src/gausskernel/optimizer/commands/define.cpp')  # defWithOids etc
+  def generate_files(compatibility_mode, basepath)
+    files = []
+    common_files = [
+      'src/gausskernel/process/threadpool/knl_session.cpp', # seLt_is_create_plsql_type etc
+      'src/gausskernel/process/threadpool/knl_thread.cpp', # seLt_is_create_plsql_type etc
+      'src/gausskernel/storage/ipc/shmem.cpp',
+      'src/gausskernel/storage/access/hash/hash.cpp',
+      'src/gausskernel/storage/access/hash/hashfunc.cpp',
+      'src/common/backend/lib/dllist.cpp', # bit_in etc
+      'src/common/backend/utils/mb/wchar.cpp',
+      'src/common/backend/utils/mmgr/*.cpp',
+      'src/common/backend/utils/hash/*.cpp',
+      'src/common/backend/utils/error/elog.cpp',
+      'src/common/backend/utils/error/assert.cpp',
+      'src/common/backend/utils/init/globals.cpp',
+      'src/common/backend/nodes/bitmapset.cpp',
+      'src/common/backend/nodes/copyfuncs.cpp',
+      'src/common/backend/nodes/equalfuncs.cpp',
+      'src/common/backend/nodes/nodeFuncs.cpp',
+      'src/common/backend/nodes/outfuncs.cpp',
+      'src/common/backend/nodes/makefuncs.cpp',
+      'src/common/backend/nodes/value.cpp',
+      'src/common/backend/nodes/list.cpp',
+      'src/common/backend/lib/stringinfo.cpp',
+      'src/common/port/pgstrcasecmp.cpp',
+      'src/common/port/qsort.cpp',
+      'src/common/backend/utils/mb/encnames.cpp',
+      'src/common/port/gs_strerror.cpp', # gs_strerror etc
+      'src/common/port/strlcpy.cpp',
+      'src/common/backend/catalog/namespace.cpp', # NameListToString etc
+      'src/gausskernel/optimizer/commands/define.cpp'  # defWithOids etc
+    ]
 
+    if compatibility_mode == 'A'
+      additional_files = [
+        'src/common/backend/parser/*.cpp', # raw_parser
+        'src/common/backend/utils/adt/varbit.cpp',
+        'src/common/backend/utils/adt/arrayfuncs.cpp', # array_iterate etc
+        'src/common/backend/utils/adt/ruleutils.cpp',
+        'src/common/backend/utils/mb/mbutils.cpp',
+        'src/common/backend/utils/adt/datum.cpp',
+        'src/common/backend/utils/adt/name.cpp',
+        'src/common/backend/utils/adt/varlena.cpp',
+        'src/common/backend/utils/adt/numutils.cpp',
+        'src/gausskernel/process/tcop/postgres.cpp', # checkCompArgs etc
+        'src/common/backend/utils/mmgr/portalmem.cpp'
+      ]
+    elsif compatibility_mode == 'B'
+      additional_files = [
+        'contrib/dolphin/plugin_parser/*.cpp',
+        'contrib/dolphin/plugin_utils/adt/varbit.cpp',
+        'contrib/dolphin/plugin_utils/adt/arrayfuncs.cpp',
+        'contrib/dolphin/plugin_utils/adt/ruleutils.cpp',
+        'contrib/dolphin/plugin_utils/mb/mbutils.cpp',
+        'contrib/dolphin/plugin_utils/adt/datum.cpp',
+        'contrib/dolphin/plugin_utils/adt/name.cpp',
+        'contrib/dolphin/plugin_utils/adt/varlena.cpp',
+        'contrib/dolphin/plugin_utils/adt/numutils.cpp',
+        'contrib/dolphin/plugin_postgres.cpp',
+        'contrib/dolphin/plugin_utils.cpp'
+      ]
+    else
+      raise "Invalid compatibility mode: #{compatibility_mode}"
+    end
+  
+    additional_files.each do |file|
+      files += Dir.glob(basepath + file)
+    end
+
+    common_files.each do |file|
+      files += Dir.glob(basepath + file)
+    end
+  
+    files
+  end
+
+  def run
+    files = generate_files(@compatibility_mode, @basepath)
     total = files.size
     progress = 0
     files.each do |file|
@@ -562,12 +601,15 @@ class Runner
 
   def compress
     folder_to_compress = @out_path
-    output_file = 'source.tar.gz'
-    destination_path = @basepath + '/contrib/dolphin/libog_query/'
+    output_file = 'source_dolphin.tar.gz'
+    if @compatibility_mode == 'A'
+      output_file = 'source_server.tar.gz'
+    end
+    destination_path = @basepath + 'src/bin/libog_query/'
     tar_command = "tar -zcf #{output_file} -C #{File.dirname(folder_to_compress)} #{File.basename(folder_to_compress)}"
     system(tar_command)
     if $?.success?
-      puts "compress success: #{output_file}"
+      puts "compress success: #{destination_path}#{output_file}"
     else
       puts "compress error!"
     end
@@ -819,6 +861,14 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
     ListCell* temp = NULL;
     bool (*p2walker)(void*, void*) = (bool (*)(void*, void*))walker;
 
+    typedef struct json_walker_context {
+      cJSON* root_obj;
+      cJSON* cur_obj;
+      cJSON* pre_obj;
+      Node* parent_node;
+    } json_walker_context;
+    extern bool create_json_walker(Node* node, void* walker_context);
+
     /*
      * The walker has already visited the current node, and so we need only
      * recurse into any sub-nodes it has.
@@ -963,6 +1013,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->withClause, context)) {
                 return true;
             }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
+            }
         } break;
         case T_DeleteStmt: {
             DeleteStmt* stmt = (DeleteStmt*)node;
@@ -987,6 +1041,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             }
             if (p2walker(stmt->relations, context)) {
                 return true;
+            }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
             }
         } break;
         case T_UpdateStmt: {
@@ -1013,6 +1071,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->relationClause, context)) {
                 return true;
             }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
+            }
         } break;
         case T_MergeStmt: {
             MergeStmt* stmt = (MergeStmt*)node;
@@ -1028,6 +1090,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             }
             if (p2walker(stmt->mergeWhenClauses, context)) {
                 return true;
+            }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
             }
         } break;
         case T_MergeWhenClause: {
@@ -1099,6 +1165,10 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             }
             if (p2walker(stmt->rarg, context)) {
                 return true;
+            }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
             }
         } break;
         case T_A_Expr: {
@@ -1342,14 +1412,54 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_UserVar:
             /* @var do not need recursion */
             break;
-        case T_CreateStmt:
-              return p2walker(((CreateStmt*)node)->tableElts, context);
+        case T_CreateStmt: {
+          CreateStmt *stmt = (CreateStmt*)node;
+
+          if (p2walker(stmt->relation, context)) {
+            return true;
+          }
+          if (p2walker(stmt->tableElts, context)) {
+              return true;
+          }
+          if ((void*)create_json_walker == (void*)p2walker) {
+            json_walker_context* cxt = (json_walker_context*)context;
+            cxt->cur_obj = cxt->pre_obj;
+          }
+        } break;
+        case T_CreateTableAsStmt: {
+          CreateTableAsStmt *stmt = (CreateTableAsStmt*)node;
+
+          if (p2walker(stmt->into, context)) {
+            return true;
+          }
+          if (p2walker(stmt->query, context)) {
+              return true;
+          }
+          if ((void*)create_json_walker == (void*)p2walker) {
+            json_walker_context* cxt = (json_walker_context*)context;
+            cxt->cur_obj = cxt->pre_obj;
+          }
+        } break;
         case T_CompositeTypeStmt:
             return p2walker(((CompositeTypeStmt*)node)->coldeflist, context);
-        case T_AlterTableStmt:
-            return p2walker(((AlterTableStmt*)node)->cmds, context);
+        case T_AlterTableStmt: {
+          AlterTableStmt *stmt = (AlterTableStmt*)node;
+
+          if (p2walker(stmt->relation, context)) {
+            return true;
+          }
+          if (p2walker(stmt->cmds, context)) {
+              return true;
+          }
+          if ((void*)create_json_walker == (void*)p2walker) {
+            json_walker_context* cxt = (json_walker_context*)context;
+            cxt->cur_obj = cxt->pre_obj;
+          }
+        } break;
         case T_AlterTableCmd:
             return p2walker(((AlterTableCmd*)node)->def, context);
+        case T_TableLikeClause:
+            return p2walker(((TableLikeClause*)node)->relation, context);
         case T_DropStmt: {
             DropStmt *stmt = (DropStmt*)node;
 
@@ -1359,9 +1469,36 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(((DropStmt*)node)->arguments, context)) {
                 return true;
             }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
+            }
         } break;
-        case T_TruncateStmt:
-            return p2walker(((TruncateStmt*)node)->relations, context);
+        case T_TruncateStmt: {
+            TruncateStmt *stmt = (TruncateStmt*)node;
+
+            if (p2walker(stmt->relations, context)) {
+                return true;
+            }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
+            }
+        } break;
+        case T_ViewStmt: {
+            ViewStmt *stmt = (ViewStmt*)node;
+
+            if (p2walker(stmt->view, context)) {
+                return true;
+            }
+            if (p2walker(stmt->query, context)) {
+                return true;
+            }
+            if ((void*)create_json_walker == (void*)p2walker) {
+              json_walker_context* cxt = (json_walker_context*)context;
+              cxt->cur_obj = cxt->pre_obj;
+            }
+        } break;
         default:
             break;
     }
@@ -1371,7 +1508,11 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
 
 
 # SQL Parsing
-runner.deep_resolve('dolphin_raw_parser')
+if runner.compatibility_mode == 'A'
+  runner.deep_resolve('raw_parser')
+elsif runner.compatibility_mode == 'B'
+  runner.deep_resolve('dolphin_raw_parser')
+end
 runner.deep_resolve('MemoryContextStrdupDebug')
 runner.deep_resolve('MemoryContextAllocZeroAlignedDebug')
 runner.deep_resolve('MemoryContextAllocZeroDebug')

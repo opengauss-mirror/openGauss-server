@@ -816,6 +816,7 @@
 ./lib/postgresql/timescaledb-tsl-1.7.4.so
 ./lib/postgresql/dolphin.so
 ./lib/postgresql/age.so
+./lib/postgresql/libog_query.so
 ./lib/postgresql/datavec.so
 ./lib/postgresql/chparser.so
 ./lib/postgresql/pg_upgrade_support.so
