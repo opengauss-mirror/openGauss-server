@@ -191,6 +191,7 @@ static inline void InitScanBlocks(HeapScanDesc scan, RangeScanInRedis rangeScanI
             Assert(rangeScanInRedis.sliceIndex == 0);
             scan->rs_base.rs_nblocks = RedisCtidGetBlockNumber(&end_ctid) - RedisCtidGetBlockNumber(&start_ctid) + 1;
             scan->rs_base.rs_startblock = RedisCtidGetBlockNumber(&start_ctid);
+            scan->rs_base.rs_numblocks = 0;
         } else {
             ItemPointer sctid = eval_redis_func_direct_slice(&start_ctid, &end_ctid, true,
                                                              rangeScanInRedis.sliceTotal,
@@ -200,12 +201,14 @@ static inline void InitScanBlocks(HeapScanDesc scan, RangeScanInRedis rangeScanI
                                                              rangeScanInRedis.sliceIndex);
             scan->rs_base.rs_startblock = RedisCtidGetBlockNumber(sctid);
             scan->rs_base.rs_nblocks    = RedisCtidGetBlockNumber(ectid) - scan->rs_base.rs_startblock + 1;
+            scan->rs_base.rs_numblocks  = 0;
         }
         ereport(LOG, (errmsg("start block is %d, nblock is %d, start_ctid is %d, end_ctid is %d, sliceTotal is %d, "
             "sliceIndex is %d", scan->rs_base.rs_startblock, scan->rs_base.rs_nblocks, RedisCtidGetBlockNumber(&start_ctid),
             RedisCtidGetBlockNumber(&end_ctid), rangeScanInRedis.sliceTotal, rangeScanInRedis.sliceIndex)));
     } else {
         scan->rs_base.rs_nblocks = nblocks;
+        scan->rs_base.rs_numblocks = 0;
     }
 }
 
