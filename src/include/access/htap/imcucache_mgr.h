@@ -102,8 +102,6 @@ public:
     bool HasInitialImcsTable();
 
     bool IsBorrowSlotId(CacheSlotId_t slotId);
-    void ResetBorrowSlot(CacheSlotId_t slotId);
-    void ReleaseBorrowMemSize(int size);
     int64 GetCurrBorrowMemSize();
     void FreeAllBorrowMemPool();
 

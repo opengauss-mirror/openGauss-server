@@ -308,9 +308,9 @@ RETRY_RESERVE_DATABLOCK:
         if (CacheBorrowMemCU(cuPtr, slotCU, cuDescPtr)) {
             cuPtr->Destroy();
         } else {
-            ReleaseBorrowMemSize(cuDescPtr->cu_size);
-            ResetBorrowSlot(slotId);
             UnPinDataBlock(slotId);
+            DataBlockCompleteIO(slotId);
+            InvalidateCU(rnode, colId, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
             goto RETRY_RESERVE_DATABLOCK;
         }
     } else {
@@ -555,16 +555,6 @@ void IMCUDataCacheMgr::ResetInstance()
 bool IMCUDataCacheMgr::IsBorrowSlotId(CacheSlotId_t slotId)
 {
     return m_cache_mgr->IsBorrowSlotId(slotId);
-}
-
-void IMCUDataCacheMgr::ResetBorrowSlot(CacheSlotId_t slotId)
-{
-    m_cache_mgr->ResetBorrowSlot(slotId);
-}
-
-void IMCUDataCacheMgr::ReleaseBorrowMemSize(int size)
-{
-    m_cache_mgr->ReleaseBorrowMem(size);
 }
 
 int64 IMCUDataCacheMgr::GetCurrBorrowMemSize()
