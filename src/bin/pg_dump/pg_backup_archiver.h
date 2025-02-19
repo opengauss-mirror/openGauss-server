@@ -209,6 +209,8 @@ typedef struct _archiveHandle {
                                         * dumped */
     WriteDataPtr WriteDataptr;         /* Called to send some table data to the
                                         * archive */
+    WriteDataPtr WriteDataptrP;         /* Called to send some table data to the
+                                        * archive */
     EndDataPtr EndDataptr;             /* Called when table data dump is finished */
     WriteBytePtr WriteByteptr;         /* Write a byte to output */
     ReadBytePtr ReadByteptr;           /* Read a byte from an archive */
@@ -228,6 +230,8 @@ typedef struct _archiveHandle {
     EndBlobsPtr EndBlobsptr;
     StartBlobPtr StartBlobptr;
     EndBlobPtr EndBlobptr;
+
+    SetupWorkerPtr SetupWorkerptr;
 
     ClonePtr Cloneptr;     /* Clone format-specific fields */
     DeClonePtr DeCloneptr; /* Clean up cloned fields */
@@ -287,6 +291,9 @@ typedef struct _archiveHandle {
     ArchiverStage lastErrorStage;
     struct _tocEntry* currentTE;
     struct _tocEntry* lastErrorTE;
+
+    /* If connCancel isn't NULL, SIGINT handler will send a cancel */
+    PGcancel   *volatile connCancel;
 } ArchiveHandle;
 
 typedef struct _tocEntry {
@@ -340,6 +347,7 @@ extern void ReadHead(ArchiveHandle* AH);
 extern void WriteToc(ArchiveHandle* AH);
 extern void ReadToc(ArchiveHandle* AH);
 extern void WriteDataChunks(ArchiveHandle* AH);
+extern void WriteDataChunksForTocEntry(ArchiveHandle *AH, TocEntry *te);
 
 extern teReqs TocIDRequired(ArchiveHandle* AH, DumpId id);
 extern bool checkSeek(FILE* fp);
@@ -370,6 +378,7 @@ extern void InitArchiveFmt_Custom(ArchiveHandle* AH);
 extern void InitArchiveFmt_Null(ArchiveHandle* AH);
 extern void InitArchiveFmt_Directory(ArchiveHandle* AH);
 extern void InitArchiveFmt_Tar(ArchiveHandle* AH);
+extern void InitArchiveFmt_Parallel(ArchiveHandle* AH);
 
 extern bool isValidTarHeader(const char* header);
 
@@ -397,6 +406,9 @@ extern size_t fread_file(void *buf, size_t size, size_t nmemb, FILE *fh);
 extern bool findDBCompatibility(Archive* fout, const char* databasename);
 extern bool hasSpecificExtension(Archive* fout, const char* databasename);
 
+extern TocEntry *getTocEntryByDumpId(ArchiveHandle *AH, DumpId id);
+extern ArchiveHandle* CloneArchive(ArchiveHandle* AH);
+extern void DeCloneArchive(ArchiveHandle* AH);
 #ifdef HAVE_LIBZ
 extern size_t gzread_file(void *buf, unsigned len, gzFile fp);
 #endif

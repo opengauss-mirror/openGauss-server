@@ -16,6 +16,8 @@
 #include "postgres_fe.h"
 #include "dumputils.h"
 #include "dumpmem.h"
+#include "securec.h"
+#include "securec_check.h"
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
@@ -51,6 +53,19 @@ void* pg_malloc(size_t size)
     return tmp;
 }
 
+void* pg_malloc_zero(size_t size)
+{
+    void* tmp = NULL;
+    errno_t rc = 0;
+
+    tmp = pg_malloc(size);
+    if (NULL == tmp)
+        exit_horribly(NULL, "out of memory\n");
+    rc = memset_s(tmp, size, 0, size);
+    securec_check_c((rc), "", "");
+    return tmp;
+}
+
 void* pg_calloc(size_t nmemb, size_t size)
 {
     void* tmp = NULL;
@@ -74,4 +89,12 @@ void* pg_realloc(void* ptr, size_t size)
     if (NULL == tmp)
         exit_horribly(NULL, "out of memory\n");
     return tmp;
+}
+
+void* pg_free(void* ptr)
+{
+    if (ptr != NULL) {
+        free(ptr);
+        ptr = NULL;
+    }
 }

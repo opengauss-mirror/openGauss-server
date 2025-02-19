@@ -56,7 +56,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 OBJS=	pg_backup_archiver.o pg_backup_db.o pg_backup_custom.o \
 	pg_backup_null.o pg_backup_tar.o \
-	pg_backup_directory.o dumpmem.o dumputils.o compress_io.o common_cipher.o $(WIN32RES)
+	parallel.o pg_backup_directory.o dumpmem.o dumputils.o compress_io.o common_cipher.o $(WIN32RES)
 	
 LIBS += -lcjson -lcurl -lz
 ifeq ($(enable_lite_mode), no)

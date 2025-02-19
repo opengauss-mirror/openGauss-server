@@ -85,7 +85,7 @@ typedef enum /* bits returned by set_dump_section */
             ptr = NULL;         \
         }                       \
     } while (0)
-
+#define fatal(...) do { write_msg(__VA_ARGS__); exit_nicely(1); } while(0)
 typedef void (*on_exit_nicely_callback)(int code, void* arg);
 
 extern int quote_all_identifiers;

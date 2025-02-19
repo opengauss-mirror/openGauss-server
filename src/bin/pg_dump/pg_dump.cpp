@@ -47,7 +47,6 @@
 #endif
 
 #include "getopt_long.h"
-
 #include "access/attnum.h"
 #include "access/sysattr.h"
 #include "catalog/pg_am.h"
@@ -76,7 +75,6 @@
 #include "dumputils.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "common/fe_memutils.h"
 #include "openssl/rand.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
@@ -151,6 +149,12 @@ typedef unsigned short uint16_t;
 #define TARGET_V5 (strcasecmp("v5", optarg) == 0 ? true : false)
 #define if_exists (targetV1 || targetV5) ? "IF EXISTS " : ""
 #define if_cascade (targetV1 || targetV5 || force_clean) ? " CASCADE" : ""
+#define N_BUF_SIZE 256
+#define IS_PARTITIONED_RELATION(parttype) \
+    ((parttype) == PARTTYPE_PARTITIONED_RELATION || \
+     (parttype) == PARTTYPE_SUBPARTITIONED_RELATION || \
+     (parttype) == PARTTYPE_VALUE_PARTITIONED_RELATION)
+
 #define INTERVAL_UNITE_OFFSET 3
 
 #define USING_STR_OFFSET 7
@@ -160,7 +164,12 @@ const int MAX_CMK_STORE_SIZE = 64;
 #define  BEGIN_P_STR      " BEGIN_B_PROC " /* used in dolphin type proc body*/
 #define  BEGIN_P_LEN      14
 #define  BEGIN_N_STR      "    BEGIN     " /* BEGIN_P_STR to same length*/
+
+#define PositiveInfinity -1
+#define NegativeInfinity -1
 /* used for progress report */
+int g_totalPageNum = 0;
+int g_splitPageNum = 0;
 int g_curStep = 0;
 int g_totalObjNums = 0;
 int g_dumpObjNums = 0;
@@ -380,6 +389,8 @@ static int exclude_function = 0;
 static bool is_pipeline = false;
 static int no_subscriptions = 0;
 static int no_publications = 0;
+static int workerNum = 1;
+static bool enableSplitTable = false;
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
 static bool disable_progress = false;
 #endif
@@ -424,6 +435,7 @@ static void exclude_error_tables(Archive* fout, SimpleOidList* oids);
 static void ExcludeMatRelTables(Archive* fout, SimpleOidList* oids);
 
 static NamespaceInfo* findNamespace(Archive* fout, Oid nsoid, Oid objoid);
+static bool isHeapTable(const char* option);
 static void dumpTableData(Archive* fout, TableDataInfo* tdinfo);
 static void guessConstraintInheritance(TableInfo* tblinfo, int numTables);
 static void dumpComment(Archive* fout, const char* target, const char* nmspace, const char* owner, CatalogId catalogId,
@@ -575,6 +587,9 @@ static void *ProgressReportDump(void *arg);
 static void *ProgressReportScanDatabase(void *arg);
 inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 static void setup_restrict_relation_kind(Archive* fout, const char* value);
+
+static void setupDumpWorker(Archive *AHX);
+
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
@@ -624,6 +639,7 @@ int main(int argc, char** argv)
         {"file", required_argument, NULL, 'f'},
         {"format", required_argument, NULL, 'F'},
         {"host", required_argument, NULL, 'h'},
+        {"jobs", required_argument, NULL, 'j'},
         {"oids", no_argument, NULL, 'o'},
         {"no-owner", no_argument, NULL, 'O'},
         {"port", required_argument, NULL, 'p'},
@@ -706,6 +722,7 @@ int main(int argc, char** argv)
 #endif
         {"with-module-params", required_argument, NULL, 19},
         {"gen-key", no_argument, NULL, 20},
+        {"split-huge-table", no_argument, NULL, 21},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -818,10 +835,19 @@ int main(int argc, char** argv)
 
         exit_nicely(0);
     }
+    if (workerNum <= 0) {
+        exit_horribly(NULL, "invalid number of parallel jobs");
+    } else if (workerNum > 1 && archiveFormat != archDirectory ) {
+        exit_horribly(NULL, "parallel backup only supported by the directory format");
+    }
 
+    if (workerNum <= 1 && enableSplitTable) {
+        exit_horribly(NULL, "can not split table without parallel");
+    }
+		
     /* Open the output file */
-    fout = CreateArchive(filename, archiveFormat, compressLevel, archiveMode);
-
+    fout = CreateArchive(filename, archiveFormat, compressLevel, archiveMode, workerNum, setupDumpWorker);
+    fout->workerNum = workerNum;
     /* Register the cleanup hook */
     on_exit_close_archive(fout);
 
@@ -998,22 +1024,6 @@ int main(int argc, char** argv)
         PQclear(res);
     }
 
-    /*
-     * Start transaction-snapshot mode transaction to dump consistent data.
-     */
-    ExecuteSqlStatement(fout, "START TRANSACTION");
-    if (fout->remoteVersion >= 90100) {
-        if (serializable_deferrable)
-            ExecuteSqlStatement(fout,
-                "SET TRANSACTION ISOLATION LEVEL "
-                "SERIALIZABLE, READ ONLY, DEFERRABLE");
-        else
-            ExecuteSqlStatement(fout,
-                "SET TRANSACTION ISOLATION LEVEL "
-                "REPEATABLE READ");
-    } else
-        ExecuteSqlStatement(fout, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-
     /* Select the appropriate subquery to convert user IDs to names */
     if (fout->remoteVersion >= 80100)
         username_subquery = "SELECT rolname FROM pg_catalog.pg_roles WHERE oid =";
@@ -1158,6 +1168,17 @@ int main(int argc, char** argv)
     /* Dump nls_length_semantics parameter */
     DummpLengthSemantics(fout);
 
+    if (enableSplitTable) {
+        for (i = 0; i < numObjs; i++) {
+            if (dobjs[i]->objType == DO_TABLE_DATA) {
+                TableInfo* tbinfo = ((TableDataInfo*)dobjs[i])->tdtable;
+                g_totalPageNum += tbinfo->relpages;
+            }
+        }
+        if (g_totalPageNum > 0) {
+            g_splitPageNum = g_totalPageNum / workerNum;
+        }
+    } 
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
         g_dumpObjNums++;
@@ -1516,7 +1537,7 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
         }
     }
 
-    while ((c = getopt_long(argc, argv, "abcCE:f:F:g:h:n:N:oOp:q:RsS:t:T:U:vwW:xZ:", options, result)) != -1) {
+    while ((c = getopt_long(argc, argv, "abcCE:f:F:g:h:j:n:N:oOp:q:RsS:t:T:U:vwW:xZ:", options, result)) != -1) {
         switch (c) {
             case 'a': /* Dump data only */
                 dataOnly = true;
@@ -1557,6 +1578,10 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 GS_FREE(pghost);
                 pghost = gs_strdup(optarg);
                 break;
+
+            case 'j': 
+                workerNum = atoi(optarg);
+				break;
 
             case 'g': /* exclude guc parameter */
                 simple_string_list_append(&exclude_guc, optarg);
@@ -1769,6 +1794,9 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
                 gen_key = true;
                 is_encrypt = true;
                 break;
+            case 21:
+                enableSplitTable = true;
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -1927,6 +1955,7 @@ void help(const char* pchProgname)
     printf(_("  -f, --file=FILENAME                         output file or directory name\n"));
     printf(_("  -F, --format=c|d|t|p                        output file format (custom, directory, tar,\n"
              "                                              plain text (default))\n"));
+    printf(_("  -j, --jobs=NUM                              use this many parallel jobs to dump\n"));
     printf(_("  -v, --verbose                               verbose mode\n"));
     printf(_("  -V, --version                               output version information, then exit\n"));
     printf(_("  -Z, --compress=0-9                          compression level for compressed formats\n"));
@@ -1993,6 +2022,7 @@ void help(const char* pchProgname)
             "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
             "used by gs_dump, load device\n"));
     printf(_("  --gen-key                      if you have not key for using,you can set this option to generate key and encrypt dump data,store it to using again\n"));
+    printf(_("  --split-huge-table                enable same-table parallel dump\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE "
              "and CREATE FOREIGN TABLE commands.\n"));
@@ -2170,6 +2200,38 @@ static void setup_connection(Archive* AH)
      * is adjusted when dumping foreign table data
      */
     setup_restrict_relation_kind(AH, "view, foreign-table");
+
+    /*
+     * Start transaction-snapshot mode transaction to dump consistent data.
+     */
+    ExecuteSqlStatement(AH, "START TRANSACTION");
+    if (AH->remoteVersion >= 90100) {
+        if (serializable_deferrable)
+            ExecuteSqlStatement(AH,
+                "SET TRANSACTION ISOLATION LEVEL "
+                "SERIALIZABLE, READ ONLY, DEFERRABLE");
+        else
+            ExecuteSqlStatement(AH,
+                "SET TRANSACTION ISOLATION LEVEL "
+                "REPEATABLE READ");
+    } else
+        ExecuteSqlStatement(AH, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+
+    if (AH->sync_snapshot_id)
+	{
+		PQExpBuffer query = createPQExpBuffer();
+
+		appendPQExpBufferStr(query, "SET TRANSACTION SNAPSHOT ");
+		appendStringLiteralConn(query, AH->sync_snapshot_id, conn);
+		ExecuteSqlStatement(AH, query->data);
+		destroyPQExpBuffer(query);
+	}
+	else if (AH->workerNum > 1)
+	{
+        res = ExecuteSqlQueryForSingleRow(AH, "SELECT pg_catalog.pg_export_snapshot()");
+		AH->sync_snapshot_id = gs_strdup(PQgetvalue(res, 0, 0));;
+        PQclear(res);
+	}
 }
 
 static ArchiveFormat parseArchiveFormat(ArchiveMode* mode)
@@ -2670,6 +2732,185 @@ static void selectDumpableFuncs(FuncInfo *fcinfo, Archive *fout = NULL)
     }
 }
 
+static int dumpTableDataSplit_copy(Archive* fout, void* dcontext) {
+    TableDataSplitInfo* tdsinfo = (TableDataSplitInfo*)dcontext;
+    TableDataInfo* tdinfo = tdsinfo->tdinfo;
+    char* splitcond = tdsinfo->splitcond;
+
+    TableInfo* tbinfo = tdinfo->tdtable;
+    const char* classname = tbinfo->dobj.name;
+    const bool hasoids = tbinfo->hasoids;
+    const bool boids = tdinfo->oids;
+    PQExpBuffer q = createPQExpBuffer();
+    PGconn* conn = GetConnection(fout);
+    PGresult* res = NULL;
+    int ret = 0;
+    char* copybuf = NULL;
+    const char* column_list = NULL;
+
+    if (g_verbose)
+        write_msg(NULL,
+            "dumping contents of table \"%s\"\n",
+            fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, tbinfo->dobj.name));
+
+    if (isDB4AIschema(tbinfo->dobj.nmspace) && !isExecUserSuperRole(fout)) {
+        write_msg(NULL, "WARNING: schema db4ai not dumped because current user is not a superuser\n");
+        destroyPQExpBuffer(q);
+        return 1;
+    }
+
+    /*
+     * Make sure we are in proper schema.  We will qualify the table name
+     * below anyway (in case its name conflicts with a pg_catalog table); but
+     * this ensures reproducible results in case the table contains regproc,
+     * regclass, etc columns.
+     */
+    selectSourceSchema(fout, tbinfo->dobj.nmspace->dobj.name);
+
+    /*
+     * If possible, specify the column list explicitly so that we have no
+     * possibility of retrieving data in the wrong column order.  (The default
+     * column ordering of COPY will not be what we want in certain corner
+     * cases involving ADD COLUMN and inheritance.)
+     */
+    if (fout->remoteVersion >= 70300)
+        column_list = fmtCopyColumnList(tbinfo);
+    else
+        column_list = ""; /* can't select columns in COPY */
+
+    if (boids && hasoids) {
+        appendPQExpBuffer(q,
+            "COPY %s %s WITH OIDS TO stdout;",
+            fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname),
+            column_list);
+    } else if (NULL != tdinfo->filtercond || NULL != splitcond || tdinfo->tdtable->isMOT) {
+        /* Note: this syntax is only supported in 8.2 and up */
+        appendPQExpBufferStr(q, "COPY (SELECT ");
+        /* klugery to get rid of parens in column list */
+        if (strlen(column_list) > 2) {
+            appendPQExpBufferStr(q, column_list + 1);
+            q->data[q->len - 1] = ' ';
+        } else {
+            appendPQExpBufferStr(q, "* ");
+        }
+        if (tdinfo->filtercond) {
+            if (!splitcond) {
+                appendPQExpBuffer(q,
+                    "FROM %s %s) TO stdout;",
+                    fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname),
+                    tdinfo->filtercond);
+            } else {
+                appendPQExpBuffer(q,
+                    "FROM %s %s AND %s) TO stdout;",
+                    fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname),
+                    splitcond, 
+                    tdinfo->filtercond);
+            }
+
+        } else if (splitcond) {
+            appendPQExpBuffer(q,
+                    "FROM %s %s) TO stdout;",
+                    fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname),
+                    splitcond);
+        } else {
+            appendPQExpBuffer(q,
+                "FROM %s) TO stdout;",
+                fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname));
+        }
+    } else {
+        appendPQExpBuffer(
+            q, "COPY %s %s TO stdout;", fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname), column_list);
+    }
+    res = ExecuteSqlQuery(fout, q->data, PGRES_COPY_OUT);
+    PQclear(res);
+
+    for (;;) {
+        ret = PQgetCopyData(conn, &copybuf, 0);
+
+        if (ret < 0)
+            break; /* done or error */
+
+        if (NULL != copybuf) {
+            size_t writeBytes = 0;
+            writeBytes = WriteDataParallel(fout, copybuf, ret);
+            if (writeBytes != (size_t)ret) {
+                write_msg(NULL, "could not write to output file: %s\n", strerror(errno));
+                exit_nicely(1);
+            }
+
+            PQfreemem(copybuf);
+        }
+
+        /* ----------
+         * THROTTLE:
+         *
+         * There was considerable discussion in late July, 2000 regarding
+         * slowing down pg_dump when backing up large tables. Users with both
+         * slow & fast (multi-processor) machines experienced performance
+         * degradation when doing a backup.
+         *
+         * Initial attempts based on sleeping for a number of ms for each ms
+         * of work were deemed too complex, then a simple 'sleep in each loop'
+         * implementation was suggested. The latter failed because the loop
+         * was too tight. Finally, the following was implemented:
+         *
+         * If throttle is non-zero, then
+         *		See how long since the last sleep.
+         *		Work out how long to sleep (based on ratio).
+         *		If sleep is more than 100ms, then
+         *			sleep
+         *			reset timer
+         *		EndIf
+         * EndIf
+         *
+         * where the throttle value was the number of ms to sleep per ms of
+         * work. The calculation was done in each loop.
+         *
+         * Most of the hard work is done in the backend, and this solution
+         * still did not work particularly well: on slow machines, the ratio
+         * was 50:1, and on medium paced machines, 1:1, and on fast
+         * multi-processor machines, it had little or no effect, for reasons
+         * that were unclear.
+         *
+         * Further discussion ensued, and the proposal was dropped.
+         *
+         * For those people who want this feature, it can be implemented using
+         * gettimeofday in each loop, calculating the time since last sleep,
+         * multiplying that by the sleep ratio, then if the result is more
+         * than a preset 'minimum sleep time' (say 100ms), call the 'select'
+         * function to sleep for a subsecond period ie.
+         *
+         * select(0, NULL, NULL, NULL, &tvi);
+         *
+         * This will return after the interval specified in the structure tvi.
+         * Finally, call gettimeofday again to save the 'last sleep time'.
+         * ----------
+         */
+    }
+
+    archprintf(fout, "\\.\n;\n\n");
+
+    if (ret == -2) {
+        /* copy data transfer failed */
+        write_msg(NULL, "Dumping the contents of table \"%s\" failed: PQgetCopyData() failed.\n", classname);
+        write_msg(NULL, "Error message from server: %s", PQerrorMessage(conn));
+        write_msg(NULL, "The command was: %s\n", q->data);
+        exit_nicely(1);
+    }
+
+    /* Check command status and return to normal libpq state */
+    res = PQgetResult(conn);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        write_msg(NULL, "Dumping the contents of table \"%s\" failed: PQgetResult() failed.\n", classname);
+        write_msg(NULL, "Error message from server: %s", PQerrorMessage(conn));
+        write_msg(NULL, "The command was: %s\n", q->data);
+        exit_nicely(1);
+    }
+    PQclear(res);
+
+    destroyPQExpBuffer(q);
+    return 1;
+}
 /*
  * 	Dump a table's contents for loading using the COPY command
  * 	- this routine is called by the Archiver when it wants the table
@@ -3023,6 +3264,15 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
     return 1;
 }
 
+static bool isHeapTable(const char* option) {
+    if (option == NULL)
+        return true;
+    if (strstr(option, "storage_type=astore") != NULL)
+        return true;
+    if (strstr(option, "storage_type") != NULL)
+        return false;
+    return true;
+}
 /*
  * dumpTableData -
  *	  dump the contents of a single table
@@ -3037,8 +3287,6 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
     char* copyStmt = NULL;
 
     if (!dump_inserts) {
-        /* Dump/restore using COPY */
-        dumpFn = dumpTableData_copy;
         /* must use 2 steps here 'cause fmtId is nonreentrant */
         appendPQExpBuffer(copyBuf, "COPY %s.%s ", tbinfo->dobj.nmspace->dobj.name, fmtId(tbinfo->dobj.name));
         appendPQExpBuffer(copyBuf,
@@ -3046,6 +3294,115 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
             fmtCopyColumnList(tbinfo),
             (tdinfo->oids && tbinfo->hasoids) ? "WITH OIDS " : "");
         copyStmt = copyBuf->data;
+        if (g_splitPageNum > 0 && tbinfo->relpages > g_splitPageNum && tbinfo->parttype == 'n' && isHeapTable(tbinfo->reloptions)) {
+            DataDumperPtr dumpFnSplit = dumpTableDataSplit_copy;
+            int partition = tbinfo->relpages / g_splitPageNum;
+            if (tbinfo->relpages % g_splitPageNum != 0) {
+                partition += 1;
+            }
+            for (int part = 1; part <= partition; part++) {
+                TableDataSplitInfo* tdsinfo = (TableDataSplitInfo*) pg_malloc(sizeof(TableDataSplitInfo));
+                tdsinfo->tdinfo = tdinfo;
+                char* splitcond = (char *)pg_malloc(256 * sizeof(char));
+                if (part == 1) {
+                    int nRet = snprintf_s(splitcond, N_BUF_SIZE, N_BUF_SIZE - 1,
+                                          "where ctid <= '(%d,0)'::tid", part * g_splitPageNum);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                } else if (part == partition) {
+                    int nRet = snprintf_s(splitcond, N_BUF_SIZE, N_BUF_SIZE - 1,
+                                          "where ctid > '(%d,0)'::tid", (part - 1) * g_splitPageNum);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                } else {
+                    int nRet = snprintf_s(splitcond, N_BUF_SIZE, N_BUF_SIZE - 1,
+                                          "where ctid > '(%d,0)'::tid and ctid <= '(%d,0)'::tid",
+                                          (part - 1) * g_splitPageNum, part * g_splitPageNum);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                }
+                tdsinfo->splitcond = splitcond;
+                if (part > 1) {
+                    AssignDumpId(&tdinfo->dobj);
+                }
+                ArchiveEntry(fout,
+                    tdinfo->dobj.catId,
+                    tdinfo->dobj.dumpId,
+                    tbinfo->dobj.name,
+                    tbinfo->dobj.nmspace->dobj.name,
+                    NULL,
+                    tbinfo->rolname,
+                    false,
+                    "TABLE DATA",
+                    SECTION_DATA,
+                    "",
+                    "",
+                    copyStmt,
+                    &(tbinfo->dobj.dumpId),
+                    1,
+                    dumpFnSplit,
+                    tdsinfo);
+            }
+            
+            destroyPQExpBuffer(copyBuf);
+            return;
+        } else if (workerNum > 1 && IS_PARTITIONED_RELATION(tbinfo->parttype)) {
+            DataDumperPtr dumpFnSplit = dumpTableDataSplit_copy;
+            PQExpBuffer partitionq = createPQExpBuffer();
+            PGresult* res = NULL;
+            int ntups;
+            const char* relname = fmtId(tbinfo->dobj.name);
+
+            appendPQExpBuffer(partitionq,
+                "select pa.relname as partName from "
+                "pg_class as c "
+                "join pg_partition as pa "
+                "on c.oid = pa.parentid "
+                "where c.relname = '%s' "
+                "and pa.parttype != 'r';",
+                relname);
+            res = ExecuteSqlQuery(fout, partitionq->data, PGRES_TUPLES_OK);
+
+            int i_partname = PQfnumber(res, "partName");
+
+            ntups = PQntuples(res);
+            for (int i = 0; i < ntups; i++) {
+                char* pname = gs_strdup(PQgetvalue(res, i, i_partname));
+                TableDataSplitInfo* tdsinfo = (TableDataSplitInfo*) pg_malloc(sizeof(TableDataSplitInfo));
+                tdsinfo->tdinfo = tdinfo;
+                char* splitcond = (char *)pg_malloc(256 * sizeof(char));
+                int nRet = snprintf_s(splitcond, N_BUF_SIZE, N_BUF_SIZE - 1,
+                                          "partition(%s)", pname);
+                securec_check_ss_c(nRet, "\0", "\0");
+
+                tdsinfo->splitcond = splitcond;
+                if (i > 0) {
+                    AssignDumpId(&tdinfo->dobj);
+                }
+                ArchiveEntry(fout,
+                    tdinfo->dobj.catId,
+                    tdinfo->dobj.dumpId,
+                    tbinfo->dobj.name,
+                    tbinfo->dobj.nmspace->dobj.name,
+                    NULL,
+                    tbinfo->rolname,
+                    false,
+                    "TABLE DATA",
+                    SECTION_DATA,
+                    "",
+                    "",
+                    copyStmt,
+                    &(tbinfo->dobj.dumpId),
+                    1,
+                    dumpFnSplit,
+                    tdsinfo);
+            }
+
+            PQclear(res);
+            destroyPQExpBuffer(partitionq);
+            destroyPQExpBuffer(copyBuf);
+            return;
+        } else {
+            /* Dump/restore using COPY */
+            dumpFn = dumpTableData_copy;
+        }
     } else {
         /* Restore using INSERT */
         dumpFn = dumpTableData_insert;
@@ -7211,6 +7568,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     int i_checkoption = 0;
     int i_toastreloptions = 0;
     int i_reloftype = 0;
+    int i_relpages = 0;
     int i_parttype = 0;
     int i_relrowmovement = 0;
     int i_relhsblockchain = 0;
@@ -7305,7 +7663,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
             }
 
             appendPQExpBuffer(query,
-                "c.parttype, c.relrowmovement, c.relcmprs, "
+                "c.relpages, c.parttype, c.relrowmovement, c.relcmprs, "
                 "CASE WHEN c.reloftype <> 0 THEN c.reloftype::pg_catalog.regtype ELSE NULL::Oid END AS reloftype, "
                 "d.refobjid AS owning_tab, "
                 "d.refobjsubid AS owning_col, "
@@ -7362,7 +7720,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 appendPQExpBuffer(query, "'d' AS relreplident, ");
             }
             appendPQExpBuffer(query,
-                "c.parttype, c.relrowmovement, c.relcmprs, "
+                "c.relpages, c.parttype, c.relrowmovement, c.relcmprs, "
                 "CASE WHEN c.reloftype <> 0 THEN c.reloftype::pg_catalog.regtype ELSE NULL::Oid END AS reloftype, "
                 "d.refobjid AS owning_tab, "
                 "d.refobjsubid AS owning_col, "
@@ -7720,6 +8078,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
     i_toastfrozenxid64 = PQfnumber(res, "tfrozenxid64");
     i_relpersistence = PQfnumber(res, "relpersistence");
     i_relreplident = PQfnumber(res, "relreplident");
+    i_relpages = PQfnumber(res, "relpages");
     i_relbucket = PQfnumber(res, "relbucket");
     i_parttype = PQfnumber(res, "parttype");
     i_relrowmovement = PQfnumber(res, "relrowmovement");
@@ -7776,6 +8135,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
         tblinfo[i].isblockchain = (strcmp(PQgetvalue(res, i, i_relhsblockchain), "t") == 0);
         tblinfo[i].isMOT = false;
         tblinfo[i].relreplident = *(PQgetvalue(res, i, i_relreplident));
+        tblinfo[i].relpages = atoi(PQgetvalue(res, i, i_relpages));
         tblinfo[i].frozenxid = atooid(PQgetvalue(res, i, i_relfrozenxid));
         tblinfo[i].frozenxid64 = atoxid(PQgetvalue(res, i, i_relfrozenxid64));
         tblinfo[i].toast_oid = atooid(PQgetvalue(res, i, i_toastoid));
@@ -24597,4 +24957,15 @@ static void setup_restrict_relation_kind(Archive* fout, const char* value) {
 
     PQclear(result);
     destroyPQExpBuffer(query);
+}
+static void
+setupDumpWorker(Archive *AH)
+{
+	/*
+	 * We want to re-select all the same values the leader connection is
+	 * using.  We'll have inherited directly-usable values in
+	 * AH->sync_snapshot_id and AH->use_role, but we need to translate the
+	 * inherited encoding value back to a string to pass to setup_connection.
+	 */
+	setup_connection(AH);
 }

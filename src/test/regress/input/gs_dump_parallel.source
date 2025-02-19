@@ -1,0 +1,51 @@
+-- 
+-- gs_dump parallel
+-- 
+drop database if exists basedb;
+create database basedb;
+\c basedb
+drop database if exists dumptest;
+
+-- two 10 page table
+create database dumptest;
+create table test1 as select generate_series(1, 2260);
+create table test2 as select generate_series(1, 2260);
+\! @abs_bindir@/gs_dump basedb -p @portstring@ -j2 --split-huge-table -Fd -f @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! ls @abs_bindir@/dumpdir/*.gz | wc -l
+\! @abs_bindir@/gs_restore -p @portstring@ -d dumptest -j2 @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gsql -p @portstring@ -d dumptest -c "select count(*) from test2;"
+\! rm -rf @abs_bindir@/dumpdir
+drop table test1;
+drop table test2;
+drop database if exists dumptest;
+
+-- a 100 page table with two 10 page table
+create database dumptest;
+create table test as select generate_series(1, 22600);
+create table test1 as select generate_series(1, 2260);
+create table test2 as select generate_series(1, 2260);
+analyze test;
+analyze test1;
+analyze test2;
+\! @abs_bindir@/gs_dump basedb -p @portstring@ -j2 --split-huge-table -Fd -f @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! ls @abs_bindir@/dumpdir/*.gz | wc -l
+\! @abs_bindir@/gs_restore -p @portstring@ -d dumptest -j2 @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gsql -p @portstring@ -d dumptest -c "select count(*) from test;"
+\! rm -rf @abs_bindir@/dumpdir
+drop table test;
+drop table test1;
+drop table test2;
+drop database if exists dumptest;
+
+-- a table with subpartition
+create database dumptest;
+create table test(col1 int, col2 int) PARTITION BY RANGE (col1) SUBPARTITION BY RANGE (col2)(partition test_1 values less than (1000)(SUBPARTITION test_1_1 values less than (1000),SUBPARTITION test_1_2 values less than (maxvalue)),partition test_2 values less than (maxvalue)(SUBPARTITION test_2_1 values less than (1000),SUBPARTITION test_2_2 values less than (maxvalue)));
+insert into test(col1, col2) select generate_series(1, 2260), 1;
+insert into test(col1, col2) select generate_series(1, 2260), 1001;
+\! @abs_bindir@/gs_dump basedb -p @portstring@ -j2 --split-huge-table -Fd -f @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! ls @abs_bindir@/dumpdir/*.gz | wc -l
+\! @abs_bindir@/gs_restore -p @portstring@ -d dumptest -j2 @abs_bindir@/dumpdir >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gsql -p @portstring@ -d dumptest -c "select count(*) from test;"
+\! rm -rf @abs_bindir@/dumpdir
+drop table test;
+drop database if exists dumptest;

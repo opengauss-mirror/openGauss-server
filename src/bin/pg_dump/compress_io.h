@@ -51,10 +51,13 @@ extern void EndCompressor(ArchiveHandle* AH, CompressorState* cs);
 typedef struct cfp cfp;
 
 extern cfp* cfopen(const char* path, const char* mode, int compression);
+extern cfp* cfopen4Lock(const char* path, const char* mode, int compression);
 extern cfp* cfopen_read(const char* path, const char* mode);
 extern cfp* cfopen_write(const char* path, const char* mode, int compression);
+extern cfp* cfopen_write4Lock(const char* path, const char* mode, int compression);
 extern int cfread(void* ptr, int size, cfp* fp);
 extern int cfwrite(const void* ptr, int size, cfp* fp);
+extern int cfwriteWithLock(const void* ptr, int size, cfp* fp);
 extern int cfgetc(cfp* fp);
 extern char* cfgets(cfp* fp, char* buf, int len);
 extern int cfclose(cfp* fp);

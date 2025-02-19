@@ -36,6 +36,9 @@
 #include "compress_io.h"
 #include "dumpmem.h"
 #include "pg_backup_cipher.h"
+#include "parallel.h"
+
+#include <unistd.h>
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
@@ -116,6 +119,14 @@ static void fillWriteCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCa
 static void fillReadCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH);
 static int readFromCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCache, cfp* FH, void* buf, size_t len, bool *isempty);
 
+
+static void _Clone(ArchiveHandle *AH);
+static void _ReopenArchive(ArchiveHandle *AH);
+static void _DeClone(ArchiveHandle *AH);
+static void _CloseArchiveP(ArchiveHandle* AH);
+static size_t _WriteDataP(ArchiveHandle* AH, const void* data, size_t dLen);
+static void _StartDataP(ArchiveHandle* AH, TocEntry* te);
+
 /*
  *	Init routine required by ALL formats. This is a global routine
  *	and should be declared in pg_backup_archiver.h
@@ -140,7 +151,7 @@ void InitArchiveFmt_Directory(ArchiveHandle* AH)
     AH->WriteBufptr = _WriteBuf;
     AH->ReadBufptr = _ReadBuf;
     AH->Closeptr = _CloseArchive;
-    AH->Reopenptr = NULL;
+    AH->Reopenptr = _ReopenArchive;;
     AH->PrintTocDataptr = _PrintTocData;
     AH->ReadExtraTocptr = _ReadExtraToc;
     AH->WriteExtraTocptr = _WriteExtraToc;
@@ -151,8 +162,8 @@ void InitArchiveFmt_Directory(ArchiveHandle* AH)
     AH->EndBlobptr = _EndBlob;
     AH->EndBlobsptr = _EndBlobs;
 
-    AH->Cloneptr = NULL;
-    AH->DeCloneptr = NULL;
+    AH->Cloneptr = _Clone;
+    AH->DeCloneptr = _DeClone;
 
     /* Set up our private context */
     ctx = (lclContext*)pg_calloc(1, sizeof(lclContext));
@@ -924,4 +935,166 @@ static int readFromCryptoCache(ArchiveHandle* AH, DFormatCryptoCache* cryptoCach
     }
 
     return 0;
+}
+
+typedef struct {
+    /*
+     * Our archive location. This is basically what the user specified as his
+     * backup file but of course here it is a directory.
+     */
+    char* directory;
+
+    cfp* dataFH; /* currently open data file */
+    DFormatCryptoCache* dataCryptoCache;
+
+    cfp* blobsTocFH; /* file handle for blobs.toc */
+    
+    ParallelStateN* parallelState;
+} lclContextP;
+
+void InitArchiveFmt_Parallel(ArchiveHandle* AH)
+{
+    InitArchiveFmt_Directory(AH);
+    AH->Closeptr = _CloseArchiveP;
+    AH->WriteDataptr = _WriteData;
+    AH->WriteDataptrP = _WriteDataP;
+    AH->StartDataptr = _StartDataP;
+}
+
+static void
+_Clone(ArchiveHandle *AH)
+{
+    lclContext *ctx = (lclContext *) AH->formatData;
+
+    AH->formatData = (lclContext *) pg_malloc(sizeof(lclContext));
+    int rc = memcpy_s(AH->formatData, sizeof(lclContext), ctx, sizeof(lclContext));
+    securec_check_c(rc, "\0", "\0");
+    ctx = (lclContext *) AH->formatData;
+
+    /*
+     * Note: we do not make a local lo_buf because we expect at most one BLOBS
+     * entry per archive, so no parallelism is possible.  Likewise,
+     * TOC-entry-local state isn't an issue because any one TOC entry is
+     * touched by just one worker child.
+     */
+
+    /*
+     * We also don't copy the ParallelStateN pointer (pstate), only the leader
+     * process ever writes to it.
+     */
+}
+
+static void
+_ReopenArchive(ArchiveHandle *AH)
+{
+    /*
+     * Our TOC is in memory, our data files are opened by each child anyway as
+     * they are separate. We support reopening the archive by just doing
+     * nothing.
+     */
+}
+
+static void
+_DeClone(ArchiveHandle *AH)
+{
+    lclContext *ctx = (lclContext *) AH->formatData;
+
+    free(ctx);
+}
+
+static void _CloseArchiveP(ArchiveHandle* AH)
+{
+    lclContextP* ctx = (lclContextP*)AH->formatData;
+
+    if (AH->mode == archModeWrite) {
+        cfp* tocFH = NULL;
+        char* fname = prependDirectory(AH, "toc.dat");
+
+        ctx->parallelState = ParallelBackupStart(AH);
+        /* The TOC is always created uncompressed */
+        tocFH = cfopen_write(fname, PG_BINARY_W, 0);
+        if (tocFH == NULL)
+            exit_horribly(modulename, "could not open output file \"%s\": %s\n", fname, strerror(errno));
+        ctx->dataFH = tocFH;
+
+        if (AH->publicArc.encryptfile) {
+            initCryptoCache(archModeWrite, &(ctx->dataCryptoCache));
+        }
+
+        /*
+         * Write 'tar' in the format field of the toc.dat file. The directory
+         * is compatible with 'tar', so there's no point having a different
+         * format code for it.
+         */
+        AH->format = archTar;
+        WriteHead(AH);
+        AH->format = archDirectory;
+        WriteToc(AH);
+
+        if (AH->publicArc.encryptfile) {
+            encryptAndFlushCache(AH, ctx->dataCryptoCache, tocFH);
+            releaseCryptoCache(ctx->dataCryptoCache);
+        }
+
+        if (cfclose(tocFH) != 0)
+            exit_horribly(modulename, "could not close TOC file: %s\n", strerror(errno));
+
+        TocEntry  **tes;
+        int			ntes;
+
+        tes = (TocEntry **) pg_malloc(AH->tocCount * sizeof(TocEntry *));
+        ntes = 0;
+        for (TocEntry *te = AH->toc->next; te != AH->toc; te = te->next) {
+            /* Consider only TEs with dataDumper functions ... */
+            if (!te->dataDumper)
+                continue;
+            /* ... and ignore ones not enabled for dump */
+            if ((te->reqs & REQ_DATA) == 0)
+                continue;
+
+            tes[ntes++] = te;
+        }
+
+        for (int i = 0; i < ntes; i++)
+            DispatchJobForTocEntry(ctx->parallelState, tes[i], ACT_DUMP);
+
+        pg_free(tes);
+        WaitForWorkers(ctx->parallelState, WFW_ALL_IDLE);
+
+        ParallelBackupEnd(AH, ctx->parallelState);
+    }
+    AH->FH = NULL;
+}
+
+static size_t _WriteDataP(ArchiveHandle* AH, const void* data, size_t dLen)
+{
+    lclContext* ctx = (lclContext*)AH->formatData;
+
+    if (dLen == 0)
+        return 0;
+
+    if (ctx->dataCryptoCache) {
+        fillWriteCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, data, dLen);
+    } else {
+        return (size_t)cfwriteWithLock(data, (int)dLen, ctx->dataFH);;
+    }
+
+    return dLen;
+}
+
+static void _StartDataP(ArchiveHandle* AH, TocEntry* te)
+{
+    lclTocEntry* tctx = (lclTocEntry*)te->formatData;
+    lclContext* ctx = (lclContext*)AH->formatData;
+    char* fname = NULL;
+
+    fname = prependDirectory(AH, tctx->filename);
+
+    ctx->dataFH = cfopen_write4Lock(fname, PG_BINARY_A, AH->compression);
+    if (ctx->dataFH == NULL)
+        exit_horribly(modulename, "could not open output file \"%s\": %s\n", fname, strerror(errno));
+    
+    if (AH->publicArc.encryptfile) {
+        initCryptoCache(AH->mode, &(ctx->dataCryptoCache));
+    }
 }
