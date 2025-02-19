@@ -2997,7 +2997,7 @@ int DecodeInterval(char** field, const int* ftype, int nf, int range, int* dtype
      * ----------
      */
     /* use standard sql interval */
-    if (*field[0] == '-') {
+    if (*field[0] == '-' && !DB_IS_CMPT(PG_FORMAT)) {
         /* Check for additional explicit signs */
         bool more_signs = false;
 
