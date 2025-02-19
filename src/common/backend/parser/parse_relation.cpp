@@ -68,6 +68,14 @@
 #include "rewrite/rewriteManip.h"
 
 #define MAXSTRLEN ((1 << 11) - 1)
+
+enum ValidateDependResult {
+    ValidateDependInvalid,
+    ValidateDependValid,
+    ValidateDependCircularDepend,
+    
+};
+
 static RangeTblEntry* scanNameSpaceForRefname(ParseState* pstate, const char* refname, int location);
 static RangeTblEntry* scanNameSpaceForRelid(ParseState* pstate, Oid relid, int location);
 static void markRTEForSelectPriv(ParseState* pstate, RangeTblEntry* rte, int rtindex, AttrNumber col);
@@ -79,6 +87,8 @@ static void setRteOrientation(Relation rel, RangeTblEntry* rte);
 static int32* getValuesTypmods(RangeTblEntry* rte);
 static IndexHintType preCheckIndexHints(ParseState* pstate, List* indexhints, Relation relation);
 static void change_var_attno(Query* query, Oid rel_oid, int oldAttnum, int newAttnum);
+static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list, bool force,
+    StringInfo buf = NULL);
 
 #ifndef PGXC
 static int specialAttNum(const char* attname);
@@ -1147,11 +1157,7 @@ bool CheckFuncExpr(FuncExpr* funcExpr, Oid rewrite_oid)
 
     Oid newFuncid = InvalidOid;
     HeapTuple dependTup = NULL;
-    Datum values[Natts_pg_depend] = { 0 };
-    bool nulls[Natts_pg_depend] = { 0 };
-    bool replaces[Natts_pg_depend] = { 0 };
-    HeapTuple new_dep_tuple = NULL;
-    Relation dependRel = heap_open(DependRelationId, RowExclusiveLock);
+    Relation dependRel = heap_open(DependRelationId, AccessShareLock);
     const int keyNum = 2;
     ScanKeyData key[keyNum];
     SysScanDesc scan = NULL;
@@ -1169,6 +1175,12 @@ bool CheckFuncExpr(FuncExpr* funcExpr, Oid rewrite_oid)
         }
     }
 
+    if (!HeapTupleIsValid(dependTup)) {
+        systable_endscan(scan);
+        heap_close(dependRel, AccessShareLock);
+        return false;
+    }
+
     bool isnull = false;
     Datum depsrc = heap_getattr(dependTup, Anum_pg_depend_depsrc, RelationGetDescr(dependRel), &isnull);
     if (isnull) {
@@ -1184,16 +1196,20 @@ bool CheckFuncExpr(FuncExpr* funcExpr, Oid rewrite_oid)
     char* funcname = NULL;
     DeconstructQualifiedName(namelist, &schemaname, &funcname, &pkgname);
 
+    list_free_ext(namelist);
+    systable_endscan(scan);
+    heap_close(dependRel, AccessShareLock);
+
     Oid schemaOid = get_namespace_oid(schemaname, true);
     if (!OidIsValid(schemaOid)) {
-        goto checkFail;
+        return false;
     }
 
     if (pkgname != NULL) {
         /* search function in package */
         Oid pkgOid = PackageNameGetOid(pkgname, schemaOid);
         if (!OidIsValid(pkgOid)) {
-            goto checkFail;
+            return false;
         }
         List* pkgFuncOids = GetFunctionOidsByPackageOid(pkgOid);
         ListCell* lc = NULL;
@@ -1211,33 +1227,11 @@ bool CheckFuncExpr(FuncExpr* funcExpr, Oid rewrite_oid)
     }
 
     if (!OidIsValid(newFuncid)) {
-        goto checkFail;
+        return false;
     }
 
-    /* update pg_depend */
-    values[Anum_pg_depend_refobjid - 1] = ObjectIdGetDatum(newFuncid);
-    replaces[Anum_pg_depend_refobjid - 1] = true;
-
-    new_dep_tuple = heap_modify_tuple(dependTup, RelationGetDescr(dependRel), values, nulls, replaces);
-    simple_heap_update(dependRel, &new_dep_tuple->t_self, new_dep_tuple);
-    CatalogUpdateIndexes(dependRel, new_dep_tuple);
-    CommandCounterIncrement();
-
-    heap_freetuple_ext(new_dep_tuple);
-
-    systable_endscan(scan);
-    heap_close(dependRel, RowExclusiveLock);
-    list_free_ext(namelist);
-
     funcExpr->funcid = newFuncid;
-
     return true;
-
-checkFail:
-    systable_endscan(scan);
-    heap_close(dependRel, RowExclusiveLock);
-    list_free_ext(namelist);
-    return false;
 }
 
 typedef struct change_relid_and_funcid_context {
@@ -1381,14 +1375,7 @@ static bool findDependentTable(Relation rel, Oid type_id)
     return found;
 }
 
-enum ValidateDependResult {
-    ValidateDependInvalid,
-    ValidateDependValid,
-    ValidateDependCircularDepend,
-    
-};
-
-static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list, bool force)
+static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list, bool force, StringInfo buf)
 {
     bool isValid = true;
     bool existTable = false;
@@ -1444,6 +1431,7 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
      * 3.2 find all columns of parent views and tables which this view depends on directly,
      * and check their validity recursively.
      */
+    List *query_str = NIL;
     ScanKeyData key_dep[keyNum];
     SysScanDesc scan_dep = NULL;
     HeapTuple tup_dep = NULL;
@@ -1537,11 +1525,20 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
      * 3.4 update pg_attribute for column type of view maybe changed
      * and pg_rewrite for ev_action
      */
-    UpdateAttrAndRewriteForView(view_oid, rw_objid, originEvAction, query);
+    UpdateAttrAndRewriteForView(view_oid, rw_objid, originEvAction, query, &query_str);
     /* 4. mark the current view valid */
     if (!circularDependency) {
         SetPgObjectValid(view_oid, objType, true);
     }
+    /* create or replace view */
+    if (!circularDependency && query_str != NIL) {
+        ReplaceViewQueryFirstAfter(query_str);
+        CommandCounterIncrement();
+    }
+    if (buf != NULL) {
+        appendStringInfo(buf, "%s", ((struct ViewInfoForAdd*)linitial(query_str))->query_string);
+    }
+    list_free_ext(query_str);
     if (objType == OBJECT_TYPE_MATVIEW) {
         HeapTuple tup = SearchSysCache1(RELOID, ObjectIdGetDatum(view_oid));
         Form_pg_class relform = (Form_pg_class)GETSTRUCT(tup);
@@ -1573,9 +1570,10 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
     return (ValidateDependResult)isValid;
 }
 
-bool ValidateDependView(Oid view_oid, char objType) {
+bool ValidateDependView(Oid view_oid, char objType, StringInfo buf)
+{
     List * list = NIL;
-    ValidateDependResult result = ValidateDependView(view_oid, objType, &list, false);
+    ValidateDependResult result = ValidateDependView(view_oid, objType, &list, false, buf);
     list_free_ext(list);
     if (result == ValidateDependCircularDepend) {
         ereport(ERROR,

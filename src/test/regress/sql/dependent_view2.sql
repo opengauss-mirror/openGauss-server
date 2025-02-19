@@ -25,6 +25,7 @@ select n1 + n2 into sum;
 return sum;
 end;
 /
+\d+ v1
 select * from v1; -- success
 
 -- targetlist
@@ -327,6 +328,112 @@ var2:=var1||p_num;
 END;
 /
 select * from depend_v1; --success
+
+-- test multi-function
+CREATE TABLE employees (
+    employee_id serial PRIMARY KEY,
+    employee_name varchar(50) NOT NULL,
+    department varchar(50),
+    salary numeric(10, 2),
+    hire_date date
+);
+INSERT INTO employees (employee_name, department, salary, hire_date)
+VALUES
+    ('张三', '研发部', 8000.00, '2020-01-01'),
+    ('李四', '市场部', 7500.00, '2021-03-15'),
+    ('王五', '财务部', 7000.00, '2019-11-20'),
+    ('赵六', '研发部', 8500.00, '2022-05-10');
+
+CREATE  FUNCTION calculate_working_years(p_hire_date date) RETURNS integer
+AS $$
+DECLARE
+    v_working_years integer;
+    v_current_date date := current_date;
+BEGIN
+    v_working_years := extract(year from age(v_current_date, p_hire_date));
+    RETURN v_working_years;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION calculate_bonus_percentage(p_working_years integer) RETURNS numeric(5, 2)
+AS $$
+DECLARE
+    v_bonus_percentage numeric(5, 2);
+BEGIN
+    IF p_working_years < 3 THEN
+        v_bonus_percentage := 0.1;
+    ELSIF p_working_years >= 3 AND p_working_years < 5 THEN
+        v_bonus_percentage := 0.15;
+    ELSE
+        v_bonus_percentage := 0.2;
+    END IF;
+    RETURN v_bonus_percentage;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE VIEW employee_bonus_view AS
+SELECT employee_name,
+       calculate_working_years(hire_date) AS working_years,
+       calculate_bonus_percentage(calculate_working_years(hire_date)) AS bonus_percentage
+FROM employees;
+
+drop FUNCTION calculate_working_years;
+
+CREATE OR REPLACE FUNCTION calculate_working_years(p_hire_date date) RETURNS integer
+AS $$
+DECLARE
+    v_working_years integer;
+    v_current_date date := current_date;
+BEGIN
+    v_working_years := extract(year from age(v_current_date, p_hire_date));
+    RETURN v_working_years;
+END;
+$$ LANGUAGE plpgsql;
+
+select pg_get_viewdef('employee_bonus_view');
+select * from employee_bonus_view;
+
+-- test function overloading with different nums of arg
+drop FUNCTION if exists func_ddl0022(int,int);
+CREATE FUNCTION func_ddl0022(a int, b int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+drop FUNCTION if exists func_ddl0022(int,int,int);
+CREATE  FUNCTION func_ddl0022(a int, b int,c int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b + c into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+create view v_ddl0022 as select func_ddl0022(1,2,3);
+drop FUNCTION func_ddl0022(int,int,int);
+CREATE  FUNCTION func_ddl0022(a int, b int,c int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b + c into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+select * from v_ddl0022;
+-- delete non-depend function with same name
+drop FUNCTION func_ddl0022(int,int);
+select valid from pg_object where object_oid='v_ddl0022'::regclass;
 
 drop schema dependent_view2 cascade;
 reset current_schema;
