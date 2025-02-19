@@ -20422,8 +20422,9 @@ retry:
                          * isn't changed.
                          */
                         if (t_thrd.xlog_cxt.readFile < 0) {
-                            t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode,
-                                                                            XLOG_FROM_STREAM);
+                            t_thrd.xlog_cxt.readFile = XLogFileRead(t_thrd.xlog_cxt.readSegNo, PANIC,
+                                                                    t_thrd.xlog_cxt.recoveryTargetTLI, XLOG_FROM_STREAM,
+                                                                    false);
                             Assert(t_thrd.xlog_cxt.readFile >= 0);
                         } else {
                             t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;

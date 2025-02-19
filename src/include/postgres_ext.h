@@ -47,9 +47,6 @@ typedef unsigned int Oid;
 
 #define EXRTO_READ_SPECIAL_LSN (-7)
 #define EXRTO_SEGMENT_STANDBY_READ_BUCKETID (-16384)
-#define EXRTO_READ_STANDBY_START_LSN_OPT (1)
-#define EXRTO_READ_STANDBY_END_LSN_OPT (2)
-#define EXRTO_READ_STANDBY_INIT_LSN_OPT (3)
 
 #define BUCKET_NODE_IS_VALID(bucket_node) ((bucket_node) > InvalidBktId && (bucket_node) < SegmentBktId)
 #define BUCKET_OID_IS_VALID(bucketOid) ((bucketOid) >= FirstNormalObjectId)
