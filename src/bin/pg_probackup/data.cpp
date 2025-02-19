@@ -2666,10 +2666,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     BlockNumber blknum = 0;
     datapagemap_iterator_t *iter = NULL;
     int   compressed_size = 0;
-    PageCompression* pageCompression = NULL;
     std::unique_ptr<PageCompression> pageCompressionPtr = NULL;
-    BlockNumber compression_extents;
-    BlockNumber current_extent = 0;
 
     /* stdio buffers */
     char *in_buf = NULL;
