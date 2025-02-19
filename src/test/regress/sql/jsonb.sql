@@ -528,3 +528,9 @@ select jsonb_set('[]','{-99}','{"foo":123}');
 select jsonb_set('{"a": [1, 2, 3]}', '{a, non_integer}', '"new_value"');
 select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, non_integer}', '"new_value"');
 select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, NULL}', '"new_value"');
+
+create table newtable(id int, jsonb1 jsonb);
+CREATE INDEX newtable_idx on newtable USING gin (jsonb1);
+INSERT INTO newtable  (id,jsonb1 ) VALUES ( '1','{"modelForDCM":""}'::jsonb);
+select * from newtable;
+drop table newtable;
