@@ -2284,3 +2284,13 @@ CONTEXT:  referenced column: jsonb_set
 select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, NULL}', '"new_value"');
 ERROR:  path element at position 3 is null
 CONTEXT:  referenced column: jsonb_set
+create table newtable(id int, jsonb1 jsonb);
+CREATE INDEX newtable_idx on newtable USING gin (jsonb1);
+INSERT INTO newtable  (id,jsonb1 ) VALUES ( '1','{"modelForDCM":""}'::jsonb);
+select * from newtable;
+ id |       jsonb1        
+----+---------------------
+  1 | {"modelForDCM": ""}
+(1 row)
+
+drop table newtable;
