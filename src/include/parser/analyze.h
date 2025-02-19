@@ -82,6 +82,7 @@ typedef struct AnalyzerRoutine {
 } AnalyzerRoutine;
 
 typedef Query* (*transformStmtFunc)(ParseState* pstate, Node* parseTree, bool isFirstNode, bool isCreateView);
+typedef void (*InvokeTransformSelectForLimitHookType) (SelectStmt* stmt);
 
 extern void transformOperatorPlus(ParseState* pstate, Node** whereClause);
 extern bool IsColumnRefPlusOuterJoin(const ColumnRef* cf);

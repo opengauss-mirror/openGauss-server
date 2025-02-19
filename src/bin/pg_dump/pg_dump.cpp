@@ -20836,51 +20836,53 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                     continue;
                 }
 
-                /* Attribute type */
-                if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
-                    appendPQExpBuffer(q, "WITH OPTIONS");
-                } else if (fout->remoteVersion >= 70100) {
-                    if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0) {
-                        free(tbinfo->atttypnames[j]);
-                        tbinfo->atttypnames[j] = gs_strdup("number");
-                    }
-                    appendPQExpBuffer(q, "%s", tbinfo->atttypnames[j]);
-                    if (has_encrypted_column) {
-                        char *encryption_type = NULL;
-                        appendPQExpBuffer(q, " encrypted with (column_encryption_key = %s, ",
-                            tbinfo->column_key_names[j]);
-                        if (tbinfo->encryption_type[j] == 2) {
-                            encryption_type = "DETERMINISTIC";
-                        } else if (tbinfo->encryption_type[j] == 1) {
-                            encryption_type = "RANDOMIZED";
+                if (!tbinfo->attrdefs[j] || tbinfo->attrdefs[j]->generatedCol !=  ATTRIBUTE_GENERATED_PERSISTED) {
+                    /* Attribute type */
+                    if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
+                        appendPQExpBuffer(q, "WITH OPTIONS");
+                    } else if (fout->remoteVersion >= 70100) {
+                        if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0) {
+                            free(tbinfo->atttypnames[j]);
+                            tbinfo->atttypnames[j] = gs_strdup("number");
                         }
-                        appendPQExpBuffer(q, "encryption_type = %s)", encryption_type);
+                        appendPQExpBuffer(q, "%s", tbinfo->atttypnames[j]);
+                        if (has_encrypted_column) {
+                            char *encryption_type = NULL;
+                            appendPQExpBuffer(q, " encrypted with (column_encryption_key = %s, ",
+                                tbinfo->column_key_names[j]);
+                            if (tbinfo->encryption_type[j] == 2) {
+                                encryption_type = "DETERMINISTIC";
+                            } else if (tbinfo->encryption_type[j] == 1) {
+                                encryption_type = "RANDOMIZED";
+                            }
+                            appendPQExpBuffer(q, "encryption_type = %s)", encryption_type);
+                        }
+                    } else {
+                        /* If no format_type, fake it */
+                        name = myFormatType(tbinfo->atttypnames[j], tbinfo->atttypmod[j]);
+                        appendPQExpBuffer(q, "%s", name);
+                        GS_FREE(name);
                     }
-                } else {
-                    /* If no format_type, fake it */
-                    name = myFormatType(tbinfo->atttypnames[j], tbinfo->atttypmod[j]);
-                    appendPQExpBuffer(q, "%s", name);
-                    GS_FREE(name);
-                }
-                if (tbinfo->attkvtype[j] != 0) {
-                    if (tbinfo->attkvtype[j] == 1) {
-                        appendPQExpBuffer(q, " %s", "TSTag");
-                    } else if (tbinfo->attkvtype[j] == 2) {
-                        appendPQExpBuffer(q, " %s", "TSField");
-                    } else if (tbinfo->attkvtype[j] == 3) {
-                        appendPQExpBuffer(q, " %s", "TSTime");
-                    }
-                }             
+                    if (tbinfo->attkvtype[j] != 0) {
+                        if (tbinfo->attkvtype[j] == 1) {
+                            appendPQExpBuffer(q, " %s", "TSTag");
+                        } else if (tbinfo->attkvtype[j] == 2) {
+                            appendPQExpBuffer(q, " %s", "TSField");
+                        } else if (tbinfo->attkvtype[j] == 3) {
+                            appendPQExpBuffer(q, " %s", "TSTime");
+                        }
+                    }             
 
-                /* Add collation if not default for the type */
-                if (OidIsValid(tbinfo->attcollation[j])) {
-                    CollInfo* coll = NULL;
+                    /* Add collation if not default for the type */
+                    if (OidIsValid(tbinfo->attcollation[j])) {
+                        CollInfo* coll = NULL;
 
-                    coll = findCollationByOid(tbinfo->attcollation[j]);
-                    if (NULL != coll) {
-                        /* always schema-qualify, don't try to be smart */
-                        appendPQExpBuffer(q, " COLLATE %s.", fmtId(coll->dobj.nmspace->dobj.name));
-                        appendPQExpBuffer(q, "%s", fmtId(coll->dobj.name));
+                        coll = findCollationByOid(tbinfo->attcollation[j]);
+                        if (NULL != coll) {
+                            /* always schema-qualify, don't try to be smart */
+                            appendPQExpBuffer(q, " COLLATE %s.", fmtId(coll->dobj.nmspace->dobj.name));
+                            appendPQExpBuffer(q, "%s", fmtId(coll->dobj.name));
+                        }
                     }
                 }
 
@@ -20914,13 +20916,17 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         default_value = (char *)plaintext;
                     }
 #endif
-                    if (tbinfo->attrdefs[j]->generatedCol == ATTRIBUTE_GENERATED_STORED)
+                    if (tbinfo->attrdefs[j]->generatedCol == ATTRIBUTE_GENERATED_STORED) {
                         appendPQExpBuffer(q, " GENERATED ALWAYS AS (%s) STORED",
                                           default_value);
-                    else if (j + 1 == tbinfo->autoinc_attnum)
+                    }  else if(tbinfo->attrdefs[j]->generatedCol ==  ATTRIBUTE_GENERATED_PERSISTED) {
+                        appendPQExpBuffer(q, " AS (%s) PERSISTED",
+                                          default_value);
+                    } else if (j + 1 == tbinfo->autoinc_attnum) {
                         appendPQExpBuffer(q, " %s", default_value);
-                    else if (pg_strcasecmp(default_value, "") != 0)
+                    } else if (pg_strcasecmp(default_value, "") != 0) {
                         appendPQExpBuffer(q, " DEFAULT %s", default_value);
+                    }
 
                     if (hasOnUpdateFeature) {
                         RemoveQuotes(onUpdate_value);

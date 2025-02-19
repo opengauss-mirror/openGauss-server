@@ -508,7 +508,8 @@ unreserved_keyword:
 			| NORESEED
 			| RESEED
 			| TSQL_CLUSTERED
-			| TSQL_NONCLUSTERED ;
+			| TSQL_NONCLUSTERED
+			| TSQL_PERSISTED ;
 
 
 DBCCCheckIdentStmt:
@@ -788,3 +789,836 @@ func_expr_common_subexpr:
 					$$ = (Node *)makeFuncCall(TsqlSystemFuncName2(name), NIL, @1);
 				}
 		;
+
+columnDef:
+			ColId TSQL_computed_column ColQualList
+				{
+					ColumnDef *n = makeNode(ColumnDef);
+					n->colname = $1;
+					/*
+					 * For computed columns, user doesn't provide a datatype.
+					 * But, PG expects a datatype.  Hence, we just assign a
+					 * valid datatype temporarily.  Later, we'll evaluate
+					 * expression to detect the actual datatype.
+					 */
+					n->typname = makeTypeName("varchar");
+					n->inhcount = 0;
+					n->is_local = true;
+					n->is_not_null = false;
+					n->is_from_type = false;
+					n->storage = 0;
+					n->raw_default = NULL;
+					n->cooked_default = NULL;
+					n->collOid = InvalidOid;
+					n->fdwoptions = NULL;
+
+					$3 = lappend($3, $2);
+					SplitColQualList($3, &n->constraints, &n->collClause,  &n->clientLogicColumnRef, yyscanner);
+
+					$$ = (Node *)n;
+				}
+		;
+
+/*
+ * Computed columns uses b_expr not a_expr to avoid conflict with general NOT
+ * (used in constraints).  Besides, it seems TSQL doesn't allow AND, NOT, IS
+ * IN clauses in the computed column expression.  So, there shouldn't be
+ * any issues.
+ */
+TSQL_computed_column:
+				AS b_expr
+				{
+					Constraint *n = makeNode(Constraint);
+
+					n->contype = CONSTR_GENERATED;
+					n->generated_when = ATTRIBUTE_GENERATED_PERSISTED;
+					n->raw_expr = $2;
+					n->cooked_expr = NULL;
+					n->location = @1;
+
+					$$ = (Node *)n;
+				}
+				| AS b_expr TSQL_PERSISTED
+				{
+					Constraint *n = makeNode(Constraint);
+
+					n->contype = CONSTR_GENERATED;
+					n->generated_when = ATTRIBUTE_GENERATED_PERSISTED;
+					n->raw_expr = $2;
+					n->cooked_expr = NULL;
+					n->location = @1;
+
+					$$ = (Node *)n;
+				}
+		;
+
+tsql_select_top_value:
+            SignedIconst                        { $$ = makeIntConst($1, @1); }
+            | FCONST                             { $$ = makeFloatConst($1, @1); }
+            | '(' a_expr ')'                    { $$ = $2; }
+            | select_with_parens
+                {
+                    /*
+                     * We need a speical grammar for scalar subquery here
+                     * because c_expr (in a_expr) has a rule select_with_parens but we defined the first rule as '(' a_expr ')'.
+                     * In other words, the first rule will be hit only when double parenthesis is used like `SELECT TOP ((select 1)) ...`
+                     */
+                    SubLink *n = makeNode(SubLink);
+                    n->subLinkType = EXPR_SUBLINK;
+                    n->testexpr = NULL;
+                    n->operName = NIL;
+                    n->subselect = $1;
+                    n->location = @1;
+                    $$ = (Node *)n;
+                }
+            ;
+
+tsql_opt_ties:
+            WITH TIES                            { $$ = true; }
+            | /*EMPTY*/                            { $$ = false; }
+        ;
+
+tsql_opt_percent:
+            TSQL_PERCENT                        { $$ = true; }
+            | /*EMPTY*/                            { $$ = false; }
+        ;
+
+tsql_top_clause:
+            TSQL_TOP tsql_select_top_value tsql_opt_percent tsql_opt_ties
+                {
+                    FetchLimit *result = (FetchLimit *)palloc0(sizeof(FetchLimit));
+                    result->limitOffset = NULL;
+                    result->limitCount = $2;
+                    result->isPercent = $3;
+                    result->isWithTies = $4;
+                    result->isFetch = true;
+                    $$ = (Node *)result;
+                }
+            ;
+
+simple_select:
+            SELECT hint_string opt_distinct tsql_top_clause target_list
+            opt_into_clause from_clause where_clause
+            group_clause having_clause window_clause
+                {
+                    SelectStmt *n = makeNode(SelectStmt);
+                    n->distinctClause = $3;
+
+                    FetchLimit* topClause = (FetchLimit*)$4;
+                    if (n->limitCount) {
+                        const char* message = "multiple OFFSET clauses not allowed";
+                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                        ereport(ERROR,
+                                (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("multiple LIMIT clauses not allowed"),
+                                parser_errposition(exprLocation(topClause->limitCount))));
+                    }
+                    n->limitCount = topClause->limitCount;
+                    n->isFetch = topClause->isFetch;
+                    n->limitIsPercent = topClause->isPercent;
+                    n->limitWithTies = topClause->isWithTies;
+
+                    n->targetList = $5;
+                    n->intoClause = $6;
+                    n->fromClause = $7;
+                    n->whereClause = $8;
+                    n->groupClause = $9;
+                    n->havingClause = $10;
+                    n->windowClause = $11;
+                    n->hintState = create_hintstate($2);
+                    n->hasPlus = getOperatorPlusFlag();
+                    $$ = (Node *)n;
+                }
+            ;
+
+/* Direct column label --- names that can be column labels without writing "AS".
+ * This classification is orthogonal to the other keyword categories.
+ */
+DirectColLabel:	IDENT								{ $$ = $1; }
+			| direct_label_keyword					{ $$ = pstrdup($1); }
+		;
+
+/*
+ * While all keywords can be used as column labels when preceded by AS,
+ * not all of them can be used as a "direct" column label without AS.
+ * Those that can be used as a direct label must be listed here,
+ * in addition to appearing in one of the category lists above.
+ *
+ * Always add a new keyword to this list if possible.  Mark it DIRECT_LABEL
+ * in kwlist.h if it is included here, or AS_LABEL if it is not.
+ */
+direct_label_keyword: ABORT_P
+            | ABSOLUTE_P
+            | ACCESS
+            | ACCOUNT
+            | ACTION
+            | ADD_P
+            | ADMIN
+            | AFTER
+            | AGGREGATE
+            | ALGORITHM
+            | ALL
+            | ALSO
+            | ALTER
+            | ALWAYS
+            | ANALYSE
+            | ANALYZE
+            | AND
+            | ANY
+            | APP
+            | APPEND
+            | APPLY
+            | ARCHIVE
+            | ASC
+            | ASOF_P
+            | ASSERTION
+            | ASSIGNMENT
+            | ASYMMETRIC
+            | AT
+            | ATTRIBUTE
+            | AUDIT
+            | AUTHID
+            | AUTHORIZATION
+            | AUTO_INCREMENT
+            | AUTOEXTEND
+            | AUTOMAPPED
+            | BACKWARD
+            | BARRIER
+            | BEFORE
+            | BEGIN_P
+            | BEGIN_NON_ANOYBLOCK
+            | BIGINT
+            | BINARY
+            | BINARY_DOUBLE
+            | BINARY_DOUBLE_INF
+            | BINARY_DOUBLE_NAN
+            | BINARY_INTEGER
+            | BIT
+            | BLANKS
+            | BLOB_P
+            | BLOCKCHAIN
+            | BODY_P
+            | BOOLEAN_P
+            | BOTH
+            | BUCKETCNT
+            | BUCKETS
+            | BUILD
+            | BYTE_P
+            | BYTEAWITHOUTORDER
+            | BYTEAWITHOUTORDERWITHEQUAL
+            | CACHE
+            | CALL
+            | CALLED
+            | CANCELABLE
+            | CASCADE
+            | CASCADED
+            | CASE
+            | CAST
+            | CATALOG_P
+            | CATALOG_NAME
+            | CHAIN
+            | CHANGE
+            | CHARACTERISTICS
+            | CHARACTERSET
+            | CHARSET
+            | CHECK
+            | CHECKPOINT
+            | CLASS
+            | CLASS_ORIGIN
+            | CLEAN
+            | CLIENT
+            | CLIENT_MASTER_KEY
+            | CLIENT_MASTER_KEYS
+            | CLOB
+            | CLOSE
+            | CLUSTER
+            | TSQL_CLUSTERED
+            | COALESCE
+            | COLLATE
+            | COLLATION
+            | COLUMN
+            | COLUMN_ENCRYPTION_KEY
+            | COLUMN_ENCRYPTION_KEYS
+            | COLUMN_NAME
+            | COLUMNS
+            | TSQL_COLUMNSTORE
+            | COMMENT
+            | COMMENTS
+            | COMMIT
+            | COMMITTED
+            | COMPACT
+            | COMPATIBLE_ILLEGAL_CHARS
+            | COMPILE
+            | COMPLETE
+            | COMPLETION
+            | COMPRESS
+            | CONCURRENTLY
+            | CONDITION
+            | CONFIGURATION
+            | CONNECT
+            | CONNECTION
+            | CONSISTENT
+            | CONSTANT
+            | CONSTRAINT
+            | CONSTRAINT_CATALOG
+            | CONSTRAINT_NAME
+            | CONSTRAINT_SCHEMA
+            | CONSTRAINTS
+            | CONSTRUCTOR
+            | CONTENT_P
+            | CONTINUE_P
+            | CONTVIEW
+            | CONVERSION_P
+            | CONVERT_P
+            | COORDINATOR
+            | COORDINATORS
+            | COPY
+            | COST
+            | CROSS
+            | CSN
+            | CSV
+            | CUBE
+            | CURRENT_P
+            | CURRENT_CATALOG
+            | CURRENT_DATE
+            | CURRENT_ROLE
+            | CURRENT_SCHEMA
+            | CURRENT_TIME
+            | CURRENT_TIMESTAMP
+            | CURRENT_USER
+            | CURSOR
+            | CURSOR_NAME
+            | CYCLE
+            | DATA_P
+            | DATABASE
+            | DATAFILE
+            | DATANODE
+            | DATANODES
+            | DATATYPE_CL
+            | DATE_P
+            | DATE_FORMAT_P
+            | DAY_HOUR_P
+            | DAY_MINUTE_P
+            | DAY_SECOND_P
+            | DBCC
+            | DBCOMPATIBILITY_P
+            | DEALLOCATE
+            | DEC
+            | DECIMAL_P
+            | DECLARE
+            | DECODE
+            | DEFAULT
+            | DEFAULTS
+            | DEFERRABLE
+            | DEFERRED
+            | DEFINER
+            | DELETE_P
+            | DELIMITER
+            | DELIMITERS
+            | DELTA
+            | DELTAMERGE
+            | DENSE_RANK
+            | DESC
+            | DETERMINISTIC
+            | DIAGNOSTICS
+            | DICTIONARY
+            | DIRECT
+            | DIRECTORY
+            | DISABLE_P
+            | DISCARD
+            | DISCONNECT
+            | DISTINCT
+            | DISTRIBUTE
+            | DISTRIBUTION
+            | DO
+            | DOCUMENT_P
+            | DOMAIN_P
+            | DOUBLE_P
+            | DROP
+            | DUMPFILE
+            | DUPLICATE
+            | EACH
+            | ELASTIC
+            | ELSE
+            | ENABLE_P
+            | ENCLOSED
+            | ENCODING
+            | ENCRYPTED
+            | ENCRYPTED_VALUE
+            | ENCRYPTION
+            | ENCRYPTION_TYPE
+            | END_P
+            | ENDS
+            | ENFORCED
+            | ENUM_P
+            | EOL
+            | ERROR_P
+            | ERRORS
+            | ESCAPE
+            | ESCAPED
+            | ESCAPING
+            | EVENT
+            | EVENTS
+            | EVERY
+            | EXCHANGE
+            | EXCLUDE
+            | EXCLUDED
+            | EXCLUDING
+            | EXCLUSIVE
+            | EXECUTE
+            | EXISTS
+            | EXPIRED_P
+            | EXPLAIN
+            | EXTENSION
+            | EXTERNAL
+            | EXTRACT
+            | FALSE_P
+            | FAMILY
+            | FAST
+            | FEATURES
+            | FENCED
+            | FIELDS
+            | FILEHEADER_P
+            | FILL_MISSING_FIELDS
+            | FILLER
+            | FINAL
+            | FIRST_P
+            | FIXED_P
+            | FLOAT_P
+            | FOLLOWING
+            | FOLLOWS_P
+            | FORCE
+            | FOREIGN
+            | FORMATTER
+            | FORWARD
+            | FREEZE
+            | FULL
+            | FUNCTION
+            | FUNCTIONS
+            | GENERATED
+            | GET
+            | GLOBAL
+            | GRANTED
+            | GREATEST
+            | GROUPING_P
+            | GROUPPARENT
+            | HANDLER
+            | HDFSDIRECTORY
+            | HEADER_P
+            | HOLD
+            | HOUR_MINUTE_P
+            | HOUR_SECOND_P
+            | IDENTIFIED
+            | IDENTITY_P
+            | IF_P
+            | IGNORE
+            | IGNORE_EXTRA_DATA
+            | ILIKE
+            | IMCSTORED
+            | IMMEDIATE
+            | IMMUTABLE
+            | IMPLICIT_P
+            | IN_P
+            | INCLUDE
+            | INCLUDING
+            | INCREMENT
+            | INCREMENTAL
+            | INDEX
+            | INDEXES
+            | INFILE
+            | INFINITE_P
+            | INHERIT
+            | INHERITS
+            | INITIAL_P
+            | INITIALLY
+            | INITRANS
+            | INLINE_P
+            | INNER_P
+            | INOUT
+            | INPUT_P
+            | INSENSITIVE
+            | INSERT
+            | INSTEAD
+            | INT_P
+            | INTEGER
+            | INTERNAL
+            | INTERVAL
+            | INVISIBLE
+            | INVOKER
+            | IP
+            | IS
+            | ISOLATION
+            | JOIN
+            | JSON_EXISTS
+            | KEY
+            | KEY_PATH
+            | KEY_STORE
+            | KILL
+            | LABEL
+            | LANGUAGE
+            | LARGE_P
+            | LAST_P
+            | LATERAL_P
+            | LC_COLLATE_P
+            | LC_CTYPE_P
+            | LEADING
+            | LEAKPROOF
+            | LEAST
+            | LEFT
+            | LESS
+            | LEVEL
+            | LIKE
+            | LINES
+            | LIST
+            | LISTEN
+            | LOAD
+            | LOCAL
+            | LOCALTIME
+            | LOCALTIMESTAMP
+            | LOCATION
+            | LOCK_P
+            | LOCKED
+            | LOG_P
+            | LOGGING
+            | LOGIN_ANY
+            | LOGIN_FAILURE
+            | LOGIN_SUCCESS
+            | LOGOUT
+            | LOOP
+            | MAP
+            | MAPPING
+            | MASKING
+            | MASTER
+            | MATCH
+            | MATCHED
+            | MATERIALIZED
+            | MAXEXTENTS
+            | MAXSIZE
+            | MAXTRANS
+            | MAXVALUE
+            | MEMBER
+            | MERGE
+            | MESSAGE_TEXT
+            | METHOD
+            | MINEXTENTS
+            | MINUTE_SECOND_P
+            | MINVALUE
+            | MODE
+            | MODEL
+            | MODIFY_P
+            | MOVE
+            | MOVEMENT
+            | MYSQL_ERRNO
+            | NAMES
+            | NAN_P
+            | NATIONAL
+            | NATURAL
+            | NCHAR
+            | NEXT
+            | NO
+            | NO_INFOMSGS
+            | NOCOMPRESS
+            | NOCYCLE
+            | NODE
+            | NOLOGGING
+            | NOMAXVALUE
+            | NOMINVALUE
+            | TSQL_NONCLUSTERED
+            | NONE
+            | NORESEED
+            | NOTHING
+            | NOTIFY
+            | NOVALIDATE
+            | NOWAIT
+            | NTH_VALUE_P
+            | NULL_P
+            | NULLCOLS
+            | NULLIF
+            | NULLS_P
+            | NUMBER_P
+            | NUMERIC
+            | NUMSTR
+            | NVARCHAR
+            | NVARCHAR2
+            | NVL
+            | OBJECT_P
+            | OF
+            | OFF
+            | OIDS
+            | ONLY
+            | OPERATOR
+            | OPTIMIZATION
+            | OPTION
+            | OPTIONALLY
+            | OPTIONS
+            | OR
+            | OUT_P
+            | OUTER_P
+            | OUTFILE
+            | OVERLAY
+            | OWNED
+            | OWNER
+            | PACKAGE
+            | PACKAGES
+            | PARALLEL_ENABLE
+            | PARSER
+            | PARTIAL
+            | PARTITION
+            | PARTITIONS
+            | PASSING
+            | PASSWORD
+            | PCTFREE
+            | PER_P
+            | TSQL_PERCENT
+            | PERFORMANCE
+            | PERM
+            | TSQL_PERSISTED
+            | PIPELINED
+            | PLACING
+            | PLAN
+            | PLANS
+            | POLICY
+            | POOL
+            | POSITION
+            | PRECEDES_P
+            | PRECEDING
+            | PREDICT
+            | PREFERRED
+            | PREFIX
+            | PREPARE
+            | PREPARED
+            | PRESERVE
+            | PRIMARY
+            | PRIOR
+            | PRIORER
+            | PRIVATE
+            | PRIVILEGE
+            | PRIVILEGES
+            | PROCEDURAL
+            | PROCEDURE
+            | PROFILE
+            | PUBLICATION
+            | PUBLISH
+            | PURGE
+            | QUERY
+            | QUOTE
+            | RANDOMIZED
+            | RANGE
+            | RATIO
+            | RAW
+            | READ
+            | REAL
+            | REASSIGN
+            | REBUILD
+            | RECHECK
+            | RECURSIVE
+            | RECYCLEBIN
+            | REDISANYVALUE
+            | REF
+            | REFERENCES
+            | REFRESH
+            | REINDEX
+            | REJECT_P
+            | RELATIVE_P
+            | RELEASE
+            | RELOPTIONS
+            | REMOTE_P
+            | REMOVE
+            | RENAME
+            | REPEAT
+            | REPEATABLE
+            | REPLACE
+            | REPLICA
+            | RESEED
+            | RESET
+            | RESIZE
+            | RESOURCE
+            | RESPECT_P
+            | RESTART
+            | RESTRICT
+            | RESULT
+            | RETURN
+            | RETURNED_SQLSTATE
+            | RETURNS
+            | REUSE
+            | REVOKE
+            | RIGHT
+            | ROLE
+            | ROLES
+            | ROLLBACK
+            | ROLLUP
+            | ROTATE
+            | ROTATION
+            | ROW
+            | ROW_COUNT
+            | ROWNUM
+            | ROWS
+            | ROWTYPE_P
+            | RULE
+            | SAMPLE
+            | SAVEPOINT
+            | SCHEDULE
+            | SCHEMA
+            | SCHEMA_NAME
+            | SCROLL
+            | SEARCH
+            | SECURITY
+            | SELF
+            | SEPARATOR_P
+            | SEQUENCE
+            | SEQUENCES
+            | SERIALIZABLE
+            | SERVER
+            | SESSION
+            | SESSION_USER
+            | SET
+            | SETOF
+            | SETS
+            | SHARE
+            | SHIPPABLE
+            | SHOW
+            | SHRINK
+            | SHUTDOWN
+            | SIBLINGS
+            | SIMILAR
+            | SIMPLE
+            | SIZE
+            | SKIP
+            | SLAVE
+            | SLICE
+            | SMALLDATETIME
+            | SMALLDATETIME_FORMAT_P
+            | SMALLINT
+            | SNAPSHOT
+            | SOME
+            | SOURCE_P
+            | SPACE
+            | SPECIFICATION
+            | SPILL
+            | SPLIT
+            | SQL_P
+            | STABLE
+            | STACKED_P
+            | STANDALONE_P
+            | START
+            | STARTING
+            | STARTS
+            | STATEMENT
+            | STATEMENT_ID
+            | STATIC_P
+            | STATISTICS
+            | STDIN
+            | STDOUT
+            | STORAGE
+            | STORE_P
+            | STORED
+            | STRATIFY
+            | STREAM
+            | STRICT_P
+            | STRIP_P
+            | SUBCLASS_ORIGIN
+            | SUBPARTITION
+            | SUBPARTITIONS
+            | SUBSCRIPTION
+            | SUBSTRING
+            | SYMMETRIC
+            | SYNONYM
+            | SYS_REFCURSOR
+            | SYSDATE
+            | SYSID
+            | SYSTEM_P
+            | TABLE
+            | TABLE_NAME
+            | TABLES
+            | TABLESAMPLE
+            | TABLESPACE
+            | TEMP
+            | TEMPLATE
+            | TEMPORARY
+            | TERMINATED
+            | TEXT_P
+            | THAN
+            | THEN
+            | TIES
+            | TIME
+            | TIME_FORMAT_P
+            | TIMECAPSULE
+            | TIMESTAMP
+            | TIMESTAMP_FORMAT_P
+            | TIMESTAMPDIFF
+            | TIMEZONE_HOUR_P
+            | TIMEZONE_MINUTE_P
+            | TINYINT
+            | TSQL_TOP
+            | TRAILING
+            | TRANSACTION
+            | TRANSFORM
+            | TREAT
+            | TRIGGER
+            | TRIM
+            | TRUE_P
+            | TRUNCATE
+            | TRUSTED
+            | TSFIELD
+            | TSTAG
+            | TSTIME
+            | TYPES_P
+            | UNBOUNDED
+            | UNCOMMITTED
+            | UNDER
+            | UNENCRYPTED
+            | UNIMCSTORED
+            | UNIQUE
+            | UNKNOWN
+            | UNLIMITED
+            | UNLISTEN
+            | UNLOCK
+            | UNLOGGED
+            | UNTIL
+            | UNUSABLE
+            | UPDATE
+            | USE_P
+            | USEEOF
+            | USER
+            | USING
+            | VACUUM
+            | VALID
+            | VALIDATE
+            | VALIDATION
+            | VALIDATOR
+            | VALUES
+            | VARCHAR
+            | VARCHAR2
+            | VARIABLES
+            | VARIADIC
+            | VARRAY
+            | VCGROUP
+            | VERBOSE
+            | VERIFY
+            | VERSION_P
+            | VIEW
+            | VISIBLE
+            | VOLATILE
+            | WAIT
+            | WARNINGS
+            | WEAK
+            | WHEN
+            | WHILE_P
+            | WHITESPACE_P
+            | WORK
+            | WORKLOAD
+            | WRAPPER
+            | WRITE
+            | XMLATTRIBUTES
+            | XMLCONCAT
+            | XMLELEMENT
+            | XMLEXISTS
+            | XMLFOREST
+            | XMLPARSE
+            | XMLPI
+            | XMLROOT
+            | XMLSERIALIZE
+            | YEAR_MONTH_P
+            | YES_P
+            | ZONE
+        ;

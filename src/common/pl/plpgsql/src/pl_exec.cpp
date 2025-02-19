@@ -2386,7 +2386,8 @@ static void RecordSetGeneratedField(PLpgSQL_rec *recNew)
     securec_check(rc, "\0", "\0");
 
     for (int i = 0; i < recNew->tupdesc->natts; i++) {
-        if (GetGeneratedCol(recNew->tupdesc, i) == ATTRIBUTE_GENERATED_STORED) {
+        if (GetGeneratedCol(recNew->tupdesc, i) == ATTRIBUTE_GENERATED_STORED ||
+            GetGeneratedCol(recNew->tupdesc, i) == ATTRIBUTE_GENERATED_PERSISTED) {
             replaces[i] = true;
             values[i] = (Datum)0;
             nulls[i] = true;

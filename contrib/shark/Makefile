@@ -1,5 +1,6 @@
 EXTENSION = shark
 MODULE_big = shark
+BASECODEDIR=src
 BEPARSERDIR=src/backend_parser
 PLDIR=src/pltsql
 DATA = shark--1.0.sql
@@ -11,6 +12,7 @@ OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o
 OBJS += $(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o
 OBJS += $(PLDIR)/pl_scanner.o
+OBJS += $(BASECODEDIR)/tablecmds.o
 
 subdir = contrib/shark
 top_builddir = ../..

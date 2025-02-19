@@ -3076,7 +3076,10 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     qry->limitOffset = transformLimitClause(pstate, stmt->limitOffset, EXPR_KIND_OFFSET, "OFFSET");
     qry->limitCount = transformLimitClause(pstate, stmt->limitCount, EXPR_KIND_LIMIT, "LIMIT");
     qry->limitIsPercent = stmt->limitIsPercent;
-    qry->limitWithTies = stmt->limitWithTies;
+    qry->limitWithTies = stmt->limitWithTies && stmt->sortClause != NIL;
+    if (u_sess->hook_cxt.invokeTransformSelectForLimitHook) {
+        ((InvokeTransformSelectForLimitHookType)(u_sess->hook_cxt.invokeTransformSelectForLimitHook))(stmt);
+    }
     qry->isFetch = stmt->isFetch;
 
     /* transform window clauses after we have seen all window functions */

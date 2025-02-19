@@ -162,6 +162,7 @@ typedef struct FetchLimit
 	bool isPercent;
 	bool isWithTies;
 	bool isFetch;
+    bool isTop;
 } FetchLimit;
 
 
@@ -32942,9 +32943,9 @@ insertSelectOptions(SelectStmt *stmt,
 			stmt->limitCount = limitCount;
 		}
 		stmt->isFetch = limitClause->isFetch;
+        stmt->limitIsPercent = limitClause && limitClause->isPercent;
+	    stmt->limitWithTies = limitClause && limitClause->isWithTies;
 	}
-	stmt->limitIsPercent = limitClause && limitClause->isPercent;
-	stmt->limitWithTies = limitClause && limitClause->isWithTies;
 
 	if (withClause)
 	{

@@ -1454,6 +1454,9 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                         parser_errposition(cxt->pstate, constraint->location)));
                 }
                 column->generatedCol = ATTRIBUTE_GENERATED_STORED;
+                if (constraint->generated_when == ATTRIBUTE_GENERATED_PERSISTED) {
+                    column->generatedCol = ATTRIBUTE_GENERATED_PERSISTED;
+                }
                 column->raw_default = constraint->raw_expr;
                 Assert(constraint->cooked_expr == NULL);
                 saw_generated = true;

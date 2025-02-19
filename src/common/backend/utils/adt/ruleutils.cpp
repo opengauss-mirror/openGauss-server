@@ -1838,6 +1838,8 @@ static int get_table_attribute(
                         const char* adsrc = TextDatumGetCString(txt);
                         if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
                             appendStringInfo(buf, " GENERATED ALWAYS AS (%s) STORED", adsrc);
+                        } else if (generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
+                            appendStringInfo(buf, "AS (%s) PERSISTED", adsrc);
                         } else if (strcmp(adsrc, "AUTO_INCREMENT") == 0) {
                             Node *adexpr = (Node*)stringToNode_skip_extern_fields(TextDatumGetCString(val));
                             find_nextval_seqoid_walker(adexpr, &tableinfo->autoinc_seqoid);

@@ -4033,7 +4033,7 @@ Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generated
     /*
      * Record dependencies on objects used in the expression, too.
      */
-    if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED || generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
         /*
          * Generated column: Dropping anything that the generation expression
          * refers to automatically drops the generated column.
@@ -4298,6 +4298,11 @@ List* AddRelationNewConstraints(
 
     pstate->p_rawdefaultlist = newColDefaults;
 
+    if (u_sess->hook_cxt.invokePreAddConstraintsHook) {
+        ((InvokePreAddConstraintsHookType)(u_sess->hook_cxt.invokePreAddConstraintsHook))(rel, pstate,
+                                                                                          newColDefaults);
+    }
+
     /*
      * Process column default expressions.
      */
@@ -4312,7 +4317,8 @@ List* AddRelationNewConstraints(
             } else {
                 expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod,
                     atp->attcollation, NameStr(atp->attname), colDef->generatedCol);
-                if (colDef->generatedCol == ATTRIBUTE_GENERATED_STORED) {
+                if (colDef->generatedCol == ATTRIBUTE_GENERATED_STORED ||
+                    colDef->generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
                     pull_varattnos(expr, 1, &generated_by_attrs);
                 }
             }
@@ -4743,7 +4749,7 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
     expr = transformExpr(pstate, raw_default, pstate->p_expr_kind);
     pstate->p_expr_kind = EXPR_KIND_NONE;
 
-    if (generatedCol == ATTRIBUTE_GENERATED_STORED)
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED || generatedCol == ATTRIBUTE_GENERATED_PERSISTED)
     {
         (void)CheckNestedGenerated(pstate, expr);
 

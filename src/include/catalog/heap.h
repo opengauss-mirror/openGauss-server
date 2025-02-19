@@ -271,4 +271,5 @@ extern bool GetIndexEnableStateByTuple(HeapTuple indexTuple);
 
 extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
 extern char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined);
+typedef void (*InvokePreAddConstraintsHookType) (Relation rel, ParseState *pstate, List *newColDefaults);
 #endif   /* HEAP_H */

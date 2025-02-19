@@ -5965,7 +5965,7 @@ static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adre
         }
     }
 
-    if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED || generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
         attrdef[attrdefIndex].generatedCol = generatedCol;
         genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
         constr->has_generated_stored = true;

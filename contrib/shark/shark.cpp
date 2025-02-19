@@ -10,6 +10,7 @@ static bool global_hook_inited = false;
 static uint32 shark_index;
 
 extern List* tsql_raw_parser(const char* str, List** query_string_locationlist);
+extern void assign_tablecmds_hook(void);
 
 void _PG_init(void)
 {}
@@ -35,6 +36,8 @@ void init_session_vars(void)
     cxt->dialect_sql = false;
     cxt->rowcount = 0;
     cxt->fetch_status = FETCH_STATUS_SUCCESS;
+
+    assign_tablecmds_hook();
 }
 
 SharkContext* GetSessionContext()

@@ -362,12 +362,17 @@ void recompute_limits(LimitState* node)
             node->noCount = false;
         } else if (node->isPercent) {
             node->count = 0;
-            node->fraction = DatumGetFloat8(val) / PERCENTAGE_BASE;
-            if (node->fraction < 0)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
-                        errmodule(MOD_EXECUTOR),
-                        errmsg("LIMIT must not be negative")));
+            float8 value = DatumGetFloat8(val);
+            node->fraction = value / PERCENTAGE_BASE;
+
+            if (u_sess->hook_cxt.recomputeLimitsHook) {
+                ((RecomputeLimitsHookType)(u_sess->hook_cxt.recomputeLimitsHook))(value);
+            } else if (node->fraction < 0) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
+                            errmodule(MOD_EXECUTOR),
+                            errmsg("LIMIT must not be negative")));
+            }
             node->noCount = false;
         }
     } else {

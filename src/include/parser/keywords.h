@@ -34,6 +34,7 @@ typedef struct PlpgsqlKeywordValue {
 
 extern PGDLLIMPORT const ScanKeywordList ScanKeywords;
 extern PGDLLIMPORT const uint8 ScanKeywordCategories[];
+extern PGDLLIMPORT const bool ScanKeywordDirectLabel[];
 
 /* Globals from keywords.c */
 extern const ScanKeywordList SQLScanKeywords[];

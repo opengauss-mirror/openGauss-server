@@ -236,5 +236,6 @@ typedef FormData_pg_attribute *Form_pg_attribute;
  */
 #define ATTRIBUTE_IDENTITY_ALWAYS 'a'
 #define ATTRIBUTE_GENERATED_STORED 's'
+#define ATTRIBUTE_GENERATED_PERSISTED 'p'
 #endif   /* PG_ATTRIBUTE_H */
 

@@ -326,7 +326,8 @@ static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, C
         resultRelInfo->ri_NumGeneratedNeeded = 0;
 
         for (int i = 0; i < natts; i++) {
-            if (GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED) {
+            if (GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED ||
+                GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_PERSISTED) {
                 Expr *expr;
 
                 /*
@@ -391,7 +392,9 @@ void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *estate, Tu
     for (uint32 i = 0; i < natts; i++) {
         Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
 
-        if (GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED && resultRelInfo->ri_GeneratedExprs[i]) {
+        if ((GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED ||
+            GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_PERSISTED) &&
+            resultRelInfo->ri_GeneratedExprs[i]) {
             ExprContext *econtext;
             Datum val;
             bool isnull;

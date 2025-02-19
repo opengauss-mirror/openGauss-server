@@ -271,4 +271,5 @@ extern char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_c
 #ifdef USE_SPQ
 extern void spq_btbuild_update_pg_class(Relation heap, Relation index);
 #endif
+typedef void (*InvokePreDropColumnHookType) (Relation rel, AttrNumber attnum);
 #endif /* TABLECMDS_H */
