@@ -515,8 +515,10 @@ static text *make_text_key(const char *str, int len, char flag)
     SET_VARSIZE(item, VARHDRSZ + len + 1);
 
     *VARDATA(item) = flag;
-    errno_t rc = memcpy_s(VARDATA(item) + 1, len, str, len);
-    securec_check(rc, "\0", "\0");
+    if (len != 0) {
+        errno_t rc = memcpy_s(VARDATA(item) + 1, len, str, len);
+        securec_check(rc, "\0", "\0");
+    }
     return item;
 }
 
