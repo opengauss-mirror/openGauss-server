@@ -10743,9 +10743,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             {
                 if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
                     t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) {
-                    ereport(WARNING, (errmsg("HTAP populate is not allowed on a cascade standby.")));
                     pq_putemptymessage('O');
                     pq_flush();
+                    ereport(WARNING, (errmsg("HTAP populate is not allowed on a cascade standby.")));
                     break;
                 }
                 int type = 0;
