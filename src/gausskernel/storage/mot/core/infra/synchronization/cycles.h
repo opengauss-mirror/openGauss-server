@@ -74,14 +74,15 @@ public:
     // cpuid--974ns
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
         uint32_t low, high;
-        #ifdef ENABLE_X86_RDTSCP
-            __asm__ __volatile__("rdtscp" : "=a"(low), "=d"(high) : : "%rcx");
-        #else
-            __asm__ __volatile__("cpuid\n\t"
-                        "rdtsc\n\t"
-                        : "=a"(low), "=d"(high)
-            );
-        #endif
+        __asm__ __volatile__("rdtscp" : "=a"(low), "=d"(high) : : "%rcx");
+        // #ifdef ENABLE_X86_RDTSCP
+        //     __asm__ __volatile__("rdtscp" : "=a"(low), "=d"(high) : : "%rcx");
+        // #else
+        //     __asm__ __volatile__("cpuid\n\t"
+        //                 "rdtsc\n\t"
+        //                 : "=a"(low), "=d"(high)
+        //     );
+        // #endif
         return (((uint64_t)high << 32) | low);
 #elif defined(__aarch64__)
         unsigned long cval = 0;
