@@ -207,6 +207,18 @@ SELECT interval '1 2:03:04.5678' minute to second(2);
 --check interval concat with null
 SELECT interval '1 2:03:04.5678' minute to second(2) || '';
 
+-- test max value
+select interval '10000000000-01' as max_interval;
+select interval '1000000000-01' as max_interval;
+select interval '100000000-01' as max_interval;
+select interval '2147483647' as max_interval;
+select interval '2147483648' as max_interval;
+select interval '-10000000000-01' as max_interval;
+select interval '-1000000000-01' as max_interval;
+select interval '-100000000-01' as max_interval;
+select interval '-2147483648' as max_interval;
+select interval '-2147483649' as max_interval;
+
 -- test casting to restricted precision (bug #14479)
 SELECT f1, 
 f1
