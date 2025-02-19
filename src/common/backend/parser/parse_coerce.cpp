@@ -1293,6 +1293,70 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
     }
 }
 
+static void release_check_tupdesc(TupleDesc src_tupdesc, TupleDesc tar_tupdesc)
+{
+    if (src_tupdesc) {
+        ReleaseTupleDesc(src_tupdesc);
+    }
+    if (tar_tupdesc) {
+        ReleaseTupleDesc(tar_tupdesc);
+    }
+}
+
+static bool check_cast_record_type(Oid sourceType, Oid targetType)
+{
+    TupleDesc src_tupdesc = lookup_rowtype_tupdesc(sourceType, -1);
+    TupleDesc tar_tupdesc = lookup_rowtype_tupdesc(targetType, -1);
+    int satts = src_tupdesc ? src_tupdesc->natts : 0;
+    int tatts = tar_tupdesc ? tar_tupdesc->natts : 0;
+    int fnum = 0;
+    int anum = 0;
+
+    if (src_tupdesc == tar_tupdesc) {
+        release_check_tupdesc(src_tupdesc, tar_tupdesc);
+        return true;
+    }
+    
+    if (tatts != satts) {
+        release_check_tupdesc(src_tupdesc, tar_tupdesc);
+        return false;
+    }
+
+    /* Walk over destination columns */
+    for (fnum = 0; fnum < satts; fnum++) {
+        Form_pg_attribute sattr = TupleDescAttr(src_tupdesc, fnum);
+        Form_pg_attribute tattr = NULL;
+        Oid reqtype, valtype;
+        int32 smod, tmod;
+
+        if (sattr->attisdropped) {
+            continue;
+        }
+
+        while (anum < tatts && TupleDescAttr(tar_tupdesc, anum)->attisdropped) {
+            anum++; /* skip dropped column in tuple */
+        }
+
+        if (anum < tatts) {
+            Form_pg_attribute tattr = TupleDescAttr(tar_tupdesc, anum);
+            reqtype = tattr->atttypid;
+            tmod = tattr->atttypmod;
+            smod = sattr->atttypmod;
+            valtype = sattr->atttypid;
+            anum++;
+            if (valtype != reqtype || smod != tmod) {
+                release_check_tupdesc(src_tupdesc, tar_tupdesc);
+                return false;
+            }
+        } else {
+            release_check_tupdesc(src_tupdesc, tar_tupdesc);
+            return false;
+        }
+    }
+    release_check_tupdesc(src_tupdesc, tar_tupdesc);
+    return true;
+}
+
 /*
  * coerce_record_to_complex
  *		Coerce a RECORD to a specific composite type.
@@ -1334,6 +1398,8 @@ static Node* coerce_record_to_complex(
         if (isParamExtenRecord) {
             /* package record var'type same with target type, no need cast, just return */
             if (((Param*)node)->recordVarTypOid == targetTypeId) {
+                return node;
+            } else if (check_cast_record_type(((Param*)node)->recordVarTypOid, targetTypeId)) {
                 return node;
             }
         }
