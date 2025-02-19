@@ -45,5 +45,15 @@ set enable_seqscan=off;
 SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 set ivfflat_probes = 3;
 SELECT /*+ indexscan(embedding, items_embedding_idx) */embedding FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+
+CREATE TABLE t1 (val vector(4));
+INSERT INTO t1 (val) VALUES ('[0,0,0,0]'), ('[1,2,3,0]'), ('[1,1,1,0]');
+INSERT INTO t1 (val) VALUES ('[4,0,0,0]'), ('[4,2,3,0]'), ('[4,1,1,0]');
+INSERT INTO t1 (val) VALUES ('[25,20,20,22]'), ('[25,22,23,26]'), ('[25,21,21,21]');
+INSERT INTO t1 (val) VALUES ('[24,20,20,20]'), ('[24,22,23,20]'), ('[24,21,21,20]');
+CREATE INDEX ON t1 USING ivfflat (val vector_l2_ops) WITH (lists=2);
+set enable_seqscan=off;
+set ivfflat_probes = 1;
+SELECT * FROM t1 ORDER BY val <-> '[1,2,3,4]';
 \c regression
 drop database test;
