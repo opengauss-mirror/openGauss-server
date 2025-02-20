@@ -46,3 +46,18 @@ select int4mod(3, 0);
 select int8mod(3, 0);
 select numeric_mod(1234.5678,0.0);
 select '10'::interval;
+
+-- test interval
+show IntervalStyle;
+set IntervalStyle = 'postgres';
+select interval '-100 years 11 months' ;
+select interval '-100 years 12 months' ;
+select interval '-100 years -12 months' ;
+select interval '-12 months 10 days' ;
+select interval '-12 months 30 days' ;
+select interval '-10 days 10 hours' ;
+select interval '-10 days 24 hours' ;
+select interval '-10 hours 10 minutes' ;
+select interval '-10 hours 60 minutes' ;
+select interval '-10 minutes 10 seconds' ;
+select interval '-10 minutes 60 seconds' ;

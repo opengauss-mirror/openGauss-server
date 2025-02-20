@@ -124,3 +124,77 @@ select '10'::interval;
  @ 10 secs
 (1 row)
 
+-- test interval
+show IntervalStyle;
+  IntervalStyle   
+------------------
+ postgres_verbose
+(1 row)
+
+set IntervalStyle = 'postgres';
+select interval '-100 years 11 months' ;
+     interval      
+-------------------
+ -99 years -1 mons
+(1 row)
+
+select interval '-100 years 12 months' ;
+ interval  
+-----------
+ -99 years
+(1 row)
+
+select interval '-100 years -12 months' ;
+  interval  
+------------
+ -101 years
+(1 row)
+
+select interval '-12 months 10 days' ;
+     interval      
+-------------------
+ -1 years +10 days
+(1 row)
+
+select interval '-12 months 30 days' ;
+     interval      
+-------------------
+ -1 years +30 days
+(1 row)
+
+select interval '-10 days 10 hours' ;
+      interval      
+--------------------
+ -10 days +10:00:00
+(1 row)
+
+select interval '-10 days 24 hours' ;
+      interval      
+--------------------
+ -10 days +24:00:00
+(1 row)
+
+select interval '-10 hours 10 minutes' ;
+ interval  
+-----------
+ -09:50:00
+(1 row)
+
+select interval '-10 hours 60 minutes' ;
+ interval  
+-----------
+ -09:00:00
+(1 row)
+
+select interval '-10 minutes 10 seconds' ;
+ interval  
+-----------
+ -00:09:50
+(1 row)
+
+select interval '-10 minutes 60 seconds' ;
+ interval  
+-----------
+ -00:09:00
+(1 row)
+
