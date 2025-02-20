@@ -10473,7 +10473,7 @@ void StartupXLOG(void)
 
 #ifdef ENABLE_HTAP
                 if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
-                    pg_atomic_write_u64(&IMCU_CACHE->m_xlog_latest_lsn, xlogreader->ReadRecPtr);
+                    pg_atomic_write_u64(&IMCU_CACHE->m_xlog_latest_lsn, xlogreader->EndRecPtr);
                 }
 #endif
 

@@ -1036,6 +1036,7 @@ static int HandleImcsResponse(PGXCNodeHandle *conn, RemoteQueryState *combiner)
 static bool HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
 {
     bool hasError = false;
+    int originConnCount = connCount;
     RemoteQueryState *combiner = NULL;
     combiner = CreateResponseCombiner(connCount, COMBINE_TYPE_NONE);
     while (connCount > 0) {
@@ -1071,6 +1072,9 @@ static bool HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
         pgxc_node_report_error(combiner);
     }
     ValidateAndCloseCombiner(combiner);
+    for (int i = 0; i < originConnCount; ++i) {
+        pgxc_node_free(tempConnections[i]);
+    }
     pfree_ext(tempConnections);
     return hasError;
 }
