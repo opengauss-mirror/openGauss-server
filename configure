@@ -758,6 +758,7 @@ enable_lite_mode
 enable_relocation
 enable_finance_mode
 enable_mot
+enable_x86_rdtscp
 enable_htap
 enable_bbox
 enable_memory_check
@@ -848,6 +849,7 @@ enable_lite_mode
 enable_relocation
 enable_finance_mode
 enable_mot
+enable_x86_rdtscp
 enable_htap
 enable_bbox
 enable_memory_check
@@ -1563,6 +1565,7 @@ Optional Features:
   --disable-spinlocks     do not use spinlocks
   --enable-debug          build with debugging symbols (-g)
   --enable-htap           enable htap feture
+  --enable-x86-rdtscp     enable rdtscp instruction for x86 architecture
   --enable-qunit          enable query driven unit test framework(QUnit)
   --enable-profiling      build with profiling enabled
   --enable-coverage       build with coverage testing instrumentation
@@ -3316,6 +3319,40 @@ if test "$enable_mot" = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_MOT 1
+_ACEOF
+
+fi
+
+# Check whether --enable-x86-rdtscp was given.
+if test "${enable_x86_rdtscp+set}" = set; then
+  enableval=$enable_x86_rdtscp;
+  case $enableval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_X86_RDTSCP 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-x86-rdtscp option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-x86-rdtscp option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_x86_rdtscp=no
+
+fi
+
+if test "$enable_x86_rdtscp" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_X86_RDTSCP 1
 _ACEOF
 
 fi

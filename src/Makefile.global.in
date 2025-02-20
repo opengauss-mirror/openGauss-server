@@ -177,6 +177,7 @@ enable_lite_mode		= @enable_lite_mode@
 enable_relocation       = @enable_relocation@
 enable_finance_mode		= @enable_finance_mode@
 enable_mot			= @enable_mot@
+enable_x86_rdtscp = @enable_x86_rdtscp@
 enable_bbox			= @enable_bbox@
 enable_llvm			= @enable_llvm@
 enable_mysql_fdw 		= @enable_mysql_fdw@
@@ -761,6 +762,10 @@ endif
 
 ifeq ($(enable_mot), yes)
   override CPPFLAGS := $(CPPFLAGS) -I$(MASSTREE_INCLUDE_PATH)
+endif
+
+ifeq ($(enable_x86_rdtscp), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DENABLE_X86_RDTSCP
 endif
 
 ifeq ($(enable_htap), yes)

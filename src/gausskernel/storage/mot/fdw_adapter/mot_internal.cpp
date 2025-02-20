@@ -43,6 +43,7 @@
 #include "utils/date.h"
 
 #include "mot_internal.h"
+#include "storage/mot/mot_fdw.h"
 #include "mot_fdw_helpers.h"
 #include "row.h"
 #include "log_statistics.h"
@@ -79,6 +80,7 @@ static inline bool EnsureSafeThreadAccessInline(bool throwError = true)
     if (MOTCurrThreadId == INVALID_THREAD_ID) {
         MOT_LOG_DEBUG("Initializing safe thread access for current thread");
         if (MOT::AllocThreadId() == INVALID_THREAD_ID) {
+            MOTCheckIsEnable();
             MOT_LOG_ERROR("Failed to allocate thread identifier");
             if (throwError) {
                 ereport(ERROR, (errmodule(MOD_MOT), errmsg("Failed to allocate thread identifier")));
@@ -274,6 +276,7 @@ MOT::TxnManager* MOTAdaptor::InitTxnManager(
         bool attachCleanFunc =
             (MOTCurrThreadId == INVALID_THREAD_ID ? true : !g_instance.attr.attr_common.enable_thread_pool);
 
+        MOTCheckIsEnable();
         // First time we handle this connection
         if (m_engine == nullptr) {
             elog(ERROR, "initTxnManager: MOT engine is not initialized");

@@ -69,6 +69,10 @@ void MOTRedo(XLogReaderState* record)
     if (!IsValidEntry(recordType)) {
         elog(ERROR, "MOTRedo: invalid op code %" PRIu8, recordType);
     }
+    if (!g_instance.attr.attr_common.enable_mot_server) {
+        ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("Could not redo MOT tables when enable_mot_server = off.")));
+    }
     if (MOT::GetRecoveryManager()->IsErrorSet() || !MOT::GetRecoveryManager()->ApplyRedoLog(lsn, data, len)) {
         // we treat errors fatally.
         ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT recovery failed.")));

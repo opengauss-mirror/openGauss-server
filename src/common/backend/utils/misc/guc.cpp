@@ -2154,6 +2154,19 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_mot_server",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enable mot server"),
+            NULL
+            },
+            &g_instance.attr.attr_common.enable_mot_server,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"foreign_key_checks",
             PGC_USERSET,
             NODE_ALL,

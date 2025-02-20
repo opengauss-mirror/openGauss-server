@@ -1,0 +1,178 @@
+show enable_mot_server;
+ enable_mot_server
+-------------------
+ off
+(1 row)
+
+set enable_mot_server = on;
+ERROR:  parameter "enable_mot_server" cannot be changed without restarting the server
+set enable_mot_server = off;
+ERROR:  parameter "enable_mot_server" cannot be changed without restarting the server
+drop user if exists test_mot;
+create user test_mot password 'Test@123';
+grant all privileges to test_mot;
+set session authorization test_mot password 'Test@123';
+drop schema if exists disable_mot_test cascade;
+NOTICE:  schema "disable_mot_test" does not exist, skipping
+create schema disable_mot_test;
+set current_schema to disable_mot_test;
+\dt
+           List of relations
+ Schema | Name | Type | Owner | Storage
+--------+------+------+-------+---------
+(0 rows)
+
+create foreign table test(x int) server mot_server;
+ERROR:  MOT engine is not initialized
+HINT:  Set enable_mot_server = on to initialize mot engine
+create foreign table test1(id int);
+ERROR:  MOT engine is not initialized
+HINT:  Set enable_mot_server = on to initialize mot engine
+drop foreign table test;
+ERROR:  foreign table "test" does not exist
+drop foreign table test1;
+ERROR:  foreign table "test1" does not exist
+\dt
+           List of relations
+ Schema | Name | Type | Owner | Storage
+--------+------+------+-------+---------
+(0 rows)
+
+create table test1(id int);
+create view test_view as select * from test1;
+insert into test1 values(1),(2),(3);
+select * from test1;
+ id
+----
+  1
+  2
+  3
+(3 rows)
+
+select * from test_view;
+ id
+----
+  1
+  2
+  3
+(3 rows)
+
+begin;
+insert into test1 values(4),(5),(6);
+select * from test1;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+select * from test_view;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+commit;
+select * from test1;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+select * from test_view;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+begin;
+insert into test1 values(7),(8),(9);
+select * from test1;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+(9 rows)
+
+select * from test_view;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+(9 rows)
+
+rollback;
+select * from test1;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+select * from test_view;
+ id
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+\dt
+                           List of relations
+  Schema  | Name  | Type  |  Owner   |             Storage
+----------+-------+-------+----------+----------------------------------
+ test_mot | test1 | table | test_mot | {orientation=row,compression=no}
+(1 row)
+
+select name, setting, category, short_desc, extra_desc, context, vartype, boot_val, reset_val from pg_settings where name = 'enable_mot_server';
+       name        | setting |     category      |    short_desc     | extra_desc |  context   | vartype | boot_val | reset_val
+-------------------+---------+-------------------+-------------------+------------+------------+---------+----------+-----------
+ enable_mot_server | off     | Developer Options | Enable mot server |            | postmaster | bool    | off      | off
+(1 row)
+
+drop table test1;
+drop view test_view;
+drop schema disable_mot_test cascade;
+drop schema test_mot_cascade;
+\c postgres
+drop user test_mot;
