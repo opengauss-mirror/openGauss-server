@@ -49,20 +49,12 @@ const char* EXRTO_FILE_SUB_DIR[] = {
 const uint32 EXRTO_FILE_PATH_LEN = 1024;
 const uint32 XID_THIRTY_TWO = 32;
 
-void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node,
-                            bool is_start_lsn, const RelFileNode& orig_node)
+void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node, const RelFileNode& orig_node)
 {
     read_node.spcNode = (Oid)(read_lsn >> 32);
     read_node.dbNode = (Oid)(read_lsn);
     read_node.relNode = orig_node.relNode;
     read_node.opt = 0;
-    if (is_start_lsn) {
-        /* means read_lsn is the start ptr of xlog */
-        read_node.opt = EXRTO_READ_STANDBY_START_LSN_OPT;
-    } else {
-        /* means read_lsn is the end ptr of xlog */
-        read_node.opt = EXRTO_READ_STANDBY_END_LSN_OPT;
-    }
     if (IsSegmentFileNode(orig_node)) {
         read_node.bucketNode = EXRTO_SEGMENT_STANDBY_READ_BUCKETID;
     } else {
@@ -70,18 +62,18 @@ void make_standby_read_node(XLogRecPtr read_lsn, RelFileNode &read_node,
     }
 }
 
-BufferDesc *alloc_standby_seg_read_buf(const BufferTag &buf_tag, bool &found, XLogRecPtr read_lsn, bool is_start_lsn)
+BufferDesc *alloc_standby_seg_read_buf(const BufferTag &buf_tag, bool &found, XLogRecPtr read_lsn)
 {
     RelFileNode read_node;
-    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode);
+    make_standby_read_node(read_lsn, read_node, buf_tag.rnode);
     BufferDesc *buf_desc = SegBufferAlloc(read_node, buf_tag.forkNum, buf_tag.blockNum, &found);
     return buf_desc;
 }
 
-BufferDesc *alloc_standby_read_buf(const BufferTag &buf_tag, BufferAccessStrategy strategy, bool &found, XLogRecPtr read_lsn, bool is_start_lsn)
+BufferDesc *alloc_standby_read_buf(const BufferTag &buf_tag, BufferAccessStrategy strategy, bool &found, XLogRecPtr read_lsn)
 {
     RelFileNode read_node;
-    make_standby_read_node(read_lsn, read_node, is_start_lsn, buf_tag.rnode);
+    make_standby_read_node(read_lsn, read_node, buf_tag.rnode);
     BufferDesc *buf_desc = BufferAlloc(read_node, 0, buf_tag.forkNum, buf_tag.blockNum, strategy, &found, NULL);
     return buf_desc;
 }
@@ -112,7 +104,7 @@ Buffer get_newest_page_for_read(Relation reln, ForkNumber fork_num, BlockNumber 
     };
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, page_lsn, false);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, page_lsn);
 
     if (hit) {
         UnlockReleaseBuffer(newest_buf);
@@ -151,7 +143,7 @@ Buffer get_newest_seg_page_for_read(
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     bool hit = false;
-    BufferDesc *buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, page_lsn, false);
+    BufferDesc *buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, page_lsn);
     if (hit) {
         UnlockReleaseBuffer(newest_seg_buf);
         return BufferDescriptorGetBuffer(buf_desc);
@@ -192,7 +184,7 @@ Buffer get_newest_page_for_read_new(
     };
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, PageGetLSN(newest_page), false);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, PageGetLSN(newest_page));
 
     if (hit) {
         UnlockReleaseBuffer(newest_buf);
@@ -259,10 +251,8 @@ Buffer standby_read_seg_buffer(
 
     // read lsn info
     XLogRecPtr expected_lsn = InvalidXLogRecPtr;
-    bool is_start_lsn = true;
     if (lsn_info->lsn_num == 0) {
         expected_lsn = lsn_info->base_page_lsn;
-        is_start_lsn = false;
     } else {
         Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] > 0);
         Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] < read_lsn);
@@ -271,7 +261,7 @@ Buffer standby_read_seg_buffer(
     }
 
     bool hit = false;
-    BufferDesc* buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, expected_lsn, is_start_lsn);
+    BufferDesc* buf_desc = alloc_standby_seg_read_buf(buf_tag, hit, expected_lsn);
     if (hit) {
         return BufferDescriptorGetBuffer(buf_desc);
     }
@@ -356,10 +346,8 @@ Buffer standby_read_buf(
 
     // read lsn info
     XLogRecPtr expected_lsn = InvalidXLogRecPtr;
-    bool is_start_lsn = true;
     if (lsn_info->lsn_num == 0) {
         expected_lsn = lsn_info->base_page_lsn;
-        is_start_lsn = false;
     } else {
         Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] > 0);
         Assert(lsn_info->lsn_array[lsn_info->lsn_num - 1] < read_lsn);
@@ -367,7 +355,7 @@ Buffer standby_read_buf(
         expected_lsn = lsn_info->lsn_array[lsn_info->lsn_num - 1];
     }
 
-    BufferDesc* buf_desc = alloc_standby_read_buf(old_buf_tag, strategy, hit, expected_lsn, is_start_lsn);
+    BufferDesc* buf_desc = alloc_standby_read_buf(old_buf_tag, strategy, hit, expected_lsn);
 
     if (hit) {
         return BufferDescriptorGetBuffer(buf_desc);
@@ -1083,7 +1071,7 @@ Buffer standby_read_buf_new(
 
     Page base_page = BufferGetPage(base_page_buffer);
     XLogRecPtr base_page_lsn = PageGetLSN(base_page);
-    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, base_page_lsn, false);
+    BufferDesc *buf_desc = alloc_standby_read_buf(buf_tag, strategy, hit, base_page_lsn);
 
     if (hit) {
         UnlockReleaseBuffer(block_info_buf);

@@ -6179,8 +6179,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
         uint64 old_buf_state;
         buf_state = pg_atomic_read_u64(&buf_desc->state);
         //  temp buf just for old page version, could not write to disk
-        if (BUCKET_NODE_IS_EXRTO_READ(buf_desc->tag.rnode.bucketNode) &&
-            buf_desc->tag.rnode.opt <= EXRTO_READ_STANDBY_INIT_LSN_OPT) {
+        if (BUCKET_NODE_IS_EXRTO_READ(buf_desc->tag.rnode.bucketNode)) {
             return; 
         }
 
