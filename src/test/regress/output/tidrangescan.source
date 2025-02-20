@@ -112,13 +112,13 @@ select count(*) from trs_10p where ctid < '(1,0)';
 (1 row)
 
 -- table with more than 65536 pages
-create table trs_gt_65536p as select generate_series(1, 15000000) id;
+create table trs_gt_65536p as select generate_series(1, 15000072) id;
 analyze trs_gt_65536p;
-explain (costs off)
+explain
 select * from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0)';
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Tid Range Scan on trs_gt_65536p
+ Tid Range Scan on trs_gt_65536p  (cost=0.01..35.60 rows=2259 width=4)
    TID Cond: ((ctid > '(65530,0)'::tid) AND (ctid < '(65540,0)'::tid))
 (2 rows)
 
@@ -129,7 +129,7 @@ select count(*) from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0
 (1 row)
 
 -- table larger than 3 files (one file is approximately 131072 pages)
-create table trs_gt_3f as select generate_series(1, 100000000) id;
+create table trs_gt_3f as select generate_series(1, 100000028) id;
 analyze trs_gt_3f;
 explain 
 select * from trs_gt_3f where ctid > '(131000,0)' and ctid < '(262150,0)';
