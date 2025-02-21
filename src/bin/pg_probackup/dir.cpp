@@ -563,6 +563,7 @@ dir_list_file(parray *files, const char *root, bool exclude, bool follow_symlink
                 root);
         else
             elog(WARNING, "Skip \"%s\": unexpected file format", root);
+        pgFileFree(file);
         return;
     }
     if (add_root)

@@ -283,6 +283,6 @@ make_pagemap_from_ptrack(parray *files,
             file->pagemap.bitmap = (unsigned char *)map->pagemap;
         }
     }
-
+    free(filemaps);
     free(dummy_map);
 }

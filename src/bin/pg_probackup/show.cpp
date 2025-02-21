@@ -140,7 +140,7 @@ do_show(const char *instance_name, time_t requested_backup_id, bool show_archive
             show_instance(instance, requested_backup_id, false);
 
         show_instance_end();
-
+        pfree(instance);
         return 0;
     }
     else
