@@ -55,6 +55,7 @@ typedef int (*dss_align_device_size)(int size);
 typedef int (*dss_link_device)(const char *oldpath, const char *newpath);
 typedef int (*dss_unlink_device)(const char *path);
 typedef int (*dss_device_name)(int handle, char *fname, size_t fname_size);
+typedef int (*dss_fcopy_device)(const char *src_path, const char *dest_path);
 typedef int (*dss_read_device_link)(const char *path, char *buf, int bufsize);
 typedef int (*dss_stat_device)(const char *path, dss_stat_info_t item);
 typedef int (*dss_lstat_device)(const char *path, dss_stat_info_t item);
@@ -93,6 +94,7 @@ typedef struct st_dss_device_op_t {
     dss_align_device_size dss_align_size;
     dss_device_size dss_fsize;
     dss_device_name dss_fname;
+    dss_fcopy_device dss_fcopy;
     dss_error_info dss_get_error;
     dss_open_device_dir dss_open_dir; 
     dss_read_device_dir dss_read_dir;
