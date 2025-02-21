@@ -12972,69 +12972,57 @@ ErrCode write_guc_file(const char* path, char** lines)
 
 static int copy_file_dss(char *scpath, char *despath)
 {
-    int fd_source, fd_target;
-    int res = 0;
-    ssize_t step_size = DSS_BYTE_AGAINST;
-    ssize_t read_size = DSS_BYTE_AGAINST;
-    struct stat statbuf;
-    char buffer[step_size];
-    off_t offset = 0;
+    const int buffer_size = 16384;
+    char buffer[buffer_size];
+    size_t need_write_size;
+    FILE *srcFile = fopen(scpath, "rb");
+    FILE *destFile = NULL;
 
-    if (lstat(despath, &statbuf) == 0) {
-        if (remove(despath) != 0) {
-            ereport(LOG, (errmsg("could not remove file: %s", despath)));
-            return -1;
-        }
-    }
-
-    fd_source = open(scpath, O_RDONLY, 0644);
-    if (fd_source < 0) {
-        ereport(LOG, (errmsg("could not open file: %s", scpath)));
-        return -1;
-    }   
-    fd_target = open(despath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd_target < 0) {
-        ereport(LOG, (errmsg("could not open file: %s", despath)));
-        close(fd_source);
+    if (srcFile == NULL) {
+        ereport(WARNING, (errmsg("could not open source file: %s:%s", scpath, TRANSLATE_ERRNO)));
         return -1;
     }
-    int size = lseek(fd_source, 0, SEEK_END);
 
-    lseek(fd_source, 0, SEEK_SET);
-    while (offset < size) {
-        if (offset + step_size > size) {
-            read_size = size - offset;
-            errno_t rc = memset_s(buffer, step_size, ' ', step_size);
-            securec_check(rc, "\0", "\0");
-            buffer[read_size] = '\n';
-        }
-        res = pread(fd_source, buffer, step_size, offset);
-        if (res != read_size && res != step_size) {
-            ereport(LOG, (errmsg("read %s, failed, errno: %s", scpath, strerror(errno))));
-            close(fd_source);
-            close(fd_target);
-            return -1;
-        }
-        res = pwrite(fd_target, buffer, step_size, offset);
-        if (res != step_size) {
-            ereport(LOG, (errmsg("write %s, failed, errno: %s", despath, strerror(errno))));
-            close(fd_source);
-            close(fd_target);
-            return -1;
-        }
-        offset += step_size;
+    if (remove(despath) != 0 && !is_file_delete(errno)) {
+        ereport(WARNING, (errmsg("could not remove destination file: %s:%s", despath, TRANSLATE_ERRNO)));
+        fclose(srcFile);
+        return -1;
     }
 
-    res = ftruncate(fd_target, size);
-    if (res != 0) {
-        close(fd_source);
-        close(fd_target);
-        ereport(LOG, (errmsg("truncate %s, failed, errno: %s", despath, strerror(errno))));
+    destFile = fopen(despath, "wb");
+    if (destFile == NULL) {
+        ereport(WARNING, (errmsg("could not create destination file: %s:%s", despath, TRANSLATE_ERRNO)));
+        fclose(srcFile);
         return -1;
     }
     
-    close(fd_source);
-    close(fd_target);
+    struct stat statbuf;
+    if (stat(scpath, &statbuf) == 0) {
+        need_write_size = statbuf.st_size;
+    } else {
+        ereport(WARNING, (errmsg("could not stat source file: %s:%s", scpath, TRANSLATE_ERRNO)));
+        fclose(srcFile);
+        fclose(destFile);
+        return -1;
+    }
+
+    if ((fread(buffer, 1, buffer_size, srcFile)) <= 0) {
+        ereport(WARNING, (errmsg("could not read source file: %s:%s", scpath, TRANSLATE_ERRNO)));
+        fclose(srcFile);
+        fclose(destFile);
+        return -1;
+    }
+    
+    /* not use read size because of the read size of file in dss is not the same as the file size */
+    if (fwrite(buffer, 1, need_write_size, destFile) <= 0 ) {
+        ereport(WARNING, (errmsg("write error to destination file: %s:%s", despath, TRANSLATE_ERRNO)));
+        fclose(srcFile);
+        fclose(destFile);
+        return -1;
+    }
+
+    fclose(srcFile);
+    fclose(destFile);
     return 0;
 }
 

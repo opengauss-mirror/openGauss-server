@@ -868,6 +868,11 @@ int dss_compare_size(const char *vg_name, long long *au_size)
     return GS_SUCCESS;
 }
 
+int dss_file_copy(const char *src_path, const char *dest_path)
+{
+    return g_dss_device_op.dss_fcopy(src_path, dest_path);
+}
+
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset)
 {
     return g_dss_device_op.dss_aio_pwrite(iocb, fd, buf, count, offset);
