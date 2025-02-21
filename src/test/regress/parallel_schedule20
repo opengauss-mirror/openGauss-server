@@ -39,3 +39,4 @@ test: mot/single_new_indexes
 test: mot/single_new_indexes2
 test: mot/single_new_indexes3
 test: mot/single_update_secondary_index_column
+test: mot/enable_mot_server

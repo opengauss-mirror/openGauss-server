@@ -77,10 +77,10 @@ DECLARE_LOGGER(InternalExecutor, FDW)
 // in a thread-pooled environment we need to ensure thread-locals are initialized properly
 static inline bool EnsureSafeThreadAccessInline(bool throwError = true)
 {
+    MOTCheckIsEnable();
     if (MOTCurrThreadId == INVALID_THREAD_ID) {
         MOT_LOG_DEBUG("Initializing safe thread access for current thread");
         if (MOT::AllocThreadId() == INVALID_THREAD_ID) {
-            MOTCheckIsEnable();
             MOT_LOG_ERROR("Failed to allocate thread identifier");
             if (throwError) {
                 ereport(ERROR, (errmodule(MOD_MOT), errmsg("Failed to allocate thread identifier")));
