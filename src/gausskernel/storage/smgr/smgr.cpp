@@ -289,7 +289,7 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             reln->encrypt = false;
             temp = col + 1;
             reln->smgr_bcm_nblocks = (BlockNumber*)MemoryContextAllocZero(
-                LocalSmgrStorageMemoryCxt(), temp * sizeof(BlockNumber));
+                LocalSmgrStorageMemoryCxt(false), temp * sizeof(BlockNumber));
             reln->smgr_bcmarry_size = temp;
             for (colnum = 0; colnum < reln->smgr_bcmarry_size; colnum++) {
                 reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
@@ -304,12 +304,12 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             if (reln->smgr_which == SEGMENT_MANAGER) {
                 reln->md_fdarray_size = fdNeeded;
                 reln->seg_desc = (struct SegmentDesc **)MemoryContextAllocZero(
-                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct SegmentDesc *));
+                    LocalSmgrStorageMemoryCxt(false), fdNeeded * sizeof(struct SegmentDesc *));
                 reln->md_fd = NULL;
             } else if (reln->smgr_which == MD_MANAGER) {
                 reln->md_fdarray_size = fdNeeded;
                 reln->md_fd = (struct _MdfdVec**)MemoryContextAllocZero(
-                                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct _MdfdVec*));
+                                    LocalSmgrStorageMemoryCxt(false), fdNeeded * sizeof(struct _MdfdVec*));
                 reln->seg_desc = NULL;
             } else {
                 reln->md_fdarray_size = 1;

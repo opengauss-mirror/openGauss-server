@@ -397,7 +397,7 @@ void CUStorage::SaveCU(char* write_buf, _in_ uint64 offset, _in_ int size, bool 
          * so we need fallocate first. In extend situation, lock is already
          * acquire in previous step.
          */
-        vfd *vfdcache = GetVfdCache();
+        vfd *vfdcache = GetVfdCache(false);
         int fd = vfdcache[m_fd].fd;
         if (is_dss_fd(fd)) {
             off_t fileSize = dss_get_file_size(m_fileName);

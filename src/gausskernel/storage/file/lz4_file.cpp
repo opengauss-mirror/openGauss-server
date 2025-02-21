@@ -48,6 +48,7 @@ LZ4File* LZ4FileCreate(bool interXact)
     lz4File->srcBuf = (char*)palloc(LZ4FileSrcBufSize);
 
     lz4File->file = OpenTemporaryFile(interXact);
+    lz4File->isInterXact = interXact;
     return lz4File;
 }
 
@@ -91,7 +92,8 @@ static void LZ4FileFlush(LZ4File* lz4File)
     }
 
     int bytestowrite =
-        FilePWrite(lz4File->file, lz4File->compressBuf, outSize + COMPRESS_DATA_SIZE, lz4File->curOffset);
+        FilePWrite(lz4File->file, lz4File->compressBuf, outSize + COMPRESS_DATA_SIZE, lz4File->curOffset,
+                   0, 0, lz4File->isInterXact);
     if (bytestowrite != outSize + COMPRESS_DATA_SIZE) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to temporary file: %m")));
     }
@@ -154,7 +156,8 @@ size_t LZ4FileRead(LZ4File* lz4File, char* buffer, size_t size)
         if (lz4File->readOffset >= lz4File->srcDataSize) {
             int len[2];
             /* Try to load more data into buffer. */
-            int nbytes = FilePRead(lz4File->file, (char*)len, COMPRESS_DATA_SIZE, lz4File->curOffset);
+            int nbytes = FilePRead(lz4File->file, (char*)len, COMPRESS_DATA_SIZE, lz4File->curOffset,
+                                   0, lz4File->isInterXact);
             /* no more data available */
             if (0 == nbytes)
                 return nread;
@@ -172,7 +175,8 @@ size_t LZ4FileRead(LZ4File* lz4File, char* buffer, size_t size)
                 lz4File->compressBufSize = compressSize;
             }
 
-            if (FilePRead(lz4File->file, lz4File->compressBuf, compressSize, lz4File->curOffset) != compressSize) {
+            if (FilePRead(lz4File->file, lz4File->compressBuf, compressSize, lz4File->curOffset,
+                          0, lz4File->isInterXact) != compressSize) {
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from temporary file: %m")));
             }
 
@@ -214,7 +218,7 @@ size_t LZ4FileRead(LZ4File* lz4File, char* buffer, size_t size)
 void LZ4FileClose(LZ4File* lz4File)
 {
     if (lz4File->file > 0) {
-        FileClose(lz4File->file);
+        FileClose(lz4File->file, lz4File->isInterXact);
         lz4File->file = FILE_INVALID;
         if (lz4File->srcBuf) {
             pfree(lz4File->srcBuf);
