@@ -52,7 +52,7 @@ extern void CreateLocalSysDBCache();
 extern MemoryContext LocalSharedCacheMemCxt();
 extern MemoryContext LocalMyDBCacheMemCxt();
 extern MemoryContext LocalGBucketMapMemCxt();
-extern MemoryContext LocalSmgrStorageMemoryCxt();
+extern MemoryContext LocalSmgrStorageMemoryCxt(bool inter_xact);
 
 extern bool EnableGlobalSysCache();
 
@@ -67,14 +67,14 @@ struct HTAB *GetTypeCacheHash();
 struct HTAB *GetTableSpaceCacheHash();
 struct HTAB *GetSMgrRelationHash();
 
-struct vfd *GetVfdCache();
-struct vfd **GetVfdCachePtr();
-void SetVfdCache(vfd *value);
-Size GetSizeVfdCache();
-Size *GetSizeVfdCachePtr();
-void SetSizeVfdCache(Size value);
-int GetVfdNfile();
-void AddVfdNfile(int n);
+struct vfd *GetVfdCache(bool inter_xact);
+struct vfd **GetVfdCachePtr(bool inter_xact);
+void SetVfdCache(vfd *value, bool inter_xact);
+Size GetSizeVfdCache(bool inter_xact);
+Size *GetSizeVfdCachePtr(bool inter_xact);
+void SetSizeVfdCache(Size value, bool inter_xact);
+int GetVfdNfile(bool inter_xact);
+void AddVfdNfile(int n, bool inter_xact);
 
 dlist_head *getUnownedReln();
 

@@ -35,6 +35,7 @@ typedef struct LZ4File {
     char* srcBuf;      /*  a temporary buffer for writing data.  */
     char* compressBuf; /*  a temporary buffer for compress data.  */
     off_t curOffset;   /* next read/write position in buffer */
+    bool isInterXact;  /* keep open over transactions? */
 
 public:
     void Reset()

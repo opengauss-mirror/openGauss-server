@@ -264,9 +264,9 @@ extern MemoryContext LocalGBucketMapMemCxt()
     }
 }
 
-MemoryContext LocalSmgrStorageMemoryCxt()
+MemoryContext LocalSmgrStorageMemoryCxt(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
     } else {
         return SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
@@ -378,72 +378,75 @@ struct HTAB *GetSMgrRelationHash()
     }
 }
 
-struct vfd *GetVfdCache()
+struct vfd *GetVfdCache(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return t_thrd.lsc_cxt.lsc->VfdCache;
     } else {
+        if (u_sess->storage_cxt.VfdCache == NULL) {
+            InitSessionFileAccess();
+        }
         return u_sess->storage_cxt.VfdCache;
     }
 }
 
-struct vfd **GetVfdCachePtr()
+struct vfd **GetVfdCachePtr(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return &t_thrd.lsc_cxt.lsc->VfdCache;
     } else {
         return &u_sess->storage_cxt.VfdCache;
     }
 }
 
-void SetVfdCache(vfd *value)
+void SetVfdCache(vfd *value, bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         t_thrd.lsc_cxt.lsc->VfdCache = value;
     } else {
         u_sess->storage_cxt.VfdCache = value;
     }
 }
 
-void SetSizeVfdCache(Size value)
+void SetSizeVfdCache(Size value, bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         t_thrd.lsc_cxt.lsc->SizeVfdCache = value;
     } else {
         u_sess->storage_cxt.SizeVfdCache = value;
     }
 }
 
-Size GetSizeVfdCache()
+Size GetSizeVfdCache(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return t_thrd.lsc_cxt.lsc->SizeVfdCache;
     } else {
         return u_sess->storage_cxt.SizeVfdCache;
     }
 }
 
-Size *GetSizeVfdCachePtr()
+Size *GetSizeVfdCachePtr(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return &t_thrd.lsc_cxt.lsc->SizeVfdCache;
     } else {
         return &u_sess->storage_cxt.SizeVfdCache;
     }
 }
 
-int GetVfdNfile()
+int GetVfdNfile(bool inter_xact)
 {
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         return t_thrd.lsc_cxt.lsc->nfile;
     } else {
         return u_sess->storage_cxt.nfile;
     }
 }
-void AddVfdNfile(int n)
+void AddVfdNfile(int n, bool inter_xact)
 {
     Assert(n == 1 || n == -1);
-    if (EnableLocalSysCache()) {
+    if (EnableLocalSysCache() && !inter_xact) {
         t_thrd.lsc_cxt.lsc->nfile += n;
     } else {
         u_sess->storage_cxt.nfile += n;
