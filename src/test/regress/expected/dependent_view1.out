@@ -1461,6 +1461,85 @@ View definition:
 
 drop view v1;
 drop table t1;
+-- test MATERIALIZED VIEW
+CREATE TABLE my_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+NOTICE:  CREATE TABLE will create implicit sequence "my_table_id_seq" for serial column "my_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "my_table_pkey" for table "my_table"
+INSERT INTO my_table (name, age) VALUES ('Alice', 25);
+INSERT INTO my_table (name, age) VALUES ('Bob', 18);
+INSERT INTO my_table (name, age) VALUES ('Charlie', 22);
+CREATE MATERIALIZED VIEW my_materialized_view AS SELECT id, name FROM my_table WHERE age > 20;
+CREATE incremental MATERIALIZED VIEW increment_materialized_view as select * from my_table;
+-- error: have incremental materialized view
+drop TABLE my_table;
+ERROR:  cannot drop table my_table because other objects depend on it
+DETAIL:  materialized view increment_materialized_view depends on table my_table
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+drop MATERIALIZED VIEW increment_materialized_view;
+drop TABLE my_table; -- success
+\d+ my_materialized_view
+           Materialized view "test_view_table_depend.my_materialized_view"
+ Column |          Type          | Modifiers | Storage  | Stats target | Description 
+--------+------------------------+-----------+----------+--------------+-------------
+ id     | integer                |           | plain    |              | 
+ name   | character varying(100) |           | extended |              | 
+Rules:
+    "_RETURN" AS
+    ON SELECT TO my_materialized_view DO INSTEAD  SELECT my_table.id, 
+    my_table.name
+   FROM my_table
+  WHERE my_table.age > 20
+Replica Identity: NOTHING
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from my_materialized_view;
+ id |  name   
+----+---------
+  1 | Alice
+  3 | Charlie
+(2 rows)
+
+refresh MATERIALIZED VIEW my_materialized_view; --error
+ERROR:  The materialized view my_materialized_view is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+CREATE TABLE my_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+NOTICE:  CREATE TABLE will create implicit sequence "my_table_id_seq" for serial column "my_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "my_table_pkey" for table "my_table"
+\d+ my_materialized_view
+           Materialized view "test_view_table_depend.my_materialized_view"
+ Column |          Type          | Modifiers | Storage  | Stats target | Description 
+--------+------------------------+-----------+----------+--------------+-------------
+ id     | integer                |           | plain    |              | 
+ name   | character varying(100) |           | extended |              | 
+Rules:
+    "_RETURN" AS
+    ON SELECT TO my_materialized_view DO INSTEAD  SELECT my_table.id, 
+    my_table.name
+   FROM my_table
+  WHERE my_table.age > 20
+Replica Identity: NOTHING
+Has OIDs: no
+Options: orientation=row, compression=no
+
+refresh MATERIALIZED VIEW my_materialized_view; --success
+select * from my_materialized_view;
+ id | name 
+----+------
+(0 rows)
+
+drop table my_table;
+drop MATERIALIZED VIEW my_materialized_view;
 drop schema test_view_table_depend cascade;
 NOTICE:  drop cascades to view partition_v3
 reset current_schema;

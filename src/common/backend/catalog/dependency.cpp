@@ -1016,8 +1016,13 @@ void reportDependentObjects(
                 add_exact_object_address_extra(obj, extra, newTargetObjects);
             } else if (objClass == OCLASS_CLASS && (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW)) {
                 viewOid = obj->objectId;
-                SetPgObjectValid(obj->objectId,
-                                 relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW, false);
+                if (relkind == RELKIND_MATVIEW && is_incremental_matview(viewOid)) {
+                    /* increment matview not support */
+                    add_exact_object_address_extra(obj, extra, newTargetObjects);
+                } else {
+                    SetPgObjectValid(obj->objectId,
+                                     relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW, false);
+                }
             } else if (objClass == OCLASS_TYPE && originalObj != NULL) {
                 if (shouldDeletePgTypeEntry(obj->objectId, viewOid)) {
                     // delete pg_type entry

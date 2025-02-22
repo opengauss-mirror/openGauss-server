@@ -1222,13 +1222,6 @@ ObjectAddress ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *qu
                                           RangeVarCallbackOwnsMatView, NULL);
     matviewRel = heap_open(matviewOid, NoLock);
 
-    if (!ValidateDependView(matviewOid, OBJECT_TYPE_MATVIEW)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The materialized view %s is invalid, please make it valid before operation.",
-                       RelationGetRelationName(matviewRel)),
-                    errhint("Please re-add missing table fields.")));
-    }
     /*
      * Switch to the owner's userid, so that any functions are run as that
      * user.  Also lock down security-restricted operations and arrange to
