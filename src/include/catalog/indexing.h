@@ -433,7 +433,8 @@ DECLARE_UNIQUE_INDEX(pg_partition_partoid_index, 3479, on pg_partition using btr
 /* Add index of indextable and parent oid for pg_partition */
 DECLARE_UNIQUE_INDEX(pg_partition_indextblid_parentoid_reloid_index, 9996, on pg_partition using btree(indextblid oid_ops, parentid oid_ops, oid oid_ops));
 #define PartitionIndexTableIdParentOidIndexId  9996
-
+DECLARE_INDEX(pg_partition_tblspc_relfilenode_index, 3480, on pg_partition using btree(reltablespace oid_ops, relfilenode oid_ops));
+#define PartitionTblspcRelfilenodeIndexId  3480
 
 /* Add index of table oid for pg_hashbucket */
 DECLARE_UNIQUE_INDEX(pg_hashbucket_oid_index, 3492, on pg_hashbucket using btree(oid oid_ops));
