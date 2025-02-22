@@ -2677,6 +2677,7 @@ found_branch:
 
                 if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
                     bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, blockNum, mode);
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
                 }
             }
             return BufferDescriptorGetBuffer(bufHdr);
@@ -2782,6 +2783,9 @@ found_branch:
                         /* when reform fail, should return InvalidBuffer to reform proc thread */
                         if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
                             SSUnPinBuffer(bufHdr);
+                            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+                                ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+                            }
                             return InvalidBuffer;
                         }
                         /* when in failover, should return to worker thread exit */
@@ -2803,7 +2807,12 @@ found_branch:
                 break;
             } while (true);
 
-            return TerminateReadPage(bufHdr, mode, pblk);
+            Buffer tmpBuffer = TerminateReadPage(bufHdr, mode, pblk);
+            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+                ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+            }
+            return tmpBuffer;
+
         }
         ClearReadHint(bufHdr->buf_id);
     }
@@ -3276,8 +3285,10 @@ retry_new_buffer:
                 buf_id = BufTableLookup(&new_tag, new_hash);
 
                 /* If the slot has been eliminated, find another slot and retry. */
-                if (buf_id < 0)
+                if (buf_id < 0) {
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(buf, fork_num, block_num);
                     continue;
+                }
 
                 /* remaining code should match code at top of routine */
                 buf = GetBufferDescriptor(buf_id);
@@ -3292,8 +3303,9 @@ retry_new_buffer:
                 * Checkpoint if buffer need to redo and try hashMap partition lock,
                 * if need to redo but doesn't get lock, unpinbuffer and retry.
                 */
-                if (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING &&
-                    SS_PRIMARY_ONDEMAND_RECOVERY) {
+                if (SS_PRIMARY_ONDEMAND_RECOVERY &&
+                    ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                    ONDEMAND_HASHMAP_ENTRY_REDOING) {
                     UnpinBuffer(buf, true);
                     while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
                         ONDEMAND_HASHMAP_ENTRY_REDOING && SS_PRIMARY_MODE) {
