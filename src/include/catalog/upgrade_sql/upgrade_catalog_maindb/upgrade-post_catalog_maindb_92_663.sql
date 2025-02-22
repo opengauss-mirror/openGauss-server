@@ -105,10 +105,10 @@ AS 'SELECT pg_catalog.pgfadvise($1, ''main'', 50)'
 ;
 
 
-DROP FUNCTION IF EXISTS pg_catalog.pgfadvise_loader(regclass, text, char, text, int, bool, bool, varbit) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pgfadvise_loader(regclass, text, "char", text, int, bool, bool, varbit) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 2373;
-CREATE FUNCTION
-pg_catalog.pgfadvise_loader(IN regclass, IN text, IN char, IN text, IN int, IN bool, IN bool, IN varbit,
+CREATE OR REPLACE FUNCTION
+pg_catalog.pgfadvise_loader(IN regclass, IN text, IN "char", IN text, IN int, IN bool, IN bool, IN varbit,
 				 OUT relpath text,
 				 OUT os_page_size bigint,
 				 OUT os_pages_free bigint,
@@ -117,14 +117,14 @@ pg_catalog.pgfadvise_loader(IN regclass, IN text, IN char, IN text, IN int, IN b
 RETURNS setof record LANGUAGE INTERNAL VOLATILE
 AS 'pgfadvise_loader'
 ;
-COMMENT ON FUNCTION pg_catalog.pgfadvise_loader(regclass, text, char, text, int, bool, bool, varbit)
+COMMENT ON FUNCTION pg_catalog.pgfadvise_loader(regclass, text, "char", text, int, bool, bool, varbit)
 IS 'Restore cache from the snapshot, options to load/unload each block to/from cache';
 
 
-DROP FUNCTION IF EXISTS pg_catalog.pgfadvise_loader(regclass, char, text, int, bool, bool, varbit) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pgfadvise_loader(regclass, "char", text, int, bool, bool, varbit) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 2539;
-CREATE FUNCTION
-pg_catalog.pgfadvise_loader(IN regclass, IN char, IN text, IN int, IN bool, IN bool, IN varbit,
+CREATE OR REPLACE FUNCTION
+pg_catalog.pgfadvise_loader(IN regclass, IN "char", IN text, IN int, IN bool, IN bool, IN varbit,
 				 OUT relpath text,
 				 OUT os_page_size bigint,
 				 OUT os_pages_free bigint,
