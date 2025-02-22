@@ -19,6 +19,7 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 // include "access/htup_details.h"
+#include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_tablespace.h"
@@ -457,10 +458,17 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid &partati
     securec_check(rc, "", "");
 
     /* set scan arguments */
+    int skeyNum = 2;
     skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
     skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-    scandesc = systable_beginscan(relation, InvalidOid, false, NULL, 2, skey);
+    if (IndexGetRelation(PartitionTblspcRelfilenodeIndexId, true) == PartitionRelationId) {
+        /* decode WAL produced after creating pg_partition_tblspc_relfilenode_index upgrade */
+        scandesc = systable_beginscan(relation, PartitionTblspcRelfilenodeIndexId, true, NULL, skeyNum, skey);
+    } else {
+        /* decode WAL produced before creating pg_partition_tblspc_relfilenode_index upgrade */
+        scandesc = systable_beginscan(relation, InvalidOid, false, NULL, skeyNum, skey);
+    }
 
     while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
         Form_pg_partition partForm = (Form_pg_partition)GETSTRUCT(ntp);
