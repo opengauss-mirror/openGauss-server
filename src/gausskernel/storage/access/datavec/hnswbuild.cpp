@@ -654,6 +654,16 @@ static void CreateGraphPages(HnswBuildState *buildstate)
     page = BufferGetPage(buf);
     HnswInitPage(buf, page);
 
+    /* Check vector and pqcode can be on the same page */
+    if (!HnswPtrIsNull(base, buildstate->graph->head)) {
+        HnswElement head = (HnswElement)HnswPtrAccess(base, buildstate->graph->head);
+        Size elementSize = HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY((Pointer)HnswPtrAccess(base, head->value)));
+        if (PageGetFreeSpace(page) < elementSize + MAXALIGN(pqcodesSize)) {
+            int maxPQcodeSize = ((PageGetFreeSpace(page) - elementSize) / 8) * 8;
+            ereport(ERROR, (errmsg("vector and pqcode must be on the same page, max pq_m is %d", maxPQcodeSize)));
+        }
+    }
+
     if (buildstate->isUStore) {
         HnswPageGetOpaque(page)->pageType = HNSW_USTORE_PAGE_TYPE;
     }

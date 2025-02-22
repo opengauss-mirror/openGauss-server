@@ -428,8 +428,19 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
 
     TupleTableSlot *slot = MakeSingleTupleTableSlot(buildstate->tupdesc);
     TupleDesc tupdesc = RelationGetDescr(index);
+    Size pqcodesSize = buildstate->pqcodeSize;
 
     GetNextTuple(buildstate->sortstate, tupdesc, slot, &itup, &list);
+
+    /* Check vector and pqcode can be on the same page */
+    if (list != -1) {
+        Size itemsize = MAXALIGN(IndexTupleSize(itup));
+        Size emptyFreeSize = BLCKSZ - sizeof(IvfflatPageOpaqueData) - SizeOfPageHeaderData - sizeof(ItemIdData);
+        if (emptyFreeSize < itemsize + MAXALIGN(pqcodesSize)) {
+            int maxPQcodeSize = ((emptyFreeSize - itemsize) / 8) * 8;
+            ereport(ERROR, (errmsg("vector and pqcode must be on the same page, max pq_m is %d", maxPQcodeSize)));
+        }
+    }
 
     for (int i = 0; i < buildstate->centers->length; i++) {
         Buffer buf;
@@ -437,7 +448,6 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
         GenericXLogState *state;
         BlockNumber startPage;
         BlockNumber insertPage;
-        Size pqcodesSize = buildstate->pqcodeSize;
 
         /* Can take a while, so ensure we can interrupt */
         /* Needs to be called when no buffer locks are held */
@@ -564,6 +574,9 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
     buildstate->residuals = NULL;
 
     if (buildstate->enablePQ) {
+        if (buildstate->dimensions % buildstate->pqM != 0) {
+            ereport(ERROR, (errmsg("dimensions must be divisible by pq_m, please reset pq_m.")));
+        }
         Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
         subItemsize = MAXALIGN(subItemsize);
         buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
