@@ -294,7 +294,7 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
         }
     }
 
-    if (fstat(GetVfdCache()[fd].fd, &statBuffer) < 0) {
+    if (fstat(GetVfdCache(false)[fd].fd, &statBuffer) < 0) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
         ereport(ERROR, (errmsg(UNDOFORMAT("could not stat file \"%s\": %m."), path)));
     }

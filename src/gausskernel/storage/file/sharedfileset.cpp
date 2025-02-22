@@ -108,7 +108,7 @@ File SharedFileSetCreate(SharedFileSet *fileset, const char *name)
     File file;
 
     SharedFilePath(path, fileset, name);
-    file = PathNameCreateTemporaryFile(path, false);
+    file = PathNameCreateTemporaryFile(path, false, false);
     /* If we failed, see if we need to create the directory on demand. */
     if (file <= 0) {
         char tempdirpath[MAXPGPATH];
@@ -118,7 +118,7 @@ File SharedFileSetCreate(SharedFileSet *fileset, const char *name)
         TempTablespacePath(tempdirpath, tablespace);
         SharedFileSetPath(filesetpath, fileset, tablespace);
         PathNameCreateTemporaryDir(tempdirpath, filesetpath);
-        file = PathNameCreateTemporaryFile(path, true);
+        file = PathNameCreateTemporaryFile(path, true, false);
     }
 
     return file;

@@ -167,3 +167,14 @@ select count(*) from hdfs_pro_cursor_002_1;
 drop table hdfs_pro_cursor_002_tmp;
 drop table hdfs_pro_cursor_002_1;
 drop function hdfs_fun_ref_cur_001_tmp;
+
+create table test_interxact_vfd(c1 int, c2 text, c3 text);
+insert into test_interxact_vfd values (generate_series(1,10000), 'hello world', 'foobar');
+set work_mem = '64kB';
+declare cur_with_hold_t1 no scroll binary cursor with hold for select * from test_interxact_vfd;
+fetch forward 2 from cur_with_hold_t1;
+move forward 1 in cur_with_hold_t1;
+
+close cur_with_hold_t1;
+drop table test_interxact_vfd;
+reset work_mem;

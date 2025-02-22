@@ -633,7 +633,7 @@ CREATE_DESC:
      * Initialize the segment descriptor in SMgrRelationData.
      */
     SegmentDesc *fork_desc =
-        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(false), sizeof(SegmentDesc));
     fork_desc->head_blocknum = fork_head_blocknum;
     fork_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(fork_head_blocknum >= DF_MAP_GROUP_SIZE);
@@ -971,7 +971,7 @@ static bool bucket_open_segment(SMgrRelation reln, int forknum, bool create, XLo
     }
 
     SegmentDesc *seg_desc =
-        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(false), sizeof(SegmentDesc));
     seg_desc->head_blocknum = head_blocknum;
     seg_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(head_blocknum >= DF_MAP_GROUP_SIZE);
