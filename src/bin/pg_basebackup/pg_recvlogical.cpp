@@ -768,6 +768,8 @@ static void StreamLogicalLog(void)
         }
 
         if (g_parallel_decode && (g_decode_style == 'b' || g_batch_sending)) {
+            destroyPQExpBuffer(res);
+            res = NULL;
             continue;
         }
         if (write(outfd, "\n", 1) != 1) {
