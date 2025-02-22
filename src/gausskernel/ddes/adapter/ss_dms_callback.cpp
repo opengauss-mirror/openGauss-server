@@ -2247,15 +2247,31 @@ static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
 
 static int CBDBCheckLock(void *db_handle)
 {
-    if (t_thrd.storage_cxt.num_held_lwlocks > 0) {
-        TimestampTz now = GetCurrentTimestamp();
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS lock] hold lock, lock address:%p, lock mode:%u, time:%ld ms",
-            t_thrd.storage_cxt.held_lwlocks[0].lock,
-            t_thrd.storage_cxt.held_lwlocks[0].mode,
-            now - t_thrd.storage_cxt.lwlock_held_times[0])));
-        return GS_ERROR;
+    if (t_thrd.storage_cxt.num_held_lwlocks <= 0) {
+        return GS_SUCCESS;
     }
-    return GS_SUCCESS;
+
+    int level = WARNING;
+#ifdef ENABLE_DEBUG
+    level = PANIC;
+#endif
+
+    TimestampTz now = GetCurrentTimestamp();
+    for (int i = t_thrd.storage_cxt.num_held_lwlocks - 1; i >= 0; i--) {
+        LWLockHandle handle = t_thrd.storage_cxt.held_lwlocks[i];
+        if (t_thrd.storage_cxt.held_lwlocks[i].lock != NULL) {
+            ereport(level, (errmodule(MOD_DMS),
+                errmsg("[SS lock] hold lock, lock address:%p, "
+                       "lock tranche:%u, lock mode:%u, time:%ld us",
+                       t_thrd.storage_cxt.held_lwlocks[i].lock,
+                       t_thrd.storage_cxt.held_lwlocks[i].lock->tranche,
+                       t_thrd.storage_cxt.held_lwlocks[i].mode,
+                       now - t_thrd.storage_cxt.lwlock_held_times[0])));
+            LWLockRelease(t_thrd.storage_cxt.held_lwlocks[i].lock);
+        }
+    }
+
+    return GS_ERROR;
 }
 
 static int CBCacheMsg(void *db_handle, char* msg)

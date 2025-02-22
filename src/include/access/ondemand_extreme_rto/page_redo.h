@@ -281,6 +281,7 @@ LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, Blo
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
+bool ReleaseHashMapLockIfAny(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 void RedoWorkerQueueCallBack();
 void OndemandProcPauseStatus();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
