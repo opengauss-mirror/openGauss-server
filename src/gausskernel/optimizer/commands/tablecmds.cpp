@@ -3024,6 +3024,16 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     }
 
     if (ENABLE_DMS && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        if ((t_thrd.proc->workingVersionNum < PAGE_BASED_VERSION_NUM) 
+            && ((stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED)
+            || (stmt->relation->relpersistence == RELPERSISTENCE_TEMP)
+            || (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+            || (relkind == RELKIND_MATVIEW)
+            || (relkind == RELKIND_FOREIGN_TABLE))) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Page Characteristics Table not supported in current version!")));
+        }
+
         if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE
             && (stmt->relation->relpersistence != RELPERSISTENCE_UNLOGGED)
             && (stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
