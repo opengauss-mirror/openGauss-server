@@ -2496,7 +2496,7 @@ static void CBReformHealthCheck(void *db_handle, unsigned int current_step, unsi
             _exit(0);
             break;
 
-        case DMS_REFORM_STEP_RECOVERY:
+        case DMS_REFORM_STEP_RECOVERY_OPENGAUSS:
             currentLsn = GetXLogReplayRecPtr(NULL, NULL);
             if (dyn_log_time - lastDynLogTime <
                 DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_CHECK_INTERVFAL) {
