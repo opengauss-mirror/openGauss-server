@@ -56,6 +56,11 @@ BEGIN
 END;
 /
 \unset VERBOSITY
+-- Tests for keywords that contains in a multi-word token
+CREATE INDEX ON ON;
+ERROR:  syntax error at or near "ON"
+LINE 1: CREATE INDEX ON ON;
+                        ^
 SET CURRENT_SCHEMA TO DEFAULT;
 DROP SCHEMA keywords CASCADE;
 NOTICE:  drop cascades to 5 other objects

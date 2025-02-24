@@ -135,35 +135,34 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     return yyextra.parsetree;
 }
 
-#define GET_NEXT_TOKEN_WITHOUT_YY()                                             \
-    do {                                                                        \
+#define GET_NEXT_TOKEN_WITHOUT_YY()                                            \
+    do {                                                                       \
         if (lookahead_len) {                                                   \
-            base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];   \
+            base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];      \
             next_token = lookahead.token;                                      \
             next_yyleng = lookahead.yyleng;                                    \
             lvalp->core_yystype = lookahead.yylval;                            \
             *llocp = lookahead.yylloc;                                         \
-            scanbuf[lookahead.prev_hold_char_loc] = lookahead.prev_hold_char; \
-            scanbuf[lookahead.yylloc + lookahead.yyleng] = '\0';              \
+            scanbuf[lookahead.prev_hold_char_loc] = lookahead.prev_hold_char;  \
+            scanbuf[lookahead.yylloc + lookahead.yyleng] = '\0';               \
             lookahead_len--;                                                   \
-        } else {                                                                \
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);  \
-            next_yyleng = pg_yyget_leng(yyscanner);                             \
-        }                                                                       \
+        } else {                                                               \
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner); \
+            next_yyleng = pg_yyget_leng(yyscanner);                            \
+        }                                                                      \
     } while (0)
 
-#define GET_NEXT_TOKEN()                                                                                 \
-    do {                                                                                                 \
-        cur_yylval = lvalp->core_yystype;                                                                \
-        cur_yylloc = *llocp;                                                                             \
-        cur_yyleng = lookahead_len ? lookaheads[lookahead_len - 1].yyleng : pg_yyget_leng(yyscanner); \
-        GET_NEXT_TOKEN_WITHOUT_YY();                                                                     \
+#define GET_NEXT_TOKEN()                  \
+    do {                                  \
+        cur_yylval = lvalp->core_yystype; \
+        cur_yylloc = *llocp;              \
+        GET_NEXT_TOKEN_WITHOUT_YY();      \
     } while (0)
 
-#define SET_LOOKAHEAD_TOKEN()                                         \
-    do {                                                              \
-        lookahead_len = 1;                                  \
-        base_yy_lookahead& lookahead = lookaheads[0];     \
+#define SET_LOOKAHEAD_TOKEN()                                        \
+    do {                                                             \
+        lookahead_len = 1;                                           \
+        base_yy_lookahead& lookahead = lookaheads[0];                \
         lookahead.token = next_token;                                \
         lookahead.yylval = lvalp->core_yystype;                      \
         lookahead.yylloc = *llocp;                                   \
@@ -172,9 +171,9 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         lookahead.prev_hold_char = scanbuf[cur_yylloc + cur_yyleng]; \
     } while (0)
 
-#define PARSE_CURSOR_PARENTHESES_AS_EXPR()                                     \
-    do {                                                                       \
-        cur_token = CURSOR_EXPR;                                               \
+#define PARSE_CURSOR_PARENTHESES_AS_EXPR()                                    \
+    do {                                                                      \
+        cur_token = CURSOR_EXPR;                                              \
         lookaheads[0].token = next_token_2;                                   \
         lookaheads[0].yylval = lvalp->core_yystype;                           \
         lookaheads[0].yylloc = *llocp;                                        \
@@ -182,12 +181,12 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         lookaheads[0].prev_hold_char_loc = cur_yylloc_2 + next_yyleng_1;      \
         lookaheads[0].prev_hold_char = scanbuf[cur_yylloc_2 + next_yyleng_1]; \
         lookahead_len = 1;                                                    \
-        lvalp->core_yystype = core_yystype_2;                                  \
-        *llocp = cur_yylloc_2;                                                 \
+        lvalp->core_yystype = core_yystype_2;                                 \
+        *llocp = cur_yylloc_2;                                                \
     } while (0)
 
-#define SET_LOOKAHEAD_2_TOKEN()                                                \
-    do {                                                                       \
+#define SET_LOOKAHEAD_2_TOKEN()                                               \
+    do {                                                                      \
         lookaheads[1].token = next_token_1;                                   \
         lookaheads[1].yylval = core_yystype_2;                                \
         lookaheads[1].yylloc = cur_yylloc_2;                                  \
@@ -201,13 +200,13 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         lookaheads[0].prev_hold_char_loc = cur_yylloc_2 + next_yyleng_1;      \
         lookaheads[0].prev_hold_char = scanbuf[cur_yylloc_2 + next_yyleng_1]; \
         lookahead_len = 2;                                                    \
-        lvalp->core_yystype = core_yystype_1;                                  \
-        *llocp = cur_yylloc_1;                                                 \
-        scanbuf[cur_yylloc_1 + cur_yyleng_1] = '\0';                           \
+        lvalp->core_yystype = core_yystype_1;                                 \
+        *llocp = cur_yylloc_1;                                                \
+        scanbuf[cur_yylloc_1 + cur_yyleng_1] = '\0';                          \
     } while (0)
 
-#define SET_LOOKAHEAD_3_TOKEN()                      \
-    do {                                             \
+#define SET_LOOKAHEAD_3_TOKEN()                     \
+    do {                                            \
         lookaheads[2].token = next_token_2;         \
         lookaheads[2].yylval = core_yystype_3;      \
         lookaheads[2].yylloc = cur_yylloc_3;        \
@@ -217,10 +216,11 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         lookaheads[0].token = next_token_3;         \
         lookaheads[0].yylval = lvalp->core_yystype; \
         lookaheads[0].yylloc = *llocp;              \
-        lookahead_len = 3;                  \
-        lvalp->core_yystype = core_yystype_1;        \
-        *llocp = cur_yylloc_1;                       \
+        lookahead_len = 3;                          \
+        lvalp->core_yystype = core_yystype_1;       \
+        *llocp = cur_yylloc_1;                      \
     } while (0)
+
 /*
  * Intermediate filter between parser and core lexer (core_yylex in scan.l).
  *
@@ -265,8 +265,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
 
     /* Get next token --- we might already have it */
     if (lookahead_len != 0) {
-        base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];
+        const base_yy_lookahead& lookahead = lookaheads[lookahead_len - 1];
         cur_token = lookahead.token;
+        cur_yyleng = lookahead.yyleng;
         lvalp->core_yystype = lookahead.yylval;
         *llocp = lookahead.yylloc;
         scanbuf[lookahead.prev_hold_char_loc] = lookahead.prev_hold_char;
@@ -274,6 +275,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
         lookahead_len--;
     } else {
         cur_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+        cur_yyleng = pg_yyget_leng(yyscanner);
     }
 
     if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT
