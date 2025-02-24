@@ -66,5 +66,8 @@ END;
 
 \unset VERBOSITY
 
+-- Tests for keywords that contains in a multi-word token
+CREATE INDEX ON ON;
+
 SET CURRENT_SCHEMA TO DEFAULT;
 DROP SCHEMA keywords CASCADE;
