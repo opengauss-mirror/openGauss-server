@@ -58,7 +58,7 @@ static void CreatePQPages(IvfflatBuildState *buildstate, ForkNumber fNum)
     Buffer buf;
     Page page;
     uint16 pqTableNblk;
-    uint16 pqPreComputeTableNblk;
+    uint32 pqPreComputeTableNblk;
     GenericXLogState *state;
 
     IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqPreComputeTableNblk, NULL);
@@ -72,7 +72,7 @@ static void CreatePQPages(IvfflatBuildState *buildstate, ForkNumber fNum)
     }
 
     /* create pq distance table page */
-    for (uint16 i = 0; i < pqPreComputeTableNblk; i++) {
+    for (uint32 i = 0; i < pqPreComputeTableNblk; i++) {
         buf = IvfflatNewBuffer(index, forkNum);
         IvfflatInitRegisterPage(index, &buf, &page, &state);
         MarkBufferDirty(buf);
@@ -695,9 +695,9 @@ static void CreateMetaPage(Relation index, IvfflatBuildState *buildstate, ForkNu
             (metap->pqTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
         if (buildstate->byResidual &&
             (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE)) {
-            uint32 TableLen = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
-            metap->pqPreComputeTableSize = (uint32)TableLen * sizeof(float);
-            metap->pqPreComputeTableNblk = (uint16)(
+            uint64 TableLen = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
+            metap->pqPreComputeTableSize = (uint64)TableLen * sizeof(float);
+            metap->pqPreComputeTableNblk = (uint32)(
                 (metap->pqPreComputeTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
         }
     } else {

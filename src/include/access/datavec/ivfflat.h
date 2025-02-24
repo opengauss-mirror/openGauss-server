@@ -261,7 +261,7 @@ typedef struct IvfflatMetaPageData {
     uint32 pqTableSize;
     uint16 pqTableNblk;
     uint64 pqPreComputeTableSize;
-    uint16 pqPreComputeTableNblk;
+    uint32 pqPreComputeTableNblk;
 } IvfflatMetaPageData;
 
 typedef IvfflatMetaPageData *IvfflatMetaPage;
@@ -287,6 +287,7 @@ typedef struct IvfflatScanList {
     BlockNumber startPage;
     double distance;
     int key;
+    double pqDistance;
 } IvfflatScanList;
 
 typedef struct IvfflatScanOpaqueData {
@@ -356,9 +357,9 @@ int IvfGetByResidual(Relation index);
 
 
 void IvfGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
-                              uint16 *pqPreComputeTableNblk, uint32 *pqPreComputeTableSize);
+                              uint32 *pqPreComputeTableNblk, uint64 *pqPreComputeTableSize);
 int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
-void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize);
+void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize);
 void IvfFlushPQInfo(IvfflatBuildState *buildstate);
 
 int IvfComputePQTable(VectorArray samples, PQParams *params);

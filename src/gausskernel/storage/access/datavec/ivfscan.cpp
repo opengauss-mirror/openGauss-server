@@ -54,7 +54,7 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
 {
     IvfflatScanOpaque so = (IvfflatScanOpaque)scan->opaque;
     uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
+    uint32 pqDisTableNblk;
     IvfGetPQInfoFromMetaPage(scan->indexRelation, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
     BlockNumber nextblkno = IVFPQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
     int listId = 0;
@@ -86,6 +86,12 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
                 scanlist->distance = distance;
                 scanlist->key = listId;
                 listId++;
+                if (so->funcType == IVFPQ_DIS_COSINE && so->byResidual) {
+                    Vector *vd = (Vector *)DatumGetPointer(value);
+                    scanlist->pqDistance = VectorL2SquaredDistance(so->dimensions, list->center.x, vd->x);
+                } else {
+                    scanlist->pqDistance = distance;
+                }
                 /* Add to heap */
                 pairingheap_add(so->listQueue, &scanlist->ph_node);
             }
@@ -246,7 +252,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
     int listCount = 0;
     while (!pairingheap_is_empty(so->listQueue)) {
         IvfflatScanList *scanlist = (IvfflatScanList *)pairingheap_remove_first(so->listQueue);
-        double dis0 = so->byResidual ? scanlist->distance : 0;
+        double dis0 = so->byResidual ? scanlist->pqDistance : 0;
         BlockNumber searchPage = scanlist->startPage;
         int key = scanlist->key;
         float *simTable2;
