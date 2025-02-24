@@ -42,6 +42,14 @@ extern void CheckCloseFile(FILE *outputfile, char *outputFilename, bool is_error
 
 extern void validate_xlog_location(char *str);
 
+extern void DumpOnePage(Page buffer, const BufferTag& buf_tag, char* pageType, char* specifiedDir,
+                        BlockNumber blkno, const RelFileNode &rnode);
+
+extern bool CheckDumpPageSpecifiedDirectory(char* specifiedDir);
+
+extern void DumpPageToSpecifiedDirectory(Buffer buffer, char* pageType, bool dump, Relation rel,
+                                         BlockNumber blkno, const XLogPhyBlock *pblk, char* specifiedDir);
+
 #define MAXFILENAME 4096
 #define MAXFNAMELEN 64
 #define MAXOUTPUTLEN 1048576
@@ -51,5 +59,10 @@ extern void validate_xlog_location(char *str);
 #define FIVE 5
 #define SHORTOUTPUTLEN 200
 #define MAXUNDOFILENAMELEN 512
+
+typedef struct PageParseText {
+    RelFileNode *rel_node;
+    char format_output[FLEXIBLE_ARRAY_MEMBER];
+} PageParseText;
 
 #endif /* OPENGAUSS_PAGEPARSE_H */
