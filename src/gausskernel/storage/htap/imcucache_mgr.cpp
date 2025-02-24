@@ -405,9 +405,10 @@ void IMCUDataCacheMgr::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int
 
 IMCSDesc* IMCUDataCacheMgr::GetImcsDesc(Oid relOid)
 {
-    if (!HAVE_HTAP_TABLES) {
+    if (!HAVE_HTAP_TABLES || CHECK_IMCSTORE_CACHE_DOWN) {
         return NULL;
     }
+
     LWLockAcquire(m_imcs_lock, LW_SHARED);
     IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, NULL);
     LWLockRelease(m_imcs_lock);
@@ -539,6 +540,7 @@ bool IMCUDataCacheMgr::HasInitialImcsTable()
 
 void IMCUDataCacheMgr::ResetInstance()
 {
+    ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
     if (g_instance.attr.attr_memory.enable_borrow_memory) {
         m_data_cache->FreeAllBorrowMemPool();
     }
@@ -549,7 +551,7 @@ void IMCUDataCacheMgr::ResetInstance()
     }
 
     CreateIMCUDirAndClearCUFiles();
-    ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
+    ereport(WARNING, (errmsg("IMCStore data cache manager reset successfully.")));
 }
 
 bool IMCUDataCacheMgr::IsBorrowSlotId(CacheSlotId_t slotId)

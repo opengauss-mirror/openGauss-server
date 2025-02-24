@@ -22388,7 +22388,7 @@ static void ATExecGenericOptions(Relation rel, List* options)
     tableam_tops_free_tuple(tuple);
 }
 
- #ifdef ENABLE_HTAP
+#ifdef ENABLE_HTAP
 /*
  * ALTER TABLE <name> IMCSTORED(...)
  */
@@ -22398,6 +22398,7 @@ static void ATExecIMCSTORED(Relation rel, List* colList)
     int2vector* imcsAtts = NULL;
     int imcsNatts = 0;
 
+    CheckImcstoreCacheReady();
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
     /* standbynode populate */
     if (IMCS_IS_PRIMARY_MODE) {
@@ -22415,6 +22416,8 @@ static void ATExecIMCSTORED(Relation rel, List* colList)
 static void ATExecUNIMCSTORED(Relation rel) 
 {
     Oid relOid = RelationGetRelid(rel);
+
+    CheckImcstoreCacheReady();
     if (!RelHasImcs(relOid)) {
         ereport(ERROR, (errmsg("rel not populated, no need to be unpopulate.")));
     }
@@ -22435,6 +22438,7 @@ static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, L
     int2vector* imcsAtts = NULL;
     int imcsNatts = 0;
 
+    CheckImcstoreCacheReady();
     partOid = ImcsPartNameGetPartOid(relOid, partName);
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts, partOid);
 
@@ -22482,8 +22486,9 @@ static void ATExecModifyPartitionUNIMCSTORED(Relation rel, const char* partName)
 {
     Oid partOid = InvalidOid;
     Oid relOid = RelationGetRelid(rel);
-    partOid = ImcsPartNameGetPartOid(relOid, partName);
 
+    CheckImcstoreCacheReady();
+    partOid = ImcsPartNameGetPartOid(relOid, partName);
     if (!RelHasImcs(relOid) || !RelHasImcs(partOid)) {
         ereport(ERROR, (errmsg("partition %d of rel %d not populated", partOid, relOid)));
     }

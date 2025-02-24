@@ -1398,6 +1398,8 @@ typedef struct knl_g_imcstore_context {
 
     pg_atomic_uint32 imcs_tbl_cnt;
     pg_atomic_uint32 is_walrcv_down;
+    pg_atomic_uint32 is_imcstore_cache_down;
+    Oid dboid;
 } knl_g_imcstore_context;
 #endif
 

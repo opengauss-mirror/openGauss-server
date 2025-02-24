@@ -3866,6 +3866,13 @@ bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared)
             if (proc == t_thrd.proc)
                 continue;
 
+#ifdef ENABLE_HTAP
+            if (!ENABLE_DSS && g_instance.pid_cxt.IMCStoreVacuumPID != 0 &&
+                g_instance.pid_cxt.IMCStoreVacuumPID == proc->pid) {
+                continue;
+            }
+#endif
+
             if (proc->pid == 0)
                 (*nprepared)++;
             else {
