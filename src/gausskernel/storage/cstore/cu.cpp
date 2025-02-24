@@ -1951,7 +1951,10 @@ RowGroup* IMCSDesc::GetRowGroup(uint32 rowGroupId)
 
 RowGroup* IMCSDesc::GetNewRGForCUInsert(uint32 rowGroupId)
 {
-    RowGroup* result = NULL;
+    RowGroup* result = GetRowGroup(rowGroupId);
+    if (result) {
+        return result;
+    }
     LWLockAcquire(imcsDescLock, LW_EXCLUSIVE);
     /* consider concurrent */
     if (maxRowGroupCapacity > 0 && rowGroupId <= curMaxRowGroupId) {
