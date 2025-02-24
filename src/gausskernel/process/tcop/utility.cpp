@@ -43,6 +43,7 @@
 #include "catalog/gs_matview.h"
 #include "catalog/pg_job.h"
 #include "catalog/gs_job_attribute.h"
+#include "catalog/pg_object.h"
 #include "commands/alter.h"
 #include "commands/async.h"
 #include "commands/cluster.h"
@@ -90,6 +91,7 @@
 #include "parser/parse_utilcmd.h"
 #include "parser/analyze.h"
 #include "parser/parse_func.h"
+#include "parser/parse_relation.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgwriter.h"
 #include "rewrite/rewriteDefine.h"
@@ -6360,6 +6362,15 @@ ProcessUtilitySlow(Node *parse_tree,
                 Relation matview = HeapOpenrvExtended(stmt->relation,
                                                       stmt->incremental ? ExclusiveLock : AccessExclusiveLock,
                                                       false, true);
+
+                if (!is_incremental_matview(matview->rd_id) &&
+                    !ValidateDependView(matview->rd_id, OBJECT_TYPE_MATVIEW)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("The materialized view %s is invalid, please make it valid before operation.",
+                                    RelationGetRelationName(matview)),
+                                errhint("Please re-add missing table fields.")));
+                }
                 CheckRefreshMatview(matview, is_incremental_matview(matview->rd_id));
                 heap_close(matview, NoLock);
 #endif

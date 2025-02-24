@@ -413,5 +413,41 @@ create table t1 (c1 text, c2 float8);
 drop view v1;
 drop table t1;
 
+-- test MATERIALIZED VIEW
+CREATE TABLE my_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO my_table (name, age) VALUES ('Alice', 25);
+INSERT INTO my_table (name, age) VALUES ('Bob', 18);
+INSERT INTO my_table (name, age) VALUES ('Charlie', 22);
+
+CREATE MATERIALIZED VIEW my_materialized_view AS SELECT id, name FROM my_table WHERE age > 20;
+CREATE incremental MATERIALIZED VIEW increment_materialized_view as select * from my_table;
+
+-- error: have incremental materialized view
+drop TABLE my_table;
+drop MATERIALIZED VIEW increment_materialized_view;
+drop TABLE my_table; -- success
+
+\d+ my_materialized_view
+select * from my_materialized_view;
+refresh MATERIALIZED VIEW my_materialized_view; --error
+
+CREATE TABLE my_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+\d+ my_materialized_view
+refresh MATERIALIZED VIEW my_materialized_view; --success
+select * from my_materialized_view;
+
+drop table my_table;
+drop MATERIALIZED VIEW my_materialized_view;
+
 drop schema test_view_table_depend cascade;
 reset current_schema;
