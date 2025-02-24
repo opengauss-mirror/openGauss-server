@@ -926,22 +926,29 @@ static void WaitSegRedoWorkersQueueEmpty()
     }
 }
 
+/*
+ * If parsestate == NULL, wait until TrxnRedoManagerQueue emtpy.
+ * Else, wait untils the recodes before parsestate has been handled.
+ */
 static void WaitTrxnRedoManagerQueueSync(XLogRecParseState *parsestate)
 {
     XLogRecPtr readPtr;
     XLogRecPtr endPtr;
+
     while (!SPSCBlockingQueueIsEmpty(g_dispatcher->trxnLine.managerThd->queue) ||
         !SPSCBlockingQueueIsEmpty(g_dispatcher->trxnQueue)) {
-        GetQueueTopReadEndPtr(g_dispatcher->trxnLine.managerThd, &readPtr, &endPtr);
-        if (XLByteLE(parsestate->blockparse.blockhead.end_ptr, endPtr)) {
-            break;
+        if (parsestate != NULL) {
+            GetQueueTopReadEndPtr(g_dispatcher->trxnLine.managerThd, &readPtr, &endPtr);
+            if (XLByteLE(parsestate->blockparse.blockhead.end_ptr, endPtr)) {
+                break;
+            }
         }
         pg_usleep(100000L);   /* 100 ms */
         RedoInterruptCallBack();
     }
 }
 
-void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
+void RedoPageManageWaitPrevRecordDispatchFinish(XLogRecParseState *parsestate)
 {
     PageManagerPruneIfRealtimeBuildFailover();
     WaitSegRedoWorkersQueueEmpty();
@@ -958,7 +965,11 @@ void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
         ReleaseRecParseState(curMap, redoItemEntry);
         RedoPageManagerDistributeToRedoThd(myRedoLine, curMap, redoItemEntry, workId);
     }
+}
 
+void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
+{
+    RedoPageManageWaitPrevRecordDispatchFinish(parsestate);
     if (parsestate != NULL) {
         RedoPageManagerDistributeToAllOneBlock(parsestate);
     }
@@ -1279,7 +1290,7 @@ void PageManagerProcLsnForwarder(RedoItem *lsnForwarder)
     } while (refCount != 0);
 
     SetCompletedReadEndPtr(g_redoWorker, lsnForwarder->record.ReadRecPtr, lsnForwarder->record.EndRecPtr);
-    RedoPageManagerDistributeBlockRecord(NULL);
+    RedoPageManageWaitPrevRecordDispatchFinish(NULL);
 }
 
 void PageManagerDistributeBcmBlock(XLogRecParseState *preState)
@@ -1343,7 +1354,7 @@ void PageManagerProcCheckPoint(XLogRecParseState *parseState)
 
 void PageManagerProcCreateTableSpace(XLogRecParseState *parseState)
 {
-    RedoPageManagerDistributeBlockRecord(NULL);
+    RedoPageManageWaitPrevRecordDispatchFinish(parseState);
     bool needWait = parseState->isFullSync;
     if (needWait) {
         pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
@@ -1631,7 +1642,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             break;
         case BLOCK_DATA_CREATE_DATABASE_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
-            RedoPageManagerDistributeBlockRecord(NULL);
+            RedoPageManageWaitPrevRecordDispatchFinish(preState);
             /* wait until queue empty */
             WaitCurrentPipeLineRedoWorkersQueueEmpty();
             /* do atcual action */
@@ -1653,7 +1664,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             PageManagerProcCheckPoint(preState);
             break;
         case BLOCK_DATA_NEWCU_TYPE:
-            RedoPageManagerDistributeBlockRecord(NULL);
+            RedoPageManageWaitPrevRecordDispatchFinish(preState);
             PageManagerDistributeBcmBlock(preState);
             break;
         case BLOCK_DATA_SEG_SPACE_DROP:
@@ -1726,7 +1737,7 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
             Assert(!SS_ONDEMAND_REALTIME_BUILD_NORMAL);
             // double check
             if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
-                RedoPageManagerDistributeBlockRecord(NULL);
+                RedoPageManageWaitPrevRecordDispatchFinish(NULL);
                 ReleaseRecParseStateUntilRedoNotPause();
             }
             continue;
