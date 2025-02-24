@@ -131,7 +131,8 @@ static char* xml_pstrdup(const char* string);
 static xmlChar* xml_text2xmlChar(text* in);
 static int parse_xml_decl(const xmlChar* str, size_t* lenp, xmlChar** version, xmlChar** encoding, int* standalone);
 static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encoding, int standalone);
-static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding, bool can_ignore = false);
+static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding,
+    bool can_ignore = false, bool try_another_parse_mode = false);
 static text* xml_xmlnodetoxmltype(xmlNodePtr cur);
 static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate, PgXmlErrorContext *xmlerrcxt);
 #endif /* USE_LIBXML */
@@ -200,7 +201,7 @@ Datum xml_in(PG_FUNCTION_ARGS)
      * Parse the data to check if it is well-formed XML data.  Assume that
      * ERROR occurred if parsing failed.
      */
-    doc = xml_parse(vardata, (XmlOptionType)xmloption, true, GetDatabaseEncoding(), fcinfo->can_ignore);
+    doc = xml_parse(vardata, (XmlOptionType)xmloption, true, GetDatabaseEncoding(), fcinfo->can_ignore, true);
     xmlFreeDoc(doc);
 
     PG_RETURN_XML_P(vardata);
@@ -1326,6 +1327,31 @@ static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encodi
         return false;
 }
 
+static xmlDocPtr try_xml_parse_on_document_mode(text* data, bool preserve_whitespace, int encoding)
+{
+    volatile xmlDocPtr doc = NULL;
+    bool is_error_on_document = false;
+    PG_TRY();
+    {
+        doc = xml_parse(data, XMLOPTION_DOCUMENT, preserve_whitespace, encoding, false);
+    }
+    PG_CATCH();
+    {
+        is_error_on_document = true;
+        FlushErrorState();
+    }
+    PG_END_TRY();
+
+    if (doc != NULL && !is_error_on_document) {
+        return doc;
+    }
+
+    if (doc != NULL)
+        xmlFreeDoc(doc);
+
+    return NULL;
+}
+
 /*
  * Convert a C string to XML internal representation
  *
@@ -1336,7 +1362,7 @@ static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encodi
  * yet do not use SAX - see xmlreader.c)
  */
 static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding,
-                           bool can_ignore)
+                           bool can_ignore, bool try_another_parse_mode)
 {
     int32 len;
     xmlChar* string = NULL;
@@ -1406,6 +1432,21 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
 
             res_code = xmlParseBalancedChunkMemory(doc, NULL, NULL, 0, utf8string + count, NULL);
             if (res_code != 0 || xmlerrcxt->err_occurred) {
+                /*
+                 *  we will try to use use XMLOPTION_DOCUMENT to parse again when we use XMLOPTION_CONTENT failed
+                 */
+                if (try_another_parse_mode) {
+                    if (doc != NULL) {
+                        xmlFreeDoc(doc);
+                        doc = NULL;
+                    }
+                    doc = try_xml_parse_on_document_mode(data, preserve_whitespace, encoding);
+                    if (doc != NULL) {
+                        xmlFreeParserCtxt(ctxt);
+                        pg_xml_done(xmlerrcxt, true);
+                        return doc;
+                    }
+                }
                 xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_CONTENT,
                             "invalid XML content");
                 /* if invalid content value error is ignorable, report warning and return 'null' */
