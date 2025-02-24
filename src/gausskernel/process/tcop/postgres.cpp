@@ -2891,7 +2891,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             BeginTxnForAutoCommitOff();
         }
         if (nodeTag(parsetree) == T_ExecuteStmt && u_sess->exec_cxt.isPbeFunctionCallOpt) {
-            MemoryContext tmpcontext = AllocSetContextCreate(u_sess->top_portal_cxt,
+            PushActiveSnapshot(GetTransactionSnapshot());
+	    snapshot_set = true;
+	    MemoryContext tmpcontext = AllocSetContextCreate(u_sess->top_portal_cxt,
                             "PBEBypassMemory",
                             ALLOCSET_SMALL_MINSIZE,
                             ALLOCSET_SMALL_INITSIZE,
@@ -2899,7 +2901,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             (void) MemoryContextSwitchTo(tmpcontext);
             DestReceiver* destRec = CreateDestReceiver(dest);
             ExecuteQuery((ExecuteStmt *)parsetree, NULL, query_string, NULL, destRec, completionTag);
-            finish_xact_command();
+            if (snapshot_set != false)
+                PopActiveSnapshot();
+	    finish_xact_command();
             EndCommand(completionTag, dest);
             MemoryContextDelete(tmpcontext);
             MemoryContextReset(OptimizerContext);
