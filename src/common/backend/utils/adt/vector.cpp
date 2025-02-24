@@ -1575,7 +1575,7 @@ struct ElementOpL2 {
 
 struct ElementOpIP {
     static float32x4_t op(float32x4_t x, float32x4_t y) {
-        return vsubq_f32(x, y);
+        return vmulq_f32(x, y);
     }
 };
 
@@ -1590,9 +1590,7 @@ void VectorOpNYD4(size_t ny, float *x, char *pqTable, Size subSize, int offset, 
     for (i = 0; i < ny; i++) {
         y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
         float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
-        accu = vaddq_f32(accu, accu);
-        accu = vaddq_f32(accu, accu);
-        dis[i] = vgetq_lane_f32(accu, 0);
+        dis[i] = vaddvq_f32(accu);
     }
 }
 
@@ -1612,9 +1610,7 @@ void VectorOpNYD8(size_t ny, float *x, char *pqTable, Size subSize, int offset, 
         float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
         y += batch;
         accu = vaddq_f32(accu, ElementOp::op(x1, vld1q_f32(y)));
-        accu = vaddq_f32(accu, accu);
-        accu = vaddq_f32(accu, accu);
-        dis[i] = vgetq_lane_f32(accu, 0);
+        dis[i] = vaddvq_f32(accu);
     }
 }
 
@@ -1640,9 +1636,7 @@ void VectorOpNYD16(size_t ny, float *x, char *pqTable, Size subSize, int offset,
         accu = vaddq_f32(accu, ElementOp::op(x2, vld1q_f32(y)));
         y += batch;
         accu = vaddq_f32(accu, ElementOp::op(x3, vld1q_f32(y)));
-        accu = vaddq_f32(accu, accu);
-        accu = vaddq_f32(accu, accu);
-        dis[i] = vgetq_lane_f32(accu, 0);
+        dis[i] = vaddvq_f32(accu);
     }
 }
 #endif
@@ -1653,7 +1647,6 @@ void VectorL2SquaredDistanceNYRef(size_t d, size_t ny, float *x, char *pqTable, 
     for (size_t i = 0; i < ny; i++) {
         y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
         dis[i] = VectorL2SquaredDistance(d, x, y);
-        y += d;
     }
 }
 

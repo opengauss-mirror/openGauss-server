@@ -235,16 +235,16 @@ float* IVFPQLoadPQDisTable(Relation index)
     Buffer buf;
     Page page;
     uint16 pqTableNblk;
-    uint16 nblks;
+    uint32 nblks;
     uint32 curFlushSize;
-    uint32 pqDisTableSize;
+    uint64 pqDisTableSize;
     float* disTable;
 
     IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &nblks, &pqDisTableSize);
     disTable = (float*)palloc0(pqDisTableSize);
 
     BlockNumber startBlkno = IVFPQTABLE_START_BLKNO + pqTableNblk;
-    for (uint16 i = 0; i < nblks; i++) {
+    for (uint32 i = 0; i < nblks; i++) {
         curFlushSize = (i == nblks - 1) ? (pqDisTableSize - i * IVFPQTABLE_STORAGE_SIZE) : IVFPQTABLE_STORAGE_SIZE;
         buf = ReadBuffer(index, startBlkno + i);
         LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -346,12 +346,12 @@ uint8 *LoadPQCode(IndexTuple itup)
 
 float GetPQDistance(float *pqDistanceTable, uint8 *code, double dis0, int pqM, int pqKsub, bool innerPro)
 {
-    float resDistance = dis0;
+    float resDistance = 0.0;
     for (int i = 0; i < pqM; i++) {
         int offset = i * pqKsub + code[i];
         resDistance += pqDistanceTable[offset];
     }
-    return innerPro ? (0 - resDistance) : resDistance;
+    return innerPro ? (dis0 - resDistance) : (dis0 + resDistance);
 }
 
 IvfpqPairingHeapNode * IvfpqCreatePairingHeapNode(float distance, ItemPointer heapTid,
@@ -432,7 +432,7 @@ int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo)
 * Get the info related to pqTable in metapage
 */
 void IvfGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
-                              uint16 *pqPreComputeTableNblk, uint32 *pqPreComputeTableSize)
+                              uint32 *pqPreComputeTableNblk, uint64 *pqPreComputeTableSize)
 {
     Buffer buf;
     Page page;
@@ -528,14 +528,14 @@ int IvfGetByResidual(Relation index)
     return IVFPQ_DEFAULT_RESIDUAL;
 }
 
-void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)
+void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize)
 {
     Buffer buf;
     Page page;
     uint32 curFlushSize;
     GenericXLogState *state;
 
-    for (uint16 i = 0; i < nblks; i++) {
+    for (uint32 i = 0; i < nblks; i++) {
         curFlushSize = (i == nblks - 1) ?
                         (totalSize - i * IVF_PQTABLE_STORAGE_SIZE) : IVF_PQTABLE_STORAGE_SIZE;
         buf = ReadBufferExtended(index, MAIN_FORKNUM, startBlkno + i, RBM_NORMAL, NULL);
@@ -560,14 +560,14 @@ void IvfFlushPQInfo(IvfflatBuildState *buildstate)
     float* preComputeTable = buildstate->preComputeTable;
     uint16 pqTableNblk;
     uint32 pqTableSize;
-    uint16 pqPrecomputeTableNblk;
-    uint32 pqPrecomputeTableSize;
+    uint32 pqPrecomputeTableNblk;
+    uint64 pqPrecomputeTableSize;
 
     IvfGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqPrecomputeTableNblk, &pqPrecomputeTableSize);
 
     /* Flush pq table */
     IvfFlushPQInfoInternal(index, pqTable, IVF_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
-    if (buildstate->byResidual && buildstate->params->funcType == IVF_PQ_DIS_L2) {
+    if (buildstate->byResidual && buildstate->params->funcType != IVF_PQ_DIS_IP) {
         /* Flush pq distance table */
         IvfFlushPQInfoInternal(index, (char*)preComputeTable,
                                IVF_PQTABLE_START_BLKNO + pqTableNblk, pqPrecomputeTableNblk, pqPrecomputeTableSize);

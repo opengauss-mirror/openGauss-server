@@ -37,7 +37,7 @@ static void FindInsertPage(Relation index, Datum *values, BlockNumber *insertPag
 {
     double minDistance = DBL_MAX;
     uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
+    uint32 pqDisTableNblk;
     IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
     BlockNumber nextblkno = IVFPQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
     FmgrInfo *procinfo;
